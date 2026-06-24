@@ -1,0 +1,112 @@
+# This workflow installs the latest version of Terraform CLI and configures the Terraform CLI configuration file
+# with an API token for Terraform Cloud (app.terraform.io). On push/pull_requests to tf/dev runs a tf plan
+
+name: AWS Setup
+
+on:
+  push: 
+    branches:
+        - tf/*
+  pull_request:
+    branches:
+        - tf/*
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Deployment environment'
+        required: true
+        default: 'development'
+        type: choice
+        options:
+          - development
+          - production
+    
+  
+  workflow_call:
+    inputs:
+      server_image_tag:
+        description: 'Image tag of the server Docker image'
+        required: true
+        type: string
+      server_version:
+        description: 'Version of the server'
+        required: true
+        type: string
+      client_image_tag:
+        description: 'Image tag of the client Docker image'
+        required: false
+        type: string
+      client_version:
+        required: true
+        type: string
+        description: 'Version of the client'  
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  TF_VAR_vpc_id: ${{ secrets.VPC_ID }}
+  TF_VAR_account_id: ${{ secrets.AWS_ACCOUNT_ID }}
+  TF_VAR_region: ${{ vars.AWS_RESOURCE_REGION }}
+  TF_VAR_project: ${{ vars.PROJECT}}
+  TF_VAR_owner: ${{ vars.OWNER}}
+  TF_VAR_environment: ${{ github.event.inputs.environment || 'development' }}
+  TF_VAR_private1_subnet_cidr: ${{ vars.SUBNET_A_CIDR }}
+  TF_VAR_private2_subnet_cidr: ${{ vars.SUBNET_B_CIDR }}
+  TF_VAR_private3_subnet_cidr: ${{ vars.SUBNET_C_CIDR }}
+  TF_VAR_public1_subnet_cidr: ${{ vars.PUBLIC1_SUBNET_CIDR }}
+  TF_VAR_public2_subnet_cidr: ${{ vars.PUBLIC2_SUBNET_CIDR }}
+  TF_VAR_public3_subnet_cidr: ${{ vars.PUBLIC3_SUBNET_CIDR }}
+
+jobs:
+  terraform:
+    name: 'Terraform'
+    runs-on: ubuntu-latest
+    environment: ${{ github.event.inputs.environment || 'development' }}
+
+    # Use the Bash shell regardless whether the GitHub Actions runner is ubuntu-latest, macos-latest, or windows-latest
+    defaults:
+      run:
+        shell: bash
+
+    steps:
+    # Checkout the repository to the GitHub Actions runner
+    - name: Checkout
+      uses: actions/checkout@v4
+
+    - name: Echo vars
+      run: |
+        echo "client_image: $TF_VAR_client_image"
+
+    - name: Configure AWS Credentials (via OIDC)
+      uses: aws-actions/configure-aws-credentials@v4
+      with:
+        role-to-assume: ${{ secrets.AWS_DEPLOY_SVC_ACCT_ARN }}
+        aws-region: ${{ vars.AWS_RESOURCE_REGION }}
+
+    # Install the latest version of Terraform CLI and configure the Terraform CLI configuration file with a Terraform Cloud user API token
+    - name: Setup Terraform
+      uses: hashicorp/setup-terraform@v3
+      with:
+        cli_config_credentials_token: ${{ secrets.TF_API_TOKEN }}
+
+    # Initialize a new or existing Terraform working directory by creating initial files, loading any remote state, downloading modules, etc.
+    - name: Terraform Init
+      run: terraform -chdir=Terraform init -reconfigure
+
+    # Checks that all Terraform configuration files adhere to a canonical format
+    - name: Terraform Format
+      run: terraform -chdir=Terraform fmt -check
+
+    # Validate Terraform
+    - name: Terraform Validate
+      run: terraform -chdir=Terraform validate
+
+    # Generates an execution plan for Terraform
+    - name: Terraform Plan
+      run: terraform -chdir=Terraform plan
+
+    # Build or change infrastructure according to Terraform configuration files
+    - name: Terraform Apply
+      run: terraform -chdir=Terraform apply -auto-approve
