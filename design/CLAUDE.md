@@ -8,11 +8,12 @@ A personal-use AI/ML platform that predicts outcomes and statistics for six spor
 
 ## Core architectural decisions
 
-1. **Two data shapes, not six bespoke pipelines.** Every sport is either a head-to-head event (two teams/competitors, binary or score-based outcome — NFL, NCAA FB, NBA, NCAA MBB) or a field event (many entrants, ranked finish — PGA Tour, F1). Storage schema and orchestration are built around these two shapes; only the per-sport adapter (data source, feature engineering, model) varies.
-2. **One model per sport, shared plumbing.** There is no single cross-sport model — "predict NFL win probability" and "predict PGA top-10 finish" are different statistical problems with different targets and base rates. What's shared is the storage schema, orchestration, the inference Lambda's response contract, and common feature-engineering primitives (rolling averages, rating systems).
-3. **Registry-driven onboarding.** New sports are added by writing one adapter module and adding one row to the sport registry (see `docs/DATA_SCHEMA.md`) — not by changing shared orchestration or serving code.
-4. **Cost-first, not scale-first.** No anticipated public traffic. Every service choice favors on-demand/serverless pricing (Lambda, DynamoDB on-demand, Fargate for scheduled jobs) over always-on compute.
-5. **Public URL, locked down.** The frontend and API are reachable on a public endpoint for convenience, but every API call requires a valid Cognito-issued token tied to the project owner's account. See `docs/ARCHITECTURE.md` for the access control design.
+1. **Two event shapes, not six bespoke pipelines.** Every sport is either a head-to-head event (two teams/competitors, binary or score-based outcome — NFL, NCAA FB, NBA, NCAA MBB) or a field event (many entrants, ranked finish — PGA Tour, F1). Storage schema and orchestration are built around these two shapes; only the per-sport adapter (data source, feature engineering, model) varies.
+2. **Two prediction granularities, orthogonal to event shape.** Every sport also needs both an event-level outcome prediction (who wins, what's the final standing) and, for team sports, individual player-stat predictions (passing yards, points, rebounds). Field-event sports get player-level granularity for free since the entity *is* the player; team sports need a separate `player_game_stats` table to carry it (see `docs/DATA_SCHEMA.md`).
+3. **One model per sport — and per prediction target, shared plumbing.** There is no single cross-sport model — "predict NFL win probability" and "predict PGA top-10 finish" are different statistical problems with different targets and base rates. The same split applies within a sport: a team sport's game-outcome model and its player-prop models are trained and versioned separately, since "will KC win" and "will Mahomes throw for 265+ yards" don't share a target either. What's shared is the storage schema, orchestration, the inference Lambda's response contract, and common feature-engineering primitives (rolling averages, rating systems).
+4. **Registry-driven onboarding.** New sports are added by writing one adapter module and adding one row to the sport registry (see `docs/DATA_SCHEMA.md`) — not by changing shared orchestration or serving code.
+5. **Cost-first, not scale-first.** No anticipated public traffic. Every service choice favors on-demand/serverless pricing (Lambda, DynamoDB on-demand, Fargate for scheduled jobs) over always-on compute.
+6. **Public URL, locked down.** The frontend and API are reachable on a public endpoint for convenience, but every API call requires a valid Cognito-issued token tied to the project owner's account. See `docs/ARCHITECTURE.md` for the access control design.
 
 ## Build order
 
@@ -28,10 +29,10 @@ See `docs/PROJECT_PLAN.md` for the full checklist. Short version: get NFL workin
 
 ## Conventions
 
-- Every sport adapter implements the same interface: `fetch()`, `normalize()`, `build_features()`, `train()`, `predict()`.
+- Every sport adapter implements the same interface: `fetch()`, `normalize()`, `build_features()`, `train()`, `predict()`. For team sports, `normalize()` writes both the event record and each player's `player_game_stats` row; `train()`/`predict()` run once for the event-outcome model and once per predicted player-stat target.
 - Every AWS resource is tagged per `docs/TAGGING_STRATEGY.md` at creation time, via infrastructure-as-code, not applied manually after the fact.
 - Models are gradient-boosted trees (XGBoost or LightGBM) trained as scheduled Fargate tasks, never as always-on SageMaker endpoints.
-- Head-to-head sports produce a win probability and predicted margin. Field-event sports (PGA, F1) produce a probability distribution across finishing positions — don't try to force these into the same output shape.
+- Head-to-head sports produce a win probability and predicted margin at the event level, plus a separate set of player-prop predictions (e.g., passing yards, points) for team sports. Field-event sports (PGA, F1) produce a probability distribution across finishing positions, which already is the player-level prediction. Don't try to force any of these into the same output shape.
 
 ## Repo structure (target)
 
