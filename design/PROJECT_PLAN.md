@@ -7,7 +7,7 @@ A phased checklist in implementation order. Each phase assumes the previous one 
 - [ ] Define entity/event schema (see `DATA_SCHEMA.md`)
 - [ ] Set up IAM roles for Lambda, Fargate, and Step Functions with least-privilege access to the specific tables/buckets they need
 - [ ] Create S3 buckets: raw data lake, model artifacts, frontend hosting
-- [ ] Create DynamoDB tables: entities, events, predictions (sport registry table comes in Phase 4)
+- [ ] Create DynamoDB tables: entities, events, player_game_stats, predictions (sport registry table comes in Phase 4)
 - [ ] Apply the tagging strategy to every resource at creation time (see `TAGGING_STRATEGY.md`) — don't defer this, retrofitting tags later means re-auditing every resource
 - [ ] Set up Cognito User Pool + App Client, create your own user, disable self-signup
 - [ ] Stand up API Gateway with a Cognito authorizer attached (no routes yet — just the auth scaffold)
@@ -17,12 +17,13 @@ A phased checklist in implementation order. Each phase assumes the previous one 
 ## Phase 1 — NFL adapter (proof of architecture)
 
 - [ ] Write the NFL ingest function pulling from nflverse
-- [ ] Write the normalize function mapping nflverse data into the entity/event schema
-- [ ] Backfill 10 years of historical NFL data
-- [ ] Build feature engineering: rolling averages, an Elo-style rating, home/away and rest-day splits
+- [ ] Write the normalize function mapping nflverse data into the entity/event schema, including per-player box scores into `player_game_stats`
+- [ ] Backfill 10 years of historical NFL data, including player box scores
+- [ ] Build feature engineering: rolling averages, an Elo-style rating, home/away and rest-day splits (event-level), plus per-player rolling stat averages and usage rate (player-prop-level)
 - [ ] Train the first XGBoost win-probability model, store the artifact in S3
-- [ ] Write the inference Lambda and wire it to an API Gateway route
-- [ ] Build a minimal React frontend showing one sport's predictions
+- [ ] Train a first player-prop model for at least one stat (e.g., QB passing yards) — proves the `player_game_stats` table and the per-target train/predict split actually work before generalizing to other sports
+- [ ] Write the inference Lambda and wire it to API Gateway routes for both event-outcome and player-prop predictions
+- [ ] Build a minimal React frontend showing one sport's event predictions and at least one player-prop prediction
 - [ ] Confirm the Cognito login gate works end to end on the live URL — log out, confirm the API rejects unauthenticated calls, log back in, confirm it works
 
 ## Phase 2 — NCAA FB adapter (validate generalization)

@@ -20,7 +20,7 @@ flowchart TD
     subgraph Normalize["Normalization"]
         NORM["Lambda: Normalize and Load"]
     end
-    RAW --> NORM --> DDB[("DynamoDB: Entities and Events")]
+    RAW --> NORM --> DDB[("DynamoDB: Entities, Events, and Player Stats")]
 
     subgraph Train["Scheduled Training"]
         SCH2["EventBridge Schedule"]
@@ -88,7 +88,7 @@ flowchart TD
 
     subgraph Storage["Shared Storage, partitioned by sport"]
         RAW[("S3: Raw Data Lake")]
-        DDB[("DynamoDB: Entities and Events")]
+        DDB[("DynamoDB: Entities, Events, and Player Stats")]
         ARTIFACT[("S3: Model Artifacts per Sport")]
     end
     A1 --> RAW
