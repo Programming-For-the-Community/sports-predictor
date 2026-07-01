@@ -20,6 +20,11 @@ resource "aws_budgets_budget" "project" {
   limit_unit   = "USD"
   time_unit    = "MONTHLY"
 
+  tags = merge(local.common_tags, {
+    Sport     = "shared"
+    Component = "billing"
+  })
+
   cost_filter {
     name   = "TagKeyValue"
     values = ["user:Project${var.project}"]
@@ -61,6 +66,11 @@ resource "aws_budgets_budget" "per_sport" {
   limit_amount = each.value
   limit_unit   = "USD"
   time_unit    = "MONTHLY"
+
+  tags = merge(local.common_tags, {
+    Sport     = each.key
+    Component = "billing"
+  })
 
   cost_filter {
     name   = "TagKeyValue"
