@@ -118,3 +118,9 @@ variable "domain_name" {
   nullable    = false
 }
 
+variable "hosted_zone_id" {
+  description = "Route 53 hosted zone ID for var.domain_name"
+  type        = string
+  nullable    = false
+}
+
