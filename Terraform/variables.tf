@@ -75,37 +75,37 @@ variable "vpc_cidr" {
 }
 
 variable "private1_subnet_cidr" {
-  description = "CIDR of private subnet A (SUBNET_A_CIDR) -- used for Lambda and Fargate placement"
+  description = "CIDR block for private subnet A (SUBNET_A_CIDR)"
   type        = string
   nullable    = false
 }
 
 variable "private2_subnet_cidr" {
-  description = "CIDR of private subnet B (SUBNET_B_CIDR)"
+  description = "CIDR block for private subnet B (SUBNET_B_CIDR)"
   type        = string
   nullable    = false
 }
 
 variable "private3_subnet_cidr" {
-  description = "CIDR of private subnet C (SUBNET_C_CIDR)"
+  description = "CIDR block for private subnet C (SUBNET_C_CIDR)"
   type        = string
   nullable    = false
 }
 
 variable "public1_subnet_cidr" {
-  description = "CIDR of public subnet 1 (PUBLIC1_SUBNET_CIDR)"
+  description = "CIDR block for public subnet 1 (PUBLIC1_SUBNET_CIDR)"
   type        = string
   nullable    = false
 }
 
 variable "public2_subnet_cidr" {
-  description = "CIDR of public subnet 2 (PUBLIC2_SUBNET_CIDR)"
+  description = "CIDR block for public subnet 2 (PUBLIC2_SUBNET_CIDR)"
   type        = string
   nullable    = false
 }
 
 variable "public3_subnet_cidr" {
-  description = "CIDR of public subnet 3 (PUBLIC3_SUBNET_CIDR)"
+  description = "CIDR block for public subnet 3 (PUBLIC3_SUBNET_CIDR)"
   type        = string
   nullable    = false
 }
