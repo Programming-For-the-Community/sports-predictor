@@ -15,6 +15,7 @@ locals {
   sport_registry_table    = "${var.project}-sport-registry"
 
   common_tags = {
+    Owner       = var.owner
     Project     = var.project
     Environment = var.environment
   }
