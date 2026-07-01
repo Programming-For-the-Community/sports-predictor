@@ -5,9 +5,9 @@
 # IAM policies are just ARN strings, so referencing them ahead of time is
 # safe as long as whatever creates them later uses these same names.
 locals {
-  raw_bucket_name         = "${var.project}-raw-data-lake"
-  model_artifacts_bucket  = "${var.project}-model-artifacts"
-  frontend_bucket         = "${var.project}-frontend"
+  raw_bucket_name         = "${var.project}-raw-data-lake-${var.account_id}"
+  model_artifacts_bucket  = "${var.project}-model-artifacts-${var.account_id}"
+  frontend_bucket         = "${var.project}-frontend-${var.account_id}"
   entities_table          = "${var.project}-entities"
   events_table            = "${var.project}-events"
   player_game_stats_table = "${var.project}-player-game-stats"
