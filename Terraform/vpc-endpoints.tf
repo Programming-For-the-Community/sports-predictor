@@ -4,7 +4,7 @@
 # this is the mechanism that makes "no NAT Gateway" viable for the
 # architecture (see docs/ARCHITECTURE.md).
 resource "aws_vpc_endpoint" "s3" {
-  vpc_id            = data.aws_vpc.main.id
+  vpc_id            = var.vpc_id
   service_name      = "com.amazonaws.${var.region}.s3"
   vpc_endpoint_type = "Gateway"
   route_table_ids   = [aws_route_table.private.id]
@@ -17,7 +17,7 @@ resource "aws_vpc_endpoint" "s3" {
 }
 
 resource "aws_vpc_endpoint" "dynamodb" {
-  vpc_id            = data.aws_vpc.main.id
+  vpc_id            = var.vpc_id
   service_name      = "com.amazonaws.${var.region}.dynamodb"
   vpc_endpoint_type = "Gateway"
   route_table_ids   = [aws_route_table.private.id]
