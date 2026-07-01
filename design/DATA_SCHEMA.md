@@ -10,7 +10,7 @@ One row per team or player, regardless of sport.
 
 | Attribute | Example | Notes |
 |---|---|---|
-| `PK` | `SPORT#NFL#ENTITY#KC` | Partition key prefixed by sport so per-sport queries don't scan unrelated data |
+| `entity_key` | `SPORT#NFL#ENTITY#KC` | Partition key prefixed by sport so per-sport queries don't scan unrelated data |
 | `entity_id` | `KC` | Source system's team/player identifier |
 | `sport` | `nfl` | One of the six supported sports |
 | `entity_type` | `team` or `player` | Team sports use both (team-level and player-level records); golf and F1 are primarily player-level |
@@ -23,7 +23,7 @@ One row per game, match, tournament, or race.
 
 | Attribute | Example | Notes |
 |---|---|---|
-| `PK` | `SPORT#NFL#EVENT#2025-W04-KC-LAC` | Partition key prefixed by sport |
+| `event_key` | `SPORT#NFL#EVENT#2025-W04-KC-LAC` | Partition key prefixed by sport |
 | `event_id` | `2025-W04-KC-LAC` | Source system's game/event identifier |
 | `sport` | `nfl` | |
 | `event_type` | `head_to_head` or `field` | Determines how `participants` is interpreted |
@@ -55,8 +55,8 @@ One row per player per event, for team sports only (NFL, NCAA FB, NBA, NCAA MBB)
 
 | Attribute | Example | Notes |
 |---|---|---|
-| `PK` | `SPORT#NFL#EVENT#2025-W04-KC-LAC` | Same partition key as the parent event — querying "all player stat lines for this game" is a single partition query, and it keeps the table consistent with the rest of the schema's `SPORT#<sport>#EVENT#<id>` convention |
-| `SK` | `PLAYER#mahomes-patrick` | Sort key — lets one event partition hold every player who appeared in that game |
+| `event_key` | `SPORT#NFL#EVENT#2025-W04-KC-LAC` | Same partition key as the parent event — querying "all player stat lines for this game" is a single partition query, and it keeps the table consistent with the rest of the schema's `SPORT#<sport>#EVENT#<id>` convention |
+| `player_key` | `PLAYER#mahomes-patrick` | Sort key — lets one event partition hold every player who appeared in that game |
 | `entity_id` | `mahomes-patrick` | Matches the player's `entity_id` in the entities table |
 | `team_id` | `KC` | Which side the player was on for this event — needed because the player entity's `team_id` reflects *current* roster state, not who they played for historically (trades, season-over-season movement) |
 | `stat_line` | `{ "passing_yards": 312, "passing_tds": 3, "interceptions": 1 }` | Sport-specific flexible map, same pattern as `entities.metadata` — a basketball box score and a football box score share nothing but the shape of the container |
@@ -68,8 +68,8 @@ One row per event per model version for event-level outcomes, or one row per eve
 
 | Attribute | Example | Notes |
 |---|---|---|
-| `PK` | `SPORT#NFL#EVENT#2025-W04-KC-LAC` | |
-| `SK` | `MODEL#v3` for an event-outcome prediction, `MODEL#v3#PLAYER#mahomes-patrick` for a player-prop prediction | Sort key — lets you keep predictions from multiple model versions for the same event, and lets dozens of player-prop rows coexist in the same event partition without colliding with the event-level prediction or each other |
+| `event_key` | `SPORT#NFL#EVENT#2025-W04-KC-LAC` | |
+| `model_key` | `MODEL#v3` for an event-outcome prediction, `MODEL#v3#PLAYER#mahomes-patrick` for a player-prop prediction | Sort key — lets you keep predictions from multiple model versions for the same event, and lets dozens of player-prop rows coexist in the same event partition without colliding with the event-level prediction or each other |
 | `predicted_value` | `{ "KC_win_prob": 0.61 }`, `{ "win_prob": {...}, "top10_prob": {...} }`, or `{ "passing_yards": {"mean": 287, "over_265_5_prob": 0.54}, "passing_tds": {"mean": 2.1} }` | Shape depends on event_type for event-level rows, and on the stat being predicted for player-prop rows — these are different statistical problems with different targets, same as the head-to-head/field-event split, so don't force one shape to fit both |
 | `model_version` | `v3` | |
 | `generated_at` | `2025-09-26T14:00:00Z` | |
@@ -80,7 +80,7 @@ Drives the Step Functions Map state — this is what makes onboarding a new spor
 
 | Attribute | Example | Notes |
 |---|---|---|
-| `PK` | `SPORT#PGA` | |
+| `sport_key` | `SPORT#PGA` | |
 | `sport` | `pga` | |
 | `event_type` | `field` | |
 | `adapter_module` | `adapters.pga` | Where the orchestrator looks for `fetch()`, `normalize()`, etc. |

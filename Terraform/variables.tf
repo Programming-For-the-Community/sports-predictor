@@ -113,7 +113,7 @@ variable "public3_subnet_cidr" {
 # ── DNS / TLS ─────────────────────────────────────────────────────────────────
 
 variable "domain_name" {
-  description = "Root domain name managed in Route 53 -- supplied via TF_VAR_domain_name from the DOMAIN_NAME GitHub Actions secret"
+  description = "Root domain name managed in Route 53"
   type        = string
   nullable    = false
 }
