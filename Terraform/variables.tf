@@ -59,3 +59,62 @@ variable "environment" {
   default     = "dev"
   nullable    = false
 }
+
+# ── Networking ────────────────────────────────────────────────────────────────
+
+variable "vpc_id" {
+  description = "ID of the VPC to deploy into -- supplied via TF_VAR_vpc_id from the VPC_ID GitHub Actions secret"
+  type        = string
+  nullable    = false
+}
+
+variable "vpc_cidr" {
+  description = "CIDR block of the VPC -- used to scope security group rules"
+  type        = string
+  nullable    = false
+}
+
+variable "private1_subnet_cidr" {
+  description = "CIDR of private subnet A (SUBNET_A_CIDR) -- used for Lambda and Fargate placement"
+  type        = string
+  nullable    = false
+}
+
+variable "private2_subnet_cidr" {
+  description = "CIDR of private subnet B (SUBNET_B_CIDR)"
+  type        = string
+  nullable    = false
+}
+
+variable "private3_subnet_cidr" {
+  description = "CIDR of private subnet C (SUBNET_C_CIDR)"
+  type        = string
+  nullable    = false
+}
+
+variable "public1_subnet_cidr" {
+  description = "CIDR of public subnet 1 (PUBLIC1_SUBNET_CIDR)"
+  type        = string
+  nullable    = false
+}
+
+variable "public2_subnet_cidr" {
+  description = "CIDR of public subnet 2 (PUBLIC2_SUBNET_CIDR)"
+  type        = string
+  nullable    = false
+}
+
+variable "public3_subnet_cidr" {
+  description = "CIDR of public subnet 3 (PUBLIC3_SUBNET_CIDR)"
+  type        = string
+  nullable    = false
+}
+
+# ── DNS / TLS ─────────────────────────────────────────────────────────────────
+
+variable "domain_name" {
+  description = "Root domain name managed in Route 53 -- supplied via TF_VAR_domain_name from the DOMAIN_NAME GitHub Actions secret"
+  type        = string
+  nullable    = false
+}
+
