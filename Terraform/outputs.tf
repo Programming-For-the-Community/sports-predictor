@@ -15,3 +15,8 @@ output "cognito_client_id" {
   description = "Cognito App Client ID -- needed in the frontend SDK config"
   value       = aws_cognito_user_pool_client.web.id
 }
+
+output "api_endpoint" {
+  description = "Full API base URL via the custom domain"
+  value       = "https://${local.api_domain}"
+}
