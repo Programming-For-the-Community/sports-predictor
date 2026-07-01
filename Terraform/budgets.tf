@@ -27,7 +27,7 @@ resource "aws_budgets_budget" "project" {
 
   cost_filter {
     name   = "TagKeyValue"
-    values = ["user:Project$$${var.project}"]
+    values = [format("user:Project$%s", var.project)]
   }
 
   notification {
@@ -74,7 +74,12 @@ resource "aws_budgets_budget" "per_sport" {
 
   cost_filter {
     name   = "TagKeyValue"
-    values = ["user:Sport$$${each.key}"]
+    values = [format("user:Project$%s", var.project)]
+  }
+
+  cost_filter {
+    name   = "TagKeyValue"
+    values = [format("user:Sport$%s", each.key)]
   }
 
   notification {
