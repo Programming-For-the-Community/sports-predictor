@@ -12,6 +12,7 @@ locals {
   events_table            = "${var.project}-events"
   player_game_stats_table = "${var.project}-player-game-stats"
   predictions_table       = "${var.project}-predictions"
+  sport_registry_table    = "${var.project}-sport-registry"
 
   common_tags = {
     Project     = var.project

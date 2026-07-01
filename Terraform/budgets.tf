@@ -22,7 +22,7 @@ resource "aws_budgets_budget" "project" {
 
   cost_filter {
     name   = "TagKeyValue"
-    values = ["user:Project$${var.project}"]
+    values = ["user:Project${var.project}"]
   }
 
   notification {
@@ -64,7 +64,7 @@ resource "aws_budgets_budget" "per_sport" {
 
   cost_filter {
     name   = "TagKeyValue"
-    values = ["user:Sport$${each.key}"]
+    values = ["user:Sport${each.key}"]
   }
 
   notification {
