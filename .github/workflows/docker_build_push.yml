@@ -1,0 +1,85 @@
+# Reusable workflow: builds a Docker image and pushes it to the shared
+# ECR repo under two tags -- an immutable version tag (for traceability/
+# rollback) and a floating "-latest" tag. ECS task definitions reference
+# only the floating tag (see Terraform/ecs-task-nfl-backfill.tf), so a
+# new push takes effect on the next `aws ecs run-task` with no task
+# definition update or terraform apply required.
+
+name: Build and Push Docker Image to ECR
+
+on:
+  workflow_call:
+    inputs:
+      dockerfile_path:
+        description: 'Path to the Dockerfile'
+        required: true
+        type: string
+      docker_context:
+        description: 'Docker build context path'
+        required: true
+        type: string
+      image_name:
+        description: 'Image name / component identifier (e.g. nfl-backfill)'
+        required: true
+        type: string
+      image_version:
+        description: 'Semantic version to tag the image with'
+        required: true
+        type: string
+    outputs:
+      versioned_tag:
+        description: 'Full URI of the pushed, version-tagged image'
+        value: ${{ jobs.build-push.outputs.versioned_tag }}
+      latest_tag:
+        description: 'Full URI of the pushed, floating-latest-tagged image'
+        value: ${{ jobs.build-push.outputs.latest_tag }}
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  build-push:
+    runs-on: ubuntu-latest
+    outputs:
+      versioned_tag: ${{ steps.build-image.outputs.versioned_tag }}
+      latest_tag: ${{ steps.build-image.outputs.latest_tag }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials from OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_DEPLOY_SVC_ACCT_ARN }}
+          aws-region: ${{ vars.AWS_RESOURCE_REGION }}
+          role-session-name: GitHubActions-${{ github.run_id }}
+
+      - name: Verify AWS identity
+        run: aws sts get-caller-identity
+
+      - name: Build, tag, and push image to Amazon ECR
+        id: build-image
+        env:
+          URI: ${{ secrets.ECR_URI }}
+          VERSIONED_TAG: ${{ inputs.image_name }}-${{ inputs.image_version }}
+          LATEST_TAG: ${{ inputs.image_name }}-latest
+        run: |
+          ECR_REGISTRY=${URI%/*}
+
+          docker build \
+            -t "$URI:$VERSIONED_TAG" \
+            -t "$URI:$LATEST_TAG" \
+            -f "${{ inputs.dockerfile_path }}" \
+            "${{ inputs.docker_context }}"
+
+          aws ecr get-login-password --region ${{ vars.AWS_RESOURCE_REGION }} \
+            | docker login --username AWS --password-stdin "$ECR_REGISTRY"
+
+          docker push "$URI:$VERSIONED_TAG"
+          docker push "$URI:$LATEST_TAG"
+
+          echo "Built and pushed: $URI:$VERSIONED_TAG and $URI:$LATEST_TAG"
+          echo "versioned_tag=$URI:$VERSIONED_TAG" >> "$GITHUB_OUTPUT"
+          echo "latest_tag=$URI:$LATEST_TAG" >> "$GITHUB_OUTPUT"

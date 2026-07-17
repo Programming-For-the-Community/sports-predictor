@@ -1,0 +1,56 @@
+# Builds, packages, and deploys the NFL AI training code. Runs standalone
+# (workflow_dispatch) or called from nfl_deploy.yml (workflow_call) --
+# either way the work is identical: build and push image(s).
+#
+# This stage likely builds more than one image (see design/ARCHITECTURE.md's
+# "Scheduled Training" subgraph: separate Feature Engineering and Train
+# Model Fargate tasks). Once their Dockerfiles exist, add one job per
+# image below, each shaped like:
+#
+#   build-<component>-image:
+#     needs: set-version
+#     uses: ./.github/workflows/docker_build_push.yml
+#     secrets: inherit
+#     with:
+#       dockerfile_path: 'Source/<path>/Dockerfile'
+#       docker_context: 'Source/<path>'
+#       image_name: 'nfl-<component>'
+#       image_version: ${{ needs.set-version.outputs.version }}
+#
+# All images built in the same run share IMAGE_VERSION below -- bump it
+# by editing this line, never by typing a version into a manual dispatch
+# input.
+
+name: NFL AI Training
+
+on:
+  workflow_dispatch:
+  workflow_call:
+
+env:
+  IMAGE_VERSION: '0.1.0'
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  set-version:
+    name: Resolve image version
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.out.outputs.version }}
+    steps:
+      - id: out
+        run: echo "version=${{ env.IMAGE_VERSION }}" >> "$GITHUB_OUTPUT"
+
+  # TODO once the NFL training source code and Dockerfile(s) exist:
+  # replace this with one build-<component>-image job per image, per the
+  # comment block above.
+  placeholder:
+    name: Build, package, and deploy (placeholder)
+    needs: set-version
+    runs-on: ubuntu-latest
+    steps:
+      - name: Placeholder
+        run: echo "Would build and push NFL AI training image(s) at version ${{ needs.set-version.outputs.version }} here."
