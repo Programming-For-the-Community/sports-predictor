@@ -48,3 +48,30 @@ resource "aws_security_group" "ecs_pipeline" {
     Component = "training"
   })
 }
+
+# Security group for Fargate tasks that need to reach the public internet
+# (e.g. a sport's free data API -- ESPN, CFBD, nba_api) rather than only
+# AWS services. VPC Gateway Endpoints only route to AWS services, not
+# arbitrary third-party hosts, and a NAT Gateway (~$32/month) doesn't fit
+# this project's $15/month budget -- so these tasks run in a public
+# subnet with a public IP instead (assignPublicIp=ENABLED, set per-task
+# at RunTask/register-task-definition time, not here). No inbound rules;
+# tasks aren't listening for anything, they only make outbound calls.
+resource "aws_security_group" "fargate_internet_egress" {
+  name        = "${var.project}-fargate-internet-egress"
+  description = "Fargate tasks needing outbound internet access (ingest/backfill jobs hitting a sport's public data API)"
+  vpc_id      = var.vpc_id
+
+  egress {
+    from_port   = 443
+    to_port     = 443
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+    description = "HTTPS to public data APIs, ECR, S3, and DynamoDB"
+  }
+
+  tags = merge(local.common_tags, {
+    Sport     = "shared"
+    Component = "networking"
+  })
+}

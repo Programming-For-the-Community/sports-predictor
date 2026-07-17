@@ -110,6 +110,21 @@ variable "public3_subnet_cidr" {
   nullable    = false
 }
 
+# ── Containers ────────────────────────────────────────────────────────────────
+
+variable "ecr_repo_url" {
+  description = "URL of the shared ECR repository that sport-specific images are pushed to. ECR is pre-existing and managed outside this stack (shared across projects, same pattern as the VPC) -- no default on purpose, supplied via TF_VAR_ecr_repo_url from the ECR_URI GitHub Actions secret."
+  type        = string
+  nullable    = false
+}
+
+variable "espn_api_root_url" {
+  description = "Root URL of ESPN's public (unofficial) site API, shared by every sport-specific task that uses it (NFL, and eventually NBA/NCAA MBB/PGA per docs/DATA_SOURCES.md) -- each task appends its own sport path (e.g. football/nfl). Defaults to the current known-working root; override via TF_VAR_espn_api_root_url from a GitHub Actions variable only if ESPN's domain changes."
+  type        = string
+  default     = "https://site.api.espn.com/apis/site/v2/sports"
+  nullable    = false
+}
+
 # ── DNS / TLS ─────────────────────────────────────────────────────────────────
 
 variable "domain_name" {

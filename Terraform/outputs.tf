@@ -20,3 +20,32 @@ output "api_endpoint" {
   description = "Full API base URL via the custom domain"
   value       = "https://${local.api_domain}"
 }
+
+# Consumed by sport-specific ingest/backfill CI workflows (see
+# .github/workflows/tf_install.yml's workflow_call outputs) to populate a
+# task's RAW_BUCKET_NAME/*_TABLE_NAME environment variables without each
+# workflow re-deriving the naming convention from locals.tf itself.
+output "raw_data_lake_bucket" {
+  description = "Raw data lake S3 bucket name"
+  value       = local.raw_bucket_name
+}
+
+output "entities_table_name" {
+  description = "Entities DynamoDB table name"
+  value       = local.entities_table
+}
+
+output "events_table_name" {
+  description = "Events DynamoDB table name"
+  value       = local.events_table
+}
+
+output "player_game_stats_table_name" {
+  description = "Player game stats DynamoDB table name"
+  value       = local.player_game_stats_table
+}
+
+output "nfl_backfill_task_definition_arn" {
+  description = "ARN of the NFL backfill ECS task definition -- pass to `aws ecs run-task --task-definition`"
+  value       = aws_ecs_task_definition.nfl_backfill.arn
+}

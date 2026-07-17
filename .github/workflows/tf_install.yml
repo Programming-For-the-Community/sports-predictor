@@ -26,20 +26,20 @@ on:
     inputs:
       server_image_tag:
         description: 'Image tag of the server Docker image'
-        required: true
+        required: false
         type: string
       server_version:
         description: 'Version of the server'
-        required: true
+        required: false
         type: string
       client_image_tag:
         description: 'Image tag of the client Docker image'
         required: false
         type: string
       client_version:
-        required: true
+        required: false
         type: string
-        description: 'Version of the client'  
+        description: 'Version of the client'
 
 permissions:
   id-token: write
@@ -62,6 +62,8 @@ env:
   TF_VAR_public1_subnet_cidr: ${{ vars.PUBLIC1_SUBNET_CIDR }}
   TF_VAR_public2_subnet_cidr: ${{ vars.PUBLIC2_SUBNET_CIDR }}
   TF_VAR_public3_subnet_cidr: ${{ vars.PUBLIC3_SUBNET_CIDR }}
+  TF_VAR_ecr_repo_url: ${{ secrets.ECR_URI }}
+  TF_VAR_espn_api_root_url: ${{ vars.ESPN_API_ROOT_URL }}
 
 jobs:
   terraform:
@@ -78,6 +80,17 @@ jobs:
     # Checkout the repository to the GitHub Actions runner
     - name: Checkout
       uses: actions/checkout@v4
+
+    # Fails loudly here rather than letting an unset ESPN_API_ROOT_URL
+    # repo variable silently resolve to an empty string and propagate all
+    # the way into a running container's environment, where it would
+    # break every ESPN call without any clear error at the source.
+    - name: Validate required variables
+      run: |
+        if [ -z "$TF_VAR_espn_api_root_url" ]; then
+          echo "::error::ESPN_API_ROOT_URL is not set. Create it under Settings > Secrets and variables > Actions > Variables (value: https://site.api.espn.com/apis/site/v2/sports)."
+          exit 1
+        fi
 
     - name: Echo vars
       run: |
@@ -111,6 +124,11 @@ jobs:
     - name: Terraform Plan
       run: terraform -chdir=Terraform plan
 
-    # Build or change infrastructure according to Terraform configuration files
+    # Build or change infrastructure according to Terraform configuration files.
+    # Resource names/env vars a task actually runs with (RAW_BUCKET_NAME,
+    # ENTITIES_TABLE_NAME, etc.) are wired directly into the ECS task
+    # definition here, from Terraform's own resources -- see
+    # Terraform/ecs-task-nfl-backfill.tf. Nothing needs to flow back out
+    # to GitHub Actions for that purpose.
     - name: Terraform Apply
       run: terraform -chdir=Terraform apply -auto-approve

@@ -1,0 +1,62 @@
+# Top-level NFL deploy pipeline. Runs on every push to an nfl* branch, but
+# pauses for manual approval (via the environment's required reviewers --
+# configure this in Settings > Environments, it can't be set from this
+# file) before doing anything. Once approved, it runs tf_install once
+# (applying any infra changes, including the ECS task definitions' env
+# vars -- see Terraform/ecs-task-nfl-backfill.tf) and fans out to the
+# four nfl_* workflows in parallel to build and push their images. No
+# values are passed between jobs here: each sub-workflow only needs the
+# ECR repo URL and AWS push credentials to build/push an image, both of
+# which are plain GitHub variables/secrets already available in every
+# job, not Terraform outputs.
+
+name: NFL Deploy
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - 'nfl*'
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  approval:
+    name: Await deployment approval
+    runs-on: ubuntu-latest
+    environment: development
+    steps:
+      - name: Approved
+        run: echo "Deployment approved -- proceeding."
+
+  infra:
+    name: Apply shared infrastructure
+    needs: approval
+    uses: ./.github/workflows/tf_install.yml
+    secrets: inherit
+
+  backfill:
+    name: Historical backfill
+    needs: infra
+    uses: ./.github/workflows/nfl_backfill.yml
+    secrets: inherit
+
+  ai_training:
+    name: AI training
+    needs: infra
+    uses: ./.github/workflows/nfl_ai_training.yml
+    secrets: inherit
+
+  ai_hosting:
+    name: AI hosting
+    needs: infra
+    uses: ./.github/workflows/nfl_ai_hosting.yml
+    secrets: inherit
+
+  data_pipeline:
+    name: Data pipeline
+    needs: infra
+    uses: ./.github/workflows/nfl_data_pipeline.yml
+    secrets: inherit

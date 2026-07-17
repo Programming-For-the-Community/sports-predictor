@@ -1,0 +1,51 @@
+# Builds, packages, and deploys the NFL historical backfill job
+# (Source/data-backfills/nfl). Runs standalone (workflow_dispatch) or
+# called from nfl_deploy.yml (workflow_call) -- either way the work is
+# identical: build and push an image.
+#
+# IMAGE_VERSION lives here, once, as a plain constant -- bump it by
+# editing this line, never by typing a version into a manual dispatch
+# input. GitHub Actions doesn't let a `uses:` job read workflow-level
+# `env:` directly in its `with:`, so `set-version` below exists purely to
+# expose that constant as a job output the build job(s) can reference.
+#
+# Only one image today. If this stage grows a second component (e.g. a
+# separate Lambda), add another job below following the same shape as
+# `build-backfill-image`: `needs: set-version`, `uses:
+# ./.github/workflows/docker_build_push.yml`, a distinct `image_name`,
+# and the same `needs.set-version.outputs.version` -- every image built
+# in the same run of this workflow shares one version.
+
+name: NFL Backfill
+
+on:
+  workflow_dispatch:
+  workflow_call:
+
+env:
+  IMAGE_VERSION: '0.1.0'
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  set-version:
+    name: Resolve image version
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.out.outputs.version }}
+    steps:
+      - id: out
+        run: echo "version=${{ env.IMAGE_VERSION }}" >> "$GITHUB_OUTPUT"
+
+  build-backfill-image:
+    name: Build and push backfill image
+    needs: set-version
+    uses: ./.github/workflows/docker_build_push.yml
+    secrets: inherit
+    with:
+      dockerfile_path: 'Source/data-backfills/nfl/Dockerfile'
+      docker_context: 'Source/data-backfills/nfl'
+      image_name: 'nfl-backfill'
+      image_version: ${{ needs.set-version.outputs.version }}
