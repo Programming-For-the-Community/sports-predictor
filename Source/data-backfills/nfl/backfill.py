@@ -44,7 +44,7 @@ from datetime import datetime, timezone
 
 import espn_client
 import normalize
-import storage
+from library.storage.pipeline_storage import PipelineStorage
 
 logging.basicConfig(
     level=logging.INFO,
@@ -64,7 +64,7 @@ def chunk_seasons(start: int, end: int, batch_size: int) -> list[list[int]]:
     return [seasons[i:i + batch_size] for i in range(0, len(seasons), batch_size)]
 
 
-def seed_teams(client: espn_client.EspnClient) -> None:
+def seed_teams(client: espn_client.EspnClient, storage: PipelineStorage) -> None:
     logger.info("Seeding team entities")
     teams_response = client.get_teams()
     storage.put_raw_json("nfl/teams.json", teams_response)
@@ -74,7 +74,7 @@ def seed_teams(client: espn_client.EspnClient) -> None:
     logger.info("Seeded %d teams", len(league["teams"]))
 
 
-def process_game(client: espn_client.EspnClient, season: int, event_id: str) -> None:
+def process_game(client: espn_client.EspnClient, storage: PipelineStorage, season: int, event_id: str) -> None:
     raw_key = f"nfl/boxscore/{season}/{event_id}.json"
     if storage.raw_object_exists(raw_key):
         logger.debug("Box score already loaded, skipping event %s", event_id)
@@ -87,7 +87,7 @@ def process_game(client: espn_client.EspnClient, season: int, event_id: str) -> 
     storage.write_player_game_stats(stats_items)
 
 
-def process_season(client: espn_client.EspnClient, season: int) -> dict:
+def process_season(client: espn_client.EspnClient, storage: PipelineStorage, season: int) -> dict:
     games_processed = 0
     games_failed = 0
     failures = []
@@ -102,7 +102,7 @@ def process_season(client: espn_client.EspnClient, season: int) -> dict:
                 event_id = event["id"]
                 try:
                     storage.upsert_event(normalize.scoreboard_event_to_event_item(event))
-                    process_game(client, season, event_id)
+                    process_game(client, storage, season, event_id)
                     games_processed += 1
                 except Exception as exc:  # noqa: BLE001 -- log and continue, one bad game shouldn't kill the run
                     games_failed += 1
@@ -117,11 +117,11 @@ def process_season(client: espn_client.EspnClient, season: int) -> dict:
     }
 
 
-def process_batch(client: espn_client.EspnClient, seasons: list[int]) -> list[dict]:
+def process_batch(client: espn_client.EspnClient, storage: PipelineStorage, seasons: list[int]) -> list[dict]:
     results = []
     for season in seasons:
         logger.info("Starting season %s", season)
-        result = process_season(client, season)
+        result = process_season(client, storage, season)
         logger.info(
             "Finished season %s: %d games processed, %d failed",
             season, result["games_processed"], result["games_failed"],
@@ -151,12 +151,13 @@ def main() -> None:
     )
 
     client = espn_client.EspnClient(min_interval_seconds=args.request_delay)
-    seed_teams(client)
+    storage = PipelineStorage()
+    seed_teams(client, storage)
 
     all_results = []
     start_time = time.monotonic()
     with concurrent.futures.ThreadPoolExecutor(max_workers=len(batches), thread_name_prefix="batch") as executor:
-        futures = {executor.submit(process_batch, client, batch): batch for batch in batches}
+        futures = {executor.submit(process_batch, client, storage, batch): batch for batch in batches}
         for future in concurrent.futures.as_completed(futures):
             batch = futures[future]
             try:
@@ -176,7 +177,7 @@ def main() -> None:
         storage.put_raw_json(failure_key, {"failures": all_failures})
         logger.warning(
             "Wrote %d failures to s3://%s/%s -- re-running the script will retry only the missing games",
-            len(all_failures), storage.RAW_BUCKET, failure_key,
+            len(all_failures), storage.raw_bucket, failure_key,
         )
         sys.exit(1)
 
