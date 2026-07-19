@@ -10,6 +10,14 @@ terraform.tfstate.*
 *.swp
 *.swo
 
+# Python
+__pycache__/
+.pytest_cache/
+.venv/
+
+# Custom Library of Shared Python Dependencies
+sports_predictor_library.egg-info/
+
 # Build and output files
 dist/
 build/

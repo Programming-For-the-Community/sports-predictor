@@ -1,6 +1,9 @@
 boto3>=1.34
 requests>=2.31
 
+# local development / testing only
+pytest>=8.0
+
 # The `library` package (Source/library) is installed separately, not via
 # this file -- a Dockerfile installs it with `pip install /path/to/library`
 # before installing these. For local development, run from a virtualenv
