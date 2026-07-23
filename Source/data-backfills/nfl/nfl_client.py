@@ -8,7 +8,7 @@ other sport's ESPN-backed client.
 from library.http.espn import EspnBaseClient
 
 
-class EspnClient(EspnBaseClient):
+class NFLClient(EspnBaseClient):
     def __init__(self, min_interval_seconds: float = 0.3):
         super().__init__(sport_path="football/nfl", min_interval_seconds=min_interval_seconds)
 

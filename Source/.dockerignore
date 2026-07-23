@@ -1,0 +1,19 @@
+# Applies to every sport's Docker build in this repo -- context root is
+# Source/ for all of them, so this file is shared rather than duplicated
+# per sport.
+
+**/__pycache__/
+**/*.pyc
+**/*.pyo
+**/*.egg-info/
+**/.pytest_cache/
+**/.venv/
+**/build/
+**/dist/
+
+# Test source isn't needed in any runtime image
+tests/
+
+# Other sports/components -- irrelevant per-image, keeps context upload small
+front-end/
+aws-lambdas/
