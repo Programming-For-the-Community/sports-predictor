@@ -49,3 +49,8 @@ output "nfl_backfill_task_definition_arn" {
   description = "ARN of the NFL backfill ECS task definition -- pass to `aws ecs run-task --task-definition`"
   value       = aws_ecs_task_definition.nfl_backfill.arn
 }
+
+output "nfl_cluster_name" {
+  description = "ECS cluster NFL tasks run in -- select this cluster in the console's Run Task screen"
+  value       = aws_ecs_cluster.main.name
+}

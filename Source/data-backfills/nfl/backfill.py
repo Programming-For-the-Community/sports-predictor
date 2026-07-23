@@ -42,13 +42,13 @@ import sys
 import time
 from datetime import datetime, timezone
 
-import espn_client
+from nfl_client import NFLClient
 import normalize
 from library.storage.pipeline_storage import PipelineStorage
 
 logging.basicConfig(
     level=logging.INFO,
-    format="%(asctime)s [%(threadName)s] %(levelname)s %(message)s",
+    format="%(asctime)s [%(levelname)s]: %(message)s",
 )
 logger = logging.getLogger("nfl-backfill")
 
@@ -64,7 +64,7 @@ def chunk_seasons(start: int, end: int, batch_size: int) -> list[list[int]]:
     return [seasons[i:i + batch_size] for i in range(0, len(seasons), batch_size)]
 
 
-def seed_teams(client: espn_client.EspnClient, storage: PipelineStorage) -> None:
+def seed_teams(client: NFLClient, storage: PipelineStorage) -> None:
     logger.info("Seeding team entities")
     teams_response = client.get_teams()
     storage.put_raw_json("nfl/teams.json", teams_response)
@@ -74,7 +74,7 @@ def seed_teams(client: espn_client.EspnClient, storage: PipelineStorage) -> None
     logger.info("Seeded %d teams", len(league["teams"]))
 
 
-def process_game(client: espn_client.EspnClient, storage: PipelineStorage, season: int, event_id: str) -> None:
+def process_game(client: NFLClient, storage: PipelineStorage, season: int, event_id: str) -> None:
     raw_key = f"nfl/boxscore/{season}/{event_id}.json"
     if storage.raw_object_exists(raw_key):
         logger.debug("Box score already loaded, skipping event %s", event_id)
@@ -87,7 +87,7 @@ def process_game(client: espn_client.EspnClient, storage: PipelineStorage, seaso
     storage.write_player_game_stats(stats_items)
 
 
-def process_season(client: espn_client.EspnClient, storage: PipelineStorage, season: int) -> dict:
+def process_season(client: NFLClient, storage: PipelineStorage, season: int) -> dict:
     games_processed = 0
     games_failed = 0
     failures = []
@@ -117,7 +117,7 @@ def process_season(client: espn_client.EspnClient, storage: PipelineStorage, sea
     }
 
 
-def process_batch(client: espn_client.EspnClient, storage: PipelineStorage, seasons: list[int]) -> list[dict]:
+def process_batch(client: NFLClient, storage: PipelineStorage, seasons: list[int]) -> list[dict]:
     results = []
     for season in seasons:
         logger.info("Starting season %s", season)
@@ -150,7 +150,7 @@ def main() -> None:
         args.start_season, args.end_season, len(batches), args.batch_size,
     )
 
-    client = espn_client.EspnClient(min_interval_seconds=args.request_delay)
+    client = NFLClient(min_interval_seconds=args.request_delay)
     storage = PipelineStorage()
     seed_teams(client, storage)
 

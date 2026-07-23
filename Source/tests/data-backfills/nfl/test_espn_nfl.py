@@ -14,7 +14,7 @@ the rate limiter is only hit a handful of times across the full suite.
 """
 import pytest
 
-import espn_client
+from nfl_client import NFLClient
 import normalize
 
 TEST_SEASON = 2024
@@ -28,7 +28,7 @@ TEST_WEEK = 1
 
 @pytest.fixture(scope="module")
 def client():
-    return espn_client.EspnClient()
+    return NFLClient()
 
 
 @pytest.fixture(scope="module")
@@ -54,10 +54,10 @@ def summary_response(client, first_event):
 
 
 # ---------------------------------------------------------------------------
-# ESPN client -- verify the API is reachable and returns expected structure
+# NFL client -- verify the API is reachable and returns expected structure
 # ---------------------------------------------------------------------------
 
-class TestEspnClient:
+class TestNFLClient:
     def test_get_teams_returns_32_nfl_teams(self, teams_response):
         leagues = teams_response["sports"][0]["leagues"]
         assert leagues, "No leagues in teams response"
