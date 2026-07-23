@@ -59,7 +59,7 @@ resource "aws_security_group" "ecs_pipeline" {
 # tasks aren't listening for anything, they only make outbound calls.
 resource "aws_security_group" "fargate_internet_egress" {
   name        = "${var.project}-fargate-internet-egress"
-  description = "Fargate tasks needing outbound internet access (ingest/backfill jobs hitting a sport's public data API)"
+  description = "Fargate tasks needing outbound internet access (ingest/backfill jobs hitting a sport public data API)"
   vpc_id      = var.vpc_id
 
   egress {

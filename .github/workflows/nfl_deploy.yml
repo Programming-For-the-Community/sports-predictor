@@ -9,6 +9,12 @@
 # ECR repo URL and AWS push credentials to build/push an image, both of
 # which are plain GitHub variables/secrets already available in every
 # job, not Terraform outputs.
+#
+# Approval only applies when this workflow is triggered directly (push or
+# workflow_dispatch). When another workflow calls this one via `uses:`,
+# github.event_name is "workflow_call" and the approval job is skipped --
+# the calling workflow is assumed to own its own review/gating, so this
+# doesn't double-gate it.
 
 name: NFL Deploy
 
@@ -17,6 +23,7 @@ on:
   push:
     branches:
       - 'nfl*'
+  workflow_call:
 
 permissions:
   id-token: write
@@ -25,6 +32,7 @@ permissions:
 jobs:
   approval:
     name: Await deployment approval
+    if: github.event_name != 'workflow_call'
     runs-on: ubuntu-latest
     environment: development
     steps:
@@ -34,6 +42,12 @@ jobs:
   infra:
     name: Apply shared infrastructure
     needs: approval
+    # approval is intentionally skipped (not failed) when called via
+    # workflow_call -- without this, a skipped `needs` job would cause
+    # `infra` (and everything downstream of it) to be skipped too.
+    if: |
+      always() &&
+      (needs.approval.result == 'success' || needs.approval.result == 'skipped')
     uses: ./.github/workflows/tf_install.yml
     secrets: inherit
 
