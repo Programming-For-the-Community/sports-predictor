@@ -32,8 +32,26 @@ resource "aws_iam_role_policy_attachment" "nfl_backfill_execution" {
 data "aws_iam_policy_document" "nfl_backfill_permissions" {
   statement {
     sid       = "WriteRawDataLake"
-    actions   = ["s3:PutObject", "s3:GetObject", "s3:HeadObject"]
+    actions   = ["s3:PutObject", "s3:GetObject"]
     resources = ["${aws_s3_bucket.raw_data_lake.arn}/nfl/*"]
+  }
+
+  # HeadObject (used by raw_object_exists() to skip already-loaded games)
+  # is authorized by s3:GetObject above, but without s3:ListBucket too, S3
+  # can't tell "object doesn't exist" from "not allowed to know" and
+  # returns 403 instead of 404 for a missing key -- which is almost every
+  # key on a first run. Scoped to the nfl/ prefix via the condition so
+  # this role still can't enumerate other sports' data in the same bucket.
+  statement {
+    sid       = "ListRawDataLakeNflPrefix"
+    actions   = ["s3:ListBucket"]
+    resources = [aws_s3_bucket.raw_data_lake.arn]
+
+    condition {
+      test     = "StringLike"
+      variable = "s3:prefix"
+      values   = ["nfl/*"]
+    }
   }
 
   statement {
