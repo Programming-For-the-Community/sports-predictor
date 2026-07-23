@@ -69,7 +69,15 @@ jobs:
   terraform:
     name: 'Terraform'
     runs-on: ubuntu-latest
-    environment: ${{ github.event.inputs.environment || 'development' }}
+    # Environment protection rules are enforced per job, not per workflow
+    # run -- so calling this job from another workflow that already has
+    # its own approval gate (e.g. nfl_deploy.yml) would otherwise trigger
+    # a second, redundant approval prompt here. An empty string means "no
+    # environment," which skips gating entirely; that only happens when
+    # github.event_name is "workflow_call" (i.e. we were called, not
+    # triggered directly), so direct push/workflow_dispatch runs are
+    # unaffected and still gate on development/production as before.
+    environment: ${{ github.event_name != 'workflow_call' && (github.event.inputs.environment || 'development') || '' }}
 
     # Use the Bash shell regardless whether the GitHub Actions runner is ubuntu-latest, macos-latest, or windows-latest
     defaults:
