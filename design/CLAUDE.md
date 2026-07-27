@@ -1,4 +1,4 @@
-# Multi-Sport Prediction Platform — Project Context
+﻿# Multi-Sport Prediction Platform — Project Context
 
 This file gives Claude Code (or any future contributor) the context needed to work on this repository without re-deriving prior decisions. Read this first, then the relevant doc in `/docs` for the area you're touching.
 
@@ -49,6 +49,6 @@ See `docs/PROJECT_PLAN.md` for the full checklist. Short version: get NFL workin
   storage.py        # shared S3/DynamoDB helpers
   registry.py        # loads the sport registry, drives the Step Functions map
 /infra              # CDK/Terraform for shared infrastructure
-/frontend           # React SPA
+/frontend           # Flutter Web app
 /docs               # this documentation set
 ```

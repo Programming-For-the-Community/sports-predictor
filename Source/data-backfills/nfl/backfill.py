@@ -42,7 +42,7 @@ import sys
 import time
 from datetime import datetime, timezone
 
-from nfl_client import NFLClient
+from library.http.nfl import NFLClient
 import normalize
 from library.storage.pipeline_storage import PipelineStorage
 

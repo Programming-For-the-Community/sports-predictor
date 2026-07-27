@@ -1,4 +1,4 @@
-# Build context is Source/ (not this directory) -- the image needs both
+﻿# Build context is Source/ (not this directory) -- the image needs both
 # this job's code and the sibling library/ package, and Docker can't COPY
 # anything from outside its build context. See .github/workflows/nfl_backfill.yml
 # for the `docker build -f Source/data-backfills/nfl/Dockerfile Source` invocation.
@@ -32,7 +32,7 @@ ENV PYTHONPATH=/app/deps \
     PYTHONUNBUFFERED=1
 
 COPY --from=builder /install /app/deps
-COPY data-backfills/nfl/backfill.py data-backfills/nfl/nfl_client.py data-backfills/nfl/normalize.py ./
+COPY data-backfills/nfl/backfill.py data-backfills/nfl/normalize.py ./
 
 USER backfill
 

@@ -23,7 +23,7 @@ A phased checklist in implementation order. Each phase assumes the previous one 
 - [ ] Train the first XGBoost win-probability model, store the artifact in S3
 - [ ] Train a first player-prop model for at least one stat (e.g., QB passing yards) — proves the `player_game_stats` table and the per-target train/predict split actually work before generalizing to other sports
 - [ ] Write the inference Lambda and wire it to API Gateway routes for both event-outcome and player-prop predictions
-- [ ] Build a minimal React frontend showing one sport's event predictions and at least one player-prop prediction
+- [ ] Build a minimal Flutter Web frontend showing one sport's event predictions and at least one player-prop prediction
 - [ ] Confirm the Cognito login gate works end to end on the live URL — log out, confirm the API rejects unauthenticated calls, log back in, confirm it works
 
 ## Phase 2 — NCAA FB adapter (validate generalization)

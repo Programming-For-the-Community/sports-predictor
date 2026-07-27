@@ -1,58 +1,55 @@
-# Builds, packages, and deploys the NFL recurring data pipeline (weekly
-# in-season ingest, distinct from the one-off historical backfill in
-# nfl_backfill.yml). Runs standalone (workflow_dispatch) or called from
-# nfl_deploy.yml (workflow_call) -- either way the work is identical:
-# build and push image(s).
+# Builds and deploys the NFL recurring data pipeline Lambdas: nfl-ingest
+# (EventBridge-triggered, writes raw JSON to S3) and nfl-normalize
+# (S3-triggered, writes to DynamoDB). Both are deployed in parallel since
+# they are independent -- a failure in one does not block the other.
 #
-# This stage builds at least two images per design/ARCHITECTURE.md's
-# "Scheduled Ingestion"/"Normalization" subgraphs: an Ingest Adapter
-# Lambda and a Normalize and Load Lambda. Once their Dockerfiles exist,
-# add one job per image below, each shaped like:
+# Lambda function names are supplied by the caller (nfl_deploy.yml) from
+# Terraform outputs so this workflow never hard-codes names that Terraform
+# owns. Defaults are provided so workflow_dispatch (manual, standalone run)
+# still works without needing the Terraform output values.
 #
-#   build-<component>-image:
-#     needs: set-version
-#     uses: ./.github/workflows/docker_build_push.yml
-#     secrets: inherit
-#     with:
-#       dockerfile_path: 'Source/<path>/Dockerfile'
-#       docker_context: 'Source/<path>'
-#       image_name: 'nfl-<component>'
-#       image_version: ${{ needs.set-version.outputs.version }}
-#
-# All images built in the same run share IMAGE_VERSION below -- bump it
-# by editing this line, never by typing a version into a manual dispatch
-# input.
+# Terraform (tf_install.yml) creates each Lambda function with a placeholder
+# ZIP and lifecycle { ignore_changes } so it never overwrites what this
+# workflow deploys. This workflow owns all subsequent code updates.
 
 name: NFL Data Pipeline
 
 on:
   workflow_dispatch:
   workflow_call:
-
-env:
-  IMAGE_VERSION: '0.1.0'
+    inputs:
+      ingest_function_name:
+        description: 'NFL ingest Lambda function name (from Terraform output nfl_ingest_function_name)'
+        required: false
+        type: string
+        default: 'sports-predictor-nfl-ingest'
+      normalize_function_name:
+        description: 'NFL normalize Lambda function name (from Terraform output nfl_normalize_function_name)'
+        required: false
+        type: string
+        default: 'sports-predictor-nfl-normalize'
 
 permissions:
   id-token: write
   contents: read
 
 jobs:
-  set-version:
-    name: Resolve image version
-    runs-on: ubuntu-latest
-    outputs:
-      version: ${{ steps.out.outputs.version }}
-    steps:
-      - id: out
-        run: echo "version=${{ env.IMAGE_VERSION }}" >> "$GITHUB_OUTPUT"
+  deploy-ingest:
+    name: Deploy nfl-ingest Lambda
+    uses: ./.github/workflows/python_lambda_build.yml
+    secrets: inherit
+    with:
+      function_name: ${{ inputs.ingest_function_name || 'sports-predictor-nfl-ingest' }}
+      handler_dir: 'Source/lambdas/nfl/ingest'
+      library_path: 'Source/library'
+      test_dir: 'Source/tests/lambdas/nfl'
 
-  # TODO once the NFL ingest/normalize source code and Dockerfile(s)
-  # exist: replace this with one build-<component>-image job per image,
-  # per the comment block above.
-  placeholder:
-    name: Build, package, and deploy (placeholder)
-    needs: set-version
-    runs-on: ubuntu-latest
-    steps:
-      - name: Placeholder
-        run: echo "Would build and push NFL data pipeline image(s) at version ${{ needs.set-version.outputs.version }} here."
+  deploy-normalize:
+    name: Deploy nfl-normalize Lambda
+    uses: ./.github/workflows/python_lambda_build.yml
+    secrets: inherit
+    with:
+      function_name: ${{ inputs.normalize_function_name || 'sports-predictor-nfl-normalize' }}
+      handler_dir: 'Source/lambdas/nfl/normalize'
+      library_path: 'Source/library'
+      test_dir: 'Source/tests/lambdas/nfl'
