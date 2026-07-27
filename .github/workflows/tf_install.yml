@@ -40,6 +40,13 @@ on:
         required: false
         type: string
         description: 'Version of the client'
+    outputs:
+      nfl_ingest_function_name:
+        description: 'NFL ingest Lambda function name'
+        value: ${{ jobs.terraform.outputs.nfl_ingest_function_name }}
+      nfl_normalize_function_name:
+        description: 'NFL normalize Lambda function name'
+        value: ${{ jobs.terraform.outputs.nfl_normalize_function_name }}
 
 permissions:
   id-token: write
@@ -69,6 +76,9 @@ jobs:
   terraform:
     name: 'Terraform'
     runs-on: ubuntu-latest
+    outputs:
+      nfl_ingest_function_name: ${{ steps.tf_outputs.outputs.nfl_ingest_function_name }}
+      nfl_normalize_function_name: ${{ steps.tf_outputs.outputs.nfl_normalize_function_name }}
     # Environment protection rules are enforced per job, not per workflow
     # run -- so calling this job from another workflow that already has
     # its own approval gate (e.g. nfl_deploy.yml) would otherwise trigger
@@ -140,3 +150,9 @@ jobs:
     # to GitHub Actions for that purpose.
     - name: Terraform Apply
       run: terraform -chdir=Terraform apply -auto-approve
+
+    - name: Capture Terraform outputs
+      id: tf_outputs
+      run: |
+        echo "nfl_ingest_function_name=$(terraform -chdir=Terraform output -raw nfl_ingest_function_name)" >> "$GITHUB_OUTPUT"
+        echo "nfl_normalize_function_name=$(terraform -chdir=Terraform output -raw nfl_normalize_function_name)" >> "$GITHUB_OUTPUT"

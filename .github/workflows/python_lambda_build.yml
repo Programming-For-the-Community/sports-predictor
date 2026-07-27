@@ -1,0 +1,136 @@
+# Reusable workflow: builds a Python Lambda deployment ZIP and updates the
+# live function code. Mirrors the role docker_build_push.yml plays for ECS:
+# Terraform owns the function infrastructure (created with a placeholder ZIP),
+# this workflow owns every subsequent code deployment.
+#
+# Build layout inside the ZIP:
+#   library/   <- shared library, installed via pip --no-deps
+#   handler.py <- Lambda entry point
+#   <any extra_source_files, placed at ZIP root>
+#   <pip-installed deps from requirements.txt>
+#
+# boto3 is intentionally excluded from requirements.txt for every Lambda
+# because it is pre-installed in the Lambda Python runtime. Bundle only
+# what the runtime doesn't already provide.
+
+name: Build and Deploy Python Lambda
+
+on:
+  workflow_call:
+    inputs:
+      function_name:
+        description: 'Exact Lambda function name in AWS (e.g. sports-predictor-nfl-ingest)'
+        required: true
+        type: string
+      handler_dir:
+        description: 'Relative path to the directory containing handler.py and requirements.txt'
+        required: true
+        type: string
+      library_path:
+        description: 'Relative path to the shared library to bundle as the `library` package'
+        required: false
+        type: string
+        default: 'Source/library'
+      extra_source_files:
+        description: 'Space-separated list of extra source files to copy into the ZIP root'
+        required: false
+        type: string
+        default: ''
+      test_dir:
+        description: 'Path to the pytest test directory to run before building (skipped if empty)'
+        required: false
+        type: string
+        default: ''
+      python_version:
+        description: 'Python version to build with (must match the Lambda runtime)'
+        required: false
+        type: string
+        default: '3.12'
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  build-deploy:
+    name: Build and deploy ${{ inputs.function_name }}
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python ${{ inputs.python_version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ inputs.python_version }}
+
+      - name: Run unit tests
+        if: inputs.test_dir != ''
+        env:
+          HANDLER_DIR: ${{ inputs.handler_dir }}
+          TEST_DIR: ${{ inputs.test_dir }}
+          LIBRARY_PATH: ${{ inputs.library_path }}
+        run: |
+          # boto3 is pre-installed in the Lambda runtime but not in the CI
+          # runner -- install it so the handler modules can be imported.
+          pip install pytest boto3
+          pip install "$LIBRARY_PATH"
+          if [ -s "$HANDLER_DIR/requirements.txt" ]; then
+            pip install -r "$HANDLER_DIR/requirements.txt"
+          fi
+          pytest "$TEST_DIR" -v
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_DEPLOY_SVC_ACCT_ARN }}
+          aws-region: ${{ vars.AWS_RESOURCE_REGION }}
+          role-session-name: GitHubActions-${{ github.run_id }}
+
+      - name: Verify AWS identity
+        run: aws sts get-caller-identity
+
+      - name: Build deployment ZIP
+        env:
+          HANDLER_DIR: ${{ inputs.handler_dir }}
+          LIBRARY_PATH: ${{ inputs.library_path }}
+          EXTRA_FILES: ${{ inputs.extra_source_files }}
+          FUNCTION_NAME: ${{ inputs.function_name }}
+        run: |
+          mkdir -p package
+
+          # Install Lambda-specific dependencies (excludes boto3 -- runtime provides it)
+          if [ -s "$HANDLER_DIR/requirements.txt" ]; then
+            pip install -r "$HANDLER_DIR/requirements.txt" -t package/
+          fi
+
+          # Bundle the shared library without pulling its declared dependencies
+          # (boto3 and requests are already handled above or by the runtime)
+          pip install --no-deps "$LIBRARY_PATH" -t package/
+
+          # Copy extra source files (e.g. sport-specific modules) to ZIP root
+          for f in $EXTRA_FILES; do
+            cp "$f" package/
+            echo "Bundled extra file: $f"
+          done
+
+          # Copy the Lambda handler
+          cp "$HANDLER_DIR/handler.py" package/
+
+          # Create the ZIP from inside the package dir so paths are at the root
+          cd package
+          zip -r "../${FUNCTION_NAME}.zip" .
+          cd ..
+
+          echo "Built ${FUNCTION_NAME}.zip ($(du -sh ${FUNCTION_NAME}.zip | cut -f1))"
+
+      - name: Deploy to Lambda
+        env:
+          FUNCTION_NAME: ${{ inputs.function_name }}
+        run: |
+          aws lambda update-function-code \
+            --function-name "$FUNCTION_NAME" \
+            --zip-file "fileb://${FUNCTION_NAME}.zip"
+
+          echo "Deployed $FUNCTION_NAME"

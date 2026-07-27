@@ -1,6 +1,6 @@
 # Frontend Visual Style — "Arena"
 
-The house visual language for the React SPA (`/frontend`). It is a dark, data-dense
+The house visual language for the Flutter Web app (`/frontend`). It is a dark, data-dense
 "sportsbook terminal" aesthetic: calm navy surfaces, a single electric-cyan accent, a
 violet secondary reserved for field-event sports, and large confident numerals. The goal
 is a board you can read at a glance — probabilities and margins are the loudest things on
@@ -13,7 +13,7 @@ below rather than introducing a new color or font.
 
 ### Fonts
 
-Two families, loaded from Google Fonts. Never add a third.
+Two families, loaded via the `google_fonts` Flutter package. Never add a third.
 
 | Role | Family | Weights | Used for |
 |---|---|---|---|
@@ -26,33 +26,35 @@ Rule of thumb: anything that is a **measured value or a label** is mono; anythin
 
 ### Color tokens
 
-```
-/* Surfaces */
---bg            #0a0e17   /* app background */
---bg-deep       #070a12   /* html/body behind the app */
---surface       rgba(255,255,255,0.035)                                   /* flat card */
---surface-grad  linear-gradient(180deg, rgba(255,255,255,0.05), rgba(255,255,255,0.02)) /* raised card */
---inset         rgba(255,255,255,0.03)   /* nested panel inside a card */
---border        rgba(255,255,255,0.07)   /* default hairline (0.08 on raised cards) */
+Define these as `const Color` values in a `AppColors` class (or via `ThemeData`). Never hardcode hex values inline — always reference these names.
 
-/* Text */
---ink           #eaf0f7   /* primary */
---ink-mid       #cdd5de   /* secondary values */
---ink-sub       #8a96a8   /* supporting copy, de-emphasized team */
---ink-mute      #586577   /* micro-labels, captions */
+```dart
+// Surfaces
+bg           = Color(0xFF0a0e17)  // app background (Scaffold backgroundColor)
+bgDeep       = Color(0xFF070a12)  // behind the app
+surface      = Color(0x09FFFFFF)  // flat card (rgba 255,255,255,0.035)
+surfaceGrad  = [Color(0x0DFFFFFF), Color(0x05FFFFFF)]  // raised card gradient stops
+inset        = Color(0x08FFFFFF)  // nested panel inside a card
+border       = Color(0x12FFFFFF)  // default hairline (0x14 on raised cards)
 
-/* Accents */
---cyan          #22d3ee   /* PRIMARY — win side, picks, active emphasis, links */
---cyan-2        #5eead4   /* gradient partner for cyan */
---violet        #7c6cff   /* SECONDARY — field-event sports (PGA, F1), tertiary cards */
---violet-2      #a99dff   /* violet text on dark */
+// Text
+ink          = Color(0xFFEAF0F7)  // primary
+inkMid       = Color(0xFFCDD5DE)  // secondary values
+inkSub       = Color(0xFF8A96A8)  // supporting copy, de-emphasized team
+inkMute      = Color(0xFF586577)  // micro-labels, captions
 
-/* Signal */
---pos           #22d3ee   /* positive feature contribution (uses cyan) */
---neg           #ff5c7a   /* negative contribution / loss */
---neg-2         #ff8fa3   /* gradient partner for neg */
---live          #4ade80   /* "live / active" status dot + pill */
---warn          #ffb454   /* warming / preseason / off-cadence */
+// Accents
+cyan         = Color(0xFF22D3EE)  // PRIMARY — win side, picks, active emphasis, links
+cyan2        = Color(0xFF5EEAD4)  // gradient partner for cyan
+violet       = Color(0xFF7C6CFF)  // SECONDARY — field-event sports (PGA, F1), tertiary cards
+violet2      = Color(0xFFA99DFF)  // violet text on dark
+
+// Signal
+pos          = Color(0xFF22D3EE)  // positive feature contribution (uses cyan)
+neg          = Color(0xFFFF5C7A)  // negative contribution / loss
+neg2         = Color(0xFFFF8FA3)  // gradient partner for neg
+live         = Color(0xFF4ADE80)  // "live / active" status dot + pill
+warn         = Color(0xFFFFB454)  // warming / preseason / off-cadence
 ```
 
 Accent discipline: **cyan is the only call-to-attention color.** Violet is structural, not
@@ -62,22 +64,22 @@ accents.
 
 ### Signature gradients
 
-```
-brand-mark   linear-gradient(135deg, #22d3ee, #7c6cff)   /* logo tile, avatar */
-cyan-fill    linear-gradient(90deg,  #22d3ee, #5eead4)    /* progress / prob bars, positive */
-neg-fill     linear-gradient(90deg,  #ff5c7a, #ff8fa3)    /* negative contribution bars */
-accent-strip linear-gradient(90deg,  #22d3ee, #5eead4)    /* 4px card top strip (h2h) */
-accent-strip linear-gradient(90deg,  #7c6cff, #22d3ee)    /* 4px card top strip (field event) */
-glow         radial-gradient(ellipse at center, rgba(34,211,238,0.10), rgba(124,108,255,0.05) 45%, transparent 70%)
+Expressed as Flutter `LinearGradient` / `RadialGradient` values:
+
+```dart
+brandMark   = LinearGradient(begin: Alignment.topLeft, end: Alignment.bottomRight,
+                colors: [Color(0xFF22D3EE), Color(0xFF7C6CFF)])  // logo tile, avatar
+cyanFill    = LinearGradient(colors: [Color(0xFF22D3EE), Color(0xFF5EEAD4)])  // prob bars, positive
+negFill     = LinearGradient(colors: [Color(0xFFFF5C7A), Color(0xFFFF8FA3)]) // negative bars
+accentStripH2h   = LinearGradient(colors: [Color(0xFF22D3EE), Color(0xFF5EEAD4)]) // 4px card top (h2h)
+accentStripField = LinearGradient(colors: [Color(0xFF7C6CFF), Color(0xFF22D3EE)]) // 4px card top (field)
+glow        = RadialGradient(colors: [Color(0x1A22D3EE), Color(0x0D7C6CFF), Colors.transparent],
+                stops: [0, 0.45, 0.70])
 ```
 
-The `glow` is a single fixed, non-interactive layer behind the page content
-(`position:fixed; top:-220px; left:50%; translateX(-50%); ~1100×560px; z-index:0`). Page
-content sits at `z-index:1`. One glow per page, top-center.
+The `glow` is a single non-interactive `Container` with the radial gradient, positioned at the top-center of each page behind all content (`Stack` with it at index 0, ~1100×560 logical px). One glow per page.
 
-Big "favored side" percentages use a **gradient-clipped** number for extra pop:
-`background:var(--cyan-fill); -webkit-background-clip:text; background-clip:text;
--webkit-text-fill-color:transparent;`
+Big "favored side" percentages use a **gradient-clipped** number for extra pop via Flutter's `ShaderMask` widget wrapping a `Text`, using `cyanFill` as the shader and `BlendMode.srcIn`.
 
 ## Shape, depth & spacing
 
@@ -112,11 +114,7 @@ labels are UPPERCASE mono.
 
 ## Components
 
-- **Top bar** — sticky, `rgba(10,14,23,0.82)` + `backdrop-filter: blur(12px)`, bottom hairline.
-  Left: gradient `brand-mark` tile (34px, radius 10px) + product name. Center/left: a
-  pill-group segmented toggle (active segment = solid cyan with `#0a0e17` text, inactive =
-  muted). Right cluster: a `--live` status pill, a mono timestamp, and a pill user chip with a
-  `brand-mark` avatar.
+- **Top bar** — sticky `AppBar` or `SliverAppBar`, background `Color(0xD20a0e17)` with `ImageFilter.blur(sigmaX:12, sigmaY:12)` via `BackdropFilter`, bottom hairline `Divider`. Left: gradient `brandMark` tile (34px, `BorderRadius.circular(10)`) + product name. Center/left: a pill-group segmented toggle (active segment = solid cyan with `bg` text, inactive = muted). Right cluster: a `live` status pill, a mono timestamp, and a pill user chip with a `brandMark` avatar.
 - **Stat pill** — `--surface` card, radius 16px, mono micro-label over a 32px 700 numeral
   (cyan when it's the highlighted metric).
 - **Sport card** — raised `surface-grad` card with a 4px top accent strip (cyan h2h / violet
@@ -155,9 +153,7 @@ labels are UPPERCASE mono.
 
 ## Responsiveness
 
-Intrinsic, **no media queries**: `clamp()` for type and padding, `grid-template-columns:
-repeat(auto-fill, minmax(340px, 1fr))` for card grids, `flex-wrap` + `min-width` on rows. The
-body scrolls; never trap scroll in an inner wrapper.
+Intrinsic, **no hardcoded breakpoints**: use `LayoutBuilder` or `MediaQuery` for type and padding scaling, `Wrap` with `spacing`/`runSpacing` for card grids (minimum child width ~340 logical px), and `Wrap` + `Flexible` on rows. The page scrolls via a top-level `SingleChildScrollView` or `CustomScrollView`; never trap scroll inside a fixed-height inner widget.
 
 ## Do / Don't
 

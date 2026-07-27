@@ -1,4 +1,4 @@
-# Architecture
+﻿# Architecture
 
 This document describes the system architecture in two stages: the single-sport pipeline you build first (Phase 1 of `PROJECT_PLAN.md`), and the multi-sport, registry-driven version it evolves into (Phase 4 onward). Both diagrams render natively in GitHub and in most Markdown viewers.
 
@@ -43,7 +43,7 @@ flowchart TD
     INF --> APIGW
 
     subgraph Client["You"]
-        CF["CloudFront + S3: React SPA"]
+        CF["CloudFront + S3: Flutter Web app"]
         BROWSER["Browser, logged in via Cognito"]
     end
     CF --> BROWSER
@@ -112,7 +112,7 @@ flowchart TD
     INF --> APIGW
 
     subgraph Client["You"]
-        CF["CloudFront + S3: React SPA"]
+        CF["CloudFront + S3: Flutter Web app"]
         BROWSER["Browser, logged in via Cognito"]
     end
     CF --> BROWSER
@@ -130,7 +130,7 @@ The frontend sits at a public URL by design (so you can reach it from anywhere),
 
 **API Gateway Cognito authorizer.** API Gateway has a built-in integration for validating Cognito-issued JWTs on every request — no custom Lambda authorizer needed. Requests without a valid, unexpired token are rejected at the gateway, before they ever reach the inference Lambda.
 
-**CloudFront + S3 for the SPA.** The React app itself is static and technically loads for anyone who hits the URL, but it's useless without logging in — every data call it makes requires the Cognito token, so an unauthenticated visitor sees a login screen and nothing else.
+**CloudFront + S3 for the Flutter Web app.** The compiled Flutter app is static and technically loads for anyone who hits the URL, but it's useless without logging in — every data call it makes requires the Cognito token, so an unauthenticated visitor sees a login screen and nothing else.
 
 **Usage plan as a second layer.** Attach a low-throughput usage plan (e.g., a handful of requests per second) to the API Gateway stage regardless of authentication. Since you're the only legitimate caller, any traffic pattern that would hit this limit is almost certainly not you — it's a cheap tripwire against scraping or abuse even if a token were ever compromised.
 

@@ -14,7 +14,7 @@ the rate limiter is only hit a handful of times across the full suite.
 """
 import pytest
 
-from nfl_client import NFLClient
+from library.http.nfl import NFLClient
 import normalize
 
 TEST_SEASON = 2024

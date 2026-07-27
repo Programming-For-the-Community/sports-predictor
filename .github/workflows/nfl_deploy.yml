@@ -74,3 +74,6 @@ jobs:
     needs: infra
     uses: ./.github/workflows/nfl_data_pipeline.yml
     secrets: inherit
+    with:
+      ingest_function_name: ${{ needs.infra.outputs.nfl_ingest_function_name }}
+      normalize_function_name: ${{ needs.infra.outputs.nfl_normalize_function_name }}

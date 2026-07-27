@@ -54,3 +54,13 @@ output "nfl_cluster_name" {
   description = "ECS cluster NFL tasks run in -- select this cluster in the console's Run Task screen"
   value       = aws_ecs_cluster.main.name
 }
+
+output "nfl_ingest_function_name" {
+  description = "NFL ingest Lambda function name -- passed to nfl_data_pipeline workflow for `aws lambda update-function-code`"
+  value       = aws_lambda_function.nfl_ingest.function_name
+}
+
+output "nfl_normalize_function_name" {
+  description = "NFL normalize Lambda function name -- passed to nfl_data_pipeline workflow for `aws lambda update-function-code`"
+  value       = aws_lambda_function.nfl_normalize.function_name
+}
