@@ -5,9 +5,12 @@ repeating put_item/batch_writer boilerplate -- entities, events, and
 player_game_stats become three DynamoDBTable instances, not three bespoke
 modules.
 """
+import logging
 from decimal import Decimal
 
 import boto3
+
+logger = logging.getLogger(__name__)
 
 
 def _to_dynamodb_safe(value):
@@ -102,16 +105,29 @@ class DynamoDBTable:
     def scan(self, filter_expression=None) -> list[dict]:
         """Paginates through the entire table. Only used where design/
         DATA_SCHEMA.md explicitly allows brute-forcing a query pattern
-        instead of adding a GSI -- not meant for hot paths."""
+        instead of adding a GSI -- not meant for hot paths.
+
+        Logs after every page -- a large table can take many pages (each
+        capped around 1MB by DynamoDB, regardless of item count), and with
+        no per-page signal a caller waiting on this has no way to tell a
+        slow-but-progressing scan apart from a hung one. This is exactly
+        what made a real feature-engineering run look stuck for ~35
+        seconds between "loaded events" and "loaded player-game rows" --
+        that gap was entirely inside this loop, logging nothing.
+        """
         kwargs = {}
         if filter_expression is not None:
             kwargs["FilterExpression"] = filter_expression
 
         items: list[dict] = []
+        page = 1
         response = self._table.scan(**kwargs)
         items.extend(response.get("Items", []))
+        logger.info("Scanning %s: page %d, %d items so far", self.table_name, page, len(items))
         while "LastEvaluatedKey" in response:
             kwargs["ExclusiveStartKey"] = response["LastEvaluatedKey"]
             response = self._table.scan(**kwargs)
             items.extend(response.get("Items", []))
+            page += 1
+            logger.info("Scanning %s: page %d, %d items so far", self.table_name, page, len(items))
         return [_from_dynamodb_safe(item) for item in items]
