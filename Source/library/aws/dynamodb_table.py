@@ -29,6 +29,30 @@ def _to_dynamodb_safe(value):
     return value
 
 
+def _from_dynamodb_safe(value):
+    """Inverse of _to_dynamodb_safe, applied to everything read back out.
+    boto3's Table resource returns every DynamoDB Number as Decimal, on
+    the way in -- but Decimal doesn't silently interoperate with the rest
+    of Python the way float does: it arithmetic-combines fine with other
+    Decimals (sum()/len() included, so a caller doing plain averaging
+    would never see an error, just a Decimal result creeping through
+    every downstream computation), yet json.dumps() and other consumers
+    that expect plain numbers reject it outright. Rather than have every
+    caller of get_item/query/scan discover this the hard way, this
+    boundary converts back to int (whole numbers) or float (everything
+    else) so nothing past this class ever has to know DynamoDB's Number
+    type existed. Found via a real feature-engineering run crashing on
+    json.dumps(Decimal(...)) while building player-prop training rows.
+    """
+    if isinstance(value, Decimal):
+        return int(value) if value % 1 == 0 else float(value)
+    if isinstance(value, dict):
+        return {k: _from_dynamodb_safe(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_from_dynamodb_safe(v) for v in value]
+    return value
+
+
 class DynamoDBTable:
     def __init__(self, table_name: str, region: str | None = None):
         self.table_name = table_name
@@ -39,7 +63,8 @@ class DynamoDBTable:
 
     def get_item(self, key: dict) -> dict | None:
         response = self._table.get_item(Key=key)
-        return response.get("Item")
+        item = response.get("Item")
+        return _from_dynamodb_safe(item) if item is not None else None
 
     def batch_write(self, items: list[dict], key_names: list[str]) -> None:
         if not items:
@@ -71,7 +96,8 @@ class DynamoDBTable:
             kwargs["ExclusiveStartKey"] = response["LastEvaluatedKey"]
             response = self._table.query(**kwargs)
             items.extend(response.get("Items", []))
-        return items[:limit] if limit is not None else items
+        items = items[:limit] if limit is not None else items
+        return [_from_dynamodb_safe(item) for item in items]
 
     def scan(self, filter_expression=None) -> list[dict]:
         """Paginates through the entire table. Only used where design/
@@ -88,4 +114,4 @@ class DynamoDBTable:
             kwargs["ExclusiveStartKey"] = response["LastEvaluatedKey"]
             response = self._table.scan(**kwargs)
             items.extend(response.get("Items", []))
-        return items
+        return [_from_dynamodb_safe(item) for item in items]
