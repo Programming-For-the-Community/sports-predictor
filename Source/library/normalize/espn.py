@@ -114,7 +114,21 @@ def boxscore_to_player_game_stats(
                             line[first_name] = parse_number(parts[0])
                             line[second_name] = parse_number(parts[1])
                             continue
-                    field_name = f"{category_name}_{snake_case(key)}"
+                    # Most ESPN stat keys already bake their category into
+                    # the name itself (category "passing", key
+                    # "passingYards") -- snake-casing that and then also
+                    # prefixing the category would double it up into
+                    # "passing_passing_yards". Only prefix when the key
+                    # doesn't already carry it, so a bare key that would
+                    # otherwise collide across categories (category
+                    # "interceptions"'s own "interceptions" key vs
+                    # "passing"'s "interceptions" key, defensive picks vs
+                    # thrown picks) still gets disambiguated.
+                    snake_key = snake_case(key)
+                    if snake_key == category_name or snake_key.startswith(f"{category_name}_"):
+                        field_name = snake_key
+                    else:
+                        field_name = f"{category_name}_{snake_key}"
                     line[field_name] = parse_number(value)
 
     player_game_stats_items = []

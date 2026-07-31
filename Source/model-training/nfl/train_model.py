@@ -127,8 +127,18 @@ def train(df: pd.DataFrame) -> tuple[xgb.XGBClassifier, dict]:
         len(train_df), *train_date_range, len(test_df), *test_date_range,
     )
 
-    X_train, y_train = train_df[feature_columns], train_df[LABEL_COLUMN]
-    X_test, y_test = test_df[feature_columns], test_df[LABEL_COLUMN]
+    # A feature column that's entirely null in this training window (e.g.
+    # weather_temperature, which real ESPN history frequently doesn't
+    # report) has no non-null value for pandas to infer a numeric dtype
+    # from, so it comes back from Parquet as dtype `object` rather than
+    # float64 -- and XGBoost rejects `object` columns outright, even when
+    # every value is just a missing float. Coercing explicitly (bools
+    # included) guarantees every feature column is numeric before it ever
+    # reaches XGBoost, regardless of how sparse any single column is.
+    X_train = train_df[feature_columns].apply(pd.to_numeric, errors="coerce")
+    y_train = train_df[LABEL_COLUMN]
+    X_test = test_df[feature_columns].apply(pd.to_numeric, errors="coerce")
+    y_test = test_df[LABEL_COLUMN]
 
     best_params = _tune_hyperparameters(X_train, y_train)
     model = xgb.XGBClassifier(objective="binary:logistic", eval_metric="logloss", **best_params)

@@ -142,6 +142,28 @@ class TestTrain:
         assert isinstance(metadata["train_rows"], int)
         assert isinstance(metadata["test_rows"], int)
 
+    def test_all_null_feature_column_is_still_numeric_not_object(self):
+        # A real production crash: weather_temperature (and, at the time,
+        # a QB-average-column naming bug) came back from Parquet as all
+        # None for the training window, which pandas types as `object` --
+        # XGBoost raises ValueError on an object dtype column even though
+        # every value is just a missing float. train() must coerce feature
+        # columns to numeric regardless of how sparse any one of them is.
+        df = _make_df(10)
+        df["weather_temperature"] = [None] * len(df)  # entirely null -- object dtype from Parquet
+        mock_model = self._mock_model()
+        captured = {}
+
+        def _capture_fit(X, y):
+            captured["dtype"] = X["weather_temperature"].dtype
+        mock_model.fit.side_effect = _capture_fit
+
+        with patch.object(train_model, "_tune_hyperparameters", return_value={}), \
+             patch.object(train_model.xgb, "XGBClassifier", return_value=mock_model):
+            train_model.train(df)
+
+        assert captured["dtype"] == np.float64
+
     def test_never_touches_real_xgboost_training(self):
         # Sanity check on the mocking boundary itself: fit() must be the
         # mock's fit(), not a real Booster ever getting built.

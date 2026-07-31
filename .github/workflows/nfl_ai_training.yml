@@ -8,9 +8,11 @@
 # player-prop training task would get its own job here too, shaped
 # exactly like the two below.
 #
-# All images built in the same run share IMAGE_VERSION below -- bump it
-# by editing this line, never by typing a version into a manual dispatch
-# input.
+# Each image gets its OWN version constant below, bumped independently --
+# feature engineering and train model are unrelated Fargate tasks with
+# unrelated code, so a change to one has no reason to force a version bump
+# (and a new image tag/deploy) of the other. Bump only the constant for
+# whichever image actually changed, never both just to keep them in sync.
 
 name: NFL AI Training
 
@@ -19,7 +21,8 @@ on:
   workflow_call:
 
 env:
-  IMAGE_VERSION: '1.0.0'
+  FEATURE_ENGINEERING_IMAGE_VERSION: '1.0.0'
+  TRAIN_MODEL_IMAGE_VERSION: '1.0.0'
 
 permissions:
   id-token: write
@@ -48,33 +51,36 @@ jobs:
       test_path: 'Source/tests/library/ Source/tests/model-training/'
       requirements_files: 'Source/model-training/nfl/requirements.txt'
 
-  set-version:
-    name: Resolve image version
+  set-versions:
+    name: Resolve image versions
     runs-on: ubuntu-latest
     outputs:
-      version: ${{ steps.out.outputs.version }}
+      feature_engineering_version: ${{ steps.out.outputs.feature_engineering_version }}
+      train_model_version: ${{ steps.out.outputs.train_model_version }}
     steps:
       - id: out
-        run: echo "version=${{ env.IMAGE_VERSION }}" >> "$GITHUB_OUTPUT"
+        run: |
+          echo "feature_engineering_version=${{ env.FEATURE_ENGINEERING_IMAGE_VERSION }}" >> "$GITHUB_OUTPUT"
+          echo "train_model_version=${{ env.TRAIN_MODEL_IMAGE_VERSION }}" >> "$GITHUB_OUTPUT"
 
   build-feature-engineering-image:
     name: Build and push feature engineering image
-    needs: [set-version, test-feature-engineering]
+    needs: [set-versions, test-feature-engineering]
     uses: ./.github/workflows/docker_build_push.yml
     secrets: inherit
     with:
       dockerfile_path: 'Source/feature-engineering/nfl/Dockerfile'
       docker_context: 'Source'
       image_name: 'nfl-feature-engineering'
-      image_version: ${{ needs.set-version.outputs.version }}
+      image_version: ${{ needs.set-versions.outputs.feature_engineering_version }}
 
   build-train-model-image:
     name: Build and push train model image
-    needs: [set-version, test-train-model]
+    needs: [set-versions, test-train-model]
     uses: ./.github/workflows/docker_build_push.yml
     secrets: inherit
     with:
       dockerfile_path: 'Source/model-training/nfl/Dockerfile'
       docker_context: 'Source'
       image_name: 'nfl-train-model'
-      image_version: ${{ needs.set-version.outputs.version }}
+      image_version: ${{ needs.set-versions.outputs.train_model_version }}
