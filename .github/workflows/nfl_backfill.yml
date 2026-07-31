@@ -36,28 +36,17 @@ permissions:
   contents: read
 
 jobs:
+  # Only one artifact here (nfl-backfill), so there's no cross-artifact
+  # coupling to fix -- using run_python_tests.yml anyway for the same
+  # reason every other workflow does: one shared place for "install the
+  # library, install extra requirements, run pytest" instead of
+  # duplicating those steps inline in every workflow file.
   test:
     name: Run tests
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
-
-      # No AWS credentials needed here -- this suite never touches the
-      # storage layer (see test_espn_nfl.py's docstring).
-      - name: Install library package
-        run: pip install --no-cache-dir ./Source/library
-
-      - name: Install test dependencies
-        run: pip install --no-cache-dir -r Source/data-backfills/nfl/requirements-dev.txt
-
-      - name: Run tests
-        run: pytest Source/tests/data-backfills/nfl/ -v
+    uses: ./.github/workflows/run_python_tests.yml
+    with:
+      test_path: 'Source/tests/data-backfills/nfl/'
+      requirements_files: 'Source/data-backfills/nfl/requirements-dev.txt'
 
   set-version:
     name: Resolve image version

@@ -30,6 +30,9 @@ One row per game, match, tournament, or race.
 | `event_date` | `2025-09-28` | |
 | `status` | `scheduled`, `completed` | |
 | `participants` | see below | Array — length 2 for head-to-head, length N for field events |
+| `season`, `season_type`, `week` | `2025`, `2`, `4` | Written by every adapter's normalize step; `season_type`/`week` also double as feature-engineering inputs (how far into the season a game falls) |
+| `venue_indoor`, `venue_city`, `venue_state` | `false`, `"Green Bay"`, `"WI"` | From the source API's venue data — the same response already fetched for `participants`, not a separate call. `venue_indoor` is a real feature input; city/state are carried for reference but excluded from training (raw strings aren't model-consumable without encoding) |
+| `weather_temperature` | `52` or `null` | Frequently `null` — most reliably for indoor games, where it doesn't apply, but also for outdoor games the source API simply didn't report on. A partial signal, not a guaranteed one |
 
 **Head-to-head `participants` shape** (NFL, NCAA FB, NBA, NCAA MBB):
 ```json

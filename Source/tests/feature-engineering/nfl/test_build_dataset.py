@@ -46,6 +46,12 @@ class TestWriteParquet:
 
 
 class TestBuildEventDataset:
+    def _storage(self, events, player_games=None):
+        storage = MagicMock()
+        storage.get_all_events.return_value = events
+        storage.get_all_player_game_stats.return_value = player_games or []
+        return storage
+
     def test_builds_one_row_per_event_and_skips_malformed(self):
         malformed = {
             "event_key": "BAD",
@@ -57,8 +63,7 @@ class TestBuildEventDataset:
             _event("E2", "2025-09-14", "KC", "DET"),
             malformed,
         ]
-        storage = MagicMock()
-        storage.get_all_events.return_value = events
+        storage = self._storage(events)
 
         rows = build_dataset.build_event_dataset(storage, window=5)
 
@@ -70,8 +75,7 @@ class TestBuildEventDataset:
             _event("E1", "2025-09-07", "KC", "LAC", home_score=27, away_score=20),
             _event("E2", "2025-09-14", "KC", "DET"),
         ]
-        storage = MagicMock()
-        storage.get_all_events.return_value = events
+        storage = self._storage(events)
 
         rows = build_dataset.build_event_dataset(storage, window=5)
 
@@ -88,13 +92,67 @@ class TestBuildEventDataset:
             _event(f"E{i}", f"2025-09-{i:02d}", "KC", f"OPP{i}")
             for i in range(1, 8)
         ]
-        storage = MagicMock()
-        storage.get_all_events.return_value = events
+        storage = self._storage(events)
 
         rows = build_dataset.build_event_dataset(storage, window=3)
 
         e7 = next(row for row in rows if row["event_key"] == "E7")
         assert e7["home_games_played"] == 3
+
+    def _qb_game(self, event_key, team_id, event_date, entity_id="mahomes", passing_yards=300, passing_attempts=30):
+        return {
+            "event_key": event_key, "player_key": f"PLAYER#{entity_id}", "entity_id": entity_id,
+            "team_id": team_id, "event_date": event_date,
+            "stat_line": {"passing_attempts": passing_attempts, "passing_yards": passing_yards},
+        }
+
+    def test_qb_history_is_empty_on_a_qbs_first_identified_start(self):
+        events = [_event("E1", "2025-09-07", "KC", "LAC")]
+        player_games = [
+            self._qb_game("E1", "KC", "2025-09-07"),
+            self._qb_game("E1", "LAC", "2025-09-07", entity_id="herbert", passing_yards=250),
+        ]
+        storage = self._storage(events, player_games)
+
+        rows = build_dataset.build_event_dataset(storage, window=5)
+
+        e1 = next(row for row in rows if row["event_key"] == "E1")
+        assert e1["home_qb_games_played"] == 0
+        assert e1["home_qb_avg_passing_yards"] is None
+
+    def test_qb_history_carries_forward_across_games_for_the_same_qb(self):
+        events = [
+            _event("E1", "2025-09-07", "KC", "LAC"),
+            _event("E2", "2025-09-14", "KC", "DET"),
+        ]
+        player_games = [
+            self._qb_game("E1", "KC", "2025-09-07", passing_yards=300),
+            self._qb_game("E1", "LAC", "2025-09-07", entity_id="herbert"),
+            self._qb_game("E2", "KC", "2025-09-14", passing_yards=250),
+            self._qb_game("E2", "DET", "2025-09-14", entity_id="goff"),
+        ]
+        storage = self._storage(events, player_games)
+
+        rows = build_dataset.build_event_dataset(storage, window=5)
+
+        e2 = next(row for row in rows if row["event_key"] == "E2")
+        assert e2["home_qb_games_played"] == 1
+        assert e2["home_qb_avg_passing_yards"] == 300  # KC's QB's own E1 line, not the team's
+
+    def test_no_identifiable_starter_yields_empty_qb_history_not_an_error(self):
+        events = [_event("E1", "2025-09-07", "KC", "LAC")]
+        # No passing_attempts on either side's stat_line -- identify_starting_qb returns None.
+        player_games = [
+            {"event_key": "E1", "player_key": "PLAYER#k1", "entity_id": "k1", "team_id": "KC",
+             "event_date": "2025-09-07", "stat_line": {"field_goals_made": 2}},
+        ]
+        storage = self._storage(events, player_games)
+
+        rows = build_dataset.build_event_dataset(storage, window=5)
+
+        e1 = next(row for row in rows if row["event_key"] == "E1")
+        assert e1["home_qb_games_played"] == 0
+        assert e1["away_qb_games_played"] == 0
 
 
 class TestBuildPlayerDataset:

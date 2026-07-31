@@ -34,7 +34,12 @@ from collections import defaultdict
 import pandas as pd
 
 from library.aws.s3_manager import S3Manager
-from library.features.nfl import build_event_features, build_player_features, compute_elo_ratings
+from library.features.nfl import (
+    build_event_features,
+    build_player_features,
+    compute_elo_ratings,
+    identify_starting_qb,
+)
 from library.storage.feature_storage import FeatureStorage
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
@@ -45,6 +50,13 @@ EVENT_FEATURES_KEY = "nfl/training-data/event_features.parquet"
 PLAYER_FEATURES_KEY = "nfl/training-data/player_features.parquet"
 
 
+def _group_player_games_by_event_and_team(player_games: list[dict]) -> dict[tuple[str, str], list[dict]]:
+    by_event_team: dict[tuple[str, str], list[dict]] = defaultdict(list)
+    for game in player_games:
+        by_event_team[(game["event_key"], game["team_id"])].append(game)
+    return by_event_team
+
+
 def build_event_dataset(storage: FeatureStorage, window: int) -> list[dict]:
     """Walks events in a single chronological pass, growing each team's own
     history one game at a time, rather than re-filtering that team's whole
@@ -53,14 +65,24 @@ def build_event_dataset(storage: FeatureStorage, window: int) -> list[dict]:
     span 10 years). Each team's running history stays capped to the last
     `window` games via a slice, so memory per team never grows past that
     regardless of how long the team's full history gets.
+
+    Each event's starting QB (per side, via identify_starting_qb) gets the
+    same incremental treatment, keyed by the QB's own entity_id rather
+    than team -- a QB's rolling history follows them across a mid-season
+    trade instead of resetting, and a team without an identifiable
+    starter that game (e.g. incomplete stat_line data) just gets an empty
+    QB history for that row.
     """
     events = storage.get_all_events(SPORT)
     logger.info("Loaded %d completed events", len(events))
+
+    player_games_by_event_team = _group_player_games_by_event_and_team(storage.get_all_player_game_stats())
 
     elo_ratings = compute_elo_ratings(events)
     events_ascending = sorted(events, key=lambda e: e.get("event_date", ""))
 
     team_history: dict[str, list[dict]] = defaultdict(list)  # ascending, grows as we go
+    qb_history: dict[str, list[dict]] = defaultdict(list)  # keyed by QB entity_id, ascending
     total = len(events_ascending)
     rows = []
     for i, event in enumerate(events_ascending, start=1):
@@ -75,10 +97,23 @@ def build_event_dataset(storage: FeatureStorage, window: int) -> list[dict]:
         # Most-recent-first, capped at `window` -- O(window), not O(len(history)).
         home_history = team_history[home_id][-window:][::-1]
         away_history = team_history[away_id][-window:][::-1]
-        rows.append(build_event_features(event, elo_ratings, home_history, away_history, window))
+
+        home_qb_game = identify_starting_qb(player_games_by_event_team.get((event["event_key"], home_id), []))
+        away_qb_game = identify_starting_qb(player_games_by_event_team.get((event["event_key"], away_id), []))
+        home_qb_history = qb_history[home_qb_game["entity_id"]][-window:][::-1] if home_qb_game else []
+        away_qb_history = qb_history[away_qb_game["entity_id"]][-window:][::-1] if away_qb_game else []
+
+        rows.append(build_event_features(
+            event, elo_ratings, home_history, away_history, window,
+            home_qb_games=home_qb_history, away_qb_games=away_qb_history,
+        ))
 
         team_history[home_id].append(event)
         team_history[away_id].append(event)
+        if home_qb_game:
+            qb_history[home_qb_game["entity_id"]].append(home_qb_game)
+        if away_qb_game:
+            qb_history[away_qb_game["entity_id"]].append(away_qb_game)
 
         if i % 500 == 0 or i == total:
             logger.info("Built event features: %d/%d", i, total)

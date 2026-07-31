@@ -10,18 +10,28 @@ from library.features.nfl import (
     build_event_features,
     build_player_features,
     compute_elo_ratings,
+    identify_starting_qb,
     rest_days,
     rolling_player_stat_averages,
     rolling_team_scoring_averages,
 )
 
 
-def _event(event_key, event_date, home_id, away_id, home_score=None, away_score=None):
+def _event(
+    event_key, event_date, home_id, away_id, home_score=None, away_score=None, week=1, season_type=2,
+    venue_indoor=None, venue_city=None, venue_state=None, weather_temperature=None,
+):
     home_result = {"score": home_score, "won": home_score is not None and home_score > away_score}
     away_result = {"score": away_score, "won": away_score is not None and away_score > home_score}
     return {
         "event_key": event_key,
         "event_date": event_date,
+        "week": week,
+        "season_type": season_type,
+        "venue_indoor": venue_indoor,
+        "venue_city": venue_city,
+        "venue_state": venue_state,
+        "weather_temperature": weather_temperature,
         "participants": [
             {"entity_id": home_id, "role": "home", "result": home_result},
             {"entity_id": away_id, "role": "away", "result": away_result},
@@ -190,9 +200,39 @@ class TestRollingPlayerStatAverages:
         assert result == {"games_played": 0, "starts": 0}
 
 
+class TestIdentifyStartingQb:
+    def test_picks_most_passing_attempts(self):
+        team_games = [
+            {"entity_id": "backup-qb", "stat_line": {"passing_attempts": 5, "passing_yards": 40}},
+            {"entity_id": "starter-qb", "stat_line": {"passing_attempts": 30, "passing_yards": 280}},
+        ]
+
+        starter = identify_starting_qb(team_games)
+
+        assert starter["entity_id"] == "starter-qb"
+
+    def test_returns_full_row_not_just_id(self):
+        team_games = [{"entity_id": "starter-qb", "stat_line": {"passing_attempts": 30, "passing_yards": 280}}]
+
+        starter = identify_starting_qb(team_games)
+
+        assert starter == team_games[0]
+
+    def test_ignores_non_passers(self):
+        team_games = [
+            {"entity_id": "kicker", "stat_line": {"field_goals_made": 2}},
+            {"entity_id": "rb", "stat_line": {"rushing_yards": 80}},
+        ]
+
+        assert identify_starting_qb(team_games) is None
+
+    def test_empty_team_games_returns_none(self):
+        assert identify_starting_qb([]) is None
+
+
 class TestBuildEventFeatures:
     def test_assembles_expected_fields(self):
-        event = _event("E2", "2025-09-14", "KC", "LAC", 20, 17)
+        event = _event("E2", "2025-09-14", "KC", "LAC", 20, 17, week=2, season_type=2)
         elo_ratings = {"E2": {"home_pre_rating": 1550.0, "away_pre_rating": 1490.0}}
         home_history = [
             {"event_date": "2025-09-07", "participants": [
@@ -204,6 +244,8 @@ class TestBuildEventFeatures:
         row = build_event_features(event, elo_ratings, home_history, away_history)
 
         assert row["event_key"] == "E2"
+        assert row["week"] == 2
+        assert row["season_type"] == 2
         assert row["home_elo"] == 1550.0
         assert row["away_elo"] == 1490.0
         assert row["elo_diff"] == 60.0
@@ -215,6 +257,17 @@ class TestBuildEventFeatures:
         assert row["label_home_score"] == 20
         assert row["label_away_score"] == 17
 
+    def test_surfaces_week_and_season_type_from_the_event(self):
+        # Distinct from the default-value case above -- confirms these
+        # are actually read from the event dict, not coincidentally
+        # matching _event()'s defaults.
+        event = _event("E1", "2025-09-07", "KC", "LAC", week=15, season_type=3)
+
+        row = build_event_features(event, {}, [], [])
+
+        assert row["week"] == 15
+        assert row["season_type"] == 3
+
     def test_missing_elo_entry_yields_none_diff(self):
         event = _event("E1", "2025-09-07", "KC", "LAC", 27, 20)
 
@@ -222,6 +275,54 @@ class TestBuildEventFeatures:
 
         assert row["home_elo"] is None
         assert row["elo_diff"] is None
+
+    def test_surfaces_venue_and_weather_from_the_event(self):
+        event = _event(
+            "E1", "2025-09-07", "KC", "LAC", 27, 20,
+            venue_indoor=False, venue_city="Kansas City", venue_state="MO", weather_temperature=68,
+        )
+
+        row = build_event_features(event, {}, [], [])
+
+        assert row["venue_indoor"] is False
+        assert row["venue_city"] == "Kansas City"
+        assert row["venue_state"] == "MO"
+        assert row["weather_temperature"] == 68
+
+    def test_venue_and_weather_default_to_none_when_absent_from_event(self):
+        event = _event("E1", "2025-09-07", "KC", "LAC", 27, 20)
+        del event["venue_indoor"], event["venue_city"], event["venue_state"], event["weather_temperature"]
+
+        row = build_event_features(event, {}, [], [])
+
+        assert row["venue_indoor"] is None
+        assert row["venue_city"] is None
+        assert row["venue_state"] is None
+        assert row["weather_temperature"] is None
+
+    def test_qb_rolling_stats_are_computed_from_qb_games(self):
+        event = _event("E2", "2025-09-14", "KC", "LAC", 20, 17)
+        home_qb_games = [
+            {"event_date": "2025-09-07", "stat_line": {"passing_yards": 300, "passing_tds": 2}, "started": True},
+        ]
+
+        row = build_event_features(event, {}, [], [], home_qb_games=home_qb_games)
+
+        assert row["home_qb_avg_passing_yards"] == 300
+        assert row["home_qb_avg_passing_tds"] == 2
+        assert row["home_qb_games_played"] == 1
+        assert row["away_qb_games_played"] == 0
+        assert row["away_qb_avg_passing_yards"] is None
+
+    def test_qb_rolling_stats_default_to_none_when_no_qb_games_given(self):
+        event = _event("E1", "2025-09-07", "KC", "LAC", 27, 20)
+
+        row = build_event_features(event, {}, [], [])
+
+        assert row["home_qb_avg_passing_yards"] is None
+        assert row["home_qb_games_played"] == 0
+        assert row["away_qb_avg_passing_yards"] is None
+        assert row["away_qb_games_played"] == 0
 
 
 class TestBuildPlayerFeatures:

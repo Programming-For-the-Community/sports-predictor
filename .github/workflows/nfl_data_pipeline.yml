@@ -34,22 +34,42 @@ permissions:
   contents: read
 
 jobs:
+  # Each Lambda gets its own upstream test job, pointed at its own
+  # specific test file -- not the whole Source/tests/aws-lambdas/nfl/
+  # directory. conftest.py there loads both nfl_ingest and nfl_normalize
+  # regardless (either test file could run standalone), but a failing
+  # normalize test used to fail the ingest deploy too, and vice versa,
+  # purely because both deploys pointed at the same shared directory.
+  test-ingest:
+    name: Run nfl-ingest tests
+    uses: ./.github/workflows/run_python_tests.yml
+    with:
+      test_path: 'Source/tests/aws-lambdas/nfl/test_ingest.py'
+      requirements_files: 'Source/aws-lambdas/nfl/ingest/requirements.txt'
+
+  test-normalize:
+    name: Run nfl-normalize tests
+    uses: ./.github/workflows/run_python_tests.yml
+    with:
+      test_path: 'Source/tests/aws-lambdas/nfl/test_normalize.py'
+      requirements_files: 'Source/aws-lambdas/nfl/normalize/requirements.txt'
+
   deploy-ingest:
     name: Deploy nfl-ingest Lambda
+    needs: test-ingest
     uses: ./.github/workflows/python_lambda_build.yml
     secrets: inherit
     with:
       function_name: ${{ inputs.ingest_function_name || 'sports-predictor-nfl-ingest' }}
       handler_dir: 'Source/aws-lambdas/nfl/ingest'
       library_path: 'Source/library'
-      test_dir: 'Source/tests/aws-lambdas/nfl'
 
   deploy-normalize:
     name: Deploy nfl-normalize Lambda
+    needs: test-normalize
     uses: ./.github/workflows/python_lambda_build.yml
     secrets: inherit
     with:
       function_name: ${{ inputs.normalize_function_name || 'sports-predictor-nfl-normalize' }}
       handler_dir: 'Source/aws-lambdas/nfl/normalize'
       library_path: 'Source/library'
-      test_dir: 'Source/tests/aws-lambdas/nfl'

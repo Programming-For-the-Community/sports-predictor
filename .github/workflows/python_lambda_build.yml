@@ -3,6 +3,14 @@
 # Terraform owns the function infrastructure (created with a placeholder ZIP),
 # this workflow owns every subsequent code deployment.
 #
+# Testing is NOT done here -- it used to be an inline step gated by a
+# test_dir input, but that meant every caller's own test run was bundled
+# into the same job as its build+deploy, and a shared test_dir (e.g. one
+# directory covering both the ingest and normalize Lambdas) meant one
+# Lambda's failing test could block the other's deploy. Callers now run
+# run_python_tests.yml as their own upstream job and gate this workflow's
+# invocation on it via `needs:` instead -- see nfl_data_pipeline.yml.
+#
 # Build layout inside the ZIP:
 #   library/   <- shared library, installed via pip --no-deps
 #   handler.py <- Lambda entry point
@@ -36,11 +44,6 @@ on:
         required: false
         type: string
         default: ''
-      test_dir:
-        description: 'Path to the pytest test directory to run before building (skipped if empty)'
-        required: false
-        type: string
-        default: ''
       python_version:
         description: 'Python version to build with (must match the Lambda runtime)'
         required: false
@@ -64,22 +67,6 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: ${{ inputs.python_version }}
-
-      - name: Run unit tests
-        if: inputs.test_dir != ''
-        env:
-          HANDLER_DIR: ${{ inputs.handler_dir }}
-          TEST_DIR: ${{ inputs.test_dir }}
-          LIBRARY_PATH: ${{ inputs.library_path }}
-        run: |
-          # boto3 is pre-installed in the Lambda runtime but not in the CI
-          # runner -- install it so the handler modules can be imported.
-          pip install pytest boto3
-          pip install "$LIBRARY_PATH"
-          if [ -s "$HANDLER_DIR/requirements.txt" ]; then
-            pip install -r "$HANDLER_DIR/requirements.txt"
-          fi
-          pytest "$TEST_DIR" -v
 
       - name: Configure AWS credentials (OIDC)
         uses: aws-actions/configure-aws-credentials@v4
