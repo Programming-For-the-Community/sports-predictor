@@ -47,3 +47,45 @@ class DynamoDBTable:
         with self._table.batch_writer(overwrite_by_pkeys=key_names) as batch:
             for item in items:
                 batch.put_item(Item=_to_dynamodb_safe(item))
+
+    def query(
+        self,
+        key_condition,
+        index_name: str | None = None,
+        scan_index_forward: bool = True,
+        limit: int | None = None,
+    ) -> list[dict]:
+        """key_condition is a boto3.dynamodb.conditions expression built by
+        the caller -- this class stays schema-agnostic, same as put_item/
+        get_item above. Paginates until either every matching item is
+        collected or `limit` is reached; `limit` caps the returned count,
+        not the page size DynamoDB queries internally."""
+        kwargs = {"KeyConditionExpression": key_condition, "ScanIndexForward": scan_index_forward}
+        if index_name is not None:
+            kwargs["IndexName"] = index_name
+
+        items: list[dict] = []
+        response = self._table.query(**kwargs)
+        items.extend(response.get("Items", []))
+        while "LastEvaluatedKey" in response and (limit is None or len(items) < limit):
+            kwargs["ExclusiveStartKey"] = response["LastEvaluatedKey"]
+            response = self._table.query(**kwargs)
+            items.extend(response.get("Items", []))
+        return items[:limit] if limit is not None else items
+
+    def scan(self, filter_expression=None) -> list[dict]:
+        """Paginates through the entire table. Only used where design/
+        DATA_SCHEMA.md explicitly allows brute-forcing a query pattern
+        instead of adding a GSI -- not meant for hot paths."""
+        kwargs = {}
+        if filter_expression is not None:
+            kwargs["FilterExpression"] = filter_expression
+
+        items: list[dict] = []
+        response = self._table.scan(**kwargs)
+        items.extend(response.get("Items", []))
+        while "LastEvaluatedKey" in response:
+            kwargs["ExclusiveStartKey"] = response["LastEvaluatedKey"]
+            response = self._table.scan(**kwargs)
+            items.extend(response.get("Items", []))
+        return items
