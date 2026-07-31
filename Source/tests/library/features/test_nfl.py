@@ -301,15 +301,28 @@ class TestBuildEventFeatures:
         assert row["weather_temperature"] is None
 
     def test_qb_rolling_stats_are_computed_from_qb_games(self):
+        # stat_line keys here match what normalize.py actually produces for
+        # the passing category -- "passing_yards"/"passing_touchdowns"
+        # (not double-prefixed) but "passing_interceptions" (prefixed, to
+        # stay distinct from the "interceptions" category's own bare
+        # "interceptions" key) -- see the comment in build_event_features.
+        # Using the real key names is the point of this test: getting them
+        # wrong is exactly what silently zeroed out these columns in
+        # production.
         event = _event("E2", "2025-09-14", "KC", "LAC", 20, 17)
         home_qb_games = [
-            {"event_date": "2025-09-07", "stat_line": {"passing_yards": 300, "passing_tds": 2}, "started": True},
+            {
+                "event_date": "2025-09-07",
+                "stat_line": {"passing_yards": 300, "passing_touchdowns": 2, "passing_interceptions": 1},
+                "started": True,
+            },
         ]
 
         row = build_event_features(event, {}, [], [], home_qb_games=home_qb_games)
 
         assert row["home_qb_avg_passing_yards"] == 300
         assert row["home_qb_avg_passing_tds"] == 2
+        assert row["home_qb_avg_interceptions"] == 1
         assert row["home_qb_games_played"] == 1
         assert row["away_qb_games_played"] == 0
         assert row["away_qb_avg_passing_yards"] is None

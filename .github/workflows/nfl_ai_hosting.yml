@@ -4,22 +4,24 @@
 # image(s).
 #
 # This stage may build more than one image if inference ends up split
-# across multiple Lambdas. Once their Dockerfiles exist, add one job per
-# image below, each shaped like:
+# across multiple Lambdas. Once their Dockerfiles exist, give each image
+# its OWN version constant below (see nfl_ai_training.yml, which builds
+# two independent images this same way) and add one job per image,
+# each shaped like:
 #
 #   build-<component>-image:
-#     needs: set-version
+#     needs: set-versions
 #     uses: ./.github/workflows/docker_build_push.yml
 #     secrets: inherit
 #     with:
 #       dockerfile_path: 'Source/<path>/Dockerfile'
 #       docker_context: 'Source/<path>'
 #       image_name: 'nfl-<component>'
-#       image_version: ${{ needs.set-version.outputs.version }}
+#       image_version: ${{ needs.set-versions.outputs.<component>_version }}
 #
-# All images built in the same run share IMAGE_VERSION below -- bump it
-# by editing this line, never by typing a version into a manual dispatch
-# input.
+# Each component's version is bumped independently -- unrelated images
+# shouldn't need a version bump (and a new tag/deploy) just because a
+# sibling image changed.
 
 name: NFL AI Hosting
 
@@ -45,8 +47,9 @@ jobs:
         run: echo "version=${{ env.IMAGE_VERSION }}" >> "$GITHUB_OUTPUT"
 
   # TODO once the NFL inference source code and Dockerfile(s) exist:
-  # replace this with one build-<component>-image job per image, per the
-  # comment block above.
+  # replace this (and set-version above) with one set-versions job
+  # outputting a version per image, and one build-<component>-image job
+  # per image, per the comment block above.
   placeholder:
     name: Build, package, and deploy (placeholder)
     needs: set-version

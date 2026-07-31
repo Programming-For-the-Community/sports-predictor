@@ -246,13 +246,25 @@ def build_event_features(
         "away_avg_points_scored": away_scoring["avg_points_scored"],
         "away_avg_points_allowed": away_scoring["avg_points_allowed"],
         "away_games_played": away_scoring["games_played"],
+        # rolling_player_stat_averages keys off whatever stat_line field
+        # names normalize.py actually produced -- for the passing category,
+        # that's "passing_yards", "passing_touchdowns" (ESPN's own key
+        # names already carry the category, so normalize.py doesn't
+        # double-prefix them), and "passing_interceptions" (a bare
+        # "interceptions" key DOES get prefixed, since the separate
+        # "interceptions" category has its own bare "interceptions" key
+        # for defensive picks -- the prefix is what keeps thrown vs.
+        # picked-off interceptions from colliding into one stat). Verified
+        # against a real ESPN boxscore response -- get this wrong and these
+        # columns are silently always None, which pandas then types as
+        # `object`, not float, and XGBoost rejects the whole training run.
         "home_qb_avg_passing_yards": home_qb_stats.get("avg_passing_yards"),
-        "home_qb_avg_passing_tds": home_qb_stats.get("avg_passing_tds"),
-        "home_qb_avg_interceptions": home_qb_stats.get("avg_interceptions"),
+        "home_qb_avg_passing_tds": home_qb_stats.get("avg_passing_touchdowns"),
+        "home_qb_avg_interceptions": home_qb_stats.get("avg_passing_interceptions"),
         "home_qb_games_played": home_qb_stats["games_played"],
         "away_qb_avg_passing_yards": away_qb_stats.get("avg_passing_yards"),
-        "away_qb_avg_passing_tds": away_qb_stats.get("avg_passing_tds"),
-        "away_qb_avg_interceptions": away_qb_stats.get("avg_interceptions"),
+        "away_qb_avg_passing_tds": away_qb_stats.get("avg_passing_touchdowns"),
+        "away_qb_avg_interceptions": away_qb_stats.get("avg_passing_interceptions"),
         "away_qb_games_played": away_qb_stats["games_played"],
         # Labels -- the training targets (win/loss and final score), not
         # model inputs. None when this is called to build a live feature

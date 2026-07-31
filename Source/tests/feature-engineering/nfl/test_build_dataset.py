@@ -100,6 +100,9 @@ class TestBuildEventDataset:
         assert e7["home_games_played"] == 3
 
     def _qb_game(self, event_key, team_id, event_date, entity_id="mahomes", passing_yards=300, passing_attempts=30):
+        # "passing_yards", matching what normalize.py actually produces for
+        # ESPN's passing category (see library/features/nfl.py's
+        # build_event_features comment).
         return {
             "event_key": event_key, "player_key": f"PLAYER#{entity_id}", "entity_id": entity_id,
             "team_id": team_id, "event_date": event_date,
