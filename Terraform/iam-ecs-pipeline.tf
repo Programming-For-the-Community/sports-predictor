@@ -30,9 +30,14 @@ resource "aws_iam_role_policy_attachment" "ecs_pipeline_execution" {
 }
 
 data "aws_iam_policy_document" "ecs_pipeline_permissions" {
+  # dynamodb:Scan is needed alongside Query/GetItem because the feature
+  # engineering task pulls the full events and player_game_stats history
+  # at once (see FeatureStorage.get_all_events/get_all_player_game_stats)
+  # rather than issuing one Query per team/player -- design/DATA_SCHEMA.md
+  # explicitly allows scanning `events` until a GSI is actually needed.
   statement {
     sid     = "ReadTrainingData"
-    actions = ["dynamodb:Query", "dynamodb:GetItem"]
+    actions = ["dynamodb:Query", "dynamodb:GetItem", "dynamodb:Scan"]
     resources = [
       "arn:aws:dynamodb:${var.region}:${var.account_id}:table/${local.entities_table}",
       "arn:aws:dynamodb:${var.region}:${var.account_id}:table/${local.events_table}",

@@ -1,0 +1,6 @@
+# boto3 comes from the library package's own dependencies; nothing extra
+# is needed for that. pandas + pyarrow are this script's own dependency --
+# used to write the training datasets as Parquet (typed columns, automatic
+# handling of ragged rows across players) rather than hand-rolled CSV.
+pandas>=2.2
+pyarrow>=16.0

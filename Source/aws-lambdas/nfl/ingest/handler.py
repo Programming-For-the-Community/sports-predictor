@@ -1,19 +1,25 @@
 """
-NFL ingest Lambda. Triggered by EventBridge Scheduler (weekly -- see
-Terraform/lambda-nfl-ingest.tf). Fetches the current week's scoreboard
-and completed box scores from ESPN and writes raw JSON to S3. The
-normalize Lambda is triggered automatically by the resulting S3 PutObject
-events, so this function never touches DynamoDB directly.
+NFL ingest Lambda. Triggered by EventBridge Scheduler -- see
+Terraform/scheduler-nfl-ingest.tf, which runs this twice a week (a
+Tuesday primary run and a Wednesday retry for anything ESPN hadn't
+finalized yet). Fetches that week's scoreboard and completed box scores
+from ESPN and writes raw JSON to S3. The normalize Lambda is triggered
+automatically by the resulting S3 PutObject events, so this function
+never touches DynamoDB directly.
 
 EventBridge can override any default via the schedule's input payload:
     { "season": 2025, "season_type": 2, "week": 4 }
 
-All three are optional. Omitting "week" tells ESPN to return the current
-week for the given season and type. Omitting everything lets ESPN infer
-today's season/type/week on its own -- the scoreboard endpoint defaults to
-"today" when called with no query params at all, so the schedule doesn't
-need to carry a season/season_type payload and nothing here needs updating
-across season or season-type transitions.
+All three must be given together for a manual override (e.g. reprocessing
+one specific past week) -- there's no partial-override path. Omitting all
+three (the normal scheduled case) auto-detects the target week from the
+most recent Sunday's date rather than from "today": ESPN's scoreboard
+endpoint resolves season/type/week entirely from a `dates=YYYYMMDD` param
+(confirmed live), and "most recent Sunday" is the same value on both the
+Tuesday run and the Wednesday retry within the same NFL week, unlike
+"today" -- which would otherwise depend on exactly when ESPN's own
+scoreboard calendar rolls over to the next week, an undocumented detail
+this function has no business depending on.
 
 Preseason (season_type 1) is never ingested, whether auto-detected or
 passed explicitly -- backup-heavy preseason rosters and results aren't
@@ -24,6 +30,7 @@ and postseason (see SEASON_TYPES in data-backfills/nfl/backfill.py).
 import json
 import logging
 import os
+from datetime import date, timedelta
 
 import boto3
 from botocore.exceptions import ClientError
@@ -37,6 +44,15 @@ RAW_BUCKET = os.environ["RAW_BUCKET_NAME"]
 PRESEASON_TYPE = 1
 
 _s3 = boto3.client("s3")
+
+
+def _most_recent_sunday(today: date | None = None) -> str:
+    """The most recent Sunday on or before `today` (default: the actual
+    current date), as YYYYMMDD. date.weekday() is Monday=0..Sunday=6, so
+    days-since-Sunday is (weekday + 1) % 7."""
+    today = today or date.today()
+    days_since_sunday = (today.weekday() + 1) % 7
+    return (today - timedelta(days=days_since_sunday)).strftime("%Y%m%d")
 
 
 def _object_exists(key: str) -> bool:
@@ -69,10 +85,10 @@ def lambda_handler(event: dict, context) -> dict:
     client = NFLClient()
 
     if week is None:
-        # Omitted season/season_type are passed through as None, which
-        # NFLClient drops from the request entirely -- ESPN then infers
-        # season/type/week from today's date server-side.
-        scoreboard = client.get_current_scoreboard(season, season_type)
+        # See the module docstring for why this resolves against the most
+        # recent Sunday rather than "today" -- it's what makes the
+        # Tuesday run and the Wednesday retry agree on the same week.
+        scoreboard = client.get_scoreboard_for_date(_most_recent_sunday())
         season = scoreboard.get("season", {}).get("year", season)
         season_type = scoreboard.get("season", {}).get("type", season_type)
         week = scoreboard.get("week", {}).get("number", 1)

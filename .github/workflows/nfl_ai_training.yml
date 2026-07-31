@@ -2,20 +2,12 @@
 # (workflow_dispatch) or called from nfl_deploy.yml (workflow_call) --
 # either way the work is identical: build and push image(s).
 #
-# This stage likely builds more than one image (see design/ARCHITECTURE.md's
+# This stage builds more than one image (see design/ARCHITECTURE.md's
 # "Scheduled Training" subgraph: separate Feature Engineering and Train
-# Model Fargate tasks). Once their Dockerfiles exist, add one job per
-# image below, each shaped like:
-#
-#   build-<component>-image:
-#     needs: set-version
-#     uses: ./.github/workflows/docker_build_push.yml
-#     secrets: inherit
-#     with:
-#       dockerfile_path: 'Source/<path>/Dockerfile'
-#       docker_context: 'Source/<path>'
-#       image_name: 'nfl-<component>'
-#       image_version: ${{ needs.set-version.outputs.version }}
+# Model Fargate tasks). The Train Model image doesn't exist yet -- once its
+# Dockerfile does, add a second job below shaped exactly like
+# build-feature-engineering-image, just with its own dockerfile_path/
+# docker_context/image_name.
 #
 # All images built in the same run share IMAGE_VERSION below -- bump it
 # by editing this line, never by typing a version into a manual dispatch
@@ -28,13 +20,44 @@ on:
   workflow_call:
 
 env:
-  IMAGE_VERSION: '0.1.0'
+  IMAGE_VERSION: '1.0.0'
 
 permissions:
   id-token: write
   contents: read
 
 jobs:
+  test:
+    name: Run tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      # No AWS credentials needed here -- library.storage.feature_storage
+      # and library.features.nfl are tested entirely against mocks, same
+      # as the ingest/normalize Lambda tests.
+      - name: Install library package
+        run: pip install --no-cache-dir ./Source/library
+
+      # build_dataset.py imports pandas at module level, and
+      # tests/feature-engineering/nfl loads it directly (see its
+      # conftest.py) -- needed for that import to succeed, not just to
+      # exercise Parquet-writing behavior.
+      - name: Install feature-engineering dependencies
+        run: pip install --no-cache-dir -r Source/feature-engineering/nfl/requirements.txt
+
+      - name: Install test dependencies
+        run: pip install --no-cache-dir pytest
+
+      - name: Run tests
+        run: pytest Source/tests/library/ Source/tests/feature-engineering/ -v
+
   set-version:
     name: Resolve image version
     runs-on: ubuntu-latest
@@ -44,13 +67,13 @@ jobs:
       - id: out
         run: echo "version=${{ env.IMAGE_VERSION }}" >> "$GITHUB_OUTPUT"
 
-  # TODO once the NFL training source code and Dockerfile(s) exist:
-  # replace this with one build-<component>-image job per image, per the
-  # comment block above.
-  placeholder:
-    name: Build, package, and deploy (placeholder)
-    needs: set-version
-    runs-on: ubuntu-latest
-    steps:
-      - name: Placeholder
-        run: echo "Would build and push NFL AI training image(s) at version ${{ needs.set-version.outputs.version }} here."
+  build-feature-engineering-image:
+    name: Build and push feature engineering image
+    needs: [set-version, test]
+    uses: ./.github/workflows/docker_build_push.yml
+    secrets: inherit
+    with:
+      dockerfile_path: 'Source/feature-engineering/nfl/Dockerfile'
+      docker_context: 'Source'
+      image_name: 'nfl-feature-engineering'
+      image_version: ${{ needs.set-version.outputs.version }}
