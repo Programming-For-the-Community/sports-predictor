@@ -4,10 +4,9 @@
 #
 # This stage builds more than one image (see design/ARCHITECTURE.md's
 # "Scheduled Training" subgraph: separate Feature Engineering and Train
-# Model Fargate tasks). The Train Model image doesn't exist yet -- once its
-# Dockerfile does, add a second job below shaped exactly like
-# build-feature-engineering-image, just with its own dockerfile_path/
-# docker_context/image_name.
+# Model Fargate tasks). Both exist now; a future score-margin or
+# player-prop training task would get its own job here too, shaped
+# exactly like the two below.
 #
 # All images built in the same run share IMAGE_VERSION below -- bump it
 # by editing this line, never by typing a version into a manual dispatch
@@ -45,18 +44,21 @@ jobs:
       - name: Install library package
         run: pip install --no-cache-dir ./Source/library
 
-      # build_dataset.py imports pandas at module level, and
-      # tests/feature-engineering/nfl loads it directly (see its
-      # conftest.py) -- needed for that import to succeed, not just to
-      # exercise Parquet-writing behavior.
+      # build_dataset.py and train_model.py both import their third-party
+      # dependencies at module level, and the matching tests/ directories
+      # load each module directly (see their conftest.py files) -- needed
+      # for those imports to succeed, not just to exercise behavior.
       - name: Install feature-engineering dependencies
         run: pip install --no-cache-dir -r Source/feature-engineering/nfl/requirements.txt
+
+      - name: Install model-training dependencies
+        run: pip install --no-cache-dir -r Source/model-training/nfl/requirements.txt
 
       - name: Install test dependencies
         run: pip install --no-cache-dir pytest
 
       - name: Run tests
-        run: pytest Source/tests/library/ Source/tests/feature-engineering/ -v
+        run: pytest Source/tests/library/ Source/tests/feature-engineering/ Source/tests/model-training/ -v
 
   set-version:
     name: Resolve image version
@@ -76,4 +78,15 @@ jobs:
       dockerfile_path: 'Source/feature-engineering/nfl/Dockerfile'
       docker_context: 'Source'
       image_name: 'nfl-feature-engineering'
+      image_version: ${{ needs.set-version.outputs.version }}
+
+  build-train-model-image:
+    name: Build and push train model image
+    needs: [set-version, test]
+    uses: ./.github/workflows/docker_build_push.yml
+    secrets: inherit
+    with:
+      dockerfile_path: 'Source/model-training/nfl/Dockerfile'
+      docker_context: 'Source'
+      image_name: 'nfl-train-model'
       image_version: ${{ needs.set-version.outputs.version }}

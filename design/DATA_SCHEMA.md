@@ -69,9 +69,9 @@ One row per event per model version for event-level outcomes, or one row per eve
 | Attribute | Example | Notes |
 |---|---|---|
 | `event_key` | `SPORT#NFL#EVENT#2025-W04-KC-LAC` | |
-| `model_key` | `MODEL#v3` for an event-outcome prediction, `MODEL#v3#PLAYER#mahomes-patrick` for a player-prop prediction | Sort key — lets you keep predictions from multiple model versions for the same event, and lets dozens of player-prop rows coexist in the same event partition without colliding with the event-level prediction or each other |
+| `model_key` | `MODEL#win-probability#v3` for an event-outcome prediction, `MODEL#passing-yards#v3#PLAYER#mahomes-patrick` for a player-prop prediction | Sort key — lets you keep predictions from multiple model versions for the same event, and lets dozens of player-prop rows coexist in the same event partition without colliding with the event-level prediction or each other. Each model (win-probability, score-margin, one per player-prop stat) versions independently, so the model name is part of the key, not just the version number — see Terraform/s3-model-artifacts.tf for the matching S3 path convention |
 | `predicted_value` | `{ "KC_win_prob": 0.61 }`, `{ "win_prob": {...}, "top10_prob": {...} }`, or `{ "passing_yards": {"mean": 287, "over_265_5_prob": 0.54}, "passing_tds": {"mean": 2.1} }` | Shape depends on event_type for event-level rows, and on the stat being predicted for player-prop rows — these are different statistical problems with different targets, same as the head-to-head/field-event split, so don't force one shape to fit both |
-| `model_version` | `v3` | |
+| `model_version` | `v3` | The version of whichever specific model model_key identifies -- not a cross-model counter |
 | `generated_at` | `2025-09-26T14:00:00Z` | |
 
 ## Sport registry table (added in Phase 4)

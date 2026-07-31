@@ -46,9 +46,28 @@ data "aws_iam_policy_document" "ecs_pipeline_permissions" {
   }
 
   statement {
-    sid       = "WriteModelArtifacts"
-    actions   = ["s3:PutObject"]
+    sid       = "ReadWriteModelArtifacts"
+    actions   = ["s3:GetObject", "s3:PutObject"]
     resources = ["arn:aws:s3:::${local.model_artifacts_bucket}/*"]
+  }
+
+  # ListBucket (scoped to the nfl/ prefix, same pattern as
+  # iam-nfl-backfill.tf's raw-data-lake listing) is what lets the training
+  # task discover the next version number for whichever model it's
+  # training -- it lists nfl/<model-name>/v*/ and picks max(existing) + 1
+  # rather than needing a separate version-tracking resource. Each model
+  # (win-probability, score-margin, one per player-prop stat) versions
+  # independently -- see Terraform/s3-model-artifacts.tf.
+  statement {
+    sid       = "ListModelArtifactsNflPrefix"
+    actions   = ["s3:ListBucket"]
+    resources = ["arn:aws:s3:::${local.model_artifacts_bucket}"]
+
+    condition {
+      test     = "StringLike"
+      variable = "s3:prefix"
+      values   = ["nfl/*"]
+    }
   }
 }
 
