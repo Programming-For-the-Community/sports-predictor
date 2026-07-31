@@ -24,11 +24,6 @@ on:
   
   workflow_call:
     inputs:
-      skip_approval_gate:
-        description: 'Set true by a calling workflow that already gates its own approval (e.g. nfl_deploy.yml), so this job does not double-prompt for environment protection.'
-        required: false
-        type: boolean
-        default: false
       server_image_tag:
         description: 'Image tag of the server Docker image'
         required: false
@@ -84,21 +79,20 @@ jobs:
     outputs:
       nfl_ingest_function_name: ${{ steps.tf_outputs.outputs.nfl_ingest_function_name }}
       nfl_normalize_function_name: ${{ steps.tf_outputs.outputs.nfl_normalize_function_name }}
-    # Environment protection rules are enforced per job, not per workflow
-    # run -- so calling this job from another workflow that already has
-    # its own approval gate (e.g. nfl_deploy.yml) would otherwise trigger
-    # a second, redundant approval prompt here. An empty string means "no
-    # environment," which skips gating entirely.
-    #
-    # This used to key off `github.event_name != 'workflow_call'`, on the
-    # assumption that event_name would read as "workflow_call" when this
-    # workflow is invoked via `uses:`. It doesn't -- inside a called
-    # workflow, github.event_name still reflects whatever triggered the
-    # top-level run (e.g. "push", since nfl_deploy.yml triggers on push),
-    # so that condition was always true and gating never actually turned
-    # off, causing a second approval prompt. skip_approval_gate is an
-    # explicit input the caller sets instead of an inferred signal.
-    environment: ${{ !inputs.skip_approval_gate && (github.event.inputs.environment || 'development') || '' }}
+    # Always attaches an environment, whether run directly or called via
+    # nfl_deploy.yml (which has its own separate approval job gating on the
+    # same environment -- so a full deploy run does prompt for approval
+    # twice; that's an accepted tradeoff, see nfl_deploy.yml's comment).
+    # This environment isn't just the approval gate: environment-scoped
+    # secrets/variables (e.g. the subnet CIDRs below) only resolve when a
+    # job actually has this environment attached. A prior version tried to
+    # skip the gate here when called from a workflow that already gates
+    # itself (an input named skip_approval_gate blanked this to '' in that
+    # case) -- that silently detached the job from every environment-scoped
+    # secret/variable too, since GitHub ties both to the same job-level
+    # `environment:` setting and there's no way to keep one without the
+    # other. Don't reintroduce that pattern.
+    environment: ${{ github.event.inputs.environment || 'development' }}
 
     # Use the Bash shell regardless whether the GitHub Actions runner is ubuntu-latest, macos-latest, or windows-latest
     defaults:

@@ -10,11 +10,13 @@
 # which are plain GitHub variables/secrets already available in every
 # job, not Terraform outputs.
 #
-# Approval only applies when this workflow is triggered directly (push or
-# workflow_dispatch). When another workflow calls this one via `uses:`,
-# github.event_name is "workflow_call" and the approval job is skipped --
-# the calling workflow is assumed to own its own review/gating, so this
-# doesn't double-gate it.
+# Both this job's `approval` step AND tf_install.yml's own terraform job
+# gate on the `development`/`production` environment, so a run through
+# this pipeline prompts for approval twice. That's intentional -- keeping
+# tf_install.yml's environment always attached (needed so its
+# environment-scoped secrets/variables, like the subnet CIDRs, actually
+# resolve) is more important than avoiding a second click, and doing both
+# without a special-case flag is simpler than the alternative.
 
 name: NFL Deploy
 
@@ -49,8 +51,6 @@ jobs:
       always() &&
       (needs.approval.result == 'success' || needs.approval.result == 'skipped')
     uses: ./.github/workflows/tf_install.yml
-    with:
-      skip_approval_gate: true
     secrets: inherit
 
   backfill:
