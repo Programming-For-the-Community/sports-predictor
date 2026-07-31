@@ -35,6 +35,7 @@ data "archive_file" "nfl_ingest_placeholder" {
 
 resource "aws_lambda_function" "nfl_ingest" {
   function_name = "${var.project}-nfl-ingest"
+  description   = "Fetches the current NFL scoreboard and completed box scores from ESPN and writes raw JSON to S3. Triggered by EventBridge Scheduler -- see scheduler-nfl-ingest.tf."
   role          = aws_iam_role.lambda_pipeline.arn
   runtime       = "python3.12"
   handler       = "handler.lambda_handler"
