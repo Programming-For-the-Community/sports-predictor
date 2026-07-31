@@ -31,6 +31,7 @@ data "archive_file" "nfl_normalize_placeholder" {
 
 resource "aws_lambda_function" "nfl_normalize" {
   function_name = "${var.project}-nfl-normalize"
+  description   = "Reads raw ESPN JSON written by nfl-ingest and upserts it into the entities, events, and player_game_stats DynamoDB tables. Triggered by S3 ObjectCreated notifications on the nfl/ prefix."
   role          = aws_iam_role.lambda_pipeline.arn
   runtime       = "python3.12"
   handler       = "handler.lambda_handler"
