@@ -148,6 +148,14 @@ class TestNormalizeScoreboardEvent:
         item = normalize.scoreboard_event_to_event_item(first_event)
         assert item["status"] in ("completed", "scheduled")
 
+    def test_venue_and_weather_fields_are_present(self, first_event):
+        # Present as keys even when their value is None -- weather in
+        # particular is frequently null (most reliably for indoor games),
+        # so this checks the field exists, not that it's populated.
+        item = normalize.scoreboard_event_to_event_item(first_event)
+        for field in ("venue_indoor", "venue_city", "venue_state", "weather_temperature"):
+            assert field in item, f"Missing field: {field}"
+
     def test_event_date_is_iso_format(self, first_event):
         item = normalize.scoreboard_event_to_event_item(first_event)
         # Should be YYYY-MM-DD (10 chars)

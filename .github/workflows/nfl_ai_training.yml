@@ -26,39 +26,27 @@ permissions:
   contents: read
 
 jobs:
-  test:
-    name: Run tests
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+  # Two independent test jobs, not one shared one -- a failing
+  # model-training test used to fail feature engineering's deployment too
+  # (and vice versa) purely because they shared one test job both image
+  # builds depended on, even though the two Fargate tasks are otherwise
+  # unrelated. Each re-runs Source/tests/library/ redundantly (a
+  # ~1-second cost) rather than trying to split library tests by exact
+  # consumer -- library.aws.dynamodb_table, for instance, is used by
+  # both, so there's no clean partition anyway.
+  test-feature-engineering:
+    name: Run feature engineering tests
+    uses: ./.github/workflows/run_python_tests.yml
+    with:
+      test_path: 'Source/tests/library/ Source/tests/feature-engineering/'
+      requirements_files: 'Source/feature-engineering/nfl/requirements.txt'
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
-
-      # No AWS credentials needed here -- library.storage.feature_storage
-      # and library.features.nfl are tested entirely against mocks, same
-      # as the ingest/normalize Lambda tests.
-      - name: Install library package
-        run: pip install --no-cache-dir ./Source/library
-
-      # build_dataset.py and train_model.py both import their third-party
-      # dependencies at module level, and the matching tests/ directories
-      # load each module directly (see their conftest.py files) -- needed
-      # for those imports to succeed, not just to exercise behavior.
-      - name: Install feature-engineering dependencies
-        run: pip install --no-cache-dir -r Source/feature-engineering/nfl/requirements.txt
-
-      - name: Install model-training dependencies
-        run: pip install --no-cache-dir -r Source/model-training/nfl/requirements.txt
-
-      - name: Install test dependencies
-        run: pip install --no-cache-dir pytest
-
-      - name: Run tests
-        run: pytest Source/tests/library/ Source/tests/feature-engineering/ Source/tests/model-training/ -v
+  test-train-model:
+    name: Run train model tests
+    uses: ./.github/workflows/run_python_tests.yml
+    with:
+      test_path: 'Source/tests/library/ Source/tests/model-training/'
+      requirements_files: 'Source/model-training/nfl/requirements.txt'
 
   set-version:
     name: Resolve image version
@@ -71,7 +59,7 @@ jobs:
 
   build-feature-engineering-image:
     name: Build and push feature engineering image
-    needs: [set-version, test]
+    needs: [set-version, test-feature-engineering]
     uses: ./.github/workflows/docker_build_push.yml
     secrets: inherit
     with:
@@ -82,7 +70,7 @@ jobs:
 
   build-train-model-image:
     name: Build and push train model image
-    needs: [set-version, test]
+    needs: [set-version, test-train-model]
     uses: ./.github/workflows/docker_build_push.yml
     secrets: inherit
     with:

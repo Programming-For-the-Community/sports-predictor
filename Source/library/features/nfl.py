@@ -152,12 +152,30 @@ def rolling_player_stat_averages(
     return averages
 
 
+def identify_starting_qb(team_player_games: list[dict]) -> dict | None:
+    """Given one team's player_game_stats rows for a single event, returns
+    whoever had the most passing attempts -- the standard heuristic for
+    identifying the game's starting QB, correctly picking the primary
+    passer over a backup who took a few series in relief. Returns the full
+    player_game_stats row (not just an ID) so the caller can use it
+    directly as one entry of that QB's own rolling history.
+
+    Returns None if nobody on the team recorded a passing attempt (e.g.
+    the stat_line schema for that game didn't carry passing stats)."""
+    passers = [row for row in team_player_games if "passing_attempts" in row.get("stat_line", {})]
+    if not passers:
+        return None
+    return max(passers, key=lambda row: row["stat_line"]["passing_attempts"])
+
+
 def build_event_features(
     event: dict,
     elo_ratings: dict[str, dict[str, float]],
     home_team_events: list[dict],
     away_team_events: list[dict],
     window: int = DEFAULT_ROLLING_WINDOW,
+    home_qb_games: list[dict] | None = None,
+    away_qb_games: list[dict] | None = None,
 ) -> dict:
     """Assembles one training row for a head-to-head event: game-outcome
     (win/loss) and game-score features and labels share this same row,
@@ -167,6 +185,16 @@ def build_event_features(
     away_team_events are each team's own prior completed events, most
     recent first, NOT including this one (see FeatureStorage.get_team_events
     with before_date=event['event_date']).
+
+    home_qb_games/away_qb_games are each event's starting QB's own prior
+    completed games, most recent first, NOT including this one -- the
+    same shape rolling_player_stat_averages expects elsewhere (see
+    identify_starting_qb + FeatureStorage.get_player_game_stats). None (or
+    an empty list) when a starting QB couldn't be identified for that
+    team, in which case the qb_* columns are just None -- a raw team ID
+    would need one-hot encoding and doesn't age well as rosters turn over,
+    so this stays as derived performance stats, consistent with team
+    history above.
     """
     participants = event["participants"]
     home = next(p for p in participants if p.get("role") == "home")
@@ -180,11 +208,33 @@ def build_event_features(
     home_scoring = rolling_team_scoring_averages(home_team_events, home_id, window)
     away_scoring = rolling_team_scoring_averages(away_team_events, away_id, window)
 
+    home_qb_stats = rolling_player_stat_averages(home_qb_games or [], window)
+    away_qb_stats = rolling_player_stat_averages(away_qb_games or [], window)
+
     return {
         "event_key": event["event_key"],
         "event_date": event["event_date"],
         "home_entity_id": home_id,
         "away_entity_id": away_id,
+        # Both already land in DynamoDB via scoreboard_event_to_event_item
+        # (library/normalize/espn.py) -- no new data source needed, these
+        # just weren't being surfaced as model inputs. Unlike event_date,
+        # these two ARE meant to be real features: week captures how far
+        # into the season a game falls, and season_type distinguishes
+        # regular-season from postseason games, which plausibly behave
+        # differently even at the same week number.
+        "week": event.get("week"),
+        "season_type": event.get("season_type"),
+        # venue_indoor and weather_temperature are real feature inputs (a
+        # dome neutralizes weather entirely, and cold/heat plausibly
+        # affects passing/kicking games); venue_city/venue_state are
+        # carried through for reference only -- raw strings aren't
+        # model-consumable without encoding, so train_model.py excludes
+        # them from its feature columns (see DATA_SCHEMA.md).
+        "venue_indoor": event.get("venue_indoor"),
+        "venue_city": event.get("venue_city"),
+        "venue_state": event.get("venue_state"),
+        "weather_temperature": event.get("weather_temperature"),
         "home_elo": home_elo,
         "away_elo": away_elo,
         "elo_diff": (home_elo - away_elo) if home_elo is not None and away_elo is not None else None,
@@ -196,6 +246,14 @@ def build_event_features(
         "away_avg_points_scored": away_scoring["avg_points_scored"],
         "away_avg_points_allowed": away_scoring["avg_points_allowed"],
         "away_games_played": away_scoring["games_played"],
+        "home_qb_avg_passing_yards": home_qb_stats.get("avg_passing_yards"),
+        "home_qb_avg_passing_tds": home_qb_stats.get("avg_passing_tds"),
+        "home_qb_avg_interceptions": home_qb_stats.get("avg_interceptions"),
+        "home_qb_games_played": home_qb_stats["games_played"],
+        "away_qb_avg_passing_yards": away_qb_stats.get("avg_passing_yards"),
+        "away_qb_avg_passing_tds": away_qb_stats.get("avg_passing_tds"),
+        "away_qb_avg_interceptions": away_qb_stats.get("avg_interceptions"),
+        "away_qb_games_played": away_qb_stats["games_played"],
         # Labels -- the training targets (win/loss and final score), not
         # model inputs. None when this is called to build a live feature
         # vector for a not-yet-played event.

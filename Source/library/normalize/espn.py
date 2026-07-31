@@ -44,6 +44,13 @@ def scoreboard_event_to_event_item(event: dict, sport: str) -> dict:
             },
         })
     event_id = event["id"]
+    # venue/weather already come back on the same scoreboard response
+    # ingest already fetches -- no extra API call. weather is frequently
+    # null (most reliably for indoor games, where it doesn't apply), so
+    # this is a real but partial signal, not a guaranteed one.
+    venue = competition.get("venue") or {}
+    venue_address = venue.get("address") or {}
+    weather = competition.get("weather") or {}
     return {
         "event_key": event_key(sport, event_id),
         "event_id": event_id,
@@ -55,6 +62,10 @@ def scoreboard_event_to_event_item(event: dict, sport: str) -> dict:
         "season": event["season"]["year"],
         "season_type": event["season"]["type"],
         "week": event.get("week", {}).get("number"),
+        "venue_indoor": venue.get("indoor"),
+        "venue_city": venue_address.get("city"),
+        "venue_state": venue_address.get("state"),
+        "weather_temperature": weather.get("temperature"),
     }
 
 

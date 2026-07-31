@@ -12,14 +12,23 @@ One row per completed game. Inputs to the model:
 
 | Feature | What it captures |
 |---|---|
+| `week` / `season_type` | How far into the season the game falls, and whether it's regular season or postseason. Both already land in DynamoDB via `scoreboard_event_to_event_item` (`library/normalize/espn.py`) — no new data source, they just weren't being surfaced as model inputs before |
 | `home_elo` / `away_elo` / `elo_diff` | Each team's Elo-style rating going into the game (see below) |
 | `home_rest_days` / `away_rest_days` | Days since each team's previous game |
 | `home_avg_points_scored` / `home_avg_points_allowed` (and the away equivalents) | Rolling average over the last 5 games (configurable via `ROLLING_WINDOW`) |
 | `home_games_played` / `away_games_played` | How much history backs those averages — lets a model learn to trust an early-season row less |
+| `venue_indoor` | Whether the game was played in a dome — weather is meaningless for an indoor game, so this lets the model treat `weather_temperature` differently (or ignore it) for those rows |
+| `weather_temperature` | Game-time temperature from ESPN's venue data. Frequently `null` — most reliably for indoor games, where it doesn't apply, but also for some outdoor games ESPN simply didn't report on. A partial signal, not a guaranteed one |
+| `home_qb_avg_passing_yards` / `home_qb_avg_passing_tds` / `home_qb_avg_interceptions` (and the away equivalents) | Rolling average over each side's **starting QB's own last 5 games** — not the team's, so a backup filling in doesn't inherit the usual starter's numbers, and a traded QB's history follows them rather than resetting |
+| `home_qb_games_played` / `away_qb_games_played` | How much of that QB's own history backs the averages above; `0` when a starter couldn't be identified for that game (see below) |
+
+Also carried on the row for reference, but **excluded from training** by `train_model.py` (raw strings aren't model-consumable without encoding — see `design/DATA_SCHEMA.md`): `venue_city`, `venue_state`.
 
 Labels carried on the same row (the training targets, not inputs): `label_home_won`, `label_home_score`, `label_away_score`.
 
 **Elo ratings** (`compute_elo_ratings`) are computed by walking every team's games in chronological order and updating a running rating after each result — the standard Elo update, with a home-field advantage added to the expected-score calculation. Defaults: starting rating 1500, K-factor 20, home advantage 55 rating points. This is intentionally the *plain* version — no margin-of-victory scaling, matching `design/PROJECT_PLAN.md` Phase 1's "an Elo-style rating" bullet. Each event gets its **pre-game** rating recorded (using the post-game rating would leak that game's own outcome into its own features).
+
+**Identifying the starting QB** (`identify_starting_qb`): a team's box score doesn't flag who started at QB, so this picks whoever had the most passing attempts in that game — the standard heuristic, and one that correctly favors the primary passer over a backup who took a few series in relief. `build_dataset.py`'s orchestration groups `player_game_stats` by `(event_key, team_id)`, runs this per side per event, and tracks each identified QB's own rolling history by `entity_id` (the same incremental, capped-at-`window` approach used for team history) rather than re-deriving it per game. A raw QB identity isn't used as a feature directly — like head coach, it's high-cardinality and doesn't generalize across roster turnover — so only the derived rolling stats above are surfaced, consistent with how team-level features already work.
 
 ### Player-level features (`build_player_features`)
 
