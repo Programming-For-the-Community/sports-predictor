@@ -9,8 +9,17 @@ EventBridge can override any default via the schedule's input payload:
     { "season": 2025, "season_type": 2, "week": 4 }
 
 All three are optional. Omitting "week" tells ESPN to return the current
-week for the given season and type. Omitting everything falls back to the
-CURRENT_SEASON / CURRENT_SEASON_TYPE env vars.
+week for the given season and type. Omitting everything lets ESPN infer
+today's season/type/week on its own -- the scoreboard endpoint defaults to
+"today" when called with no query params at all, so the schedule doesn't
+need to carry a season/season_type payload and nothing here needs updating
+across season or season-type transitions.
+
+Preseason (season_type 1) is never ingested, whether auto-detected or
+passed explicitly -- backup-heavy preseason rosters and results aren't
+representative of regular-season performance and would skew training data.
+This matches the historical backfill, which only ever pulls regular season
+and postseason (see SEASON_TYPES in data-backfills/nfl/backfill.py).
 """
 import json
 import logging
@@ -25,8 +34,7 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(me
 logger = logging.getLogger("nfl-ingest")
 
 RAW_BUCKET = os.environ["RAW_BUCKET_NAME"]
-DEFAULT_SEASON = int(os.environ.get("CURRENT_SEASON", 2025))
-DEFAULT_SEASON_TYPE = int(os.environ.get("CURRENT_SEASON_TYPE", 2))
+PRESEASON_TYPE = 1
 
 _s3 = boto3.client("s3")
 
@@ -50,16 +58,30 @@ def _put_json(key: str, payload: dict) -> None:
 
 
 def lambda_handler(event: dict, context) -> dict:
-    season = event.get("season", DEFAULT_SEASON)
-    season_type = event.get("season_type", DEFAULT_SEASON_TYPE)
+    season = event.get("season")
+    season_type = event.get("season_type")
     week = event.get("week")
+
+    if season_type == PRESEASON_TYPE:
+        logger.info("season_type=%d is preseason -- skipping, not ingested by design", PRESEASON_TYPE)
+        return {"processed": 0, "skipped": 0, "failed": 0}
 
     client = NFLClient()
 
     if week is None:
+        # Omitted season/season_type are passed through as None, which
+        # NFLClient drops from the request entirely -- ESPN then infers
+        # season/type/week from today's date server-side.
         scoreboard = client.get_current_scoreboard(season, season_type)
+        season = scoreboard.get("season", {}).get("year", season)
+        season_type = scoreboard.get("season", {}).get("type", season_type)
         week = scoreboard.get("week", {}).get("number", 1)
-        logger.info("Auto-detected week %d for season %d type %d", week, season, season_type)
+
+        if season_type == PRESEASON_TYPE:
+            logger.info("Auto-detected preseason (season %d) -- skipping, not ingested by design", season)
+            return {"processed": 0, "skipped": 0, "failed": 0}
+
+        logger.info("Auto-detected season %d type %d week %d", season, season_type, week)
     else:
         scoreboard = client.get_scoreboard(season, season_type, week)
 

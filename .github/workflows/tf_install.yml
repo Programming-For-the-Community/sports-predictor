@@ -24,6 +24,11 @@ on:
   
   workflow_call:
     inputs:
+      skip_approval_gate:
+        description: 'Set true by a calling workflow that already gates its own approval (e.g. nfl_deploy.yml), so this job does not double-prompt for environment protection.'
+        required: false
+        type: boolean
+        default: false
       server_image_tag:
         description: 'Image tag of the server Docker image'
         required: false
@@ -83,11 +88,17 @@ jobs:
     # run -- so calling this job from another workflow that already has
     # its own approval gate (e.g. nfl_deploy.yml) would otherwise trigger
     # a second, redundant approval prompt here. An empty string means "no
-    # environment," which skips gating entirely; that only happens when
-    # github.event_name is "workflow_call" (i.e. we were called, not
-    # triggered directly), so direct push/workflow_dispatch runs are
-    # unaffected and still gate on development/production as before.
-    environment: ${{ github.event_name != 'workflow_call' && (github.event.inputs.environment || 'development') || '' }}
+    # environment," which skips gating entirely.
+    #
+    # This used to key off `github.event_name != 'workflow_call'`, on the
+    # assumption that event_name would read as "workflow_call" when this
+    # workflow is invoked via `uses:`. It doesn't -- inside a called
+    # workflow, github.event_name still reflects whatever triggered the
+    # top-level run (e.g. "push", since nfl_deploy.yml triggers on push),
+    # so that condition was always true and gating never actually turned
+    # off, causing a second approval prompt. skip_approval_gate is an
+    # explicit input the caller sets instead of an inferred signal.
+    environment: ${{ !inputs.skip_approval_gate && (github.event.inputs.environment || 'development') || '' }}
 
     # Use the Bash shell regardless whether the GitHub Actions runner is ubuntu-latest, macos-latest, or windows-latest
     defaults:
@@ -143,11 +154,6 @@ jobs:
       run: terraform -chdir=Terraform plan
 
     # Build or change infrastructure according to Terraform configuration files.
-    # Resource names/env vars a task actually runs with (RAW_BUCKET_NAME,
-    # ENTITIES_TABLE_NAME, etc.) are wired directly into the ECS task
-    # definition here, from Terraform's own resources -- see
-    # Terraform/ecs-task-nfl-backfill.tf. Nothing needs to flow back out
-    # to GitHub Actions for that purpose.
     - name: Terraform Apply
       run: terraform -chdir=Terraform apply -auto-approve
 

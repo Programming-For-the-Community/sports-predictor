@@ -30,12 +30,12 @@ data "archive_file" "nfl_normalize_placeholder" {
 }
 
 resource "aws_lambda_function" "nfl_normalize" {
-  function_name    = "${var.project}-nfl-normalize"
-  role             = aws_iam_role.lambda_pipeline.arn
-  runtime          = "python3.12"
-  handler          = "handler.lambda_handler"
-  timeout          = 60
-  memory_size      = 256
+  function_name = "${var.project}-nfl-normalize"
+  role          = aws_iam_role.lambda_pipeline.arn
+  runtime       = "python3.12"
+  handler       = "handler.lambda_handler"
+  timeout       = 60
+  memory_size   = 256
 
   filename         = data.archive_file.nfl_normalize_placeholder.output_path
   source_code_hash = data.archive_file.nfl_normalize_placeholder.output_base64sha256

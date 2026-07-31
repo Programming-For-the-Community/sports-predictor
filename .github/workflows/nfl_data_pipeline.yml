@@ -40,9 +40,9 @@ jobs:
     secrets: inherit
     with:
       function_name: ${{ inputs.ingest_function_name || 'sports-predictor-nfl-ingest' }}
-      handler_dir: 'Source/lambdas/nfl/ingest'
+      handler_dir: 'Source/aws-lambdas/nfl/ingest'
       library_path: 'Source/library'
-      test_dir: 'Source/tests/lambdas/nfl'
+      test_dir: 'Source/tests/aws-lambdas/nfl'
 
   deploy-normalize:
     name: Deploy nfl-normalize Lambda
@@ -50,6 +50,6 @@ jobs:
     secrets: inherit
     with:
       function_name: ${{ inputs.normalize_function_name || 'sports-predictor-nfl-normalize' }}
-      handler_dir: 'Source/lambdas/nfl/normalize'
+      handler_dir: 'Source/aws-lambdas/nfl/normalize'
       library_path: 'Source/library'
-      test_dir: 'Source/tests/lambdas/nfl'
+      test_dir: 'Source/tests/aws-lambdas/nfl'
