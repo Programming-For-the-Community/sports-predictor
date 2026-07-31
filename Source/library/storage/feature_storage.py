@@ -62,15 +62,44 @@ class FeatureStorage:
         for entity_id yet -- design/DATA_SCHEMA.md defers that until it's
         actually painful, and NFL's ~2,720 total games is cheap enough to
         scan and filter in Python instead.
+
+        Intended for one-team-at-a-time lookups (e.g. a future inference
+        Lambda building a live feature vector for one upcoming matchup).
+        Batch feature engineering over the whole history should call
+        get_all_events() once instead -- calling this per team would scan
+        the table once per team rather than once total.
+        """
+        events = self.get_all_events(sport)
+        team_events = [
+            event
+            for event in events
+            if any(p.get("entity_id") == entity_id for p in event.get("participants", []))
+            and (before_date is None or event.get("event_date", "") < before_date)
+        ]
+        return team_events[:limit] if limit is not None else team_events
+
+    def get_all_events(self, sport: str, status: str = "completed") -> list[dict]:
+        """Every event for a sport, most recent first. Meant for batch jobs
+        that need the whole history at once (e.g. Elo rating computation,
+        which has to walk every team's games in chronological order, not
+        just one team's) -- one scan instead of one Query per team.
         """
         items = self._events_table.scan()
-        team_events = [
-            item
-            for item in items
-            if item.get("sport") == sport
-            and item.get("status") == "completed"
-            and any(p.get("entity_id") == entity_id for p in item.get("participants", []))
-            and (before_date is None or item.get("event_date", "") < before_date)
+        events = [
+            item for item in items if item.get("sport") == sport and item.get("status") == status
         ]
-        team_events.sort(key=lambda item: item.get("event_date", ""), reverse=True)
-        return team_events[:limit] if limit is not None else team_events
+        events.sort(key=lambda item: item.get("event_date", ""), reverse=True)
+        return events
+
+    def get_all_player_game_stats(self) -> list[dict]:
+        """Every player_game_stats row, unsorted. Meant for batch jobs that
+        need to group by player in memory rather than issue one
+        entity-history Query per player (there can be thousands of
+        distinct players across a full history).
+
+        No sport filter -- player_game_stats rows don't carry a `sport`
+        attribute directly (see design/DATA_SCHEMA.md), and only NFL data
+        exists today. Once a second sport's data lands, filter by parsing
+        the sport out of event_key's SPORT#<sport>#EVENT#... prefix.
+        """
+        return self._player_game_stats_table.scan()

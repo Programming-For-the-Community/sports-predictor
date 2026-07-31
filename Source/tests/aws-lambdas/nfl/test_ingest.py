@@ -10,6 +10,7 @@ also sets RAW_BUCKET_NAME before the module is imported (it's read at
 module level by the handler).
 """
 import nfl_ingest
+from datetime import date
 from unittest.mock import MagicMock, patch
 
 from botocore.exceptions import ClientError
@@ -54,7 +55,7 @@ def _make_s3(existing_keys: set | None = None):
 
 def _make_client(scoreboard: dict, summary: dict | None = None):
     mock = MagicMock()
-    mock.get_current_scoreboard.return_value = scoreboard
+    mock.get_scoreboard_for_date.return_value = scoreboard
     mock.get_scoreboard.return_value = scoreboard
     mock.get_summary.return_value = summary or {"header": {}, "boxscore": {}}
     return mock
@@ -117,7 +118,7 @@ class TestIngestLambdaHandler:
             nfl_ingest.lambda_handler({"season": 2024, "season_type": 2, "week": 3}, None)
 
         mock_client.get_scoreboard.assert_called_once_with(2024, 2, 3)
-        mock_client.get_current_scoreboard.assert_not_called()
+        mock_client.get_scoreboard_for_date.assert_not_called()
 
     def test_auto_detects_week_when_not_in_payload(self):
         board = _scoreboard([], week=7)
@@ -128,7 +129,10 @@ class TestIngestLambdaHandler:
              patch.object(nfl_ingest, "NFLClient", return_value=mock_client):
             nfl_ingest.lambda_handler({}, None)
 
-        mock_client.get_current_scoreboard.assert_called_once_with(None, None)
+        # Exact date value is covered by TestMostRecentSunday below --
+        # here we only need to confirm the date-based lookup is used
+        # instead of get_scoreboard's explicit-week path.
+        mock_client.get_scoreboard_for_date.assert_called_once()
         mock_client.get_scoreboard.assert_not_called()
 
     def test_skips_preseason_given_explicitly(self):
@@ -141,7 +145,7 @@ class TestIngestLambdaHandler:
 
         assert result == {"processed": 0, "skipped": 0, "failed": 0}
         mock_client.get_scoreboard.assert_not_called()
-        mock_client.get_current_scoreboard.assert_not_called()
+        mock_client.get_scoreboard_for_date.assert_not_called()
         mock_s3.put_object.assert_not_called()
 
     def test_skips_preseason_when_auto_detected(self):
@@ -197,6 +201,38 @@ class TestIngestLambdaHandler:
 
         assert result == {"processed": 0, "skipped": 0, "failed": 0}
         mock_client.get_summary.assert_not_called()
+
+
+class TestMostRecentSunday:
+    # 2026-09-13 is a confirmed Sunday (live ESPN response for
+    # dates=20260913 returned week 1, season.type 2, games at the classic
+    # Sunday 1pm ET slot -- see the ingest handler's module docstring).
+    SUNDAY = date(2026, 9, 13)
+
+    def test_sunday_itself_returns_same_day(self):
+        assert nfl_ingest._most_recent_sunday(self.SUNDAY) == "20260913"
+
+    def test_monday_returns_previous_day(self):
+        assert nfl_ingest._most_recent_sunday(date(2026, 9, 14)) == "20260913"
+
+    def test_tuesday_returns_same_sunday_as_wednesday(self):
+        tuesday = nfl_ingest._most_recent_sunday(date(2026, 9, 15))
+        wednesday = nfl_ingest._most_recent_sunday(date(2026, 9, 16))
+
+        assert tuesday == "20260913"
+        assert wednesday == "20260913"
+        assert tuesday == wednesday  # the whole point of this function
+
+    def test_saturday_does_not_roll_forward_to_next_sunday(self):
+        assert nfl_ingest._most_recent_sunday(date(2026, 9, 19)) == "20260913"
+
+    def test_defaults_to_actual_today_when_not_given(self):
+        # Just confirms the default path runs and returns the expected
+        # format -- the date-math itself is covered by the fixed-date
+        # cases above.
+        result = nfl_ingest._most_recent_sunday()
+        assert len(result) == 8
+        assert result.isdigit()
 
 
 class TestIngestHelpers:

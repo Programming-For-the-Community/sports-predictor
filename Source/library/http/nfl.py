@@ -1,7 +1,8 @@
 """
 NFL ESPN client. Extends EspnBaseClient with the football/nfl sport path
-and the three endpoint methods used by both the historical backfill
-(data-backfills/nfl/) and the recurring ingest Lambda (lambdas/nfl/ingest/).
+and the four endpoint methods used by both the historical backfill
+(data-backfills/nfl/) and the recurring ingest Lambda
+(aws-lambdas/nfl/ingest/).
 """
 from library.http.espn import EspnBaseClient
 
@@ -16,16 +17,12 @@ class NFLClient(EspnBaseClient):
     def get_scoreboard(self, year: int, seasontype: int, week: int) -> dict:
         return self._get("scoreboard", params={"dates": year, "seasontype": seasontype, "week": week})
 
-    def get_current_scoreboard(self, year: int | None = None, seasontype: int | None = None) -> dict:
-        """Fetch the current week's scoreboard without specifying a week number.
-        Omitting year and seasontype omits them from the request entirely --
-        ESPN then infers the current season/type from today's date."""
-        params = {}
-        if year is not None:
-            params["dates"] = year
-        if seasontype is not None:
-            params["seasontype"] = seasontype
-        return self._get("scoreboard", params=params)
+    def get_scoreboard_for_date(self, date: str) -> dict:
+        """Fetch the scoreboard for the NFL week containing a specific date
+        (YYYYMMDD). ESPN infers season/season_type/week entirely from this
+        one parameter -- confirmed live: dates=20260913 (a Sunday) returned
+        week 1, season.type 2, with no seasontype param needed alongside it."""
+        return self._get("scoreboard", params={"dates": date})
 
     def get_summary(self, event_id: str) -> dict:
         return self._get("summary", params={"event": event_id})
