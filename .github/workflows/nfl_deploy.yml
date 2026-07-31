@@ -49,6 +49,8 @@ jobs:
       always() &&
       (needs.approval.result == 'success' || needs.approval.result == 'skipped')
     uses: ./.github/workflows/tf_install.yml
+    with:
+      skip_approval_gate: true
     secrets: inherit
 
   backfill:

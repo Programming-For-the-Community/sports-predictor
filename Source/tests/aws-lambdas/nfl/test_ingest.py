@@ -26,8 +26,16 @@ def _incomplete_event(event_id: str) -> dict:
     return {"id": event_id, "status": {"type": {"completed": False}}}
 
 
-def _scoreboard(events: list, week: int = 5) -> dict:
-    return {"week": {"number": week}, "events": events}
+SEASON_YEAR = 2025
+SEASON_TYPE = 2
+
+
+def _scoreboard(events: list, week: int = 5, season_year: int = SEASON_YEAR, season_type: int = SEASON_TYPE) -> dict:
+    return {
+        "week": {"number": week},
+        "season": {"year": season_year, "type": season_type},
+        "events": events,
+    }
 
 
 def _make_s3(existing_keys: set | None = None):
@@ -87,7 +95,7 @@ class TestIngestLambdaHandler:
     def test_skips_events_already_in_s3(self):
         board = _scoreboard([_completed_event("123")])
         # Pre-mark the box score key as already present
-        existing_key = f"nfl/boxscore/{nfl_ingest.DEFAULT_SEASON}/123.json"
+        existing_key = f"nfl/boxscore/{SEASON_YEAR}/123.json"
         mock_s3 = _make_s3(existing_keys={existing_key})
         mock_client = _make_client(board)
 
@@ -120,8 +128,34 @@ class TestIngestLambdaHandler:
              patch.object(nfl_ingest, "NFLClient", return_value=mock_client):
             nfl_ingest.lambda_handler({}, None)
 
-        mock_client.get_current_scoreboard.assert_called_once()
+        mock_client.get_current_scoreboard.assert_called_once_with(None, None)
         mock_client.get_scoreboard.assert_not_called()
+
+    def test_skips_preseason_given_explicitly(self):
+        mock_s3 = _make_s3()
+        mock_client = _make_client(_scoreboard([]))
+
+        with patch.object(nfl_ingest, "_s3", mock_s3), \
+             patch.object(nfl_ingest, "NFLClient", return_value=mock_client):
+            result = nfl_ingest.lambda_handler({"season": 2025, "season_type": 1, "week": 1}, None)
+
+        assert result == {"processed": 0, "skipped": 0, "failed": 0}
+        mock_client.get_scoreboard.assert_not_called()
+        mock_client.get_current_scoreboard.assert_not_called()
+        mock_s3.put_object.assert_not_called()
+
+    def test_skips_preseason_when_auto_detected(self):
+        board = _scoreboard([_completed_event("1")], season_type=1)
+        mock_s3 = _make_s3()
+        mock_client = _make_client(board)
+
+        with patch.object(nfl_ingest, "_s3", mock_s3), \
+             patch.object(nfl_ingest, "NFLClient", return_value=mock_client):
+            result = nfl_ingest.lambda_handler({}, None)
+
+        assert result == {"processed": 0, "skipped": 0, "failed": 0}
+        mock_client.get_summary.assert_not_called()
+        mock_s3.put_object.assert_not_called()
 
     def test_continues_after_individual_game_failure(self):
         board = _scoreboard([_completed_event("1"), _completed_event("2")])
@@ -142,7 +176,7 @@ class TestIngestLambdaHandler:
             _incomplete_event("2"),  # skipped (not done)
             _completed_event("3"),  # skipped (already in S3)
         ])
-        existing_key = f"nfl/boxscore/{nfl_ingest.DEFAULT_SEASON}/3.json"
+        existing_key = f"nfl/boxscore/{SEASON_YEAR}/3.json"
         mock_s3 = _make_s3(existing_keys={existing_key})
         mock_client = _make_client(board)
 

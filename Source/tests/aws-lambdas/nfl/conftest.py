@@ -20,5 +20,5 @@ def _load_handler(module_name: str, relative_path: str) -> None:
     spec.loader.exec_module(mod)
 
 
-_load_handler("nfl_ingest", "lambdas/nfl/ingest/handler.py")
-_load_handler("nfl_normalize", "lambdas/nfl/normalize/handler.py")
+_load_handler("nfl_ingest", "aws-lambdas/nfl/ingest/handler.py")
+_load_handler("nfl_normalize", "aws-lambdas/nfl/normalize/handler.py")
