@@ -12,8 +12,18 @@ resource "aws_cloudwatch_log_group" "nfl_feature_engineering" {
 # Standalone Fargate task (launched via `aws ecs run-task`, not a Service --
 # runs to completion and stops, same pattern as ecs-task-nfl-backfill.tf).
 # Reads the full events/player_game_stats history and writes two training
-# CSVs to the model artifacts bucket -- see Source/feature-engineering/nfl/
-# build_dataset.py.
+# Parquet files to the model artifacts bucket -- see
+# Source/feature-engineering/nfl/build_dataset.py.
+#
+# cpu/memory bumped from 512/1024 after a real run against ~2,700 events
+# and ~158,000 player-game rows hit an OutOfMemoryError (exit 137) at
+# 1024MB. The proximate cause was a memory-inefficient Parquet-writing
+# step (fixed in build_dataset.py -- it was holding a full second copy of
+# the entire player-rows dataset alongside the original list, the
+# DataFrame, and pyarrow's own Table, all at once, just to JSON-encode one
+# column). This sizing is a safety margin on top of that fix, not a
+# substitute for it -- matches backfill's sizing, and costs a fraction of
+# a cent more per run either way.
 #
 # Uses the shared aws_iam_role.ecs_pipeline (iam-ecs-pipeline.tf) rather
 # than a dedicated role like nfl_backfill's -- that role was already scoped
@@ -36,8 +46,8 @@ resource "aws_ecs_task_definition" "nfl_feature_engineering" {
   family                   = "${var.project}-nfl-feature-engineering"
   requires_compatibilities = ["FARGATE"]
   network_mode             = "awsvpc"
-  cpu                      = "512"
-  memory                   = "1024"
+  cpu                      = "1024"
+  memory                   = "2048"
   execution_role_arn       = aws_iam_role.ecs_pipeline.arn
   task_role_arn            = aws_iam_role.ecs_pipeline.arn
 

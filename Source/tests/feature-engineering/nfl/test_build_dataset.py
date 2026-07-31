@@ -24,36 +24,6 @@ def _event(event_key, event_date, home_id, away_id, home_score=20, away_score=17
     }
 
 
-class TestGroupEventsByTeam:
-    def test_groups_each_participant_and_sorts_ascending(self):
-        events = [
-            _event("E2", "2025-09-14", "KC", "LAC"),
-            _event("E1", "2025-09-07", "KC", "DET"),
-        ]
-
-        grouped = build_dataset._group_events_by_team(events)
-
-        assert [e["event_key"] for e in grouped["KC"]] == ["E1", "E2"]
-        assert [e["event_key"] for e in grouped["LAC"]] == ["E2"]
-        assert [e["event_key"] for e in grouped["DET"]] == ["E1"]
-
-
-class TestHistoryBefore:
-    def test_returns_prior_rows_most_recent_first(self):
-        sorted_ascending = [
-            {"event_date": "2025-09-07"},
-            {"event_date": "2025-09-14"},
-            {"event_date": "2025-09-21"},
-        ]
-
-        result = build_dataset._history_before(sorted_ascending, "2025-09-21")
-
-        assert [r["event_date"] for r in result] == ["2025-09-14", "2025-09-07"]
-
-    def test_empty_when_no_prior_rows(self):
-        assert build_dataset._history_before([{"event_date": "2025-09-21"}], "2025-09-07") == []
-
-
 class TestWriteParquet:
     def test_empty_rows_returns_empty_bytes(self):
         assert build_dataset._write_parquet([]) == b""
@@ -108,6 +78,24 @@ class TestBuildEventDataset:
         e2 = next(row for row in rows if row["event_key"] == "E2")
         assert e2["home_elo"] > 1500  # KC won E1 as home favorite -> rating rose
 
+    def test_team_history_stays_capped_at_window_across_many_games(self):
+        # KC plays 7 games (alternating opponents so KC is the only shared
+        # team); window=3 means game 7 should only see the 3 most recent
+        # prior games, not all 6 -- the case the incremental-history
+        # rewrite (replacing a full per-game history re-filter) needs to
+        # get right.
+        events = [
+            _event(f"E{i}", f"2025-09-{i:02d}", "KC", f"OPP{i}")
+            for i in range(1, 8)
+        ]
+        storage = MagicMock()
+        storage.get_all_events.return_value = events
+
+        rows = build_dataset.build_event_dataset(storage, window=3)
+
+        e7 = next(row for row in rows if row["event_key"] == "E7")
+        assert e7["home_games_played"] == 3
+
 
 class TestBuildPlayerDataset:
     def test_builds_one_row_per_player_game_using_prior_games_only(self):
@@ -130,3 +118,21 @@ class TestBuildPlayerDataset:
         second_row = next(r for r in rows if r["event_key"] == "E2")
         assert "avg_passing_yards" not in first_row  # no prior games yet
         assert second_row["avg_passing_yards"] == 250  # only E1 counts as history
+
+    def test_player_history_stays_capped_at_window_across_many_games(self):
+        # Same case as the event-dataset equivalent, for the per-player
+        # incremental-history path.
+        games = [
+            {
+                "event_key": f"E{i}", "player_key": "PLAYER#p1", "entity_id": "p1", "team_id": "KC",
+                "event_date": f"2025-09-{i:02d}", "stat_line": {"passing_yards": 250}, "started": True,
+            }
+            for i in range(1, 8)
+        ]
+        storage = MagicMock()
+        storage.get_all_player_game_stats.return_value = games
+
+        rows = build_dataset.build_player_dataset(storage, window=3)
+
+        e7 = next(r for r in rows if r["event_key"] == "E7")
+        assert e7["games_played"] == 3

@@ -1,6 +1,12 @@
 # sports-predictor
 AWS hosted AI driven application to predict sports outcomes while providing up-to-date information to ensure the models stay current
 
+## Documentation
+
+Deeper write-ups on specific pieces of the system live in [docs/](docs/):
+
+- [NFL Feature Engineering](docs/NFL_FEATURE_ENGINEERING.md) — what the NFL feature-engineering pipeline computes and what it makes it possible to predict
+
 ## Local Development Setup
 
 ### 1. Create and activate a virtual environment

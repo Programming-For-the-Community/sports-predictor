@@ -66,3 +66,4 @@ A phased checklist in implementation order. Each phase assumes the previous one 
 - [ ] Add CloudWatch alarms for unexpected Lambda or Fargate error rates
 - [ ] Set explicit log retention policies so CloudWatch Logs doesn't grow unbounded
 - [ ] Document and test the runbook for adding a hypothetical sport #7 — if the registry-driven pattern actually works, this should take an afternoon, not a redesign
+- [ ] Add a notification flow (e.g. SNS/email) for reviewing a newly trained model before promoting it — the sport registry's `current_model_version` pointer should only move to the new version after approval, not automatically on every retrain
