@@ -186,29 +186,73 @@ def _group_player_games_by_player(player_games: list[dict]) -> dict[str, list[di
     return by_player
 
 
+def _team_previous_event_dates(events: list[dict]) -> dict[tuple[str, str], str | None]:
+    """Maps (team_id, event_key) -> that team's own previous event's date,
+    for every team's participation in every event -- computed once by
+    walking each team's own chronological event list, rather than
+    re-deriving it per player-game (a team plays dozens of players' worth
+    of rows per game)."""
+    by_team: dict[str, list[dict]] = defaultdict(list)
+    for event in events:
+        for participant in event.get("participants", []):
+            by_team[participant["entity_id"]].append(event)
+
+    previous_dates: dict[tuple[str, str], str | None] = {}
+    for team_id, team_events in by_team.items():
+        team_events.sort(key=lambda e: e.get("event_date", ""))
+        previous_date = None
+        for event in team_events:
+            previous_dates[(team_id, event["event_key"])] = previous_date
+            previous_date = event.get("event_date")
+    return previous_dates
+
+
 def build_player_dataset(storage: FeatureStorage, window: int) -> list[dict]:
     """Same incremental-history approach as build_event_dataset, per
     player instead of per team -- walks each player's games in
     chronological order once, growing their history one game at a time
-    instead of re-filtering their whole career from scratch per game."""
+    instead of re-filtering their whole career from scratch per game.
+
+    Also loads events and computes Elo the same way build_event_dataset
+    does (each independently, rather than sharing one computation between
+    the two dataset builders) -- keeps both functions self-contained and
+    independently testable at the cost of one extra pass over events,
+    which is cheap next to the player-game volume this function already
+    processes."""
+    events = storage.get_all_events(SPORT)
+    events_by_key = {event["event_key"]: event for event in events}
+    elo_ratings = compute_elo_ratings(events)
+    team_previous_event_dates = _team_previous_event_dates(events)
+
     player_games = storage.get_all_player_game_stats()
     logger.info("Loaded %d player-game rows", len(player_games))
 
     games_by_player = _group_player_games_by_player(player_games)
 
     total = len(player_games)
-    processed = 0
+    seen = 0  # rows examined, including skipped ones -- see == total is what marks completion
+    skipped = 0
     rows = []
     for games in games_by_player.values():
         history: list[dict] = []  # ascending, grows as we go
         for game in games:
-            prior = history[-window:][::-1]  # most-recent-first, capped at window
-            rows.append(build_player_features(game, prior, window))
-            history.append(game)
+            event = events_by_key.get(game["event_key"])
+            participants = event.get("participants", []) if event else []
+            has_home_and_away = any(p.get("role") == "home" for p in participants) and any(
+                p.get("role") == "away" for p in participants
+            )
+            if not has_home_and_away:
+                logger.debug("Skipping player-game %s -- event missing or missing home/away role", game["event_key"])
+                skipped += 1
+            else:
+                prior = history[-window:][::-1]  # most-recent-first, capped at window
+                own_previous_event_date = team_previous_event_dates.get((game["team_id"], game["event_key"]))
+                rows.append(build_player_features(game, prior, event, elo_ratings, own_previous_event_date, window))
+                history.append(game)
 
-            processed += 1
-            if processed % 20000 == 0 or processed == total:
-                logger.info("Built player features: %d/%d", processed, total)
+            seen += 1
+            if seen % 20000 == 0 or seen == total:
+                logger.info("Built player features: %d/%d (%d skipped)", seen, total, skipped)
 
     return rows
 

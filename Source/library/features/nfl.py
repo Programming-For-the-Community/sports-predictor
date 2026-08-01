@@ -209,6 +209,12 @@ def rolling_player_stat_averages(
             counts[key] = counts.get(key, 0) + 1
 
     averages = {f"avg_{key}": totals[key] / counts[key] for key in totals}
+    # How many of the windowed games actually had this key, not just the
+    # blanket games_played/starts below -- lets a caller distinguish a
+    # real, established stat (e.g. a starting QB's passing_yards) from
+    # one a player recorded once by fluke (see
+    # train_player_prop_model.py's MIN_PRIOR_GAMES_WITH_STAT).
+    averages.update({f"games_with_{key}": counts[key] for key in counts})
     averages["games_played"] = len(windowed)
     averages["starts"] = sum(1 for game in windowed if game.get("started"))
     return averages
@@ -425,21 +431,70 @@ def build_event_features(
 
 
 def build_player_features(
-    player_game: dict, prior_games: list[dict], window: int = DEFAULT_ROLLING_WINDOW
+    player_game: dict,
+    prior_games: list[dict],
+    event: dict,
+    elo_ratings: dict[str, dict[str, float]],
+    own_previous_event_date: str | None,
+    window: int = DEFAULT_ROLLING_WINDOW,
 ) -> dict:
     """Assembles one training row for a player-prop target: player_game is
     the specific game being labeled (its stat_line becomes the training
     label); prior_games is that player's own completed games before this
     one, most recent first (see FeatureStorage.get_player_game_stats with
-    before_date=player_game['event_date'])."""
+    before_date=player_game['event_date']).
+
+    event is the full event record player_game belongs to (see
+    FeatureStorage.get_all_events), elo_ratings is compute_elo_ratings'
+    full output, and own_previous_event_date is this player's OWN TEAM's
+    (not the player's own) most recent prior event date, for rest_days --
+    the same context build_event_features uses for the win-probability
+    model, reoriented to one player's perspective (own/opponent rather
+    than home/away) since a player-prop row has no "home team" of its
+    own."""
+    participants = event["participants"]
+    home = next(p for p in participants if p.get("role") == "home")
+    away = next(p for p in participants if p.get("role") == "away")
+    home_id, away_id = home["entity_id"], away["entity_id"]
+    team_id = player_game["team_id"]
+    is_home = team_id == home_id
+    opponent_id = away_id if is_home else home_id
+
+    ratings = elo_ratings.get(event["event_key"], {})
+    home_elo = ratings.get("home_pre_rating")
+    away_elo = ratings.get("away_pre_rating")
+    own_elo = home_elo if is_home else away_elo
+    opponent_elo = away_elo if is_home else home_elo
+
+    # No unrecognized-venue warning here, unlike build_event_features --
+    # build_event_dataset already logs it once per event; every player in
+    # that game routing through here too would repeat the same warning
+    # once per roster spot.
+    venue_city = event.get("venue_city")
+    home_travel_km, away_travel_km = travel_distances_km(away_id, home_id, venue_city)
+    own_travel_km = home_travel_km if is_home else away_travel_km
+
     averages = rolling_player_stat_averages(prior_games, window)
     return {
         "event_key": player_game["event_key"],
         "player_key": player_game["player_key"],
         "entity_id": player_game["entity_id"],
-        "team_id": player_game["team_id"],
+        "team_id": team_id,
+        "opponent_id": opponent_id,
         "event_date": player_game["event_date"],
         **averages,
+        "is_home": is_home,
+        "week": event.get("week"),
+        "season_type": event.get("season_type"),
+        "venue_indoor": event.get("venue_indoor"),
+        "weather_temperature": event.get("weather_temperature"),
+        "rest_days": rest_days(player_game["event_date"], own_previous_event_date),
+        "own_elo": own_elo,
+        "opponent_elo": opponent_elo,
+        "elo_diff": (own_elo - opponent_elo) if own_elo is not None and opponent_elo is not None else None,
+        "is_divisional_game": is_divisional_game(home_id, away_id),
+        "is_international_game": is_international_game(venue_city),
+        "travel_km": own_travel_km,
         # Label -- this game's actual stat line, the training target.
         "label_stat_line": player_game.get("stat_line", {}),
         "label_started": player_game.get("started"),

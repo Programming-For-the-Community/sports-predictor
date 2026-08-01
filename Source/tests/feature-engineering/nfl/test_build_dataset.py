@@ -235,6 +235,12 @@ class TestBuildEventDataset:
 
 
 class TestBuildPlayerDataset:
+    def _storage(self, events, player_games):
+        storage = MagicMock()
+        storage.get_all_events.return_value = events
+        storage.get_all_player_game_stats.return_value = player_games
+        return storage
+
     def test_builds_one_row_per_player_game_using_prior_games_only(self):
         games = [
             {
@@ -246,8 +252,8 @@ class TestBuildPlayerDataset:
                 "event_date": "2025-09-14", "stat_line": {"passing_yards": 300}, "started": True,
             },
         ]
-        storage = MagicMock()
-        storage.get_all_player_game_stats.return_value = games
+        events = [_event("E1", "2025-09-07", "KC", "LAC"), _event("E2", "2025-09-14", "KC", "DEN")]
+        storage = self._storage(events, games)
 
         rows = build_dataset.build_player_dataset(storage, window=5)
 
@@ -266,10 +272,51 @@ class TestBuildPlayerDataset:
             }
             for i in range(1, 8)
         ]
-        storage = MagicMock()
-        storage.get_all_player_game_stats.return_value = games
+        events = [_event(f"E{i}", f"2025-09-{i:02d}", "KC", "LAC") for i in range(1, 8)]
+        storage = self._storage(events, games)
 
         rows = build_dataset.build_player_dataset(storage, window=3)
 
         e7 = next(r for r in rows if r["event_key"] == "E7")
         assert e7["games_played"] == 3
+
+    def test_skips_a_player_game_whose_event_is_missing_or_malformed(self):
+        games = [
+            {
+                "event_key": "MISSING", "player_key": "PLAYER#p1", "entity_id": "p1", "team_id": "KC",
+                "event_date": "2025-09-07", "stat_line": {"passing_yards": 250}, "started": True,
+            },
+            {
+                "event_key": "E2", "player_key": "PLAYER#p1", "entity_id": "p1", "team_id": "KC",
+                "event_date": "2025-09-14", "stat_line": {"passing_yards": 300}, "started": True,
+            },
+        ]
+        # No event for "MISSING" at all -- the player-game row referencing
+        # it should be skipped, not crash.
+        events = [_event("E2", "2025-09-14", "KC", "DEN")]
+        storage = self._storage(events, games)
+
+        rows = build_dataset.build_player_dataset(storage, window=5)
+
+        assert {row["event_key"] for row in rows} == {"E2"}
+
+    def test_own_home_away_elo_and_rest_days_flow_through(self):
+        games = [
+            {
+                "event_key": "E1", "player_key": "PLAYER#p1", "entity_id": "p1", "team_id": "LAC",
+                "event_date": "2025-09-07", "stat_line": {"passing_yards": 250}, "started": True,
+            },
+        ]
+        # p1's team (LAC) is the away side of E1 -- is_home should read False,
+        # and own/opponent Elo should resolve to LAC's/KC's ratings, not KC's/LAC's.
+        events = [_event("E1", "2025-09-07", "KC", "LAC")]
+        storage = self._storage(events, games)
+
+        rows = build_dataset.build_player_dataset(storage, window=5)
+
+        row = rows[0]
+        assert row["is_home"] is False
+        assert row["opponent_id"] == "KC"
+        assert row["own_elo"] is not None
+        assert row["opponent_elo"] is not None
+        assert row["rest_days"] is None  # no prior LAC event in this fixture
