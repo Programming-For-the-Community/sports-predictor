@@ -7,7 +7,7 @@ resource "aws_ecs_cluster" "main" {
 
   setting {
     name  = "containerInsights"
-    value = "disabled" # avoid the extra CloudWatch charge until it's actually needed for debugging
+    value = "enabled" # per-task CPU/memory/network metrics in CloudWatch -- small added charge, worth it for sizing decisions
   }
 
   tags = merge(local.common_tags, {

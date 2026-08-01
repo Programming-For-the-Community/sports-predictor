@@ -11,6 +11,7 @@ from library.features.nfl import (
     build_event_features,
     build_player_features,
     compute_elo_ratings,
+    current_streak,
     identify_lead_receiver,
     identify_lead_rusher,
     identify_starting_qb,
@@ -204,6 +205,54 @@ class TestRollingTeamScoringAverages:
         assert result["avg_points_scored"] is None
         assert result["avg_points_allowed"] is None
         assert result["games_played"] == 0
+
+
+class TestCurrentStreak:
+    def _game(self, event_date, own_score, opp_score, own_id="KC", opp_id="LAC"):
+        return {
+            "event_date": event_date,
+            "participants": [
+                {"entity_id": own_id, "result": {"score": own_score}},
+                {"entity_id": opp_id, "result": {"score": opp_score}},
+            ],
+        }
+
+    def test_win_streak_is_positive(self):
+        team_events = [  # most recent first
+            self._game("2025-09-15", 27, 20),
+            self._game("2025-09-08", 24, 21),
+            self._game("2025-09-01", 17, 10),
+        ]
+
+        assert current_streak(team_events, "KC") == 3
+
+    def test_loss_streak_is_negative(self):
+        team_events = [
+            self._game("2025-09-15", 10, 27),
+            self._game("2025-09-08", 14, 21),
+        ]
+
+        assert current_streak(team_events, "KC") == -2
+
+    def test_streak_stops_at_direction_change(self):
+        team_events = [
+            self._game("2025-09-15", 27, 20),  # win
+            self._game("2025-09-08", 27, 20),  # win
+            self._game("2025-09-01", 10, 27),  # loss -- streak ends here
+        ]
+
+        assert current_streak(team_events, "KC") == 2
+
+    def test_tie_breaks_the_streak_rather_than_counting_as_a_loss(self):
+        team_events = [
+            self._game("2025-09-15", 20, 20),  # tie
+            self._game("2025-09-08", 27, 20),  # win -- shouldn't be reached
+        ]
+
+        assert current_streak(team_events, "KC") == 0
+
+    def test_empty_history_is_zero(self):
+        assert current_streak([], "KC") == 0
 
 
 class TestRollingPlayerStatAverages:
@@ -522,6 +571,50 @@ class TestBuildEventFeatures:
         row = build_event_features(event, {}, [], [], home_team_box_stats=home_box_history)
 
         assert row["home_third_down_pct"] == pytest.approx(0.2)
+
+    def test_divisional_game_and_travel_use_real_team_ids(self):
+        # "12"/"13" are KC/LV's real ESPN team ids (both AFC West);
+        # "KC"/"LAC"-style abbreviations used elsewhere in this test file
+        # don't match library.features.nfl_teams' lookup tables, so this
+        # test specifically uses the real ids to get a non-None result.
+        event = _event("E1", "2025-09-07", "12", "13", 27, 20)
+
+        row = build_event_features(event, {}, [], [])
+
+        assert row["is_divisional_game"] is True
+        assert row["away_travel_km"] > 0
+
+    def test_non_divisional_game_is_false(self):
+        # "12" (KC, AFC West) vs "9" (GB, NFC North).
+        event = _event("E1", "2025-09-07", "12", "9", 27, 20)
+
+        row = build_event_features(event, {}, [], [])
+
+        assert row["is_divisional_game"] is False
+
+    def test_unknown_team_id_yields_none_not_a_crash(self):
+        event = _event("E1", "2025-09-07", "KC", "LAC", 27, 20)
+
+        row = build_event_features(event, {}, [], [])
+
+        assert row["is_divisional_game"] is None
+        assert row["away_travel_km"] is None
+
+    def test_win_streak_fields_reflect_team_history(self):
+        event = _event("E3", "2025-09-21", "KC", "LAC", 27, 20)
+        home_history = [
+            {"event_date": "2025-09-14", "participants": [
+                {"entity_id": "KC", "result": {"score": 27}}, {"entity_id": "DET", "result": {"score": 20}},
+            ]},
+            {"event_date": "2025-09-07", "participants": [
+                {"entity_id": "KC", "result": {"score": 24}}, {"entity_id": "NYJ", "result": {"score": 17}},
+            ]},
+        ]
+
+        row = build_event_features(event, {}, home_history, [])
+
+        assert row["home_win_streak"] == 2
+        assert row["away_win_streak"] == 0
 
 
 class TestBuildPlayerFeatures:

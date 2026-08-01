@@ -19,6 +19,8 @@ top of the event-level features below.
 import math
 from datetime import date
 
+from library.features.nfl_teams import is_divisional_game, travel_distance_km
+
 DEFAULT_ROLLING_WINDOW = 5
 DEFAULT_STARTING_RATING = 1500.0
 DEFAULT_K_FACTOR = 20.0
@@ -141,6 +143,38 @@ def rolling_team_scoring_averages(
         "avg_points_allowed": sum(allowed) / len(allowed) if allowed else None,
         "games_played": len(scored),
     }
+
+
+def current_streak(team_events: list[dict], entity_id: str) -> int:
+    """team_events: a team's own completed events, most recent first, NOT
+    including the event being scored. Positive = current win streak
+    length, negative = current loss streak length, 0 if there's no
+    history yet or the most recent game was a tie.
+
+    Compares scores directly rather than reading each participant's
+    `won` flag -- scoreboard_event_to_event_item sets `won=False` for
+    BOTH sides on a tie, so the flag alone can't distinguish a tie from a
+    loss the way a direct score comparison can.
+    """
+    streak = 0
+    for event in team_events:
+        participants = event.get("participants", [])
+        own = next((p for p in participants if p.get("entity_id") == entity_id), None)
+        opponent = next((p for p in participants if p.get("entity_id") != entity_id), None)
+        if own is None or opponent is None:
+            break
+        own_score = own.get("result", {}).get("score")
+        opp_score = opponent.get("result", {}).get("score")
+        if own_score is None or opp_score is None or own_score == opp_score:
+            break
+        won = own_score > opp_score
+        if streak == 0:
+            streak = 1 if won else -1
+        elif (streak > 0) == won:
+            streak += 1 if won else -1
+        else:
+            break
+    return streak
 
 
 def rolling_player_stat_averages(
@@ -278,6 +312,9 @@ def build_event_features(
     home_red_zone_pct = _rate(home_box_stats, "avg_red_zone_conversions", "avg_red_zone_attempts")
     away_red_zone_pct = _rate(away_box_stats, "avg_red_zone_conversions", "avg_red_zone_attempts")
 
+    home_win_streak = current_streak(home_team_events, home_id)
+    away_win_streak = current_streak(away_team_events, away_id)
+
     return {
         "event_key": event["event_key"],
         "event_date": event["event_date"],
@@ -353,6 +390,10 @@ def build_event_features(
         "away_third_down_pct": away_third_down_pct,
         "away_red_zone_pct": away_red_zone_pct,
         "away_box_games_played": away_box_stats["games_played"],
+        "is_divisional_game": is_divisional_game(home_id, away_id),
+        "away_travel_km": travel_distance_km(away_id, home_id),
+        "home_win_streak": home_win_streak,
+        "away_win_streak": away_win_streak,
         # Labels -- the training targets (win/loss and final score), not
         # model inputs. None when this is called to build a live feature
         # vector for a not-yet-played event.

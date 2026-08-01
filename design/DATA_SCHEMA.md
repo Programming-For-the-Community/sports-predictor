@@ -15,7 +15,7 @@ One row per team or player, regardless of sport.
 | `sport` | `nfl` | One of the six supported sports |
 | `entity_type` | `team` or `player` | Team sports use both (team-level and player-level records); golf and F1 are primarily player-level |
 | `name` | `Kansas City Chiefs` | Display name |
-| `metadata` | `{conference, division, ...}` for a team; `{team_id: "KC", position: "QB"}` for a player | Sport-specific attributes, stored as a flexible map rather than fixed columns. For player entities in team sports, `team_id` is the current roster link — it's what lets a feature pipeline join a player to their team's pace/scheme context, and it changes on trades, so treat it as current-state, not historical |
+| `metadata` | `{abbreviation, location, nickname}` for a team; `{team_id: "KC", jersey: "15"}` for a player | Sport-specific attributes, stored as a flexible map rather than fixed columns. For player entities in team sports, `team_id` is the current roster link — it's what lets a feature pipeline join a player to their team's pace/scheme context, and it changes on trades, so treat it as current-state, not historical. Division/conference are NOT here — ESPN's teams endpoint doesn't return them, and since they're essentially static (last realignment 2002), they live in a hardcoded table (`library/features/nfl_teams.py`) instead |
 
 ## Events table
 
