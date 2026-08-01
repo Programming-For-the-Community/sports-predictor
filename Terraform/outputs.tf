@@ -60,6 +60,11 @@ output "nfl_train_baseline_model_task_definition_arn" {
   value       = aws_ecs_task_definition.nfl_train_baseline_model.arn
 }
 
+output "nfl_train_player_prop_model_task_definition_arn" {
+  description = "ARN of the NFL player-prop ECS task definition -- manual-only, pass to `aws ecs run-task --task-definition` with a TARGET_STAT environment override"
+  value       = aws_ecs_task_definition.nfl_train_player_prop_model.arn
+}
+
 output "nfl_cluster_name" {
   description = "ECS cluster NFL tasks run in -- select this cluster in the console's Run Task screen"
   value       = aws_ecs_cluster.main.name

@@ -48,6 +48,13 @@ logger = logging.getLogger("nfl-train-model")
 
 MODEL_NAME = "win-probability-logistic"
 ALGORITHM = "logistic_regression"
+EVENT_FEATURES_KEY = "nfl/training-data/event_features.parquet"
+
+# Same dataset/label as train_model.py -- this is a comparison baseline
+# for that exact model, not a different one.
+NON_FEATURE_COLUMNS = {"event_key", "event_date", "home_entity_id", "away_entity_id", "venue_city", "venue_state"}
+LABEL_COLUMN = "label_home_won"
+SUMMARY_METRICS = ["accuracy", "log_loss"]
 
 # Unlike XGBoost, scikit-learn's LogisticRegression can't handle NaN or
 # wildly different feature scales natively -- rolling-average columns
@@ -107,7 +114,7 @@ def _tune_hyperparameters(X_train: pd.DataFrame, y_train: pd.Series) -> dict:
 
 
 def train(df: pd.DataFrame) -> tuple[Pipeline, dict]:
-    feature_columns = model_common.feature_columns(df)
+    feature_columns = model_common.feature_columns(df, NON_FEATURE_COLUMNS)
     train_df, test_df = model_common.chronological_split(df, model_common.TEST_FRACTION)
     train_date_range = [str(train_df["event_date"].min()), str(train_df["event_date"].max())]
     test_date_range = [str(test_df["event_date"].min()), str(test_df["event_date"].max())]
@@ -117,9 +124,9 @@ def train(df: pd.DataFrame) -> tuple[Pipeline, dict]:
     )
 
     X_train = model_common.numeric_frame(train_df, feature_columns)
-    y_train = train_df[model_common.LABEL_COLUMN]
+    y_train = train_df[LABEL_COLUMN]
     X_test = model_common.numeric_frame(test_df, feature_columns)
-    y_test = test_df[model_common.LABEL_COLUMN]
+    y_test = test_df[LABEL_COLUMN]
 
     best_params = _tune_hyperparameters(X_train, y_train)
     model = _build_pipeline().set_params(**best_params)
@@ -162,15 +169,17 @@ def main() -> None:
     region = os.environ.get("AWS_REGION")
     s3 = S3Manager(bucket, region=region)
 
-    logger.info("Loading %s training data from s3://%s/%s", MODEL_NAME, bucket, model_common.EVENT_FEATURES_KEY)
-    df = model_common.load_features(s3)
+    logger.info("Loading %s training data from s3://%s/%s", MODEL_NAME, bucket, EVENT_FEATURES_KEY)
+    df = model_common.load_features(s3, EVENT_FEATURES_KEY)
     logger.info("Loaded %d event rows", len(df))
 
     model, metadata = train(df)
 
     buffer = io.BytesIO()
     joblib.dump(model, buffer)
-    model_common.save_model_artifact(s3, MODEL_NAME, ALGORITHM, buffer.getvalue(), "model.joblib", metadata)
+    model_common.save_model_artifact(
+        s3, MODEL_NAME, ALGORITHM, buffer.getvalue(), "model.joblib", metadata, SUMMARY_METRICS,
+    )
 
 
 if __name__ == "__main__":

@@ -55,12 +55,23 @@ Also included: `games_played` and `starts` over the window. Label carried on the
 
 **Known simplification — usage rate:** `design/PROJECT_PLAN.md` calls for "usage rate" as a player feature. What's implemented is raw per-game volume (attempts, targets, carries — as ordinary rolling-average stat_line keys). A true usage-rate metric (share of team volume, e.g. target share) needs every player on the team's stat line for the same game to compute a team total, which isn't wired up yet. This is a follow-up, not something silently skipped.
 
+## Models trained on these features
+
+`Source/model-training/nfl/` -- one script per predicted value, sharing loading/splitting/evaluation/artifact-writing/promotion plumbing via `model_common.py` so that logic exists once regardless of which estimator or dataset a given script targets.
+
+| Predicted value | Model type(s) trained & evaluated | Features used |
+|---|---|---|
+| Home team win probability (`label_home_won`) | XGBoost classifier (`train_model.py`, production model, versioned under `nfl/win-probability/`) vs. L1/L2-regularized logistic regression (`train_baseline_model.py`, a comparison baseline versioned separately under `nfl/win-probability-logistic/`, never itself promoted to production) | Every event-level feature in the table above |
+| Player stat props -- one model per stat (e.g. `passing_yards`, `rushing_yards`, `receiving_yards`, `receptions`) | XGBoost regression (`train_player_prop_model.py`) -- one script, not one script per stat; which stat to train is set by the `TARGET_STAT` environment variable at `aws ecs run-task` time (see `Terraform/ecs-task-nfl-train-player-prop-model.tf`), and the dataset is filtered to only the rows where that player actually recorded `TARGET_STAT` in the game being labeled | That player's own rolling per-stat averages (`avg_<stat>` for every stat_line key their history has), `games_played`, `starts` |
+
+Comparing model types is how "best" gets decided rather than assumed: both scripts for win-probability read the identical `event_features.parquet` and chronological split, so their model cards' `log_loss` (the metric that matters for a probability output, not just accuracy) are directly comparable. In practice XGBoost and logistic regression have landed within 0.1% log_loss of each other across every version trained so far -- evidence the ~0.62 log_loss plateau is closer to this dataset's noise ceiling than a modeling-capacity gap, not a case where one architecture is clearly better. `model_common.promote_if_better` formalizes the "did the newest retrain actually get better" half of that comparison for whichever script calls it (currently just `train_model.py` -- the baseline has no production concept, it only ever versions for comparison): a new version is promoted to `model_name`'s "current" pointer unless it's a meaningful regression (see `PROMOTION_TOLERANCE`) against whatever's currently promoted, in which case it's left trained and versioned but not promoted, for manual review.
+
 ## What this makes it possible to predict
 
 **Directly, from these two datasets:**
-- **Game outcomes** (win/loss) — a classifier trained on the event-level features and `label_home_won`.
-- **Game scores** — a regressor trained on the same event-level features, predicting `label_home_score` / `label_away_score` (or the margin between them).
-- **Individual player stats** — one regressor per stat (passing yards, receptions, etc.), trained on the player-level features and the corresponding key inside `label_stat_line`.
+- **Game outcomes** (win/loss) — trained and evaluated; see the table above.
+- **Game scores** — a regressor trained on the same event-level features, predicting `label_home_score` / `label_away_score` (or the margin between them). Not yet built — the dataset and features it would need already exist, no new feature engineering required.
+- **Individual player stats** — trained and evaluated; see the table above.
 
 **Not directly — these are simulated, not separately feature-engineered:**
 - **Team win-loss totals for a season**, **playoff game winners**, and **Super Bowl winner** are all downstream of the single-game outcome model above, not new feature categories. The standard approach (and the one this project follows): run the game-outcome model's win probability for every remaining game on a team's schedule — or every matchup in a playoff bracket — and simulate forward (e.g. Monte Carlo over those probabilities) rather than training a model whose target *is* "wins this season" or "wins the Super Bowl" directly. There's no separate feature set to build for these; they consume the event-level features and model that already exist here. This logic belongs in a future `predict.py`, not in feature engineering.

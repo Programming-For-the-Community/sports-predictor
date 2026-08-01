@@ -25,3 +25,11 @@ def next_model_version(existing_keys: list[str]) -> int:
 
 def model_artifact_key(sport: str, model_name: str, version: int, filename: str) -> str:
     return f"{model_artifact_prefix(sport, model_name)}v{version}/{filename}"
+
+
+def current_version_key(sport: str, model_name: str) -> str:
+    """Key of the pointer file recording which version of this model is
+    currently promoted to production -- lives directly under the model's
+    prefix (not inside any v{N}/ folder), so next_model_version's /v(\\d+)/
+    pattern never mistakes it for a version."""
+    return f"{model_artifact_prefix(sport, model_name)}current.json"
