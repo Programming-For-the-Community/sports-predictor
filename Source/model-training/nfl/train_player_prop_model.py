@@ -5,9 +5,13 @@ TARGET_STAT=rushing_yards for RB rushing yards, TARGET_STAT=receptions
 for a receiver). Reads player_features.parquet (written by
 Source/feature-engineering/nfl/build_dataset.py's build_player_dataset)
 from S3, filters to rows where the player actually recorded TARGET_STAT
-in the game being labeled, and trains a regressor predicting that value
+in the game being labeled AND has an established history of it (see
+_filter_to_target_stat), and trains a regressor predicting that value
 from their own rolling stat history (see build_player_features and
-rolling_player_stat_averages in library/features/nfl.py).
+rolling_player_stat_averages in library/features/nfl.py). Requires a
+player_features.parquet built after games_with_<stat> was added to
+rolling_player_stat_averages -- re-run feature engineering first if an
+older dataset is all that's in S3.
 
 Deliberately one script for every stat rather than one script (or one
 Terraform task definition, or one image) per stat -- TARGET_STAT is the
@@ -47,11 +51,19 @@ PLAYER_FEATURES_KEY = "nfl/training-data/player_features.parquet"
 # excluded generically (they start with "label_"), same as every other
 # script here -- LABEL_COLUMN below also starts with "label_" for the
 # same reason, so it never leaks into feature_columns either.
-NON_FEATURE_COLUMNS = {"event_key", "player_key", "entity_id", "team_id", "event_date"}
+NON_FEATURE_COLUMNS = {"event_key", "player_key", "entity_id", "team_id", "opponent_id", "event_date"}
 LABEL_COLUMN = "label_target_stat"
 ALGORITHM = "xgboost"
 SUMMARY_METRICS = ["rmse", "mae"]
 PROMOTION_METRIC = "rmse"
+
+# A player must have recorded TARGET_STAT in at least this many of their
+# own windowed prior games, not just the game being labeled -- excludes
+# one-off gadget plays (e.g. a WR's single career pass attempt) whose
+# rolling avg_<stat> would otherwise be undefined/NaN anyway. A real
+# starter or regular backup at the relevant position trivially clears
+# this; it's the fluke rows this is meant to catch.
+MIN_PRIOR_GAMES_WITH_STAT = 2
 
 # Same search shape as train_model.py's -- see that file for why
 # max_depth has a floor of 2 (a depth-1 stump can't model any feature
@@ -77,16 +89,42 @@ def _filter_to_target_stat(df: pd.DataFrame, target_stat: str) -> pd.DataFrame:
     passing_yards) -- label_stat_line is JSON-encoded (see
     build_player_features in library/features/nfl.py, and _write_parquet
     in feature-engineering/nfl/build_dataset.py for why), so it has to be
-    parsed before it can be filtered on or turned into a label."""
+    parsed before it can be filtered on or turned into a label.
+
+    Also requires MIN_PRIOR_GAMES_WITH_STAT prior games with this stat,
+    via the games_with_<stat> column (rolling_player_stat_averages in
+    library/features/nfl.py). Without this, a one-off gadget-play row
+    (e.g. a WR's single career pass attempt) still passes the has_stat
+    check above, and its avg_<other-position>_* features -- genuinely
+    populated from that player's real history, unlike the near-universal
+    NaN they'd be for an actual QB -- give a shallow tree an easy way to
+    isolate that single fluke label instead of learning real QB
+    performance patterns. A real starter or regular backup trivially
+    clears this bar every week; a true one-off doesn't.
+    """
     stat_lines = df["label_stat_line"].apply(json.loads)
     has_stat = stat_lines.apply(lambda stat_line: target_stat in stat_line)
     filtered = df[has_stat].copy()
     filtered[LABEL_COLUMN] = stat_lines[has_stat].apply(lambda stat_line: float(stat_line[target_stat]))
+
+    volume_column = f"games_with_{target_stat}"
+    filtered = filtered[filtered[volume_column] >= MIN_PRIOR_GAMES_WITH_STAT]
     return filtered
 
 
 def _feature_columns(df: pd.DataFrame) -> list[str]:
-    return model_common.feature_columns(df, NON_FEATURE_COLUMNS)
+    """player_features.parquet has ONE schema spanning every position in
+    the league (build_dataset.py's _write_parquet unions every row's
+    columns) -- after _filter_to_target_stat narrows to one stat's real
+    population, most other positions' columns (kicking, punting,
+    defensive, ...) are structurally inapplicable to every remaining row,
+    not just occasionally sparse the way win-probability's
+    weather_temperature is. Dropping all-null columns here, scoped to
+    this script rather than model_common.feature_columns, keeps the
+    other two scripts' feature schema stable regardless of a given week's
+    null pattern -- see model_common.feature_columns' own callers."""
+    candidates = model_common.feature_columns(df, NON_FEATURE_COLUMNS)
+    return [col for col in candidates if df[col].notna().any()]
 
 
 _chronological_split = model_common.chronological_split

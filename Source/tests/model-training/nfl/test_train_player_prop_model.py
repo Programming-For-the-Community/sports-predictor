@@ -17,10 +17,19 @@ import pytest
 import train_player_prop_model
 
 
-def _make_df(n=10, target_stat="passing_yards", missing_stat_rows=0):
+def _make_df(n=10, target_stat="passing_yards", missing_stat_rows=0, games_with_stat=None):
     """missing_stat_rows: how many trailing rows record a different stat
     entirely (e.g. a kicker's field_goals_made) -- these must be filtered
-    out rather than crashing or contributing a bogus label."""
+    out rather than crashing or contributing a bogus label.
+
+    games_with_stat: per-row games_with_<target_stat> values, defaulting
+    to comfortably clearing MIN_PRIOR_GAMES_WITH_STAT so tests that
+    aren't specifically exercising the volume filter don't need to think
+    about it.
+    """
+    if games_with_stat is None:
+        games_with_stat = [5] * n
+
     stat_lines = []
     for i in range(n):
         if i >= n - missing_stat_rows:
@@ -36,6 +45,7 @@ def _make_df(n=10, target_stat="passing_yards", missing_stat_rows=0):
         "event_date": [f"2025-09-{i + 1:02d}" for i in range(n)],
         "avg_passing_yards": [250.0 + i for i in range(n)],
         "games_played": [i for i in range(n)],
+        f"games_with_{target_stat}": games_with_stat,
         "label_stat_line": stat_lines,
         "label_started": [True] * n,
     })
@@ -77,6 +87,26 @@ class TestFilterToTargetStat:
         assert "label_stat_line" not in columns
         assert "label_started" not in columns
 
+    def test_excludes_a_one_off_gadget_play_despite_having_the_stat_this_game(self):
+        # Has the stat in the label game (has_stat check passes) but no
+        # real prior history of it -- exactly the passing-yards v1 model
+        # card's contamination scenario (a WR's single career pass).
+        games_with_stat = [5] * 9 + [0]
+        df = _make_df(10, target_stat="passing_yards", games_with_stat=games_with_stat)
+
+        filtered = train_player_prop_model._filter_to_target_stat(df, "passing_yards")
+
+        assert len(filtered) == 9
+        assert 0 not in filtered["games_with_passing_yards"].values
+
+    def test_requires_at_least_the_minimum_not_strictly_more(self):
+        games_with_stat = [train_player_prop_model.MIN_PRIOR_GAMES_WITH_STAT] * 10
+        df = _make_df(10, target_stat="passing_yards", games_with_stat=games_with_stat)
+
+        filtered = train_player_prop_model._filter_to_target_stat(df, "passing_yards")
+
+        assert len(filtered) == 10
+
 
 class TestFeatureColumns:
     def test_excludes_identifiers(self):
@@ -84,7 +114,31 @@ class TestFeatureColumns:
 
         columns = train_player_prop_model._feature_columns(df)
 
-        assert columns == ["avg_passing_yards", "games_played"]
+        assert "event_key" not in columns
+        assert "player_key" not in columns
+        assert "entity_id" not in columns
+        assert "team_id" not in columns
+        assert "event_date" not in columns
+
+    def test_drops_columns_that_are_entirely_null(self):
+        # avg_field_goals_made is a real column in player_features.parquet's
+        # shared schema (some kicker somewhere has it), but structurally
+        # irrelevant to this all-QB slice -- 100% null here.
+        df = _make_df(5)
+        df["avg_field_goals_made"] = [None] * 5
+
+        columns = train_player_prop_model._feature_columns(df)
+
+        assert "avg_field_goals_made" not in columns
+        assert "avg_passing_yards" in columns
+
+    def test_keeps_a_column_with_even_one_real_value(self):
+        df = _make_df(5)
+        df["avg_field_goals_made"] = [None, None, None, None, 3.0]
+
+        columns = train_player_prop_model._feature_columns(df)
+
+        assert "avg_field_goals_made" in columns
 
 
 class TestTrain:
@@ -105,7 +159,7 @@ class TestTrain:
         mock_model.fit.assert_called_once()
         assert model is mock_model
         assert metadata["target_stat"] == "passing_yards"
-        assert metadata["feature_columns"] == ["avg_passing_yards", "games_played"]
+        assert set(metadata["feature_columns"]) == {"avg_passing_yards", "games_played", "games_with_passing_yards"}
         assert metadata["train_rows"] == 8
         assert metadata["test_rows"] == 2
 
@@ -143,7 +197,8 @@ class TestTrain:
              patch.object(train_player_prop_model.xgb, "XGBRegressor", return_value=mock_model):
             _, metadata = train_player_prop_model.train(df, "passing_yards")
 
-        assert metadata["feature_importances"] == {"avg_passing_yards": 5.0, "games_played": 0.0}
+        assert metadata["feature_importances"]["avg_passing_yards"] == 5.0
+        assert metadata["feature_importances"]["games_played"] == 0.0
 
 
 class TestTuneHyperparameters:
