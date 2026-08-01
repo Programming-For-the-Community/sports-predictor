@@ -35,15 +35,15 @@ resource "aws_cloudwatch_log_group" "nfl_train_player_prop_model" {
 # model_name's own nfl/<model_name>/ prefix), so no IAM changes were
 # needed for this task.
 #
-# cpu=8192/memory=16384 -- same hyperparameter search shape as
-# ecs-task-nfl-train-model.tf (identical PARAM_DISTRIBUTIONS,
-# SEARCH_ITERATIONS, CV_SPLITS), so the same compute sizing applies
-# regardless of which stat is being trained.
+# cpu=4096/memory=16384 -- same hyperparameter search shape (and the
+# same quota-driven 4 vCPU step-down -- see ecs-task-nfl-train-model.tf's
+# comment) as ecs-task-nfl-train-model.tf, so the same compute sizing
+# applies regardless of which stat is being trained.
 resource "aws_ecs_task_definition" "nfl_train_player_prop_model" {
   family                   = "${var.project}-nfl-train-player-prop-model"
   requires_compatibilities = ["FARGATE"]
   network_mode             = "awsvpc"
-  cpu                      = "8192"
+  cpu                      = "4096"
   memory                   = "16384"
   execution_role_arn       = aws_iam_role.ecs_pipeline.arn
   task_role_arn            = aws_iam_role.ecs_pipeline.arn

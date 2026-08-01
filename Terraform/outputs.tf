@@ -70,6 +70,20 @@ output "nfl_train_score_model_task_definition_arn" {
   value       = aws_ecs_task_definition.nfl_train_score_model.arn
 }
 
+# Every NFL training/backfill schedule launches into this same
+# public-subnet + fargate_internet_egress network shape (see any
+# scheduler-nfl-*.tf) -- exposed here so a manual `aws ecs run-task`
+# doesn't need these IDs looked up by hand.
+output "nfl_public_subnet_ids" {
+  description = "Public subnet IDs NFL Fargate tasks run in -- pass to `aws ecs run-task --network-configuration`"
+  value       = [aws_subnet.public_1.id, aws_subnet.public_2.id, aws_subnet.public_3.id]
+}
+
+output "nfl_fargate_security_group_id" {
+  description = "Security group NFL Fargate tasks run with -- pass to `aws ecs run-task --network-configuration`"
+  value       = aws_security_group.fargate_internet_egress.id
+}
+
 output "nfl_cluster_name" {
   description = "ECS cluster NFL tasks run in -- select this cluster in the console's Run Task screen"
   value       = aws_ecs_cluster.main.name
