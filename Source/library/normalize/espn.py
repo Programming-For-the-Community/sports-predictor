@@ -138,7 +138,7 @@ def boxscore_to_player_game_stats(
         team_id = athlete_team[athlete_id]
         player_game_stats_items.append({
             "event_key": event_key(sport, event_id),
-            "player_key": player_key(athlete_id),
+            "player_key": player_key(sport, athlete_id),
             "entity_id": athlete_id,
             "team_id": team_id,
             "event_date": event_date,

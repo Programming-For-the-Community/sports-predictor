@@ -88,7 +88,7 @@ class TestFilterToTargetStat:
         df = _make_df(5, target_stat="passing_yards")
         filtered = train_player_prop_model._filter_to_target_stat(df, "passing_yards")
 
-        columns = train_player_prop_model._feature_columns(filtered)
+        columns = train_player_prop_model._feature_columns(filtered, "passing_yards")
 
         assert train_player_prop_model.LABEL_COLUMN not in columns
         assert "label_stat_line" not in columns
@@ -158,7 +158,7 @@ class TestFeatureColumns:
     def test_excludes_identifiers(self):
         df = _make_df(5)
 
-        columns = train_player_prop_model._feature_columns(df)
+        columns = train_player_prop_model._feature_columns(df, "passing_yards")
 
         assert "event_key" not in columns
         assert "player_key" not in columns
@@ -173,7 +173,7 @@ class TestFeatureColumns:
         df = _make_df(5)
         df["avg_field_goals_made"] = [None] * 5
 
-        columns = train_player_prop_model._feature_columns(df)
+        columns = train_player_prop_model._feature_columns(df, "passing_yards")
 
         assert "avg_field_goals_made" not in columns
         assert "avg_passing_yards" in columns
@@ -181,21 +181,94 @@ class TestFeatureColumns:
     def test_drops_a_column_below_the_non_null_fraction(self):
         # 1 real value out of 100 rows is 1% -- below MIN_NON_NULL_FRACTION
         # (5%). Needs a large n; a tiny fixture would let even one value
-        # trivially clear 5% of the row count.
+        # trivially clear 5% of the row count. avg_receiving_yards, not a
+        # defensive stat, so this stays isolated from the separate
+        # opposing-side-category exclusion (see TestOpposingSideExclusion).
         df = _make_df(100)
-        df["avg_defensive_sacks"] = [None] * 99 + [1.0]
+        df["avg_receiving_yards"] = [None] * 99 + [1.0]
 
-        columns = train_player_prop_model._feature_columns(df)
+        columns = train_player_prop_model._feature_columns(df, "passing_yards")
 
-        assert "avg_defensive_sacks" not in columns
+        assert "avg_receiving_yards" not in columns
 
     def test_keeps_a_column_at_or_above_the_non_null_fraction(self):
         df = _make_df(100)
         df["avg_rushing_yards"] = [None] * 90 + [10.0] * 10  # exactly 10%
 
-        columns = train_player_prop_model._feature_columns(df)
+        columns = train_player_prop_model._feature_columns(df, "passing_yards")
 
         assert "avg_rushing_yards" in columns
+
+    def test_excludes_the_opposing_side_of_the_ball_even_when_common(self):
+        # avg_defensive_solo_tackles at 20% non-null -- comfortably clears
+        # MIN_NON_NULL_FRACTION (real signal, e.g. a QB tackling after an
+        # interception -- see the player-prop-passing-yards v3/v4 model
+        # cards), but must still be excluded from an offensive target by
+        # the opposing-side-category rule, not just the null-fraction one.
+        df = _make_df(100)
+        df["avg_defensive_solo_tackles"] = [None] * 80 + [1.0] * 20
+
+        columns = train_player_prop_model._feature_columns(df, "passing_yards")
+
+        assert "avg_defensive_solo_tackles" not in columns
+
+    def test_keeps_the_same_side_of_the_ball(self):
+        df = _make_df(100)
+        df["avg_rushing_touchdowns"] = [None] * 80 + [1.0] * 20
+
+        columns = train_player_prop_model._feature_columns(df, "passing_yards")
+
+        assert "avg_rushing_touchdowns" in columns
+
+    def test_excludes_offense_for_a_defensive_target(self):
+        df = _make_df(100, target_stat="defensive_sacks")
+        df["avg_passing_yards"] = [None] * 80 + [250.0] * 20
+
+        columns = train_player_prop_model._feature_columns(df, "defensive_sacks")
+
+        assert "avg_passing_yards" not in columns
+
+    def test_neutral_category_is_unaffected_by_the_side_rule(self):
+        # fumbles is deliberately uncategorized -- real for both ball
+        # carriers and defenders forcing/recovering them -- so it should
+        # survive purely on MIN_NON_NULL_FRACTION, not get excluded
+        # outright the way a defensive stat would for an offensive target.
+        df = _make_df(100)
+        df["avg_fumbles_recovered"] = [None] * 80 + [1.0] * 20
+
+        columns = train_player_prop_model._feature_columns(df, "passing_yards")
+
+        assert "avg_fumbles_recovered" in columns
+
+
+class TestStatCategory:
+    def test_recognizes_offensive_categories(self):
+        assert train_player_prop_model._stat_category("passing_yards") == "passing"
+        assert train_player_prop_model._stat_category("rushing_touchdowns") == "rushing"
+        assert train_player_prop_model._stat_category("receiving_targets") == "receiving"
+
+    def test_recognizes_defensive_categories(self):
+        assert train_player_prop_model._stat_category("defensive_sacks") == "defensive"
+        assert train_player_prop_model._stat_category("interceptions") == "interceptions"
+
+    def test_returns_none_for_a_neutral_or_unknown_category(self):
+        assert train_player_prop_model._stat_category("fumbles_recovered") is None
+        assert train_player_prop_model._stat_category("punting_punts") is None
+
+
+class TestOpposingSideCategories:
+    def test_offensive_target_opposes_defensive_categories(self):
+        opposing = train_player_prop_model._opposing_side_categories("passing_yards")
+
+        assert opposing == train_player_prop_model.DEFENSIVE_CATEGORIES
+
+    def test_defensive_target_opposes_offensive_categories(self):
+        opposing = train_player_prop_model._opposing_side_categories("defensive_sacks")
+
+        assert opposing == train_player_prop_model.OFFENSIVE_CATEGORIES
+
+    def test_neutral_target_opposes_nothing(self):
+        assert train_player_prop_model._opposing_side_categories("fumbles_recovered") == set()
 
 
 class TestTrain:
@@ -289,7 +362,7 @@ class TestTuneHyperparameters:
     def test_uses_time_series_split_and_rmse_scoring(self):
         df = _make_df(10, target_stat="passing_yards")
         filtered = train_player_prop_model._filter_to_target_stat(df, "passing_yards")
-        feature_columns = train_player_prop_model._feature_columns(filtered)
+        feature_columns = train_player_prop_model._feature_columns(filtered, "passing_yards")
         X, y = filtered[feature_columns], filtered[train_player_prop_model.LABEL_COLUMN]
         mock_search = MagicMock()
         mock_search.best_params_ = {"max_depth": 3}
@@ -308,7 +381,7 @@ class TestTuneHyperparameters:
     def test_parallelizes_search_without_oversubscribing_per_fit_threads(self):
         df = _make_df(10, target_stat="passing_yards")
         filtered = train_player_prop_model._filter_to_target_stat(df, "passing_yards")
-        feature_columns = train_player_prop_model._feature_columns(filtered)
+        feature_columns = train_player_prop_model._feature_columns(filtered, "passing_yards")
         X, y = filtered[feature_columns], filtered[train_player_prop_model.LABEL_COLUMN]
         mock_search = MagicMock()
         mock_search.best_params_ = {}

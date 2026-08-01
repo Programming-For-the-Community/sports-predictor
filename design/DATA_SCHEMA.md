@@ -59,7 +59,7 @@ One row per player per event, for team sports only (NFL, NCAA FB, NBA, NCAA MBB)
 | Attribute | Example | Notes |
 |---|---|---|
 | `event_key` | `SPORT#NFL#EVENT#2025-W04-KC-LAC` | Same partition key as the parent event — querying "all player stat lines for this game" is a single partition query, and it keeps the table consistent with the rest of the schema's `SPORT#<sport>#EVENT#<id>` convention |
-| `player_key` | `PLAYER#mahomes-patrick` | Sort key — lets one event partition hold every player who appeared in that game |
+| `player_key` | `SPORT#NFL#PLAYER#mahomes-patrick` | Sort key — lets one event partition hold every player who appeared in that game. Sport-scoped like every other key here, since this table (like `events` and `entities`) is shared across every sport, not one table per sport — an unscoped key would risk two different sports' athletes colliding under the same raw id once a second sport's data lands |
 | `entity_id` | `mahomes-patrick` | Matches the player's `entity_id` in the entities table |
 | `team_id` | `KC` | Which side the player was on for this event — needed because the player entity's `team_id` reflects *current* roster state, not who they played for historically (trades, season-over-season movement) |
 | `stat_line` | `{ "passing_yards": 312, "passing_tds": 3, "interceptions": 1 }` | Sport-specific flexible map, same pattern as `entities.metadata` — a basketball box score and a football box score share nothing but the shape of the container |
