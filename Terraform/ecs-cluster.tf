@@ -7,7 +7,7 @@ resource "aws_ecs_cluster" "main" {
 
   setting {
     name  = "containerInsights"
-    value = "enabled" # per-task CPU/memory/network metrics in CloudWatch -- small added charge, worth it for sizing decisions
+    value = "enhanced" # task/container-level CPU/memory/network/storage metrics in CloudWatch, not just cluster/service aggregates -- small added charge, worth it for sizing decisions
   }
 
   tags = merge(local.common_tags, {

@@ -245,7 +245,9 @@ class TestTuneHyperparameters:
     def test_enables_verbose_progress_output(self):
         # RandomizedSearchCV's own verbose logging is the only progress
         # visibility during the search itself (hundreds of fits, no
-        # per-candidate hook to log through otherwise).
+        # per-candidate hook to log through otherwise). >9 is required for
+        # sklearn to include the candidate number (out of SEARCH_ITERATIONS)
+        # alongside the fold number in each fit's log line.
         df = _make_df(10)
         X, y = df[["home_elo", "elo_diff"]], df["label_home_won"]
         mock_search = MagicMock()
@@ -255,7 +257,7 @@ class TestTuneHyperparameters:
         with patch.object(train_model, "RandomizedSearchCV", return_value=mock_search) as mock_search_cls:
             train_model._tune_hyperparameters(X, y)
 
-        assert mock_search_cls.call_args.kwargs["verbose"] == 2
+        assert mock_search_cls.call_args.kwargs["verbose"] > 9
 
     def test_logs_total_fit_count_before_starting(self, caplog):
         df = _make_df(10)
