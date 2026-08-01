@@ -93,6 +93,25 @@ MIN_AVG_FRACTION_OF_MEDIAN = 0.35
 # values come from anomalous rows rather than a real, common pattern.
 MIN_NON_NULL_FRACTION = 0.05
 
+# ESPN category names (see boxscore_to_player_game_stats in
+# library/normalize/espn.py) grouped by which side of the ball they
+# belong to. "interceptions" is the defensive-picks category (bare
+# "interceptions" key) -- distinct from "passing"'s own "interceptions"
+# key, already disambiguated to "passing_interceptions" by that
+# function's category-prefixing rule. "fumbles" is deliberately left out
+# of both -- ball carriers AND defenders forcing/recovering fumbles are
+# both real, so it isn't cleanly one side's stat; MIN_NON_NULL_FRACTION
+# decides its fate on prevalence instead. Verified against real ESPN
+# data: a QB occasionally picking up a real, correctly-attributed
+# "defensive" stat line (e.g. tackling after an interception) is common
+# enough to survive MIN_NON_NULL_FRACTION on its own, even though it's
+# real signal, not corruption -- see the player-prop-passing-yards v3/v4
+# model cards. That signal is already captured more directly by
+# avg_passing_interceptions, so excluding the other side's category
+# outright is a deliberate modeling choice, not a bug fix.
+OFFENSIVE_CATEGORIES = {"passing", "rushing", "receiving"}
+DEFENSIVE_CATEGORIES = {"defensive", "interceptions"}
+
 # Same search shape as train_model.py's -- see that file for why
 # max_depth has a floor of 2 (a depth-1 stump can't model any feature
 # interaction) and why n_jobs is split the way it is below.
@@ -153,7 +172,37 @@ def _filter_to_target_stat(df: pd.DataFrame, target_stat: str) -> pd.DataFrame:
     return filtered
 
 
-def _feature_columns(df: pd.DataFrame) -> list[str]:
+def _stat_category(stat_key: str) -> str | None:
+    """The ESPN category a stat_line key belongs to, inferred from its own
+    name -- every key already follows the category-prefixed convention
+    (see boxscore_to_player_game_stats), so this needs no separate
+    mapping. None for a category not in OFFENSIVE_CATEGORIES/
+    DEFENSIVE_CATEGORIES (special teams, fumbles) -- those are left to
+    MIN_NON_NULL_FRACTION rather than a hard side-of-the-ball rule."""
+    for category in OFFENSIVE_CATEGORIES | DEFENSIVE_CATEGORIES:
+        if stat_key == category or stat_key.startswith(f"{category}_"):
+            return category
+    return None
+
+
+def _opposing_side_categories(target_stat: str) -> set[str]:
+    target_category = _stat_category(target_stat)
+    if target_category in OFFENSIVE_CATEGORIES:
+        return DEFENSIVE_CATEGORIES
+    if target_category in DEFENSIVE_CATEGORIES:
+        return OFFENSIVE_CATEGORIES
+    return set()
+
+
+def _strip_metric_prefix(column: str) -> str:
+    if column.startswith("avg_"):
+        return column.removeprefix("avg_")
+    if column.startswith("games_with_"):
+        return column.removeprefix("games_with_")
+    return column
+
+
+def _feature_columns(df: pd.DataFrame, target_stat: str) -> list[str]:
     """player_features.parquet has ONE schema spanning every position in
     the league (build_dataset.py's _write_parquet unions every row's
     columns) -- after _filter_to_target_stat narrows to one stat's real
@@ -164,10 +213,19 @@ def _feature_columns(df: pd.DataFrame) -> list[str]:
     here, scoped to this script rather than model_common.feature_columns,
     keeps the other two scripts' feature schema stable regardless of a
     given week's null pattern -- see model_common.feature_columns' own
-    callers."""
+    callers.
+
+    Also excludes the opposing side of the ball outright (see
+    OFFENSIVE_CATEGORIES/DEFENSIVE_CATEGORIES) -- a deliberate modeling
+    choice, not something MIN_NON_NULL_FRACTION would ever catch on its
+    own, since e.g. a QB's real (if indirect) defensive stat line from
+    tackling after an interception is common enough to clear that bar."""
     candidates = model_common.feature_columns(df, NON_FEATURE_COLUMNS)
     minimum_non_null = len(df) * MIN_NON_NULL_FRACTION
-    return [col for col in candidates if df[col].notna().sum() >= minimum_non_null]
+    candidates = [col for col in candidates if df[col].notna().sum() >= minimum_non_null]
+
+    opposing_categories = _opposing_side_categories(target_stat)
+    return [col for col in candidates if _stat_category(_strip_metric_prefix(col)) not in opposing_categories]
 
 
 _chronological_split = model_common.chronological_split
@@ -202,7 +260,7 @@ def _tune_hyperparameters(X_train: pd.DataFrame, y_train: pd.Series) -> dict:
 
 def train(df: pd.DataFrame, target_stat: str) -> tuple[xgb.XGBRegressor, dict]:
     df = _filter_to_target_stat(df, target_stat)
-    feature_columns = _feature_columns(df)
+    feature_columns = _feature_columns(df, target_stat)
     train_df, test_df = _chronological_split(df, model_common.TEST_FRACTION)
     train_date_range = [str(train_df["event_date"].min()), str(train_df["event_date"].max())]
     test_date_range = [str(test_df["event_date"].min()), str(test_df["event_date"].max())]
