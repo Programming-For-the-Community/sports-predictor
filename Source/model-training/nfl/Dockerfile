@@ -11,6 +11,14 @@
 # Python, but all ship prebuilt manylinux wheels for standard Fargate
 # architectures, so `pip install` still just downloads a wheel; no
 # compiler needed in either stage.
+#
+# One image, two entrypoint scripts (train_model.py for the production
+# XGBoost model, train_baseline_model.py for the logistic regression
+# comparison baseline -- see model_common.py) -- they share every
+# dependency in requirements.txt, so a second image/build job would just
+# duplicate this one. CMD picks train_model.py by default; the baseline
+# task definition overrides the container command to run the other
+# script instead (see Terraform/ecs-task-nfl-train-baseline-model.tf).
 
 FROM python:3.12-slim AS builder
 
@@ -34,8 +42,9 @@ ENV PYTHONPATH=/app/deps \
     PYTHONUNBUFFERED=1
 
 COPY --from=builder /install /app/deps
-COPY model-training/nfl/train_model.py ./
+COPY model-training/nfl/train_model.py model-training/nfl/train_baseline_model.py model-training/nfl/model_common.py ./
 
 USER train-model
 
-ENTRYPOINT ["python", "train_model.py"]
+ENTRYPOINT ["python"]
+CMD ["train_model.py"]
