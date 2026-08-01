@@ -21,17 +21,21 @@ resource "aws_cloudwatch_log_group" "nfl_train_model" {
 # inspect a specific run's output without waiting for Wednesday.
 #
 # Uses the shared aws_iam_role.ecs_pipeline (iam-ecs-pipeline.tf), same as
-# feature engineering. cpu=2048 (2 vCPU) gives _tune_hyperparameters'
-# n_jobs=-1 RandomizedSearchCV actual cores to spread its (candidate,
-# fold) fits across, rather than running all of them sequentially on a
-# single core. memory=4096 is Fargate's minimum allowed at 2 vCPU, well
-# above what this workload's ~2,700-row dataset needs on its own.
+# feature engineering. cpu=8192 (8 vCPU) gives _tune_hyperparameters'
+# n_jobs=-1 RandomizedSearchCV actual cores to spread its ~2,400
+# (candidate, fold) fits across -- confirmed CPU-bound, not I/O-bound, by
+# CloudWatch Container Insights showing the previous 2 vCPU allocation
+# pegged near 100% utilization throughout the search, so more cores
+# translate almost directly into a shorter run rather than sitting idle.
+# memory=16384 is Fargate's minimum allowed at 8 vCPU (4GB increments
+# from there), well above what this workload's ~2,700-row dataset needs
+# on its own.
 resource "aws_ecs_task_definition" "nfl_train_model" {
   family                   = "${var.project}-nfl-train-model"
   requires_compatibilities = ["FARGATE"]
   network_mode             = "awsvpc"
-  cpu                      = "2048"
-  memory                   = "4096"
+  cpu                      = "8192"
+  memory                   = "16384"
   execution_role_arn       = aws_iam_role.ecs_pipeline.arn
   task_role_arn            = aws_iam_role.ecs_pipeline.arn
 
