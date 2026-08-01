@@ -178,13 +178,24 @@ class TestFeatureColumns:
         assert "avg_field_goals_made" not in columns
         assert "avg_passing_yards" in columns
 
-    def test_keeps_a_column_with_even_one_real_value(self):
-        df = _make_df(5)
-        df["avg_field_goals_made"] = [None, None, None, None, 3.0]
+    def test_drops_a_column_below_the_non_null_fraction(self):
+        # 1 real value out of 100 rows is 1% -- below MIN_NON_NULL_FRACTION
+        # (5%). Needs a large n; a tiny fixture would let even one value
+        # trivially clear 5% of the row count.
+        df = _make_df(100)
+        df["avg_defensive_sacks"] = [None] * 99 + [1.0]
 
         columns = train_player_prop_model._feature_columns(df)
 
-        assert "avg_field_goals_made" in columns
+        assert "avg_defensive_sacks" not in columns
+
+    def test_keeps_a_column_at_or_above_the_non_null_fraction(self):
+        df = _make_df(100)
+        df["avg_rushing_yards"] = [None] * 90 + [10.0] * 10  # exactly 10%
+
+        columns = train_player_prop_model._feature_columns(df)
+
+        assert "avg_rushing_yards" in columns
 
 
 class TestTrain:
@@ -245,6 +256,33 @@ class TestTrain:
 
         assert metadata["feature_importances"]["avg_passing_yards"] == 5.0
         assert metadata["feature_importances"]["games_played"] == 0.0
+
+    def test_includes_naive_baseline_metrics(self):
+        df = _make_df(10, target_stat="passing_yards")
+        mock_model = self._mock_model()
+
+        with patch.object(train_player_prop_model, "_tune_hyperparameters", return_value={}), \
+             patch.object(train_player_prop_model.xgb, "XGBRegressor", return_value=mock_model):
+            _, metadata = train_player_prop_model.train(df, "passing_yards")
+
+        assert isinstance(metadata["naive_baseline_rmse"], float)
+        assert isinstance(metadata["naive_baseline_mae"], float)
+
+    def test_naive_baseline_predicts_the_players_own_rolling_average(self):
+        # Set avg_passing_yards to exactly match each row's own label
+        # (200 + i, from _make_df's stat_line values) -- the naive
+        # baseline's error should be exactly zero regardless of what the
+        # (mocked) model itself predicts.
+        n = 10
+        df = _make_df(n, target_stat="passing_yards", avg_stat=[200.0 + i for i in range(n)])
+        mock_model = self._mock_model()
+
+        with patch.object(train_player_prop_model, "_tune_hyperparameters", return_value={}), \
+             patch.object(train_player_prop_model.xgb, "XGBRegressor", return_value=mock_model):
+            _, metadata = train_player_prop_model.train(df, "passing_yards")
+
+        assert metadata["naive_baseline_rmse"] == pytest.approx(0.0)
+        assert metadata["naive_baseline_mae"] == pytest.approx(0.0)
 
 
 class TestTuneHyperparameters:

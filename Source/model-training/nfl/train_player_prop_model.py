@@ -37,6 +37,7 @@ import os
 
 import pandas as pd
 import xgboost as xgb
+from sklearn.metrics import mean_absolute_error, root_mean_squared_error
 from sklearn.model_selection import RandomizedSearchCV, TimeSeriesSplit
 
 import model_common
@@ -54,7 +55,7 @@ PLAYER_FEATURES_KEY = "nfl/training-data/player_features.parquet"
 NON_FEATURE_COLUMNS = {"event_key", "player_key", "entity_id", "team_id", "opponent_id", "event_date"}
 LABEL_COLUMN = "label_target_stat"
 ALGORITHM = "xgboost"
-SUMMARY_METRICS = ["rmse", "mae"]
+SUMMARY_METRICS = ["rmse", "mae", "naive_baseline_rmse", "naive_baseline_mae"]
 PROMOTION_METRIC = "rmse"
 
 # A player must have recorded TARGET_STAT in at least this many of their
@@ -79,6 +80,18 @@ MIN_PRIOR_GAMES_WITH_STAT = 2
 # (large, continuous) or something like sacks (small, discrete) without
 # per-stat calibration.
 MIN_AVG_FRACTION_OF_MEDIAN = 0.35
+
+# A column surviving _feature_columns' all-null check with even one real
+# value isn't enough -- a handful of anomalous rows (a data quirk, or a
+# genuine but vanishingly rare two-way player) can still give a shallow
+# tree an irrelevant column to exploit (see v3's player-prop-passing-yards
+# model card: games_with_defensive_sacks, a defensive stat, showing real
+# importance for a passing target). Requiring a real fraction of rows to
+# have a value, not just one, still keeps genuinely common cross-category
+# signal (e.g. avg_rushing_yards for dual-threat QBs, which plenty of
+# real quarterbacks clear) while excluding columns whose few non-null
+# values come from anomalous rows rather than a real, common pattern.
+MIN_NON_NULL_FRACTION = 0.05
 
 # Same search shape as train_model.py's -- see that file for why
 # max_depth has a floor of 2 (a depth-1 stump can't model any feature
@@ -147,12 +160,14 @@ def _feature_columns(df: pd.DataFrame) -> list[str]:
     population, most other positions' columns (kicking, punting,
     defensive, ...) are structurally inapplicable to every remaining row,
     not just occasionally sparse the way win-probability's
-    weather_temperature is. Dropping all-null columns here, scoped to
-    this script rather than model_common.feature_columns, keeps the
-    other two scripts' feature schema stable regardless of a given week's
-    null pattern -- see model_common.feature_columns' own callers."""
+    weather_temperature is. Dropping columns below MIN_NON_NULL_FRACTION
+    here, scoped to this script rather than model_common.feature_columns,
+    keeps the other two scripts' feature schema stable regardless of a
+    given week's null pattern -- see model_common.feature_columns' own
+    callers."""
     candidates = model_common.feature_columns(df, NON_FEATURE_COLUMNS)
-    return [col for col in candidates if df[col].notna().any()]
+    minimum_non_null = len(df) * MIN_NON_NULL_FRACTION
+    return [col for col in candidates if df[col].notna().sum() >= minimum_non_null]
 
 
 _chronological_split = model_common.chronological_split
@@ -212,13 +227,26 @@ def train(df: pd.DataFrame, target_stat: str) -> tuple[xgb.XGBRegressor, dict]:
     ))
 
     metrics = model_common.evaluate_regression_holdout(model, X_test, y_test)
+
+    # A trivial baseline -- predict this player's own rolling average
+    # directly, no model at all -- since that average is already one of
+    # the model's own input features. If the trained model doesn't clear
+    # this by much, the search/training isn't adding real value beyond
+    # "assume this game looks like their recent history."
+    naive_predictions = test_df[f"avg_{target_stat}"]
+    metrics["naive_baseline_rmse"] = float(root_mean_squared_error(y_test, naive_predictions))
+    metrics["naive_baseline_mae"] = float(mean_absolute_error(y_test, naive_predictions))
+
     metrics.update({
         "train_rows": int(len(train_df)),
         "test_rows": int(len(test_df)),
         "train_date_range": train_date_range,
         "test_date_range": test_date_range,
     })
-    logger.info("Holdout rmse=%.4f mae=%.4f", metrics["rmse"], metrics["mae"])
+    logger.info(
+        "Holdout rmse=%.4f mae=%.4f (naive baseline rmse=%.4f mae=%.4f)",
+        metrics["rmse"], metrics["mae"], metrics["naive_baseline_rmse"], metrics["naive_baseline_mae"],
+    )
 
     return model, {
         "target_stat": target_stat,
