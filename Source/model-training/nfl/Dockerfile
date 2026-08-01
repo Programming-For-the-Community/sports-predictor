@@ -12,14 +12,16 @@
 # architectures, so `pip install` still just downloads a wheel; no
 # compiler needed in either stage.
 #
-# One image, three entrypoint scripts (train_model.py for the production
+# One image, four entrypoint scripts (train_model.py for the production
 # win-probability XGBoost model, train_baseline_model.py for its logistic
-# regression comparison baseline, train_player_prop_model.py for every
-# player-prop stat -- see model_common.py) -- they share every dependency
-# in requirements.txt, so a second image/build job per script would just
-# duplicate this one. CMD picks train_model.py by default; the other two
-# task definitions override the container command to run their own
-# script instead (see Terraform/ecs-task-nfl-train-baseline-model.tf and
+# regression comparison baseline, train_score_model.py for the
+# margin/home-score/away-score models, train_player_prop_model.py for
+# every player-prop stat -- see model_common.py) -- they share every
+# dependency in requirements.txt, so a second image/build job per script
+# would just duplicate this one. CMD picks train_model.py by default; the
+# other three task definitions override the container command to run
+# their own script instead (see Terraform/ecs-task-nfl-train-baseline-model.tf,
+# Terraform/ecs-task-nfl-train-score-model.tf, and
 # Terraform/ecs-task-nfl-train-player-prop-model.tf).
 
 FROM python:3.12-slim AS builder
@@ -45,7 +47,8 @@ ENV PYTHONPATH=/app/deps \
 
 COPY --from=builder /install /app/deps
 COPY model-training/nfl/train_model.py model-training/nfl/train_baseline_model.py \
-     model-training/nfl/train_player_prop_model.py model-training/nfl/model_common.py ./
+     model-training/nfl/train_score_model.py model-training/nfl/train_player_prop_model.py \
+     model-training/nfl/model_common.py ./
 
 USER train-model
 
