@@ -7,6 +7,7 @@ from library.normalize.espn import (
     team_to_entity as _team_to_entity,
     scoreboard_event_to_event_item as _scoreboard_event_to_event_item,
     boxscore_to_player_game_stats as _boxscore_to_player_game_stats,
+    boxscore_to_team_game_stats as _boxscore_to_team_game_stats,
 )
 
 SPORT = "nfl"
@@ -22,6 +23,15 @@ _COMPOUND_KEY_SPLITS: dict[str, tuple[str, str]] = {
     "extraPointsMade/extraPointAttempts": ("extra_points_made", "extra_point_attempts"),
 }
 
+_TEAM_COMPOUND_KEY_SPLITS: dict[str, tuple[str, str]] = {
+    "thirdDownEff": ("third_down_conversions", "third_down_attempts"),
+    "fourthDownEff": ("fourth_down_conversions", "fourth_down_attempts"),
+    "completionAttempts": ("completions", "pass_attempts"),
+    "redZoneAttempts": ("red_zone_conversions", "red_zone_attempts"),
+    "sacksYardsLost": ("sacks_taken", "sack_yards_lost"),
+    "totalPenaltiesYards": ("penalties", "penalty_yards"),
+}
+
 
 def team_to_entity(team: dict) -> dict:
     return _team_to_entity(team, SPORT)
@@ -33,3 +43,7 @@ def scoreboard_event_to_event_item(event: dict) -> dict:
 
 def boxscore_to_player_game_stats(summary: dict) -> tuple[list[dict], list[dict]]:
     return _boxscore_to_player_game_stats(summary, SPORT, _COMPOUND_KEY_SPLITS)
+
+
+def boxscore_to_team_game_stats(summary: dict) -> list[dict]:
+    return _boxscore_to_team_game_stats(summary, SPORT, _TEAM_COMPOUND_KEY_SPLITS)

@@ -11,6 +11,7 @@ locals {
   entities_table          = "${var.project}-entities"
   events_table            = "${var.project}-events"
   player_game_stats_table = "${var.project}-player-game-stats"
+  team_game_stats_table   = "${var.project}-team-game-stats"
   predictions_table       = "${var.project}-predictions"
   sport_registry_table    = "${var.project}-sport-registry"
 

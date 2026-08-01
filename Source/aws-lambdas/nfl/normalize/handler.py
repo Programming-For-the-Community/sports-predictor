@@ -12,7 +12,7 @@ the others.
 Key routing (based on S3 key pattern):
     nfl/teams.json                             -> team entities
     nfl/scoreboard/{season}/{type}/{week}.json -> event records
-    nfl/boxscore/{season}/{event_id}.json      -> player stats + player entities
+    nfl/boxscore/{season}/{event_id}.json      -> player stats, player entities, team stats
 """
 import json
 import logging
@@ -22,6 +22,7 @@ import boto3
 
 from library.normalize.espn import (
     boxscore_to_player_game_stats,
+    boxscore_to_team_game_stats,
     scoreboard_event_to_event_item,
     team_to_entity,
 )
@@ -37,6 +38,15 @@ _COMPOUND_KEY_SPLITS: dict[str, tuple[str, str]] = {
     "sacks-sackYardsLost": ("sacks_taken", "sack_yards_lost"),
     "fieldGoalsMade/fieldGoalAttempts": ("field_goals_made", "field_goal_attempts"),
     "extraPointsMade/extraPointAttempts": ("extra_points_made", "extra_point_attempts"),
+}
+
+_TEAM_COMPOUND_KEY_SPLITS: dict[str, tuple[str, str]] = {
+    "thirdDownEff": ("third_down_conversions", "third_down_attempts"),
+    "fourthDownEff": ("fourth_down_conversions", "fourth_down_attempts"),
+    "completionAttempts": ("completions", "pass_attempts"),
+    "redZoneAttempts": ("red_zone_conversions", "red_zone_attempts"),
+    "sacksYardsLost": ("sacks_taken", "sack_yards_lost"),
+    "totalPenaltiesYards": ("penalties", "penalty_yards"),
 }
 
 _s3 = boto3.client("s3")
@@ -77,6 +87,10 @@ def _process_boxscore(payload: dict, key: str) -> None:
         "Wrote %d player stat lines and %d player entities from %s",
         len(stats_items), len(player_entities), key,
     )
+
+    team_stats_items = boxscore_to_team_game_stats(payload, SPORT, _TEAM_COMPOUND_KEY_SPLITS)
+    storage.write_team_game_stats(team_stats_items)
+    logger.info("Wrote %d team stat lines from %s", len(team_stats_items), key)
 
 
 def _dispatch(bucket: str, key: str) -> None:

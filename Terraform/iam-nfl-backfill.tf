@@ -2,7 +2,7 @@
 # attached AWS-managed policy) and the task role (the application code's
 # own AWS access), same combined-role pattern as iam-ecs-pipeline.tf.
 # Scoped only to what Source/data-backfills/nfl actually calls: write raw
-# JSON to the raw data lake, upsert the three DynamoDB tables. No read
+# JSON to the raw data lake, upsert the four DynamoDB tables. No read
 # access -- the backfill job doesn't need to read anything back out.
 data "aws_iam_policy_document" "nfl_backfill_assume" {
   statement {
@@ -64,6 +64,12 @@ data "aws_iam_policy_document" "nfl_backfill_permissions" {
     sid       = "WritePlayerGameStats"
     actions   = ["dynamodb:PutItem", "dynamodb:BatchWriteItem"]
     resources = [aws_dynamodb_table.player_game_stats.arn]
+  }
+
+  statement {
+    sid       = "WriteTeamGameStats"
+    actions   = ["dynamodb:PutItem", "dynamodb:BatchWriteItem"]
+    resources = [aws_dynamodb_table.team_game_stats.arn]
   }
 }
 

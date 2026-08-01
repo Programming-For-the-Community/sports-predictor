@@ -35,6 +35,7 @@ class FeatureStorage:
         region = os.environ.get("AWS_REGION")
         self._events_table = DynamoDBTable(_require_env("EVENTS_TABLE_NAME"), region=region)
         self._player_game_stats_table = DynamoDBTable(_require_env("PLAYER_GAME_STATS_TABLE_NAME"), region=region)
+        self._team_game_stats_table = DynamoDBTable(_require_env("TEAM_GAME_STATS_TABLE_NAME"), region=region)
 
     def get_player_game_stats(
         self, entity_id: str, before_date: str | None = None, limit: int | None = None
@@ -103,3 +104,9 @@ class FeatureStorage:
         the sport out of event_key's SPORT#<sport>#EVENT#... prefix.
         """
         return self._player_game_stats_table.scan()
+
+    def get_all_team_game_stats(self) -> list[dict]:
+        """Every team_game_stats row, unsorted. Same batch-job rationale
+        as get_all_player_game_stats -- one scan instead of a per-team
+        Query, and no sport filter since only NFL data exists today."""
+        return self._team_game_stats_table.scan()

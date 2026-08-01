@@ -56,17 +56,20 @@ TEST_FRACTION = 0.2
 
 # A modest, standard XGBoost search space -- deliberately not exhaustive.
 # At ~2,700 rows and this few features, a single fit is milliseconds, so
-# SEARCH_ITERATIONS * CV_SPLITS (150) fits total finishes in seconds, not
-# minutes; there's room to widen this later without it becoming slow.
+# SEARCH_ITERATIONS * CV_SPLITS (800) fits total finishes in seconds, not
+# minutes.
 PARAM_DISTRIBUTIONS = {
-    "max_depth": [2, 3, 4, 5, 6],
-    "n_estimators": [50, 100, 200, 300],
-    "learning_rate": [0.01, 0.05, 0.1, 0.2],
-    "min_child_weight": [1, 3, 5],
-    "subsample": [0.6, 0.8, 1.0],
+    "max_depth": [1, 2, 3, 4, 5, 6],
+    "n_estimators": [50, 100, 200, 300, 400, 500, 750],
+    "learning_rate": [0.001, 0.005, 0.01, 0.05, 0.1, 0.2],
+    "min_child_weight": [1, 3, 5, 7, 10],
+    "subsample": [0.4, 0.5, 0.6, 0.8, 1.0],
 }
-SEARCH_ITERATIONS = 30
-CV_SPLITS = 5
+SEARCH_ITERATIONS = 100
+# TimeSeriesSplit divides the training set into CV_SPLITS + 1 chronological
+# chunks -- too many splits shrinks the earliest folds' training window
+# enough that their score gets noisy.
+CV_SPLITS = 8
 RANDOM_STATE = 42
 
 

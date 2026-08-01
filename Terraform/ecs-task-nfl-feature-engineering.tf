@@ -59,6 +59,7 @@ resource "aws_ecs_task_definition" "nfl_feature_engineering" {
       environment = [
         { name = "EVENTS_TABLE_NAME", value = aws_dynamodb_table.events.name },
         { name = "PLAYER_GAME_STATS_TABLE_NAME", value = aws_dynamodb_table.player_game_stats.name },
+        { name = "TEAM_GAME_STATS_TABLE_NAME", value = aws_dynamodb_table.team_game_stats.name },
         { name = "MODEL_ARTIFACTS_BUCKET_NAME", value = aws_s3_bucket.model_artifacts.bucket },
         { name = "AWS_REGION", value = var.region },
       ]

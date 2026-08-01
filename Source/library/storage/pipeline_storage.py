@@ -34,6 +34,7 @@ class PipelineStorage:
         self._entities_table = DynamoDBTable(_require_env("ENTITIES_TABLE_NAME"), region=region)
         self._events_table = DynamoDBTable(_require_env("EVENTS_TABLE_NAME"), region=region)
         self._player_game_stats_table = DynamoDBTable(_require_env("PLAYER_GAME_STATS_TABLE_NAME"), region=region)
+        self._team_game_stats_table = DynamoDBTable(_require_env("TEAM_GAME_STATS_TABLE_NAME"), region=region)
 
     def raw_object_exists(self, key: str) -> bool:
         return self._raw_data_lake.object_exists(key)
@@ -49,3 +50,6 @@ class PipelineStorage:
 
     def write_player_game_stats(self, items: list[dict]) -> None:
         self._player_game_stats_table.batch_write(items, key_names=["event_key", "player_key"])
+
+    def write_team_game_stats(self, items: list[dict]) -> None:
+        self._team_game_stats_table.batch_write(items, key_names=["event_key", "team_key"])

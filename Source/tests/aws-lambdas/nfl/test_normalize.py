@@ -84,14 +84,17 @@ class TestDispatch:
         mock_storage = MagicMock()
         stats = [{"pk": "stat1"}, {"pk": "stat2"}]
         entities = [{"pk": "nfl#player#999"}]
+        team_stats = [{"pk": "team-stat1"}]
 
         with patch.object(nfl_normalize, "_s3", mock_s3), \
              patch("nfl_normalize.PipelineStorage", return_value=mock_storage), \
-             patch.object(nfl_normalize, "boxscore_to_player_game_stats", return_value=(stats, entities)):
+             patch.object(nfl_normalize, "boxscore_to_player_game_stats", return_value=(stats, entities)), \
+             patch.object(nfl_normalize, "boxscore_to_team_game_stats", return_value=team_stats):
             nfl_normalize._dispatch("test-bucket", "nfl/boxscore/2025/401547603.json")
 
         mock_storage.upsert_entity.assert_called_once_with(entities[0])
         mock_storage.write_player_game_stats.assert_called_once_with(stats)
+        mock_storage.write_team_game_stats.assert_called_once_with(team_stats)
 
     def test_ignores_unrecognized_key_without_raising(self):
         mock_s3 = MagicMock()
@@ -105,6 +108,7 @@ class TestDispatch:
         mock_storage.upsert_entity.assert_not_called()
         mock_storage.upsert_event.assert_not_called()
         mock_storage.write_player_game_stats.assert_not_called()
+        mock_storage.write_team_game_stats.assert_not_called()
 
     def test_scoreboard_key_with_no_events_does_not_call_upsert(self):
         payload = {"events": []}

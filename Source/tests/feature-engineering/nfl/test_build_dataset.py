@@ -46,10 +46,11 @@ class TestWriteParquet:
 
 
 class TestBuildEventDataset:
-    def _storage(self, events, player_games=None):
+    def _storage(self, events, player_games=None, team_game_stats=None):
         storage = MagicMock()
         storage.get_all_events.return_value = events
         storage.get_all_player_game_stats.return_value = player_games or []
+        storage.get_all_team_game_stats.return_value = team_game_stats or []
         return storage
 
     def test_builds_one_row_per_event_and_skips_malformed(self):
@@ -156,6 +157,81 @@ class TestBuildEventDataset:
         e1 = next(row for row in rows if row["event_key"] == "E1")
         assert e1["home_qb_games_played"] == 0
         assert e1["away_qb_games_played"] == 0
+
+    def _rb_game(self, event_key, team_id, event_date, entity_id="mccaffrey", rushing_yards=95, rushing_attempts=20):
+        return {
+            "event_key": event_key, "player_key": f"PLAYER#{entity_id}", "entity_id": entity_id,
+            "team_id": team_id, "event_date": event_date,
+            "stat_line": {"rushing_attempts": rushing_attempts, "rushing_yards": rushing_yards},
+        }
+
+    def _wr_game(self, event_key, team_id, event_date, entity_id="hill", receiving_yards=110, receiving_targets=9):
+        return {
+            "event_key": event_key, "player_key": f"PLAYER#{entity_id}", "entity_id": entity_id,
+            "team_id": team_id, "event_date": event_date,
+            "stat_line": {"receiving_targets": receiving_targets, "receiving_yards": receiving_yards},
+        }
+
+    def test_rb_and_wr_history_carry_forward_across_games(self):
+        events = [
+            _event("E1", "2025-09-07", "KC", "LAC"),
+            _event("E2", "2025-09-14", "KC", "DET"),
+        ]
+        player_games = [
+            self._rb_game("E1", "KC", "2025-09-07", rushing_yards=95),
+            self._rb_game("E1", "LAC", "2025-09-07", entity_id="ekeler"),
+            self._rb_game("E2", "KC", "2025-09-14", rushing_yards=60),
+            self._rb_game("E2", "DET", "2025-09-14", entity_id="gibbs"),
+            self._wr_game("E1", "KC", "2025-09-07", receiving_yards=110),
+            self._wr_game("E1", "LAC", "2025-09-07", entity_id="williams"),
+            self._wr_game("E2", "KC", "2025-09-14", receiving_yards=80),
+            self._wr_game("E2", "DET", "2025-09-14", entity_id="stbrown"),
+        ]
+        storage = self._storage(events, player_games)
+
+        rows = build_dataset.build_event_dataset(storage, window=5)
+
+        e2 = next(row for row in rows if row["event_key"] == "E2")
+        assert e2["home_rb_games_played"] == 1
+        assert e2["home_rb_avg_rushing_yards"] == 95  # KC's RB's own E1 line, not the team's
+        assert e2["home_wr_games_played"] == 1
+        assert e2["home_wr_avg_receiving_yards"] == 110
+
+    def _team_box_row(self, event_key, team_id, turnovers=1, total_yards=350):
+        return {
+            "event_key": event_key, "team_key": f"TEAM#{team_id}", "team_id": team_id,
+            "event_date": "2025-09-07", "stat_line": {"turnovers": turnovers, "total_yards": total_yards},
+        }
+
+    def test_team_box_stats_history_carries_forward_across_games(self):
+        events = [
+            _event("E1", "2025-09-07", "KC", "LAC"),
+            _event("E2", "2025-09-14", "KC", "DET"),
+        ]
+        team_game_stats = [
+            self._team_box_row("E1", "KC", turnovers=1, total_yards=350),
+            self._team_box_row("E1", "LAC", turnovers=2, total_yards=280),
+            self._team_box_row("E2", "KC", turnovers=0, total_yards=400),
+            self._team_box_row("E2", "DET", turnovers=1, total_yards=300),
+        ]
+        storage = self._storage(events, team_game_stats=team_game_stats)
+
+        rows = build_dataset.build_event_dataset(storage, window=5)
+
+        e2 = next(row for row in rows if row["event_key"] == "E2")
+        assert e2["home_box_games_played"] == 1
+        assert e2["home_avg_turnovers"] == 1  # KC's own E1 line
+        assert e2["home_avg_total_yards"] == 350
+
+    def test_missing_team_game_stats_row_yields_empty_box_history_not_an_error(self):
+        events = [_event("E1", "2025-09-07", "KC", "LAC")]
+        storage = self._storage(events, team_game_stats=[])
+
+        rows = build_dataset.build_event_dataset(storage, window=5)
+
+        e1 = next(row for row in rows if row["event_key"] == "E1")
+        assert e1["home_box_games_played"] == 0
+        assert e1["home_avg_turnovers"] is None
 
 
 class TestBuildPlayerDataset:
