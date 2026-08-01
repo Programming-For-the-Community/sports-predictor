@@ -95,6 +95,7 @@ class TestTrain:
         mock_model = MagicMock()
         mock_model.predict.return_value = np.array([True, False])
         mock_model.predict_proba.return_value = np.array([[0.1, 0.9], [0.8, 0.2]])
+        mock_model.get_booster.return_value.get_score.return_value = {}
         return mock_model
 
     def test_fits_mocked_model_and_computes_metrics(self):
@@ -174,7 +175,33 @@ class TestTrain:
              patch.object(train_model.xgb, "XGBClassifier", return_value=mock_model):
             train_model.train(df)
 
-        mock_model.get_booster.assert_not_called()  # only main() calls this, not train()
+        mock_model.fit.assert_called_once()  # the mock's fit(), never a real Booster
+
+    def test_feature_importances_use_gain_and_default_unused_features_to_zero(self):
+        df = _make_df(10)
+        mock_model = self._mock_model()
+        # "elo_diff" never appears in get_score()'s output -- as if XGBoost
+        # never split on it -- while "home_elo" does.
+        mock_model.get_booster.return_value.get_score.return_value = {"home_elo": 12.5}
+
+        with patch.object(train_model, "_tune_hyperparameters", return_value={}), \
+             patch.object(train_model.xgb, "XGBClassifier", return_value=mock_model):
+            _, metadata = train_model.train(df)
+
+        mock_model.get_booster.return_value.get_score.assert_called_once_with(importance_type="gain")
+        assert metadata["feature_importances"] == {"home_elo": 12.5, "elo_diff": 0.0}
+        assert isinstance(metadata["feature_importances"]["home_elo"], float)
+
+    def test_feature_importances_are_sorted_descending(self):
+        df = _make_df(10)
+        mock_model = self._mock_model()
+        mock_model.get_booster.return_value.get_score.return_value = {"home_elo": 3.0, "elo_diff": 9.0}
+
+        with patch.object(train_model, "_tune_hyperparameters", return_value={}), \
+             patch.object(train_model.xgb, "XGBClassifier", return_value=mock_model):
+            _, metadata = train_model.train(df)
+
+        assert list(metadata["feature_importances"].keys()) == ["elo_diff", "home_elo"]
 
 
 class TestTuneHyperparameters:
@@ -201,6 +228,49 @@ class TestTuneHyperparameters:
         assert call_kwargs["param_distributions"] == train_model.PARAM_DISTRIBUTIONS
         assert result == {"max_depth": 3}
 
+    def test_parallelizes_search_without_oversubscribing_per_fit_threads(self):
+        df = _make_df(10)
+        X, y = df[["home_elo", "elo_diff"]], df["label_home_won"]
+        mock_search = MagicMock()
+        mock_search.best_params_ = {}
+        mock_search.best_score_ = -0.65
+
+        with patch.object(train_model, "RandomizedSearchCV", return_value=mock_search) as mock_search_cls, \
+             patch.object(train_model.xgb, "XGBClassifier") as mock_xgb_cls:
+            train_model._tune_hyperparameters(X, y)
+
+        assert mock_search_cls.call_args.kwargs["n_jobs"] == -1
+        mock_xgb_cls.assert_called_once_with(objective="binary:logistic", eval_metric="logloss", n_jobs=1)
+
+    def test_enables_verbose_progress_output(self):
+        # RandomizedSearchCV's own verbose logging is the only progress
+        # visibility during the search itself (hundreds of fits, no
+        # per-candidate hook to log through otherwise).
+        df = _make_df(10)
+        X, y = df[["home_elo", "elo_diff"]], df["label_home_won"]
+        mock_search = MagicMock()
+        mock_search.best_params_ = {}
+        mock_search.best_score_ = -0.65
+
+        with patch.object(train_model, "RandomizedSearchCV", return_value=mock_search) as mock_search_cls:
+            train_model._tune_hyperparameters(X, y)
+
+        assert mock_search_cls.call_args.kwargs["verbose"] == 2
+
+    def test_logs_total_fit_count_before_starting(self, caplog):
+        df = _make_df(10)
+        X, y = df[["home_elo", "elo_diff"]], df["label_home_won"]
+        mock_search = MagicMock()
+        mock_search.best_params_ = {}
+        mock_search.best_score_ = -0.65
+
+        with caplog.at_level("INFO"), \
+             patch.object(train_model, "RandomizedSearchCV", return_value=mock_search):
+            train_model._tune_hyperparameters(X, y)
+
+        expected_fits = train_model.SEARCH_ITERATIONS * train_model.CV_SPLITS
+        assert any(str(expected_fits) in r.message for r in caplog.records)
+
 
 class TestMain:
     def test_writes_versioned_model_and_metadata(self, monkeypatch):
@@ -215,6 +285,7 @@ class TestMain:
         mock_model.predict.return_value = np.array([True, False])
         mock_model.predict_proba.return_value = np.array([[0.1, 0.9], [0.8, 0.2]])
         mock_model.get_booster.return_value.save_raw.return_value = b"fake-model-bytes"
+        mock_model.get_booster.return_value.get_score.return_value = {}
 
         with patch.object(train_model, "S3Manager", return_value=mock_s3), \
              patch.object(train_model, "_tune_hyperparameters", return_value={}), \
@@ -244,6 +315,7 @@ class TestMain:
         mock_model.predict.return_value = np.array([True, False])
         mock_model.predict_proba.return_value = np.array([[0.1, 0.9], [0.8, 0.2]])
         mock_model.get_booster.return_value.save_raw.return_value = b"fake-model-bytes"
+        mock_model.get_booster.return_value.get_score.return_value = {}
 
         with patch.object(train_model, "S3Manager", return_value=mock_s3), \
              patch.object(train_model, "_tune_hyperparameters", return_value={}), \
@@ -273,6 +345,7 @@ class TestMain:
         mock_model.predict.return_value = np.array([True, False])
         mock_model.predict_proba.return_value = np.array([[0.1, 0.9], [0.8, 0.2]])
         mock_model.get_booster.return_value.save_raw.return_value = b"fake-model-bytes"
+        mock_model.get_booster.return_value.get_score.return_value = {}
 
         with caplog.at_level("INFO"), \
              patch.object(train_model, "S3Manager", return_value=mock_s3), \

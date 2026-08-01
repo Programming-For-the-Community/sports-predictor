@@ -28,6 +28,9 @@ One row per completed game. Inputs to the model:
 | `home_avg_turnovers` / `home_avg_total_yards` / `home_avg_possession_time_seconds` (and the away equivalents) | Rolling average of each team's own box score totals (see `team_game_stats` in `design/DATA_SCHEMA.md`) |
 | `home_third_down_pct` / `home_red_zone_pct` (and the away equivalents) | Conversions over attempts across the rolling window (not an average of per-game percentages, which would let a small-sample game skew the rate) |
 | `home_box_games_played` / `away_box_games_played` | How much team box score history backs the averages above |
+| `is_divisional_game` | Whether both teams are in the same division (`library/features/nfl_teams.py`) — divisional matchups are played more often and behave differently in some analyses |
+| `away_travel_km` | Approximate distance the away team travels, computed between each team's home-market coordinates (not the exact venue) |
+| `home_win_streak` / `away_win_streak` | Each team's current run of consecutive wins (positive) or losses (negative), reset by a tie — a short-term-momentum signal distinct from Elo's longer-run skill estimate |
 
 Also carried on the row for reference, but **excluded from training** by `train_model.py` (raw strings aren't model-consumable without encoding — see `design/DATA_SCHEMA.md`): `venue_city`, `venue_state`.
 
@@ -38,6 +41,8 @@ Labels carried on the same row (the training targets, not inputs): `label_home_w
 **Identifying a game's key players** (`identify_starting_qb` / `identify_lead_rusher` / `identify_lead_receiver`): a team's box score doesn't flag who started, so these pick whoever had the most passing attempts / rushing attempts / receiving targets in that game — correctly favoring the primary contributor over a backup with a handful of mop-up reps. `build_dataset.py`'s orchestration groups `player_game_stats` by `(event_key, team_id)`, runs each identify function per side per event, and tracks each identified player's own rolling history by `entity_id` (the same incremental, capped-at-`window` approach used for team history) rather than re-deriving it per game. A raw player identity isn't used as a feature directly — like head coach, it's high-cardinality and doesn't generalize across roster turnover — so only the derived rolling stats above are surfaced.
 
 **Team box score stats**: ESPN's box score also reports team-level aggregates (turnovers, total yards, time of possession, third/fourth-down and red-zone efficiency) directly, separate from individual player stat lines — stored in the `team_game_stats` table and tracked with the same incremental rolling-history approach as team scoring, keyed by `team_id`.
+
+**Division/travel/streak** (`library/features/nfl_teams.py`, `current_streak`): division and each team's home-market coordinates are a static, hardcoded table, not fetched from any API — the last NFL realignment was 2002, well before this project's data window, so a fixed table is simpler and more robust than depending on an ESPN endpoint for something that essentially never changes. `current_streak` walks a team's own event history backward from most recent, comparing scores directly (not each participant's `won` flag, which reads `False` for both sides on a tie) so a tie correctly resets the streak instead of counting as a loss.
 
 ### Player-level features (`build_player_features`)
 

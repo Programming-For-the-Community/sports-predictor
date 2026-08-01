@@ -56,16 +56,17 @@ TEST_FRACTION = 0.2
 
 # A modest, standard XGBoost search space -- deliberately not exhaustive.
 # At ~2,700 rows and this few features, a single fit is milliseconds, so
-# SEARCH_ITERATIONS * CV_SPLITS (800) fits total finishes in seconds, not
-# minutes.
+# SEARCH_ITERATIONS * CV_SPLITS fits total finishes in seconds, not
+# minutes. max_depth is left at unit steps -- tree depth is already an
+# integer, so there's no finer resolution to add.
 PARAM_DISTRIBUTIONS = {
     "max_depth": [1, 2, 3, 4, 5, 6],
-    "n_estimators": [50, 100, 200, 300, 400, 500, 750],
-    "learning_rate": [0.001, 0.005, 0.01, 0.05, 0.1, 0.2],
-    "min_child_weight": [1, 3, 5, 7, 10],
-    "subsample": [0.4, 0.5, 0.6, 0.8, 1.0],
+    "n_estimators": [50, 100, 200, 300, 400, 450, 500, 550, 600, 750],
+    "learning_rate": [0.001, 0.002, 0.003, 0.005, 0.007, 0.01, 0.02, 0.05, 0.1, 0.2],
+    "min_child_weight": [1, 3, 5, 7, 10, 15, 20],
+    "subsample": [0.4, 0.45, 0.5, 0.55, 0.6, 0.65, 0.7, 0.8, 0.9, 1.0],
 }
-SEARCH_ITERATIONS = 100
+SEARCH_ITERATIONS = 300
 # TimeSeriesSplit divides the training set into CV_SPLITS + 1 chronological
 # chunks -- too many splits shrinks the earliest folds' training window
 # enough that their score gets noisy.
@@ -101,13 +102,24 @@ def _tune_hyperparameters(X_train: pd.DataFrame, y_train: pd.Series) -> dict:
     expanding-window folds keep every fold's validation slice strictly
     after its training slice.
     """
+    total_fits = SEARCH_ITERATIONS * CV_SPLITS
+    logger.info(
+        "Starting hyperparameter search: %d candidates x %d CV folds = %d fits",
+        SEARCH_ITERATIONS, CV_SPLITS, total_fits,
+    )
+    # n_jobs=-1 on the search parallelizes across the (candidate, fold)
+    # combinations via joblib; n_jobs=1 on the estimator keeps each
+    # individual XGBoost fit single-threaded so the two don't oversubscribe
+    # the same cores against each other.
     search = RandomizedSearchCV(
-        xgb.XGBClassifier(objective="binary:logistic", eval_metric="logloss"),
+        xgb.XGBClassifier(objective="binary:logistic", eval_metric="logloss", n_jobs=1),
         param_distributions=PARAM_DISTRIBUTIONS,
         n_iter=SEARCH_ITERATIONS,
         scoring="neg_log_loss",
         cv=TimeSeriesSplit(n_splits=CV_SPLITS),
         random_state=RANDOM_STATE,
+        verbose=2,
+        n_jobs=-1,
     )
     search.fit(X_train, y_train)
     logger.info(
@@ -147,6 +159,15 @@ def train(df: pd.DataFrame) -> tuple[xgb.XGBClassifier, dict]:
     model = xgb.XGBClassifier(objective="binary:logistic", eval_metric="logloss", **best_params)
     model.fit(X_train, y_train)
 
+    # get_score() only returns features that appear in at least one split
+    # -- defaulting the rest to 0.0 makes it possible to see at a glance
+    # whether a given feature is contributing at all, not just how much.
+    raw_importances = model.get_booster().get_score(importance_type="gain")
+    feature_importances = dict(sorted(
+        ((col, float(raw_importances.get(col, 0.0))) for col in feature_columns),
+        key=lambda kv: kv[1], reverse=True,
+    ))
+
     predictions = model.predict(X_test)
     probabilities = model.predict_proba(X_test)[:, 1]
     metrics = {
@@ -165,7 +186,12 @@ def train(df: pd.DataFrame) -> tuple[xgb.XGBClassifier, dict]:
     }
     logger.info("Holdout accuracy=%.4f log_loss=%.4f", metrics["accuracy"], metrics["log_loss"])
 
-    return model, {"feature_columns": feature_columns, "hyperparameters": best_params, **metrics}
+    return model, {
+        "feature_columns": feature_columns,
+        "feature_importances": feature_importances,
+        "hyperparameters": best_params,
+        **metrics,
+    }
 
 
 def main() -> None:
