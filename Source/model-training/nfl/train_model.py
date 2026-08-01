@@ -118,7 +118,12 @@ def _tune_hyperparameters(X_train: pd.DataFrame, y_train: pd.Series) -> dict:
         scoring="neg_log_loss",
         cv=TimeSeriesSplit(n_splits=CV_SPLITS),
         random_state=RANDOM_STATE,
-        verbose=2,
+        # >9 is what unlocks the candidate number in each fit's log line
+        # (sklearn's _fit_and_score only appends "; candidate/total" to the
+        # "[CV fold/total; candidate/total] END ..." message above that
+        # threshold) -- without it every line only shows the fold, not
+        # which of the SEARCH_ITERATIONS candidates it belongs to.
+        verbose=10,
         n_jobs=-1,
     )
     search.fit(X_train, y_train)
