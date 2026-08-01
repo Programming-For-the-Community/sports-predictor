@@ -582,6 +582,7 @@ class TestBuildEventFeatures:
         row = build_event_features(event, {}, [], [])
 
         assert row["is_divisional_game"] is True
+        assert row["home_travel_km"] == 0
         assert row["away_travel_km"] > 0
 
     def test_non_divisional_game_is_false(self):
@@ -598,7 +599,32 @@ class TestBuildEventFeatures:
         row = build_event_features(event, {}, [], [])
 
         assert row["is_divisional_game"] is None
+        assert row["home_travel_km"] is None
         assert row["away_travel_km"] is None
+
+    def test_international_venue_gives_both_teams_travel(self):
+        # "12"/"17" are KC/NE's real ids; the game is played in London,
+        # so neither team is at their own market.
+        event = _event("E1", "2025-09-07", "17", "12", 27, 20, venue_city="London")
+
+        row = build_event_features(event, {}, [], [])
+
+        assert row["is_international_game"] is True
+        assert row["home_travel_km"] > 0
+        assert row["away_travel_km"] > 0
+
+    def test_unrecognized_non_us_venue_logs_a_warning(self, caplog):
+        # A venue with no US state and no entry in INTERNATIONAL_VENUES
+        # should surface a warning rather than silently mis-computing
+        # travel distance for a new host city nobody's added yet.
+        event = _event("E1", "2025-09-07", "17", "12", 27, 20, venue_city="Tokyo")
+        event["venue_state"] = None
+
+        with caplog.at_level("WARNING"):
+            row = build_event_features(event, {}, [], [])
+
+        assert row["is_international_game"] is False
+        assert any("Tokyo" in r.message for r in caplog.records)
 
     def test_win_streak_fields_reflect_team_history(self):
         event = _event("E3", "2025-09-21", "KC", "LAC", 27, 20)

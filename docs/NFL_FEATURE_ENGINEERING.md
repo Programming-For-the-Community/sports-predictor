@@ -29,7 +29,8 @@ One row per completed game. Inputs to the model:
 | `home_third_down_pct` / `home_red_zone_pct` (and the away equivalents) | Conversions over attempts across the rolling window (not an average of per-game percentages, which would let a small-sample game skew the rate) |
 | `home_box_games_played` / `away_box_games_played` | How much team box score history backs the averages above |
 | `is_divisional_game` | Whether both teams are in the same division (`library/features/nfl_teams.py`) — divisional matchups are played more often and behave differently in some analyses |
-| `away_travel_km` | Approximate distance the away team travels, computed between each team's home-market coordinates (not the exact venue) |
+| `is_international_game` | Whether the game was played at one of `nfl_teams.INTERNATIONAL_VENUES` (London, Munich, etc.) rather than either team's home market |
+| `home_travel_km` / `away_travel_km` | Distance each team travels to the game, computed between team home-market coordinates and, for international games, the actual host-city coordinates instead of assuming the home team traveled 0 km |
 | `home_win_streak` / `away_win_streak` | Each team's current run of consecutive wins (positive) or losses (negative), reset by a tie — a short-term-momentum signal distinct from Elo's longer-run skill estimate |
 
 Also carried on the row for reference, but **excluded from training** by `train_model.py` (raw strings aren't model-consumable without encoding — see `design/DATA_SCHEMA.md`): `venue_city`, `venue_state`.
@@ -43,6 +44,8 @@ Labels carried on the same row (the training targets, not inputs): `label_home_w
 **Team box score stats**: ESPN's box score also reports team-level aggregates (turnovers, total yards, time of possession, third/fourth-down and red-zone efficiency) directly, separate from individual player stat lines — stored in the `team_game_stats` table and tracked with the same incremental rolling-history approach as team scoring, keyed by `team_id`.
 
 **Division/travel/streak** (`library/features/nfl_teams.py`, `current_streak`): division and each team's home-market coordinates are a static, hardcoded table, not fetched from any API — the last NFL realignment was 2002, well before this project's data window, so a fixed table is simpler and more robust than depending on an ESPN endpoint for something that essentially never changes. `current_streak` walks a team's own event history backward from most recent, comparing scores directly (not each participant's `won` flag, which reads `False` for both sides on a tie) so a tie correctly resets the streak instead of counting as a loss.
+
+`travel_distances_km` also hardcodes `INTERNATIONAL_VENUES` (London, Munich, Mexico City, etc.) so the handful of neutral-site games each season get real travel distances for both teams instead of assuming the designated home team is at their actual home market. This table needs a manual update whenever the NFL adds a new host city — `build_event_features` logs a warning (venue has no US state and isn't in `INTERNATIONAL_VENUES`) when it hits one it doesn't recognize, so a new city shows up in CloudWatch instead of silently producing wrong travel numbers for that game.
 
 ### Player-level features (`build_player_features`)
 
