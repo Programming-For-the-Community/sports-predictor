@@ -7,39 +7,38 @@
 #
 # for_each over nfl_player_prop_stats rather than seven near-duplicate
 # resources -- adding an eighth stat later is a one-line change to the
-# list below, not a new resource block.
+# map below, not a new resource block.
 #
 # Reuses aws_iam_role.eventbridge_invoke (iam-eventbridge-invoke.tf) --
 # already scoped for ecs:RunTask on ${var.project}-* task definitions
 # plus iam:PassRole on aws_iam_role.ecs_pipeline. No new IAM needed.
 #
-# Same Wednesday 12:00 UTC as scheduler-nfl-train-model.tf and
-# scheduler-nfl-train-score-model.tf -- all eleven NFL training tasks
-# (win-probability, the three score targets, and these seven) read
-# datasets already finished by that day's 11:00 UTC feature-engineering
-# run, and have no dependency on each other, so EventBridge fires all
-# eleven as independent, parallel Fargate tasks at the same moment
-# rather than a sequential chain.
+# Slots 5-11 of the 11-task, 15-minute stagger described in
+# scheduler-nfl-train-model.tf (13:00 through 14:30 UTC) -- each stat's
+# map value is its own "minute hour" pair, not just the stat name, since
+# a set/list for_each has no stable per-item ordering to derive a time
+# offset from. Launching every NFL training task at the same instant
+# once exceeded the account's Fargate on-demand vCPU quota.
 locals {
-  nfl_player_prop_stats = [
-    "passing_yards",
-    "passing_touchdowns",
-    "rushing_yards",
-    "rushing_touchdowns",
-    "receiving_yards",
-    "receiving_touchdowns",
-    "defensive_sacks",
-  ]
+  nfl_player_prop_stats = {
+    "passing_yards"        = "0 13"
+    "passing_touchdowns"   = "15 13"
+    "rushing_yards"        = "30 13"
+    "rushing_touchdowns"   = "45 13"
+    "receiving_yards"      = "0 14"
+    "receiving_touchdowns" = "15 14"
+    "defensive_sacks"      = "30 14"
+  }
 }
 
 resource "aws_scheduler_schedule" "nfl_train_player_prop_model" {
-  for_each = toset(local.nfl_player_prop_stats)
+  for_each = local.nfl_player_prop_stats
 
-  name        = "${var.project}-nfl-train-player-prop-${replace(each.value, "_", "-")}"
-  description = "Retrains the NFL ${each.value} player-prop model (Aug-Feb, Wed 12:00 UTC, after that day's feature engineering run)"
+  name        = "${var.project}-nfl-train-player-prop-${replace(each.key, "_", "-")}"
+  description = "Retrains the NFL ${each.key} player-prop model (Aug-Feb, Wed ${each.value} UTC, staggered after that day's feature engineering run)"
   group_name  = aws_scheduler_schedule_group.sports_predictor.name
 
-  schedule_expression          = "cron(0 12 ? 8-12,1-2 WED *)"
+  schedule_expression          = "cron(${each.value} ? 8-12,1-2 WED *)"
   schedule_expression_timezone = "UTC"
 
   flexible_time_window {
@@ -59,7 +58,7 @@ resource "aws_scheduler_schedule" "nfl_train_player_prop_model" {
         {
           name = "nfl-train-player-prop-model"
           environment = [
-            { name = "TARGET_STAT", value = each.value },
+            { name = "TARGET_STAT", value = each.key },
           ]
         }
       ]

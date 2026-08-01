@@ -33,14 +33,15 @@ resource "aws_cloudwatch_log_group" "nfl_train_score_model" {
 # training an unintended target.
 #
 # Uses the shared aws_iam_role.ecs_pipeline (iam-ecs-pipeline.tf). Same
-# cpu/memory sizing as ecs-task-nfl-train-model.tf -- identical
+# cpu/memory sizing (and the same quota-driven 4 vCPU step-down -- see
+# that file's comment) as ecs-task-nfl-train-model.tf -- identical
 # hyperparameter search shape (PARAM_DISTRIBUTIONS, SEARCH_ITERATIONS,
 # CV_SPLITS), so the same compute rationale applies.
 resource "aws_ecs_task_definition" "nfl_train_score_model" {
   family                   = "${var.project}-nfl-train-score-model"
   requires_compatibilities = ["FARGATE"]
   network_mode             = "awsvpc"
-  cpu                      = "8192"
+  cpu                      = "4096"
   memory                   = "16384"
   execution_role_arn       = aws_iam_role.ecs_pipeline.arn
   task_role_arn            = aws_iam_role.ecs_pipeline.arn
