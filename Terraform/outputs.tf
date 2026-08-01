@@ -61,8 +61,13 @@ output "nfl_train_baseline_model_task_definition_arn" {
 }
 
 output "nfl_train_player_prop_model_task_definition_arn" {
-  description = "ARN of the NFL player-prop ECS task definition -- manual-only, pass to `aws ecs run-task --task-definition` with a TARGET_STAT environment override"
+  description = "ARN of the NFL player-prop ECS task definition -- scheduled once per stat (see scheduler-nfl-train-player-prop-model.tf), also runnable manually via `aws ecs run-task --task-definition` with your own TARGET_STAT environment override"
   value       = aws_ecs_task_definition.nfl_train_player_prop_model.arn
+}
+
+output "nfl_train_score_model_task_definition_arn" {
+  description = "ARN of the NFL score model ECS task definition (margin/home-score/away-score) -- scheduled once per target (see scheduler-nfl-train-score-model.tf), also runnable manually via `aws ecs run-task --task-definition` with your own SCORE_TARGET environment override"
+  value       = aws_ecs_task_definition.nfl_train_score_model.arn
 }
 
 output "nfl_cluster_name" {
