@@ -62,8 +62,23 @@ PROMOTION_METRIC = "rmse"
 # one-off gadget plays (e.g. a WR's single career pass attempt) whose
 # rolling avg_<stat> would otherwise be undefined/NaN anyway. A real
 # starter or regular backup at the relevant position trivially clears
-# this; it's the fluke rows this is meant to catch.
+# this; it's the fluke rows this is meant to catch. Left at a low bar
+# rather than raised further -- MIN_AVG_FRACTION_OF_MEDIAN below is what
+# catches a player who clears this count but at trivial volume, so this
+# constant doesn't also need to do that job (and raising it would cost
+# legitimate new starters with only a couple of games of history).
 MIN_PRIOR_GAMES_WITH_STAT = 2
+
+# A player can pass the games_with_<stat> bar above by recurring at low
+# volume rather than one-off (e.g. a WR who's run a real wildcat passing
+# package in a couple of recent games while remaining primarily a
+# receiver) -- their own avg_<stat> stays far below what a real
+# participant in this stat category posts. Scale-invariant relative to
+# the stat's own filtered population median rather than an absolute
+# floor, so the same fraction applies whether TARGET_STAT is yards
+# (large, continuous) or something like sacks (small, discrete) without
+# per-stat calibration.
+MIN_AVG_FRACTION_OF_MEDIAN = 0.35
 
 # Same search shape as train_model.py's -- see that file for why
 # max_depth has a floor of 2 (a depth-1 stump can't model any feature
@@ -101,6 +116,14 @@ def _filter_to_target_stat(df: pd.DataFrame, target_stat: str) -> pd.DataFrame:
     isolate that single fluke label instead of learning real QB
     performance patterns. A real starter or regular backup trivially
     clears this bar every week; a true one-off doesn't.
+
+    Also requires avg_<stat> to be at least MIN_AVG_FRACTION_OF_MEDIAN of
+    the remaining population's own median avg_<stat> -- catches a player
+    who clears the games_with_<stat> bar by recurring at trivial volume
+    rather than by being a true one-off (see MIN_AVG_FRACTION_OF_MEDIAN).
+    The median is computed AFTER the games_with_<stat> filter above, not
+    before -- otherwise the one-off flukes that filter excludes would
+    still be dragging the median down and weakening this threshold.
     """
     stat_lines = df["label_stat_line"].apply(json.loads)
     has_stat = stat_lines.apply(lambda stat_line: target_stat in stat_line)
@@ -109,6 +132,11 @@ def _filter_to_target_stat(df: pd.DataFrame, target_stat: str) -> pd.DataFrame:
 
     volume_column = f"games_with_{target_stat}"
     filtered = filtered[filtered[volume_column] >= MIN_PRIOR_GAMES_WITH_STAT]
+
+    avg_column = f"avg_{target_stat}"
+    median_avg = filtered[avg_column].median()
+    filtered = filtered[filtered[avg_column] >= median_avg * MIN_AVG_FRACTION_OF_MEDIAN]
+
     return filtered
 
 

@@ -17,7 +17,7 @@ import pytest
 import train_player_prop_model
 
 
-def _make_df(n=10, target_stat="passing_yards", missing_stat_rows=0, games_with_stat=None):
+def _make_df(n=10, target_stat="passing_yards", missing_stat_rows=0, games_with_stat=None, avg_stat=None):
     """missing_stat_rows: how many trailing rows record a different stat
     entirely (e.g. a kicker's field_goals_made) -- these must be filtered
     out rather than crashing or contributing a bogus label.
@@ -26,9 +26,16 @@ def _make_df(n=10, target_stat="passing_yards", missing_stat_rows=0, games_with_
     to comfortably clearing MIN_PRIOR_GAMES_WITH_STAT so tests that
     aren't specifically exercising the volume filter don't need to think
     about it.
+
+    avg_stat: per-row avg_<target_stat> values, defaulting to a range
+    comfortably clearing MIN_AVG_FRACTION_OF_MEDIAN of their own median
+    so tests that aren't specifically exercising the magnitude filter
+    don't need to think about it.
     """
     if games_with_stat is None:
         games_with_stat = [5] * n
+    if avg_stat is None:
+        avg_stat = [250.0 + i for i in range(n)]
 
     stat_lines = []
     for i in range(n):
@@ -43,7 +50,7 @@ def _make_df(n=10, target_stat="passing_yards", missing_stat_rows=0, games_with_
         "entity_id": ["QB1"] * n,
         "team_id": ["KC"] * n,
         "event_date": [f"2025-09-{i + 1:02d}" for i in range(n)],
-        "avg_passing_yards": [250.0 + i for i in range(n)],
+        f"avg_{target_stat}": avg_stat,
         "games_played": [i for i in range(n)],
         f"games_with_{target_stat}": games_with_stat,
         "label_stat_line": stat_lines,
@@ -106,6 +113,45 @@ class TestFilterToTargetStat:
         filtered = train_player_prop_model._filter_to_target_stat(df, "passing_yards")
 
         assert len(filtered) == 10
+
+    def test_excludes_a_low_volume_recurring_participant_relative_to_peers(self):
+        # Four rows near a real starter's typical average (300), one row
+        # from a player whose own average (20) is far below their peers
+        # despite clearing games_with_<stat> -- a recurring low-volume
+        # gadget role, not a real passer. median([300,300,300,300,20]) is
+        # 300 (5 values, sorted middle); 0.35 * 300 = 105, well above 20.
+        avg_stat = [300.0, 300.0, 300.0, 300.0, 20.0]
+        df = _make_df(5, target_stat="passing_yards", games_with_stat=[5] * 5, avg_stat=avg_stat)
+
+        filtered = train_player_prop_model._filter_to_target_stat(df, "passing_yards")
+
+        assert len(filtered) == 4
+        assert 20.0 not in filtered["avg_passing_yards"].values
+
+    def test_keeps_a_player_at_exactly_the_fraction_of_median(self):
+        # median([300,300,300,300,105]) is 300; 0.35 * 300 = 105 exactly
+        # -- the ">=" boundary must include, not exclude, this row.
+        avg_stat = [300.0, 300.0, 300.0, 300.0, 105.0]
+        df = _make_df(5, target_stat="passing_yards", games_with_stat=[5] * 5, avg_stat=avg_stat)
+
+        filtered = train_player_prop_model._filter_to_target_stat(df, "passing_yards")
+
+        assert len(filtered) == 5
+
+    def test_median_is_computed_after_the_volume_filter_not_before(self):
+        # Without excluding the games_with_stat=0 row first, its low
+        # average (10) would drag the median down and let a genuinely
+        # low-volume row (60) slip through the magnitude filter too.
+        # median of just the 4 real rows ([300,300,300,60]) is 300;
+        # 0.35 * 300 = 105 > 60, so the low row is correctly excluded.
+        games_with_stat = [5, 5, 5, 5, 0]
+        avg_stat = [300.0, 300.0, 300.0, 60.0, 10.0]
+        df = _make_df(5, target_stat="passing_yards", games_with_stat=games_with_stat, avg_stat=avg_stat)
+
+        filtered = train_player_prop_model._filter_to_target_stat(df, "passing_yards")
+
+        assert len(filtered) == 3
+        assert 60.0 not in filtered["avg_passing_yards"].values
 
 
 class TestFeatureColumns:
