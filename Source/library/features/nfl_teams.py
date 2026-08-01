@@ -8,7 +8,7 @@ ESPN endpoint for something that essentially never changes.
 
 Coordinates are each team's home city/market, not exact stadium
 geolocation -- sufficient precision for a travel-distance feature at
-this scale (see travel_distance_km).
+this scale (see travel_distances_km).
 """
 import math
 
@@ -59,6 +59,22 @@ TEAM_COORDINATES: dict[str, tuple[float, float]] = {
     "28": (38.9077, -76.8645),   # WSH -- Landover
 }
 
+# Recurring NFL international-game host cities (2016-2025), keyed on the
+# same venue_city string normalize.py already captures for every event.
+# Neither team is at their own market for these -- the designated "home"
+# team is just the scheduling/stats convention, not where anyone actually
+# is.
+INTERNATIONAL_VENUES: dict[str, tuple[float, float]] = {
+    "London": (51.5560, -0.2795),        # Wembley / Tottenham Hotspur Stadium
+    "Mexico City": (19.3029, -99.1505),  # Estadio Azteca
+    "Munich": (48.2188, 11.6247),        # Allianz Arena
+    "Frankfurt": (50.0686, 8.6455),      # Deutsche Bank Park
+    "Sao Paulo": (-23.5449, -46.4741),   # Neo Química Arena
+    "Berlin": (52.5147, 13.2394),        # Olympiastadion Berlin
+    "Madrid": (40.4531, -3.6883),        # Santiago Bernabéu
+    "Dublin": (53.3607, -6.2512),        # Croke Park
+}
+
 
 def _haversine_km(coord1: tuple[float, float], coord2: tuple[float, float]) -> float:
     earth_radius_km = 6371.0
@@ -82,15 +98,27 @@ def is_divisional_game(home_id: str, away_id: str) -> bool | None:
     return home_division == away_division
 
 
-def travel_distance_km(away_id: str, home_id: str) -> float | None:
-    """Approximate distance the away team travels for this game, between
-    each team's home-market coordinates rather than the exact venue --
-    the home team is always treated as playing at their own market (0 km
-    of travel), which is wrong for the handful of neutral-site/
-    international games per season but otherwise accurate.
+def is_international_game(venue_city: str | None) -> bool:
+    return venue_city in INTERNATIONAL_VENUES
+
+
+def travel_distances_km(
+    away_id: str, home_id: str, venue_city: str | None
+) -> tuple[float | None, float | None]:
+    """Returns (home_travel_km, away_travel_km) -- the distance each team
+    travels from their own home market to the actual game site. For an
+    ordinary game the site IS the home team's market, so home travel is
+    always 0 and away travel is the distance between the two teams'
+    markets. For a game at one of INTERNATIONAL_VENUES, neither team is
+    at their own market, so both get a real distance computed from that
+    venue instead.
     """
     away_coords = TEAM_COORDINATES.get(away_id)
     home_coords = TEAM_COORDINATES.get(home_id)
     if away_coords is None or home_coords is None:
-        return None
-    return _haversine_km(away_coords, home_coords)
+        return None, None
+
+    venue_coords = INTERNATIONAL_VENUES.get(venue_city) if venue_city else None
+    if venue_coords is not None:
+        return _haversine_km(home_coords, venue_coords), _haversine_km(away_coords, venue_coords)
+    return 0.0, _haversine_km(away_coords, home_coords)

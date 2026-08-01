@@ -16,10 +16,13 @@ simulating a season/bracket using the per-game outcome model's win
 probabilities repeatedly (a model/predict.py concern), built entirely on
 top of the event-level features below.
 """
+import logging
 import math
 from datetime import date
 
-from library.features.nfl_teams import is_divisional_game, travel_distance_km
+from library.features.nfl_teams import INTERNATIONAL_VENUES, is_divisional_game, is_international_game, travel_distances_km
+
+logger = logging.getLogger(__name__)
 
 DEFAULT_ROLLING_WINDOW = 5
 DEFAULT_STARTING_RATING = 1500.0
@@ -315,6 +318,22 @@ def build_event_features(
     home_win_streak = current_streak(home_team_events, home_id)
     away_win_streak = current_streak(away_team_events, away_id)
 
+    venue_city = event.get("venue_city")
+    # Every domestic US venue address has a state; international ones
+    # never do (see library.features.nfl_teams). A venue with no state
+    # AND no entry in INTERNATIONAL_VENUES means either a new
+    # international host city needs adding there, or this is a data
+    # quirk worth a look -- either way, travel_distances_km is silently
+    # falling back to the ordinary-game assumption for this event.
+    if venue_city and event.get("venue_state") is None and venue_city not in INTERNATIONAL_VENUES:
+        logger.warning(
+            "Event %s has venue_city=%r with no US state and no entry in "
+            "INTERNATIONAL_VENUES -- travel distance for this game is "
+            "likely wrong; consider adding it to nfl_teams.INTERNATIONAL_VENUES.",
+            event.get("event_key"), venue_city,
+        )
+    home_travel_km, away_travel_km = travel_distances_km(away_id, home_id, venue_city)
+
     return {
         "event_key": event["event_key"],
         "event_date": event["event_date"],
@@ -391,7 +410,9 @@ def build_event_features(
         "away_red_zone_pct": away_red_zone_pct,
         "away_box_games_played": away_box_stats["games_played"],
         "is_divisional_game": is_divisional_game(home_id, away_id),
-        "away_travel_km": travel_distance_km(away_id, home_id),
+        "is_international_game": is_international_game(venue_city),
+        "home_travel_km": home_travel_km,
+        "away_travel_km": away_travel_km,
         "home_win_streak": home_win_streak,
         "away_win_streak": away_win_streak,
         # Labels -- the training targets (win/loss and final score), not

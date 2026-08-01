@@ -2,10 +2,12 @@
 Unit tests for library.features.nfl_teams' static reference data helpers.
 """
 from library.features.nfl_teams import (
+    INTERNATIONAL_VENUES,
     TEAM_COORDINATES,
     TEAM_DIVISIONS,
     is_divisional_game,
-    travel_distance_km,
+    is_international_game,
+    travel_distances_km,
 )
 
 
@@ -37,16 +39,37 @@ class TestIsDivisionalGame:
         assert is_divisional_game("12", "unknown-id") is None
 
 
-class TestTravelDistanceKm:
+class TestIsInternationalGame:
+    def test_known_host_city_is_true(self):
+        assert is_international_game("London") is True
+
+    def test_domestic_city_is_false(self):
+        assert is_international_game("Kansas City") is False
+
+    def test_none_is_false(self):
+        assert is_international_game(None) is False
+
+
+class TestTravelDistancesKm:
     def test_same_market_is_zero(self):
         # LAC (24) and LAR (14) share a stadium/market.
-        assert travel_distance_km("24", "14") == 0
+        home, away = travel_distances_km("24", "14", venue_city=None)
+        assert home == 0
+        assert away == 0
 
-    def test_cross_country_distance_is_substantial(self):
-        # NE (17, Foxborough) traveling to SEA (26, Seattle) -- roughly
-        # a cross-continent trip, should be several thousand km.
-        distance = travel_distance_km("17", "26")
-        assert distance > 3500
+    def test_ordinary_game_home_team_travels_zero(self):
+        # NE (17, Foxborough) at SEA (26, Seattle) -- an ordinary game,
+        # not one of INTERNATIONAL_VENUES.
+        home, away = travel_distances_km("17", "26", venue_city="Seattle")
+        assert home == 0
+        assert away > 3500  # roughly a cross-continent trip
 
-    def test_unknown_team_returns_none(self):
-        assert travel_distance_km("unknown-id", "12") is None
+    def test_international_venue_gives_both_teams_real_travel(self):
+        # KC (12) at NE (17), played in London -- neither team is at
+        # their own market, so both get a nonzero distance to Wembley.
+        home, away = travel_distances_km("17", "12", venue_city="London")
+        assert home > 0
+        assert away > 0
+
+    def test_unknown_team_returns_none_none(self):
+        assert travel_distances_km("unknown-id", "12", venue_city=None) == (None, None)
