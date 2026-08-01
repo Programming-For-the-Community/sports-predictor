@@ -282,6 +282,7 @@ class TestMain:
         mock_s3 = MagicMock()
         mock_s3.get_bytes.return_value = _parquet_bytes(df)
         mock_s3.list_keys.return_value = ["nfl/win-probability/v1/model.xgb"]
+        mock_s3.object_exists.return_value = False  # no current-production pointer yet
 
         mock_model = MagicMock()
         mock_model.predict.return_value = np.array([True, False])
@@ -298,12 +299,38 @@ class TestMain:
         assert model_call.args[0] == "nfl/win-probability/v2/model.xgb"
         assert model_call.args[1] == b"fake-model-bytes"
 
-        model_card_call = mock_s3.put_json.call_args
+        # put_json is called twice now (model card, then the promotion
+        # pointer) -- call_args_list[0] is the model card, written first.
+        model_card_call = mock_s3.put_json.call_args_list[0]
         assert model_card_call.args[0] == "nfl/win-probability/v2/model_card.json"
         assert model_card_call.args[1]["version"] == 2
         assert model_card_call.args[1]["model_name"] == "win-probability"
         assert "train_date_range" in model_card_call.args[1]
         assert "test_date_range" in model_card_call.args[1]
+
+    def test_promotes_the_new_version_when_no_current_pointer_exists(self, monkeypatch):
+        monkeypatch.setenv("MODEL_ARTIFACTS_BUCKET_NAME", "test-bucket")
+
+        df = _make_df(10)
+        mock_s3 = MagicMock()
+        mock_s3.get_bytes.return_value = _parquet_bytes(df)
+        mock_s3.list_keys.return_value = ["nfl/win-probability/v1/model.xgb"]
+        mock_s3.object_exists.return_value = False
+
+        mock_model = MagicMock()
+        mock_model.predict.return_value = np.array([True, False])
+        mock_model.predict_proba.return_value = np.array([[0.1, 0.9], [0.8, 0.2]])
+        mock_model.get_booster.return_value.save_raw.return_value = b"fake-model-bytes"
+        mock_model.get_booster.return_value.get_score.return_value = {}
+
+        with patch.object(train_model, "S3Manager", return_value=mock_s3), \
+             patch.object(train_model, "_tune_hyperparameters", return_value={}), \
+             patch.object(train_model.xgb, "XGBClassifier", return_value=mock_model):
+            train_model.main()
+
+        promotion_call = mock_s3.put_json.call_args_list[1]
+        assert promotion_call.args[0] == "nfl/win-probability/current.json"
+        assert promotion_call.args[1] == {"version": 2}
 
     def test_starts_at_version_one_when_none_exist(self, monkeypatch):
         monkeypatch.setenv("MODEL_ARTIFACTS_BUCKET_NAME", "test-bucket")
@@ -312,6 +339,7 @@ class TestMain:
         mock_s3 = MagicMock()
         mock_s3.get_bytes.return_value = _parquet_bytes(df)
         mock_s3.list_keys.return_value = []
+        mock_s3.object_exists.return_value = False
 
         mock_model = MagicMock()
         mock_model.predict.return_value = np.array([True, False])
@@ -342,6 +370,7 @@ class TestMain:
         mock_s3 = MagicMock()
         mock_s3.get_bytes.return_value = _parquet_bytes(df)
         mock_s3.list_keys.return_value = []
+        mock_s3.object_exists.return_value = False
 
         mock_model = MagicMock()
         mock_model.predict.return_value = np.array([True, False])

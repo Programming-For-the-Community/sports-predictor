@@ -18,7 +18,11 @@ Each run trains a brand-new version under its own prefix; it never
 overwrites a previous one -- see library.storage.model_artifacts for the
 versioning scheme, and Terraform/s3-model-artifacts.tf for why versioning
 is per-model rather than one shared counter across every model this sport
-has.
+has. After writing the artifact, model_common.promote_if_better decides
+whether this version becomes the one an eventual inference Lambda would
+read -- see its docstring for the promotion rule. train_baseline_model.py
+never calls this; the baseline has no production concept, it only ever
+versions for comparison.
 
 Required environment variables:
     MODEL_ARTIFACTS_BUCKET_NAME
@@ -42,11 +46,22 @@ logger = logging.getLogger("nfl-train-model")
 
 MODEL_NAME = "win-probability"
 ALGORITHM = "xgboost"
+EVENT_FEATURES_KEY = "nfl/training-data/event_features.parquet"
 
-# Kept as direct-call aliases (rather than callers spelling out
-# model_common.feature_columns/chronological_split) since this script's
-# own train()/tests call them by these names throughout.
-_feature_columns = model_common.feature_columns
+# Identifiers, never model inputs. Every other label_* column is excluded
+# generically below -- this model only predicts label_home_won, the score
+# columns belong to the score-margin model on design/PROJECT_PLAN.md, not
+# this one.
+NON_FEATURE_COLUMNS = {"event_key", "event_date", "home_entity_id", "away_entity_id", "venue_city", "venue_state"}
+LABEL_COLUMN = "label_home_won"
+SUMMARY_METRICS = ["accuracy", "log_loss"]
+PROMOTION_METRIC = "log_loss"
+
+
+def _feature_columns(df: pd.DataFrame) -> list[str]:
+    return model_common.feature_columns(df, NON_FEATURE_COLUMNS)
+
+
 _chronological_split = model_common.chronological_split
 
 # A modest, standard XGBoost search space -- deliberately not exhaustive.
@@ -141,9 +156,9 @@ def train(df: pd.DataFrame) -> tuple[xgb.XGBClassifier, dict]:
     )
 
     X_train = model_common.numeric_frame(train_df, feature_columns)
-    y_train = train_df[model_common.LABEL_COLUMN]
+    y_train = train_df[LABEL_COLUMN]
     X_test = model_common.numeric_frame(test_df, feature_columns)
-    y_test = test_df[model_common.LABEL_COLUMN]
+    y_test = test_df[LABEL_COLUMN]
 
     best_params = _tune_hyperparameters(X_train, y_train)
     model = xgb.XGBClassifier(objective="binary:logistic", eval_metric="logloss", **best_params)
@@ -183,14 +198,17 @@ def main() -> None:
     region = os.environ.get("AWS_REGION")
     s3 = S3Manager(bucket, region=region)
 
-    logger.info("Loading %s training data from s3://%s/%s", MODEL_NAME, bucket, model_common.EVENT_FEATURES_KEY)
-    df = model_common.load_features(s3)
+    logger.info("Loading %s training data from s3://%s/%s", MODEL_NAME, bucket, EVENT_FEATURES_KEY)
+    df = model_common.load_features(s3, EVENT_FEATURES_KEY)
     logger.info("Loaded %d event rows", len(df))
 
     model, metadata = train(df)
 
     model_bytes = model.get_booster().save_raw()
-    model_common.save_model_artifact(s3, MODEL_NAME, ALGORITHM, model_bytes, "model.xgb", metadata)
+    model_card = model_common.save_model_artifact(
+        s3, MODEL_NAME, ALGORITHM, model_bytes, "model.xgb", metadata, SUMMARY_METRICS,
+    )
+    model_common.promote_if_better(s3, MODEL_NAME, model_card["version"], metadata, PROMOTION_METRIC)
 
 
 if __name__ == "__main__":

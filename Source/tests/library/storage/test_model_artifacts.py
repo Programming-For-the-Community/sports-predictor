@@ -3,7 +3,12 @@ Unit tests for library.storage.model_artifacts -- the versioned S3 key
 scheme shared by every sport's training task (win-probability,
 score-margin, per-stat player props all use these same helpers).
 """
-from library.storage.model_artifacts import model_artifact_key, model_artifact_prefix, next_model_version
+from library.storage.model_artifacts import (
+    current_version_key,
+    model_artifact_key,
+    model_artifact_prefix,
+    next_model_version,
+)
 
 
 class TestModelArtifactPrefix:
@@ -35,3 +40,12 @@ class TestModelArtifactKey:
         key = model_artifact_key("nfl", "win-probability", 3, "model.xgb")
 
         assert key == "nfl/win-probability/v3/model.xgb"
+
+
+class TestCurrentVersionKey:
+    def test_builds_a_key_outside_any_version_folder(self):
+        key = current_version_key("nfl", "win-probability")
+
+        assert key == "nfl/win-probability/current.json"
+        # Must never be mistaken for a version by next_model_version.
+        assert next_model_version([key]) == 1
