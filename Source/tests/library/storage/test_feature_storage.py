@@ -15,15 +15,17 @@ from library.storage.feature_storage import FeatureStorage
 def storage_env(monkeypatch):
     monkeypatch.setenv("EVENTS_TABLE_NAME", "test-events")
     monkeypatch.setenv("PLAYER_GAME_STATS_TABLE_NAME", "test-player-game-stats")
+    monkeypatch.setenv("TEAM_GAME_STATS_TABLE_NAME", "test-team-game-stats")
 
 
 def _make_storage(storage_env):
     mock_events = MagicMock()
     mock_stats = MagicMock()
+    mock_team_stats = MagicMock()
     with patch("library.storage.feature_storage.DynamoDBTable") as mock_table_cls:
-        mock_table_cls.side_effect = [mock_events, mock_stats]
+        mock_table_cls.side_effect = [mock_events, mock_stats, mock_team_stats]
         storage = FeatureStorage()
-    return storage, mock_events, mock_stats
+    return storage, mock_events, mock_stats, mock_team_stats
 
 
 def _event(event_id, entity_id, sport="nfl", status="completed", event_date="2025-09-01"):
@@ -38,7 +40,7 @@ def _event(event_id, entity_id, sport="nfl", status="completed", event_date="202
 
 class TestGetPlayerGameStats:
     def test_queries_entity_history_index_most_recent_first(self, storage_env):
-        storage, _, mock_stats = _make_storage(storage_env)
+        storage, _, mock_stats, _ = _make_storage(storage_env)
         mock_stats.query.return_value = [{"event_date": "2025-09-28"}]
 
         result = storage.get_player_game_stats("mahomes-patrick")
@@ -50,7 +52,7 @@ class TestGetPlayerGameStats:
         assert call_kwargs["limit"] is None
 
     def test_passes_limit_through(self, storage_env):
-        storage, _, mock_stats = _make_storage(storage_env)
+        storage, _, mock_stats, _ = _make_storage(storage_env)
         mock_stats.query.return_value = []
 
         storage.get_player_game_stats("mahomes-patrick", limit=5)
@@ -60,7 +62,7 @@ class TestGetPlayerGameStats:
 
 class TestGetTeamEvents:
     def test_filters_by_sport_status_and_participant(self, storage_env):
-        storage, mock_events, _ = _make_storage(storage_env)
+        storage, mock_events, _, _ = _make_storage(storage_env)
         mock_events.scan.return_value = [
             _event("1", "KC"),
             _event("2", "LAC"),  # different team
@@ -73,7 +75,7 @@ class TestGetTeamEvents:
         assert [e["event_id"] for e in result] == ["1"]
 
     def test_sorts_most_recent_first(self, storage_env):
-        storage, mock_events, _ = _make_storage(storage_env)
+        storage, mock_events, _, _ = _make_storage(storage_env)
         mock_events.scan.return_value = [
             _event("1", "KC", event_date="2025-09-01"),
             _event("2", "KC", event_date="2025-09-15"),
@@ -84,7 +86,7 @@ class TestGetTeamEvents:
         assert [e["event_id"] for e in result] == ["2", "1"]
 
     def test_before_date_excludes_later_games(self, storage_env):
-        storage, mock_events, _ = _make_storage(storage_env)
+        storage, mock_events, _, _ = _make_storage(storage_env)
         mock_events.scan.return_value = [
             _event("1", "KC", event_date="2025-09-01"),
             _event("2", "KC", event_date="2025-09-15"),
@@ -95,7 +97,7 @@ class TestGetTeamEvents:
         assert [e["event_id"] for e in result] == ["1"]
 
     def test_limit_truncates_after_sort(self, storage_env):
-        storage, mock_events, _ = _make_storage(storage_env)
+        storage, mock_events, _, _ = _make_storage(storage_env)
         mock_events.scan.return_value = [
             _event("1", "KC", event_date="2025-09-01"),
             _event("2", "KC", event_date="2025-09-15"),
@@ -105,3 +107,14 @@ class TestGetTeamEvents:
         result = storage.get_team_events("nfl", "KC", limit=2)
 
         assert [e["event_id"] for e in result] == ["2", "3"]
+
+
+class TestGetAllTeamGameStats:
+    def test_scans_team_game_stats_table(self, storage_env):
+        storage, _, _, mock_team_stats = _make_storage(storage_env)
+        mock_team_stats.scan.return_value = [{"team_id": "KC"}]
+
+        result = storage.get_all_team_game_stats()
+
+        assert result == [{"team_id": "KC"}]
+        mock_team_stats.scan.assert_called_once()

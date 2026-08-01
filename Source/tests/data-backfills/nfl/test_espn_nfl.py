@@ -213,3 +213,30 @@ class TestNormalizeBoxscore:
     def test_stat_items_and_player_entities_have_same_count(self, summary_response):
         stats_items, player_entities = normalize.boxscore_to_player_game_stats(summary_response)
         assert len(stats_items) == len(player_entities)
+
+
+# ---------------------------------------------------------------------------
+# normalize.boxscore_to_team_game_stats
+# ---------------------------------------------------------------------------
+
+class TestNormalizeTeamGameStats:
+    def test_returns_two_team_items(self, summary_response):
+        items = normalize.boxscore_to_team_game_stats(summary_response)
+        assert len(items) == 2
+
+    def test_item_has_required_schema_fields(self, summary_response):
+        items = normalize.boxscore_to_team_game_stats(summary_response)
+        for item in items:
+            for field in ("event_key", "team_key", "team_id", "event_date", "stat_line"):
+                assert field in item, f"Missing field: {field}"
+
+    def test_stat_line_is_non_empty_dict(self, summary_response):
+        items = normalize.boxscore_to_team_game_stats(summary_response)
+        for item in items:
+            assert isinstance(item["stat_line"], dict)
+            assert len(item["stat_line"]) > 0
+
+    def test_no_duplicate_team_keys(self, summary_response):
+        items = normalize.boxscore_to_team_game_stats(summary_response)
+        team_keys = [item["team_key"] for item in items]
+        assert len(team_keys) == len(set(team_keys))

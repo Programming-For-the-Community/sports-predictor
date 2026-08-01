@@ -9,6 +9,7 @@ terraform.tfstate.*
 .idea/
 *.swp
 *.swo
+.claude/
 
 # Python
 __pycache__/

@@ -65,6 +65,17 @@ One row per player per event, for team sports only (NFL, NCAA FB, NBA, NCAA MBB)
 | `stat_line` | `{ "passing_yards": 312, "passing_tds": 3, "interceptions": 1 }` | Sport-specific flexible map, same pattern as `entities.metadata` — a basketball box score and a football box score share nothing but the shape of the container |
 | `started` | `true` | Cheap signal for feature engineering (did this player start vs. come off the bench) without needing snap counts or play-by-play |
 
+## Team game stats table
+
+One row per team per event, for team sports only. ESPN's box score already computes team-level aggregates (turnovers, total yards, time of possession, third/fourth-down and red-zone efficiency, etc.) that aren't derivable by summing individual player stat lines.
+
+| Attribute | Example | Notes |
+|---|---|---|
+| `event_key` | `SPORT#NFL#EVENT#2025-W04-KC-LAC` | Same partition key as the parent event |
+| `team_key` | `TEAM#KC` | Sort key — lets one event partition hold both teams' rows |
+| `team_id` | `KC` | Matches the team's `entity_id` in the entities table |
+| `stat_line` | `{ "turnovers": 1, "total_yards": 350, "possession_time_seconds": 1800, "third_down_conversions": 6, "third_down_attempts": 12 }` | Same flexible-map pattern as `player_game_stats.stat_line` |
+
 ## Predictions table
 
 One row per event per model version for event-level outcomes, or one row per event-player-model for player props — kept separate from raw results so re-running a model doesn't overwrite history.

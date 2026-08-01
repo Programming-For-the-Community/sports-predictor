@@ -16,12 +16,26 @@ simulating a season/bracket using the per-game outcome model's win
 probabilities repeatedly (a model/predict.py concern), built entirely on
 top of the event-level features below.
 """
+import math
 from datetime import date
 
 DEFAULT_ROLLING_WINDOW = 5
 DEFAULT_STARTING_RATING = 1500.0
 DEFAULT_K_FACTOR = 20.0
 DEFAULT_HOME_ADVANTAGE = 55.0
+# FiveThirtyEight's NFL Elo margin-of-victory constant -- see _mov_multiplier.
+DEFAULT_MOV_BASE = 2.2
+DEFAULT_MOV_DIVISOR = 0.001
+
+
+def _mov_multiplier(point_diff: int, winner_elo_diff: float, base: float, divisor: float) -> float:
+    """Scales a rating update by how many points a game was decided by,
+    log-dampened, and further dampened by winner_elo_diff (the winner's
+    pre-game rating edge, home-field advantage included) so a big
+    favorite winning big moves ratings less than a big underdog winning
+    by the same margin.
+    """
+    return math.log(abs(point_diff) + 1) * (base / (winner_elo_diff * divisor + base))
 
 
 def compute_elo_ratings(
@@ -29,17 +43,20 @@ def compute_elo_ratings(
     k_factor: float = DEFAULT_K_FACTOR,
     home_advantage: float = DEFAULT_HOME_ADVANTAGE,
     starting_rating: float = DEFAULT_STARTING_RATING,
+    mov_base: float = DEFAULT_MOV_BASE,
+    mov_divisor: float = DEFAULT_MOV_DIVISOR,
 ) -> dict[str, dict[str, float]]:
     """Walks head-to-head events in chronological order, updating a running
     Elo-style rating per team. Returns each event's PRE-game ratings, keyed
     by event_key -- using the post-game rating would leak that event's own
     outcome into its own features.
 
-    Plain win/loss Elo, no margin-of-victory scaling (see design/
-    PROJECT_PLAN.md Phase 1's "an Elo-style rating" bullet -- this is
-    intentionally the simple version). Ties count as a 0.5 result for both
-    teams. Events without both a home/away role or a final score still get
-    a pre-game rating recorded, they just don't produce a rating update.
+    Margin-of-victory-scaled (see _mov_multiplier) -- a blowout moves
+    ratings more than a one-score win. Ties count as a 0.5 result for both
+    teams with no MOV scaling applied (there's no winner to measure a
+    margin from). Events without both a home/away role or a final score
+    still get a pre-game rating recorded, they just don't produce a
+    rating update.
     """
     ratings: dict[str, float] = {}
     pre_game_ratings: dict[str, dict[str, float]] = {}
@@ -65,18 +82,26 @@ def compute_elo_ratings(
         if home_score is None or away_score is None:
             continue
 
+        point_diff = home_score - away_score
         if home_score > away_score:
             home_actual, away_actual = 1.0, 0.0
+            winner_elo_diff = (home_rating + home_advantage) - away_rating
         elif home_score < away_score:
             home_actual, away_actual = 0.0, 1.0
+            winner_elo_diff = away_rating - (home_rating + home_advantage)
         else:
             home_actual = away_actual = 0.5
+            winner_elo_diff = 0.0
+
+        mov_multiplier = (
+            _mov_multiplier(point_diff, winner_elo_diff, mov_base, mov_divisor) if point_diff != 0 else 1.0
+        )
 
         expected_home = 1 / (1 + 10 ** ((away_rating - (home_rating + home_advantage)) / 400))
         expected_away = 1 - expected_home
 
-        ratings[home_id] = home_rating + k_factor * (home_actual - expected_home)
-        ratings[away_id] = away_rating + k_factor * (away_actual - expected_away)
+        ratings[home_id] = home_rating + k_factor * mov_multiplier * (home_actual - expected_home)
+        ratings[away_id] = away_rating + k_factor * mov_multiplier * (away_actual - expected_away)
 
     return pre_game_ratings
 
@@ -152,20 +177,40 @@ def rolling_player_stat_averages(
     return averages
 
 
-def identify_starting_qb(team_player_games: list[dict]) -> dict | None:
+def _identify_leader(team_player_games: list[dict], volume_stat: str) -> dict | None:
     """Given one team's player_game_stats rows for a single event, returns
-    whoever had the most passing attempts -- the standard heuristic for
-    identifying the game's starting QB, correctly picking the primary
-    passer over a backup who took a few series in relief. Returns the full
+    whoever had the most of `volume_stat`. Returns the full
     player_game_stats row (not just an ID) so the caller can use it
-    directly as one entry of that QB's own rolling history.
-
-    Returns None if nobody on the team recorded a passing attempt (e.g.
-    the stat_line schema for that game didn't carry passing stats)."""
-    passers = [row for row in team_player_games if "passing_attempts" in row.get("stat_line", {})]
-    if not passers:
+    directly as one entry of that player's own rolling history, or None
+    if nobody on the team recorded that stat."""
+    candidates = [row for row in team_player_games if volume_stat in row.get("stat_line", {})]
+    if not candidates:
         return None
-    return max(passers, key=lambda row: row["stat_line"]["passing_attempts"])
+    return max(candidates, key=lambda row: row["stat_line"][volume_stat])
+
+
+def identify_starting_qb(team_player_games: list[dict]) -> dict | None:
+    """The player with the most passing attempts -- see _identify_leader."""
+    return _identify_leader(team_player_games, "passing_attempts")
+
+
+def identify_lead_rusher(team_player_games: list[dict]) -> dict | None:
+    """The player with the most rushing attempts -- see _identify_leader."""
+    return _identify_leader(team_player_games, "rushing_attempts")
+
+
+def identify_lead_receiver(team_player_games: list[dict]) -> dict | None:
+    """The player with the most receiving targets (not receptions -- targets
+    reflect who the offense is actually looking for, independent of how
+    many of those looks were caught) -- see _identify_leader."""
+    return _identify_leader(team_player_games, "receiving_targets")
+
+
+def _rate(averages: dict, numerator_key: str, denominator_key: str) -> float | None:
+    denominator = averages.get(denominator_key)
+    if not denominator:
+        return None
+    return averages[numerator_key] / denominator
 
 
 def build_event_features(
@@ -176,6 +221,12 @@ def build_event_features(
     window: int = DEFAULT_ROLLING_WINDOW,
     home_qb_games: list[dict] | None = None,
     away_qb_games: list[dict] | None = None,
+    home_rb_games: list[dict] | None = None,
+    away_rb_games: list[dict] | None = None,
+    home_wr_games: list[dict] | None = None,
+    away_wr_games: list[dict] | None = None,
+    home_team_box_stats: list[dict] | None = None,
+    away_team_box_stats: list[dict] | None = None,
 ) -> dict:
     """Assembles one training row for a head-to-head event: game-outcome
     (win/loss) and game-score features and labels share this same row,
@@ -186,15 +237,18 @@ def build_event_features(
     recent first, NOT including this one (see FeatureStorage.get_team_events
     with before_date=event['event_date']).
 
-    home_qb_games/away_qb_games are each event's starting QB's own prior
-    completed games, most recent first, NOT including this one -- the
-    same shape rolling_player_stat_averages expects elsewhere (see
-    identify_starting_qb + FeatureStorage.get_player_game_stats). None (or
-    an empty list) when a starting QB couldn't be identified for that
-    team, in which case the qb_* columns are just None -- a raw team ID
-    would need one-hot encoding and doesn't age well as rosters turn over,
-    so this stays as derived performance stats, consistent with team
-    history above.
+    home_qb_games/away_qb_games, home_rb_games/away_rb_games, and
+    home_wr_games/away_wr_games are each event's identified key player's
+    (see identify_starting_qb/identify_lead_rusher/identify_lead_receiver)
+    own prior completed games, most recent first, NOT including this one
+    -- the same shape rolling_player_stat_averages expects (see
+    FeatureStorage.get_player_game_stats). None (or an empty list) when a
+    leader couldn't be identified for that team/position, in which case
+    those columns are just None.
+
+    home_team_box_stats/away_team_box_stats are each team's own prior
+    team_game_stats rows (see FeatureStorage.get_all_team_game_stats),
+    most recent first, NOT including this one.
     """
     participants = event["participants"]
     home = next(p for p in participants if p.get("role") == "home")
@@ -210,6 +264,19 @@ def build_event_features(
 
     home_qb_stats = rolling_player_stat_averages(home_qb_games or [], window)
     away_qb_stats = rolling_player_stat_averages(away_qb_games or [], window)
+    home_rb_stats = rolling_player_stat_averages(home_rb_games or [], window)
+    away_rb_stats = rolling_player_stat_averages(away_rb_games or [], window)
+    home_wr_stats = rolling_player_stat_averages(home_wr_games or [], window)
+    away_wr_stats = rolling_player_stat_averages(away_wr_games or [], window)
+
+    # team_game_stats rows carry a stat_line the same shape
+    # rolling_player_stat_averages already handles generically.
+    home_box_stats = rolling_player_stat_averages(home_team_box_stats or [], window)
+    away_box_stats = rolling_player_stat_averages(away_team_box_stats or [], window)
+    home_third_down_pct = _rate(home_box_stats, "avg_third_down_conversions", "avg_third_down_attempts")
+    away_third_down_pct = _rate(away_box_stats, "avg_third_down_conversions", "avg_third_down_attempts")
+    home_red_zone_pct = _rate(home_box_stats, "avg_red_zone_conversions", "avg_red_zone_attempts")
+    away_red_zone_pct = _rate(away_box_stats, "avg_red_zone_conversions", "avg_red_zone_attempts")
 
     return {
         "event_key": event["event_key"],
@@ -246,18 +313,10 @@ def build_event_features(
         "away_avg_points_scored": away_scoring["avg_points_scored"],
         "away_avg_points_allowed": away_scoring["avg_points_allowed"],
         "away_games_played": away_scoring["games_played"],
-        # rolling_player_stat_averages keys off whatever stat_line field
-        # names normalize.py actually produced -- for the passing category,
-        # that's "passing_yards", "passing_touchdowns" (ESPN's own key
-        # names already carry the category, so normalize.py doesn't
-        # double-prefix them), and "passing_interceptions" (a bare
-        # "interceptions" key DOES get prefixed, since the separate
-        # "interceptions" category has its own bare "interceptions" key
-        # for defensive picks -- the prefix is what keeps thrown vs.
-        # picked-off interceptions from colliding into one stat). Verified
-        # against a real ESPN boxscore response -- get this wrong and these
-        # columns are silently always None, which pandas then types as
-        # `object`, not float, and XGBoost rejects the whole training run.
+        # Keys match the stat_line field names normalize.py actually
+        # produces: "passing_yards"/"passing_touchdowns" (clean, no
+        # double-prefix), and "passing_interceptions" (prefixed, distinct
+        # from the "interceptions" category's own bare "interceptions" key).
         "home_qb_avg_passing_yards": home_qb_stats.get("avg_passing_yards"),
         "home_qb_avg_passing_tds": home_qb_stats.get("avg_passing_touchdowns"),
         "home_qb_avg_interceptions": home_qb_stats.get("avg_passing_interceptions"),
@@ -266,6 +325,34 @@ def build_event_features(
         "away_qb_avg_passing_tds": away_qb_stats.get("avg_passing_touchdowns"),
         "away_qb_avg_interceptions": away_qb_stats.get("avg_passing_interceptions"),
         "away_qb_games_played": away_qb_stats["games_played"],
+        # Lead rusher/receiver, same identify-then-track-their-own-history
+        # approach as the QB above (see identify_lead_rusher/identify_lead_receiver).
+        "home_rb_avg_rushing_yards": home_rb_stats.get("avg_rushing_yards"),
+        "home_rb_avg_rushing_tds": home_rb_stats.get("avg_rushing_touchdowns"),
+        "home_rb_games_played": home_rb_stats["games_played"],
+        "away_rb_avg_rushing_yards": away_rb_stats.get("avg_rushing_yards"),
+        "away_rb_avg_rushing_tds": away_rb_stats.get("avg_rushing_touchdowns"),
+        "away_rb_games_played": away_rb_stats["games_played"],
+        "home_wr_avg_receiving_yards": home_wr_stats.get("avg_receiving_yards"),
+        "home_wr_avg_receiving_tds": home_wr_stats.get("avg_receiving_touchdowns"),
+        "home_wr_avg_receptions": home_wr_stats.get("avg_receiving_receptions"),
+        "home_wr_games_played": home_wr_stats["games_played"],
+        "away_wr_avg_receiving_yards": away_wr_stats.get("avg_receiving_yards"),
+        "away_wr_avg_receiving_tds": away_wr_stats.get("avg_receiving_touchdowns"),
+        "away_wr_avg_receptions": away_wr_stats.get("avg_receiving_receptions"),
+        "away_wr_games_played": away_wr_stats["games_played"],
+        "home_avg_turnovers": home_box_stats.get("avg_turnovers"),
+        "home_avg_total_yards": home_box_stats.get("avg_total_yards"),
+        "home_avg_possession_time_seconds": home_box_stats.get("avg_possession_time_seconds"),
+        "home_third_down_pct": home_third_down_pct,
+        "home_red_zone_pct": home_red_zone_pct,
+        "home_box_games_played": home_box_stats["games_played"],
+        "away_avg_turnovers": away_box_stats.get("avg_turnovers"),
+        "away_avg_total_yards": away_box_stats.get("avg_total_yards"),
+        "away_avg_possession_time_seconds": away_box_stats.get("avg_possession_time_seconds"),
+        "away_third_down_pct": away_third_down_pct,
+        "away_red_zone_pct": away_red_zone_pct,
+        "away_box_games_played": away_box_stats["games_played"],
         # Labels -- the training targets (win/loss and final score), not
         # model inputs. None when this is called to build a live feature
         # vector for a not-yet-played event.

@@ -17,3 +17,7 @@ def event_key(sport: str, event_id: str) -> str:
 
 def player_key(entity_id: str) -> str:
     return f"PLAYER#{entity_id}"
+
+
+def team_key(team_id: str) -> str:
+    return f"TEAM#{team_id}"

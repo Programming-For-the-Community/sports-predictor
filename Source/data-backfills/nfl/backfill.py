@@ -20,6 +20,7 @@ Required environment variables:
     ENTITIES_TABLE_NAME
     EVENTS_TABLE_NAME
     PLAYER_GAME_STATS_TABLE_NAME
+    TEAM_GAME_STATS_TABLE_NAME
     AWS_REGION
 
 Optional environment variables -- these exist so an ECS "Run Task" console
@@ -85,6 +86,7 @@ def process_game(client: NFLClient, storage: PipelineStorage, season: int, event
     for entity in player_entities:
         storage.upsert_entity(entity)
     storage.write_player_game_stats(stats_items)
+    storage.write_team_game_stats(normalize.boxscore_to_team_game_stats(summary))
 
 
 def process_season(client: NFLClient, storage: PipelineStorage, season: int) -> dict:

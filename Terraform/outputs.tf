@@ -45,6 +45,11 @@ output "player_game_stats_table_name" {
   value       = local.player_game_stats_table
 }
 
+output "team_game_stats_table_name" {
+  description = "Team game stats DynamoDB table name"
+  value       = local.team_game_stats_table
+}
+
 output "nfl_backfill_task_definition_arn" {
   description = "ARN of the NFL backfill ECS task definition -- pass to `aws ecs run-task --task-definition`"
   value       = aws_ecs_task_definition.nfl_backfill.arn

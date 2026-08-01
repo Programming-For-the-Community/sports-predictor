@@ -8,7 +8,7 @@ one string -- is passed in by the caller via compound_key_splits rather
 than hardcoded here.
 """
 from library.parsing import parse_number, snake_case
-from library.schema.keys import entity_key, event_key, player_key
+from library.schema.keys import entity_key, event_key, player_key, team_key
 
 
 def team_to_entity(team: dict, sport: str) -> dict:
@@ -156,3 +156,76 @@ def boxscore_to_player_game_stats(
             },
         })
     return player_game_stats_items, player_entities
+
+
+def _parse_clock_to_seconds(display_value):
+    """Converts ESPN's "MM:SS" time-of-possession format (e.g. "23:45")
+    into total seconds. Falls back to the raw value unparsed if it's not
+    clock-shaped."""
+    if not isinstance(display_value, str) or ":" not in display_value:
+        return display_value
+    minutes, _, seconds = display_value.partition(":")
+    try:
+        return int(minutes) * 60 + int(seconds)
+    except ValueError:
+        return display_value
+
+
+def boxscore_to_team_game_stats(
+    summary: dict,
+    sport: str,
+    compound_key_splits: dict[str, tuple[str, str]],
+) -> list[dict]:
+    """Returns one team_game_stats item per team from a single game's box
+    score -- ESPN's boxscore.teams section (turnovers, total yards, time
+    of possession, third/fourth-down and red-zone efficiency, etc.).
+
+    ESPN's team statistics are a flat list with no category grouping, so
+    every stat name snake-cases to a unique field directly, unlike
+    boxscore_to_player_game_stats. compound_key_splits follows the same
+    "one string packs two numbers" contract as the player-stats version,
+    with team-level field names (e.g. "thirdDownEff": "3-9" -> conversions,
+    attempts) -- a separate map from the player one, since the raw ESPN
+    key strings differ at this level ("completionAttempts", not
+    "completions/passingAttempts").
+
+    ESPN's team statistics list contains "interceptions" twice with an
+    identical value both times; the second occurrence just overwrites the
+    first with the same number.
+    """
+    header = summary["header"]
+    event_id = header["id"]
+    event_date = None
+    for competition in header.get("competitions", []):
+        if competition.get("date"):
+            event_date = competition["date"][:10]
+            break
+
+    items = []
+    for team_block in summary.get("boxscore", {}).get("teams", []):
+        team_id = str(team_block["team"]["id"])
+        line: dict = {}
+        for stat in team_block.get("statistics", []):
+            name = stat.get("name", "")
+            display_value = stat.get("displayValue")
+            if name in compound_key_splits:
+                first_name, second_name = compound_key_splits[name]
+                sep = "/" if "/" in display_value else "-"
+                parts = display_value.split(sep, 1)
+                if len(parts) == 2:
+                    line[first_name] = parse_number(parts[0])
+                    line[second_name] = parse_number(parts[1])
+                    continue
+            if name == "possessionTime":
+                line["possession_time_seconds"] = _parse_clock_to_seconds(display_value)
+                continue
+            line[snake_case(name)] = parse_number(display_value)
+
+        items.append({
+            "event_key": event_key(sport, event_id),
+            "team_key": team_key(team_id),
+            "team_id": team_id,
+            "event_date": event_date,
+            "stat_line": line,
+        })
+    return items
