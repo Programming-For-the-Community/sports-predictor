@@ -1,16 +1,13 @@
-# front_end
+# sports-predictor front-end
 
-A new Flutter project.
+Flutter Web client for the sports-predictor platform. See `design/FRONTEND_STYLE.md`
+for the visual language and `design/ARCHITECTURE.md` for how this fits into the
+overall system.
 
-## Getting Started
+## Local development
 
-This project is a starting point for a Flutter application.
+```
+flutter run -d chrome --dart-define-from-file=config/dev.json
+```
 
-A few resources to get you started if this is your first Flutter project:
-
-- [Lab: Write your first Flutter app](https://docs.flutter.dev/get-started/codelab)
-- [Cookbook: Useful Flutter samples](https://docs.flutter.dev/cookbook)
-
-For help getting started with Flutter development, view the
-[online documentation](https://docs.flutter.dev/), which offers tutorials,
-samples, guidance on mobile development, and a full API reference.
+Or use the "Flutter: Run web (dev)" launch configuration in `.vscode/launch.json`.
