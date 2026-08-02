@@ -16,6 +16,52 @@ resource "aws_api_gateway_resource" "nfl" {
   path_part   = "nfl"
 }
 
+resource "aws_api_gateway_resource" "nfl_events" {
+  rest_api_id = aws_api_gateway_rest_api.main.id
+  parent_id   = aws_api_gateway_resource.nfl.id
+  path_part   = "events"
+}
+
+resource "aws_api_gateway_method" "nfl_events" {
+  rest_api_id   = aws_api_gateway_rest_api.main.id
+  resource_id   = aws_api_gateway_resource.nfl_events.id
+  http_method   = "GET"
+  authorization = "COGNITO_USER_POOLS"
+  authorizer_id = aws_api_gateway_authorizer.cognito.id
+}
+
+resource "aws_api_gateway_integration" "nfl_events" {
+  rest_api_id             = aws_api_gateway_rest_api.main.id
+  resource_id             = aws_api_gateway_resource.nfl_events.id
+  http_method             = aws_api_gateway_method.nfl_events.http_method
+  type                    = "AWS_PROXY"
+  integration_http_method = "POST"
+  uri                     = aws_lambda_function.nfl_predict.invoke_arn
+}
+
+resource "aws_api_gateway_resource" "nfl_models" {
+  rest_api_id = aws_api_gateway_rest_api.main.id
+  parent_id   = aws_api_gateway_resource.nfl.id
+  path_part   = "models"
+}
+
+resource "aws_api_gateway_method" "nfl_models" {
+  rest_api_id   = aws_api_gateway_rest_api.main.id
+  resource_id   = aws_api_gateway_resource.nfl_models.id
+  http_method   = "GET"
+  authorization = "COGNITO_USER_POOLS"
+  authorizer_id = aws_api_gateway_authorizer.cognito.id
+}
+
+resource "aws_api_gateway_integration" "nfl_models" {
+  rest_api_id             = aws_api_gateway_rest_api.main.id
+  resource_id             = aws_api_gateway_resource.nfl_models.id
+  http_method             = aws_api_gateway_method.nfl_models.http_method
+  type                    = "AWS_PROXY"
+  integration_http_method = "POST"
+  uri                     = aws_lambda_function.nfl_predict.invoke_arn
+}
+
 resource "aws_api_gateway_resource" "nfl_predictions" {
   rest_api_id = aws_api_gateway_rest_api.main.id
   parent_id   = aws_api_gateway_resource.nfl.id
@@ -111,6 +157,13 @@ resource "aws_api_gateway_deployment" "main" {
       aws_api_gateway_integration.nfl_predict_event.id,
       aws_api_gateway_method.nfl_predict_player.id,
       aws_api_gateway_integration.nfl_predict_player.id,
+      aws_api_gateway_gateway_response.missing_auth_token.id,
+      aws_api_gateway_resource.nfl_events.id,
+      aws_api_gateway_method.nfl_events.id,
+      aws_api_gateway_integration.nfl_events.id,
+      aws_api_gateway_resource.nfl_models.id,
+      aws_api_gateway_method.nfl_models.id,
+      aws_api_gateway_integration.nfl_models.id,
     ]))
   }
 

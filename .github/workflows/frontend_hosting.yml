@@ -1,0 +1,106 @@
+# Builds, tests, and packages the Flutter Web frontend. Runs standalone
+# (workflow_dispatch) or called from frontend_deploy.yml (workflow_call) --
+# either way the work is identical: run tests, then build only if they
+# pass, and upload the built site as an artifact.
+#
+# Build-only, same shape as nfl_ai_hosting.yml -- no deploy step here.
+# Deploying (syncing to S3 + invalidating CloudFront) is
+# frontend_sync_deploy.yml's job, which needs the S3 bucket/CloudFront
+# distribution (Terraform/s3-frontend.tf, cloudfront.tf) to already exist
+# -- this job has no such dependency (reading pre-existing Terraform
+# outputs to render config/prod.json doesn't require infra to have just
+# applied; those specific outputs -- api_endpoint, cognito_user_pool_id,
+# cognito_client_id -- already existed before this frontend work), so it
+# can run in parallel with `infra` in frontend_deploy.yml.
+#
+# No Dockerfile -- flutter build web runs directly on the runner via
+# subosito/flutter-action, the same way run_python_tests.yml installs
+# Python directly rather than containerizing test runs.
+
+name: Frontend Hosting
+
+on:
+  workflow_dispatch:
+  workflow_call:
+    outputs:
+      artifact_name:
+        description: 'Name of the uploaded build/web artifact, for frontend_sync_deploy.yml to download'
+        value: ${{ jobs.build-frontend.outputs.artifact_name }}
+
+env:
+  FLUTTER_VERSION: '3.29.3'
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  test-frontend:
+    name: Run frontend tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+
+      - name: Install dependencies
+        working-directory: Source/front-end
+        run: flutter pub get
+
+      - name: Analyze
+        working-directory: Source/front-end
+        run: flutter analyze
+
+      - name: Test
+        working-directory: Source/front-end
+        run: flutter test
+
+  build-frontend:
+    name: Build frontend
+    needs: test-frontend
+    runs-on: ubuntu-latest
+    outputs:
+      artifact_name: frontend-build
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_DEPLOY_SVC_ACCT_ARN }}
+          aws-region: ${{ vars.AWS_RESOURCE_REGION }}
+          role-session-name: GitHubActions-${{ github.run_id }}
+
+      - name: Install dependencies
+        working-directory: Source/front-end
+        run: flutter pub get
+
+      - name: Terraform init (read-only -- needed to read outputs from remote state)
+        run: terraform -chdir=Terraform init -reconfigure
+
+      - name: Render production config from Terraform outputs
+        working-directory: Source/front-end
+        run: bash scripts/render_frontend_config.sh
+
+      - name: Build web
+        working-directory: Source/front-end
+        run: flutter build web --release --dart-define-from-file=config/prod.json
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-build
+          path: Source/front-end/build/web
+          retention-days: 7
