@@ -14,6 +14,11 @@
 # AWS-published base image so wheels built against it are guaranteed ABI
 # -compatible with where they run -- no separate manylinux-tag concerns.
 #
+# requirements.txt installs with --no-deps (see that file's own comment)
+# to skip xgboost's unconditional nvidia-nccl-cu12 dependency on Linux --
+# safe because scipy/numpy are listed directly in requirements.txt, so
+# --no-deps only drops what xgboost itself would otherwise pull in.
+#
 # boto3 is intentionally excluded from requirements.txt -- the Lambda
 # Python base image ships it preinstalled, same as the managed (zip)
 # runtime does.
@@ -26,7 +31,7 @@ COPY library/ ./library/
 COPY aws-lambdas/nfl/predict/requirements.txt ./requirements.txt
 
 RUN pip install --no-cache-dir --target=/install --no-deps ./library && \
-    pip install --no-cache-dir --target=/install -r requirements.txt
+    pip install --no-cache-dir --target=/install --no-deps -r requirements.txt
 
 # --- Runtime: installed packages + application source, nothing else ---
 FROM public.ecr.aws/lambda/python:3.12 AS runtime

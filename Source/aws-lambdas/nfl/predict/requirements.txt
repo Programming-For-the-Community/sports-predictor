@@ -2,9 +2,15 @@
 # The shared library (Source/library) is installed separately by the build
 # workflow via `pip install --no-deps Source/library -t package/`.
 #
-# xgboost pulls in numpy and scipy transitively -- these three packages
-# are the reason this Lambda can't use the default x86_64/zip-only build
-# without checking the unzipped size limit (250MB). See
-# Terraform/lambda-nfl-predict.tf for the measured result and any
-# mitigation (e.g. a Lambda layer) if it's needed.
+# numpy and scipy are listed explicitly, and the Dockerfile installs this
+# file with --no-deps, specifically to skip xgboost's OTHER unconditional
+# Linux/x86_64 dependency: nvidia-nccl-cu12 (~300MB, GPU-only distributed
+# training support). Verified against the real public.ecr.aws/lambda/
+# python:3.12 image that a plain CPU train/save_raw/load_model/predict
+# round trip works fine without it installed -- xgboost only touches NCCL
+# on a CUDA device path this Lambda never takes. scipy, unlike nccl, IS a
+# genuine import-time dependency (xgboost.core imports scipy.sparse
+# unconditionally) and can't be dropped the same way.
 xgboost>=2.0,<3.0
+numpy
+scipy
