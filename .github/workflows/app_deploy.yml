@@ -1,0 +1,113 @@
+# Top-level orchestrator for every component's deploy, across every sport
+# and the frontend. Triggers only on a push to main (i.e. after a PR has
+# been reviewed and merged -- that review is the approval gate, so unlike
+# nfl_deploy.yml/frontend_deploy.yml there's no separate `approval` job
+# here) or manual dispatch.
+#
+# Calls `tf_install.yml` exactly ONCE, not once per component -- the whole
+# point of this file. nfl_deploy.yml and frontend_deploy.yml each embed
+# their own `infra` job so they stay fully standalone when triggered by
+# their own branch-push patterns, but composing those files directly here
+# would mean tf_install.yml running three-plus times in one pipeline
+# for no reason. Instead this reimplements their job graphs one level up:
+# the same granular build/deploy workflows they each call, fed from one
+# shared `infra` job.
+#
+# Ordering follows the same rule as nfl_deploy.yml/frontend_deploy.yml:
+# anything that only builds/pushes an artifact (no Terraform-created
+# resource to read or write) runs BEFORE infra; anything that needs a
+# Terraform-created resource to already exist (pointing a Lambda at an
+# image, deploying zip code to a function, syncing to a bucket) runs
+# AFTER. The NFL backfill/training/hosting images have no such
+# requirement, so they run first; the frontend build has no such
+# requirement EITHER, but it does need infra's own outputs (Cognito IDs,
+# API URL) as plain inputs rather than re-reading Terraform state itself,
+# so it's simplest fed after `infra` -- see frontend_hosting.yml's own
+# comment for why.
+
+name: App Deploy
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+  workflow_call:
+
+permissions:
+  id-token: write
+  contents: read
+  actions: read
+
+jobs:
+  # --- Before infra: build/push only, no Terraform dependency ---
+  nfl_backfill_build:
+    name: NFL backfill (build)
+    uses: ./.github/workflows/nfl_backfill.yml
+    secrets: inherit
+
+  nfl_ai_training_build:
+    name: NFL AI training (build)
+    uses: ./.github/workflows/nfl_ai_training.yml
+    secrets: inherit
+
+  nfl_ai_hosting_build:
+    name: NFL AI hosting (build)
+    uses: ./.github/workflows/nfl_ai_hosting.yml
+    secrets: inherit
+
+  # --- Infra: applies once, gated on every "before" job tolerating
+  # success-or-skip (mirrors nfl_deploy.yml's own tolerant-if pattern) ---
+  infra:
+    name: Apply shared infrastructure
+    needs: [nfl_backfill_build, nfl_ai_training_build, nfl_ai_hosting_build]
+    if: |
+      always() &&
+      (needs.nfl_backfill_build.result == 'success' || needs.nfl_backfill_build.result == 'skipped') &&
+      (needs.nfl_ai_training_build.result == 'success' || needs.nfl_ai_training_build.result == 'skipped') &&
+      (needs.nfl_ai_hosting_build.result == 'success' || needs.nfl_ai_hosting_build.result == 'skipped')
+    uses: ./.github/workflows/tf_install.yml
+    secrets: inherit
+
+  # --- After infra: needs a Terraform-created resource to already exist ---
+  nfl_predict_deploy:
+    name: NFL predict (deploy)
+    needs: [infra, nfl_ai_hosting_build]
+    uses: ./.github/workflows/nfl_predict_deploy.yml
+    secrets: inherit
+    with:
+      function_name: ${{ needs.infra.outputs.nfl_predict_function_name }}
+      image_uri: ${{ needs.nfl_ai_hosting_build.outputs.predict_image_uri }}
+
+  nfl_data_pipeline:
+    name: NFL data pipeline (deploy)
+    needs: infra
+    uses: ./.github/workflows/nfl_data_pipeline.yml
+    secrets: inherit
+    with:
+      ingest_function_name: ${{ needs.infra.outputs.nfl_ingest_function_name }}
+      normalize_function_name: ${{ needs.infra.outputs.nfl_normalize_function_name }}
+
+  frontend_build:
+    name: Frontend hosting (build)
+    needs: infra
+    uses: ./.github/workflows/frontend_hosting.yml
+    secrets: inherit
+    with:
+      api_base_url: ${{ needs.infra.outputs.api_endpoint }}
+      cognito_user_pool_id: ${{ needs.infra.outputs.cognito_user_pool_id }}
+      cognito_client_id: ${{ needs.infra.outputs.cognito_client_id }}
+
+  frontend_deploy:
+    name: Frontend hosting (deploy)
+    needs: [infra, frontend_build]
+    uses: ./.github/workflows/frontend_sync_deploy.yml
+    secrets: inherit
+    with:
+      bucket_name: ${{ needs.infra.outputs.frontend_bucket_name }}
+      distribution_id: ${{ needs.infra.outputs.frontend_distribution_id }}
+      source_run_id: ${{ github.run_id }}
+
+  # A future sport's deploy (e.g. NCAA FB) adds its own build job(s)
+  # before `infra`, its own needs entry in `infra`'s tolerant-if, and its
+  # own deploy job(s) after -- same shape as the NFL jobs above.

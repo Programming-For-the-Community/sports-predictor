@@ -1,23 +1,19 @@
 #!/usr/bin/env bash
-# Generates config/prod.json from live Terraform outputs, in the exact
-# shape config/prod.json.example documents and lib/core/config/app_config.dart
-# reads via --dart-define-from-file. Run from the repo root, before
-# `flutter build web` -- see .github/workflows/frontend_hosting.yml.
+# Generates config/prod.json from the values passed in as env vars, in the
+# exact shape config/prod.json.example documents and
+# lib/core/config/app_config.dart reads via --dart-define-from-file. Run
+# from Source/front-end -- see .github/workflows/frontend_hosting.yml,
+# which passes these in from frontend_deploy.yml's `infra` job outputs
+# (Terraform outputs, read once there -- not re-read here).
 #
 # config/prod.json is gitignored and never hand-maintained -- it always
-# tracks whatever infra is actually live, the same reasoning
-# lib/aws-lambdas/nfl/predict never hardcodes a model version.
+# tracks whatever infra is actually live.
 set -euo pipefail
 
-REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
-OUTPUT_FILE="$REPO_ROOT/Source/front-end/config/prod.json"
-
-TF_OUTPUTS=$(terraform -chdir="$REPO_ROOT/Terraform" output -json)
-
-API_BASE_URL=$(echo "$TF_OUTPUTS" | jq -r '.api_endpoint.value')
-COGNITO_USER_POOL_ID=$(echo "$TF_OUTPUTS" | jq -r '.cognito_user_pool_id.value')
-COGNITO_CLIENT_ID=$(echo "$TF_OUTPUTS" | jq -r '.cognito_client_id.value')
-AWS_REGION=$(echo "$TF_OUTPUTS" | jq -r '.aws_region.value // "us-east-2"')
+: "${API_BASE_URL:?API_BASE_URL is required}"
+: "${COGNITO_USER_POOL_ID:?COGNITO_USER_POOL_ID is required}"
+: "${COGNITO_CLIENT_ID:?COGNITO_CLIENT_ID is required}"
+AWS_REGION="${AWS_REGION:-us-east-2}"
 
 jq -n \
   --arg apiBaseUrl "$API_BASE_URL" \
@@ -29,6 +25,6 @@ jq -n \
     COGNITO_USER_POOL_ID: $cognitoUserPoolId,
     COGNITO_CLIENT_ID: $cognitoClientId,
     AWS_REGION: $awsRegion
-  }' > "$OUTPUT_FILE"
+  }' > config/prod.json
 
-echo "Wrote $OUTPUT_FILE"
+echo "Wrote config/prod.json"

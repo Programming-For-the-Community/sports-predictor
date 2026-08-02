@@ -5,13 +5,11 @@
 #
 # Build-only, same shape as nfl_ai_hosting.yml -- no deploy step here.
 # Deploying (syncing to S3 + invalidating CloudFront) is
-# frontend_sync_deploy.yml's job, which needs the S3 bucket/CloudFront
-# distribution (Terraform/s3-frontend.tf, cloudfront.tf) to already exist
-# -- this job has no such dependency (reading pre-existing Terraform
-# outputs to render config/prod.json doesn't require infra to have just
-# applied; those specific outputs -- api_endpoint, cognito_user_pool_id,
-# cognito_client_id -- already existed before this frontend work), so it
-# can run in parallel with `infra` in frontend_deploy.yml.
+# frontend_sync_deploy.yml's job. Unlike the predict Lambda's image (which
+# MUST be pushed before Terraform can create the function), S3/CloudFront
+# have no such ordering requirement, so there's no reason for this job to
+# touch Terraform/AWS at all -- frontend_deploy.yml runs this AFTER
+# `infra` and passes the config values in directly as inputs.
 #
 # No Dockerfile -- flutter build web runs directly on the runner via
 # subosito/flutter-action, the same way run_python_tests.yml installs
@@ -21,7 +19,27 @@ name: Frontend Hosting
 
 on:
   workflow_dispatch:
+    inputs:
+      api_base_url:
+        required: true
+        type: string
+      cognito_user_pool_id:
+        required: true
+        type: string
+      cognito_client_id:
+        required: true
+        type: string
   workflow_call:
+    inputs:
+      api_base_url:
+        required: true
+        type: string
+      cognito_user_pool_id:
+        required: true
+        type: string
+      cognito_client_id:
+        required: true
+        type: string
     outputs:
       artifact_name:
         description: 'Name of the uploaded build/web artifact, for frontend_sync_deploy.yml to download'
@@ -31,7 +49,6 @@ env:
   FLUTTER_VERSION: '3.29.3'
 
 permissions:
-  id-token: write
   contents: read
 
 jobs:
@@ -76,22 +93,16 @@ jobs:
           flutter-version: ${{ env.FLUTTER_VERSION }}
           channel: stable
 
-      - name: Configure AWS credentials (OIDC)
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          role-to-assume: ${{ secrets.AWS_DEPLOY_SVC_ACCT_ARN }}
-          aws-region: ${{ vars.AWS_RESOURCE_REGION }}
-          role-session-name: GitHubActions-${{ github.run_id }}
-
       - name: Install dependencies
         working-directory: Source/front-end
         run: flutter pub get
 
-      - name: Terraform init (read-only -- needed to read outputs from remote state)
-        run: terraform -chdir=Terraform init -reconfigure
-
-      - name: Render production config from Terraform outputs
+      - name: Render production config
         working-directory: Source/front-end
+        env:
+          API_BASE_URL: ${{ inputs.api_base_url }}
+          COGNITO_USER_POOL_ID: ${{ inputs.cognito_user_pool_id }}
+          COGNITO_CLIENT_ID: ${{ inputs.cognito_client_id }}
         run: bash scripts/render_frontend_config.sh
 
       - name: Build web
