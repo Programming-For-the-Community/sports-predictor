@@ -34,7 +34,7 @@ on:
         value: ${{ jobs.build-predict-image.outputs.versioned_tag }}
 
 env:
-  PREDICT_IMAGE_VERSION: '0.1.0'
+  PREDICT_IMAGE_VERSION: '1.0.0'
 
 permissions:
   id-token: write
