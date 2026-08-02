@@ -22,7 +22,9 @@ on:
   workflow_dispatch:
   push:
     branches:
-      - 'frontend*'
+      - 'frontend'
+      - 'frontend-*'
+      - 'frontend/**'
   workflow_call:
 
 permissions:
