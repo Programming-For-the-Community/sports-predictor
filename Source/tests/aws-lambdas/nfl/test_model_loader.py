@@ -19,11 +19,16 @@ import model_loader
 
 
 def _tiny_booster_bytes(feature_columns):
+    """Raw xgb.train()/DMatrix API, not the sklearn wrapper (XGBClassifier)
+    -- the sklearn wrapper needs scikit-learn installed, which isn't in
+    the predict Lambda's own requirements.txt (model_loader.py only ever
+    uses the raw Booster/DMatrix API in production, so the test shouldn't
+    need more than that either)."""
     X = [[float(i)] * len(feature_columns) for i in range(4)]
     y = [0, 1, 0, 1]
-    model = xgb.XGBClassifier(n_estimators=2, max_depth=2, objective="binary:logistic")
-    model.fit(X, y)
-    return model.get_booster().save_raw()
+    dtrain = xgb.DMatrix(X, label=y, feature_names=feature_columns)
+    booster = xgb.train({"objective": "binary:logistic", "max_depth": 2}, dtrain, num_boost_round=2)
+    return booster.save_raw()
 
 
 class TestLoadCurrentModel:
