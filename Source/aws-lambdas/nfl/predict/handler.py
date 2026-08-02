@@ -37,6 +37,7 @@ from library.aws.s3_manager import S3Manager
 from library.schema.keys import entity_key as build_entity_key
 from library.schema.keys import event_key as build_event_key
 from library.storage.feature_storage import FeatureStorage
+from library.storage.model_artifacts import current_version_key, model_artifact_key
 import live_features
 import model_loader
 
@@ -153,12 +154,65 @@ def _predict_player_prop(event_id: str, entity_id: str, target_stat: str) -> dic
     }
 
 
+def _list_events(status: str) -> dict:
+    storage = _get_storage()
+    events = storage.get_all_events(SPORT, status=status)
+    return {
+        "sport": SPORT,
+        "events": [
+            {
+                "event_id": e["event_id"],
+                "event_date": e.get("event_date"),
+                "status": e.get("status"),
+                "season": e.get("season"),
+                "season_type": e.get("season_type"),
+                "week": e.get("week"),
+                "participants": e.get("participants"),
+            }
+            for e in events
+        ],
+    }
+
+
+def _list_models() -> dict:
+    s3 = _get_model_bucket()
+    prefix = f"{SPORT}/"
+    model_names = sorted({key[len(prefix):].split("/")[0] for key in s3.list_keys(prefix)})
+
+    models = []
+    for model_name in model_names:
+        pointer_key = current_version_key(SPORT, model_name)
+        if not s3.object_exists(pointer_key):
+            continue
+        version = s3.get_json(pointer_key)["version"]
+        card = s3.get_json(model_artifact_key(SPORT, model_name, version, "model_card.json"))
+        top_features = [
+            {"feature": name, "importance": value}
+            for name, value in list(card.get("feature_importances", {}).items())[:5]
+        ]
+        models.append({
+            "model_name": card["model_name"],
+            "algorithm": card["algorithm"],
+            "version": card["version"],
+            "trained_at": card["trained_at"],
+            **{k: v for k, v in card.items() if k in ("accuracy", "log_loss", "rmse", "mae", "naive_baseline_rmse", "naive_baseline_mae")},
+            "top_features": top_features,
+        })
+    return {"sport": SPORT, "models": models}
+
+
 def lambda_handler(event, context):
     path_params = event.get("pathParameters") or {}
     query_params = event.get("queryStringParameters") or {}
     resource = event.get("resource", "")
 
     try:
+        if resource == "/nfl/events":
+            return _response(200, _list_events(query_params.get("status", "scheduled")))
+
+        if resource == "/nfl/models":
+            return _response(200, _list_models())
+
         if resource == "/nfl/predictions/events/{event_id}/players/{entity_id}":
             target_stat = query_params.get("stat")
             if not target_stat:

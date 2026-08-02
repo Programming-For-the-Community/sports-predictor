@@ -17,8 +17,18 @@ output "cognito_client_id" {
 }
 
 output "api_endpoint" {
-  description = "Full API base URL via the custom domain"
-  value       = "https://${local.api_domain}"
+  description = "The app's one public URL -- frontend at the root, API under /nfl/* -- both served via CloudFront (see cloudfront.tf)"
+  value       = "https://${local.domain}"
+}
+
+output "frontend_bucket_name" {
+  description = "Frontend static site S3 bucket name -- passed to frontend_sync_deploy.yml for `aws s3 sync`"
+  value       = aws_s3_bucket.frontend.bucket
+}
+
+output "frontend_distribution_id" {
+  description = "CloudFront distribution ID -- passed to frontend_sync_deploy.yml for `aws cloudfront create-invalidation`"
+  value       = aws_cloudfront_distribution.main.id
 }
 
 # Consumed by sport-specific ingest/backfill CI workflows (see

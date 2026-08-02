@@ -50,6 +50,21 @@ on:
       nfl_predict_function_name:
         description: 'NFL predict Lambda function name'
         value: ${{ jobs.terraform.outputs.nfl_predict_function_name }}
+      cognito_user_pool_id:
+        description: 'Cognito User Pool ID'
+        value: ${{ jobs.terraform.outputs.cognito_user_pool_id }}
+      cognito_client_id:
+        description: 'Cognito App Client ID'
+        value: ${{ jobs.terraform.outputs.cognito_client_id }}
+      api_endpoint:
+        description: "The app's one public URL (frontend + API, via CloudFront)"
+        value: ${{ jobs.terraform.outputs.api_endpoint }}
+      frontend_bucket_name:
+        description: 'Frontend static site S3 bucket name'
+        value: ${{ jobs.terraform.outputs.frontend_bucket_name }}
+      frontend_distribution_id:
+        description: 'CloudFront distribution ID for the frontend/API'
+        value: ${{ jobs.terraform.outputs.frontend_distribution_id }}
 
 permissions:
   id-token: write
@@ -83,6 +98,11 @@ jobs:
       nfl_ingest_function_name: ${{ steps.tf_outputs.outputs.nfl_ingest_function_name }}
       nfl_normalize_function_name: ${{ steps.tf_outputs.outputs.nfl_normalize_function_name }}
       nfl_predict_function_name: ${{ steps.tf_outputs.outputs.nfl_predict_function_name }}
+      cognito_user_pool_id: ${{ steps.tf_outputs.outputs.cognito_user_pool_id }}
+      cognito_client_id: ${{ steps.tf_outputs.outputs.cognito_client_id }}
+      api_endpoint: ${{ steps.tf_outputs.outputs.api_endpoint }}
+      frontend_bucket_name: ${{ steps.tf_outputs.outputs.frontend_bucket_name }}
+      frontend_distribution_id: ${{ steps.tf_outputs.outputs.frontend_distribution_id }}
     # Always attaches an environment, whether run directly or called via
     # nfl_deploy.yml (which has its own separate approval job gating on the
     # same environment -- so a full deploy run does prompt for approval
@@ -161,3 +181,8 @@ jobs:
         echo "nfl_ingest_function_name=$(terraform -chdir=Terraform output -raw nfl_ingest_function_name)" >> "$GITHUB_OUTPUT"
         echo "nfl_normalize_function_name=$(terraform -chdir=Terraform output -raw nfl_normalize_function_name)" >> "$GITHUB_OUTPUT"
         echo "nfl_predict_function_name=$(terraform -chdir=Terraform output -raw nfl_predict_function_name)" >> "$GITHUB_OUTPUT"
+        echo "cognito_user_pool_id=$(terraform -chdir=Terraform output -raw cognito_user_pool_id)" >> "$GITHUB_OUTPUT"
+        echo "cognito_client_id=$(terraform -chdir=Terraform output -raw cognito_client_id)" >> "$GITHUB_OUTPUT"
+        echo "api_endpoint=$(terraform -chdir=Terraform output -raw api_endpoint)" >> "$GITHUB_OUTPUT"
+        echo "frontend_bucket_name=$(terraform -chdir=Terraform output -raw frontend_bucket_name)" >> "$GITHUB_OUTPUT"
+        echo "frontend_distribution_id=$(terraform -chdir=Terraform output -raw frontend_distribution_id)" >> "$GITHUB_OUTPUT"

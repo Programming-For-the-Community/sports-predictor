@@ -1,14 +1,18 @@
-# TLS certificate for the API custom domain. Regional endpoint means the
-# cert must be in the same region as the API Gateway (var.region / us-east-2)
-# -- if this were an edge-optimized endpoint it would have to be in us-east-1
-# regardless of where the API lives.
+# TLS certificate for the app's one public domain (frontend + API, both
+# served through CloudFront -- see cloudfront.tf). Must be requested in
+# us-east-1 regardless of the stack's primary region (var.region is
+# us-east-2) -- this is a hard CloudFront requirement, unlike a regional
+# API Gateway custom domain (the previous setup), which needed the cert in
+# its own region. Uses the aws.us_east_1 provider alias (main.tf).
 #
 # DNS validation is automatic because the hosted zone is managed in Route 53
 # (see route53.tf). The validation CNAME records are created here alongside
-# the certificate so the dependency chain is explicit: cert → CNAME →
-# validation resource → domain name → base path mapping.
+# the certificate so the dependency chain is explicit: cert -> CNAME ->
+# validation resource -> CloudFront distribution -> DNS alias.
 resource "aws_acm_certificate" "api" {
-  domain_name       = local.api_domain
+  provider = aws.us_east_1
+
+  domain_name       = local.domain
   validation_method = "DNS"
 
   lifecycle {
@@ -35,6 +39,8 @@ resource "aws_route53_record" "acm_validation" {
 }
 
 resource "aws_acm_certificate_validation" "api" {
+  provider = aws.us_east_1
+
   certificate_arn         = aws_acm_certificate.api.arn
   validation_record_fqdns = [for record in aws_route53_record.acm_validation : record.fqdn]
 }

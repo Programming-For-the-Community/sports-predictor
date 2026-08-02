@@ -1,0 +1,71 @@
+# Top-level frontend deploy pipeline. Mirrors nfl_deploy.yml's trigger
+# shape and job graph exactly -- push to a branch prefix, workflow_dispatch,
+# workflow_call, an approval gate, build before infra, deploy after.
+#
+# Terraform is one shared state/config for the whole account -- infra here
+# is the same tf_install.yml apply nfl_deploy.yml calls, so a push to a
+# frontend* branch applies the full config (including any pending NFL
+# changes), same as nfl_deploy.yml applying the full config on an nfl*
+# push. This mirrors the existing accepted tradeoff rather than inventing
+# a new one: nfl_deploy.yml doesn't guard against two concurrent applies
+# either.
+#
+# build_frontend (frontend_hosting.yml) has no infra dependency and runs
+# in parallel with infra; deploy_frontend (frontend_sync_deploy.yml) needs
+# the S3 bucket/CloudFront distribution infra creates, so it waits for
+# both -- same reasoning as nfl_deploy.yml's ai_hosting/deploy_predict_lambda
+# split.
+
+name: Frontend Deploy
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - 'frontend*'
+  workflow_call:
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  approval:
+    name: Await deployment approval
+    if: github.event_name != 'workflow_call'
+    runs-on: ubuntu-latest
+    environment: development
+    steps:
+      - name: Approved
+        run: echo "Deployment approved -- proceeding."
+
+  # approval is intentionally skipped (not failed) when called via
+  # workflow_call -- same reasoning as nfl_deploy.yml.
+  build_frontend:
+    name: Frontend hosting (build)
+    needs: approval
+    if: |
+      always() &&
+      (needs.approval.result == 'success' || needs.approval.result == 'skipped')
+    uses: ./.github/workflows/frontend_hosting.yml
+    secrets: inherit
+
+  infra:
+    name: Apply shared infrastructure
+    needs: [approval, build_frontend]
+    if: |
+      always() &&
+      (needs.approval.result == 'success' || needs.approval.result == 'skipped') &&
+      (needs.build_frontend.result == 'success' || needs.build_frontend.result == 'skipped')
+    uses: ./.github/workflows/tf_install.yml
+    secrets: inherit
+
+  deploy_frontend:
+    name: Frontend hosting (deploy)
+    needs: [infra, build_frontend]
+    uses: ./.github/workflows/frontend_sync_deploy.yml
+    secrets: inherit
+    with:
+      bucket_name: ${{ needs.infra.outputs.frontend_bucket_name }}
+      distribution_id: ${{ needs.infra.outputs.frontend_distribution_id }}
+      source_run_id: ${{ github.run_id }}
