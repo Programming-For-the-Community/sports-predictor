@@ -107,7 +107,7 @@ def build_event_dataset(storage: FeatureStorage, window: int) -> list[dict]:
     player_games_by_event_team = _group_player_games_by_event_and_team(storage.get_all_player_game_stats())
     team_game_stats_by_event_team = _index_team_game_stats(storage.get_all_team_game_stats())
 
-    elo_ratings = compute_elo_ratings(events)
+    elo_ratings, _ = compute_elo_ratings(events)  # only the pre-game side is used here
     events_ascending = sorted(events, key=lambda e: e.get("event_date", ""))
 
     team_history: dict[str, list[dict]] = defaultdict(list)  # ascending, grows as we go
@@ -221,7 +221,7 @@ def build_player_dataset(storage: FeatureStorage, window: int) -> list[dict]:
     processes."""
     events = storage.get_all_events(SPORT)
     events_by_key = {event["event_key"]: event for event in events}
-    elo_ratings = compute_elo_ratings(events)
+    elo_ratings, _ = compute_elo_ratings(events)  # only the pre-game side is used here
     team_previous_event_dates = _team_previous_event_dates(events)
 
     player_games = storage.get_all_player_game_stats()

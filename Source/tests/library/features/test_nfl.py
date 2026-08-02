@@ -47,7 +47,7 @@ class TestComputeEloRatings:
     def test_first_meeting_starts_both_teams_at_starting_rating(self):
         events = [_event("E1", "2025-09-07", "KC", "LAC", 27, 20)]
 
-        ratings = compute_elo_ratings(events, starting_rating=1500)
+        ratings, _ = compute_elo_ratings(events, starting_rating=1500)
 
         assert ratings["E1"]["home_pre_rating"] == 1500
         assert ratings["E1"]["away_pre_rating"] == 1500
@@ -63,7 +63,7 @@ class TestComputeEloRatings:
             _event("E2", "2025-09-14", "KC", "LAC", 20, 17),
         ]
 
-        ratings = compute_elo_ratings(events, k_factor=20, home_advantage=55, starting_rating=1500)
+        ratings, _ = compute_elo_ratings(events, k_factor=20, home_advantage=55, starting_rating=1500)
 
         assert ratings["E2"]["home_pre_rating"] == pytest.approx(1517.10, abs=0.05)
         assert ratings["E2"]["away_pre_rating"] == pytest.approx(1482.90, abs=0.05)
@@ -75,8 +75,8 @@ class TestComputeEloRatings:
         close_win = [_event("E1", "2025-09-07", "KC", "LAC", 24, 20), followup]
         blowout = [_event("E1", "2025-09-07", "KC", "LAC", 45, 3), followup]
 
-        close_ratings = compute_elo_ratings(close_win, starting_rating=1500)
-        blowout_ratings = compute_elo_ratings(blowout, starting_rating=1500)
+        close_ratings, _ = compute_elo_ratings(close_win, starting_rating=1500)
+        blowout_ratings, _ = compute_elo_ratings(blowout, starting_rating=1500)
 
         close_gain = close_ratings["E2"]["home_pre_rating"] - 1500
         blowout_gain = blowout_ratings["E2"]["home_pre_rating"] - 1500
@@ -99,7 +99,7 @@ class TestComputeEloRatings:
             _event("E2", "2025-09-14", "KC", "LAC", 20, 17),
         ]
 
-        ratings = compute_elo_ratings(events, starting_rating=1500, home_advantage=10)
+        ratings, _ = compute_elo_ratings(events, starting_rating=1500, home_advantage=10)
 
         # With home_advantage=10 (unequal expected outcome) and a tied
         # result, ratings should still move by exactly k_factor * (0.5 -
@@ -114,7 +114,7 @@ class TestComputeEloRatings:
             _event("E2", "2025-09-14", "KC", "LAC", 20, 17),
         ]
 
-        ratings = compute_elo_ratings(events, starting_rating=1500)
+        ratings, _ = compute_elo_ratings(events, starting_rating=1500)
 
         assert ratings["E2"]["home_pre_rating"] < 1500
 
@@ -122,8 +122,8 @@ class TestComputeEloRatings:
         earlier = _event("E1", "2025-09-07", "KC", "LAC", 27, 20)
         later = _event("E2", "2025-09-14", "KC", "LAC", 20, 17)
 
-        forward = compute_elo_ratings([earlier, later], starting_rating=1500)
-        reversed_input = compute_elo_ratings([later, earlier], starting_rating=1500)
+        forward, _ = compute_elo_ratings([earlier, later], starting_rating=1500)
+        reversed_input, _ = compute_elo_ratings([later, earlier], starting_rating=1500)
 
         assert forward["E2"]["home_pre_rating"] == reversed_input["E2"]["home_pre_rating"]
 
@@ -133,7 +133,7 @@ class TestComputeEloRatings:
             _event("E2", "2025-09-14", "KC", "LAC", 20, 17),
         ]
 
-        ratings = compute_elo_ratings(events, starting_rating=1500, home_advantage=0)
+        ratings, _ = compute_elo_ratings(events, starting_rating=1500, home_advantage=0)
 
         # Equal pre-game ratings, no home advantage, tied result -> no change.
         assert ratings["E2"]["home_pre_rating"] == pytest.approx(1500, abs=0.01)
@@ -147,7 +147,7 @@ class TestComputeEloRatings:
         }
         events = [malformed, _event("E1", "2025-09-14", "KC", "LAC", 27, 20)]
 
-        ratings = compute_elo_ratings(events, starting_rating=1500)
+        ratings, _ = compute_elo_ratings(events, starting_rating=1500)
 
         assert "BAD" not in ratings
         assert ratings["E1"]["home_pre_rating"] == 1500
@@ -156,11 +156,33 @@ class TestComputeEloRatings:
         scheduled = _event("E1", "2025-09-07", "KC", "LAC")  # no scores
         played = _event("E2", "2025-09-14", "KC", "LAC", 27, 20)
 
-        ratings = compute_elo_ratings([scheduled, played], starting_rating=1500)
+        ratings, _ = compute_elo_ratings([scheduled, played], starting_rating=1500)
 
         assert ratings["E1"]["home_pre_rating"] == 1500
         # Unaffected by the scoreless event -- still starting_rating.
         assert ratings["E2"]["home_pre_rating"] == 1500
+
+    def test_current_ratings_reflect_every_processed_event_not_just_pre_game(self):
+        # current_ratings (the second return value) is each team's rating
+        # AFTER all events passed in -- e.g. for a live inference request
+        # about a not-yet-played game, which has no pre_game_ratings entry
+        # of its own to look up.
+        events = [
+            _event("E1", "2025-09-07", "KC", "LAC", 27, 20),
+            _event("E2", "2025-09-14", "KC", "LAC", 20, 17),
+        ]
+
+        _, current_ratings = compute_elo_ratings(events, starting_rating=1500)
+
+        assert current_ratings["KC"] > 1500  # won both games
+        assert current_ratings["LAC"] < 1500  # lost both games
+
+    def test_current_ratings_for_a_team_with_no_events_is_absent(self):
+        events = [_event("E1", "2025-09-07", "KC", "LAC", 27, 20)]
+
+        _, current_ratings = compute_elo_ratings(events, starting_rating=1500)
+
+        assert "DEN" not in current_ratings
 
 
 class TestRestDays:

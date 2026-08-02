@@ -16,6 +16,7 @@ import os
 from boto3.dynamodb.conditions import Key
 
 from library.aws.dynamodb_table import DynamoDBTable
+from library.schema.keys import entity_key
 
 
 def _require_env(name: str) -> str:
@@ -29,10 +30,18 @@ class FeatureStorage:
     """Reads EVENTS_TABLE_NAME/PLAYER_GAME_STATS_TABLE_NAME from the
     environment -- same variable names PipelineStorage uses, so a
     feature-engineering task's env vars look identical to an
-    ingest/backfill task's (see Terraform/ecs-task-nfl-backfill.tf)."""
+    ingest/backfill task's (see Terraform/ecs-task-nfl-backfill.tf).
+
+    ENTITIES_TABLE_NAME is only required by get_entity below -- batch
+    feature engineering never reads the entities table, only the live
+    inference Lambda does (see Source/aws-lambdas/nfl/predict), so this
+    stays required rather than optional to fail loudly if a caller that
+    needs it forgot to set it, not silently return None forever.
+    """
 
     def __init__(self):
         region = os.environ.get("AWS_REGION")
+        self._entities_table = DynamoDBTable(_require_env("ENTITIES_TABLE_NAME"), region=region)
         self._events_table = DynamoDBTable(_require_env("EVENTS_TABLE_NAME"), region=region)
         self._player_game_stats_table = DynamoDBTable(_require_env("PLAYER_GAME_STATS_TABLE_NAME"), region=region)
         self._team_game_stats_table = DynamoDBTable(_require_env("TEAM_GAME_STATS_TABLE_NAME"), region=region)
@@ -110,3 +119,43 @@ class FeatureStorage:
         as get_all_player_game_stats -- one scan instead of a per-team
         Query, and no sport filter since only NFL data exists today."""
         return self._team_game_stats_table.scan()
+
+    def get_team_game_stats_for_team(
+        self, entity_id: str, before_date: str | None = None, limit: int | None = None
+    ) -> list[dict]:
+        """A team's own completed team_game_stats rows, most recent first.
+        Same one-team-at-a-time lookup shape as get_team_events, and the
+        same reasoning for scanning rather than needing a GSI -- see
+        Terraform/dynamodb-team-game-stats.tf."""
+        rows = self.get_all_team_game_stats()
+        team_rows = [
+            row
+            for row in rows
+            if row.get("team_id") == entity_id and (before_date is None or row.get("event_date", "") < before_date)
+        ]
+        team_rows.sort(key=lambda row: row.get("event_date", ""), reverse=True)
+        return team_rows[:limit] if limit is not None else team_rows
+
+    def get_player_game_stats_for_event(self, event_key: str) -> list[dict]:
+        """Every player's stat line for one game, via a direct Query on
+        player_game_stats' own partition key (event_key is the hash key --
+        see Terraform/dynamodb-player-game-stats.tf) rather than a scan.
+        Meant for one-event-at-a-time lookups, e.g. identifying last
+        game's starting QB/lead rusher/lead receiver for a live inference
+        request -- design/DATA_SCHEMA.md calls this exact access pattern
+        out: 'querying "all player stat lines for this game" is a single
+        partition query.'"""
+        return self._player_game_stats_table.query(Key("event_key").eq(event_key))
+
+    def get_event(self, event_key: str) -> dict | None:
+        """One event by its own key -- a direct GetItem, for a live
+        inference request about one specific (usually not-yet-played)
+        game, unlike get_all_events/get_team_events which return many."""
+        return self._events_table.get_item({"event_key": event_key})
+
+    def get_entity(self, sport: str, entity_id: str) -> dict | None:
+        """One entity (team or player) by id -- a direct GetItem. Only
+        get_entity needs ENTITIES_TABLE_NAME; every other method here
+        reads events/player_game_stats/team_game_stats, which batch
+        feature engineering never needs the entities table for."""
+        return self._entities_table.get_item({"entity_key": entity_key(sport, entity_id)})

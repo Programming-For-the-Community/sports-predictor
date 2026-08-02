@@ -1,59 +1,69 @@
-# Builds, packages, and deploys the NFL AI hosting/inference code. Runs
+# Builds, tests, and pushes the NFL AI hosting/inference image. Runs
 # standalone (workflow_dispatch) or called from nfl_deploy.yml
-# (workflow_call) -- either way the work is identical: build and push
-# image(s).
+# (workflow_call) -- either way the work is identical: run tests, then
+# build and push an image only if they pass.
 #
-# This stage may build more than one image if inference ends up split
-# across multiple Lambdas. Once their Dockerfiles exist, give each image
-# its OWN version constant below (see nfl_ai_training.yml, which builds
-# two independent images this same way) and add one job per image,
-# each shaped like:
+# Build-only, same shape as nfl_ai_training.yml/nfl_backfill.yml -- no
+# deploy step here. That's a deliberate split, not an oversight: unlike
+# an ECS task definition (which resolves its floating "-latest" tag at
+# run-task time, so nothing needs to happen after a push), a Lambda
+# function's image is resolved to a fixed digest at
+# CreateFunction/UpdateFunctionCode time and never re-resolves a tag on
+# its own. Pointing the nfl-predict Lambda at what this workflow just
+# pushed is nfl_predict_deploy.yml's job -- see nfl_deploy.yml for why it
+# runs after infra while this workflow runs before it.
 #
-#   build-<component>-image:
-#     needs: set-versions
-#     uses: ./.github/workflows/docker_build_push.yml
-#     secrets: inherit
-#     with:
-#       dockerfile_path: 'Source/<path>/Dockerfile'
-#       docker_context: 'Source/<path>'
-#       image_name: 'nfl-<component>'
-#       image_version: ${{ needs.set-versions.outputs.<component>_version }}
+# Container image, not the zip packaging ingest/normalize use (see
+# python_lambda_build.yml) -- xgboost pulls in numpy and scipy, which
+# alone measure ~225MB unzipped, leaving almost no headroom under
+# Lambda's 250MB unzipped zip limit. Container Lambdas get a 10GB image
+# limit instead. See Source/aws-lambdas/nfl/predict/Dockerfile.
 #
-# Each component's version is bumped independently -- unrelated images
-# shouldn't need a version bump (and a new tag/deploy) just because a
-# sibling image changed.
+# A second component (e.g. a future sport's own predict Lambda) gets its
+# own version constant and its own test/build job pair below, same shape
+# as nfl_ai_training.yml's two independent images.
 
 name: NFL AI Hosting
 
 on:
   workflow_dispatch:
   workflow_call:
+    outputs:
+      predict_image_uri:
+        description: 'Versioned tag of the pushed nfl-predict image, for nfl_predict_deploy.yml to point the Lambda at'
+        value: ${{ jobs.build-predict-image.outputs.versioned_tag }}
 
 env:
-  IMAGE_VERSION: '0.1.0'
+  PREDICT_IMAGE_VERSION: '0.1.0'
 
 permissions:
   id-token: write
   contents: read
 
 jobs:
-  set-version:
-    name: Resolve image version
+  test-predict:
+    name: Run nfl-predict tests
+    uses: ./.github/workflows/run_python_tests.yml
+    with:
+      test_path: 'Source/tests/library/ Source/tests/aws-lambdas/nfl/test_predict.py Source/tests/aws-lambdas/nfl/test_live_features.py Source/tests/aws-lambdas/nfl/test_model_loader.py'
+      requirements_files: 'Source/aws-lambdas/nfl/predict/requirements.txt'
+
+  set-versions:
+    name: Resolve image versions
     runs-on: ubuntu-latest
     outputs:
-      version: ${{ steps.out.outputs.version }}
+      predict_version: ${{ steps.out.outputs.predict_version }}
     steps:
       - id: out
-        run: echo "version=${{ env.IMAGE_VERSION }}" >> "$GITHUB_OUTPUT"
+        run: echo "predict_version=${{ env.PREDICT_IMAGE_VERSION }}" >> "$GITHUB_OUTPUT"
 
-  # TODO once the NFL inference source code and Dockerfile(s) exist:
-  # replace this (and set-version above) with one set-versions job
-  # outputting a version per image, and one build-<component>-image job
-  # per image, per the comment block above.
-  placeholder:
-    name: Build, package, and deploy (placeholder)
-    needs: set-version
-    runs-on: ubuntu-latest
-    steps:
-      - name: Placeholder
-        run: echo "Would build and push NFL AI hosting image(s) at version ${{ needs.set-version.outputs.version }} here."
+  build-predict-image:
+    name: Build and push predict image
+    needs: [set-versions, test-predict]
+    uses: ./.github/workflows/docker_build_push.yml
+    secrets: inherit
+    with:
+      dockerfile_path: 'Source/aws-lambdas/nfl/predict/Dockerfile'
+      docker_context: 'Source'
+      image_name: 'nfl-predict'
+      image_version: ${{ needs.set-versions.outputs.predict_version }}

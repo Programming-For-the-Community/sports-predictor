@@ -57,6 +57,14 @@ resource "aws_ecs_task_definition" "nfl_feature_engineering" {
       image     = "${var.ecr_repo_url}:nfl-feature-engineering-latest"
       essential = true
       environment = [
+        # ENTITIES_TABLE_NAME isn't read by anything build_dataset.py
+        # itself calls today -- FeatureStorage's constructor just requires
+        # it unconditionally (see get_entity, added for the inference
+        # Lambda) the same way it requires the other three table names.
+        # ecs_pipeline already has read access to this table (see
+        # iam-ecs-pipeline.tf), so this is just wiring the env var, not a
+        # new permission.
+        { name = "ENTITIES_TABLE_NAME", value = aws_dynamodb_table.entities.name },
         { name = "EVENTS_TABLE_NAME", value = aws_dynamodb_table.events.name },
         { name = "PLAYER_GAME_STATS_TABLE_NAME", value = aws_dynamodb_table.player_game_stats.name },
         { name = "TEAM_GAME_STATS_TABLE_NAME", value = aws_dynamodb_table.team_game_stats.name },

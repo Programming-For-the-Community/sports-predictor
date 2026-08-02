@@ -55,35 +55,6 @@ output "nfl_backfill_task_definition_arn" {
   value       = aws_ecs_task_definition.nfl_backfill.arn
 }
 
-output "nfl_train_baseline_model_task_definition_arn" {
-  description = "ARN of the NFL logistic regression baseline ECS task definition -- manual-only, pass to `aws ecs run-task --task-definition`"
-  value       = aws_ecs_task_definition.nfl_train_baseline_model.arn
-}
-
-output "nfl_train_player_prop_model_task_definition_arn" {
-  description = "ARN of the NFL player-prop ECS task definition -- scheduled once per stat (see scheduler-nfl-train-player-prop-model.tf), also runnable manually via `aws ecs run-task --task-definition` with your own TARGET_STAT environment override"
-  value       = aws_ecs_task_definition.nfl_train_player_prop_model.arn
-}
-
-output "nfl_train_score_model_task_definition_arn" {
-  description = "ARN of the NFL score model ECS task definition (margin/home-score/away-score) -- scheduled once per target (see scheduler-nfl-train-score-model.tf), also runnable manually via `aws ecs run-task --task-definition` with your own SCORE_TARGET environment override"
-  value       = aws_ecs_task_definition.nfl_train_score_model.arn
-}
-
-# Every NFL training/backfill schedule launches into this same
-# public-subnet + fargate_internet_egress network shape (see any
-# scheduler-nfl-*.tf) -- exposed here so a manual `aws ecs run-task`
-# doesn't need these IDs looked up by hand.
-output "nfl_public_subnet_ids" {
-  description = "Public subnet IDs NFL Fargate tasks run in -- pass to `aws ecs run-task --network-configuration`"
-  value       = [aws_subnet.public_1.id, aws_subnet.public_2.id, aws_subnet.public_3.id]
-}
-
-output "nfl_fargate_security_group_id" {
-  description = "Security group NFL Fargate tasks run with -- pass to `aws ecs run-task --network-configuration`"
-  value       = aws_security_group.fargate_internet_egress.id
-}
-
 output "nfl_cluster_name" {
   description = "ECS cluster NFL tasks run in -- select this cluster in the console's Run Task screen"
   value       = aws_ecs_cluster.main.name
@@ -97,4 +68,9 @@ output "nfl_ingest_function_name" {
 output "nfl_normalize_function_name" {
   description = "NFL normalize Lambda function name -- passed to nfl_data_pipeline workflow for `aws lambda update-function-code`"
   value       = aws_lambda_function.nfl_normalize.function_name
+}
+
+output "nfl_predict_function_name" {
+  description = "NFL predict Lambda function name -- passed to nfl_ai_hosting workflow for `aws lambda update-function-code`"
+  value       = aws_lambda_function.nfl_predict.function_name
 }

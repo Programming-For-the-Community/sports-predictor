@@ -4,7 +4,7 @@ This describes the feature engineering built for NFL — what it computes, where
 
 ## Feature Logic
 
-The math itself lives in `Source/library/features/nfl.py`, deliberately *not* inside `feature-engineering/nfl/`. The reason: the same functions will eventually be called twice — once here, in bulk, to build a training set, and later by an inference Lambda computing a live feature vector for one upcoming game. Keeping one shared implementation instead of two copies is what prevents train/serve skew (the model being trained on features computed slightly differently than what it's fed at prediction time).
+The math itself lives in `Source/library/features/nfl.py`, deliberately *not* inside `feature-engineering/nfl/`. The reason: the same functions are called from two places — here, in bulk, to build a training set, and by the inference Lambda's `live_features.py` (`Source/aws-lambdas/nfl/predict/`, see "Serving layer" in `design/DATA_SCHEMA.md`), computing a live feature vector for one upcoming game. Keeping one shared implementation instead of two copies is what prevents train/serve skew (the model being trained on features computed slightly differently than what it's fed at prediction time). The one thing that differs between the two callers is how history gets gathered, not the feature math itself: batch feature engineering loads the whole table once and walks it incrementally; live inference looks up exactly one event's worth of context via `FeatureStorage`'s one-team/one-player/one-event methods, since it's only ever building a single row per request.
 
 ### Event-level features (`build_event_features`)
 

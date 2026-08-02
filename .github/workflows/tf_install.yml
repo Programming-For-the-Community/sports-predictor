@@ -47,6 +47,9 @@ on:
       nfl_normalize_function_name:
         description: 'NFL normalize Lambda function name'
         value: ${{ jobs.terraform.outputs.nfl_normalize_function_name }}
+      nfl_predict_function_name:
+        description: 'NFL predict Lambda function name'
+        value: ${{ jobs.terraform.outputs.nfl_predict_function_name }}
 
 permissions:
   id-token: write
@@ -79,6 +82,7 @@ jobs:
     outputs:
       nfl_ingest_function_name: ${{ steps.tf_outputs.outputs.nfl_ingest_function_name }}
       nfl_normalize_function_name: ${{ steps.tf_outputs.outputs.nfl_normalize_function_name }}
+      nfl_predict_function_name: ${{ steps.tf_outputs.outputs.nfl_predict_function_name }}
     # Always attaches an environment, whether run directly or called via
     # nfl_deploy.yml (which has its own separate approval job gating on the
     # same environment -- so a full deploy run does prompt for approval
@@ -156,3 +160,4 @@ jobs:
       run: |
         echo "nfl_ingest_function_name=$(terraform -chdir=Terraform output -raw nfl_ingest_function_name)" >> "$GITHUB_OUTPUT"
         echo "nfl_normalize_function_name=$(terraform -chdir=Terraform output -raw nfl_normalize_function_name)" >> "$GITHUB_OUTPUT"
+        echo "nfl_predict_function_name=$(terraform -chdir=Terraform output -raw nfl_predict_function_name)" >> "$GITHUB_OUTPUT"
