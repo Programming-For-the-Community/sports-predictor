@@ -16,4 +16,12 @@ tests/
 
 # Other sports/components -- irrelevant per-image, keeps context upload small
 front-end/
-aws-lambdas/
+
+# ingest/normalize Lambdas (any sport) are zip-packaged, never built via
+# Docker (see python_lambda_build.yml) -- excluded individually, not via
+# a blanket `aws-lambdas/` exclusion, since Docker can't reliably
+# re-include a nested path (e.g. predict/, which IS a Docker build -- see
+# Source/aws-lambdas/nfl/predict/Dockerfile) once a parent directory is
+# excluded.
+aws-lambdas/*/ingest/
+aws-lambdas/*/normalize/
