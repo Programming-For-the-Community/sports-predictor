@@ -78,15 +78,25 @@ One row per team per event, for team sports only. ESPN's box score already compu
 
 ## Predictions table
 
-One row per event per model version for event-level outcomes, or one row per event-player-model for player props — kept separate from raw results so re-running a model doesn't overwrite history.
+One row per event per model per version for event-level outcomes, or one row per event-player-model for player props — kept separate from raw results so re-running a model doesn't overwrite history. Written by the inference Lambda (`Source/aws-lambdas/nfl/predict/handler.py`) as an audit trail every time it computes a prediction — see "Serving layer" below for the request contract that triggers a write. The IAM role backing that Lambda only has `PutItem` on this table (see `Terraform/iam-lambda-inference.tf`); it never reads a past prediction back.
 
 | Attribute | Example | Notes |
 |---|---|---|
-| `event_key` | `SPORT#NFL#EVENT#2025-W04-KC-LAC` | |
-| `model_key` | `MODEL#win-probability#v3` for an event-outcome prediction, `MODEL#passing-yards#v3#PLAYER#mahomes-patrick` for a player-prop prediction | Sort key — lets you keep predictions from multiple model versions for the same event, and lets dozens of player-prop rows coexist in the same event partition without colliding with the event-level prediction or each other. Each model (win-probability, score-margin, one per player-prop stat) versions independently, so the model name is part of the key, not just the version number — see Terraform/s3-model-artifacts.tf for the matching S3 path convention |
-| `predicted_value` | `{ "KC_win_prob": 0.61 }`, `{ "win_prob": {...}, "top10_prob": {...} }`, or `{ "passing_yards": {"mean": 287, "over_265_5_prob": 0.54}, "passing_tds": {"mean": 2.1} }` | Shape depends on event_type for event-level rows, and on the stat being predicted for player-prop rows — these are different statistical problems with different targets, same as the head-to-head/field-event split, so don't force one shape to fit both |
-| `model_version` | `v3` | The version of whichever specific model model_key identifies -- not a cross-model counter |
-| `generated_at` | `2025-09-26T14:00:00Z` | |
+| `event_key` | `SPORT#NFL#EVENT#401547417` | The raw ESPN event id, same `event_key()` builder (`library/schema/keys.py`) every other NFL table uses |
+| `model_key` | `MODEL#win-probability#v6` for an event-outcome prediction, `MODEL#player-prop-passing-yards#v5#PLAYER#mahomes-patrick` for a player-prop prediction | Sort key — lets you keep predictions from multiple model versions for the same event, and lets dozens of player-prop rows coexist in the same event partition without colliding with the event-level prediction or each other. The model name matches whatever `model_common.py` named that model at training time (`win-probability`, `score-margin`, `home-score`, `away-score`, or `player-prop-<stat>` — see `Terraform/s3-model-artifacts.tf` for the matching S3 path convention), and the version is read off that model's own `current.json` pointer at request time, so it's embedded in the key rather than tracked as a separate top-level attribute |
+| `predicted_value` | `{"home_win_probability": 0.62, "model_version": 6}` for win-probability, `{"value": 3.2, "model_version": 2}` for margin/score/player-prop rows | Shape depends on which model produced it — a classifier's raw output is already a probability, a regressor's is a raw number, and forcing them into one shared shape would just add a layer of translation nothing reads |
+| `generated_at` | `2026-08-02T14:00:00Z` | ISO 8601, UTC, stamped by the inference Lambda at prediction time |
+
+## Serving layer
+
+The inference Lambda (`Source/aws-lambdas/nfl/predict/handler.py`) sits behind API Gateway (`Terraform/api-gateway-nfl-predict.tf`), authenticated by the same Cognito authorizer every other route uses (see "Access control" in `ARCHITECTURE.md`). Every prediction is computed live from current DynamoDB/S3 state on each request — nothing is pre-computed or served from a cache.
+
+| Route | Returns |
+|---|---|
+| `GET /nfl/predictions/events/{event_id}` | Win probability, margin, home score, and away score for one matchup, from one shared live feature vector (`live_features.build_live_event_features`) scored against all four event-level models |
+| `GET /nfl/predictions/events/{event_id}/players/{entity_id}?stat=passing_yards` | One player-prop prediction for one player in one game (`live_features.build_live_player_features`), scored against the `player-prop-<stat>` model matching the `stat` query parameter |
+
+`event_id`/`entity_id` are raw ESPN ids, translated internally to `SPORT#NFL#EVENT#...`/`SPORT#NFL#ENTITY#...` keys the same way every other NFL adapter does — callers never construct a DynamoDB key themselves. Packaged as a container image rather than the zip format `ingest`/`normalize` use (`Terraform/lambda-nfl-predict.tf`) — xgboost pulls in numpy and scipy, which alone measure ~225MB unzipped for this runtime, leaving almost no headroom under Lambda's 250MB unzipped zip limit; container Lambdas get a 10GB image limit instead.
 
 ## Sport registry table (added in Phase 4)
 

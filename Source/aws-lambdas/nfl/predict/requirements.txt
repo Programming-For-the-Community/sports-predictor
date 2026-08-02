@@ -1,0 +1,10 @@
+# boto3 is pre-installed in the Lambda Python runtime -- not bundled here.
+# The shared library (Source/library) is installed separately by the build
+# workflow via `pip install --no-deps Source/library -t package/`.
+#
+# xgboost pulls in numpy and scipy transitively -- these three packages
+# are the reason this Lambda can't use the default x86_64/zip-only build
+# without checking the unzipped size limit (250MB). See
+# Terraform/lambda-nfl-predict.tf for the measured result and any
+# mitigation (e.g. a Lambda layer) if it's needed.
+xgboost>=2.0,<3.0

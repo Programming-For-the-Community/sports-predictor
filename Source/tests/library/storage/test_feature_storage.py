@@ -13,19 +13,21 @@ from library.storage.feature_storage import FeatureStorage
 
 @pytest.fixture
 def storage_env(monkeypatch):
+    monkeypatch.setenv("ENTITIES_TABLE_NAME", "test-entities")
     monkeypatch.setenv("EVENTS_TABLE_NAME", "test-events")
     monkeypatch.setenv("PLAYER_GAME_STATS_TABLE_NAME", "test-player-game-stats")
     monkeypatch.setenv("TEAM_GAME_STATS_TABLE_NAME", "test-team-game-stats")
 
 
 def _make_storage(storage_env):
+    mock_entities = MagicMock()
     mock_events = MagicMock()
     mock_stats = MagicMock()
     mock_team_stats = MagicMock()
     with patch("library.storage.feature_storage.DynamoDBTable") as mock_table_cls:
-        mock_table_cls.side_effect = [mock_events, mock_stats, mock_team_stats]
+        mock_table_cls.side_effect = [mock_entities, mock_events, mock_stats, mock_team_stats]
         storage = FeatureStorage()
-    return storage, mock_events, mock_stats, mock_team_stats
+    return storage, mock_entities, mock_events, mock_stats, mock_team_stats
 
 
 def _event(event_id, entity_id, sport="nfl", status="completed", event_date="2025-09-01"):
@@ -40,7 +42,7 @@ def _event(event_id, entity_id, sport="nfl", status="completed", event_date="202
 
 class TestGetPlayerGameStats:
     def test_queries_entity_history_index_most_recent_first(self, storage_env):
-        storage, _, mock_stats, _ = _make_storage(storage_env)
+        storage, _, _, mock_stats, _ = _make_storage(storage_env)
         mock_stats.query.return_value = [{"event_date": "2025-09-28"}]
 
         result = storage.get_player_game_stats("mahomes-patrick")
@@ -52,7 +54,7 @@ class TestGetPlayerGameStats:
         assert call_kwargs["limit"] is None
 
     def test_passes_limit_through(self, storage_env):
-        storage, _, mock_stats, _ = _make_storage(storage_env)
+        storage, _, _, mock_stats, _ = _make_storage(storage_env)
         mock_stats.query.return_value = []
 
         storage.get_player_game_stats("mahomes-patrick", limit=5)
@@ -62,7 +64,7 @@ class TestGetPlayerGameStats:
 
 class TestGetTeamEvents:
     def test_filters_by_sport_status_and_participant(self, storage_env):
-        storage, mock_events, _, _ = _make_storage(storage_env)
+        storage, _, mock_events, _, _ = _make_storage(storage_env)
         mock_events.scan.return_value = [
             _event("1", "KC"),
             _event("2", "LAC"),  # different team
@@ -75,7 +77,7 @@ class TestGetTeamEvents:
         assert [e["event_id"] for e in result] == ["1"]
 
     def test_sorts_most_recent_first(self, storage_env):
-        storage, mock_events, _, _ = _make_storage(storage_env)
+        storage, _, mock_events, _, _ = _make_storage(storage_env)
         mock_events.scan.return_value = [
             _event("1", "KC", event_date="2025-09-01"),
             _event("2", "KC", event_date="2025-09-15"),
@@ -86,7 +88,7 @@ class TestGetTeamEvents:
         assert [e["event_id"] for e in result] == ["2", "1"]
 
     def test_before_date_excludes_later_games(self, storage_env):
-        storage, mock_events, _, _ = _make_storage(storage_env)
+        storage, _, mock_events, _, _ = _make_storage(storage_env)
         mock_events.scan.return_value = [
             _event("1", "KC", event_date="2025-09-01"),
             _event("2", "KC", event_date="2025-09-15"),
@@ -97,7 +99,7 @@ class TestGetTeamEvents:
         assert [e["event_id"] for e in result] == ["1"]
 
     def test_limit_truncates_after_sort(self, storage_env):
-        storage, mock_events, _, _ = _make_storage(storage_env)
+        storage, _, mock_events, _, _ = _make_storage(storage_env)
         mock_events.scan.return_value = [
             _event("1", "KC", event_date="2025-09-01"),
             _event("2", "KC", event_date="2025-09-15"),
@@ -111,10 +113,65 @@ class TestGetTeamEvents:
 
 class TestGetAllTeamGameStats:
     def test_scans_team_game_stats_table(self, storage_env):
-        storage, _, _, mock_team_stats = _make_storage(storage_env)
+        storage, _, _, _, mock_team_stats = _make_storage(storage_env)
         mock_team_stats.scan.return_value = [{"team_id": "KC"}]
 
         result = storage.get_all_team_game_stats()
 
         assert result == [{"team_id": "KC"}]
         mock_team_stats.scan.assert_called_once()
+
+
+class TestGetTeamGameStatsForTeam:
+    def test_filters_by_team_sorts_and_respects_before_date_and_limit(self, storage_env):
+        storage, _, _, _, mock_team_stats = _make_storage(storage_env)
+        mock_team_stats.scan.return_value = [
+            {"team_id": "KC", "event_date": "2025-09-01"},
+            {"team_id": "LAC", "event_date": "2025-09-08"},  # different team
+            {"team_id": "KC", "event_date": "2025-09-15"},
+            {"team_id": "KC", "event_date": "2025-09-22"},
+        ]
+
+        result = storage.get_team_game_stats_for_team("KC", before_date="2025-09-20", limit=1)
+
+        assert result == [{"team_id": "KC", "event_date": "2025-09-15"}]
+
+
+class TestGetPlayerGameStatsForEvent:
+    def test_queries_the_base_table_by_event_key(self, storage_env):
+        storage, _, _, mock_stats, _ = _make_storage(storage_env)
+        mock_stats.query.return_value = [{"entity_id": "mahomes-patrick"}]
+
+        result = storage.get_player_game_stats_for_event("SPORT#NFL#EVENT#401547417")
+
+        assert result == [{"entity_id": "mahomes-patrick"}]
+        mock_stats.query.assert_called_once()
+        assert mock_stats.query.call_args.kwargs == {}  # no index_name -- base table query
+
+
+class TestGetEvent:
+    def test_gets_by_event_key(self, storage_env):
+        storage, _, mock_events, _, _ = _make_storage(storage_env)
+        mock_events.get_item.return_value = {"event_key": "SPORT#NFL#EVENT#401547417"}
+
+        result = storage.get_event("SPORT#NFL#EVENT#401547417")
+
+        assert result == {"event_key": "SPORT#NFL#EVENT#401547417"}
+        mock_events.get_item.assert_called_once_with({"event_key": "SPORT#NFL#EVENT#401547417"})
+
+    def test_returns_none_when_missing(self, storage_env):
+        storage, _, mock_events, _, _ = _make_storage(storage_env)
+        mock_events.get_item.return_value = None
+
+        assert storage.get_event("SPORT#NFL#EVENT#missing") is None
+
+
+class TestGetEntity:
+    def test_gets_by_sport_scoped_entity_key(self, storage_env):
+        storage, mock_entities, _, _, _ = _make_storage(storage_env)
+        mock_entities.get_item.return_value = {"entity_id": "mahomes-patrick"}
+
+        result = storage.get_entity("nfl", "mahomes-patrick")
+
+        assert result == {"entity_id": "mahomes-patrick"}
+        mock_entities.get_item.assert_called_once_with({"entity_key": "SPORT#NFL#ENTITY#mahomes-patrick"})

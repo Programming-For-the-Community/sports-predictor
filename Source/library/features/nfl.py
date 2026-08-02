@@ -50,11 +50,16 @@ def compute_elo_ratings(
     starting_rating: float = DEFAULT_STARTING_RATING,
     mov_base: float = DEFAULT_MOV_BASE,
     mov_divisor: float = DEFAULT_MOV_DIVISOR,
-) -> dict[str, dict[str, float]]:
+) -> tuple[dict[str, dict[str, float]], dict[str, float]]:
     """Walks head-to-head events in chronological order, updating a running
-    Elo-style rating per team. Returns each event's PRE-game ratings, keyed
-    by event_key -- using the post-game rating would leak that event's own
-    outcome into its own features.
+    Elo-style rating per team. Returns (pre_game_ratings, current_ratings):
+    pre_game_ratings is each event's PRE-game ratings, keyed by event_key --
+    using the post-game rating would leak that event's own outcome into its
+    own features, which is what every training-time caller uses.
+    current_ratings is each team's rating after every event passed in has
+    been processed, keyed by entity_id -- for a team with no upcoming event
+    to look up a pre-game rating from yet, e.g. a live inference request
+    for a game that hasn't happened.
 
     Margin-of-victory-scaled (see _mov_multiplier) -- a blowout moves
     ratings more than a one-score win. Ties count as a 0.5 result for both
@@ -108,7 +113,7 @@ def compute_elo_ratings(
         ratings[home_id] = home_rating + k_factor * mov_multiplier * (home_actual - expected_home)
         ratings[away_id] = away_rating + k_factor * mov_multiplier * (away_actual - expected_away)
 
-    return pre_game_ratings
+    return pre_game_ratings, ratings
 
 
 def rest_days(event_date: str, previous_event_date: str | None) -> int | None:
