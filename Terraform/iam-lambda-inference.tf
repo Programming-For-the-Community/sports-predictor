@@ -28,6 +28,17 @@ resource "aws_iam_role_policy_attachment" "lambda_inference_logs" {
   policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
 }
 
+# Required because this Lambda is VPC-attached (lambda-nfl-predict.tf's
+# vpc_config) -- unlike lambda_pipeline (ingest/normalize's role), which
+# never needs this since those functions have no vpc_config block at all.
+# Lambda provisions an ENI per subnet/security-group combination to reach
+# the private subnets, which needs ec2:CreateNetworkInterface and friends
+# on the execution role -- this AWS-managed policy grants exactly that.
+resource "aws_iam_role_policy_attachment" "lambda_inference_vpc_access" {
+  role       = aws_iam_role.lambda_inference.name
+  policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole"
+}
+
 data "aws_iam_policy_document" "lambda_inference_permissions" {
   statement {
     sid       = "ReadModelArtifacts"
