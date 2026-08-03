@@ -51,6 +51,13 @@ jobs:
     name: Sync frontend to S3 and invalidate CloudFront
     runs-on: ubuntu-latest
     steps:
+      # Needed for Terraform/ to exist when resolving bucket/distribution
+      # below -- this job never needed repo source before (it only
+      # downloaded a build artifact and ran AWS CLI commands), so a
+      # checkout was never part of it until that Terraform read was added.
+      - name: Checkout code
+        uses: actions/checkout@v4
+
       - name: Configure AWS credentials (OIDC)
         uses: aws-actions/configure-aws-credentials@v4
         with:
