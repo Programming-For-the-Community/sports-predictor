@@ -26,6 +26,9 @@ from library.features.nfl import (
     identify_lead_receiver,
     identify_lead_rusher,
     identify_starting_qb,
+    identify_top_receivers,
+    identify_top_rushers,
+    rank_by_average_stat,
 )
 from library.schema.keys import player_key
 
@@ -131,26 +134,16 @@ def build_live_event_features(storage, sport: str, event_key: str, window: int =
     )
 
 
-def build_live_player_features(
-    storage, sport: str, event_key: str, entity_id: str, window: int = DEFAULT_ROLLING_WINDOW,
+def _build_player_feature_row(
+    storage, sport: str, event: dict, home_id: str, away_id: str, entity_id: str, team_id: str,
+    prior_games: list[dict], window: int,
 ) -> dict:
-    """One player-prop feature row for entity_id's performance in
-    event_key, in the exact shape train_player_prop_model.py was trained
-    on. team_id comes from the player's own entity record (metadata.team_id,
-    kept current by every normalize.py upsert), not from the event or
-    their own last game log, since a just-traded player's most recent
-    game log would still show their old team."""
-    event = storage.get_event(event_key)
-    if event is None:
-        raise EventNotFoundError(f"No event found for {event_key}")
-    home_id, away_id = _home_away_ids(event)
-
-    entity = storage.get_entity(sport, entity_id)
-    if entity is None:
-        raise EventNotFoundError(f"No entity found for {entity_id}")
-    team_id = entity.get("metadata", {}).get("team_id")
-
-    prior_games = storage.get_player_game_stats(entity_id, before_date=event["event_date"], limit=window)
+    """Shared by build_live_player_features (one specific requested
+    player) and build_live_event_leader_candidates (every candidate
+    likely to lead a team in some category) -- both already know
+    team_id and (for the leader case) may have already fetched
+    prior_games while identifying the candidate in the first place, so
+    this takes them as arguments rather than re-deriving them itself."""
     own_previous_events = storage.get_team_events(sport, team_id, before_date=event["event_date"], limit=1)
     own_previous_event_date = own_previous_events[0]["event_date"] if own_previous_events else None
 
@@ -171,3 +164,91 @@ def build_live_player_features(
         own_previous_event_date,
         window,
     )
+
+
+def build_live_player_features(
+    storage, sport: str, event_key: str, entity_id: str, window: int = DEFAULT_ROLLING_WINDOW,
+) -> dict:
+    """One player-prop feature row for entity_id's performance in
+    event_key, in the exact shape train_player_prop_model.py was trained
+    on. team_id comes from the player's own entity record (metadata.team_id,
+    kept current by every normalize.py upsert), not from the event or
+    their own last game log, since a just-traded player's most recent
+    game log would still show their old team."""
+    event = storage.get_event(event_key)
+    if event is None:
+        raise EventNotFoundError(f"No event found for {event_key}")
+    home_id, away_id = _home_away_ids(event)
+
+    entity = storage.get_entity(sport, entity_id)
+    if entity is None:
+        raise EventNotFoundError(f"No entity found for {entity_id}")
+    team_id = entity.get("metadata", {}).get("team_id")
+
+    prior_games = storage.get_player_game_stats(entity_id, before_date=event["event_date"], limit=window)
+    return _build_player_feature_row(storage, sport, event, home_id, away_id, entity_id, team_id, prior_games, window)
+
+
+def build_live_event_leader_candidates(
+    storage, sport: str, event_key: str, window: int = DEFAULT_ROLLING_WINDOW,
+) -> dict:
+    """One feature row per candidate likely to lead each team in
+    passing/receiving/rushing/sacks for event_key, grouped
+    {"home": {"passing": [row], "receiving": [row, row, row],
+    "rushing": [row, row], "sacks": [row, row, row]}, "away": {...}} --
+    each row is build_player_features' usual output (carries entity_id),
+    same as build_live_player_features. Deliberately doesn't touch S3 or
+    load any model -- scoring these against the right player-prop model
+    per category is the caller's job (handler.py), same separation
+    build_live_player_features/model_loader.py already have."""
+    event = storage.get_event(event_key)
+    if event is None:
+        raise EventNotFoundError(f"No event found for {event_key}")
+    home_id, away_id = _home_away_ids(event)
+
+    return {
+        "home": _team_leader_candidates(storage, sport, event, home_id, away_id, home_id, window),
+        "away": _team_leader_candidates(storage, sport, event, home_id, away_id, away_id, window),
+    }
+
+
+def _team_leader_candidates(
+    storage, sport: str, event: dict, home_id: str, away_id: str, team_id: str, window: int,
+) -> dict:
+    before_date = event["event_date"]
+    last_events = storage.get_team_events(sport, team_id, before_date=before_date, limit=1)
+    if not last_events:
+        return {"passing": [], "receiving": [], "rushing": [], "sacks": []}
+
+    last_event_players = storage.get_player_game_stats_for_event(last_events[0]["event_key"])
+    team_players = [row for row in last_event_players if row.get("team_id") == team_id]
+
+    def rows_for(candidates: list[dict]) -> list[dict]:
+        rows = []
+        for candidate in candidates:
+            entity_id = candidate["entity_id"]
+            prior_games = storage.get_player_game_stats(entity_id, before_date=before_date, limit=window)
+            rows.append(_build_player_feature_row(storage, sport, event, home_id, away_id, entity_id, team_id, prior_games, window))
+        return rows
+
+    qb = identify_starting_qb(team_players)
+    passing_rows = rows_for([qb]) if qb else []
+    receiving_rows = rows_for(identify_top_receivers(team_players))
+    rushing_rows = rows_for(identify_top_rushers(team_players))
+
+    # Sacks: ranked by each candidate's OWN rolling average, not
+    # single-game volume -- see rank_by_average_stat's docstring. Every
+    # player on the last game's roster is a candidate; offensive players
+    # naturally sort to the bottom since they have no defensive_sacks
+    # history, so no separate position filter is needed.
+    histories = {
+        row["entity_id"]: storage.get_player_game_stats(row["entity_id"], before_date=before_date, limit=window)
+        for row in team_players
+    }
+    top_sack_ids = rank_by_average_stat(histories, "defensive_sacks", 3)
+    sacks_rows = [
+        _build_player_feature_row(storage, sport, event, home_id, away_id, entity_id, team_id, histories[entity_id], window)
+        for entity_id in top_sack_ids
+    ]
+
+    return {"passing": passing_rows, "receiving": receiving_rows, "rushing": rushing_rows, "sacks": sacks_rows}

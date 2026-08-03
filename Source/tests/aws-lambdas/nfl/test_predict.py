@@ -16,6 +16,7 @@ import pytest
 import live_features
 import model_loader
 import nfl_predict
+import season_simulation
 
 
 @pytest.fixture(autouse=True)
@@ -42,6 +43,26 @@ def _api_event(resource: str, path_params: dict | None = None, query_params: dic
 
 def _model_card(version: int) -> dict:
     return {"version": version, "feature_columns": []}
+
+
+def _completed_event(event_key, season, home_id, away_id, home_score, away_score):
+    return {
+        "event_key": event_key, "event_date": "2025-09-14", "season": season, "status": "completed",
+        "participants": [
+            {"entity_id": home_id, "role": "home", "result": {"score": home_score, "won": home_score > away_score}},
+            {"entity_id": away_id, "role": "away", "result": {"score": away_score, "won": away_score > home_score}},
+        ],
+    }
+
+
+def _scheduled_event(event_key, season, event_date, home_id, away_id):
+    return {
+        "event_key": event_key, "event_date": event_date, "season": season, "status": "scheduled",
+        "participants": [
+            {"entity_id": home_id, "role": "home", "result": None},
+            {"entity_id": away_id, "role": "away", "result": None},
+        ],
+    }
 
 
 class TestEventOutcomeRoute:
@@ -246,3 +267,226 @@ class TestListModels:
         response = nfl_predict.lambda_handler(_api_event("/nfl/models"), None)
 
         assert json.loads(response["body"])["models"] == []
+
+
+def _candidate_row(entity_id: str) -> dict:
+    return {"entity_id": entity_id, "home_elo": 1500}
+
+
+class TestEventOutcomeRouteLeaders:
+    def test_leaders_block_includes_player_name_when_the_entity_has_one(self):
+        nfl_predict._storage = MagicMock()
+        nfl_predict._model_bucket = MagicMock()
+        nfl_predict._predictions_table = MagicMock()
+        nfl_predict._storage.get_entity.return_value = {"entity_id": "qb1", "name": "Patrick Mahomes"}
+
+        candidates = {
+            "home": {"passing": [_candidate_row("qb1")], "receiving": [], "rushing": [], "sacks": []},
+            "away": {"passing": [], "receiving": [], "rushing": [], "sacks": []},
+        }
+
+        with patch.object(live_features, "build_live_event_features", return_value={"home_elo": 1500}), \
+             patch.object(live_features, "build_live_event_leader_candidates", return_value=candidates), \
+             patch.object(model_loader, "load_current_model", return_value=(MagicMock(), _model_card(1))), \
+             patch.object(model_loader, "predict", return_value=267.0):
+            response = nfl_predict.lambda_handler(
+                _api_event("/nfl/predictions/events/{event_id}", {"event_id": "401547417"}), None,
+            )
+
+        body = json.loads(response["body"])
+        passing = body["leaders"]["home"]["passing"]
+        assert passing["entity_id"] == "qb1"
+        assert passing["name"] == "Patrick Mahomes"
+        assert passing["passing_yards"] == 267.0
+
+    def test_leaders_is_none_when_candidate_building_fails_but_core_predictions_still_succeed(self):
+        nfl_predict._storage = MagicMock()
+        nfl_predict._model_bucket = MagicMock()
+        nfl_predict._predictions_table = MagicMock()
+
+        with patch.object(live_features, "build_live_event_features", return_value={"home_elo": 1500}), \
+             patch.object(live_features, "build_live_event_leader_candidates", side_effect=RuntimeError("boom")), \
+             patch.object(model_loader, "load_current_model", return_value=(MagicMock(), _model_card(1))), \
+             patch.object(model_loader, "predict", return_value=0.5):
+            response = nfl_predict.lambda_handler(
+                _api_event("/nfl/predictions/events/{event_id}", {"event_id": "401547417"}), None,
+            )
+
+        assert response["statusCode"] == 200
+        body = json.loads(response["body"])
+        assert body["leaders"] is None
+        assert "win_probability" in body["predictions"]
+
+    def test_a_missing_prop_model_for_one_stat_is_skipped_not_fatal(self):
+        nfl_predict._storage = MagicMock()
+        nfl_predict._model_bucket = MagicMock()
+        nfl_predict._predictions_table = MagicMock()
+        nfl_predict._storage.get_entity.return_value = None
+
+        candidates = {
+            "home": {"passing": [_candidate_row("qb1")], "receiving": [], "rushing": [], "sacks": []},
+            "away": {"passing": [], "receiving": [], "rushing": [], "sacks": []},
+        }
+
+        with patch.object(live_features, "build_live_event_features", return_value={"home_elo": 1500}), \
+             patch.object(live_features, "build_live_event_leader_candidates", return_value=candidates), \
+             patch.object(model_loader, "load_current_model", side_effect=[
+                 (MagicMock(), _model_card(1)),  # win-probability
+                 (MagicMock(), _model_card(2)),  # margin
+                 (MagicMock(), _model_card(3)),  # home-score
+                 (MagicMock(), _model_card(4)),  # away-score
+                 model_loader.NoPromotedModelError("no passing_yards model yet"),
+                 (MagicMock(), _model_card(5)),  # passing_touchdowns
+             ]), \
+             patch.object(model_loader, "predict", side_effect=[0.62, 3.2, 24.1, 20.9, 2.0]):
+            response = nfl_predict.lambda_handler(
+                _api_event("/nfl/predictions/events/{event_id}", {"event_id": "401547417"}), None,
+            )
+
+        assert response["statusCode"] == 200
+        passing = json.loads(response["body"])["leaders"]["home"]["passing"]
+        assert "passing_yards" not in passing
+        assert passing["passing_touchdowns"] == 2.0
+
+    def test_reuses_a_loaded_model_across_candidates_sharing_the_same_stat(self):
+        nfl_predict._storage = MagicMock()
+        nfl_predict._model_bucket = MagicMock()
+        nfl_predict._predictions_table = MagicMock()
+        nfl_predict._storage.get_entity.return_value = None
+
+        candidates = {
+            "home": {
+                "passing": [], "rushing": [], "sacks": [],
+                "receiving": [_candidate_row("wr1"), _candidate_row("wr2")],
+            },
+            "away": {"passing": [], "receiving": [], "rushing": [], "sacks": []},
+        }
+        load_call_count = {"n": 0}
+
+        def fake_load(s3, sport, model_name):
+            load_call_count["n"] += 1
+            return (MagicMock(), _model_card(1))
+
+        with patch.object(live_features, "build_live_event_features", return_value={"home_elo": 1500}), \
+             patch.object(live_features, "build_live_event_leader_candidates", return_value=candidates), \
+             patch.object(model_loader, "load_current_model", side_effect=fake_load), \
+             patch.object(model_loader, "predict", return_value=50.0):
+            nfl_predict.lambda_handler(
+                _api_event("/nfl/predictions/events/{event_id}", {"event_id": "401547417"}), None,
+            )
+
+        # 4 core models (win-probability, margin, home-score, away-score)
+        # + 2 DISTINCT receiving models (yards, touchdowns) -- NOT 4,
+        # even though there are 2 receiver candidates each needing both.
+        assert load_call_count["n"] == 6
+
+
+class TestSeasonStandingsInputs:
+    def test_derives_wins_losses_and_point_differential_from_completed_events(self):
+        storage = MagicMock()
+        storage.get_all_events.side_effect = lambda sport, status: {
+            "completed": [_completed_event("E1", 2025, "KC", "LAC", 27, 20)],
+            "scheduled": [],
+        }[status]
+
+        inputs = nfl_predict._season_standings_inputs(storage)
+
+        assert inputs["wins"]["KC"] == 1
+        assert inputs["losses"]["LAC"] == 1
+        assert inputs["point_differential"]["KC"] == 7
+        assert inputs["point_differential"]["LAC"] == -7
+
+    def test_current_season_is_the_max_season_across_both_statuses(self):
+        storage = MagicMock()
+        storage.get_all_events.side_effect = lambda sport, status: {
+            "completed": [_completed_event("E1", 2024, "KC", "LAC", 27, 20)],
+            "scheduled": [_scheduled_event("E2", 2025, "2025-09-21", "KC", "DEN")],
+        }[status]
+
+        inputs = nfl_predict._season_standings_inputs(storage)
+
+        assert inputs["current_season"] == 2025
+        # The 2024 completed game shouldn't leak into this season's record.
+        assert inputs["wins"] == {}
+
+    def test_remaining_games_and_team_next_event_reflect_chronological_order(self):
+        storage = MagicMock()
+        storage.get_all_events.side_effect = lambda sport, status: {
+            "completed": [],
+            "scheduled": [
+                _scheduled_event("E2", 2025, "2025-09-28", "KC", "SF"),
+                _scheduled_event("E1", 2025, "2025-09-21", "KC", "DEN"),
+            ],
+        }[status]
+
+        inputs = nfl_predict._season_standings_inputs(storage)
+
+        assert inputs["remaining_games"] == [("KC", "DEN"), ("KC", "SF")]
+        assert inputs["team_next_event"]["KC"] == "E1"  # earliest game, not insertion order
+        assert inputs["games_remaining"]["KC"] == 2
+
+
+class TestSeasonProjectionRoute:
+    def test_returns_standings_sorted_by_projected_wins(self):
+        nfl_predict._storage = MagicMock()
+        nfl_predict._model_bucket = MagicMock()
+        nfl_predict._storage.get_all_events.side_effect = lambda sport, status: {
+            "completed": [_completed_event("E1", 2025, "KC", "LAC", 27, 20)],
+            "scheduled": [],
+        }[status]
+        nfl_predict._storage.get_all_player_game_stats.return_value = []
+
+        simulated = {
+            "KC": {"projected_wins": 11.0, "division_winner_probability": 0.8, "playoff_probability": 0.9, "championship_probability": 0.2},
+            "LAC": {"projected_wins": 6.0, "division_winner_probability": 0.1, "playoff_probability": 0.3, "championship_probability": 0.01},
+        }
+        with patch.object(season_simulation, "simulate_season", return_value=simulated):
+            response = nfl_predict.lambda_handler(_api_event("/nfl/season"), None)
+
+        assert response["statusCode"] == 200
+        body = json.loads(response["body"])
+        assert body["season"] == 2025
+        assert [row["team_id"] for row in body["standings"]] == ["KC", "LAC"]
+        assert body["standings"][0]["wins"] == 1
+
+    def test_leaderboards_is_none_when_building_them_fails_but_standings_still_return(self):
+        nfl_predict._storage = MagicMock()
+        nfl_predict._model_bucket = MagicMock()
+        nfl_predict._storage.get_all_events.side_effect = lambda sport, status: {
+            "completed": [_completed_event("E1", 2025, "KC", "LAC", 27, 20)],
+            "scheduled": [],
+        }[status]
+        nfl_predict._storage.get_all_player_game_stats.side_effect = RuntimeError("boom")
+
+        with patch.object(season_simulation, "simulate_season", return_value={}):
+            response = nfl_predict.lambda_handler(_api_event("/nfl/season"), None)
+
+        assert response["statusCode"] == 200
+        body = json.loads(response["body"])
+        assert body["leaderboards"] is None
+        assert body["standings"] == []
+
+    def test_leaderboards_include_player_names_and_are_capped_at_ten(self):
+        nfl_predict._storage = MagicMock()
+        nfl_predict._model_bucket = MagicMock()
+        nfl_predict._storage.get_all_events.side_effect = lambda sport, status: {
+            "completed": [_completed_event("E1", 2025, "KC", "LAC", 27, 20)],
+            "scheduled": [_scheduled_event("E2", 2025, "2025-09-21", "KC", "DEN")],
+        }[status]
+        nfl_predict._storage.get_all_player_game_stats.return_value = [
+            {"entity_id": "qb1", "team_id": "KC", "event_key": "E1", "stat_line": {"passing_yards": 300}},
+        ]
+        nfl_predict._storage.get_entity.return_value = {"entity_id": "qb1", "name": "Patrick Mahomes"}
+
+        with patch.object(season_simulation, "simulate_season", return_value={}), \
+             patch.object(live_features, "build_live_player_features", return_value={"entity_id": "qb1"}), \
+             patch.object(model_loader, "load_current_model", return_value=(MagicMock(), _model_card(1))), \
+             patch.object(model_loader, "predict", return_value=280.0):
+            response = nfl_predict.lambda_handler(_api_event("/nfl/season"), None)
+
+        body = json.loads(response["body"])
+        passing_leaders = body["leaderboards"]["passing_yards"]
+        assert len(passing_leaders) <= 10
+        assert passing_leaders[0]["name"] == "Patrick Mahomes"
+        # current 300 + one remaining game projected at 280/game
+        assert passing_leaders[0]["projected_total"] == pytest.approx(580.0)

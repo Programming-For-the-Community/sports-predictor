@@ -33,6 +33,16 @@ DEFAULT_MOV_BASE = 2.2
 DEFAULT_MOV_DIVISOR = 0.001
 
 
+def expected_score(rating: float, opponent_rating: float, rating_advantage: float = 0.0) -> float:
+    """Standard Elo expected-score formula: probability `rating` (plus
+    any home-field rating_advantage) beats opponent_rating. Extracted out
+    of compute_elo_ratings so other callers needing the same win
+    probability (e.g. aws-lambdas/nfl/predict/season_simulation.py's
+    Monte Carlo season simulation) share the exact formula rather than
+    risking a second copy drifting from what actually updates ratings."""
+    return 1 / (1 + 10 ** ((opponent_rating - (rating + rating_advantage)) / 400))
+
+
 def _mov_multiplier(point_diff: int, winner_elo_diff: float, base: float, divisor: float) -> float:
     """Scales a rating update by how many points a game was decided by,
     log-dampened, and further dampened by winner_elo_diff (the winner's
@@ -107,7 +117,7 @@ def compute_elo_ratings(
             _mov_multiplier(point_diff, winner_elo_diff, mov_base, mov_divisor) if point_diff != 0 else 1.0
         )
 
-        expected_home = 1 / (1 + 10 ** ((away_rating - (home_rating + home_advantage)) / 400))
+        expected_home = expected_score(home_rating, away_rating, home_advantage)
         expected_away = 1 - expected_home
 
         ratings[home_id] = home_rating + k_factor * mov_multiplier * (home_actual - expected_home)

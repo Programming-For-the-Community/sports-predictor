@@ -1,8 +1,11 @@
-# Routes for the NFL inference Lambda (lambda-nfl-predict.tf). Both
+# Routes for the NFL inference Lambda (lambda-nfl-predict.tf). All
 # resources sit under aws_api_gateway_rest_api.main (api-gateway.tf) --
 # see Source/aws-lambdas/nfl/predict/handler.py's docstring for the exact
 # request/response contract each route serves.
 #
+#   GET /nfl/events
+#   GET /nfl/models
+#   GET /nfl/season
 #   GET /nfl/predictions/events/{event_id}
 #   GET /nfl/predictions/events/{event_id}/players/{entity_id}
 #
@@ -57,6 +60,29 @@ resource "aws_api_gateway_integration" "nfl_models" {
   rest_api_id             = aws_api_gateway_rest_api.main.id
   resource_id             = aws_api_gateway_resource.nfl_models.id
   http_method             = aws_api_gateway_method.nfl_models.http_method
+  type                    = "AWS_PROXY"
+  integration_http_method = "POST"
+  uri                     = aws_lambda_function.nfl_predict.invoke_arn
+}
+
+resource "aws_api_gateway_resource" "nfl_season" {
+  rest_api_id = aws_api_gateway_rest_api.main.id
+  parent_id   = aws_api_gateway_resource.nfl.id
+  path_part   = "season"
+}
+
+resource "aws_api_gateway_method" "nfl_season" {
+  rest_api_id   = aws_api_gateway_rest_api.main.id
+  resource_id   = aws_api_gateway_resource.nfl_season.id
+  http_method   = "GET"
+  authorization = "COGNITO_USER_POOLS"
+  authorizer_id = aws_api_gateway_authorizer.cognito.id
+}
+
+resource "aws_api_gateway_integration" "nfl_season" {
+  rest_api_id             = aws_api_gateway_rest_api.main.id
+  resource_id             = aws_api_gateway_resource.nfl_season.id
+  http_method             = aws_api_gateway_method.nfl_season.http_method
   type                    = "AWS_PROXY"
   integration_http_method = "POST"
   uri                     = aws_lambda_function.nfl_predict.invoke_arn
@@ -154,6 +180,7 @@ locals {
   cors_resources = {
     events         = aws_api_gateway_resource.nfl_events.id
     models         = aws_api_gateway_resource.nfl_models.id
+    season         = aws_api_gateway_resource.nfl_season.id
     predict_event  = aws_api_gateway_resource.nfl_predictions_event.id
     predict_player = aws_api_gateway_resource.nfl_predictions_event_player.id
   }
@@ -231,6 +258,9 @@ resource "aws_api_gateway_deployment" "main" {
       aws_api_gateway_resource.nfl_models.id,
       aws_api_gateway_method.nfl_models.id,
       aws_api_gateway_integration.nfl_models.id,
+      aws_api_gateway_resource.nfl_season.id,
+      aws_api_gateway_method.nfl_season.id,
+      aws_api_gateway_integration.nfl_season.id,
       sha1(jsonencode(values(aws_api_gateway_method.cors)[*].id)),
       sha1(jsonencode(values(aws_api_gateway_integration.cors)[*].id)),
       sha1(jsonencode(values(aws_api_gateway_integration_response.cors)[*].id)),
