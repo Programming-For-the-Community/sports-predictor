@@ -8,11 +8,17 @@ resource "aws_security_group" "lambda_inference" {
   vpc_id      = var.vpc_id
 
   egress {
-    from_port   = 443
-    to_port     = 443
-    protocol    = "tcp"
-    cidr_blocks = [var.vpc_cidr]
-    description = "HTTPS to DynamoDB and S3 via VPC Gateway Endpoints"
+    from_port = 443
+    to_port   = 443
+    protocol  = "tcp"
+    # Gateway endpoints route to AWS's real public service IP ranges (each
+    # endpoint's own prefix list), NOT anything inside the VPC's own CIDR --
+    # cidr_blocks = [var.vpc_cidr] silently dropped every DynamoDB/S3 call
+    # this Lambda ever made (no RST, just a hang until boto3's own 60s
+    # connect timeout, which is why this looked like a mysterious total
+    # timeout instead of a fast connection error).
+    prefix_list_ids = [aws_vpc_endpoint.s3.prefix_list_id, aws_vpc_endpoint.dynamodb.prefix_list_id]
+    description     = "HTTPS to DynamoDB and S3 via VPC Gateway Endpoints"
   }
 
   tags = merge(local.common_tags, {

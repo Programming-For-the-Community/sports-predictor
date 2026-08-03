@@ -53,8 +53,11 @@ resource "aws_lambda_function" "nfl_predict" {
   role          = aws_iam_role.lambda_inference.arn
   package_type  = "Image"
   image_uri     = "${var.ecr_repo_url}:nfl-predict-latest"
-  timeout       = 30
-  memory_size   = 1024
+  # API Gateway's REST API integration timeout is a hard, non-configurable
+  # 29s ceiling -- any value here at or above that just gets cut off by API
+  # Gateway with a 504 before this timeout would ever fire.
+  timeout     = 29
+  memory_size = 1024
 
   environment {
     variables = {
