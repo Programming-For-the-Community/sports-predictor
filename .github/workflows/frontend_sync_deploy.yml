@@ -66,7 +66,19 @@ jobs:
           run-id: ${{ inputs.source_run_id }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Resolve bucket/distribution (Terraform outputs if not provided)
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          cli_config_credentials_token: ${{ secrets.TF_API_TOKEN }}
+
+      # Reads Terraform state directly by default -- frontend_deploy.yml
+      # deliberately does NOT pass bucket_name/distribution_id anymore
+      # (see frontend_hosting.yml's comment for why: relaying a value
+      # through nested reusable-workflow-call outputs proved unreliable
+      # across several real runs). The inputs stay as an explicit manual
+      # override for a standalone workflow_dispatch redeploy against a
+      # non-default bucket/distribution, not as the normal path.
+      - name: Resolve bucket/distribution
         id: resolve
         env:
           BUCKET_NAME: ${{ inputs.bucket_name }}
@@ -77,6 +89,12 @@ jobs:
             BUCKET_NAME="${BUCKET_NAME:-$(terraform -chdir=Terraform output -raw frontend_bucket_name)}"
             DISTRIBUTION_ID="${DISTRIBUTION_ID:-$(terraform -chdir=Terraform output -raw frontend_distribution_id)}"
           fi
+          if [ -z "$BUCKET_NAME" ] || [ -z "$DISTRIBUTION_ID" ]; then
+            echo "::error::Could not resolve bucket_name/distribution_id from inputs or Terraform state"
+            exit 1
+          fi
+          echo "Resolved bucket_name = $BUCKET_NAME"
+          echo "Resolved distribution_id = $DISTRIBUTION_ID"
           echo "bucket_name=$BUCKET_NAME" >> "$GITHUB_OUTPUT"
           echo "distribution_id=$DISTRIBUTION_ID" >> "$GITHUB_OUTPUT"
 

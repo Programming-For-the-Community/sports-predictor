@@ -53,15 +53,16 @@ jobs:
     uses: ./.github/workflows/tf_install.yml
     secrets: inherit
 
+  # No `with:` block -- frontend_hosting.yml/frontend_sync_deploy.yml read
+  # their own config directly from Terraform state (see
+  # frontend_hosting.yml's comment for why passing it through
+  # needs.infra.outputs.* was dropped). `needs: infra` still enforces the
+  # ordering (S3 bucket/CloudFront distribution must exist first).
   build_frontend:
     name: Frontend hosting (build)
     needs: infra
     uses: ./.github/workflows/frontend_hosting.yml
     secrets: inherit
-    with:
-      api_base_url: ${{ needs.infra.outputs.api_endpoint }}
-      cognito_user_pool_id: ${{ needs.infra.outputs.cognito_user_pool_id }}
-      cognito_client_id: ${{ needs.infra.outputs.cognito_client_id }}
 
   deploy_frontend:
     name: Frontend hosting (deploy)
@@ -69,6 +70,4 @@ jobs:
     uses: ./.github/workflows/frontend_sync_deploy.yml
     secrets: inherit
     with:
-      bucket_name: ${{ needs.infra.outputs.frontend_bucket_name }}
-      distribution_id: ${{ needs.infra.outputs.frontend_distribution_id }}
       source_run_id: ${{ github.run_id }}

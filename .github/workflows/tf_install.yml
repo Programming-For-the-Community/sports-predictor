@@ -187,13 +187,27 @@ jobs:
         # instead of a clear one here. capture_output fails the step
         # immediately, with the real output name, if Terraform can't
         # produce a value.
+        # Also fails on an EMPTY-but-successful value, not just a non-zero
+        # exit code -- `terraform output -raw` can exit 0 with nothing on
+        # stdout (e.g. the output genuinely resolves to ""), which the
+        # earlier version of this check let straight through.
         capture_output() {
           local name="$1"
           local value
           if ! value="$(terraform -chdir=Terraform output -raw "$name")"; then
-            echo "::error::terraform output -raw $name failed -- see the error above" >&2
+            echo "::error::terraform output -raw $name failed (non-zero exit) -- see the error above" >&2
             exit 1
           fi
+          if [ -z "$value" ]; then
+            echo "::error::terraform output -raw $name succeeded but returned an empty value" >&2
+            exit 1
+          fi
+          # Printed to the visible log on purpose -- none of these 8 values
+          # are secrets (resource names/IDs/URLs, already visible in any
+          # `terraform plan`/`apply` output), and the whole reason this
+          # function exists is that the previous failure mode was
+          # impossible to diagnose from the log alone.
+          echo "Resolved $name = $value"
           echo "$name=$value" >> "$GITHUB_OUTPUT"
         }
 
