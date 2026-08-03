@@ -254,6 +254,48 @@ def identify_lead_receiver(team_player_games: list[dict]) -> dict | None:
     return _identify_leader(team_player_games, "receiving_targets")
 
 
+def _identify_top_leaders(team_player_games: list[dict], volume_stat: str, n: int) -> list[dict]:
+    """Same shape as _identify_leader but returns the top n rows instead
+    of just the single leader -- used where a live prediction needs
+    several candidates per team (e.g. the top 3 receivers), not just one."""
+    candidates = [row for row in team_player_games if volume_stat in row.get("stat_line", {})]
+    return sorted(candidates, key=lambda row: row["stat_line"][volume_stat], reverse=True)[:n]
+
+
+def identify_top_receivers(team_player_games: list[dict], n: int = 3) -> list[dict]:
+    """The top n players by receiving targets -- see identify_lead_receiver
+    for why targets, not receptions."""
+    return _identify_top_leaders(team_player_games, "receiving_targets", n)
+
+
+def identify_top_rushers(team_player_games: list[dict], n: int = 2) -> list[dict]:
+    """The top n players by rushing attempts -- see identify_lead_rusher."""
+    return _identify_top_leaders(team_player_games, "rushing_attempts", n)
+
+
+def rank_by_average_stat(histories: dict[str, list[dict]], stat: str, n: int) -> list[str]:
+    """Given each candidate's own recent player_game_stats rows (most
+    recent first, e.g. from FeatureStorage.get_player_game_stats), ranks
+    by their average of `stat` over that window and returns the top n
+    entity_ids.
+
+    Unlike _identify_leader/_identify_top_leaders (which pick by volume
+    WITHIN ONE GAME's roster), this ranks by each candidate's OWN rolling
+    performance across their own history. Needed for defensive_sacks --
+    sacks are rare, bursty events, so "who had the most sacks in the last
+    game" is a much noisier signal than "who has the highest average"
+    the way passing_attempts/receiving_targets/rushing_attempts reliably
+    identify a starter within a single game.
+    """
+    averages = []
+    for entity_id, games in histories.items():
+        values = [game["stat_line"][stat] for game in games if stat in game.get("stat_line", {})]
+        if values:
+            averages.append((entity_id, sum(values) / len(values)))
+    averages.sort(key=lambda pair: pair[1], reverse=True)
+    return [entity_id for entity_id, _ in averages[:n]]
+
+
 def _rate(averages: dict, numerator_key: str, denominator_key: str) -> float | None:
     denominator = averages.get(denominator_key)
     if not denominator:

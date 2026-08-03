@@ -16,3 +16,10 @@ terraform {
 provider "aws" {
   region = var.region
 }
+
+# CloudFront (cloudfront.tf) requires its ACM certificate in us-east-1
+# regardless of the stack's primary region -- see acm.tf.
+provider "aws" {
+  alias  = "us_east_1"
+  region = "us-east-1"
+}

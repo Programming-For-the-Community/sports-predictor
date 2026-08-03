@@ -15,9 +15,10 @@ locals {
   predictions_table       = "${var.project}-predictions"
   sport_registry_table    = "${var.project}-sport-registry"
 
-  # DNS -- additional subdomains for future services go here as locals,
-  # not as variables, so the domain structure is defined in code.
-  api_domain = "${var.project}.${var.domain_name}"
+  # The one public domain for the whole app -- CloudFront (cloudfront.tf)
+  # serves the frontend at the default behavior and the API at /nfl/*
+  # (path-routed to API Gateway), so this is no longer API-specific.
+  domain = "${var.project}.${var.domain_name}"
 
   common_tags = {
     Owner       = var.owner

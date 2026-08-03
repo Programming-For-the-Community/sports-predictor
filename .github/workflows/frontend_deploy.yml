@@ -1,0 +1,73 @@
+# Top-level frontend deploy pipeline. Mirrors nfl_deploy.yml's trigger
+# shape and job graph -- push to a branch prefix, workflow_dispatch,
+# workflow_call, an approval gate.
+#
+# Terraform is one shared state/config for the whole account -- infra here
+# is the same tf_install.yml apply nfl_deploy.yml calls, so a push to a
+# front-end branch applies the full config (including any pending NFL
+# changes), same as nfl_deploy.yml applying the full config on an nfl*
+# push. This mirrors the existing accepted tradeoff rather than inventing
+# a new one: nfl_deploy.yml doesn't guard against two concurrent applies
+# either.
+#
+# Unlike the predict Lambda (which MUST build before infra, since
+# CreateFunction validates the image exists in ECR), S3/CloudFront have no
+# such ordering requirement -- so here `infra` runs first, and
+# build_frontend/deploy_frontend both run after, using infra's own outputs
+# directly instead of each re-reading Terraform state.
+
+name: Frontend Deploy
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - 'frontend/**'
+      - 'front-end*'
+      - 'front-end/**'
+  workflow_call:
+
+permissions:
+  id-token: write
+  contents: read
+  actions: read
+
+jobs:
+  approval:
+    name: Await deployment approval
+    if: github.event_name != 'workflow_call'
+    runs-on: ubuntu-latest
+    environment: development
+    steps:
+      - name: Approved
+        run: echo "Deployment approved -- proceeding."
+
+  # approval is intentionally skipped (not failed) when called via
+  # workflow_call -- same reasoning as nfl_deploy.yml.
+  infra:
+    name: Apply shared infrastructure
+    needs: approval
+    if: |
+      always() &&
+      (needs.approval.result == 'success' || needs.approval.result == 'skipped')
+    uses: ./.github/workflows/tf_install.yml
+    secrets: inherit
+
+  # No `with:` block -- frontend_hosting.yml/frontend_sync_deploy.yml read
+  # their own config directly from Terraform state (see
+  # frontend_hosting.yml's comment for why passing it through
+  # needs.infra.outputs.* was dropped). `needs: infra` still enforces the
+  # ordering (S3 bucket/CloudFront distribution must exist first).
+  build_frontend:
+    name: Frontend hosting (build)
+    needs: infra
+    uses: ./.github/workflows/frontend_hosting.yml
+    secrets: inherit
+
+  deploy_frontend:
+    name: Frontend hosting (deploy)
+    needs: [infra, build_frontend]
+    uses: ./.github/workflows/frontend_sync_deploy.yml
+    secrets: inherit
+    with:
+      source_run_id: ${{ github.run_id }}

@@ -1,0 +1,116 @@
+# Syncs an already-built frontend to S3 and invalidates CloudFront. Split
+# out of frontend_hosting.yml for the same reason nfl_predict_deploy.yml is
+# split from nfl_ai_hosting.yml: building has no infra dependency and runs
+# before `terraform apply`, but this step needs the S3 bucket/CloudFront
+# distribution (Terraform/s3-frontend.tf, cloudfront.tf) to already exist.
+#
+# Runs standalone (workflow_dispatch, downloading a previously-uploaded
+# frontend-build artifact by run ID -- useful for redeploying without a
+# rebuild) or called from frontend_deploy.yml with the artifact
+# frontend_hosting.yml just produced.
+
+name: Frontend Sync Deploy
+
+on:
+  workflow_dispatch:
+    inputs:
+      bucket_name:
+        description: 'Frontend S3 bucket name'
+        required: false
+        type: string
+      distribution_id:
+        description: 'CloudFront distribution ID'
+        required: false
+        type: string
+      source_run_id:
+        description: 'Workflow run ID to download the frontend-build artifact from'
+        required: true
+        type: string
+  workflow_call:
+    inputs:
+      bucket_name:
+        description: 'Frontend S3 bucket name (from Terraform output frontend_bucket_name)'
+        required: false
+        type: string
+      distribution_id:
+        description: 'CloudFront distribution ID (from Terraform output frontend_distribution_id)'
+        required: false
+        type: string
+      source_run_id:
+        description: 'Workflow run ID to download the frontend-build artifact from'
+        required: true
+        type: string
+
+permissions:
+  id-token: write
+  contents: read
+  actions: read
+
+jobs:
+  deploy:
+    name: Sync frontend to S3 and invalidate CloudFront
+    runs-on: ubuntu-latest
+    steps:
+      # Needed for Terraform/ to exist when resolving bucket/distribution
+      # below -- this job never needed repo source before (it only
+      # downloaded a build artifact and ran AWS CLI commands), so a
+      # checkout was never part of it until that Terraform read was added.
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_DEPLOY_SVC_ACCT_ARN }}
+          aws-region: ${{ vars.AWS_RESOURCE_REGION }}
+          role-session-name: GitHubActions-${{ github.run_id }}
+
+      - name: Download build artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: frontend-build
+          path: build/web
+          run-id: ${{ inputs.source_run_id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          cli_config_credentials_token: ${{ secrets.TF_API_TOKEN }}
+
+      # Reads Terraform state directly by default -- frontend_deploy.yml
+      # deliberately does NOT pass bucket_name/distribution_id anymore
+      # (see frontend_hosting.yml's comment for why: relaying a value
+      # through nested reusable-workflow-call outputs proved unreliable
+      # across several real runs). The inputs stay as an explicit manual
+      # override for a standalone workflow_dispatch redeploy against a
+      # non-default bucket/distribution, not as the normal path.
+      - name: Resolve bucket/distribution
+        id: resolve
+        env:
+          BUCKET_NAME: ${{ inputs.bucket_name }}
+          DISTRIBUTION_ID: ${{ inputs.distribution_id }}
+        run: |
+          if [ -z "$BUCKET_NAME" ] || [ -z "$DISTRIBUTION_ID" ]; then
+            terraform -chdir=Terraform init -reconfigure
+            BUCKET_NAME="${BUCKET_NAME:-$(terraform -chdir=Terraform output -raw frontend_bucket_name)}"
+            DISTRIBUTION_ID="${DISTRIBUTION_ID:-$(terraform -chdir=Terraform output -raw frontend_distribution_id)}"
+          fi
+          if [ -z "$BUCKET_NAME" ] || [ -z "$DISTRIBUTION_ID" ]; then
+            echo "::error::Could not resolve bucket_name/distribution_id from inputs or Terraform state"
+            exit 1
+          fi
+          echo "Resolved bucket_name = $BUCKET_NAME"
+          echo "Resolved distribution_id = $DISTRIBUTION_ID"
+          echo "bucket_name=$BUCKET_NAME" >> "$GITHUB_OUTPUT"
+          echo "distribution_id=$DISTRIBUTION_ID" >> "$GITHUB_OUTPUT"
+
+      - name: Sync to S3
+        env:
+          BUCKET_NAME: ${{ steps.resolve.outputs.bucket_name }}
+        run: aws s3 sync build/web/ "s3://$BUCKET_NAME" --delete
+
+      - name: Invalidate CloudFront
+        env:
+          DISTRIBUTION_ID: ${{ steps.resolve.outputs.distribution_id }}
+        run: aws cloudfront create-invalidation --distribution-id "$DISTRIBUTION_ID" --paths '/*'

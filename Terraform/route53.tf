@@ -1,13 +1,14 @@
-# A-Record alias for the API custom domain. Alias records have no TTL and
-# automatically follow any changes to the API Gateway regional IP.
+# A-Record alias for the app's one public domain (frontend + API, both via
+# CloudFront -- see cloudfront.tf). Alias records have no TTL and
+# automatically follow any changes to the distribution's underlying IPs.
 resource "aws_route53_record" "api" {
   zone_id = var.hosted_zone_id
-  name    = local.api_domain
+  name    = local.domain
   type    = "A"
 
   alias {
-    name                   = aws_api_gateway_domain_name.api.regional_domain_name
-    zone_id                = aws_api_gateway_domain_name.api.regional_zone_id
+    name                   = aws_cloudfront_distribution.main.domain_name
+    zone_id                = aws_cloudfront_distribution.main.hosted_zone_id
     evaluate_target_health = false
   }
 }

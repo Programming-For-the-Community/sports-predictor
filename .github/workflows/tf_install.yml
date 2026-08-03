@@ -50,6 +50,21 @@ on:
       nfl_predict_function_name:
         description: 'NFL predict Lambda function name'
         value: ${{ jobs.terraform.outputs.nfl_predict_function_name }}
+      cognito_user_pool_id:
+        description: 'Cognito User Pool ID'
+        value: ${{ jobs.terraform.outputs.cognito_user_pool_id }}
+      cognito_client_id:
+        description: 'Cognito App Client ID'
+        value: ${{ jobs.terraform.outputs.cognito_client_id }}
+      api_endpoint:
+        description: "The app's one public URL (frontend + API, via CloudFront)"
+        value: ${{ jobs.terraform.outputs.api_endpoint }}
+      frontend_bucket_name:
+        description: 'Frontend static site S3 bucket name'
+        value: ${{ jobs.terraform.outputs.frontend_bucket_name }}
+      frontend_distribution_id:
+        description: 'CloudFront distribution ID for the frontend/API'
+        value: ${{ jobs.terraform.outputs.frontend_distribution_id }}
 
 permissions:
   id-token: write
@@ -83,6 +98,11 @@ jobs:
       nfl_ingest_function_name: ${{ steps.tf_outputs.outputs.nfl_ingest_function_name }}
       nfl_normalize_function_name: ${{ steps.tf_outputs.outputs.nfl_normalize_function_name }}
       nfl_predict_function_name: ${{ steps.tf_outputs.outputs.nfl_predict_function_name }}
+      cognito_user_pool_id: ${{ steps.tf_outputs.outputs.cognito_user_pool_id }}
+      cognito_client_id: ${{ steps.tf_outputs.outputs.cognito_client_id }}
+      api_endpoint: ${{ steps.tf_outputs.outputs.api_endpoint }}
+      frontend_bucket_name: ${{ steps.tf_outputs.outputs.frontend_bucket_name }}
+      frontend_distribution_id: ${{ steps.tf_outputs.outputs.frontend_distribution_id }}
     # Always attaches an environment, whether run directly or called via
     # nfl_deploy.yml (which has its own separate approval job gating on the
     # same environment -- so a full deploy run does prompt for approval
@@ -158,6 +178,44 @@ jobs:
     - name: Capture Terraform outputs
       id: tf_outputs
       run: |
-        echo "nfl_ingest_function_name=$(terraform -chdir=Terraform output -raw nfl_ingest_function_name)" >> "$GITHUB_OUTPUT"
-        echo "nfl_normalize_function_name=$(terraform -chdir=Terraform output -raw nfl_normalize_function_name)" >> "$GITHUB_OUTPUT"
-        echo "nfl_predict_function_name=$(terraform -chdir=Terraform output -raw nfl_predict_function_name)" >> "$GITHUB_OUTPUT"
+        # A failed `terraform output` inside $(...) does NOT stop this
+        # script under `set -e` -- a failing command substitution embedded
+        # in a larger command (here, the argument to echo) doesn't count
+        # as the "simple command" failing, so bash happily writes an EMPTY
+        # value and moves on. That turned a real Terraform-side failure
+        # into a confusing "env var missing" error several jobs downstream
+        # instead of a clear one here. capture_output fails the step
+        # immediately, with the real output name, if Terraform can't
+        # produce a value.
+        # Also fails on an EMPTY-but-successful value, not just a non-zero
+        # exit code -- `terraform output -raw` can exit 0 with nothing on
+        # stdout (e.g. the output genuinely resolves to ""), which the
+        # earlier version of this check let straight through.
+        capture_output() {
+          local name="$1"
+          local value
+          if ! value="$(terraform -chdir=Terraform output -raw "$name")"; then
+            echo "::error::terraform output -raw $name failed (non-zero exit) -- see the error above" >&2
+            exit 1
+          fi
+          if [ -z "$value" ]; then
+            echo "::error::terraform output -raw $name succeeded but returned an empty value" >&2
+            exit 1
+          fi
+          # Printed to the visible log on purpose -- none of these 8 values
+          # are secrets (resource names/IDs/URLs, already visible in any
+          # `terraform plan`/`apply` output), and the whole reason this
+          # function exists is that the previous failure mode was
+          # impossible to diagnose from the log alone.
+          echo "Resolved $name = $value"
+          echo "$name=$value" >> "$GITHUB_OUTPUT"
+        }
+
+        capture_output nfl_ingest_function_name
+        capture_output nfl_normalize_function_name
+        capture_output nfl_predict_function_name
+        capture_output cognito_user_pool_id
+        capture_output cognito_client_id
+        capture_output api_endpoint
+        capture_output frontend_bucket_name
+        capture_output frontend_distribution_id

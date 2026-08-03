@@ -25,12 +25,21 @@ resource "aws_api_gateway_authorizer" "cognito" {
   identity_source = "method.request.header.Authorization"
 }
 
-# ── Deferred to the Lambda pass ───────────────────────────────────────────────
-# The following resources require at least one method to exist on the API
-# before AWS will accept them. Add them once routes and Lambda integrations
-# are defined:
-#
-#   aws_api_gateway_deployment  -- triggers map should list each integration ID
-#   aws_api_gateway_stage       -- references the deployment
-#   aws_api_gateway_method_settings -- throttle settings per method
-#   aws_api_gateway_usage_plan  -- references the stage
+# Deployment/stage/usage plan live in api-gateway-nfl-predict.tf, added
+# once the first routes existed (AWS rejects those resources on an API
+# with zero methods).
+
+# Without this, a request to an undefined path OR an existing path hit
+# with an undefined method both get API Gateway's default
+# {"message":"Missing Authentication Token"} 403 -- confusing for a client
+# that just made a typo. Overriding this gateway response to a real 404
+# covers both cases, account/API-wide, not per-route.
+resource "aws_api_gateway_gateway_response" "missing_auth_token" {
+  rest_api_id   = aws_api_gateway_rest_api.main.id
+  response_type = "MISSING_AUTHENTICATION_TOKEN"
+  status_code   = "404"
+
+  response_templates = {
+    "application/json" = jsonencode({ error = "Not found" })
+  }
+}

@@ -47,8 +47,14 @@ data "aws_iam_policy_document" "lambda_inference_permissions" {
   }
 
   statement {
+    sid       = "ListModelArtifacts"
+    actions   = ["s3:ListBucket"]
+    resources = ["arn:aws:s3:::${local.model_artifacts_bucket}"]
+  }
+
+  statement {
     sid     = "ReadFeatureData"
-    actions = ["dynamodb:GetItem", "dynamodb:Query"]
+    actions = ["dynamodb:GetItem", "dynamodb:Query", "dynamodb:Scan"]
     resources = [
       "arn:aws:dynamodb:${var.region}:${var.account_id}:table/${local.entities_table}",
       "arn:aws:dynamodb:${var.region}:${var.account_id}:table/${local.events_table}",

@@ -180,3 +180,69 @@ class TestErrorMapping:
             )
 
         assert response["statusCode"] == 500
+
+
+class TestListEvents:
+    def test_returns_events_for_the_requested_status(self):
+        nfl_predict._storage = MagicMock()
+        nfl_predict._storage.get_all_events.return_value = [
+            {
+                "event_id": "401547417", "event_date": "2025-09-28", "status": "scheduled",
+                "season": 2025, "season_type": 2, "week": 4,
+                "participants": [{"entity_id": "KC", "role": "home"}, {"entity_id": "LAC", "role": "away"}],
+            },
+        ]
+
+        response = nfl_predict.lambda_handler(_api_event("/nfl/events", query_params={"status": "scheduled"}), None)
+
+        assert response["statusCode"] == 200
+        body = json.loads(response["body"])
+        assert body["sport"] == "nfl"
+        assert body["events"][0]["event_id"] == "401547417"
+        nfl_predict._storage.get_all_events.assert_called_once_with("nfl", status="scheduled")
+
+    def test_defaults_to_scheduled_status(self):
+        nfl_predict._storage = MagicMock()
+        nfl_predict._storage.get_all_events.return_value = []
+
+        nfl_predict.lambda_handler(_api_event("/nfl/events"), None)
+
+        nfl_predict._storage.get_all_events.assert_called_once_with("nfl", status="scheduled")
+
+
+class TestListModels:
+    def test_returns_a_model_card_summary_per_current_model(self):
+        nfl_predict._model_bucket = MagicMock()
+        nfl_predict._model_bucket.list_keys.return_value = [
+            "nfl/win-probability/current.json",
+            "nfl/win-probability/v6/model_card.json",
+            "nfl/win-probability/v6/model.xgb",
+        ]
+        nfl_predict._model_bucket.object_exists.return_value = True
+        nfl_predict._model_bucket.get_json.side_effect = [
+            {"version": 6},  # current.json pointer
+            {
+                "model_name": "win-probability", "algorithm": "xgboost", "version": 6,
+                "trained_at": "2026-01-01T00:00:00Z", "accuracy": 0.63, "log_loss": 0.65,
+                "feature_importances": {"elo_diff": 0.22, "home_rest_days": 0.10},
+            },
+        ]
+
+        response = nfl_predict.lambda_handler(_api_event("/nfl/models"), None)
+
+        assert response["statusCode"] == 200
+        body = json.loads(response["body"])
+        assert body["sport"] == "nfl"
+        model = body["models"][0]
+        assert model["model_name"] == "win-probability"
+        assert model["accuracy"] == 0.63
+        assert model["top_features"][0] == {"feature": "elo_diff", "importance": 0.22}
+
+    def test_skips_a_model_name_with_no_promoted_version(self):
+        nfl_predict._model_bucket = MagicMock()
+        nfl_predict._model_bucket.list_keys.return_value = ["nfl/score-margin/v1/model_card.json"]
+        nfl_predict._model_bucket.object_exists.return_value = False
+
+        response = nfl_predict.lambda_handler(_api_event("/nfl/models"), None)
+
+        assert json.loads(response["body"])["models"] == []
