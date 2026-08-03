@@ -1,5 +1,6 @@
 import 'dart:convert';
 
+import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 
 import '../config/app_config.dart';
@@ -94,22 +95,31 @@ class CognitoAuthClient {
     // stalled Cognito call hangs getValidAccessToken() forever, which hangs
     // every ApiClient.get() call before it ever reaches ApiClient's own
     // timeout-guarded request.
-    final response = await _httpClient
-        .post(
-          _endpoint,
-          headers: {
-            'Content-Type': 'application/x-amz-json-1.1',
-            'X-Amz-Target': 'AWSCognitoIdentityProviderService.$target',
-          },
-          body: jsonEncode(body),
-        )
-        .timeout(
-          _timeout,
-          onTimeout: () => throw CognitoException(
-            'TimeoutError',
-            'Cognito request ($target) timed out after ${_timeout.inSeconds}s',
-          ),
-        );
+    final stopwatch = Stopwatch()..start();
+    debugPrint('[CognitoAuthClient] -> POST $target');
+    final http.Response response;
+    try {
+      response = await _httpClient
+          .post(
+            _endpoint,
+            headers: {
+              'Content-Type': 'application/x-amz-json-1.1',
+              'X-Amz-Target': 'AWSCognitoIdentityProviderService.$target',
+            },
+            body: jsonEncode(body),
+          )
+          .timeout(
+            _timeout,
+            onTimeout: () => throw CognitoException(
+              'TimeoutError',
+              'Cognito request ($target) timed out after ${_timeout.inSeconds}s',
+            ),
+          );
+    } catch (error) {
+      debugPrint('[CognitoAuthClient] <- $target FAILED after ${stopwatch.elapsedMilliseconds}ms: $error');
+      rethrow;
+    }
+    debugPrint('[CognitoAuthClient] <- $target responded ${response.statusCode} in ${stopwatch.elapsedMilliseconds}ms');
 
     final decoded = jsonDecode(response.body) as Map<String, dynamic>;
     if (response.statusCode != 200) {

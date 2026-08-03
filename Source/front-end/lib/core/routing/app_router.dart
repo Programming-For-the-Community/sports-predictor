@@ -3,6 +3,9 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../auth/auth_repository.dart';
+import '../data/events_repository.dart';
+import '../data/models_repository.dart';
+import '../data/season_repository.dart';
 import '../../features/auth/login_page.dart';
 import '../../features/home/home_page.dart';
 import '../../features/events/event_detail_page.dart';
@@ -15,9 +18,23 @@ import '../../features/sport_shell/sport_shell_page.dart';
 /// go_router's `refreshListenable` re-evaluates `redirect` whenever auth
 /// state changes (login, logout, or a session restore completing) --
 /// standard Riverpod+go_router integration pattern.
+///
+/// Also invalidates every data provider on each auth change. None of
+/// eventsListProvider/eventPredictionProvider/modelsListProvider/
+/// seasonProjectionProvider watch auth state themselves, so a session
+/// dying mid-use (see AuthRepository.getValidAccessToken) leaves them
+/// permanently cached on that error -- logging back in changes
+/// authRepositoryProvider's state, but without this, nothing would ever
+/// tell the data providers to forget the stale failure and retry.
 class _AuthChangeNotifier extends ChangeNotifier {
   _AuthChangeNotifier(Ref ref) {
-    ref.listen<AuthState>(authRepositoryProvider, (previous, next) => notifyListeners());
+    ref.listen<AuthState>(authRepositoryProvider, (previous, next) {
+      ref.invalidate(eventsListProvider);
+      ref.invalidate(eventPredictionProvider);
+      ref.invalidate(modelsListProvider);
+      ref.invalidate(seasonProjectionProvider);
+      notifyListeners();
+    });
   }
 }
 
