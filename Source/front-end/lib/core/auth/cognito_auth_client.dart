@@ -83,19 +83,33 @@ class CognitoNewPasswordRequired extends CognitoAuthResult {
 class CognitoAuthClient {
   CognitoAuthClient({http.Client? httpClient}) : _httpClient = httpClient ?? http.Client();
 
+  static const _timeout = Duration(seconds: 15);
+
   final http.Client _httpClient;
 
   Uri get _endpoint => Uri.https('cognito-idp.${AppConfig.awsRegion}.amazonaws.com', '/');
 
   Future<Map<String, dynamic>> _post(String target, Map<String, dynamic> body) async {
-    final response = await _httpClient.post(
-      _endpoint,
-      headers: {
-        'Content-Type': 'application/x-amz-json-1.1',
-        'X-Amz-Target': 'AWSCognitoIdentityProviderService.$target',
-      },
-      body: jsonEncode(body),
-    );
+    // Same reasoning as ApiClient._send's timeout -- without this, a
+    // stalled Cognito call hangs getValidAccessToken() forever, which hangs
+    // every ApiClient.get() call before it ever reaches ApiClient's own
+    // timeout-guarded request.
+    final response = await _httpClient
+        .post(
+          _endpoint,
+          headers: {
+            'Content-Type': 'application/x-amz-json-1.1',
+            'X-Amz-Target': 'AWSCognitoIdentityProviderService.$target',
+          },
+          body: jsonEncode(body),
+        )
+        .timeout(
+          _timeout,
+          onTimeout: () => throw CognitoException(
+            'TimeoutError',
+            'Cognito request ($target) timed out after ${_timeout.inSeconds}s',
+          ),
+        );
 
     final decoded = jsonDecode(response.body) as Map<String, dynamic>;
     if (response.statusCode != 200) {
