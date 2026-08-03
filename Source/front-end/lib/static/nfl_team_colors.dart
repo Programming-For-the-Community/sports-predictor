@@ -1,0 +1,48 @@
+import 'package:flutter/material.dart';
+
+/// Frontend-only -- the backend has no team display/color data (see
+/// Source/library/features/nfl_teams.py, which only carries
+/// division/conference/coordinates). Keyed by ESPN's numeric team_id, the
+/// same id used as entity_id throughout the backend.
+class NflTeam {
+  const NflTeam(this.abbreviation, this.primary);
+  final String abbreviation;
+  final Color primary;
+}
+
+const Map<String, NflTeam> kNflTeams = {
+  '1': NflTeam('ATL', Color(0xFFA71930)),
+  '2': NflTeam('BUF', Color(0xFF00338D)),
+  '3': NflTeam('CHI', Color(0xFF0B162A)),
+  '4': NflTeam('CIN', Color(0xFFFB4F14)),
+  '5': NflTeam('CLE', Color(0xFF311D00)),
+  '6': NflTeam('DAL', Color(0xFF041E42)),
+  '7': NflTeam('DEN', Color(0xFFFB4F14)),
+  '8': NflTeam('DET', Color(0xFF0076B6)),
+  '9': NflTeam('GB', Color(0xFF203731)),
+  '10': NflTeam('TEN', Color(0xFF4B92DB)),
+  '11': NflTeam('IND', Color(0xFF002C5F)),
+  '12': NflTeam('KC', Color(0xFFE31837)),
+  '13': NflTeam('LV', Color(0xFF000000)),
+  '14': NflTeam('LAR', Color(0xFF003594)),
+  '15': NflTeam('MIA', Color(0xFF008E97)),
+  '16': NflTeam('MIN', Color(0xFF4F2683)),
+  '17': NflTeam('NE', Color(0xFF002244)),
+  '18': NflTeam('NO', Color(0xFFD3BC8D)),
+  '19': NflTeam('NYG', Color(0xFF0B2265)),
+  '20': NflTeam('NYJ', Color(0xFF125740)),
+  '21': NflTeam('PHI', Color(0xFF004C54)),
+  '22': NflTeam('ARI', Color(0xFF97233F)),
+  '23': NflTeam('PIT', Color(0xFFFFB612)),
+  '24': NflTeam('LAC', Color(0xFF0080C6)),
+  '25': NflTeam('SF', Color(0xFFAA0000)),
+  '26': NflTeam('SEA', Color(0xFF002244)),
+  '27': NflTeam('TB', Color(0xFFD50A0A)),
+  '28': NflTeam('WSH', Color(0xFF5A1414)),
+  '29': NflTeam('CAR', Color(0xFF0085CA)),
+  '30': NflTeam('JAX', Color(0xFF006778)),
+  '33': NflTeam('BAL', Color(0xFF241773)),
+  '34': NflTeam('HOU', Color(0xFF03202F)),
+};
+
+NflTeam nflTeam(String entityId) => kNflTeams[entityId] ?? NflTeam(entityId, const Color(0xFF586577));

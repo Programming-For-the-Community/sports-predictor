@@ -15,6 +15,8 @@ import 'api_exception.dart';
 class ApiClient {
   ApiClient(this._ref, {http.Client? httpClient}) : _httpClient = httpClient ?? http.Client();
 
+  static const _timeout = Duration(seconds: 15);
+
   final Ref _ref;
   final http.Client _httpClient;
 
@@ -31,7 +33,18 @@ class ApiClient {
     return _decode(response);
   }
 
-  Future<http.Response> _send(Uri uri, Map<String, String> headers) => _httpClient.get(uri, headers: headers);
+  Future<http.Response> _send(Uri uri, Map<String, String> headers) {
+    // Without this, a stalled connection (DNS not resolved, a CloudFront
+    // distribution still propagating, a hung TCP handshake) never
+    // resolves OR rejects the Future -- the UI just spins forever instead
+    // of ever reaching an error state. A CORS rejection specifically
+    // still fails fast on its own and isn't what this guards against.
+    return _httpClient.get(uri, headers: headers).timeout(
+      _timeout,
+      onTimeout: () => throw ApiException(0, 'Request to $uri timed out after ${_timeout.inSeconds}s -- '
+          'check the API is reachable and, if calling from a local dev server, that CORS is configured'),
+    );
+  }
 
   Future<Map<String, String>> _authHeader({bool forceRefresh = false}) async {
     final authRepository = _ref.read(authRepositoryProvider.notifier);

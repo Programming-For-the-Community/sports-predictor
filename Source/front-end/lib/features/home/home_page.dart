@@ -2,15 +2,13 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/auth/auth_repository.dart';
+import '../../core/models/sport_config.dart';
 import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_text_styles.dart';
 import '../../core/widgets/brand_mark.dart';
 import '../../core/widgets/page_glow.dart';
+import '../../core/widgets/sport_card.dart';
 
-/// Placeholder for Phase 1 -- proves the auth-gated route actually works
-/// end to end (a real login redirects here, logging out redirects back to
-/// /login). The sport card grid (design/FRONTEND_STYLE.md's "Sport card"
-/// component, driven by SportConfig/kSports) replaces this in Phase 5.
 class HomePage extends ConsumerWidget {
   const HomePage({super.key});
 
@@ -22,7 +20,7 @@ class HomePage extends ConsumerWidget {
         children: [
           const PageGlow(),
           SafeArea(
-            child: Padding(
+            child: SingleChildScrollView(
               padding: const EdgeInsets.all(24),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -39,12 +37,16 @@ class HomePage extends ConsumerWidget {
                       ),
                     ],
                   ),
-                  const SizedBox(height: 48),
-                  Text('Signed in.', style: AppTextStyles.pageH1()),
-                  const SizedBox(height: 12),
-                  Text(
-                    'Sport predictions land here once the events pipeline is wired up.',
-                    style: AppTextStyles.body(),
+                  const SizedBox(height: 40),
+                  Text('Sports', style: AppTextStyles.pageH1()),
+                  const SizedBox(height: 24),
+                  Wrap(
+                    spacing: 20,
+                    runSpacing: 20,
+                    children: [
+                      for (final sport in kSports)
+                        SizedBox(width: 340, child: SportCard(sport: sport)),
+                    ],
                   ),
                 ],
               ),

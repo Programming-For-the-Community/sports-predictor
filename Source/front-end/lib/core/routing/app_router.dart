@@ -5,6 +5,10 @@ import 'package:go_router/go_router.dart';
 import '../auth/auth_repository.dart';
 import '../../features/auth/login_page.dart';
 import '../../features/home/home_page.dart';
+import '../../features/events/event_detail_page.dart';
+import '../../features/events/event_list_page.dart';
+import '../../features/models/model_cards_page.dart';
+import '../../features/sport_shell/sport_shell_page.dart';
 
 /// Bridges Riverpod's authRepositoryProvider state into a Listenable so
 /// go_router's `refreshListenable` re-evaluates `redirect` whenever auth
@@ -38,6 +42,31 @@ final appRouterProvider = Provider<GoRouter>((ref) {
     routes: [
       GoRoute(path: '/login', builder: (context, state) => const LoginPage()),
       GoRoute(path: '/', builder: (context, state) => const HomePage()),
+      ShellRoute(
+        builder: (context, state, child) {
+          final sportId = state.pathParameters['sport']!;
+          return SportShellPage(sportId: sportId, child: child);
+        },
+        routes: [
+          GoRoute(
+            path: '/:sport/events',
+            builder: (context, state) => EventListPage(sportId: state.pathParameters['sport']!),
+            routes: [
+              GoRoute(
+                path: ':eventId',
+                builder: (context, state) => EventDetailPage(
+                  sportId: state.pathParameters['sport']!,
+                  eventId: state.pathParameters['eventId']!,
+                ),
+              ),
+            ],
+          ),
+          GoRoute(
+            path: '/:sport/models',
+            builder: (context, state) => ModelCardsPage(sportId: state.pathParameters['sport']!),
+          ),
+        ],
+      ),
     ],
   );
 });
