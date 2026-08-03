@@ -17,13 +17,11 @@
 # anything that only builds/pushes an artifact (no Terraform-created
 # resource to read or write) runs BEFORE infra; anything that needs a
 # Terraform-created resource to already exist (pointing a Lambda at an
-# image, deploying zip code to a function, syncing to a bucket) runs
-# AFTER. The NFL backfill/training/hosting images have no such
-# requirement, so they run first; the frontend build has no such
-# requirement EITHER, but it does need infra's own outputs (Cognito IDs,
-# API URL) as plain inputs rather than re-reading Terraform state itself,
-# so it's simplest fed after `infra` -- see frontend_hosting.yml's own
-# comment for why.
+# image, deploying zip code to a function, syncing to a bucket, or --
+# for the frontend build specifically -- reading Terraform outputs
+# directly, see frontend_hosting.yml's own comment for why it reads
+# state itself rather than receiving it via needs.infra.outputs.*) runs
+# AFTER.
 
 name: App Deploy
 
@@ -88,15 +86,15 @@ jobs:
       ingest_function_name: ${{ needs.infra.outputs.nfl_ingest_function_name }}
       normalize_function_name: ${{ needs.infra.outputs.nfl_normalize_function_name }}
 
+  # No config `with:` block for either -- both read directly from
+  # Terraform state instead of relaying it through needs.infra.outputs.*,
+  # which proved unreliable in practice (see frontend_hosting.yml's
+  # comment). `needs: infra` still enforces ordering.
   frontend_build:
     name: Frontend hosting (build)
     needs: infra
     uses: ./.github/workflows/frontend_hosting.yml
     secrets: inherit
-    with:
-      api_base_url: ${{ needs.infra.outputs.api_endpoint }}
-      cognito_user_pool_id: ${{ needs.infra.outputs.cognito_user_pool_id }}
-      cognito_client_id: ${{ needs.infra.outputs.cognito_client_id }}
 
   frontend_deploy:
     name: Frontend hosting (deploy)
@@ -104,8 +102,6 @@ jobs:
     uses: ./.github/workflows/frontend_sync_deploy.yml
     secrets: inherit
     with:
-      bucket_name: ${{ needs.infra.outputs.frontend_bucket_name }}
-      distribution_id: ${{ needs.infra.outputs.frontend_distribution_id }}
       source_run_id: ${{ github.run_id }}
 
   # A future sport's deploy (e.g. NCAA FB) adds its own build job(s)

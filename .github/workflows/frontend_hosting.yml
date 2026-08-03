@@ -5,11 +5,21 @@
 #
 # Build-only, same shape as nfl_ai_hosting.yml -- no deploy step here.
 # Deploying (syncing to S3 + invalidating CloudFront) is
-# frontend_sync_deploy.yml's job. Unlike the predict Lambda's image (which
-# MUST be pushed before Terraform can create the function), S3/CloudFront
-# have no such ordering requirement, so there's no reason for this job to
-# touch Terraform/AWS at all -- frontend_deploy.yml runs this AFTER
-# `infra` and passes the config values in directly as inputs.
+# frontend_sync_deploy.yml's job.
+#
+# The build job reads its config (API URL, Cognito IDs) directly from
+# Terraform state via `terraform output`, rather than receiving them as
+# workflow_call inputs from a parent's `needs.infra.outputs.*`. That
+# pass-through was tried first and proved unreliable in practice across
+# several real runs even with verified-correct upstream state -- relaying
+# a value through two layers of reusable-workflow-call outputs
+# (frontend_deploy.yml -> tf_install.yml, and separately
+# frontend_deploy.yml -> this workflow) is a known flaky spot in GitHub
+# Actions. Reading Terraform state directly is the same one-hop read
+# tf_install.yml's own job already does successfully -- no relay, nothing
+# to propagate incorrectly. The tradeoff: this job needs AWS credentials
+# and the Terraform CLI, which it otherwise wouldn't -- accepted in
+# exchange for actually working.
 #
 # No Dockerfile -- flutter build web runs directly on the runner via
 # subosito/flutter-action, the same way run_python_tests.yml installs
@@ -19,27 +29,7 @@ name: Frontend Hosting
 
 on:
   workflow_dispatch:
-    inputs:
-      api_base_url:
-        required: true
-        type: string
-      cognito_user_pool_id:
-        required: true
-        type: string
-      cognito_client_id:
-        required: true
-        type: string
   workflow_call:
-    inputs:
-      api_base_url:
-        required: true
-        type: string
-      cognito_user_pool_id:
-        required: true
-        type: string
-      cognito_client_id:
-        required: true
-        type: string
     outputs:
       artifact_name:
         description: 'Name of the uploaded build/web artifact, for frontend_sync_deploy.yml to download'
@@ -49,6 +39,7 @@ env:
   FLUTTER_VERSION: '3.29.3'
 
 permissions:
+  id-token: write
   contents: read
 
 jobs:
@@ -93,6 +84,38 @@ jobs:
           flutter-version: ${{ env.FLUTTER_VERSION }}
           channel: stable
 
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_DEPLOY_SVC_ACCT_ARN }}
+          aws-region: ${{ vars.AWS_RESOURCE_REGION }}
+          role-session-name: GitHubActions-${{ github.run_id }}
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          cli_config_credentials_token: ${{ secrets.TF_API_TOKEN }}
+
+      - name: Terraform init
+        run: terraform -chdir=Terraform init -reconfigure
+
+      - name: Fetch config from Terraform outputs
+        id: tf_config
+        run: |
+          fetch() {
+            local name="$1"
+            local value
+            if ! value="$(terraform -chdir=Terraform output -raw "$name")" || [ -z "$value" ]; then
+              echo "::error::terraform output -raw $name did not produce a value"
+              exit 1
+            fi
+            echo "Resolved $name = $value"
+            echo "$name=$value" >> "$GITHUB_OUTPUT"
+          }
+          fetch api_endpoint
+          fetch cognito_user_pool_id
+          fetch cognito_client_id
+
       - name: Install dependencies
         working-directory: Source/front-end
         run: flutter pub get
@@ -100,9 +123,9 @@ jobs:
       - name: Render production config
         working-directory: Source/front-end
         env:
-          API_BASE_URL: ${{ inputs.api_base_url }}
-          COGNITO_USER_POOL_ID: ${{ inputs.cognito_user_pool_id }}
-          COGNITO_CLIENT_ID: ${{ inputs.cognito_client_id }}
+          API_BASE_URL: ${{ steps.tf_config.outputs.api_endpoint }}
+          COGNITO_USER_POOL_ID: ${{ steps.tf_config.outputs.cognito_user_pool_id }}
+          COGNITO_CLIENT_ID: ${{ steps.tf_config.outputs.cognito_client_id }}
         run: bash scripts/render_frontend_config.sh
 
       - name: Build web
