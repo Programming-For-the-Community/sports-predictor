@@ -140,6 +140,73 @@ resource "aws_api_gateway_integration" "nfl_predict_player" {
   uri                     = aws_lambda_function.nfl_predict.invoke_arn
 }
 
+# --- CORS preflight (OPTIONS) -------------------------------------------
+# Irrelevant in production -- the frontend and API share one origin via
+# CloudFront (cloudfront.tf), so real traffic never triggers a browser CORS
+# check. Needed for local dev: `flutter run` serves the app from
+# http://localhost while still calling the real deployed API, and every
+# request carries a custom Authorization header, which alone forces a
+# preflight OPTIONS regardless of method. The actual GET responses already
+# carry Access-Control-Allow-Origin from handler.py's _CORS_HEADERS --
+# only the preflight itself needs a mock response here, since API Gateway
+# calls the real Lambda for every other method.
+locals {
+  cors_resources = {
+    events         = aws_api_gateway_resource.nfl_events.id
+    models         = aws_api_gateway_resource.nfl_models.id
+    predict_event  = aws_api_gateway_resource.nfl_predictions_event.id
+    predict_player = aws_api_gateway_resource.nfl_predictions_event_player.id
+  }
+}
+
+resource "aws_api_gateway_method" "cors" {
+  for_each      = local.cors_resources
+  rest_api_id   = aws_api_gateway_rest_api.main.id
+  resource_id   = each.value
+  http_method   = "OPTIONS"
+  authorization = "NONE"
+}
+
+resource "aws_api_gateway_integration" "cors" {
+  for_each    = local.cors_resources
+  rest_api_id = aws_api_gateway_rest_api.main.id
+  resource_id = each.value
+  http_method = aws_api_gateway_method.cors[each.key].http_method
+  type        = "MOCK"
+
+  request_templates = {
+    "application/json" = jsonencode({ statusCode = 200 })
+  }
+}
+
+resource "aws_api_gateway_method_response" "cors" {
+  for_each    = local.cors_resources
+  rest_api_id = aws_api_gateway_rest_api.main.id
+  resource_id = each.value
+  http_method = aws_api_gateway_method.cors[each.key].http_method
+  status_code = "200"
+
+  response_parameters = {
+    "method.response.header.Access-Control-Allow-Headers" = true
+    "method.response.header.Access-Control-Allow-Methods" = true
+    "method.response.header.Access-Control-Allow-Origin"  = true
+  }
+}
+
+resource "aws_api_gateway_integration_response" "cors" {
+  for_each    = local.cors_resources
+  rest_api_id = aws_api_gateway_rest_api.main.id
+  resource_id = each.value
+  http_method = aws_api_gateway_method.cors[each.key].http_method
+  status_code = aws_api_gateway_method_response.cors[each.key].status_code
+
+  response_parameters = {
+    "method.response.header.Access-Control-Allow-Headers" = "'Content-Type,Authorization'"
+    "method.response.header.Access-Control-Allow-Methods" = "'GET,OPTIONS'"
+    "method.response.header.Access-Control-Allow-Origin"  = "'*'"
+  }
+}
+
 # --- Deployment / stage / usage plan -----------------------------------------
 
 resource "aws_api_gateway_deployment" "main" {
@@ -164,6 +231,9 @@ resource "aws_api_gateway_deployment" "main" {
       aws_api_gateway_resource.nfl_models.id,
       aws_api_gateway_method.nfl_models.id,
       aws_api_gateway_integration.nfl_models.id,
+      sha1(jsonencode(values(aws_api_gateway_method.cors)[*].id)),
+      sha1(jsonencode(values(aws_api_gateway_integration.cors)[*].id)),
+      sha1(jsonencode(values(aws_api_gateway_integration_response.cors)[*].id)),
     ]))
   }
 

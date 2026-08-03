@@ -178,11 +178,30 @@ jobs:
     - name: Capture Terraform outputs
       id: tf_outputs
       run: |
-        echo "nfl_ingest_function_name=$(terraform -chdir=Terraform output -raw nfl_ingest_function_name)" >> "$GITHUB_OUTPUT"
-        echo "nfl_normalize_function_name=$(terraform -chdir=Terraform output -raw nfl_normalize_function_name)" >> "$GITHUB_OUTPUT"
-        echo "nfl_predict_function_name=$(terraform -chdir=Terraform output -raw nfl_predict_function_name)" >> "$GITHUB_OUTPUT"
-        echo "cognito_user_pool_id=$(terraform -chdir=Terraform output -raw cognito_user_pool_id)" >> "$GITHUB_OUTPUT"
-        echo "cognito_client_id=$(terraform -chdir=Terraform output -raw cognito_client_id)" >> "$GITHUB_OUTPUT"
-        echo "api_endpoint=$(terraform -chdir=Terraform output -raw api_endpoint)" >> "$GITHUB_OUTPUT"
-        echo "frontend_bucket_name=$(terraform -chdir=Terraform output -raw frontend_bucket_name)" >> "$GITHUB_OUTPUT"
-        echo "frontend_distribution_id=$(terraform -chdir=Terraform output -raw frontend_distribution_id)" >> "$GITHUB_OUTPUT"
+        # A failed `terraform output` inside $(...) does NOT stop this
+        # script under `set -e` -- a failing command substitution embedded
+        # in a larger command (here, the argument to echo) doesn't count
+        # as the "simple command" failing, so bash happily writes an EMPTY
+        # value and moves on. That turned a real Terraform-side failure
+        # into a confusing "env var missing" error several jobs downstream
+        # instead of a clear one here. capture_output fails the step
+        # immediately, with the real output name, if Terraform can't
+        # produce a value.
+        capture_output() {
+          local name="$1"
+          local value
+          if ! value="$(terraform -chdir=Terraform output -raw "$name")"; then
+            echo "::error::terraform output -raw $name failed -- see the error above" >&2
+            exit 1
+          fi
+          echo "$name=$value" >> "$GITHUB_OUTPUT"
+        }
+
+        capture_output nfl_ingest_function_name
+        capture_output nfl_normalize_function_name
+        capture_output nfl_predict_function_name
+        capture_output cognito_user_pool_id
+        capture_output cognito_client_id
+        capture_output api_endpoint
+        capture_output frontend_bucket_name
+        capture_output frontend_distribution_id
