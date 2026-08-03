@@ -12,9 +12,13 @@ from library.features.nfl import (
     build_player_features,
     compute_elo_ratings,
     current_streak,
+    expected_score,
     identify_lead_receiver,
     identify_lead_rusher,
     identify_starting_qb,
+    identify_top_receivers,
+    identify_top_rushers,
+    rank_by_average_stat,
     rest_days,
     rolling_player_stat_averages,
     rolling_team_scoring_averages,
@@ -401,6 +405,99 @@ class TestIdentifyLeadReceiver:
 
     def test_empty_team_games_returns_none(self):
         assert identify_lead_receiver([]) is None
+
+
+class TestExpectedScore:
+    def test_equal_ratings_no_advantage_is_a_coin_flip(self):
+        assert expected_score(1500, 1500) == pytest.approx(0.5)
+
+    def test_higher_rating_favored(self):
+        assert expected_score(1600, 1500) > 0.5
+
+    def test_home_advantage_shifts_probability_toward_the_home_side(self):
+        even = expected_score(1500, 1500, rating_advantage=0)
+        with_advantage = expected_score(1500, 1500, rating_advantage=55)
+
+        assert with_advantage > even
+
+    def test_symmetric_with_its_opponent(self):
+        home = expected_score(1500, 1600, rating_advantage=55)
+        away = expected_score(1600, 1500, rating_advantage=-55)
+
+        assert home == pytest.approx(1 - away)
+
+
+class TestIdentifyTopReceivers:
+    def test_returns_top_n_sorted_descending_by_targets(self):
+        team_games = [
+            {"entity_id": "wr3", "stat_line": {"receiving_targets": 5}},
+            {"entity_id": "wr1", "stat_line": {"receiving_targets": 11}},
+            {"entity_id": "wr2", "stat_line": {"receiving_targets": 8}},
+            {"entity_id": "wr4", "stat_line": {"receiving_targets": 2}},
+        ]
+
+        top = identify_top_receivers(team_games, n=3)
+
+        assert [row["entity_id"] for row in top] == ["wr1", "wr2", "wr3"]
+
+    def test_fewer_candidates_than_n_returns_all_of_them(self):
+        team_games = [{"entity_id": "wr1", "stat_line": {"receiving_targets": 4}}]
+
+        assert len(identify_top_receivers(team_games, n=3)) == 1
+
+    def test_ignores_players_without_receiving_targets(self):
+        team_games = [{"entity_id": "rb", "stat_line": {"rushing_attempts": 15}}]
+
+        assert identify_top_receivers(team_games, n=3) == []
+
+
+class TestIdentifyTopRushers:
+    def test_returns_top_n_sorted_descending_by_attempts(self):
+        team_games = [
+            {"entity_id": "rb2", "stat_line": {"rushing_attempts": 6}},
+            {"entity_id": "rb1", "stat_line": {"rushing_attempts": 18}},
+        ]
+
+        top = identify_top_rushers(team_games, n=2)
+
+        assert [row["entity_id"] for row in top] == ["rb1", "rb2"]
+
+
+class TestRankByAverageStat:
+    def test_ranks_by_average_not_a_single_huge_game(self):
+        # "player-b" had one huge game but a lower average overall --
+        # this is exactly the case single-game volume (_identify_leader's
+        # approach) would get wrong for a bursty stat like sacks.
+        histories = {
+            "player-a": [
+                {"stat_line": {"defensive_sacks": 2.0}},
+                {"stat_line": {"defensive_sacks": 2.0}},
+                {"stat_line": {"defensive_sacks": 2.0}},
+            ],
+            "player-b": [
+                {"stat_line": {"defensive_sacks": 5.0}},
+                {"stat_line": {"defensive_sacks": 0.0}},
+                {"stat_line": {"defensive_sacks": 0.0}},
+            ],
+        }
+
+        ranked = rank_by_average_stat(histories, "defensive_sacks", n=2)
+
+        assert ranked == ["player-a", "player-b"]
+
+    def test_candidates_with_no_recorded_value_are_excluded(self):
+        histories = {"offense-player": [{"stat_line": {"passing_yards": 250}}]}
+
+        assert rank_by_average_stat(histories, "defensive_sacks", n=3) == []
+
+    def test_respects_n(self):
+        histories = {
+            "a": [{"stat_line": {"defensive_sacks": 3.0}}],
+            "b": [{"stat_line": {"defensive_sacks": 2.0}}],
+            "c": [{"stat_line": {"defensive_sacks": 1.0}}],
+        }
+
+        assert rank_by_average_stat(histories, "defensive_sacks", n=1) == ["a"]
 
 
 class TestBuildEventFeatures:
