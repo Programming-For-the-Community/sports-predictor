@@ -56,8 +56,8 @@ resource "aws_lambda_function" "nfl_predict" {
   # API Gateway's REST API integration timeout is a hard, non-configurable
   # 29s ceiling -- any value here at or above that just gets cut off by API
   # Gateway with a 504 before this timeout would ever fire.
-  timeout       = 29
-  memory_size   = 1024
+  timeout     = 29
+  memory_size = 1024
 
   environment {
     variables = {
