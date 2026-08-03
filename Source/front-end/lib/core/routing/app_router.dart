@@ -8,6 +8,7 @@ import '../../features/home/home_page.dart';
 import '../../features/events/event_detail_page.dart';
 import '../../features/events/event_list_page.dart';
 import '../../features/models/model_cards_page.dart';
+import '../../features/season/season_page.dart';
 import '../../features/sport_shell/sport_shell_page.dart';
 
 /// Bridges Riverpod's authRepositoryProvider state into a Listenable so
@@ -64,6 +65,10 @@ final appRouterProvider = Provider<GoRouter>((ref) {
           GoRoute(
             path: '/:sport/models',
             builder: (context, state) => ModelCardsPage(sportId: state.pathParameters['sport']!),
+          ),
+          GoRoute(
+            path: '/:sport/season',
+            builder: (context, state) => SeasonPage(sportId: state.pathParameters['sport']!),
           ),
         ],
       ),

@@ -98,6 +98,32 @@ void main() {
     expect(refreshCalls, 1);
   });
 
+  test('getValidAccessToken transitions to AuthUnauthenticated when the refresh token itself is rejected', () async {
+    final repo = AuthRepository(
+      authClient: CognitoAuthClient(
+        httpClient: MockClient((request) async {
+          final body = jsonDecode(request.body) as Map<String, dynamic>;
+          if (body['AuthFlow'] == 'REFRESH_TOKEN_AUTH') {
+            return http.Response(
+              jsonEncode({'__type': 'NotAuthorizedException', 'message': 'Refresh Token has expired'}),
+              400,
+            );
+          }
+          // Login response: expires in 30s -- already within the 60s window.
+          return _tokenResponse(access: 'initial', expiresIn: 30);
+        }),
+      ),
+    );
+    await _firstRealState(repo);
+    await repo.login(username: 'chamar', password: 'hunter2');
+
+    await expectLater(repo.getValidAccessToken(), throwsA(isA<CognitoException>()));
+
+    expect(repo.state, isA<AuthUnauthenticated>());
+    final prefs = await SharedPreferences.getInstance();
+    expect(prefs.getString('cognito_tokens'), isNull);
+  });
+
   test('logout clears state and persisted storage', () async {
     final repo = AuthRepository(authClient: CognitoAuthClient(httpClient: MockClient((r) async => _tokenResponse())));
     await _firstRealState(repo);

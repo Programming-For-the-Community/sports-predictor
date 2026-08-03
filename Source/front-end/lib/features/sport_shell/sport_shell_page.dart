@@ -10,6 +10,8 @@ import '../../core/widgets/page_glow.dart';
 /// design/FRONTEND_STYLE.md's top-bar spec. Reads SportConfig from the
 /// :sport path param for title/accent only -- no sport-specific logic
 /// lives here.
+enum _SportTab { events, season, models }
+
 class SportShellPage extends StatelessWidget {
   const SportShellPage({super.key, required this.sportId, required this.child});
 
@@ -19,7 +21,12 @@ class SportShellPage extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final sport = sportById(sportId);
-    final onModels = GoRouterState.of(context).matchedLocation.endsWith('/models');
+    final location = GoRouterState.of(context).matchedLocation;
+    final activeTab = location.endsWith('/models')
+        ? _SportTab.models
+        : location.endsWith('/season')
+            ? _SportTab.season
+            : _SportTab.events;
 
     return Scaffold(
       backgroundColor: AppColors.bg,
@@ -40,7 +47,7 @@ class SportShellPage extends StatelessWidget {
                       const SizedBox(width: 8),
                       Text(sport.displayName, style: AppTextStyles.sectionTitle()),
                       const Spacer(),
-                      _TabToggle(sportId: sportId, onModels: onModels),
+                      _TabToggle(sportId: sportId, activeTab: activeTab),
                     ],
                   ),
                 ),
@@ -55,9 +62,9 @@ class SportShellPage extends StatelessWidget {
 }
 
 class _TabToggle extends StatelessWidget {
-  const _TabToggle({required this.sportId, required this.onModels});
+  const _TabToggle({required this.sportId, required this.activeTab});
   final String sportId;
-  final bool onModels;
+  final _SportTab activeTab;
 
   @override
   Widget build(BuildContext context) {
@@ -67,8 +74,21 @@ class _TabToggle extends StatelessWidget {
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          _TabButton(label: 'Events', active: !onModels, onTap: () => context.go('/$sportId/events')),
-          _TabButton(label: 'Models', active: onModels, onTap: () => context.go('/$sportId/models')),
+          _TabButton(
+            label: 'Events',
+            active: activeTab == _SportTab.events,
+            onTap: () => context.go('/$sportId/events'),
+          ),
+          _TabButton(
+            label: 'Season',
+            active: activeTab == _SportTab.season,
+            onTap: () => context.go('/$sportId/season'),
+          ),
+          _TabButton(
+            label: 'Models',
+            active: activeTab == _SportTab.models,
+            onTap: () => context.go('/$sportId/models'),
+          ),
         ],
       ),
     );

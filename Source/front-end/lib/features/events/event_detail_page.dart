@@ -10,10 +10,10 @@ import '../../core/widgets/team_leaders_panel.dart';
 import '../../static/nfl_team_colors.dart';
 
 /// Event-level predictions (win probability, margin, home/away score) plus
-/// player leaders per team, once the backend returns them -- see
-/// core/models/event_leaders.dart. `EventPrediction.leaders` is nullable
-/// against the currently-deployed API, so the leaders panel simply
-/// doesn't render until that backend work (tracked separately) ships.
+/// player leaders per team -- see core/models/event_leaders.dart.
+/// `EventPrediction.leaders` stays nullable since it's a best-effort field
+/// server-side (see handler.py's _predict_event_leaders): the panel simply
+/// doesn't render if the backend couldn't compute it for a given event.
 class EventDetailPage extends ConsumerWidget {
   const EventDetailPage({super.key, required this.sportId, required this.eventId});
 

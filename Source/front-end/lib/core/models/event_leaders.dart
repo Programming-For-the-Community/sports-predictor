@@ -1,11 +1,10 @@
-/// Mirrors the `leaders` block GET /{sport}/predictions/events/{event_id}
-/// will add (see the "Rich NFL Predictions" plan, §1) -- optional/nullable
-/// throughout since the currently-deployed API doesn't return this yet.
-/// `name` is likewise optional: the planned response only guarantees
-/// `entity_id`, but a raw ESPN id is meaningless in the UI, so the
-/// backend work should include each player's display name (already on
-/// the `entities` table) -- this model prefers `name` and falls back to
-/// the id either way.
+/// Mirrors the `leaders` block on GET /{sport}/predictions/events/{event_id}
+/// (see Source/aws-lambdas/nfl/predict/handler.py's _predict_event_leaders)
+/// -- optional/nullable throughout since it's a best-effort field that can
+/// come back null if the backend couldn't compute it for a given event.
+/// `name` is likewise optional -- a raw ESPN id is meaningless in the UI,
+/// so this model prefers `name` when the backend includes it and falls
+/// back to the id otherwise.
 class PlayerStatLine {
   const PlayerStatLine({required this.entityId, required this.name, required this.stats});
 

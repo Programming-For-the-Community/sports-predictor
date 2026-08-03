@@ -93,7 +93,12 @@ class AuthRepository extends StateNotifier<AuthState> {
   }
 
   /// Called by ApiClient before every request -- refreshes proactively
-  /// within ~60s of expiry rather than waiting for a 401.
+  /// within ~60s of expiry rather than waiting for a 401. If the refresh
+  /// token itself has expired or been revoked, transitions to
+  /// AuthUnauthenticated (same as _restoreSession's own failure path)
+  /// instead of leaving the caller to surface a raw exception on whatever
+  /// page happened to trigger it -- app_router's redirect already listens
+  /// to this state and bounces to /login as soon as it changes.
   Future<String> getValidAccessToken() async {
     final current = state;
     if (current is! AuthAuthenticated) {
@@ -102,10 +107,16 @@ class AuthRepository extends StateNotifier<AuthState> {
     if (!current.tokens.isNearExpiry) {
       return current.tokens.accessToken;
     }
-    final refreshed = await _authClient.refresh(current.tokens.refreshToken);
-    await _persist(refreshed);
-    state = AuthAuthenticated(refreshed);
-    return refreshed.accessToken;
+    try {
+      final refreshed = await _authClient.refresh(current.tokens.refreshToken);
+      await _persist(refreshed);
+      state = AuthAuthenticated(refreshed);
+      return refreshed.accessToken;
+    } catch (_) {
+      await _clear();
+      state = AuthUnauthenticated();
+      rethrow;
+    }
   }
 
   Future<void> logout() async {

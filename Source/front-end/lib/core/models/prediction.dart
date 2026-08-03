@@ -2,8 +2,8 @@ import 'event_leaders.dart';
 
 /// Mirrors GET /{sport}/predictions/events/{event_id}'s response shape
 /// (see Source/aws-lambdas/nfl/predict/handler.py's _predict_event).
-/// `leaders` is optional -- planned (see event_leaders.dart) but not yet
-/// returned by the currently-deployed API.
+/// `leaders` is optional -- best-effort server-side (see event_leaders.dart),
+/// not a currently-missing feature.
 class EventPrediction {
   const EventPrediction({
     required this.homeWinProbability,
