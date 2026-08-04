@@ -99,12 +99,18 @@ class AuthRepository extends StateNotifier<AuthState> {
   /// instead of leaving the caller to surface a raw exception on whatever
   /// page happened to trigger it -- app_router's redirect already listens
   /// to this state and bounces to /login as soon as it changes.
-  Future<String> getValidAccessToken() async {
+  ///
+  /// forceRefresh skips the isNearExpiry check -- ApiClient's 401-retry
+  /// path needs this: a token can be rejected server-side (revoked, clock
+  /// skew, whatever) while still looking fresh by its own local expiresAt,
+  /// and resending that same not-actually-valid token on "retry" would
+  /// just fail identically.
+  Future<String> getValidAccessToken({bool forceRefresh = false}) async {
     final current = state;
     if (current is! AuthAuthenticated) {
       throw StateError('No authenticated session');
     }
-    if (!current.tokens.isNearExpiry) {
+    if (!forceRefresh && !current.tokens.isNearExpiry) {
       return current.tokens.accessToken;
     }
     try {

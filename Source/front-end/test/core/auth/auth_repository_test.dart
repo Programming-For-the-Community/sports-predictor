@@ -98,6 +98,31 @@ void main() {
     expect(refreshCalls, 1);
   });
 
+  test('getValidAccessToken(forceRefresh: true) refreshes even when the token looks fresh locally', () async {
+    var refreshCalls = 0;
+    final repo = AuthRepository(
+      authClient: CognitoAuthClient(
+        httpClient: MockClient((request) async {
+          final body = jsonDecode(request.body) as Map<String, dynamic>;
+          if (body['AuthFlow'] == 'REFRESH_TOKEN_AUTH') {
+            refreshCalls++;
+            return _tokenResponse(access: 'refreshed', refresh: null);
+          }
+          // Login response: expires in 3600s -- nowhere near the 60s window,
+          // so a plain getValidAccessToken() call would NOT refresh this.
+          return _tokenResponse(access: 'initial', expiresIn: 3600);
+        }),
+      ),
+    );
+    await _firstRealState(repo);
+    await repo.login(username: 'chamar', password: 'hunter2');
+
+    final token = await repo.getValidAccessToken(forceRefresh: true);
+
+    expect(token, 'refreshed');
+    expect(refreshCalls, 1);
+  });
+
   test('getValidAccessToken transitions to AuthUnauthenticated when the refresh token itself is rejected', () async {
     final repo = AuthRepository(
       authClient: CognitoAuthClient(

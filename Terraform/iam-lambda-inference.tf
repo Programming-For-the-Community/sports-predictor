@@ -64,8 +64,11 @@ data "aws_iam_policy_document" "lambda_inference_permissions" {
   }
 
   statement {
-    sid       = "WritePredictions"
-    actions   = ["dynamodb:PutItem"]
+    sid = "ReadWritePredictions"
+    # Query added alongside PutItem -- GET /nfl/events?status=completed now
+    # reads back each event's own logged prediction (via the event_key
+    # partition key) to show predicted-vs-actual, not just write new rows.
+    actions   = ["dynamodb:PutItem", "dynamodb:Query"]
     resources = ["arn:aws:dynamodb:${var.region}:${var.account_id}:table/${local.predictions_table}"]
   }
 }

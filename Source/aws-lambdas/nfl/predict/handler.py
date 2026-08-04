@@ -6,6 +6,17 @@ already had its JWT validated by API Gateway itself; this code never
 checks auth.
 
 Routes (see Terraform/lambda-nfl-predict.tf for the API Gateway wiring):
+    GET /nfl/events?status=scheduled|completed
+        -> scoped to exactly one week, not the whole matching history:
+           status=scheduled returns the soonest upcoming week (empty if
+           that week hasn't been ingested yet -- the frontend shows a
+           "coming soon" state rather than mistaking that for no games);
+           status=completed returns the most recently completed week, each
+           event carrying a `prediction_comparison` block (predicted vs.
+           actual win/margin/score, `null` if no prediction was ever
+           logged for that event before it was played -- see
+           _prediction_comparison's own docstring for why this reads the
+           predictions-table audit trail rather than recomputing one now).
     GET /nfl/predictions/events/{event_id}
         -> win probability, margin, home score, and away score for one
            upcoming/completed matchup, computed from one shared live
@@ -47,6 +58,8 @@ import json
 import logging
 import os
 from datetime import datetime, timezone
+
+from boto3.dynamodb.conditions import Key
 
 from library.aws.dynamodb_table import DynamoDBTable
 from library.aws.s3_manager import S3Manager
@@ -259,24 +272,117 @@ def _predict_player_prop(event_id: str, entity_id: str, target_stat: str) -> dic
     }
 
 
+def _week_key(event: dict) -> tuple:
+    return (event.get("season"), event.get("season_type"), event.get("week"))
+
+
+def _previous_week_events(completed: list[dict]) -> list[dict]:
+    """Only the most recently completed week's games -- not the full
+    history. "Most recent" is the (season, season_type, week) of whichever
+    completed event has the latest event_date; every other game sharing
+    that same triple is part of the same week."""
+    if not completed:
+        return []
+    latest = max(completed, key=lambda e: e.get("event_date", ""))
+    target = _week_key(latest)
+    return [e for e in completed if _week_key(e) == target]
+
+
+def _next_week_events(scheduled: list[dict]) -> list[dict]:
+    """Only the soonest upcoming week's games. Empty if nothing's been
+    ingested yet for the next week (e.g. between seasons, before the
+    Tuesday/Wednesday ingest schedule has run for it) -- the frontend
+    shows a "coming soon" state for that case instead of an empty list
+    that looks like a data problem."""
+    if not scheduled:
+        return []
+    earliest = min(scheduled, key=lambda e: e.get("event_date", ""))
+    target = _week_key(earliest)
+    return [e for e in scheduled if _week_key(e) == target]
+
+
+def _actual_result(event: dict) -> dict | None:
+    home_away = _home_and_away(event)
+    if home_away is None:
+        return None
+    home_id, away_id = home_away
+    participants = event.get("participants", [])
+    home = next((p for p in participants if p.get("entity_id") == home_id), None)
+    away = next((p for p in participants if p.get("entity_id") == away_id), None)
+    home_score = (home.get("result") or {}).get("score") if home else None
+    away_score = (away.get("result") or {}).get("score") if away else None
+    if home_score is None or away_score is None:
+        return None
+    return {"home_score": home_score, "away_score": away_score, "home_won": home_score > away_score}
+
+
+def _prediction_comparison(event: dict) -> dict | None:
+    """Compares this event's logged prediction against the actual result --
+    reads the audit trail _record_prediction already writes (whatever was
+    predicted BEFORE the game), never recomputes one now. Recomputing after
+    the fact would build live features from rolling averages/Elo that may
+    already include this very game's own now-normalized stats, leaking the
+    outcome into its own "prediction". Returns None if no prediction was
+    ever logged for this event (nobody requested one before it was played)
+    or the event has no final score yet."""
+    actual = _actual_result(event)
+    if actual is None:
+        return None
+
+    rows = _get_predictions_table().query(Key("event_key").eq(event["event_key"]))
+
+    def _row_for(model_prefix: str) -> dict | None:
+        return next((r for r in rows if r["model_key"].startswith(f"MODEL#{model_prefix}#")), None)
+
+    win_probability_row = _row_for(WIN_PROBABILITY_MODEL)
+    if win_probability_row is None:
+        return None
+
+    margin_row = _row_for(SCORE_MODELS["margin"])
+    home_score_row = _row_for(SCORE_MODELS["home_score"])
+    away_score_row = _row_for(SCORE_MODELS["away_score"])
+
+    home_win_probability = win_probability_row["predicted_value"]["home_win_probability"]
+    predicted_home_won = home_win_probability >= 0.5
+
+    return {
+        "predicted_home_win_probability": home_win_probability,
+        "predicted_home_won": predicted_home_won,
+        "actual_home_won": actual["home_won"],
+        "correct": predicted_home_won == actual["home_won"],
+        "predicted_margin": margin_row["predicted_value"]["value"] if margin_row else None,
+        "actual_margin": actual["home_score"] - actual["away_score"],
+        "predicted_home_score": home_score_row["predicted_value"]["value"] if home_score_row else None,
+        "predicted_away_score": away_score_row["predicted_value"]["value"] if away_score_row else None,
+        "actual_home_score": actual["home_score"],
+        "actual_away_score": actual["away_score"],
+    }
+
+
 def _list_events(status: str) -> dict:
     storage = _get_storage()
     events = storage.get_all_events(SPORT, status=status)
-    return {
-        "sport": SPORT,
-        "events": [
-            {
-                "event_id": e["event_id"],
-                "event_date": e.get("event_date"),
-                "status": e.get("status"),
-                "season": e.get("season"),
-                "season_type": e.get("season_type"),
-                "week": e.get("week"),
-                "participants": e.get("participants"),
-            }
-            for e in events
-        ],
-    }
+
+    if status == "completed":
+        events = _previous_week_events(events)
+    elif status == "scheduled":
+        events = _next_week_events(events)
+
+    def _entry(e: dict) -> dict:
+        entry = {
+            "event_id": e["event_id"],
+            "event_date": e.get("event_date"),
+            "status": e.get("status"),
+            "season": e.get("season"),
+            "season_type": e.get("season_type"),
+            "week": e.get("week"),
+            "participants": e.get("participants"),
+        }
+        if status == "completed":
+            entry["prediction_comparison"] = _prediction_comparison(e)
+        return entry
+
+    return {"sport": SPORT, "events": [_entry(e) for e in events]}
 
 
 def _list_models() -> dict:

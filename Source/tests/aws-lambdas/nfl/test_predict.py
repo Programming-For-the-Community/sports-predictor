@@ -45,9 +45,11 @@ def _model_card(version: int) -> dict:
     return {"version": version, "feature_columns": []}
 
 
-def _completed_event(event_key, season, home_id, away_id, home_score, away_score):
+def _completed_event(event_key, season, home_id, away_id, home_score, away_score, *,
+                      event_id=None, event_date="2025-09-14", season_type=2, week=1):
     return {
-        "event_key": event_key, "event_date": "2025-09-14", "season": season, "status": "completed",
+        "event_key": event_key, "event_id": event_id or event_key, "event_date": event_date,
+        "season": season, "season_type": season_type, "week": week, "status": "completed",
         "participants": [
             {"entity_id": home_id, "role": "home", "result": {"score": home_score, "won": home_score > away_score}},
             {"entity_id": away_id, "role": "away", "result": {"score": away_score, "won": away_score > home_score}},
@@ -55,14 +57,20 @@ def _completed_event(event_key, season, home_id, away_id, home_score, away_score
     }
 
 
-def _scheduled_event(event_key, season, event_date, home_id, away_id):
+def _scheduled_event(event_key, season, event_date, home_id, away_id, *,
+                      event_id=None, season_type=2, week=1):
     return {
-        "event_key": event_key, "event_date": event_date, "season": season, "status": "scheduled",
+        "event_key": event_key, "event_id": event_id or event_key, "event_date": event_date,
+        "season": season, "season_type": season_type, "week": week, "status": "scheduled",
         "participants": [
             {"entity_id": home_id, "role": "home", "result": None},
             {"entity_id": away_id, "role": "away", "result": None},
         ],
     }
+
+
+def _prediction_row(model_key, predicted_value):
+    return {"model_key": model_key, "predicted_value": predicted_value}
 
 
 class TestEventOutcomeRoute:
@@ -229,6 +237,79 @@ class TestListEvents:
         nfl_predict.lambda_handler(_api_event("/nfl/events"), None)
 
         nfl_predict._storage.get_all_events.assert_called_once_with("nfl", status="scheduled")
+
+    def test_completed_status_scopes_to_the_most_recent_week_only(self):
+        nfl_predict._storage = MagicMock()
+        nfl_predict._predictions_table = MagicMock()
+        nfl_predict._predictions_table.query.return_value = []
+        nfl_predict._storage.get_all_events.return_value = [
+            _completed_event("EVT#1", 2025, "12", "13", 24, 17, event_date="2025-09-07", week=1),
+            _completed_event("EVT#2", 2025, "12", "13", 20, 10, event_date="2025-09-14", week=2),
+            _completed_event("EVT#3", 2025, "12", "13", 30, 27, event_date="2025-09-15", week=2),
+        ]
+
+        response = nfl_predict.lambda_handler(_api_event("/nfl/events", query_params={"status": "completed"}), None)
+
+        body = json.loads(response["body"])
+        assert [e["event_id"] for e in body["events"]] == ["EVT#2", "EVT#3"]
+
+    def test_scheduled_status_scopes_to_the_soonest_week_only(self):
+        nfl_predict._storage = MagicMock()
+        nfl_predict._storage.get_all_events.return_value = [
+            _scheduled_event("EVT#1", 2025, "2025-09-21", "12", "13", week=3),
+            _scheduled_event("EVT#2", 2025, "2025-09-14", "12", "13", week=2),
+            _scheduled_event("EVT#3", 2025, "2025-09-14", "1", "2", week=2),
+        ]
+
+        response = nfl_predict.lambda_handler(_api_event("/nfl/events", query_params={"status": "scheduled"}), None)
+
+        body = json.loads(response["body"])
+        assert [e["event_id"] for e in body["events"]] == ["EVT#2", "EVT#3"]
+
+    def test_scheduled_status_is_empty_when_the_next_week_has_not_been_ingested_yet(self):
+        nfl_predict._storage = MagicMock()
+        nfl_predict._storage.get_all_events.return_value = []
+
+        response = nfl_predict.lambda_handler(_api_event("/nfl/events", query_params={"status": "scheduled"}), None)
+
+        body = json.loads(response["body"])
+        assert body["events"] == []
+
+    def test_completed_events_include_prediction_comparison_when_one_was_logged(self):
+        nfl_predict._storage = MagicMock()
+        nfl_predict._predictions_table = MagicMock()
+        nfl_predict._predictions_table.query.return_value = [
+            _prediction_row("MODEL#win-probability#v6", {"home_win_probability": 0.71, "model_version": 6}),
+            _prediction_row("MODEL#score-margin#v3", {"value": 6.2, "model_version": 3}),
+            _prediction_row("MODEL#home-score#v2", {"value": 27.4, "model_version": 2}),
+            _prediction_row("MODEL#away-score#v2", {"value": 21.2, "model_version": 2}),
+        ]
+        nfl_predict._storage.get_all_events.return_value = [
+            _completed_event("EVT#1", 2025, "12", "13", 24, 17),
+        ]
+
+        response = nfl_predict.lambda_handler(_api_event("/nfl/events", query_params={"status": "completed"}), None)
+
+        comparison = json.loads(response["body"])["events"][0]["prediction_comparison"]
+        assert comparison["predicted_home_win_probability"] == 0.71
+        assert comparison["predicted_home_won"] is True
+        assert comparison["actual_home_won"] is True
+        assert comparison["correct"] is True
+        assert comparison["actual_margin"] == 7
+        assert comparison["actual_home_score"] == 24
+        assert comparison["actual_away_score"] == 17
+
+    def test_completed_events_have_no_comparison_when_nothing_was_ever_predicted(self):
+        nfl_predict._storage = MagicMock()
+        nfl_predict._predictions_table = MagicMock()
+        nfl_predict._predictions_table.query.return_value = []
+        nfl_predict._storage.get_all_events.return_value = [
+            _completed_event("EVT#1", 2025, "12", "13", 24, 17),
+        ]
+
+        response = nfl_predict.lambda_handler(_api_event("/nfl/events", query_params={"status": "completed"}), None)
+
+        assert json.loads(response["body"])["events"][0]["prediction_comparison"] is None
 
 
 class TestListModels:

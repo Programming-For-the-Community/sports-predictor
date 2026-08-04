@@ -46,7 +46,14 @@ class _EventListPageState extends ConsumerState<EventListPage> {
           events.when(
             data: (list) {
               if (list.isEmpty) {
-                return Text('No games found.', style: AppTextStyles.body(color: AppColors.inkSub));
+                // Both routes are scoped server-side to exactly one week
+                // (see handler.py's _next_week_events/_previous_week_events)
+                // -- an empty "scheduled" list specifically means next
+                // week hasn't been ingested yet (see
+                // Terraform/scheduler-nfl-ingest.tf), not that there's
+                // nothing to show.
+                final message = _status == 'scheduled' ? 'Coming Soon' : 'No games found.';
+                return Text(message, style: AppTextStyles.body(color: AppColors.inkSub));
               }
               return Column(
                 children: [

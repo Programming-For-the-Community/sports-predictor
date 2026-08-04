@@ -18,5 +18,65 @@ void main() {
     expect(event.eventId, '401547417');
     expect(event.home.entityId, 'KC');
     expect(event.away.entityId, 'LAC');
+    expect(event.home.result, isNull);
+    expect(event.predictionComparison, isNull);
+  });
+
+  test('parses final scores and a prediction comparison for a completed event', () {
+    final event = SportEvent.fromJson({
+      'event_id': '401547417',
+      'event_date': '2025-09-28',
+      'status': 'completed',
+      'week': 4,
+      'participants': [
+        {
+          'entity_id': 'KC', 'role': 'home',
+          'result': {'score': 24, 'won': true},
+        },
+        {
+          'entity_id': 'LAC', 'role': 'away',
+          'result': {'score': 17, 'won': false},
+        },
+      ],
+      'prediction_comparison': {
+        'predicted_home_win_probability': 0.71,
+        'predicted_home_won': true,
+        'actual_home_won': true,
+        'correct': true,
+        'predicted_margin': 6.2,
+        'actual_margin': 7,
+        'predicted_home_score': 27.4,
+        'predicted_away_score': 21.2,
+        'actual_home_score': 24,
+        'actual_away_score': 17,
+      },
+    });
+
+    expect(event.home.result!.score, 24);
+    expect(event.home.result!.won, isTrue);
+    expect(event.predictionComparison!.correct, isTrue);
+    expect(event.predictionComparison!.actualMargin, 7);
+  });
+
+  test('prediction_comparison is null when the backend never logged one', () {
+    final event = SportEvent.fromJson({
+      'event_id': '401547417',
+      'event_date': '2025-09-28',
+      'status': 'completed',
+      'week': 4,
+      'participants': [
+        {
+          'entity_id': 'KC', 'role': 'home',
+          'result': {'score': 24, 'won': true},
+        },
+        {
+          'entity_id': 'LAC', 'role': 'away',
+          'result': {'score': 17, 'won': false},
+        },
+      ],
+      'prediction_comparison': null,
+    });
+
+    expect(event.predictionComparison, isNull);
   });
 }

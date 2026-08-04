@@ -69,7 +69,7 @@ class ApiClient {
     debugPrint('[ApiClient] -- resolving access token (forceRefresh=$forceRefresh)');
     final authRepository = _ref.read(authRepositoryProvider.notifier);
     try {
-      final token = await authRepository.getValidAccessToken();
+      final token = await authRepository.getValidAccessToken(forceRefresh: forceRefresh);
       debugPrint('[ApiClient] -- got access token in ${stopwatch.elapsedMilliseconds}ms');
       return {'Authorization': token};
     } catch (error) {
