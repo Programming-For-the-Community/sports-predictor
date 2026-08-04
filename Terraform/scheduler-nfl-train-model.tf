@@ -19,12 +19,17 @@
 # always reads that week's freshly rebuilt event_features.parquet rather
 # than racing a still-in-progress feature-engineering run.
 #
-# This is the first slot in an 11-task, 15-minute stagger across every
+# This is the first slot in an 11-task, 30-minute stagger across every
 # NFL training schedule (this one, the 3 in scheduler-nfl-train-score-model.tf,
 # and the 7 in scheduler-nfl-train-player-prop-model.tf) -- launching all
 # eleven at the same instant once exceeded the account's Fargate
-# on-demand vCPU quota. Spacing them 12:00 through 14:30 keeps at most
-# one training task's vCPU allocation in flight at a time.
+# on-demand vCPU quota. Spacing them 12:00 through 17:00 keeps at most
+# one training task's vCPU allocation in flight at a time. Widened from
+# an original 15-minute spacing once every target started running a
+# 4-candidate tournament (see library/ml/backtest.py) instead of fitting
+# a single algorithm -- each task now takes real, not-yet-precisely-
+# measured longer to finish, and 15 minutes was already a tight fit
+# against a single fit's own runtime.
 resource "aws_scheduler_schedule" "nfl_train_model" {
   name        = "${var.project}-nfl-train-model"
   description = "Retrains the NFL win-probability model (Aug-Feb, Wed 12:00 UTC, after that day's feature engineering run)"

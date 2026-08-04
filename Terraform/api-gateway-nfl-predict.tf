@@ -1,13 +1,18 @@
-# Routes for the NFL inference Lambda (lambda-nfl-predict.tf). All
-# resources sit under aws_api_gateway_rest_api.main (api-gateway.tf) --
-# see Source/aws-lambdas/nfl/predict/handler.py's docstring for the exact
-# request/response contract each route serves.
+# Routes for the two NFL serving Lambdas. All resources sit under
+# aws_api_gateway_rest_api.main (api-gateway.tf).
 #
-#   GET /nfl/events
-#   GET /nfl/models
-#   GET /nfl/season
-#   GET /nfl/predictions/events/{event_id}
-#   GET /nfl/predictions/events/{event_id}/players/{entity_id}
+#   GET /nfl/events                                              -> nfl_predict_read (lambda-nfl-predict-read.tf)
+#   GET /nfl/models                                               -> nfl_predict_read (lambda-nfl-predict-read.tf)
+#   GET /nfl/season                                               -> nfl_predict (lambda-nfl-predict.tf)
+#   GET /nfl/predictions/events/{event_id}                        -> nfl_predict (lambda-nfl-predict.tf)
+#   GET /nfl/predictions/events/{event_id}/players/{entity_id}    -> nfl_predict (lambda-nfl-predict.tf)
+#
+# events/models point at the read-only Lambda specifically for cold start
+# -- see lambda-nfl-predict-read.tf's own comment. Everything else stays
+# on the main predict Lambda, which needs the full ML dependency chain
+# regardless. See Source/aws-lambdas/nfl/predict/handler.py's and
+# Source/aws-lambdas/nfl/predict-read/handler.py's own docstrings for the
+# exact request/response contract each route serves.
 #
 # This is also where the deployment/stage/usage plan api-gateway.tf
 # deferred live -- AWS won't accept those until at least one method
@@ -39,7 +44,7 @@ resource "aws_api_gateway_integration" "nfl_events" {
   http_method             = aws_api_gateway_method.nfl_events.http_method
   type                    = "AWS_PROXY"
   integration_http_method = "POST"
-  uri                     = aws_lambda_function.nfl_predict.invoke_arn
+  uri                     = aws_lambda_function.nfl_predict_read.invoke_arn
 }
 
 resource "aws_api_gateway_resource" "nfl_models" {
@@ -62,7 +67,7 @@ resource "aws_api_gateway_integration" "nfl_models" {
   http_method             = aws_api_gateway_method.nfl_models.http_method
   type                    = "AWS_PROXY"
   integration_http_method = "POST"
-  uri                     = aws_lambda_function.nfl_predict.invoke_arn
+  uri                     = aws_lambda_function.nfl_predict_read.invoke_arn
 }
 
 resource "aws_api_gateway_resource" "nfl_season" {
@@ -257,9 +262,18 @@ resource "aws_api_gateway_deployment" "main" {
       aws_api_gateway_resource.nfl_events.id,
       aws_api_gateway_method.nfl_events.id,
       aws_api_gateway_integration.nfl_events.id,
+      # .uri explicitly, not just .id -- aws_api_gateway_integration's id
+      # is a stable composite key (rest_api_id/resource_id/http_method)
+      # that does NOT change when only uri is updated in place, so
+      # repointing this integration at a different Lambda (as this one
+      # now is, see lambda-nfl-predict-read.tf) would otherwise never
+      # trigger a new deployment -- confirmed by reading how this
+      # resource's id is actually computed, not assumed.
+      aws_api_gateway_integration.nfl_events.uri,
       aws_api_gateway_resource.nfl_models.id,
       aws_api_gateway_method.nfl_models.id,
       aws_api_gateway_integration.nfl_models.id,
+      aws_api_gateway_integration.nfl_models.uri,
       aws_api_gateway_resource.nfl_season.id,
       aws_api_gateway_method.nfl_season.id,
       aws_api_gateway_integration.nfl_season.id,

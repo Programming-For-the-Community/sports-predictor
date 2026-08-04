@@ -69,10 +69,6 @@ def _scheduled_event(event_key, season, event_date, home_id, away_id, *,
     }
 
 
-def _prediction_row(model_key, predicted_value):
-    return {"model_key": model_key, "predicted_value": predicted_value}
-
-
 class TestEventOutcomeRoute:
     def test_returns_all_four_event_level_predictions_from_one_feature_row(self):
         nfl_predict._storage = MagicMock()
@@ -167,6 +163,18 @@ class TestRouting:
 
         assert response["headers"]["Access-Control-Allow-Origin"] == "*"
 
+    def test_events_and_models_are_not_served_here(self):
+        # Moved to predict-read/handler.py (library.serving.nfl_reads,
+        # covered by Source/tests/library/serving/test_nfl_reads.py and
+        # Source/tests/aws-lambdas/nfl/test_predict_read.py) -- neither
+        # route ever loads an ML model artifact, so they're served by a
+        # separate, much lighter Lambda that never imports xgboost/
+        # scikit-learn/pandas. API Gateway is repointed to send this
+        # traffic there instead; this Lambda should never see it, but if
+        # it somehow did, it must 404, not silently resurrect the route.
+        assert nfl_predict.lambda_handler(_api_event("/nfl/events"), None)["statusCode"] == 404
+        assert nfl_predict.lambda_handler(_api_event("/nfl/models"), None)["statusCode"] == 404
+
 
 class TestErrorMapping:
     def test_event_not_found_is_a_404(self):
@@ -209,241 +217,6 @@ class TestErrorMapping:
             )
 
         assert response["statusCode"] == 500
-
-
-class TestRoundLabel:
-    def test_regular_season_is_none(self):
-        assert nfl_predict._round_label({"season_type": 2, "week": 5}) is None
-
-    def test_wild_card_is_week_1(self):
-        assert nfl_predict._round_label({"season_type": 3, "week": 1}) == "Wild Card"
-
-    def test_divisional_is_week_2(self):
-        assert nfl_predict._round_label({"season_type": 3, "week": 2}) == "Divisional"
-
-    def test_conference_championship_is_week_3(self):
-        assert nfl_predict._round_label({"season_type": 3, "week": 3}) == "Conference Championship"
-
-    def test_super_bowl_is_week_5(self):
-        assert nfl_predict._round_label({"season_type": 3, "week": 5}) == "Super Bowl"
-
-    def test_week_4_pro_bowl_has_no_label(self):
-        # Always the Pro Bowl -- already excluded by is_real_franchise_matchup
-        # before _round_label is ever consulted, so this documents "unmapped",
-        # not an expected real code path.
-        assert nfl_predict._round_label({"season_type": 3, "week": 4}) is None
-
-
-class TestListEvents:
-    def test_returns_events_for_the_requested_status(self):
-        nfl_predict._storage = MagicMock()
-        nfl_predict._storage.get_all_events.return_value = [
-            {
-                "event_id": "401547417", "event_date": "2025-09-28", "status": "scheduled",
-                "season": 2025, "season_type": 2, "week": 4,
-                "participants": [{"entity_id": "12", "role": "home"}, {"entity_id": "24", "role": "away"}],
-            },
-        ]
-
-        response = nfl_predict.lambda_handler(_api_event("/nfl/events", query_params={"status": "scheduled"}), None)
-
-        assert response["statusCode"] == 200
-        body = json.loads(response["body"])
-        assert body["sport"] == "nfl"
-        assert body["events"][0]["event_id"] == "401547417"
-        nfl_predict._storage.get_all_events.assert_called_once_with("nfl", status="scheduled")
-
-    def test_defaults_to_scheduled_status(self):
-        nfl_predict._storage = MagicMock()
-        nfl_predict._storage.get_all_events.return_value = []
-
-        nfl_predict.lambda_handler(_api_event("/nfl/events"), None)
-
-        nfl_predict._storage.get_all_events.assert_called_once_with("nfl", status="scheduled")
-
-    def test_completed_status_scopes_to_the_most_recent_week_only(self):
-        nfl_predict._storage = MagicMock()
-        nfl_predict._predictions_table = MagicMock()
-        nfl_predict._predictions_table.query.return_value = []
-        nfl_predict._storage.get_all_events.return_value = [
-            _completed_event("EVT#1", 2025, "12", "13", 24, 17, event_date="2025-09-07", week=1),
-            _completed_event("EVT#2", 2025, "12", "13", 20, 10, event_date="2025-09-14", week=2),
-            _completed_event("EVT#3", 2025, "12", "13", 30, 27, event_date="2025-09-15", week=2),
-        ]
-
-        response = nfl_predict.lambda_handler(_api_event("/nfl/events", query_params={"status": "completed"}), None)
-
-        body = json.loads(response["body"])
-        assert [e["event_id"] for e in body["events"]] == ["EVT#2", "EVT#3"]
-
-    def test_scheduled_status_scopes_to_the_soonest_week_only(self):
-        nfl_predict._storage = MagicMock()
-        nfl_predict._storage.get_all_events.return_value = [
-            _scheduled_event("EVT#1", 2025, "2025-09-21", "12", "13", week=3),
-            _scheduled_event("EVT#2", 2025, "2025-09-14", "12", "13", week=2),
-            _scheduled_event("EVT#3", 2025, "2025-09-14", "1", "2", week=2),
-        ]
-
-        response = nfl_predict.lambda_handler(_api_event("/nfl/events", query_params={"status": "scheduled"}), None)
-
-        body = json.loads(response["body"])
-        assert [e["event_id"] for e in body["events"]] == ["EVT#2", "EVT#3"]
-
-    def test_scheduled_status_is_empty_when_the_next_week_has_not_been_ingested_yet(self):
-        nfl_predict._storage = MagicMock()
-        nfl_predict._storage.get_all_events.return_value = []
-
-        response = nfl_predict.lambda_handler(_api_event("/nfl/events", query_params={"status": "scheduled"}), None)
-
-        body = json.loads(response["body"])
-        assert body["events"] == []
-
-    def test_completed_events_include_prediction_comparison_when_one_was_logged(self):
-        nfl_predict._storage = MagicMock()
-        nfl_predict._predictions_table = MagicMock()
-        nfl_predict._predictions_table.query.return_value = [
-            _prediction_row("MODEL#win-probability#v6", {"home_win_probability": 0.71, "model_version": 6}),
-            _prediction_row("MODEL#score-margin#v3", {"value": 6.2, "model_version": 3}),
-            _prediction_row("MODEL#home-score#v2", {"value": 27.4, "model_version": 2}),
-            _prediction_row("MODEL#away-score#v2", {"value": 21.2, "model_version": 2}),
-        ]
-        nfl_predict._storage.get_all_events.return_value = [
-            _completed_event("EVT#1", 2025, "12", "13", 24, 17),
-        ]
-
-        response = nfl_predict.lambda_handler(_api_event("/nfl/events", query_params={"status": "completed"}), None)
-
-        comparison = json.loads(response["body"])["events"][0]["prediction_comparison"]
-        assert comparison["predicted_home_win_probability"] == 0.71
-        assert comparison["predicted_home_won"] is True
-        assert comparison["actual_home_won"] is True
-        assert comparison["correct"] is True
-        assert comparison["actual_margin"] == 7
-        assert comparison["actual_home_score"] == 24
-        assert comparison["actual_away_score"] == 17
-
-    def test_excludes_the_pro_bowl_from_the_list(self):
-        nfl_predict._storage = MagicMock()
-        nfl_predict._storage.get_all_events.return_value = [
-            _completed_event("EVT#REAL", 2025, "12", "13", 24, 17, event_date="2025-09-14", week=2),
-            # AFC (31) vs NFC (32) -- the Pro Bowl, same week as the real game.
-            _completed_event("EVT#PROBOWL", 2025, "31", "32", 40, 35, event_date="2025-09-14", week=2),
-        ]
-        nfl_predict._predictions_table = MagicMock()
-        nfl_predict._predictions_table.query.return_value = []
-
-        response = nfl_predict.lambda_handler(_api_event("/nfl/events", query_params={"status": "completed"}), None)
-
-        body = json.loads(response["body"])
-        assert [e["event_id"] for e in body["events"]] == ["EVT#REAL"]
-
-    def test_postseason_events_carry_a_round_label(self):
-        nfl_predict._storage = MagicMock()
-        nfl_predict._predictions_table = MagicMock()
-        nfl_predict._predictions_table.query.return_value = []
-        nfl_predict._storage.get_all_events.return_value = [
-            _completed_event(
-                "EVT#WC", 2025, "12", "13", 24, 17,
-                event_date="2026-01-11", season_type=3, week=1,
-            ),
-        ]
-
-        response = nfl_predict.lambda_handler(_api_event("/nfl/events", query_params={"status": "completed"}), None)
-
-        assert json.loads(response["body"])["events"][0]["round"] == "Wild Card"
-
-    def test_regular_season_events_have_no_round_label(self):
-        nfl_predict._storage = MagicMock()
-        nfl_predict._predictions_table = MagicMock()
-        nfl_predict._predictions_table.query.return_value = []
-        nfl_predict._storage.get_all_events.return_value = [
-            _completed_event("EVT#1", 2025, "12", "13", 24, 17, season_type=2, week=4),
-        ]
-
-        response = nfl_predict.lambda_handler(_api_event("/nfl/events", query_params={"status": "completed"}), None)
-
-        assert json.loads(response["body"])["events"][0]["round"] is None
-
-    def test_completed_events_have_no_comparison_when_nothing_was_ever_predicted(self):
-        nfl_predict._storage = MagicMock()
-        nfl_predict._predictions_table = MagicMock()
-        nfl_predict._predictions_table.query.return_value = []
-        nfl_predict._storage.get_all_events.return_value = [
-            _completed_event("EVT#1", 2025, "12", "13", 24, 17),
-        ]
-
-        response = nfl_predict.lambda_handler(_api_event("/nfl/events", query_params={"status": "completed"}), None)
-
-        assert json.loads(response["body"])["events"][0]["prediction_comparison"] is None
-
-
-class TestListModels:
-    def test_returns_a_model_card_summary_per_current_model(self):
-        nfl_predict._model_bucket = MagicMock()
-        nfl_predict._model_bucket.list_keys.return_value = [
-            "nfl/win-probability/current.json",
-            "nfl/win-probability/v6/model_card.json",
-            "nfl/win-probability/v6/model.xgb",
-        ]
-        nfl_predict._model_bucket.object_exists.return_value = True
-        nfl_predict._model_bucket.get_json.side_effect = [
-            {"version": 6},  # current.json pointer
-            {
-                "model_name": "win-probability", "algorithm": "xgboost", "version": 6,
-                "trained_at": "2026-01-01T00:00:00Z", "accuracy": 0.63, "log_loss": 0.65,
-                "feature_importances": {"elo_diff": 0.22, "home_rest_days": 0.10},
-            },
-        ]
-
-        response = nfl_predict.lambda_handler(_api_event("/nfl/models"), None)
-
-        assert response["statusCode"] == 200
-        body = json.loads(response["body"])
-        assert body["sport"] == "nfl"
-        model = body["models"][0]
-        assert model["model_name"] == "win-probability"
-        assert model["accuracy"] == 0.63
-        assert model["top_features"][0] == {"feature": "elo_diff", "importance": 0.22}
-
-    def test_returns_a_summary_per_model_when_multiple_are_loaded_concurrently(self):
-        # Keyed by the exact key string, not an ordered side_effect list --
-        # _list_models now loads each model's chain on its own thread, so
-        # call order across models isn't deterministic. An ordered list
-        # here would be a real flaky-test risk, not just a style choice.
-        cards = {
-            "nfl/win-probability/current.json": {"version": 6},
-            "nfl/win-probability/v6/model_card.json": {
-                "model_name": "win-probability", "algorithm": "xgboost", "version": 6,
-                "trained_at": "2026-01-01T00:00:00Z", "accuracy": 0.63, "log_loss": 0.65,
-                "feature_importances": {},
-            },
-            "nfl/score-margin/current.json": {"version": 3},
-            "nfl/score-margin/v3/model_card.json": {
-                "model_name": "score-margin", "algorithm": "xgboost", "version": 3,
-                "trained_at": "2026-01-01T00:00:00Z", "rmse": 9.8, "mae": 7.4,
-                "feature_importances": {},
-            },
-        }
-        nfl_predict._model_bucket = MagicMock()
-        nfl_predict._model_bucket.list_keys.return_value = [
-            "nfl/win-probability/current.json", "nfl/score-margin/current.json",
-        ]
-        nfl_predict._model_bucket.object_exists.return_value = True
-        nfl_predict._model_bucket.get_json.side_effect = lambda key: cards[key]
-
-        response = nfl_predict.lambda_handler(_api_event("/nfl/models"), None)
-
-        body = json.loads(response["body"])
-        assert {m["model_name"] for m in body["models"]} == {"win-probability", "score-margin"}
-
-    def test_skips_a_model_name_with_no_promoted_version(self):
-        nfl_predict._model_bucket = MagicMock()
-        nfl_predict._model_bucket.list_keys.return_value = ["nfl/score-margin/v1/model_card.json"]
-        nfl_predict._model_bucket.object_exists.return_value = False
-
-        response = nfl_predict.lambda_handler(_api_event("/nfl/models"), None)
-
-        assert json.loads(response["body"])["models"] == []
 
 
 def _candidate_row(entity_id: str) -> dict:

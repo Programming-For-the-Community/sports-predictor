@@ -1,13 +1,14 @@
 """
 Unit tests for the NFL win-probability training entrypoint.
 
-xgboost.XGBClassifier is ALWAYS mocked here -- these tests verify
+library.ml.backtest.run_backtest is mocked here -- these tests verify
 train_model.py's own orchestration (column selection, chronological
-split, metric computation, versioned S3 writes), never fitting a real
-model. Same boundary the rest of this pipeline's tests already draw
-around AWS calls (mocked boto3/DynamoDB/S3) -- a test run should never be
-able to accidentally kick off real model training any more than it can
-accidentally hit real AWS.
+split, naive-baseline computation, and what gets handed to run_backtest),
+not the tournament itself (see Source/tests/library/ml/test_backtest.py)
+or any real algorithm fitting (see Source/tests/library/ml/
+test_model_types.py). Same "never touch real training" boundary this
+suite always drew, just moved up a layer now that train_model.py delegates
+the actual fitting to run_backtest instead of doing it inline.
 """
 import io
 from unittest.mock import MagicMock, patch
@@ -39,6 +40,14 @@ def _parquet_bytes(df: pd.DataFrame) -> bytes:
     return buffer.getvalue()
 
 
+def _fake_result(version=1, algorithm="xgboost"):
+    return {
+        "winner": {"model_name": "win-probability", "algorithm": algorithm, "version": version, "log_loss": 0.6},
+        "promoted": True,
+        "candidates": [{"algorithm": algorithm, "log_loss": 0.6}],
+    }
+
+
 class TestFeatureColumns:
     def test_excludes_identifiers_and_every_label_column(self):
         df = _make_df()
@@ -63,296 +72,97 @@ class TestFeatureColumns:
         assert "venue_state" not in columns
 
 
-class TestChronologicalSplit:
-    def test_splits_by_date_not_randomly(self):
-        df = _make_df(10)
-
-        train_df, test_df = train_model._chronological_split(df, test_fraction=0.2)
-
-        assert len(train_df) == 8
-        assert len(test_df) == 2
-        assert train_df["event_date"].max() < test_df["event_date"].min()
-
-    def test_works_on_unsorted_input(self):
-        df = _make_df(10).sample(frac=1, random_state=0)  # shuffle rows
-
-        train_df, test_df = train_model._chronological_split(df, test_fraction=0.2)
-
-        assert train_df["event_date"].max() < test_df["event_date"].min()
-
-
 class TestTrain:
-    """_tune_hyperparameters is mocked directly (returning a fixed, empty
-    params dict) rather than letting it run for real here -- letting a
-    real RandomizedSearchCV wrap a mocked XGBClassifier would break (
-    sklearn's internal clone() doesn't work on a MagicMock), and even if
-    it didn't, it would mean these tests exercise real cross-validation
-    fitting, which is exactly the "accidentally train a real model"
-    outcome this suite is built to avoid. See TestTuneHyperparameters for
-    coverage of _tune_hyperparameters' own configuration."""
-
-    def _mock_model(self):
-        mock_model = MagicMock()
-        mock_model.predict.return_value = np.array([True, False])
-        mock_model.predict_proba.return_value = np.array([[0.1, 0.9], [0.8, 0.2]])
-        mock_model.get_booster.return_value.get_score.return_value = {}
-        return mock_model
-
-    def test_fits_mocked_model_and_computes_metrics(self):
+    def test_calls_run_backtest_with_both_candidates_and_classification_task(self):
         df = _make_df(10)
-        mock_model = self._mock_model()
 
-        with patch.object(train_model, "_tune_hyperparameters", return_value={}), \
-             patch.object(train_model.xgb, "XGBClassifier", return_value=mock_model) as mock_cls:
-            model, metadata = train_model.train(df)
+        with patch.object(train_model.backtest, "run_backtest", return_value=_fake_result()) as mock_run:
+            result = train_model.train(MagicMock(), df)
 
-        mock_cls.assert_called_once_with(objective="binary:logistic", eval_metric="logloss")
-        mock_model.fit.assert_called_once()
-        assert model is mock_model
-        assert metadata["feature_columns"] == ["home_elo", "elo_diff"]
-        assert metadata["train_rows"] == 8
-        assert metadata["test_rows"] == 2
+        call = mock_run.call_args
+        assert call.kwargs["task"] == "classification"
+        assert call.kwargs["candidates"] == train_model.CANDIDATES
+        assert {type(c).__name__ for c in call.kwargs["candidates"]} == {
+            "XGBoostClassifierAdapter", "LogisticRegressionAdapter",
+            "RandomForestClassifierAdapter", "MLPClassifierAdapter",
+        }
+        assert result == _fake_result()
 
-    def test_includes_tuned_hyperparameters_in_metadata(self):
+    def test_splits_chronologically_and_builds_numeric_frames_of_the_right_columns(self):
         df = _make_df(10)
-        mock_model = self._mock_model()
-        fake_params = {"max_depth": 3, "n_estimators": 100}
 
-        with patch.object(train_model, "_tune_hyperparameters", return_value=fake_params) as mock_tune, \
-             patch.object(train_model.xgb, "XGBClassifier", return_value=mock_model) as mock_cls:
-            _, metadata = train_model.train(df)
+        with patch.object(train_model.backtest, "run_backtest", return_value=_fake_result()) as mock_run:
+            train_model.train(MagicMock(), df)
 
-        mock_tune.assert_called_once()
-        mock_cls.assert_called_once_with(objective="binary:logistic", eval_metric="logloss", **fake_params)
-        assert metadata["hyperparameters"] == fake_params
+        call = mock_run.call_args
+        assert list(call.kwargs["X_train"].columns) == ["home_elo", "elo_diff"]
+        assert len(call.kwargs["X_train"]) == 8
+        assert len(call.kwargs["X_test"]) == 2
+        assert call.kwargs["y_train"].name == "label_home_won"
+        # Chronological, not random -- the held-out rows are the most
+        # recent by event_date.
+        assert call.kwargs["X_test"].index.tolist() == df.index[-2:].tolist()
 
-    def test_metrics_are_plain_python_types_not_numpy(self):
-        # sklearn returns numpy scalar types (e.g. numpy.float64), which
-        # json.dumps() can't serialize -- the same lesson learned from
-        # DynamoDB's Decimal. Metadata gets written via S3Manager.put_json,
-        # so this has to hold or a real run would crash writing metadata.
+    def test_naive_baseline_accuracy_is_fraction_of_home_wins_in_test_set(self):
+        # label_home_won is [True, False, True, False, ...] -- the last 2
+        # rows (test_fraction=0.2, chronological) are i=8 (True) and i=9
+        # (False), so "always predict home wins" gets exactly one of two
+        # right.
         df = _make_df(10)
-        mock_model = self._mock_model()
 
-        with patch.object(train_model, "_tune_hyperparameters", return_value={}), \
-             patch.object(train_model.xgb, "XGBClassifier", return_value=mock_model):
-            _, metadata = train_model.train(df)
+        with patch.object(train_model.backtest, "run_backtest", return_value=_fake_result()) as mock_run:
+            train_model.train(MagicMock(), df)
 
-        assert isinstance(metadata["accuracy"], float)
-        assert isinstance(metadata["log_loss"], float)
-        assert isinstance(metadata["train_rows"], int)
-        assert isinstance(metadata["test_rows"], int)
+        assert mock_run.call_args.kwargs["naive_baseline_metrics"] == {"naive_baseline_accuracy": 0.5}
+
+    def test_passes_row_counts_and_date_ranges_in_extra_metadata(self):
+        df = _make_df(10)
+
+        with patch.object(train_model.backtest, "run_backtest", return_value=_fake_result()) as mock_run:
+            train_model.train(MagicMock(), df)
+
+        extra = mock_run.call_args.kwargs["extra_metadata"]
+        assert extra["train_rows"] == 8
+        assert extra["test_rows"] == 2
+        assert "train_date_range" in extra
+        assert "test_date_range" in extra
+
+    def test_promotion_metric_is_log_loss(self):
+        df = _make_df(10)
+
+        with patch.object(train_model.backtest, "run_backtest", return_value=_fake_result()) as mock_run:
+            train_model.train(MagicMock(), df)
+
+        assert mock_run.call_args.kwargs["promotion_metric"] == "log_loss"
 
     def test_all_null_feature_column_is_still_numeric_not_object(self):
         # A real production crash: weather_temperature (and, at the time,
         # a QB-average-column naming bug) came back from Parquet as all
         # None for the training window, which pandas types as `object` --
-        # XGBoost raises ValueError on an object dtype column even though
-        # every value is just a missing float. train() must coerce feature
-        # columns to numeric regardless of how sparse any one of them is.
+        # both XGBoost and scikit-learn raise on an object dtype column
+        # even though every value is just a missing float.
         df = _make_df(10)
         df["weather_temperature"] = [None] * len(df)  # entirely null -- object dtype from Parquet
-        mock_model = self._mock_model()
-        captured = {}
 
-        def _capture_fit(X, y):
-            captured["dtype"] = X["weather_temperature"].dtype
-        mock_model.fit.side_effect = _capture_fit
+        with patch.object(train_model.backtest, "run_backtest", return_value=_fake_result()) as mock_run:
+            train_model.train(MagicMock(), df)
 
-        with patch.object(train_model, "_tune_hyperparameters", return_value={}), \
-             patch.object(train_model.xgb, "XGBClassifier", return_value=mock_model):
-            train_model.train(df)
-
-        assert captured["dtype"] == np.float64
-
-    def test_never_touches_real_xgboost_training(self):
-        # Sanity check on the mocking boundary itself: fit() must be the
-        # mock's fit(), not a real Booster ever getting built.
-        df = _make_df(10)
-        mock_model = self._mock_model()
-
-        with patch.object(train_model, "_tune_hyperparameters", return_value={}), \
-             patch.object(train_model.xgb, "XGBClassifier", return_value=mock_model):
-            train_model.train(df)
-
-        mock_model.fit.assert_called_once()  # the mock's fit(), never a real Booster
-
-    def test_feature_importances_use_gain_and_default_unused_features_to_zero(self):
-        df = _make_df(10)
-        mock_model = self._mock_model()
-        # "elo_diff" never appears in get_score()'s output -- as if XGBoost
-        # never split on it -- while "home_elo" does.
-        mock_model.get_booster.return_value.get_score.return_value = {"home_elo": 12.5}
-
-        with patch.object(train_model, "_tune_hyperparameters", return_value={}), \
-             patch.object(train_model.xgb, "XGBClassifier", return_value=mock_model):
-            _, metadata = train_model.train(df)
-
-        mock_model.get_booster.return_value.get_score.assert_called_once_with(importance_type="gain")
-        assert metadata["feature_importances"] == {"home_elo": 12.5, "elo_diff": 0.0}
-        assert isinstance(metadata["feature_importances"]["home_elo"], float)
-
-    def test_feature_importances_are_sorted_descending(self):
-        df = _make_df(10)
-        mock_model = self._mock_model()
-        mock_model.get_booster.return_value.get_score.return_value = {"home_elo": 3.0, "elo_diff": 9.0}
-
-        with patch.object(train_model, "_tune_hyperparameters", return_value={}), \
-             patch.object(train_model.xgb, "XGBClassifier", return_value=mock_model):
-            _, metadata = train_model.train(df)
-
-        assert list(metadata["feature_importances"].keys()) == ["elo_diff", "home_elo"]
-
-
-class TestTuneHyperparameters:
-    """RandomizedSearchCV itself is mocked at the class level -- this
-    verifies _tune_hyperparameters configures the search correctly
-    (TimeSeriesSplit, not k-fold; scoring="neg_log_loss") without ever
-    letting a real search run, since RandomizedSearchCV.fit() would mean
-    real XGBoost fits across every param combination and CV fold."""
-
-    def test_uses_time_series_split_not_kfold(self):
-        df = _make_df(10)
-        X, y = df[["home_elo", "elo_diff"]], df["label_home_won"]
-        mock_search = MagicMock()
-        mock_search.best_params_ = {"max_depth": 3}
-        mock_search.best_score_ = -0.65
-
-        with patch.object(train_model, "RandomizedSearchCV", return_value=mock_search) as mock_search_cls:
-            result = train_model._tune_hyperparameters(X, y)
-
-        mock_search.fit.assert_called_once()
-        call_kwargs = mock_search_cls.call_args.kwargs
-        assert isinstance(call_kwargs["cv"], train_model.TimeSeriesSplit)
-        assert call_kwargs["scoring"] == "neg_log_loss"
-        assert call_kwargs["param_distributions"] == train_model.PARAM_DISTRIBUTIONS
-        assert result == {"max_depth": 3}
-
-    def test_parallelizes_search_without_oversubscribing_per_fit_threads(self):
-        df = _make_df(10)
-        X, y = df[["home_elo", "elo_diff"]], df["label_home_won"]
-        mock_search = MagicMock()
-        mock_search.best_params_ = {}
-        mock_search.best_score_ = -0.65
-
-        with patch.object(train_model, "RandomizedSearchCV", return_value=mock_search) as mock_search_cls, \
-             patch.object(train_model.xgb, "XGBClassifier") as mock_xgb_cls:
-            train_model._tune_hyperparameters(X, y)
-
-        assert mock_search_cls.call_args.kwargs["n_jobs"] == -1
-        mock_xgb_cls.assert_called_once_with(objective="binary:logistic", eval_metric="logloss", n_jobs=1)
-
-    def test_enables_verbose_progress_output(self):
-        # RandomizedSearchCV's own verbose logging is the only progress
-        # visibility during the search itself (hundreds of fits, no
-        # per-candidate hook to log through otherwise). >9 is required for
-        # sklearn to include the candidate number (out of SEARCH_ITERATIONS)
-        # alongside the fold number in each fit's log line.
-        df = _make_df(10)
-        X, y = df[["home_elo", "elo_diff"]], df["label_home_won"]
-        mock_search = MagicMock()
-        mock_search.best_params_ = {}
-        mock_search.best_score_ = -0.65
-
-        with patch.object(train_model, "RandomizedSearchCV", return_value=mock_search) as mock_search_cls:
-            train_model._tune_hyperparameters(X, y)
-
-        assert mock_search_cls.call_args.kwargs["verbose"] > 9
-
-    def test_logs_total_fit_count_before_starting(self, caplog):
-        df = _make_df(10)
-        X, y = df[["home_elo", "elo_diff"]], df["label_home_won"]
-        mock_search = MagicMock()
-        mock_search.best_params_ = {}
-        mock_search.best_score_ = -0.65
-
-        with caplog.at_level("INFO"), \
-             patch.object(train_model, "RandomizedSearchCV", return_value=mock_search):
-            train_model._tune_hyperparameters(X, y)
-
-        expected_fits = train_model.SEARCH_ITERATIONS * train_model.CV_SPLITS
-        assert any(str(expected_fits) in r.message for r in caplog.records)
+        assert mock_run.call_args.kwargs["X_train"]["weather_temperature"].dtype == np.float64
 
 
 class TestMain:
-    def test_writes_versioned_model_and_metadata(self, monkeypatch):
+    def test_loads_features_and_delegates_to_train(self, monkeypatch):
         monkeypatch.setenv("MODEL_ARTIFACTS_BUCKET_NAME", "test-bucket")
-
         df = _make_df(10)
         mock_s3 = MagicMock()
-        mock_s3.get_bytes.return_value = _parquet_bytes(df)
-        mock_s3.list_keys.return_value = ["nfl/win-probability/v1/model.xgb"]
-        mock_s3.object_exists.return_value = False  # no current-production pointer yet
-
-        mock_model = MagicMock()
-        mock_model.predict.return_value = np.array([True, False])
-        mock_model.predict_proba.return_value = np.array([[0.1, 0.9], [0.8, 0.2]])
-        mock_model.get_booster.return_value.save_raw.return_value = b"fake-model-bytes"
-        mock_model.get_booster.return_value.get_score.return_value = {}
 
         with patch.object(train_model, "S3Manager", return_value=mock_s3), \
-             patch.object(train_model, "_tune_hyperparameters", return_value={}), \
-             patch.object(train_model.xgb, "XGBClassifier", return_value=mock_model):
+             patch.object(train_model.training_common, "load_features", return_value=df) as mock_load, \
+             patch.object(train_model, "train", return_value=_fake_result()) as mock_train:
             train_model.main()
 
-        model_call = mock_s3.put_bytes.call_args
-        assert model_call.args[0] == "nfl/win-probability/v2/model.xgb"
-        assert model_call.args[1] == b"fake-model-bytes"
-
-        # put_json is called twice now (model card, then the promotion
-        # pointer) -- call_args_list[0] is the model card, written first.
-        model_card_call = mock_s3.put_json.call_args_list[0]
-        assert model_card_call.args[0] == "nfl/win-probability/v2/model_card.json"
-        assert model_card_call.args[1]["version"] == 2
-        assert model_card_call.args[1]["model_name"] == "win-probability"
-        assert "train_date_range" in model_card_call.args[1]
-        assert "test_date_range" in model_card_call.args[1]
-
-    def test_promotes_the_new_version_when_no_current_pointer_exists(self, monkeypatch):
-        monkeypatch.setenv("MODEL_ARTIFACTS_BUCKET_NAME", "test-bucket")
-
-        df = _make_df(10)
-        mock_s3 = MagicMock()
-        mock_s3.get_bytes.return_value = _parquet_bytes(df)
-        mock_s3.list_keys.return_value = ["nfl/win-probability/v1/model.xgb"]
-        mock_s3.object_exists.return_value = False
-
-        mock_model = MagicMock()
-        mock_model.predict.return_value = np.array([True, False])
-        mock_model.predict_proba.return_value = np.array([[0.1, 0.9], [0.8, 0.2]])
-        mock_model.get_booster.return_value.save_raw.return_value = b"fake-model-bytes"
-        mock_model.get_booster.return_value.get_score.return_value = {}
-
-        with patch.object(train_model, "S3Manager", return_value=mock_s3), \
-             patch.object(train_model, "_tune_hyperparameters", return_value={}), \
-             patch.object(train_model.xgb, "XGBClassifier", return_value=mock_model):
-            train_model.main()
-
-        promotion_call = mock_s3.put_json.call_args_list[1]
-        assert promotion_call.args[0] == "nfl/win-probability/current.json"
-        assert promotion_call.args[1] == {"version": 2}
-
-    def test_starts_at_version_one_when_none_exist(self, monkeypatch):
-        monkeypatch.setenv("MODEL_ARTIFACTS_BUCKET_NAME", "test-bucket")
-
-        df = _make_df(10)
-        mock_s3 = MagicMock()
-        mock_s3.get_bytes.return_value = _parquet_bytes(df)
-        mock_s3.list_keys.return_value = []
-        mock_s3.object_exists.return_value = False
-
-        mock_model = MagicMock()
-        mock_model.predict.return_value = np.array([True, False])
-        mock_model.predict_proba.return_value = np.array([[0.1, 0.9], [0.8, 0.2]])
-        mock_model.get_booster.return_value.save_raw.return_value = b"fake-model-bytes"
-        mock_model.get_booster.return_value.get_score.return_value = {}
-
-        with patch.object(train_model, "S3Manager", return_value=mock_s3), \
-             patch.object(train_model, "_tune_hyperparameters", return_value={}), \
-             patch.object(train_model.xgb, "XGBClassifier", return_value=mock_model):
-            train_model.main()
-
-        assert mock_s3.put_bytes.call_args.args[0] == "nfl/win-probability/v1/model.xgb"
+        mock_load.assert_called_once_with(mock_s3, train_model.EVENT_FEATURES_KEY)
+        mock_train.assert_called_once_with(mock_s3, df)
 
     def test_requires_bucket_env_var(self, monkeypatch):
         monkeypatch.delenv("MODEL_ARTIFACTS_BUCKET_NAME", raising=False)
@@ -360,32 +170,66 @@ class TestMain:
         with pytest.raises(KeyError):
             train_model.main()
 
-    def test_logs_version_and_score_together(self, monkeypatch, caplog):
-        # There's no backtesting harness yet -- this log line is the
-        # actual, current way to see how a run performed, so it has to
-        # exist and has to name both the version and the score.
-        monkeypatch.setenv("MODEL_ARTIFACTS_BUCKET_NAME", "test-bucket")
 
+class TestEndToEndWithRealBacktest:
+    """One test that lets run_backtest itself run for real, with every
+    candidate adapter's own tune_and_fit mocked (the same "never touch
+    real fitting" boundary every other test in this pipeline draws) --
+    proves train_model.py's arguments actually thread through
+    run_backtest -> save_model_artifact -> promote_if_better correctly
+    end to end, not just that train_model.py calls run_backtest with
+    plausible-looking arguments in isolation."""
+
+    def test_writes_every_candidate_and_promotes_the_best_one(self, monkeypatch):
+        monkeypatch.setenv("MODEL_ARTIFACTS_BUCKET_NAME", "test-bucket")
         df = _make_df(10)
         mock_s3 = MagicMock()
         mock_s3.get_bytes.return_value = _parquet_bytes(df)
-        mock_s3.list_keys.return_value = []
+        # Reflects what's actually been "written" so far via put_bytes,
+        # rather than a fixed empty list -- otherwise every candidate in
+        # the tournament would compute the same next_model_version(1),
+        # since a static mock return value doesn't track state the way
+        # real S3 would across run_backtest's per-candidate save calls.
+        mock_s3.list_keys.side_effect = lambda prefix: [
+            call.args[0] for call in mock_s3.put_bytes.call_args_list if call.args[0].startswith(prefix)
+        ]
         mock_s3.object_exists.return_value = False
 
-        mock_model = MagicMock()
-        mock_model.predict.return_value = np.array([True, False])
-        mock_model.predict_proba.return_value = np.array([[0.1, 0.9], [0.8, 0.2]])
-        mock_model.get_booster.return_value.save_raw.return_value = b"fake-model-bytes"
-        mock_model.get_booster.return_value.get_score.return_value = {}
+        # True test-set labels are [True, False] (see _make_df) --
+        # xgboost's predictions are near-perfect and confident; every
+        # other candidate is directionally correct but progressively less
+        # confident, so xgboost must win on log_loss unambiguously.
+        candidate_predictions = {
+            "XGBoostClassifierAdapter": (np.array([0.95, 0.05]), b"xgb-bytes"),
+            "LogisticRegressionAdapter": (np.array([0.6, 0.4]), b"logistic-bytes"),
+            "RandomForestClassifierAdapter": (np.array([0.55, 0.45]), b"rf-bytes"),
+            "MLPClassifierAdapter": (np.array([0.5, 0.5]), b"mlp-bytes"),
+        }
+        patches = []
+        for adapter in train_model.CANDIDATES:
+            predictions, model_bytes = candidate_predictions[type(adapter).__name__]
+            patches.append(patch.object(adapter, "tune_and_fit", return_value=(f"{adapter.algorithm}-estimator", {})))
+            patches.append(patch.object(adapter, "predict", return_value=predictions))
+            patches.append(patch.object(adapter, "feature_importances", return_value={}))
+            patches.append(patch.object(adapter, "serialize", return_value=model_bytes))
 
-        with caplog.at_level("INFO"), \
-             patch.object(train_model, "S3Manager", return_value=mock_s3), \
-             patch.object(train_model, "_tune_hyperparameters", return_value={}), \
-             patch.object(train_model.xgb, "XGBClassifier", return_value=mock_model):
-            train_model.main()
+        with patch.object(train_model, "S3Manager", return_value=mock_s3):
+            for p in patches:
+                p.start()
+            try:
+                train_model.main()
+            finally:
+                for p in patches:
+                    p.stop()
 
-        summary_lines = [r.message for r in caplog.records if "Training complete" in r.message]
-        assert len(summary_lines) == 1
-        assert "v1" in summary_lines[0]
-        assert "accuracy=" in summary_lines[0]
-        assert "log_loss=" in summary_lines[0]
+        written_models = {call.args[0]: call.args[1] for call in mock_s3.put_bytes.call_args_list}
+        assert written_models["nfl/win-probability/v1/model.xgb"] == b"xgb-bytes"
+        assert written_models["nfl/win-probability/v2/model.joblib"] == b"logistic-bytes"
+        assert written_models["nfl/win-probability/v3/model.joblib"] == b"rf-bytes"
+        assert written_models["nfl/win-probability/v4/model.joblib"] == b"mlp-bytes"
+
+        # xgboost's predictions ([0.95, 0.05] vs true [True, False]) are
+        # perfect; logistic's ([0.6, 0.4]) are directionally right but
+        # less confident -- xgboost must win on log_loss.
+        promotion_call = next(c for c in mock_s3.put_json.call_args_list if c.args[0] == "nfl/win-probability/current.json")
+        assert promotion_call.args[1] == {"version": 1}

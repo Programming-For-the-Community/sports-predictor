@@ -13,21 +13,21 @@
 # already scoped for ecs:RunTask on ${var.project}-* task definitions
 # plus iam:PassRole on aws_iam_role.ecs_pipeline. No new IAM needed.
 #
-# Slots 5-11 of the 11-task, 15-minute stagger described in
-# scheduler-nfl-train-model.tf (13:00 through 14:30 UTC) -- each stat's
+# Slots 5-11 of the 11-task, 30-minute stagger described in
+# scheduler-nfl-train-model.tf (14:00 through 17:00 UTC) -- each stat's
 # map value is its own "minute hour" pair, not just the stat name, since
 # a set/list for_each has no stable per-item ordering to derive a time
 # offset from. Launching every NFL training task at the same instant
 # once exceeded the account's Fargate on-demand vCPU quota.
 locals {
   nfl_player_prop_stats = {
-    "passing_yards"        = "0 13"
-    "passing_touchdowns"   = "15 13"
-    "rushing_yards"        = "30 13"
-    "rushing_touchdowns"   = "45 13"
-    "receiving_yards"      = "0 14"
-    "receiving_touchdowns" = "15 14"
-    "defensive_sacks"      = "30 14"
+    "passing_yards"        = "0 14"
+    "passing_touchdowns"   = "30 14"
+    "rushing_yards"        = "0 15"
+    "rushing_touchdowns"   = "30 15"
+    "receiving_yards"      = "0 16"
+    "receiving_touchdowns" = "30 16"
+    "defensive_sacks"      = "0 17"
   }
 }
 

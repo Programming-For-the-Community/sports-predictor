@@ -1,9 +1,14 @@
+%%{init: {'flowchart': {'curve': 'stepAfter'}}}%%
 %% sports-predictor -- current deployed AWS architecture (NFL, Phase 1).
 %% See docs/AWS_ARCHITECTURE.md for the walkthrough and a legend.
 %% Solid arrows = data flow / invocation. Dotted arrows = supporting,
 %% non-data-flow dependency (TLS cert, container image pull, VPC endpoint
 %% path). Edge labels are numbered only on the primary client request path;
 %% everywhere else they're verbs describing what crosses that arrow.
+%% Color = component role (see classDef legend at the bottom), not
+%% cosmetic -- the same color always means the same kind of thing
+%% (client/edge, API/auth, serving compute, pipeline compute, storage,
+%% scheduling, external/shared).
 flowchart TD
     BROWSER(["Browser<br/>Cognito-authenticated user"])
 
@@ -18,7 +23,8 @@ flowchart TD
     subgraph VPCBox["VPC (pre-existing, shared)"]
         direction TB
         subgraph PrivSub["Private Subnets (3 AZs)<br/>no NAT Gateway"]
-            PREDICT["Lambda: nfl-predict<br/>(container image)"]
+            PREDICTREAD["Lambda: nfl-predict-read<br/>(zip, read-only --<br/>no xgboost/scikit-learn/pandas)"]
+            PREDICT["Lambda: nfl-predict<br/>(container image --<br/>xgboost/scikit-learn/pandas)"]
         end
         subgraph PubSub["Public Subnets (3 AZs)<br/>+ Internet Gateway"]
             BACKFILL["Fargate: nfl-backfill<br/>(manual run-task, historical only)"]
@@ -32,7 +38,7 @@ flowchart TD
     SCHIN["EventBridge Schedule<br/>ingest (2x/week, Aug-Feb)"]
     INGEST["Lambda: nfl-ingest"]
     NORMALIZE["Lambda: nfl-normalize"]
-    SCHTRAIN["EventBridge Schedules<br/>feature-eng + training<br/>(11x, staggered weekly, Aug-Feb)"]
+    SCHTRAIN["EventBridge Schedules<br/>feature-eng + training<br/>(11x, staggered 30min, Aug-Feb)"]
 
     S3RAW[("S3 Bucket<br/>Raw Data Lake")]
     S3MODEL[("S3 Bucket<br/>Model Artifacts")]
@@ -49,10 +55,14 @@ flowchart TD
     CF -->|"2a. default behavior: /*"| S3FE
     CF -->|"2b. ordered behavior: /nfl/*"| APIGW
     APIGW -->|"3. validates JWT"| COGNITO
-    APIGW -->|"4. AWS_PROXY invoke"| PREDICT
+    APIGW -->|"4a. AWS_PROXY: /events, /models"| PREDICTREAD
+    APIGW -->|"4b. AWS_PROXY: /season, /predictions/*"| PREDICT
+    PREDICTREAD -->|"5a. read events + logged predictions"| DDBCORE
+    PREDICTREAD -->|"5b. read model card (metadata only)"| S3MODEL
     PREDICT -->|"5. read live features"| DDBCORE
-    PREDICT -->|"6. read promoted model"| S3MODEL
+    PREDICT -->|"6. read + deserialize promoted model"| S3MODEL
     PREDICT -->|"7. write audit record"| DDBPRED
+    PREDICTREAD -.->|"read logged predictions"| DDBPRED
     PREDICT -.->|"pulls image"| ECR
 
     %% ---- Scheduled ingestion ----
@@ -74,6 +84,30 @@ flowchart TD
     FEAT -->|"write training Parquet"| S3MODEL
     SCHTRAIN -->|"triggers"| TRAIN
     TRAIN -->|"read Parquet"| S3MODEL
-    TRAIN -->|"write model + model_card,<br/>promote if better"| S3MODEL
+    TRAIN -->|"write model + model_card per candidate,<br/>promote whichever wins"| S3MODEL
     FEAT -.->|"pulls image"| ECR
     TRAIN -.->|"pulls image"| ECR
+
+    %% ---- Color legend (component role) ----
+    classDef client fill:#e8eaed,stroke:#5f6368,color:#202124;
+    classDef edge fill:#cfe8fc,stroke:#1a73e8,color:#0b3d78;
+    classDef auth fill:#e6d9f7,stroke:#7b3fe4,color:#3a1a63;
+    classDef servingCompute fill:#ffd8a8,stroke:#e8590c,color:#5c2200;
+    classDef pipelineCompute fill:#fff3bf,stroke:#e8b800,color:#5c4a00;
+    classDef fargateCompute fill:#b2f2bb,stroke:#2f9e44,color:#0b3d1c;
+    classDef storage fill:#ffc9c9,stroke:#e03131,color:#5c1111;
+    classDef schedule fill:#e9ecef,stroke:#495057,color:#212529,stroke-dasharray: 4 3;
+    classDef external fill:#dee2e6,stroke:#343a40,color:#212529;
+
+    class BROWSER client;
+    class ESPN external;
+    class ECR external;
+    class GWEP external;
+    class R53,ACM,CF edge;
+    class S3FE edge;
+    class APIGW,COGNITO auth;
+    class PREDICT,PREDICTREAD servingCompute;
+    class INGEST,NORMALIZE pipelineCompute;
+    class BACKFILL,FEAT,TRAIN fargateCompute;
+    class S3RAW,S3MODEL,DDBCORE,DDBPRED storage;
+    class SCHIN,SCHTRAIN schedule;

@@ -13,7 +13,7 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools]
-packages = ["library", "library.aws", "library.features", "library.http", "library.normalize", "library.schema", "library.storage"]
+packages = ["library", "library.aws", "library.features", "library.http", "library.ml", "library.normalize", "library.schema", "library.serving", "library.storage"]
 
 [tool.setuptools.package-dir]
 library = "."

@@ -1,20 +1,26 @@
 """
-Shared plumbing for every NFL model-training script -- train_model.py
-(the production win-probability XGBoost classifier), train_baseline_model.py
-(a logistic-regression comparison baseline for it), and
-train_player_prop_model.py (one XGBoost regressor per target stat), plus
-any future model type. Loading a training set, splitting it
-chronologically, coercing feature dtypes, computing holdout metrics, and
-writing a versioned model artifact plus model card are identical
-regardless of which estimator is being trained or which dataset/label it
-targets -- only the estimator itself, its hyperparameter search, and the
-dataset/label/feature-column specifics are model-specific and stay in
-each script.
+Shared plumbing for every sport's model-training scripts -- loading a
+training set, splitting it chronologically, coercing feature dtypes,
+computing holdout metrics, and writing a versioned model artifact plus
+model card are identical regardless of sport, algorithm, or which
+dataset/label a script targets. Moved here from
+Source/model-training/nfl/model_common.py, which had no NFL-specific
+assumptions except a hardcoded SPORT constant -- every function below
+takes `sport` explicitly instead, so a future sport's training scripts
+import this exact module rather than reaching across a sport boundary or
+copy-pasting it (see design/PROJECT_PLAN.md Phase 4).
+
+evaluate_holdout/evaluate_regression_holdout take already-computed
+predictions/probabilities rather than a model object -- library.ml.
+model_types.ModelAdapter.predict() is what produces those, uniformly
+across every algorithm, so this module never needs to know how any
+particular algorithm turns a feature matrix into a prediction.
 """
 import io
 import logging
 from datetime import datetime, timezone
 
+import numpy as np
 import pandas as pd
 from sklearn.metrics import accuracy_score, log_loss, mean_absolute_error, root_mean_squared_error
 
@@ -26,9 +32,8 @@ from library.storage.model_artifacts import (
     next_model_version,
 )
 
-logger = logging.getLogger("nfl-train-model")
+logger = logging.getLogger("model-training")
 
-SPORT = "nfl"
 MODEL_CARD_FILENAME = "model_card.json"
 
 # How much worse (as a fraction of the current production version's gate
@@ -79,9 +84,13 @@ def numeric_frame(df: pd.DataFrame, columns: list[str]) -> pd.DataFrame:
     return df[columns].apply(pd.to_numeric, errors="coerce")
 
 
-def evaluate_holdout(model, X_test: pd.DataFrame, y_test: pd.Series) -> dict:
-    predictions = model.predict(X_test)
-    probabilities = model.predict_proba(X_test)[:, 1]
+def evaluate_holdout(probabilities, y_test: pd.Series) -> dict:
+    """probabilities: a ModelAdapter.predict() output for a
+    classification-task target -- positive-class probability per row.
+    Accuracy needs a thresholded label, not a probability; 0.5 is the
+    standard decision boundary and the only one any caller here has ever
+    used."""
+    predictions = np.asarray(probabilities) >= 0.5
     return {
         # float() casts -- sklearn returns numpy scalar types, which
         # json.dumps() (via S3Manager.put_json) doesn't know how to
@@ -91,14 +100,13 @@ def evaluate_holdout(model, X_test: pd.DataFrame, y_test: pd.Series) -> dict:
     }
 
 
-def evaluate_regression_holdout(model, X_test: pd.DataFrame, y_test: pd.Series) -> dict:
-    """Regression counterpart to evaluate_holdout -- for a player-prop
-    model predicting a continuous stat (passing yards, receptions, ...),
-    not a win/loss classification, so accuracy/log_loss don't apply.
-    rmse is the gate metric (see PROMOTION_TOLERANCE); mae is carried on
-    the model card alongside it since it's easier to read in the stat's
-    own units without RMSE's squared-error weighting toward big misses."""
-    predictions = model.predict(X_test)
+def evaluate_regression_holdout(predictions, y_test: pd.Series) -> dict:
+    """Regression counterpart to evaluate_holdout -- for a target
+    predicting a continuous value, not a win/loss classification, so
+    accuracy/log_loss don't apply. rmse is the gate metric (see
+    PROMOTION_TOLERANCE); mae is carried on the model card alongside it
+    since it's easier to read in the target's own units without RMSE's
+    squared-error weighting toward big misses."""
     return {
         "rmse": float(root_mean_squared_error(y_test, predictions)),
         "mae": float(mean_absolute_error(y_test, predictions)),
@@ -107,6 +115,7 @@ def evaluate_regression_holdout(model, X_test: pd.DataFrame, y_test: pd.Series) 
 
 def save_model_artifact(
     s3: S3Manager,
+    sport: str,
     model_name: str,
     algorithm: str,
     model_bytes: bytes,
@@ -118,25 +127,29 @@ def save_model_artifact(
     needed to know what a given version is (training window, row counts,
     hyperparameters, holdout metrics) without re-running anything or
     cross-referencing CloudWatch Logs. See library.storage.model_artifacts
-    for the versioning scheme -- each model_name (e.g. "win-probability",
-    "win-probability-logistic", "player-prop-passing-yards") versions
-    independently under its own prefix, so one model's runs never collide
-    with or skip another's version numbers.
+    for the versioning scheme -- each (sport, model_name) pair (e.g.
+    nfl/win-probability, nfl/win-probability-logistic,
+    nfl/player-prop-passing-yards) versions independently under its own
+    prefix, so one model's runs never collide with or skip another's
+    version numbers, and different algorithms trained for the SAME target
+    (see library.ml.backtest.run_backtest) simply share that target's one
+    version counter -- nothing here needs to know or care that v7 was
+    xgboost and v8 was logistic_regression.
 
     summary_metrics: which metadata keys (e.g. ["accuracy", "log_loss"]
     or ["rmse", "mae"]) to fold into the one-line CloudWatch summary
-    below -- the metric names vary by model type, everything else about
+    below -- the metric names vary by task type, everything else about
     writing the artifact doesn't."""
-    prefix = model_artifact_prefix(SPORT, model_name)
+    prefix = model_artifact_prefix(sport, model_name)
     version = next_model_version(s3.list_keys(prefix))
-    model_key = model_artifact_key(SPORT, model_name, version, artifact_filename)
-    model_card_key = model_artifact_key(SPORT, model_name, version, MODEL_CARD_FILENAME)
+    model_key = model_artifact_key(sport, model_name, version, artifact_filename)
+    model_card_key = model_artifact_key(sport, model_name, version, MODEL_CARD_FILENAME)
 
     s3.put_bytes(model_key, model_bytes, content_type="application/octet-stream")
     logger.info("Wrote model artifact to s3://%s/%s", s3.bucket, model_key)
 
     model_card = {
-        "sport": SPORT,
+        "sport": sport,
         "model_name": model_name,
         "algorithm": algorithm,
         "version": version,
@@ -146,29 +159,25 @@ def save_model_artifact(
     s3.put_json(model_card_key, model_card)
     logger.info("Wrote model card to s3://%s/%s", s3.bucket, model_card_key)
 
-    # One line with the version and its score together -- there's no
-    # backtesting harness yet (design/PROJECT_PLAN.md Phase 4), so this is
-    # the fastest way to eyeball "did this run look reasonable" straight
-    # from CloudWatch Logs without opening the model card.
     metric_summary = " ".join(f"{name}={metadata[name]:.4f}" for name in summary_metrics)
     logger.info(
-        "Training complete: %s v%d (%s) -- %s (%d train rows, %d test rows)",
-        model_name, version, algorithm, metric_summary, metadata["train_rows"], metadata["test_rows"],
+        "Training complete: %s/%s v%d (%s) -- %s (%d train rows, %d test rows)",
+        sport, model_name, version, algorithm, metric_summary, metadata["train_rows"], metadata["test_rows"],
     )
     return model_card
 
 
-def get_current_version(s3: S3Manager, model_name: str) -> int | None:
+def get_current_version(s3: S3Manager, sport: str, model_name: str) -> int | None:
     """None means no version of this model has ever been promoted --
     distinct from "version 1 is current", which is why this can't just
     return 0 as a sentinel."""
-    key = current_version_key(SPORT, model_name)
+    key = current_version_key(sport, model_name)
     if not s3.object_exists(key):
         return None
     return s3.get_json(key)["version"]
 
 
-def promote_if_better(s3: S3Manager, model_name: str, version: int, metadata: dict, metric: str) -> bool:
+def promote_if_better(s3: S3Manager, sport: str, model_name: str, version: int, metadata: dict, metric: str) -> bool:
     """Points model_name's "current" pointer (current_version_key) at
     `version` unless an existing production version already scores
     meaningfully better on `metric` -- guards against a retrain with bad
@@ -180,38 +189,43 @@ def promote_if_better(s3: S3Manager, model_name: str, version: int, metadata: di
     `metric` must name a lower-is-better value present on both model
     cards (log_loss for a classifier, rmse for a regressor) -- accuracy
     or anything else higher-is-better would invert this comparison.
+    Algorithm-agnostic: `version`'s own algorithm doesn't have to match
+    whatever algorithm the currently-promoted version happens to be --
+    this only ever compares the two versions' own `metric` value, so a
+    logistic-regression version can beat and replace an xgboost one, or
+    vice versa, with no special-casing here (see
+    library.ml.backtest.run_backtest, which is what actually runs several
+    algorithms and calls this once on whichever one wins among them).
 
     Not a controlled A/B: the current production version's score was
     measured on an older, now-stale holdout window, while `version`'s was
-    measured on a newer one that includes since-completed games -- a true
-    apples-to-apples comparison needs the backtesting harness on
-    design/PROJECT_PLAN.md's Phase 4 list, which doesn't exist yet. Good
+    measured on a newer one that includes since-completed games. Good
     enough to catch a genuine regression, not precise enough to
     adjudicate between two versions within normal noise of each other --
     see PROMOTION_TOLERANCE.
     """
-    current_version = get_current_version(s3, model_name)
+    current_version = get_current_version(s3, sport, model_name)
     if current_version is None:
-        logger.info("No existing production version for %s -- promoting v%d directly.", model_name, version)
-        s3.put_json(current_version_key(SPORT, model_name), {"version": version})
+        logger.info("No existing production version for %s/%s -- promoting v%d directly.", sport, model_name, version)
+        s3.put_json(current_version_key(sport, model_name), {"version": version})
         return True
 
-    current_card = s3.get_json(model_artifact_key(SPORT, model_name, current_version, MODEL_CARD_FILENAME))
+    current_card = s3.get_json(model_artifact_key(sport, model_name, current_version, MODEL_CARD_FILENAME))
     current_score = current_card[metric]
     new_score = metadata[metric]
     threshold = current_score * (1 + PROMOTION_TOLERANCE)
 
     if new_score <= threshold:
         logger.info(
-            "Promoting %s v%d (%s=%.4f) over current production v%d (%s=%.4f).",
-            model_name, version, metric, new_score, current_version, metric, current_score,
+            "Promoting %s/%s v%d (%s=%.4f) over current production v%d (%s=%.4f).",
+            sport, model_name, version, metric, new_score, current_version, metric, current_score,
         )
-        s3.put_json(current_version_key(SPORT, model_name), {"version": version})
+        s3.put_json(current_version_key(sport, model_name), {"version": version})
         return True
 
     logger.warning(
-        "Holding back %s v%d (%s=%.4f) -- more than %.0f%% worse than current production v%d "
+        "Holding back %s/%s v%d (%s=%.4f) -- more than %.0f%% worse than current production v%d "
         "(%s=%.4f). Still versioned and available, just not promoted automatically.",
-        model_name, version, metric, new_score, PROMOTION_TOLERANCE * 100, current_version, metric, current_score,
+        sport, model_name, version, metric, new_score, PROMOTION_TOLERANCE * 100, current_version, metric, current_score,
     )
     return False

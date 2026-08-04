@@ -1,16 +1,17 @@
 """
-Unit tests for the NFL player-prop training entrypoint. xgboost's
-XGBRegressor is ALWAYS mocked here, same mocking boundary as
-test_train_model.py draws around XGBClassifier -- these tests verify
+Unit tests for the NFL player-prop training entrypoint.
+
+library.ml.backtest.run_backtest is mocked here -- these tests verify
 train_player_prop_model.py's own orchestration (target-stat filtering,
-column selection, metric computation, versioned S3 writes), never a real
-fit.
+column selection, naive baseline computation, what gets handed to
+run_backtest), not the tournament itself (see Source/tests/library/ml/
+test_backtest.py) or any real algorithm fitting (see Source/tests/
+library/ml/test_model_types.py).
 """
 import io
 import json
 from unittest.mock import MagicMock, patch
 
-import numpy as np
 import pandas as pd
 import pytest
 
@@ -62,6 +63,14 @@ def _parquet_bytes(df: pd.DataFrame) -> bytes:
     buffer = io.BytesIO()
     df.to_parquet(buffer, index=False)
     return buffer.getvalue()
+
+
+def _fake_result(model_name="player-prop-passing-yards", version=1):
+    return {
+        "winner": {"model_name": model_name, "algorithm": "xgboost", "version": version, "rmse": 25.0},
+        "promoted": True,
+        "candidates": [{"algorithm": "xgboost", "rmse": 25.0}],
+    }
 
 
 class TestModelName:
@@ -272,157 +281,71 @@ class TestOpposingSideCategories:
 
 
 class TestTrain:
-    def _mock_model(self):
-        mock_model = MagicMock()
-        mock_model.predict.return_value = np.array([250.0, 260.0])
-        mock_model.get_booster.return_value.get_score.return_value = {}
-        return mock_model
-
-    def test_fits_mocked_model_and_computes_metrics(self):
+    def test_calls_run_backtest_with_regression_task_and_every_candidate(self):
         df = _make_df(10, target_stat="passing_yards")
-        mock_model = self._mock_model()
 
-        with patch.object(train_player_prop_model, "_tune_hyperparameters", return_value={}), \
-             patch.object(train_player_prop_model.xgb, "XGBRegressor", return_value=mock_model):
-            model, metadata = train_player_prop_model.train(df, "passing_yards")
+        with patch.object(train_player_prop_model.backtest, "run_backtest", return_value=_fake_result()) as mock_run:
+            result = train_player_prop_model.train(MagicMock(), df, "passing_yards")
 
-        mock_model.fit.assert_called_once()
-        assert model is mock_model
-        assert metadata["target_stat"] == "passing_yards"
-        assert set(metadata["feature_columns"]) == {"avg_passing_yards", "games_played", "games_with_passing_yards"}
-        assert metadata["train_rows"] == 8
-        assert metadata["test_rows"] == 2
+        call = mock_run.call_args
+        assert call.kwargs["task"] == "regression"
+        assert call.kwargs["candidates"] == train_player_prop_model.CANDIDATES
+        assert {type(c).__name__ for c in call.kwargs["candidates"]} == {
+            "XGBoostRegressorAdapter", "ElasticNetAdapter", "RandomForestRegressorAdapter", "MLPRegressorAdapter",
+        }
+        assert result == _fake_result()
+
+    def test_uses_the_stats_own_model_name(self):
+        df = _make_df(10, target_stat="passing_yards")
+
+        with patch.object(train_player_prop_model.backtest, "run_backtest", return_value=_fake_result()) as mock_run:
+            train_player_prop_model.train(MagicMock(), df, "passing_yards")
+
+        assert mock_run.call_args.args[2] == "player-prop-passing-yards"
 
     def test_filters_to_target_stat_before_splitting(self):
         # 3 of 10 rows record a different stat -- the 80/20 split must
         # apply to the remaining 7, not the original 10.
         df = _make_df(10, target_stat="passing_yards", missing_stat_rows=3)
-        mock_model = self._mock_model()
 
-        with patch.object(train_player_prop_model, "_tune_hyperparameters", return_value={}), \
-             patch.object(train_player_prop_model.xgb, "XGBRegressor", return_value=mock_model):
-            _, metadata = train_player_prop_model.train(df, "passing_yards")
+        with patch.object(train_player_prop_model.backtest, "run_backtest", return_value=_fake_result()) as mock_run:
+            train_player_prop_model.train(MagicMock(), df, "passing_yards")
 
-        assert metadata["train_rows"] + metadata["test_rows"] == 7
+        extra = mock_run.call_args.kwargs["extra_metadata"]
+        assert extra["train_rows"] + extra["test_rows"] == 7
 
-    def test_metrics_are_rmse_and_mae_not_classification_metrics(self):
+    def test_includes_target_stat_in_extra_metadata(self):
         df = _make_df(10, target_stat="passing_yards")
-        mock_model = self._mock_model()
 
-        with patch.object(train_player_prop_model, "_tune_hyperparameters", return_value={}), \
-             patch.object(train_player_prop_model.xgb, "XGBRegressor", return_value=mock_model):
-            _, metadata = train_player_prop_model.train(df, "passing_yards")
+        with patch.object(train_player_prop_model.backtest, "run_backtest", return_value=_fake_result()) as mock_run:
+            train_player_prop_model.train(MagicMock(), df, "passing_yards")
 
-        assert isinstance(metadata["rmse"], float)
-        assert isinstance(metadata["mae"], float)
-        assert "accuracy" not in metadata
-        assert "log_loss" not in metadata
-
-    def test_feature_importances_default_unused_features_to_zero(self):
-        df = _make_df(10, target_stat="passing_yards")
-        mock_model = self._mock_model()
-        mock_model.get_booster.return_value.get_score.return_value = {"avg_passing_yards": 5.0}
-
-        with patch.object(train_player_prop_model, "_tune_hyperparameters", return_value={}), \
-             patch.object(train_player_prop_model.xgb, "XGBRegressor", return_value=mock_model):
-            _, metadata = train_player_prop_model.train(df, "passing_yards")
-
-        assert metadata["feature_importances"]["avg_passing_yards"] == 5.0
-        assert metadata["feature_importances"]["games_played"] == 0.0
-
-    def test_includes_naive_baseline_metrics(self):
-        df = _make_df(10, target_stat="passing_yards")
-        mock_model = self._mock_model()
-
-        with patch.object(train_player_prop_model, "_tune_hyperparameters", return_value={}), \
-             patch.object(train_player_prop_model.xgb, "XGBRegressor", return_value=mock_model):
-            _, metadata = train_player_prop_model.train(df, "passing_yards")
-
-        assert isinstance(metadata["naive_baseline_rmse"], float)
-        assert isinstance(metadata["naive_baseline_mae"], float)
+        assert mock_run.call_args.kwargs["extra_metadata"]["target_stat"] == "passing_yards"
 
     def test_naive_baseline_predicts_the_players_own_rolling_average(self):
         # Set avg_passing_yards to exactly match each row's own label
         # (200 + i, from _make_df's stat_line values) -- the naive
-        # baseline's error should be exactly zero regardless of what the
-        # (mocked) model itself predicts.
+        # baseline's error should be exactly zero.
         n = 10
         df = _make_df(n, target_stat="passing_yards", avg_stat=[200.0 + i for i in range(n)])
-        mock_model = self._mock_model()
 
-        with patch.object(train_player_prop_model, "_tune_hyperparameters", return_value={}), \
-             patch.object(train_player_prop_model.xgb, "XGBRegressor", return_value=mock_model):
-            _, metadata = train_player_prop_model.train(df, "passing_yards")
+        with patch.object(train_player_prop_model.backtest, "run_backtest", return_value=_fake_result()) as mock_run:
+            train_player_prop_model.train(MagicMock(), df, "passing_yards")
 
-        assert metadata["naive_baseline_rmse"] == pytest.approx(0.0)
-        assert metadata["naive_baseline_mae"] == pytest.approx(0.0)
+        naive = mock_run.call_args.kwargs["naive_baseline_metrics"]
+        assert naive["naive_baseline_rmse"] == pytest.approx(0.0)
+        assert naive["naive_baseline_mae"] == pytest.approx(0.0)
 
-
-class TestTuneHyperparameters:
-    def test_uses_time_series_split_and_rmse_scoring(self):
+    def test_promotion_metric_is_rmse(self):
         df = _make_df(10, target_stat="passing_yards")
-        filtered = train_player_prop_model._filter_to_target_stat(df, "passing_yards")
-        feature_columns = train_player_prop_model._feature_columns(filtered, "passing_yards")
-        X, y = filtered[feature_columns], filtered[train_player_prop_model.LABEL_COLUMN]
-        mock_search = MagicMock()
-        mock_search.best_params_ = {"max_depth": 3}
-        mock_search.best_score_ = -15.0
 
-        with patch.object(train_player_prop_model, "RandomizedSearchCV", return_value=mock_search) as mock_search_cls:
-            result = train_player_prop_model._tune_hyperparameters(X, y)
+        with patch.object(train_player_prop_model.backtest, "run_backtest", return_value=_fake_result()) as mock_run:
+            train_player_prop_model.train(MagicMock(), df, "passing_yards")
 
-        mock_search.fit.assert_called_once()
-        call_kwargs = mock_search_cls.call_args.kwargs
-        assert isinstance(call_kwargs["cv"], train_player_prop_model.TimeSeriesSplit)
-        assert call_kwargs["scoring"] == "neg_root_mean_squared_error"
-        assert call_kwargs["param_distributions"] == train_player_prop_model.PARAM_DISTRIBUTIONS
-        assert result == {"max_depth": 3}
-
-    def test_parallelizes_search_without_oversubscribing_per_fit_threads(self):
-        df = _make_df(10, target_stat="passing_yards")
-        filtered = train_player_prop_model._filter_to_target_stat(df, "passing_yards")
-        feature_columns = train_player_prop_model._feature_columns(filtered, "passing_yards")
-        X, y = filtered[feature_columns], filtered[train_player_prop_model.LABEL_COLUMN]
-        mock_search = MagicMock()
-        mock_search.best_params_ = {}
-        mock_search.best_score_ = -15.0
-
-        with patch.object(train_player_prop_model, "RandomizedSearchCV", return_value=mock_search) as mock_search_cls, \
-             patch.object(train_player_prop_model.xgb, "XGBRegressor") as mock_xgb_cls:
-            train_player_prop_model._tune_hyperparameters(X, y)
-
-        assert mock_search_cls.call_args.kwargs["n_jobs"] == -1
-        mock_xgb_cls.assert_called_once_with(objective="reg:squarederror", n_jobs=1)
+        assert mock_run.call_args.kwargs["promotion_metric"] == "rmse"
 
 
 class TestMain:
-    def _mock_model(self):
-        mock_model = MagicMock()
-        mock_model.predict.return_value = np.array([250.0, 260.0])
-        mock_model.get_booster.return_value.save_raw.return_value = b"fake-model-bytes"
-        mock_model.get_booster.return_value.get_score.return_value = {}
-        return mock_model
-
-    def test_writes_versioned_model_under_a_stat_specific_model_name(self, monkeypatch):
-        monkeypatch.setenv("MODEL_ARTIFACTS_BUCKET_NAME", "test-bucket")
-        monkeypatch.setenv("TARGET_STAT", "passing_yards")
-
-        df = _make_df(10, target_stat="passing_yards")
-        mock_s3 = MagicMock()
-        mock_s3.get_bytes.return_value = _parquet_bytes(df)
-        mock_s3.list_keys.return_value = []
-        mock_s3.object_exists.return_value = False
-        mock_model = self._mock_model()
-
-        with patch.object(train_player_prop_model, "S3Manager", return_value=mock_s3), \
-             patch.object(train_player_prop_model, "_tune_hyperparameters", return_value={}), \
-             patch.object(train_player_prop_model.xgb, "XGBRegressor", return_value=mock_model):
-            train_player_prop_model.main()
-
-        model_call = mock_s3.put_bytes.call_args
-        assert model_call.args[0] == "nfl/player-prop-passing-yards/v1/model.xgb"
-        assert model_call.args[1] == b"fake-model-bytes"
-
     def test_requires_target_stat_env_var(self, monkeypatch):
         monkeypatch.setenv("MODEL_ARTIFACTS_BUCKET_NAME", "test-bucket")
         monkeypatch.delenv("TARGET_STAT", raising=False)
@@ -437,21 +360,16 @@ class TestMain:
         with pytest.raises(KeyError):
             train_player_prop_model.main()
 
-    def test_gates_promotion_on_rmse_not_log_loss(self, monkeypatch):
+    def test_loads_features_and_delegates_to_train(self, monkeypatch):
         monkeypatch.setenv("MODEL_ARTIFACTS_BUCKET_NAME", "test-bucket")
         monkeypatch.setenv("TARGET_STAT", "passing_yards")
-
         df = _make_df(10, target_stat="passing_yards")
         mock_s3 = MagicMock()
-        mock_s3.get_bytes.return_value = _parquet_bytes(df)
-        mock_s3.list_keys.return_value = []
-        mock_s3.object_exists.return_value = False
-        mock_model = self._mock_model()
 
         with patch.object(train_player_prop_model, "S3Manager", return_value=mock_s3), \
-             patch.object(train_player_prop_model, "_tune_hyperparameters", return_value={}), \
-             patch.object(train_player_prop_model.xgb, "XGBRegressor", return_value=mock_model), \
-             patch.object(train_player_prop_model.model_common, "promote_if_better") as mock_promote:
+             patch.object(train_player_prop_model.training_common, "load_features", return_value=df) as mock_load, \
+             patch.object(train_player_prop_model, "train", return_value=_fake_result()) as mock_train:
             train_player_prop_model.main()
 
-        assert mock_promote.call_args.args[-1] == "rmse"
+        mock_load.assert_called_once_with(mock_s3, train_player_prop_model.PLAYER_FEATURES_KEY)
+        mock_train.assert_called_once_with(mock_s3, df, "passing_yards")

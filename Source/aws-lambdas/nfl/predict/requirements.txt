@@ -1,16 +1,38 @@
 # boto3 is pre-installed in the Lambda Python runtime -- not bundled here.
 # The shared library (Source/library) is installed separately by the build
-# workflow via `pip install --no-deps Source/library -t package/`.
+# workflow.
 #
-# numpy and scipy are listed explicitly, and the Dockerfile installs this
-# file with --no-deps, specifically to skip xgboost's OTHER unconditional
-# Linux/x86_64 dependency: nvidia-nccl-cu12 (~300MB, GPU-only distributed
-# training support). Verified against the real public.ecr.aws/lambda/
-# python:3.12 image that a plain CPU train/save_raw/load_model/predict
-# round trip works fine without it installed -- xgboost only touches NCCL
-# on a CUDA device path this Lambda never takes. scipy, unlike nccl, IS a
-# genuine import-time dependency (xgboost.core imports scipy.sparse
-# unconditionally) and can't be dropped the same way.
-xgboost>=2.0,<3.0
+# Installed normally (pip resolves transitive deps itself) -- unlike
+# xgboost (see requirements-nodeps.txt, installed --no-deps specifically
+# to dodge its unconditional nvidia-nccl-cu12 GPU dependency), nothing
+# here needs dodging anything, so there's no reason to hand-maintain a
+# transitive dependency list ourselves and risk missing one (e.g. pandas'
+# own python-dateutil/pytz/tzdata, scikit-learn's threadpoolctl) the way
+# a --no-deps install would require.
+#
+# numpy/scipy: xgboost's own real runtime deps (xgboost.core imports
+# scipy.sparse unconditionally) -- listed here since xgboost itself
+# installs --no-deps and won't pull them in on its own.
+#
+# scikit-learn/joblib/pandas: needed once library.ml.model_types.
+# LogisticRegressionAdapter can genuinely be the promoted model for a
+# target (see library/ml/backtest.py's tournament -- any candidate
+# algorithm can win, so this Lambda has to be able to deserialize/predict
+# whichever one actually is current, not just XGBoost). ModelAdapter.predict
+# takes a pandas DataFrame deliberately, so a live single-row prediction
+# here and a training-time holdout batch go through the exact same
+# per-algorithm predict code, never two parallel implementations that
+# could drift -- that's what pulls pandas into this Lambda too, not just
+# scikit-learn/joblib for deserializing a promoted logistic-regression
+# artifact. A real cold-start/package-size cost, deliberately accepted
+# over a "predict Lambda can only ever serve XGBoost" restriction that
+# would silently cap the backtesting harness's whole "let the best model
+# type change dynamically" premise for every classification target. This
+# Lambda is already VPC-attached with a real, previously-measured cold
+# start (ENI provisioning) -- revisit with SnapStart/provisioned
+# concurrency if this addition regresses it further.
 numpy
 scipy
+scikit-learn
+joblib
+pandas

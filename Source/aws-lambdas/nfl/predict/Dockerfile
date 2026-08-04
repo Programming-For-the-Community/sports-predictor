@@ -14,10 +14,14 @@
 # AWS-published base image so wheels built against it are guaranteed ABI
 # -compatible with where they run -- no separate manylinux-tag concerns.
 #
-# requirements.txt installs with --no-deps (see that file's own comment)
-# to skip xgboost's unconditional nvidia-nccl-cu12 dependency on Linux --
-# safe because scipy/numpy are listed directly in requirements.txt, so
-# --no-deps only drops what xgboost itself would otherwise pull in.
+# requirements-nodeps.txt (xgboost only) installs with --no-deps to skip
+# its unconditional nvidia-nccl-cu12 dependency on Linux -- safe because
+# its own real runtime deps (numpy, scipy) are covered by requirements.txt
+# below. requirements.txt (everything else -- numpy, scipy, scikit-learn,
+# joblib, pandas) installs normally, letting pip resolve their own
+# transitive dependencies itself (pandas' python-dateutil/pytz/tzdata,
+# scikit-learn's threadpoolctl) rather than risking a hand-maintained list
+# missing one, the way a --no-deps install would require.
 #
 # boto3 is intentionally excluded from requirements.txt -- the Lambda
 # Python base image ships it preinstalled, same as the managed (zip)
@@ -29,9 +33,11 @@ WORKDIR /build
 
 COPY library/ ./library/
 COPY aws-lambdas/nfl/predict/requirements.txt ./requirements.txt
+COPY aws-lambdas/nfl/predict/requirements-nodeps.txt ./requirements-nodeps.txt
 
 RUN pip install --no-cache-dir --target=/install --no-deps ./library && \
-    pip install --no-cache-dir --target=/install --no-deps -r requirements.txt
+    pip install --no-cache-dir --target=/install --no-deps -r requirements-nodeps.txt && \
+    pip install --no-cache-dir --target=/install -r requirements.txt
 
 # --- Runtime: installed packages + application source, nothing else ---
 FROM public.ecr.aws/lambda/python:3.12 AS runtime

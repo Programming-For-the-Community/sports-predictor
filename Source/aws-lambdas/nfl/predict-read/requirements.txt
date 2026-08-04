@@ -1,0 +1,9 @@
+# boto3 is pre-installed in the Lambda Python runtime -- not bundled here.
+# The shared library (Source/library) is installed separately by the build
+# workflow via `pip install --no-deps Source/library -t package/`.
+#
+# Deliberately empty otherwise -- this Lambda's whole reason for existing
+# is to need NOTHING beyond boto3 + the library package (see handler.py's
+# own docstring). If a future change to library.serving.nfl_reads ever
+# needs a real third-party dependency, think hard before adding it here --
+# that's exactly the cold-start cost this Lambda was split out to avoid.

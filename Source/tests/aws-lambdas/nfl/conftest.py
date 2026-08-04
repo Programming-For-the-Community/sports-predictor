@@ -43,3 +43,8 @@ _load_handler("nfl_normalize", "aws-lambdas/nfl/normalize/handler.py")
 # needs one, same reasoning as ingest/normalize above.
 sys.path.insert(0, os.path.join(_src, "aws-lambdas", "nfl", "predict"))
 _load_handler("nfl_predict", "aws-lambdas/nfl/predict/handler.py")
+
+# predict-read/'s handler.py only ever imports from library.* (no local
+# sibling modules the way predict/'s model_loader.py etc. are) -- no
+# sys.path insert needed, just the same unique-module-name registration.
+_load_handler("nfl_predict_read", "aws-lambdas/nfl/predict-read/handler.py")

@@ -1,12 +1,12 @@
 """
-NFL game score model training (XGBoost regression) -- one model per
-score target: SCORE_TARGET=margin for the game's final margin (home
-score minus away score), SCORE_TARGET=home_score or SCORE_TARGET=away_score
-for each team's actual final score. Reads the exact same
-event_features.parquet as train_model.py -- same feature columns, same
-chronological split -- and derives whichever label SCORE_TARGET asks for
-from the already-present label_home_score/label_away_score columns at
-training time. No new feature engineering needed for any of the three.
+NFL game score model training -- one model per score target:
+SCORE_TARGET=margin for the game's final margin (home score minus away
+score), SCORE_TARGET=home_score or SCORE_TARGET=away_score for each
+team's actual final score. Reads the exact same event_features.parquet as
+train_model.py -- same feature columns, same chronological split -- and
+derives whichever label SCORE_TARGET asks for from the already-present
+label_home_score/label_away_score columns at training time. No new
+feature engineering needed for any of the three.
 
 Deliberately one script for all three rather than one script per target
 -- SCORE_TARGET is the only thing that varies, same reasoning as
@@ -14,6 +14,13 @@ TARGET_STAT in train_player_prop_model.py. Run a given target by
 overriding the SCORE_TARGET environment variable at `aws ecs run-task`
 time (see Terraform/ecs-task-nfl-train-score-model.tf and
 Terraform/scheduler-nfl-train-score-model.tf, which schedules all three).
+
+Runs every CANDIDATES adapter as a competing candidate against the same
+holdout split via library.ml.backtest.run_backtest, and promotes
+whichever wins on rmse -- see train_model.py's own docstring for the
+reasoning behind this roster, which mirrors it (same four algorithms,
+this target's regression-capable candidates instead of win-probability's
+classification-capable ones).
 
 Required environment variables:
     MODEL_ARTIFACTS_BUCKET_NAME
@@ -27,16 +34,16 @@ import logging
 import os
 
 import pandas as pd
-import xgboost as xgb
 from sklearn.metrics import mean_absolute_error, root_mean_squared_error
-from sklearn.model_selection import RandomizedSearchCV, TimeSeriesSplit
 
-import model_common
 from library.aws.s3_manager import S3Manager
+from library.ml import backtest, training_common
+from library.ml.model_types import ElasticNetAdapter, MLPRegressorAdapter, RandomForestRegressorAdapter, XGBoostRegressorAdapter
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger("nfl-train-model")
 
+SPORT = "nfl"
 EVENT_FEATURES_KEY = "nfl/training-data/event_features.parquet"
 
 # Identifiers, never model inputs -- same event-level dataset and
@@ -44,7 +51,6 @@ EVENT_FEATURES_KEY = "nfl/training-data/event_features.parquet"
 # different label.
 NON_FEATURE_COLUMNS = {"event_key", "event_date", "home_entity_id", "away_entity_id", "venue_city", "venue_state"}
 LABEL_COLUMN = "label_score_target"
-ALGORITHM = "xgboost"
 SUMMARY_METRICS = ["rmse", "mae", "naive_baseline_rmse", "naive_baseline_mae"]
 PROMOTION_METRIC = "rmse"
 
@@ -58,18 +64,12 @@ MODEL_NAMES = {
     "away_score": "away-score",
 }
 
-# Same search shape as train_model.py's -- see that file for why
-# max_depth has a floor of 2 and why n_jobs is split the way it is below.
-PARAM_DISTRIBUTIONS = {
-    "max_depth": [2, 3, 4, 5, 6, 7, 8, 9],
-    "n_estimators": [50, 100, 200, 300, 400, 450, 500, 550, 600, 750],
-    "learning_rate": [0.001, 0.002, 0.003, 0.005, 0.007, 0.01, 0.02, 0.05, 0.1, 0.2],
-    "min_child_weight": [1, 3, 5, 7, 10, 15, 20],
-    "subsample": [0.4, 0.45, 0.5, 0.55, 0.6, 0.65, 0.7, 0.8, 0.9, 1.0],
-}
-SEARCH_ITERATIONS = 300
-CV_SPLITS = 8
-RANDOM_STATE = 42
+CANDIDATES = [
+    XGBoostRegressorAdapter(),
+    ElasticNetAdapter(),
+    RandomForestRegressorAdapter(),
+    MLPRegressorAdapter(),
+]
 
 
 def _model_name(score_target: str) -> str:
@@ -90,10 +90,7 @@ def _add_label(df: pd.DataFrame, score_target: str) -> pd.DataFrame:
 
 
 def _feature_columns(df: pd.DataFrame) -> list[str]:
-    return model_common.feature_columns(df, NON_FEATURE_COLUMNS)
-
-
-_chronological_split = model_common.chronological_split
+    return training_common.feature_columns(df, NON_FEATURE_COLUMNS)
 
 
 def _column_or_mean(df: pd.DataFrame, column: str) -> pd.Series:
@@ -122,37 +119,12 @@ def _naive_prediction(df: pd.DataFrame, score_target: str) -> pd.Series:
     return (away_scored + home_allowed) / 2  # away_score
 
 
-def _tune_hyperparameters(X_train: pd.DataFrame, y_train: pd.Series) -> dict:
-    """Same TimeSeriesSplit-over-k-fold reasoning as train_model.py's --
-    scored on RMSE instead of log_loss since this predicts a continuous
-    score/margin, not a win probability."""
-    total_fits = SEARCH_ITERATIONS * CV_SPLITS
-    logger.info(
-        "Starting hyperparameter search: %d candidates x %d CV folds = %d fits",
-        SEARCH_ITERATIONS, CV_SPLITS, total_fits,
-    )
-    search = RandomizedSearchCV(
-        xgb.XGBRegressor(objective="reg:squarederror", n_jobs=1),
-        param_distributions=PARAM_DISTRIBUTIONS,
-        n_iter=SEARCH_ITERATIONS,
-        scoring="neg_root_mean_squared_error",
-        cv=TimeSeriesSplit(n_splits=CV_SPLITS),
-        random_state=RANDOM_STATE,
-        verbose=10,
-        n_jobs=-1,
-    )
-    search.fit(X_train, y_train)
-    logger.info(
-        "Best hyperparameters: %s (cv rmse=%.4f)",
-        search.best_params_, -search.best_score_,
-    )
-    return search.best_params_
-
-
-def train(df: pd.DataFrame, score_target: str) -> tuple[xgb.XGBRegressor, dict]:
+def train(s3: S3Manager, df: pd.DataFrame, score_target: str) -> dict:
+    """Runs the full candidate tournament and returns run_backtest's
+    result ({"winner": card, "promoted": bool, "candidates": [card, ...]})."""
     df = _add_label(df, score_target)
     feature_columns = _feature_columns(df)
-    train_df, test_df = _chronological_split(df, model_common.TEST_FRACTION)
+    train_df, test_df = training_common.chronological_split(df, training_common.TEST_FRACTION)
     train_date_range = [str(train_df["event_date"].min()), str(train_df["event_date"].max())]
     test_date_range = [str(test_df["event_date"].min()), str(test_df["event_date"].max())]
     logger.info(
@@ -160,45 +132,32 @@ def train(df: pd.DataFrame, score_target: str) -> tuple[xgb.XGBRegressor, dict]:
         len(train_df), *train_date_range, len(test_df), *test_date_range,
     )
 
-    X_train = model_common.numeric_frame(train_df, feature_columns)
+    X_train = training_common.numeric_frame(train_df, feature_columns)
     y_train = train_df[LABEL_COLUMN]
-    X_test = model_common.numeric_frame(test_df, feature_columns)
+    X_test = training_common.numeric_frame(test_df, feature_columns)
     y_test = test_df[LABEL_COLUMN]
 
-    best_params = _tune_hyperparameters(X_train, y_train)
-    model = xgb.XGBRegressor(objective="reg:squarederror", **best_params)
-    model.fit(X_train, y_train)
-
-    raw_importances = model.get_booster().get_score(importance_type="gain")
-    feature_importances = dict(sorted(
-        ((col, float(raw_importances.get(col, 0.0))) for col in feature_columns),
-        key=lambda kv: kv[1], reverse=True,
-    ))
-
-    metrics = model_common.evaluate_regression_holdout(model, X_test, y_test)
-
     naive_predictions = _naive_prediction(test_df, score_target)
-    metrics["naive_baseline_rmse"] = float(root_mean_squared_error(y_test, naive_predictions))
-    metrics["naive_baseline_mae"] = float(mean_absolute_error(y_test, naive_predictions))
-
-    metrics.update({
-        "train_rows": int(len(train_df)),
-        "test_rows": int(len(test_df)),
-        "train_date_range": train_date_range,
-        "test_date_range": test_date_range,
-    })
-    logger.info(
-        "Holdout rmse=%.4f mae=%.4f (naive baseline rmse=%.4f mae=%.4f)",
-        metrics["rmse"], metrics["mae"], metrics["naive_baseline_rmse"], metrics["naive_baseline_mae"],
-    )
-
-    return model, {
-        "score_target": score_target,
-        "feature_columns": feature_columns,
-        "feature_importances": feature_importances,
-        "hyperparameters": best_params,
-        **metrics,
+    naive_baseline_metrics = {
+        "naive_baseline_rmse": float(root_mean_squared_error(y_test, naive_predictions)),
+        "naive_baseline_mae": float(mean_absolute_error(y_test, naive_predictions)),
     }
+
+    return backtest.run_backtest(
+        s3, SPORT, _model_name(score_target), task="regression",
+        X_train=X_train, y_train=y_train, X_test=X_test, y_test=y_test,
+        candidates=CANDIDATES,
+        naive_baseline_metrics=naive_baseline_metrics,
+        extra_metadata={
+            "score_target": score_target,
+            "train_rows": int(len(train_df)),
+            "test_rows": int(len(test_df)),
+            "train_date_range": train_date_range,
+            "test_date_range": test_date_range,
+        },
+        summary_metrics=SUMMARY_METRICS,
+        promotion_metric=PROMOTION_METRIC,
+    )
 
 
 def main() -> None:
@@ -209,16 +168,10 @@ def main() -> None:
     model_name = _model_name(score_target)
 
     logger.info("Loading %s training data from s3://%s/%s", model_name, bucket, EVENT_FEATURES_KEY)
-    df = model_common.load_features(s3, EVENT_FEATURES_KEY)
+    df = training_common.load_features(s3, EVENT_FEATURES_KEY)
     logger.info("Loaded %d event rows", len(df))
 
-    model, metadata = train(df, score_target)
-
-    model_bytes = model.get_booster().save_raw()
-    model_card = model_common.save_model_artifact(
-        s3, model_name, ALGORITHM, model_bytes, "model.xgb", metadata, SUMMARY_METRICS,
-    )
-    model_common.promote_if_better(s3, model_name, model_card["version"], metadata, PROMOTION_METRIC)
+    train(s3, df, score_target)
 
 
 if __name__ == "__main__":

@@ -84,3 +84,8 @@ output "nfl_predict_function_name" {
   description = "NFL predict Lambda function name -- passed to nfl_ai_hosting workflow for `aws lambda update-function-code`"
   value       = aws_lambda_function.nfl_predict.function_name
 }
+
+output "nfl_predict_read_function_name" {
+  description = "NFL predict-read Lambda function name -- passed to nfl_deploy workflow for `aws lambda update-function-code`"
+  value       = aws_lambda_function.nfl_predict_read.function_name
+}

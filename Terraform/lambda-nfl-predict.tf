@@ -56,8 +56,20 @@ resource "aws_lambda_function" "nfl_predict" {
   # API Gateway's REST API integration timeout is a hard, non-configurable
   # 29s ceiling -- any value here at or above that just gets cut off by API
   # Gateway with a 504 before this timeout would ever fire.
-  timeout     = 29
-  memory_size = 1024
+  timeout = 29
+  # Lambda CPU scales with memory (roughly linear up to ~1,769MB = 1 vCPU).
+  # Bumped from 1024 -- confirmed live via CloudWatch that this Lambda's
+  # cold start repeatedly hit Lambda's own non-configurable 10-second
+  # INIT PHASE ceiling (INIT_REPORT ... Phase: init Status: timeout,
+  # independent of this resource's own `timeout` above) even before
+  # scikit-learn/pandas/joblib were added to requirements.txt for the
+  # backtesting harness -- AWS's own documented guidance for exactly this
+  # failure mode is more memory/CPU during init, not a longer timeout
+  # (which can't help anyway, since the init-phase cap isn't governed by
+  # it). Runtime memory usage measured well under 512MB even on the
+  # heaviest requests seen (season leaderboards) -- this is sized for
+  # import/init CPU, not actual memory need.
+  memory_size = 3008
 
   environment {
     variables = {
