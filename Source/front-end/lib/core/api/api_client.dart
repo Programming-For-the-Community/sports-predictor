@@ -9,10 +9,14 @@ import '../config/app_config.dart';
 import 'api_exception.dart';
 
 /// Thin GET-only wrapper (every route this app calls today is a GET) around
-/// the nfl-predict API. Sends the raw access token as the Authorization
-/// header value -- no "Bearer " prefix, matching the API Gateway
-/// COGNITO_USER_POOLS authorizer's expectation (confirmed against the real
-/// deployed API during backend development).
+/// the nfl-predict API. Sends the raw ID token as the Authorization header
+/// value -- no "Bearer " prefix. API Gateway's COGNITO_USER_POOLS
+/// authorizer expects an ID token specifically when a method has no
+/// authorization_scopes configured (true of every route here); it only
+/// accepts an access token when scopes ARE configured. See
+/// AuthRepository.getValidIdToken's own doc comment -- confirmed live
+/// against the real deployed API after the access token was rejected with
+/// a 401 regardless of freshness.
 class ApiClient {
   ApiClient(this._ref, {http.Client? httpClient}) : _httpClient = httpClient ?? http.Client();
 
@@ -24,7 +28,7 @@ class ApiClient {
   Future<dynamic> get(String path, {Map<String, String>? queryParameters}) async {
     final uri = Uri.parse('${AppConfig.apiBaseUrl}$path').replace(queryParameters: queryParameters);
     final stopwatch = Stopwatch()..start();
-    debugPrint('[ApiClient] GET $uri -- requesting access token');
+    debugPrint('[ApiClient] GET $uri -- requesting id token');
     final response = await _send(uri, await _authHeader());
 
     if (response.statusCode == 401) {
@@ -66,14 +70,14 @@ class ApiClient {
 
   Future<Map<String, String>> _authHeader({bool forceRefresh = false}) async {
     final stopwatch = Stopwatch()..start();
-    debugPrint('[ApiClient] -- resolving access token (forceRefresh=$forceRefresh)');
+    debugPrint('[ApiClient] -- resolving id token (forceRefresh=$forceRefresh)');
     final authRepository = _ref.read(authRepositoryProvider.notifier);
     try {
-      final token = await authRepository.getValidAccessToken(forceRefresh: forceRefresh);
-      debugPrint('[ApiClient] -- got access token in ${stopwatch.elapsedMilliseconds}ms');
+      final token = await authRepository.getValidIdToken(forceRefresh: forceRefresh);
+      debugPrint('[ApiClient] -- got id token in ${stopwatch.elapsedMilliseconds}ms');
       return {'Authorization': token};
     } catch (error) {
-      debugPrint('[ApiClient] -- failed to resolve access token after ${stopwatch.elapsedMilliseconds}ms: $error');
+      debugPrint('[ApiClient] -- failed to resolve id token after ${stopwatch.elapsedMilliseconds}ms: $error');
       rethrow;
     }
   }

@@ -23,12 +23,12 @@ import '../../features/sport_shell/sport_shell_page.dart';
 /// INTO AuthAuthenticated from some other state). None of
 /// eventsListProvider/eventPredictionProvider/modelsListProvider/
 /// seasonProjectionProvider watch auth state themselves, so a session
-/// dying mid-use (see AuthRepository.getValidAccessToken) leaves them
+/// dying mid-use (see AuthRepository.getValidIdToken) leaves them
 /// permanently cached on that error -- logging back in changes
 /// authRepositoryProvider's state, but without this, nothing would ever
 /// tell the data providers to forget the stale failure and retry.
 ///
-/// Deliberately NOT invalidated on every state change -- getValidAccessToken
+/// Deliberately NOT invalidated on every state change -- getValidIdToken
 /// reassigns state on a routine proactive token refresh too (same signed-in
 /// session, nothing about the data went stale), and resetting an
 /// actively-watched provider mid-fetch on every one of those would fight

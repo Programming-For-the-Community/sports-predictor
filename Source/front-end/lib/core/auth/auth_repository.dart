@@ -100,24 +100,32 @@ class AuthRepository extends StateNotifier<AuthState> {
   /// page happened to trigger it -- app_router's redirect already listens
   /// to this state and bounces to /login as soon as it changes.
   ///
+  /// Returns the ID token, not the access token -- API Gateway's
+  /// COGNITO_USER_POOLS authorizer only accepts access tokens for methods
+  /// with authorization_scopes configured (see Terraform/api-gateway-nfl-
+  /// predict.tf's aws_api_gateway_method resources -- none set any), and
+  /// falls back to expecting an ID token otherwise. Confirmed live: an
+  /// access token was rejected with a real 401 regardless of how freshly
+  /// it was issued, which is what led here.
+  ///
   /// forceRefresh skips the isNearExpiry check -- ApiClient's 401-retry
   /// path needs this: a token can be rejected server-side (revoked, clock
   /// skew, whatever) while still looking fresh by its own local expiresAt,
   /// and resending that same not-actually-valid token on "retry" would
   /// just fail identically.
-  Future<String> getValidAccessToken({bool forceRefresh = false}) async {
+  Future<String> getValidIdToken({bool forceRefresh = false}) async {
     final current = state;
     if (current is! AuthAuthenticated) {
       throw StateError('No authenticated session');
     }
     if (!forceRefresh && !current.tokens.isNearExpiry) {
-      return current.tokens.accessToken;
+      return current.tokens.idToken;
     }
     try {
       final refreshed = await _authClient.refresh(current.tokens.refreshToken);
       await _persist(refreshed);
       state = AuthAuthenticated(refreshed);
-      return refreshed.accessToken;
+      return refreshed.idToken;
     } catch (_) {
       await _clear();
       state = AuthUnauthenticated();

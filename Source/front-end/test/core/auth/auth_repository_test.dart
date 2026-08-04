@@ -74,7 +74,7 @@ void main() {
     expect(() => repo.respondToNewPassword('whatever'), throwsStateError);
   });
 
-  test('getValidAccessToken refreshes proactively when near expiry', () async {
+  test('getValidIdToken refreshes proactively when near expiry', () async {
     var refreshCalls = 0;
     final repo = AuthRepository(
       authClient: CognitoAuthClient(
@@ -82,23 +82,23 @@ void main() {
           final body = jsonDecode(request.body) as Map<String, dynamic>;
           if (body['AuthFlow'] == 'REFRESH_TOKEN_AUTH') {
             refreshCalls++;
-            return _tokenResponse(access: 'refreshed', refresh: null);
+            return _tokenResponse(id: 'refreshed', refresh: null);
           }
           // Login response: expires in 30s -- already within the 60s window.
-          return _tokenResponse(access: 'initial', expiresIn: 30);
+          return _tokenResponse(id: 'initial', expiresIn: 30);
         }),
       ),
     );
     await _firstRealState(repo);
     await repo.login(username: 'chamar', password: 'hunter2');
 
-    final token = await repo.getValidAccessToken();
+    final token = await repo.getValidIdToken();
 
     expect(token, 'refreshed');
     expect(refreshCalls, 1);
   });
 
-  test('getValidAccessToken(forceRefresh: true) refreshes even when the token looks fresh locally', () async {
+  test('getValidIdToken(forceRefresh: true) refreshes even when the token looks fresh locally', () async {
     var refreshCalls = 0;
     final repo = AuthRepository(
       authClient: CognitoAuthClient(
@@ -106,24 +106,24 @@ void main() {
           final body = jsonDecode(request.body) as Map<String, dynamic>;
           if (body['AuthFlow'] == 'REFRESH_TOKEN_AUTH') {
             refreshCalls++;
-            return _tokenResponse(access: 'refreshed', refresh: null);
+            return _tokenResponse(id: 'refreshed', refresh: null);
           }
           // Login response: expires in 3600s -- nowhere near the 60s window,
-          // so a plain getValidAccessToken() call would NOT refresh this.
-          return _tokenResponse(access: 'initial', expiresIn: 3600);
+          // so a plain getValidIdToken() call would NOT refresh this.
+          return _tokenResponse(id: 'initial', expiresIn: 3600);
         }),
       ),
     );
     await _firstRealState(repo);
     await repo.login(username: 'chamar', password: 'hunter2');
 
-    final token = await repo.getValidAccessToken(forceRefresh: true);
+    final token = await repo.getValidIdToken(forceRefresh: true);
 
     expect(token, 'refreshed');
     expect(refreshCalls, 1);
   });
 
-  test('getValidAccessToken transitions to AuthUnauthenticated when the refresh token itself is rejected', () async {
+  test('getValidIdToken transitions to AuthUnauthenticated when the refresh token itself is rejected', () async {
     final repo = AuthRepository(
       authClient: CognitoAuthClient(
         httpClient: MockClient((request) async {
@@ -135,14 +135,14 @@ void main() {
             );
           }
           // Login response: expires in 30s -- already within the 60s window.
-          return _tokenResponse(access: 'initial', expiresIn: 30);
+          return _tokenResponse(id: 'initial', expiresIn: 30);
         }),
       ),
     );
     await _firstRealState(repo);
     await repo.login(username: 'chamar', password: 'hunter2');
 
-    await expectLater(repo.getValidAccessToken(), throwsA(isA<CognitoException>()));
+    await expectLater(repo.getValidIdToken(), throwsA(isA<CognitoException>()));
 
     expect(repo.state, isA<AuthUnauthenticated>());
     final prefs = await SharedPreferences.getInstance();

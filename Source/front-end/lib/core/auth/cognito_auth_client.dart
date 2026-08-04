@@ -92,7 +92,7 @@ class CognitoAuthClient {
 
   Future<Map<String, dynamic>> _post(String target, Map<String, dynamic> body) async {
     // Same reasoning as ApiClient._send's timeout -- without this, a
-    // stalled Cognito call hangs getValidAccessToken() forever, which hangs
+    // stalled Cognito call hangs getValidIdToken() forever, which hangs
     // every ApiClient.get() call before it ever reaches ApiClient's own
     // timeout-guarded request.
     final stopwatch = Stopwatch()..start();
