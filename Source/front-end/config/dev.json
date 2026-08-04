@@ -1,5 +1,5 @@
 {
-  "API_BASE_URL": "https://sports-predictor.professorchaos0802.com",
+  "API_BASE_URL": "https://f9jff7nlcj.execute-api.us-east-2.amazonaws.com/development",
   "COGNITO_USER_POOL_ID": "us-east-2_mhGzF8z65",
   "COGNITO_CLIENT_ID": "19ip82r9gka70kveceeevkbgks",
   "AWS_REGION": "us-east-2"

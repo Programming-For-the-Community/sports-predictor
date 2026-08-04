@@ -252,6 +252,8 @@ resource "aws_api_gateway_deployment" "main" {
       aws_api_gateway_method.nfl_predict_player.id,
       aws_api_gateway_integration.nfl_predict_player.id,
       aws_api_gateway_gateway_response.missing_auth_token.id,
+      aws_api_gateway_gateway_response.default_4xx.id,
+      aws_api_gateway_gateway_response.default_5xx.id,
       aws_api_gateway_resource.nfl_events.id,
       aws_api_gateway_method.nfl_events.id,
       aws_api_gateway_integration.nfl_events.id,
