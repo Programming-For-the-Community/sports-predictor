@@ -65,9 +65,22 @@ resource "aws_cloudfront_distribution" "main" {
       cached_methods         = ["GET", "HEAD"]
       # Managed-CachingDisabled -- predictions are always dynamic.
       cache_policy_id = "4135ea2d-6df8-44a3-9df3-4b5a84be39ad"
-      # Managed-AllViewer -- forwards Authorization + all query strings,
-      # needed for the Cognito authorizer and player-prop `?stat=` params.
-      origin_request_policy_id = "216adef6-5c7f-47e4-b989-5492eafa07d3"
+      # Managed-AllViewerExceptHostHeader -- forwards Authorization + all
+      # query strings (needed for the Cognito authorizer and player-prop
+      # `?stat=` params), same as Managed-AllViewer, but drops the
+      # viewer's own Host header instead of forwarding it verbatim.
+      # Confirmed live: with plain AllViewer, CloudFront forwarded this
+      # distribution's own domain as the Host header to the nfl-api
+      # origin: API Gateway's regional execute-api endpoint rejects that
+      # with a 403 (it doesn't match its own domain), which this
+      # distribution's custom_error_response then silently rewrote into
+      # the SPA fallback (index.html, 200) -- every /nfl/* request,
+      # valid or not, was actually failing this way, not reaching the
+      # Lambda at all. AllViewerExceptHostHeader is AWS's own documented
+      # fix for API Gateway/Lambda Function URL origins specifically:
+      # CloudFront substitutes the origin's own domain as the Host header
+      # instead of forwarding the viewer's.
+      origin_request_policy_id = "b689b0a8-53d0-40ab-baf2-68738e2966ac"
     }
   }
 
