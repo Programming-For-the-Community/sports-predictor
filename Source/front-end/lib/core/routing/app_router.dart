@@ -19,20 +19,30 @@ import '../../features/sport_shell/sport_shell_page.dart';
 /// state changes (login, logout, or a session restore completing) --
 /// standard Riverpod+go_router integration pattern.
 ///
-/// Also invalidates every data provider on each auth change. None of
+/// Also invalidates every data provider on a genuine sign-in (transitioning
+/// INTO AuthAuthenticated from some other state). None of
 /// eventsListProvider/eventPredictionProvider/modelsListProvider/
 /// seasonProjectionProvider watch auth state themselves, so a session
 /// dying mid-use (see AuthRepository.getValidAccessToken) leaves them
 /// permanently cached on that error -- logging back in changes
 /// authRepositoryProvider's state, but without this, nothing would ever
 /// tell the data providers to forget the stale failure and retry.
+///
+/// Deliberately NOT invalidated on every state change -- getValidAccessToken
+/// reassigns state on a routine proactive token refresh too (same signed-in
+/// session, nothing about the data went stale), and resetting an
+/// actively-watched provider mid-fetch on every one of those would fight
+/// with whatever page is currently loading.
 class _AuthChangeNotifier extends ChangeNotifier {
   _AuthChangeNotifier(Ref ref) {
     ref.listen<AuthState>(authRepositoryProvider, (previous, next) {
-      ref.invalidate(eventsListProvider);
-      ref.invalidate(eventPredictionProvider);
-      ref.invalidate(modelsListProvider);
-      ref.invalidate(seasonProjectionProvider);
+      final signedIn = next is AuthAuthenticated && previous is! AuthAuthenticated;
+      if (signedIn) {
+        ref.invalidate(eventsListProvider);
+        ref.invalidate(eventPredictionProvider);
+        ref.invalidate(modelsListProvider);
+        ref.invalidate(seasonProjectionProvider);
+      }
       notifyListeners();
     });
   }

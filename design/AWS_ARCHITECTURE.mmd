@@ -1,0 +1,79 @@
+%% sports-predictor -- current deployed AWS architecture (NFL, Phase 1).
+%% See docs/AWS_ARCHITECTURE.md for the walkthrough and a legend.
+%% Solid arrows = data flow / invocation. Dotted arrows = supporting,
+%% non-data-flow dependency (TLS cert, container image pull, VPC endpoint
+%% path). Edge labels are numbered only on the primary client request path;
+%% everywhere else they're verbs describing what crosses that arrow.
+flowchart TD
+    BROWSER(["Browser<br/>Cognito-authenticated user"])
+
+    R53["Route 53<br/>hosted zone"]
+    ACM["ACM Certificate<br/>(us-east-1, DNS-validated)"]
+    CF["CloudFront Distribution<br/>single public domain"]
+
+    S3FE[("S3 Bucket<br/>Frontend (Flutter Web build)")]
+    APIGW["API Gateway REST API<br/>/nfl/* -- Cognito authorizer on every route"]
+    COGNITO["Cognito User Pool<br/>+ App Client"]
+
+    subgraph VPCBox["VPC (pre-existing, shared)"]
+        direction TB
+        subgraph PrivSub["Private Subnets (3 AZs)<br/>no NAT Gateway"]
+            PREDICT["Lambda: nfl-predict<br/>(container image)"]
+        end
+        subgraph PubSub["Public Subnets (3 AZs)<br/>+ Internet Gateway"]
+            BACKFILL["Fargate: nfl-backfill<br/>(manual run-task, historical only)"]
+            FEAT["Fargate: nfl-feature-engineering"]
+            TRAIN["Fargate: train-model /<br/>train-score-model /<br/>train-player-prop-model"]
+        end
+        GWEP{{"VPC Gateway Endpoints<br/>S3 + DynamoDB"}}
+        PrivSub -.->|"outbound HTTPS"| GWEP
+    end
+
+    SCHIN["EventBridge Schedule<br/>ingest (2x/week, Aug-Feb)"]
+    INGEST["Lambda: nfl-ingest"]
+    NORMALIZE["Lambda: nfl-normalize"]
+    SCHTRAIN["EventBridge Schedules<br/>feature-eng + training<br/>(11x, staggered weekly, Aug-Feb)"]
+
+    S3RAW[("S3 Bucket<br/>Raw Data Lake")]
+    S3MODEL[("S3 Bucket<br/>Model Artifacts")]
+    DDBCORE[("DynamoDB<br/>entities / events /<br/>player_game_stats /<br/>team_game_stats")]
+    DDBPRED[("DynamoDB<br/>predictions")]
+
+    ESPN(["ESPN Public API<br/>(unofficial)"])
+    ECR[("ECR<br/>shared, pre-existing")]
+
+    %% ---- Client request path ----
+    BROWSER -->|"1. HTTPS request"| CF
+    R53 -.->|"alias record"| CF
+    ACM -.->|"TLS cert"| CF
+    CF -->|"2a. default behavior: /*"| S3FE
+    CF -->|"2b. ordered behavior: /nfl/*"| APIGW
+    APIGW -->|"3. validates JWT"| COGNITO
+    APIGW -->|"4. AWS_PROXY invoke"| PREDICT
+    PREDICT -->|"5. read live features"| DDBCORE
+    PREDICT -->|"6. read promoted model"| S3MODEL
+    PREDICT -->|"7. write audit record"| DDBPRED
+    PREDICT -.->|"pulls image"| ECR
+
+    %% ---- Scheduled ingestion ----
+    SCHIN -->|"triggers"| INGEST
+    INGEST -->|"fetch scoreboard / box scores"| ESPN
+    INGEST -->|"write raw JSON"| S3RAW
+    S3RAW -->|"ObjectCreated (nfl/*.json)"| NORMALIZE
+    NORMALIZE -->|"upsert"| DDBCORE
+
+    %% ---- One-time historical backfill ----
+    BACKFILL -->|"fetch full history"| ESPN
+    BACKFILL -->|"write raw JSON"| S3RAW
+    BACKFILL -->|"upsert"| DDBCORE
+    BACKFILL -.->|"pulls image"| ECR
+
+    %% ---- Scheduled training ----
+    SCHTRAIN -->|"triggers"| FEAT
+    FEAT -->|"read history"| DDBCORE
+    FEAT -->|"write training Parquet"| S3MODEL
+    SCHTRAIN -->|"triggers"| TRAIN
+    TRAIN -->|"read Parquet"| S3MODEL
+    TRAIN -->|"write model + model_card,<br/>promote if better"| S3MODEL
+    FEAT -.->|"pulls image"| ECR
+    TRAIN -.->|"pulls image"| ECR

@@ -43,9 +43,19 @@ class EventDetailPage extends ConsumerWidget {
           if (scheduledAsync.isLoading || completedAsync.isLoading) {
             return const Center(child: CircularProgressIndicator());
           }
+          // Loading is already handled above, so by this point each of
+          // these is either data or error -- surface a real error instead
+          // of silently treating it as "no events" and misreporting
+          // "Event not found" for what might be a session/network failure.
+          if (scheduledAsync.hasError) {
+            return Text('Couldn\'t load events: ${scheduledAsync.error}', style: AppTextStyles.body(color: AppColors.neg));
+          }
+          if (completedAsync.hasError) {
+            return Text('Couldn\'t load events: ${completedAsync.error}', style: AppTextStyles.body(color: AppColors.neg));
+          }
 
-          final scheduled = scheduledAsync.maybeWhen(data: (events) => events, orElse: () => const <SportEvent>[]);
-          final completed = completedAsync.maybeWhen(data: (events) => events, orElse: () => const <SportEvent>[]);
+          final scheduled = scheduledAsync.value ?? const <SportEvent>[];
+          final completed = completedAsync.value ?? const <SportEvent>[];
           final event = _findEvent(scheduled) ?? _findEvent(completed);
 
           if (event == null) {
