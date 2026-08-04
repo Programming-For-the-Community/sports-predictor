@@ -10,6 +10,22 @@ import '../../static/nfl_team_colors.dart';
 import 'confidence_pill.dart';
 import 'win_probability_bar.dart';
 
+// Abbreviated for this compact row -- the backend's full round names
+// ("Conference Championship") don't fit the fixed-width week/round slot
+// this list uses. See core/models/event.dart's SportEvent.round.
+const _roundAbbreviations = {
+  'Wild Card': 'WC',
+  'Divisional': 'DIV',
+  'Conference Championship': 'CONF',
+  'Super Bowl': 'SB',
+};
+
+String _weekLabel(SportEvent event) {
+  final round = event.round;
+  if (round != null) return _roundAbbreviations[round] ?? round;
+  return event.week != null ? 'WK ${event.week}' : '';
+}
+
 /// design/FRONTEND_STYLE.md's "Game row (list)" component.
 ///
 /// Scheduled events fetch their own live prediction (one request per
@@ -50,7 +66,7 @@ class GameRow extends ConsumerWidget {
             SizedBox(
               width: 56,
               child: Text(
-                event.week != null ? 'WK ${event.week}' : '',
+                _weekLabel(event),
                 style: AppTextStyles.microLabel(),
               ),
             ),

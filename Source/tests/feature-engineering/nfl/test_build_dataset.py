@@ -57,11 +57,11 @@ class TestBuildEventDataset:
         malformed = {
             "event_key": "BAD",
             "event_date": "2025-09-01",
-            "participants": [{"entity_id": "KC", "role": "home", "result": {"score": 10}}],
+            "participants": [{"entity_id": "12", "role": "home", "result": {"score": 10}}],
         }
         events = [
-            _event("E1", "2025-09-07", "KC", "LAC"),
-            _event("E2", "2025-09-14", "KC", "DET"),
+            _event("E1", "2025-09-07", "12", "24"),
+            _event("E2", "2025-09-14", "12", "8"),
             malformed,
         ]
         storage = self._storage(events)
@@ -73,8 +73,8 @@ class TestBuildEventDataset:
 
     def test_second_game_sees_first_games_pre_game_elo_change(self):
         events = [
-            _event("E1", "2025-09-07", "KC", "LAC", home_score=27, away_score=20),
-            _event("E2", "2025-09-14", "KC", "DET"),
+            _event("E1", "2025-09-07", "12", "24", home_score=27, away_score=20),
+            _event("E2", "2025-09-14", "12", "8"),
         ]
         storage = self._storage(events)
 
@@ -84,13 +84,16 @@ class TestBuildEventDataset:
         assert e2["home_elo"] > 1500  # KC won E1 as home favorite -> rating rose
 
     def test_team_history_stays_capped_at_window_across_many_games(self):
-        # KC plays 7 games (alternating opponents so KC is the only shared
-        # team); window=3 means game 7 should only see the 3 most recent
-        # prior games, not all 6 -- the case the incremental-history
-        # rewrite (replacing a full per-game history re-filter) needs to
-        # get right.
+        # KC (12) plays 7 games against 7 different real opponents (so KC
+        # is the only shared team); window=3 means game 7 should only see
+        # the 3 most recent prior games, not all 6 -- the case the
+        # incremental-history rewrite (replacing a full per-game history
+        # re-filter) needs to get right. Opponent identities don't matter
+        # for what this test checks, just that each is a real franchise
+        # (is_real_franchise_matchup would otherwise exclude the event).
+        opponents = ["13", "24", "25", "26", "27", "28", "29"]
         events = [
-            _event(f"E{i}", f"2025-09-{i:02d}", "KC", f"OPP{i}")
+            _event(f"E{i}", f"2025-09-{i:02d}", "12", opponents[i - 1])
             for i in range(1, 8)
         ]
         storage = self._storage(events)
@@ -111,10 +114,10 @@ class TestBuildEventDataset:
         }
 
     def test_qb_history_is_empty_on_a_qbs_first_identified_start(self):
-        events = [_event("E1", "2025-09-07", "KC", "LAC")]
+        events = [_event("E1", "2025-09-07", "12", "24")]
         player_games = [
-            self._qb_game("E1", "KC", "2025-09-07"),
-            self._qb_game("E1", "LAC", "2025-09-07", entity_id="herbert", passing_yards=250),
+            self._qb_game("E1", "12", "2025-09-07"),
+            self._qb_game("E1", "24", "2025-09-07", entity_id="herbert", passing_yards=250),
         ]
         storage = self._storage(events, player_games)
 
@@ -126,14 +129,14 @@ class TestBuildEventDataset:
 
     def test_qb_history_carries_forward_across_games_for_the_same_qb(self):
         events = [
-            _event("E1", "2025-09-07", "KC", "LAC"),
-            _event("E2", "2025-09-14", "KC", "DET"),
+            _event("E1", "2025-09-07", "12", "24"),
+            _event("E2", "2025-09-14", "12", "8"),
         ]
         player_games = [
-            self._qb_game("E1", "KC", "2025-09-07", passing_yards=300),
-            self._qb_game("E1", "LAC", "2025-09-07", entity_id="herbert"),
-            self._qb_game("E2", "KC", "2025-09-14", passing_yards=250),
-            self._qb_game("E2", "DET", "2025-09-14", entity_id="goff"),
+            self._qb_game("E1", "12", "2025-09-07", passing_yards=300),
+            self._qb_game("E1", "24", "2025-09-07", entity_id="herbert"),
+            self._qb_game("E2", "12", "2025-09-14", passing_yards=250),
+            self._qb_game("E2", "8", "2025-09-14", entity_id="goff"),
         ]
         storage = self._storage(events, player_games)
 
@@ -144,10 +147,10 @@ class TestBuildEventDataset:
         assert e2["home_qb_avg_passing_yards"] == 300  # KC's QB's own E1 line, not the team's
 
     def test_no_identifiable_starter_yields_empty_qb_history_not_an_error(self):
-        events = [_event("E1", "2025-09-07", "KC", "LAC")]
+        events = [_event("E1", "2025-09-07", "12", "24")]
         # No passing_attempts on either side's stat_line -- identify_starting_qb returns None.
         player_games = [
-            {"event_key": "E1", "player_key": "PLAYER#k1", "entity_id": "k1", "team_id": "KC",
+            {"event_key": "E1", "player_key": "PLAYER#k1", "entity_id": "k1", "team_id": "12",
              "event_date": "2025-09-07", "stat_line": {"field_goals_made": 2}},
         ]
         storage = self._storage(events, player_games)
@@ -174,18 +177,18 @@ class TestBuildEventDataset:
 
     def test_rb_and_wr_history_carry_forward_across_games(self):
         events = [
-            _event("E1", "2025-09-07", "KC", "LAC"),
-            _event("E2", "2025-09-14", "KC", "DET"),
+            _event("E1", "2025-09-07", "12", "24"),
+            _event("E2", "2025-09-14", "12", "8"),
         ]
         player_games = [
-            self._rb_game("E1", "KC", "2025-09-07", rushing_yards=95),
-            self._rb_game("E1", "LAC", "2025-09-07", entity_id="ekeler"),
-            self._rb_game("E2", "KC", "2025-09-14", rushing_yards=60),
-            self._rb_game("E2", "DET", "2025-09-14", entity_id="gibbs"),
-            self._wr_game("E1", "KC", "2025-09-07", receiving_yards=110),
-            self._wr_game("E1", "LAC", "2025-09-07", entity_id="williams"),
-            self._wr_game("E2", "KC", "2025-09-14", receiving_yards=80),
-            self._wr_game("E2", "DET", "2025-09-14", entity_id="stbrown"),
+            self._rb_game("E1", "12", "2025-09-07", rushing_yards=95),
+            self._rb_game("E1", "24", "2025-09-07", entity_id="ekeler"),
+            self._rb_game("E2", "12", "2025-09-14", rushing_yards=60),
+            self._rb_game("E2", "8", "2025-09-14", entity_id="gibbs"),
+            self._wr_game("E1", "12", "2025-09-07", receiving_yards=110),
+            self._wr_game("E1", "24", "2025-09-07", entity_id="williams"),
+            self._wr_game("E2", "12", "2025-09-14", receiving_yards=80),
+            self._wr_game("E2", "8", "2025-09-14", entity_id="stbrown"),
         ]
         storage = self._storage(events, player_games)
 
@@ -205,14 +208,14 @@ class TestBuildEventDataset:
 
     def test_team_box_stats_history_carries_forward_across_games(self):
         events = [
-            _event("E1", "2025-09-07", "KC", "LAC"),
-            _event("E2", "2025-09-14", "KC", "DET"),
+            _event("E1", "2025-09-07", "12", "24"),
+            _event("E2", "2025-09-14", "12", "8"),
         ]
         team_game_stats = [
-            self._team_box_row("E1", "KC", turnovers=1, total_yards=350),
-            self._team_box_row("E1", "LAC", turnovers=2, total_yards=280),
-            self._team_box_row("E2", "KC", turnovers=0, total_yards=400),
-            self._team_box_row("E2", "DET", turnovers=1, total_yards=300),
+            self._team_box_row("E1", "12", turnovers=1, total_yards=350),
+            self._team_box_row("E1", "24", turnovers=2, total_yards=280),
+            self._team_box_row("E2", "12", turnovers=0, total_yards=400),
+            self._team_box_row("E2", "8", turnovers=1, total_yards=300),
         ]
         storage = self._storage(events, team_game_stats=team_game_stats)
 
@@ -224,7 +227,7 @@ class TestBuildEventDataset:
         assert e2["home_avg_total_yards"] == 350
 
     def test_missing_team_game_stats_row_yields_empty_box_history_not_an_error(self):
-        events = [_event("E1", "2025-09-07", "KC", "LAC")]
+        events = [_event("E1", "2025-09-07", "12", "24")]
         storage = self._storage(events, team_game_stats=[])
 
         rows = build_dataset.build_event_dataset(storage, window=5)
@@ -244,15 +247,15 @@ class TestBuildPlayerDataset:
     def test_builds_one_row_per_player_game_using_prior_games_only(self):
         games = [
             {
-                "event_key": "E1", "player_key": "PLAYER#p1", "entity_id": "p1", "team_id": "KC",
+                "event_key": "E1", "player_key": "PLAYER#p1", "entity_id": "p1", "team_id": "12",
                 "event_date": "2025-09-07", "stat_line": {"passing_yards": 250}, "started": True,
             },
             {
-                "event_key": "E2", "player_key": "PLAYER#p1", "entity_id": "p1", "team_id": "KC",
+                "event_key": "E2", "player_key": "PLAYER#p1", "entity_id": "p1", "team_id": "12",
                 "event_date": "2025-09-14", "stat_line": {"passing_yards": 300}, "started": True,
             },
         ]
-        events = [_event("E1", "2025-09-07", "KC", "LAC"), _event("E2", "2025-09-14", "KC", "DEN")]
+        events = [_event("E1", "2025-09-07", "12", "24"), _event("E2", "2025-09-14", "12", "7")]
         storage = self._storage(events, games)
 
         rows = build_dataset.build_player_dataset(storage, window=5)
@@ -267,12 +270,12 @@ class TestBuildPlayerDataset:
         # incremental-history path.
         games = [
             {
-                "event_key": f"E{i}", "player_key": "PLAYER#p1", "entity_id": "p1", "team_id": "KC",
+                "event_key": f"E{i}", "player_key": "PLAYER#p1", "entity_id": "p1", "team_id": "12",
                 "event_date": f"2025-09-{i:02d}", "stat_line": {"passing_yards": 250}, "started": True,
             }
             for i in range(1, 8)
         ]
-        events = [_event(f"E{i}", f"2025-09-{i:02d}", "KC", "LAC") for i in range(1, 8)]
+        events = [_event(f"E{i}", f"2025-09-{i:02d}", "12", "24") for i in range(1, 8)]
         storage = self._storage(events, games)
 
         rows = build_dataset.build_player_dataset(storage, window=3)
@@ -283,17 +286,17 @@ class TestBuildPlayerDataset:
     def test_skips_a_player_game_whose_event_is_missing_or_malformed(self):
         games = [
             {
-                "event_key": "MISSING", "player_key": "PLAYER#p1", "entity_id": "p1", "team_id": "KC",
+                "event_key": "MISSING", "player_key": "PLAYER#p1", "entity_id": "p1", "team_id": "12",
                 "event_date": "2025-09-07", "stat_line": {"passing_yards": 250}, "started": True,
             },
             {
-                "event_key": "E2", "player_key": "PLAYER#p1", "entity_id": "p1", "team_id": "KC",
+                "event_key": "E2", "player_key": "PLAYER#p1", "entity_id": "p1", "team_id": "12",
                 "event_date": "2025-09-14", "stat_line": {"passing_yards": 300}, "started": True,
             },
         ]
         # No event for "MISSING" at all -- the player-game row referencing
         # it should be skipped, not crash.
-        events = [_event("E2", "2025-09-14", "KC", "DEN")]
+        events = [_event("E2", "2025-09-14", "12", "7")]
         storage = self._storage(events, games)
 
         rows = build_dataset.build_player_dataset(storage, window=5)
@@ -303,20 +306,20 @@ class TestBuildPlayerDataset:
     def test_own_home_away_elo_and_rest_days_flow_through(self):
         games = [
             {
-                "event_key": "E1", "player_key": "PLAYER#p1", "entity_id": "p1", "team_id": "LAC",
+                "event_key": "E1", "player_key": "PLAYER#p1", "entity_id": "p1", "team_id": "24",
                 "event_date": "2025-09-07", "stat_line": {"passing_yards": 250}, "started": True,
             },
         ]
         # p1's team (LAC) is the away side of E1 -- is_home should read False,
         # and own/opponent Elo should resolve to LAC's/KC's ratings, not KC's/LAC's.
-        events = [_event("E1", "2025-09-07", "KC", "LAC")]
+        events = [_event("E1", "2025-09-07", "12", "24")]
         storage = self._storage(events, games)
 
         rows = build_dataset.build_player_dataset(storage, window=5)
 
         row = rows[0]
         assert row["is_home"] is False
-        assert row["opponent_id"] == "KC"
+        assert row["opponent_id"] == "12"
         assert row["own_elo"] is not None
         assert row["opponent_elo"] is not None
         assert row["rest_days"] is None  # no prior LAC event in this fixture

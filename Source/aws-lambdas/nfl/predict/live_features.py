@@ -54,7 +54,9 @@ def _home_away_ids(event: dict) -> tuple[str, str]:
     return home["entity_id"], away["entity_id"]
 
 
-def _live_elo_ratings(storage, sport: str, event: dict, home_id: str, away_id: str) -> dict:
+def _live_elo_ratings(
+    storage, sport: str, event: dict, home_id: str, away_id: str, current_ratings: dict | None = None,
+) -> dict:
     """A minimal elo_ratings dict containing just this one (not-yet-played)
     event's key, mapped to each team's CURRENT rating -- the second
     compute_elo_ratings return value, not the first. The first
@@ -62,9 +64,18 @@ def _live_elo_ratings(storage, sport: str, event: dict, home_id: str, away_id: s
     it has nothing for a future event's own key; build_event_features/
     build_player_features only ever do one lookup
     (elo_ratings.get(event['event_key'])), so a single-entry dict works
-    identically to the full training-time one for this purpose."""
-    completed_events = storage.get_all_events(sport)
-    _, current_ratings = compute_elo_ratings(completed_events)
+    identically to the full training-time one for this purpose.
+
+    current_ratings lets a caller that's already computed it (handler.py's
+    _leaderboards, which calls this once per candidate player per prop
+    stat) pass it straight through instead of paying this module's usual
+    per-call full-history recompute -- see this module's docstring for why
+    that recompute is normally cheap enough not to matter, and why a
+    hundreds-of-candidates loop is exactly the condition that stops being
+    true."""
+    if current_ratings is None:
+        completed_events = storage.get_all_events(sport)
+        _, current_ratings = compute_elo_ratings(completed_events)
     return {
         event["event_key"]: {
             "home_pre_rating": current_ratings.get(home_id, DEFAULT_STARTING_RATING),
@@ -137,15 +148,26 @@ def build_live_event_features(storage, sport: str, event_key: str, window: int =
 def _build_player_feature_row(
     storage, sport: str, event: dict, home_id: str, away_id: str, entity_id: str, team_id: str,
     prior_games: list[dict], window: int,
+    current_ratings: dict | None = None, team_last_event_dates: dict[str, str] | None = None,
 ) -> dict:
     """Shared by build_live_player_features (one specific requested
     player) and build_live_event_leader_candidates (every candidate
     likely to lead a team in some category) -- both already know
     team_id and (for the leader case) may have already fetched
     prior_games while identifying the candidate in the first place, so
-    this takes them as arguments rather than re-deriving them itself."""
-    own_previous_events = storage.get_team_events(sport, team_id, before_date=event["event_date"], limit=1)
-    own_previous_event_date = own_previous_events[0]["event_date"] if own_previous_events else None
+    this takes them as arguments rather than re-deriving them itself.
+
+    team_last_event_dates, like current_ratings, is an optional
+    already-computed lookup (handler.py's _leaderboards builds one team's
+    worth of "last completed game date" once from the same completed-events
+    fetch _season_standings_inputs already does) -- when given, this skips
+    its own storage.get_team_events call, the other per-candidate query
+    this function would otherwise repeat once per player per stat."""
+    if team_last_event_dates is not None:
+        own_previous_event_date = team_last_event_dates.get(team_id)
+    else:
+        own_previous_events = storage.get_team_events(sport, team_id, before_date=event["event_date"], limit=1)
+        own_previous_event_date = own_previous_events[0]["event_date"] if own_previous_events else None
 
     player_game = {
         "event_key": event["event_key"],
@@ -160,7 +182,7 @@ def _build_player_feature_row(
         player_game,
         prior_games,
         event,
-        _live_elo_ratings(storage, sport, event, home_id, away_id),
+        _live_elo_ratings(storage, sport, event, home_id, away_id, current_ratings),
         own_previous_event_date,
         window,
     )
@@ -168,13 +190,19 @@ def _build_player_feature_row(
 
 def build_live_player_features(
     storage, sport: str, event_key: str, entity_id: str, window: int = DEFAULT_ROLLING_WINDOW,
+    current_ratings: dict | None = None, team_last_event_dates: dict[str, str] | None = None,
 ) -> dict:
     """One player-prop feature row for entity_id's performance in
     event_key, in the exact shape train_player_prop_model.py was trained
     on. team_id comes from the player's own entity record (metadata.team_id,
     kept current by every normalize.py upsert), not from the event or
     their own last game log, since a just-traded player's most recent
-    game log would still show their old team."""
+    game log would still show their old team.
+
+    current_ratings/team_last_event_dates: see _build_player_feature_row --
+    optional pass-throughs for a caller (handler.py's season leaderboards)
+    that's calling this in a loop over many players and has already paid
+    for the full-history data these would otherwise each re-fetch."""
     event = storage.get_event(event_key)
     if event is None:
         raise EventNotFoundError(f"No event found for {event_key}")
@@ -186,7 +214,10 @@ def build_live_player_features(
     team_id = entity.get("metadata", {}).get("team_id")
 
     prior_games = storage.get_player_game_stats(entity_id, before_date=event["event_date"], limit=window)
-    return _build_player_feature_row(storage, sport, event, home_id, away_id, entity_id, team_id, prior_games, window)
+    return _build_player_feature_row(
+        storage, sport, event, home_id, away_id, entity_id, team_id, prior_games, window,
+        current_ratings, team_last_event_dates,
+    )
 
 
 def build_live_event_leader_candidates(

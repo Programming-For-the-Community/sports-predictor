@@ -27,8 +27,15 @@ class ModelCardView extends StatelessWidget {
         children: [
           Row(
             children: [
-              Text(_displayName(model.modelName), style: AppTextStyles.cardTitle()),
-              const Spacer(),
+              Expanded(
+                child: Text(
+                  _displayName(model.modelName),
+                  style: AppTextStyles.cardTitle(),
+                  overflow: TextOverflow.ellipsis,
+                  maxLines: 1,
+                ),
+              ),
+              const SizedBox(width: 8),
               _Badge(text: model.algorithm.toUpperCase()),
               const SizedBox(width: 8),
               _Badge(text: 'v${model.version}'),

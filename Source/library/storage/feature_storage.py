@@ -92,14 +92,23 @@ class FeatureStorage:
         """Every event for a sport, most recent first. Meant for batch jobs
         that need the whole history at once (e.g. Elo rating computation,
         which has to walk every team's games in chronological order, not
-        just one team's) -- one scan instead of one Query per team.
+        just one team's) -- one Query instead of one Query per team.
+
+        Queries the status-index GSI (Terraform/dynamodb-events.tf) rather
+        than scanning the whole table -- confirmed live that the Scan this
+        replaced was a real contributor to /nfl/events and /nfl/season's
+        latency. scan_index_forward=False means the index already returns
+        results most-recent-first (its range key is event_date), so no
+        separate Python sort is needed the way the Scan-based version
+        needed one. sport is still filtered in Python since the index is
+        keyed on status alone -- cheap once status has already narrowed
+        the result set via the index, unlike filtering sport out of a full
+        table scan.
         """
-        items = self._events_table.scan()
-        events = [
-            item for item in items if item.get("sport") == sport and item.get("status") == status
-        ]
-        events.sort(key=lambda item: item.get("event_date", ""), reverse=True)
-        return events
+        items = self._events_table.query(
+            Key("status").eq(status), index_name="status-index", scan_index_forward=False,
+        )
+        return [item for item in items if item.get("sport") == sport]
 
     def get_all_player_game_stats(self) -> list[dict]:
         """Every player_game_stats row, unsorted. Meant for batch jobs that

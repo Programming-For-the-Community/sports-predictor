@@ -23,6 +23,20 @@ TEAM_DIVISIONS: dict[str, str] = {
     "22": "NFC West", "14": "NFC West", "25": "NFC West", "26": "NFC West",
 }
 
+
+def is_real_franchise_matchup(event: dict) -> bool:
+    """False for events involving a non-franchise "team" -- the Pro Bowl's
+    AFC/NFC all-star squads (ESPN ids 31/32) aren't in TEAM_DIVISIONS,
+    since they're exhibition rosters, not real franchises. The Pro Bowl is
+    fetched by the same postseason (season_type=3) ingest/backfill path as
+    real playoff games, so nothing upstream already excludes it -- this is
+    the filter feature engineering applies before building any rolling
+    history, so a player's own Pro Bowl appearance (mixed roster, different
+    rules, not representative of real performance) never leaks into their
+    regular-season rolling stats or a team's Elo rating."""
+    return all(p.get("entity_id") in TEAM_DIVISIONS for p in event.get("participants", []))
+
+
 # (latitude, longitude) of each team's home market.
 TEAM_COORDINATES: dict[str, tuple[float, float]] = {
     "22": (33.5276, -112.2626),  # ARI -- Glendale

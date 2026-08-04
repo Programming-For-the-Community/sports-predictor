@@ -43,6 +43,7 @@ from library.features.nfl import (
     identify_lead_rusher,
     identify_starting_qb,
 )
+from library.features.nfl_teams import is_real_franchise_matchup
 from library.storage.feature_storage import FeatureStorage
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
@@ -102,7 +103,8 @@ def build_event_dataset(storage: FeatureStorage, window: int) -> list[dict]:
     incomplete stat_line data) just gets an empty history for that row.
     """
     events = storage.get_all_events(SPORT)
-    logger.info("Loaded %d completed events", len(events))
+    events = [e for e in events if is_real_franchise_matchup(e)]
+    logger.info("Loaded %d completed events (excluding exhibition games)", len(events))
 
     player_games_by_event_team = _group_player_games_by_event_and_team(storage.get_all_player_game_stats())
     team_game_stats_by_event_team = _index_team_game_stats(storage.get_all_team_game_stats())
@@ -220,6 +222,7 @@ def build_player_dataset(storage: FeatureStorage, window: int) -> list[dict]:
     which is cheap next to the player-game volume this function already
     processes."""
     events = storage.get_all_events(SPORT)
+    events = [e for e in events if is_real_franchise_matchup(e)]
     events_by_key = {event["event_key"]: event for event in events}
     elo_ratings, _ = compute_elo_ratings(events)  # only the pre-game side is used here
     team_previous_event_dates = _team_previous_event_dates(events)

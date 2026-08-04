@@ -77,6 +77,7 @@ class SportEvent {
     required this.eventDate,
     required this.status,
     required this.week,
+    required this.round,
     required this.participants,
     required this.predictionComparison,
   });
@@ -85,6 +86,10 @@ class SportEvent {
   final String eventDate;
   final String status;
   final int? week;
+  // Playoff round name (Wild Card/Divisional/Conference Championship/Super
+  // Bowl) for a postseason game -- null for regular season, in which case
+  // `week` is what the UI should show instead. See handler.py's _round_label.
+  final String? round;
   final List<Participant> participants;
   final PredictionComparison? predictionComparison;
 
@@ -93,6 +98,7 @@ class SportEvent {
         eventDate: json['event_date'] as String? ?? '',
         status: json['status'] as String? ?? '',
         week: json['week'] as int?,
+        round: json['round'] as String?,
         participants: (json['participants'] as List<dynamic>? ?? [])
             .map((p) => Participant.fromJson(p as Map<String, dynamic>))
             .toList(),

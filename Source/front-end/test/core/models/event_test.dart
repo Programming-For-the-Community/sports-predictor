@@ -20,6 +20,23 @@ void main() {
     expect(event.away.entityId, 'LAC');
     expect(event.home.result, isNull);
     expect(event.predictionComparison, isNull);
+    expect(event.round, isNull);
+  });
+
+  test('parses a playoff round label for a postseason event', () {
+    final event = SportEvent.fromJson({
+      'event_id': '401547417',
+      'event_date': '2026-01-11',
+      'status': 'scheduled',
+      'week': 1,
+      'round': 'Wild Card',
+      'participants': [
+        {'entity_id': 'KC', 'role': 'home'},
+        {'entity_id': 'LAC', 'role': 'away'},
+      ],
+    });
+
+    expect(event.round, 'Wild Card');
   });
 
   test('parses final scores and a prediction comparison for a completed event', () {

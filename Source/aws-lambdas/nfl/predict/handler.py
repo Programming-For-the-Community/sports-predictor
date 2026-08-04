@@ -17,6 +17,11 @@ Routes (see Terraform/lambda-nfl-predict.tf for the API Gateway wiring):
            logged for that event before it was played -- see
            _prediction_comparison's own docstring for why this reads the
            predictions-table audit trail rather than recomputing one now).
+           Every event also carries `round` -- the playoff round name
+           (Wild Card/Divisional/Conference Championship/Super Bowl) for
+           a postseason game, `null` for regular season -- see
+           _round_label. Excludes the Pro Bowl and any other exhibition
+           game entirely (see is_real_franchise_matchup).
     GET /nfl/predictions/events/{event_id}
         -> win probability, margin, home score, and away score for one
            upcoming/completed matchup, computed from one shared live
@@ -54,6 +59,7 @@ Terraform/iam-lambda-inference.tf); this function never reads a past
 prediction back.
 """
 from collections import Counter
+from concurrent.futures import ThreadPoolExecutor
 import json
 import logging
 import os
@@ -64,6 +70,7 @@ from boto3.dynamodb.conditions import Key
 from library.aws.dynamodb_table import DynamoDBTable
 from library.aws.s3_manager import S3Manager
 from library.features.nfl import compute_elo_ratings
+from library.features.nfl_teams import is_real_franchise_matchup
 from library.schema.keys import entity_key as build_entity_key
 from library.schema.keys import event_key as build_event_key
 from library.storage.feature_storage import FeatureStorage
@@ -78,6 +85,17 @@ logger = logging.getLogger("nfl-predict")
 SPORT = "nfl"
 WIN_PROBABILITY_MODEL = "win-probability"
 SCORE_MODELS = {"margin": "score-margin", "home_score": "home-score", "away_score": "away-score"}
+
+# season_type=3 (postseason) week -> round name, confirmed live against
+# ESPN's own scoreboard (season 2020: week 1=Wild Card, 2=Divisional,
+# 3=Conference Championship, 4=Pro Bowl, 5=Super Bowl). Week 4 is
+# deliberately absent -- that's always the Pro Bowl, already excluded
+# entirely by is_real_franchise_matchup before this mapping is consulted,
+# so a real week=4 postseason game should never occur. This numbering has
+# been stable across this project's whole 2016-2025+ window -- the
+# playoff field expanded to 7 teams per conference in 2020, but the
+# round *count* and week numbering didn't change.
+POSTSEASON_ROUND_LABELS = {1: "Wild Card", 2: "Divisional", 3: "Conference Championship", 5: "Super Bowl"}
 
 # Source of truth is Terraform/scheduler-nfl-train-player-prop-model.tf's
 # nfl_player_prop_stats map -- duplicated here as a plain list (not read
@@ -359,9 +377,21 @@ def _prediction_comparison(event: dict) -> dict | None:
     }
 
 
+def _round_label(event: dict) -> str | None:
+    """None for regular season (season_type=2) or any postseason week not
+    in POSTSEASON_ROUND_LABELS -- a raw week number means nothing for the
+    postseason (nobody thinks of the Super Bowl as "week 5"), but is
+    exactly what a regular-season game should keep showing."""
+    if event.get("season_type") != 3:
+        return None
+    return POSTSEASON_ROUND_LABELS.get(event.get("week"))
+
+
 def _list_events(status: str) -> dict:
     storage = _get_storage()
-    events = storage.get_all_events(SPORT, status=status)
+    # Excludes the Pro Bowl and any other exhibition game -- see
+    # is_real_franchise_matchup's own docstring.
+    events = [e for e in storage.get_all_events(SPORT, status=status) if is_real_franchise_matchup(e)]
 
     if status == "completed":
         events = _previous_week_events(events)
@@ -376,6 +406,7 @@ def _list_events(status: str) -> dict:
             "season": e.get("season"),
             "season_type": e.get("season_type"),
             "week": e.get("week"),
+            "round": _round_label(e),
             "participants": e.get("participants"),
         }
         if status == "completed":
@@ -385,31 +416,50 @@ def _list_events(status: str) -> dict:
     return {"sport": SPORT, "events": [_entry(e) for e in events]}
 
 
+def _load_model_summary(s3, model_name: str) -> dict | None:
+    """One model's card summary, or None if it's never had a version
+    promoted. 3 sequential S3 round-trips (existence check, pointer, card)
+    -- factored out so _list_models can run every model's lookup
+    concurrently instead of one full round-trip chain after another. Each
+    model's lookup is fully independent of every other's."""
+    pointer_key = current_version_key(SPORT, model_name)
+    if not s3.object_exists(pointer_key):
+        return None
+    version = s3.get_json(pointer_key)["version"]
+    card = s3.get_json(model_artifact_key(SPORT, model_name, version, "model_card.json"))
+    top_features = [
+        {"feature": name, "importance": value}
+        for name, value in list(card.get("feature_importances", {}).items())[:5]
+    ]
+    return {
+        "model_name": card["model_name"],
+        "algorithm": card["algorithm"],
+        "version": card["version"],
+        "trained_at": card["trained_at"],
+        **{k: v for k, v in card.items() if k in ("accuracy", "log_loss", "rmse", "mae", "naive_baseline_rmse", "naive_baseline_mae")},
+        "top_features": top_features,
+    }
+
+
 def _list_models() -> dict:
     s3 = _get_model_bucket()
     prefix = f"{SPORT}/"
     model_names = sorted({key[len(prefix):].split("/")[0] for key in s3.list_keys(prefix)})
 
-    models = []
-    for model_name in model_names:
-        pointer_key = current_version_key(SPORT, model_name)
-        if not s3.object_exists(pointer_key):
-            continue
-        version = s3.get_json(pointer_key)["version"]
-        card = s3.get_json(model_artifact_key(SPORT, model_name, version, "model_card.json"))
-        top_features = [
-            {"feature": name, "importance": value}
-            for name, value in list(card.get("feature_importances", {}).items())[:5]
-        ]
-        models.append({
-            "model_name": card["model_name"],
-            "algorithm": card["algorithm"],
-            "version": card["version"],
-            "trained_at": card["trained_at"],
-            **{k: v for k, v in card.items() if k in ("accuracy", "log_loss", "rmse", "mae", "naive_baseline_rmse", "naive_baseline_mae")},
-            "top_features": top_features,
-        })
-    return {"sport": SPORT, "models": models}
+    if not model_names:
+        return {"sport": SPORT, "models": []}
+
+    # boto3 clients are thread-safe for concurrent calls -- sharing one S3
+    # client across these threads is the documented, supported usage, not
+    # a race. Previously this was N models * 3 sequential S3 round-trips
+    # in series (confirmed live: ~2.9s for ~10 models); running each
+    # model's own 3-call chain concurrently instead cuts wall-clock time
+    # to roughly the slowest single model's chain, not the sum of all of
+    # them.
+    with ThreadPoolExecutor(max_workers=min(len(model_names), 10)) as executor:
+        results = executor.map(lambda name: _load_model_summary(s3, name), model_names)
+
+    return {"sport": SPORT, "models": [card for card in results if card is not None]}
 
 
 def _home_and_away(event: dict) -> tuple[str, str] | None:
@@ -429,8 +479,13 @@ def _season_standings_inputs(storage: FeatureStorage) -> dict:
     """Fetches this season's completed+scheduled events once and derives
     everything season_simulation.simulate_season needs, plus each team's
     next scheduled event_key (reused by _leaderboards below)."""
-    scheduled = storage.get_all_events(SPORT, status="scheduled")
-    completed = storage.get_all_events(SPORT, status="completed")
+    # Excludes the Pro Bowl and any other exhibition matchup -- its AFC/NFC
+    # all-star "teams" aren't real franchises (see
+    # library.features.nfl_teams.is_real_franchise_matchup), so a played
+    # one would otherwise count as a real win/loss and Elo update for a
+    # non-existent team_id.
+    scheduled = [e for e in storage.get_all_events(SPORT, status="scheduled") if is_real_franchise_matchup(e)]
+    completed = [e for e in storage.get_all_events(SPORT, status="completed") if is_real_franchise_matchup(e)]
     current_season = max(
         (e.get("season") for e in scheduled + completed if e.get("season") is not None), default=None,
     )
@@ -440,6 +495,7 @@ def _season_standings_inputs(storage: FeatureStorage) -> dict:
     wins: dict[str, int] = {}
     losses: dict[str, int] = {}
     point_differential: dict[str, int] = {}
+    team_last_completed_date: dict[str, str] = {}
     for event in completed:
         home_away = _home_and_away(event)
         if home_away is None:
@@ -454,6 +510,9 @@ def _season_standings_inputs(storage: FeatureStorage) -> dict:
             wins[entity_id] = wins.get(entity_id, 0) + (1 if score > opponent_score else 0)
             losses[entity_id] = losses.get(entity_id, 0) + (1 if score < opponent_score else 0)
             point_differential[entity_id] = point_differential.get(entity_id, 0) + (score - opponent_score)
+            event_date = event.get("event_date", "")
+            if event_date > team_last_completed_date.get(entity_id, ""):
+                team_last_completed_date[entity_id] = event_date
 
     _, current_ratings = compute_elo_ratings(completed)
 
@@ -478,6 +537,7 @@ def _season_standings_inputs(storage: FeatureStorage) -> dict:
         "current_ratings": current_ratings,
         "remaining_games": remaining_games,
         "team_next_event": team_next_event,
+        "team_last_completed_date": team_last_completed_date,
         "games_remaining": Counter(team_id for pair in remaining_games for team_id in pair),
     }
 
@@ -508,19 +568,43 @@ def _leaderboards(storage: FeatureStorage, s3, model_cache: dict, season_inputs:
 
         model_name = _model_name_to_prop(stat)
         per_game_projections: dict[str, float] = {}
-        for entity_id in current_totals:
-            next_event_key = season_inputs["team_next_event"].get(player_team.get(entity_id))
-            if next_event_key is None:
-                continue
-            try:
-                feature_row = live_features.build_live_player_features(storage, SPORT, next_event_key, entity_id)
-                booster, model_card = _get_cached_model(model_cache, s3, model_name)
-                per_game_projections[entity_id] = model_loader.predict(booster, model_card, feature_row)
-            except (live_features.EventNotFoundError, model_loader.NoPromotedModelError):
-                continue
-            except Exception:
-                logger.exception("Failed to project %s for %s", stat, entity_id)
-                continue
+        try:
+            booster, model_card = _get_cached_model(model_cache, s3, model_name)
+        except model_loader.NoPromotedModelError:
+            booster = None
+
+        # Loading the model once above (single-threaded, before fan-out)
+        # avoids a check-then-set race in _get_cached_model's dict if
+        # candidates for the same stat resolved it concurrently instead.
+        # current_ratings/team_last_event_dates reuse what
+        # _season_standings_inputs already computed once for the whole
+        # request -- without them, build_live_player_features would redo
+        # a full-history Elo recompute per candidate per stat, which is
+        # what actually blew this route's 29s budget (confirmed live via
+        # CloudWatch: every /nfl/season request here was timing out).
+        if booster is not None:
+            def _project(entity_id: str) -> tuple[str, float] | None:
+                next_event_key = season_inputs["team_next_event"].get(player_team.get(entity_id))
+                if next_event_key is None:
+                    return None
+                try:
+                    feature_row = live_features.build_live_player_features(
+                        storage, SPORT, next_event_key, entity_id,
+                        current_ratings=season_inputs["current_ratings"],
+                        team_last_event_dates=season_inputs["team_last_completed_date"],
+                    )
+                    return entity_id, model_loader.predict(booster, model_card, feature_row)
+                except live_features.EventNotFoundError:
+                    return None
+                except Exception:
+                    logger.exception("Failed to project %s for %s", stat, entity_id)
+                    return None
+
+            with ThreadPoolExecutor(max_workers=max(1, min(len(current_totals), 10))) as executor:
+                for result in executor.map(_project, current_totals):
+                    if result is not None:
+                        entity_id, value = result
+                        per_game_projections[entity_id] = value
 
         games_remaining = {
             entity_id: season_inputs["games_remaining"].get(player_team.get(entity_id), 0)

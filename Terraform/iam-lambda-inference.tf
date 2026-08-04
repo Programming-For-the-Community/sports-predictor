@@ -60,6 +60,16 @@ data "aws_iam_policy_document" "lambda_inference_permissions" {
       "arn:aws:dynamodb:${var.region}:${var.account_id}:table/${local.events_table}",
       "arn:aws:dynamodb:${var.region}:${var.account_id}:table/${local.player_game_stats_table}",
       "arn:aws:dynamodb:${var.region}:${var.account_id}:table/${local.team_game_stats_table}",
+      # A table's GSI is a distinct IAM resource from the table itself --
+      # Query against status-index/entity-history was silently AccessDenied
+      # even though the base-table ARNs above were already granted (confirmed
+      # live via CloudWatch: get_player_game_stats's entity-history Query
+      # threw AccessDeniedException in production despite this same statement
+      # already covering GetItem/Query/Scan on the base player_game_stats
+      # table). Only these two tables have a GSI today (dynamodb-events.tf's
+      # status-index, dynamodb-player-game-stats.tf's entity-history).
+      "arn:aws:dynamodb:${var.region}:${var.account_id}:table/${local.events_table}/index/*",
+      "arn:aws:dynamodb:${var.region}:${var.account_id}:table/${local.player_game_stats_table}/index/*",
     ]
   }
 

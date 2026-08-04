@@ -7,6 +7,7 @@ from library.features.nfl_teams import (
     TEAM_DIVISIONS,
     is_divisional_game,
     is_international_game,
+    is_real_franchise_matchup,
     travel_distances_km,
 )
 
@@ -73,3 +74,26 @@ class TestTravelDistancesKm:
 
     def test_unknown_team_returns_none_none(self):
         assert travel_distances_km("unknown-id", "12", venue_city=None) == (None, None)
+
+
+class TestIsRealFranchiseMatchup:
+    def test_true_for_two_real_franchises(self):
+        event = {"participants": [{"entity_id": "12"}, {"entity_id": "13"}]}
+
+        assert is_real_franchise_matchup(event) is True
+
+    def test_false_for_the_pro_bowl(self):
+        # ESPN team ids 31 (AFC) / 32 (NFC) -- exhibition all-star squads,
+        # not in TEAM_DIVISIONS.
+        event = {"participants": [{"entity_id": "31"}, {"entity_id": "32"}]}
+
+        assert is_real_franchise_matchup(event) is False
+
+    def test_false_if_only_one_side_is_a_real_franchise(self):
+        event = {"participants": [{"entity_id": "12"}, {"entity_id": "31"}]}
+
+        assert is_real_franchise_matchup(event) is False
+
+    def test_true_for_an_event_with_no_participants(self):
+        assert is_real_franchise_matchup({"participants": []}) is True
+        assert is_real_franchise_matchup({}) is True

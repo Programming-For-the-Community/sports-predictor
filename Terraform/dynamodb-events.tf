@@ -4,11 +4,23 @@
 # the field-event case, the participant entity IS the player, so there is
 # no separate player_game_stats row needed.
 #
-# No GSI yet -- the two candidates from docs/DATA_SCHEMA.md are deferred
-# until a feature actually needs them, since each GSI roughly doubles the
-# write cost for this table:
-#   - event_date GSI: for "this week's games" date-range queries
-#   - entity_id GSI: for "this team's full event history" frontend view
+# status-index GSI added once "this week's games" (GET /nfl/events, GET
+# /nfl/season) became a real, frequently-hit access pattern -- confirmed
+# live that FeatureStorage.get_all_events's full-table Scan was a real
+# contributor to that route's latency. Query(status=X) via this index
+# replaces the Scan entirely; range_key=event_date also means the index
+# already returns results in the order get_all_events wants (most recent
+# first, scan_index_forward=False) without a separate Python sort.
+#
+# The entity_id GSI from docs/DATA_SCHEMA.md ("this team's full event
+# history" frontend view) stays deferred -- no route needs it yet.
+#
+# Every item written here MUST have a non-empty event_date -- DynamoDB
+# silently omits an item from a GSI projection if it's missing the GSI's
+# range key attribute. normalize.py's scoreboard_event_to_event_item
+# always sets event_date from the raw ESPN payload, so this isn't a
+# concern in practice, just worth knowing if a future write path ever
+# skips it.
 resource "aws_dynamodb_table" "events" {
   name         = local.events_table
   billing_mode = "PAY_PER_REQUEST"
@@ -17,6 +29,23 @@ resource "aws_dynamodb_table" "events" {
   attribute {
     name = "event_key"
     type = "S"
+  }
+
+  attribute {
+    name = "status"
+    type = "S"
+  }
+
+  attribute {
+    name = "event_date"
+    type = "S"
+  }
+
+  global_secondary_index {
+    name            = "status-index"
+    hash_key        = "status"
+    range_key       = "event_date"
+    projection_type = "ALL"
   }
 
   deletion_protection_enabled = var.environment == "production"
