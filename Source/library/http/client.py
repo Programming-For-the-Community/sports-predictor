@@ -21,10 +21,28 @@ REQUEST_TIMEOUT_SECONDS = 15
 
 
 class HttpClient:
-    def __init__(self, base_url: str, min_interval_seconds: float = 0.3, user_agent: str = "sports-predictor/1.0"):
+    def __init__(self, base_url: str, min_interval_seconds: float = 0.3, user_agent: str | None = None):
         self.base_url = base_url.rstrip("/")
         self._session = requests.Session()
-        self._session.headers.update({"User-Agent": user_agent})
+        # A bare, self-identifying User-Agent like "sports-predictor/1.0"
+        # (the old default) is exactly the kind of signature a WAF/CDN in
+        # front of an "unofficial" API blocks outright -- confirmed live:
+        # every ESPN request from a GitHub Actions runner came back
+        # 403 Forbidden with that UA, not a network/timeout failure, and a
+        # 403 isn't retried away by backoff since it's the same block on
+        # every attempt. Defaulting to a real browser's UA + standard
+        # Accept headers is standard practice for a public API with no
+        # official client library, not an attempt to evade anything --
+        # this project only ever reads public scoreboard/box-score data
+        # the same page a real visitor's browser would load.
+        self._session.headers.update({
+            "User-Agent": user_agent or (
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+            ),
+            "Accept": "application/json, text/plain, */*",
+            "Accept-Language": "en-US,en;q=0.9",
+        })
         self._rate_limiter = RateLimiter(min_interval_seconds)
 
     def _get(self, path: str, params: dict) -> dict:

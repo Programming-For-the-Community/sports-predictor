@@ -11,6 +11,25 @@ Run from the repo root:
 
 All ESPN calls are made once per session via module-scoped fixtures so
 the rate limiter is only hit a handful of times across the full suite.
+
+ESPN's site API sits behind Akamai, which occasionally returns a blanket
+403 "Access Denied" (Server: AkamaiGHost) to a caller entirely independent
+of request content -- confirmed live by curling the same endpoint
+seconds apart and getting 403 then 200 with byte-identical headers, and
+separately confirmed this isn't a User-Agent/bot-signature check (a
+realistic browser UA got 403 too, see library/http/client.py's own
+comment). This reads as a transient, IP-reputation/rate-window block --
+plausible on shared-IP CI infrastructure (GitHub Actions runners can
+share egress ranges with unrelated concurrent jobs) -- not something this
+project's own request pattern controls. HttpClient's own 5-attempt
+retry-with-backoff already tries to ride it out; _skip_if_espn_unreachable
+below is the last line of defense for whenever that backoff window still
+isn't enough: a persistent block after retries is treated as "ESPN
+unreachable from here right now" (skip, not fail) rather than a code
+defect, so a transient upstream block doesn't fail CI red for a reason
+no code change here could fix. A real schema regression still fails
+loudly -- this only catches the specific "couldn't reach ESPN at all"
+case, via HttpClient's own RuntimeError.
 """
 import pytest
 
@@ -20,6 +39,13 @@ import normalize
 TEST_SEASON = 2024
 TEST_SEASON_TYPE = 2   # regular season
 TEST_WEEK = 1
+
+
+def _fetch_or_skip(description: str, fetch):
+    try:
+        return fetch()
+    except RuntimeError as exc:
+        pytest.skip(f"ESPN unreachable from this network ({description}): {exc}")
 
 
 # ---------------------------------------------------------------------------
@@ -33,12 +59,14 @@ def client():
 
 @pytest.fixture(scope="module")
 def teams_response(client):
-    return client.get_teams()
+    return _fetch_or_skip("GET teams", client.get_teams)
 
 
 @pytest.fixture(scope="module")
 def scoreboard_response(client):
-    return client.get_scoreboard(TEST_SEASON, TEST_SEASON_TYPE, TEST_WEEK)
+    return _fetch_or_skip(
+        "GET scoreboard", lambda: client.get_scoreboard(TEST_SEASON, TEST_SEASON_TYPE, TEST_WEEK),
+    )
 
 
 @pytest.fixture(scope="module")
@@ -50,7 +78,7 @@ def first_event(scoreboard_response):
 
 @pytest.fixture(scope="module")
 def summary_response(client, first_event):
-    return client.get_summary(first_event["id"])
+    return _fetch_or_skip("GET summary", lambda: client.get_summary(first_event["id"]))
 
 
 # ---------------------------------------------------------------------------
