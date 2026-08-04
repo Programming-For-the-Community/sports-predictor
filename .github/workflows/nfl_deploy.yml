@@ -109,33 +109,21 @@ jobs:
 
   # nfl-predict-read -- the light GET /nfl/events + GET /nfl/models Lambda
   # split out of nfl-predict for cold start (see
-  # Terraform/lambda-nfl-predict-read.tf). Zip-packaged like ingest/
-  # normalize, not a container image, so this deploys via
-  # python_lambda_build.yml directly rather than nfl_ai_hosting.yml/
-  # nfl_predict_deploy.yml's Docker build+CreateFunction dance -- there's
-  # no image tag for infra's CreateFunction call to validate, so this can
-  # run any time after infra creates the function, same ordering
-  # data_pipeline's ingest/normalize deploys already use.
-  test_predict_read:
-    name: NFL predict-read (test)
-    needs: approval
+  # Terraform/lambda-nfl-predict-read.tf). A reusable workflow
+  # (nfl_predict_read_deploy.yml), not inline jobs here -- app_deploy.yml
+  # (the actual main-branch deploy path) needs to run this exact same
+  # test+deploy pair too, and this file alone isn't what production
+  # deploys actually run through.
+  predict_read_deploy:
+    name: NFL predict-read (test + deploy)
+    needs: [approval, infra]
     if: |
       always() &&
       (needs.approval.result == 'success' || needs.approval.result == 'skipped')
-    uses: ./.github/workflows/run_python_tests.yml
-    with:
-      test_path: 'Source/tests/aws-lambdas/nfl/test_predict_read.py Source/tests/library/serving/'
-      requirements_files: 'Source/aws-lambdas/nfl/predict-read/requirements.txt'
-
-  deploy_predict_read_lambda:
-    name: NFL predict-read (deploy)
-    needs: [infra, test_predict_read]
-    uses: ./.github/workflows/python_lambda_build.yml
+    uses: ./.github/workflows/nfl_predict_read_deploy.yml
     secrets: inherit
     with:
       function_name: ${{ needs.infra.outputs.nfl_predict_read_function_name }}
-      handler_dir: 'Source/aws-lambdas/nfl/predict-read'
-      library_path: 'Source/library'
 
   data_pipeline:
     name: Data pipeline

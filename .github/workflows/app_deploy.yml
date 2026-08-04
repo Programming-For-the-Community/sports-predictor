@@ -86,6 +86,14 @@ jobs:
       ingest_function_name: ${{ needs.infra.outputs.nfl_ingest_function_name }}
       normalize_function_name: ${{ needs.infra.outputs.nfl_normalize_function_name }}
 
+  nfl_predict_read_deploy:
+    name: NFL predict-read (deploy)
+    needs: infra
+    uses: ./.github/workflows/nfl_predict_read_deploy.yml
+    secrets: inherit
+    with:
+      function_name: ${{ needs.infra.outputs.nfl_predict_read_function_name }}
+
   # No config `with:` block for either -- both read directly from
   # Terraform state instead of relaying it through needs.infra.outputs.*,
   # which proved unreliable in practice (see frontend_hosting.yml's

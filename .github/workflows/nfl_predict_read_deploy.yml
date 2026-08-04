@@ -1,0 +1,55 @@
+# Tests and deploys the NFL predict-read Lambda -- GET /nfl/events and GET
+# /nfl/models, split out of nfl-predict for cold start (see
+# Terraform/lambda-nfl-predict-read.tf). Zip-packaged like ingest/normalize,
+# not a container image, so this deploys via python_lambda_build.yml
+# directly rather than nfl_ai_hosting.yml/nfl_predict_deploy.yml's Docker
+# build+CreateFunction dance -- there's no image tag for infra's
+# CreateFunction call to validate, so this can run any time after infra
+# creates the function.
+#
+# A separate reusable workflow, not jobs inlined into nfl_deploy.yml/
+# app_deploy.yml directly -- same reason nfl_data_pipeline.yml/
+# nfl_predict_deploy.yml are their own files: BOTH nfl_deploy.yml
+# (nfl*-branch pushes) and app_deploy.yml (main-branch pushes, the actual
+# production deploy path) need to run this exact same test+deploy pair,
+# and duplicating it inline in each one is exactly how this Lambda's
+# deploy got missed from app_deploy.yml the first time -- it was only
+# ever added to nfl_deploy.yml, which main-branch pushes never call.
+#
+# Function name is supplied by the caller from a Terraform output, with a
+# default so workflow_dispatch (manual, standalone run) still works
+# without needing that wiring -- same pattern as nfl_data_pipeline.yml.
+
+name: NFL Predict Read Deploy
+
+on:
+  workflow_dispatch:
+  workflow_call:
+    inputs:
+      function_name:
+        description: 'NFL predict-read Lambda function name (from Terraform output nfl_predict_read_function_name)'
+        required: false
+        type: string
+        default: 'sports-predictor-nfl-predict-read'
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  test:
+    name: Run nfl-predict-read tests
+    uses: ./.github/workflows/run_python_tests.yml
+    with:
+      test_path: 'Source/tests/aws-lambdas/nfl/test_predict_read.py Source/tests/library/serving/'
+      requirements_files: 'Source/aws-lambdas/nfl/predict-read/requirements.txt'
+
+  deploy:
+    name: Deploy nfl-predict-read Lambda
+    needs: test
+    uses: ./.github/workflows/python_lambda_build.yml
+    secrets: inherit
+    with:
+      function_name: ${{ inputs.function_name || 'sports-predictor-nfl-predict-read' }}
+      handler_dir: 'Source/aws-lambdas/nfl/predict-read'
+      library_path: 'Source/library'
