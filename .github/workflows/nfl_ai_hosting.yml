@@ -46,7 +46,14 @@ jobs:
     uses: ./.github/workflows/run_python_tests.yml
     with:
       test_path: 'Source/tests/library/ Source/tests/aws-lambdas/nfl/test_predict.py Source/tests/aws-lambdas/nfl/test_live_features.py Source/tests/aws-lambdas/nfl/test_model_loader.py'
-      requirements_files: 'Source/aws-lambdas/nfl/predict/requirements.txt'
+      # Both requirements files -- requirements-nodeps.txt (xgboost, only
+      # ever installed --no-deps in the real Dockerfile build to dodge its
+      # nvidia-nccl-cu12 GPU dependency) still needs to be installed HERE
+      # for xgboost itself to be importable at all in this test job. The
+      # --no-deps discipline only matters for the actual deployed image's
+      # size, not this ephemeral CI runner -- a normal (deps-resolved)
+      # install here is fine.
+      requirements_files: 'Source/aws-lambdas/nfl/predict/requirements.txt Source/aws-lambdas/nfl/predict/requirements-nodeps.txt'
 
   set-versions:
     name: Resolve image versions

@@ -37,11 +37,20 @@ jobs:
   # ~1-second cost) rather than trying to split library tests by exact
   # consumer -- library.aws.dynamodb_table, for instance, is used by
   # both, so there's no clean partition anyway.
+  #
+  # feature-engineering's own requirements.txt deliberately has no reason
+  # to carry xgboost/scikit-learn/pandas's ML-training extras (it only
+  # writes Parquet, never trains or evaluates a model) -- library/tests/ml/
+  # needs those (see library/ml/model_types.py's own imports) and is
+  # excluded here rather than bloating this job's install for a component
+  # that doesn't use it. train-model's own job below DOES already have
+  # every one of those (pandas/pyarrow/scikit-learn/xgboost), so it needs
+  # no such exclusion.
   test-feature-engineering:
     name: Run feature engineering tests
     uses: ./.github/workflows/run_python_tests.yml
     with:
-      test_path: 'Source/tests/library/ Source/tests/feature-engineering/'
+      test_path: 'Source/tests/library/ Source/tests/feature-engineering/ --ignore=Source/tests/library/ml'
       requirements_files: 'Source/feature-engineering/nfl/requirements.txt'
 
   test-train-model:

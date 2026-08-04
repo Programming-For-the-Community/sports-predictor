@@ -1,0 +1,69 @@
+%%{init: {'flowchart': {'curve': 'stepAfter', 'nodeSpacing': 45, 'rankSpacing': 65}}}%%
+%% sports-predictor -- scheduled data pipeline (NFL, Phase 1): ingestion,
+%% one-time historical backfill, and scheduled training. Companion diagram
+%% design/AWS_ARCHITECTURE.mmd covers the client request path. See
+%% docs/AWS_ARCHITECTURE.md for the full walkthrough and legend -- this
+%% file is the single source of truth for this diagram; the doc links here
+%% and embeds a generated image rather than duplicating this source
+%% (regenerate the image after editing this file -- see the doc's own
+%% comment for the exact command).
+%% Solid arrows = data flow / invocation. Dotted arrows = supporting,
+%% non-data-flow dependency (container image pull).
+flowchart TD
+    SCHIN["EventBridge Schedule<br/>ingest (2x/week, Aug-Feb)"]
+    INGEST["Lambda: nfl-ingest"]
+    NORMALIZE["Lambda: nfl-normalize"]
+    SCHTRAIN["EventBridge Schedules<br/>feature-eng + training<br/>(11x, staggered 30min, Aug-Feb)"]
+    ESPN(["ESPN Public API<br/>(unofficial)"])
+    ECR[("ECR<br/>shared, pre-existing")]
+
+    subgraph PubSub["VPC public subnets (3 AZs) + Internet Gateway"]
+        direction LR
+        BACKFILL["Fargate: nfl-backfill<br/>(manual run-task, historical only)"]
+        FEAT["Fargate: nfl-feature-engineering"]
+        TRAIN["Fargate: train-model /<br/>train-score-model /<br/>train-player-prop-model"]
+    end
+
+    subgraph StorageBox["Storage"]
+        direction LR
+        S3RAW[("S3: Raw Data Lake")]
+        S3MODEL[("S3: Model Artifacts")]
+        DDBCORE[("DynamoDB: entities / events /<br/>player_game_stats / team_game_stats")]
+    end
+
+    %% ---- Scheduled ingestion ----
+    SCHIN -->|"triggers"| INGEST
+    INGEST -->|"fetch scoreboard"| ESPN
+    INGEST -->|"write raw JSON"| S3RAW
+    S3RAW -->|"ObjectCreated"| NORMALIZE
+    NORMALIZE -->|"upsert"| DDBCORE
+
+    %% ---- One-time historical backfill ----
+    BACKFILL -->|"fetch full history"| ESPN
+    BACKFILL -->|"write raw JSON"| S3RAW
+    BACKFILL -->|"upsert"| DDBCORE
+    BACKFILL -.->|"pulls image"| ECR
+
+    %% ---- Scheduled training ----
+    SCHTRAIN -->|"triggers"| FEAT
+    FEAT -->|"read history"| DDBCORE
+    FEAT -->|"write Parquet"| S3MODEL
+    SCHTRAIN -->|"triggers"| TRAIN
+    TRAIN -->|"read Parquet, write model +<br/>model_card per candidate,<br/>promote whichever wins"| S3MODEL
+    FEAT -.->|"pulls image"| ECR
+    TRAIN -.->|"pulls image"| ECR
+
+    classDef pipelineCompute fill:#fff3bf,stroke:#e8b800,color:#5c4a00;
+    classDef fargateCompute fill:#b2f2bb,stroke:#2f9e44,color:#0b3d1c;
+    classDef storage fill:#ffc9c9,stroke:#e03131,color:#5c1111;
+    classDef schedule fill:#e9ecef,stroke:#495057,color:#212529,stroke-dasharray: 4 3;
+    classDef external fill:#dee2e6,stroke:#343a40,color:#212529;
+
+    class ESPN,ECR external;
+    class INGEST,NORMALIZE pipelineCompute;
+    class BACKFILL,FEAT,TRAIN fargateCompute;
+    class S3RAW,S3MODEL,DDBCORE storage;
+    class SCHIN,SCHTRAIN schedule;
+
+    style PubSub fill:#e6fcf5,stroke:#2f9e44
+    style StorageBox fill:#fff5f5,stroke:#e03131
