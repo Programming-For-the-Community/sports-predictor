@@ -108,18 +108,32 @@ def _home_away_team_ids(event: dict) -> tuple[str, str] | None:
 
 def _filter_depth_chart(raw_depth_chart: dict) -> dict:
     """Keeps only the positions leader-selection actually needs (see
-    DEPTH_CHART_POSITIONS) -- ESPN's full depth chart has roughly 25
-    entries per team (offensive line, special teams, individual
-    defensive-line spots) this project has no use for. Filters on each
-    entry's position.abbreviation rather than the outer dict key, since
-    that key's exact casing/format was only confirmed live for
-    non-skill-position codes (e.g. "lde" for Left Defensive End)."""
+    DEPTH_CHART_POSITIONS), AND trims each retained athlete down to just
+    the id live_features.py's _healthy_athlete_ids actually reads --
+    confirmed live that ESPN's full depth chart response is ~289KB for
+    ONE team, almost entirely per-athlete link metadata (player card,
+    stats, splits, game log, news, bio -- each with a web AND a
+    sportscenter:// deep-link variant) this project never uses. Filtering
+    by position alone (an earlier version of this function) kept every
+    retained athlete's full raw object, which silently bloated every
+    event item with tens of KB of unused data per team -- confirmed live
+    via CloudWatch as a real contributor to the predict Lambda's memory
+    and latency (Max Memory Used roughly doubled, some requests hitting
+    the full 29s timeout) once this shipped. Filters on each entry's
+    position.abbreviation rather than the outer dict key, since that
+    key's exact casing/format was only confirmed live for non-skill-
+    position codes (e.g. "lde" for Left Defensive End)."""
     positions = raw_depth_chart.get("positions") or {}
-    return {
-        code: entry
-        for code, entry in positions.items()
-        if (entry.get("position") or {}).get("abbreviation") in DEPTH_CHART_POSITIONS
-    }
+    result = {}
+    for code, entry in positions.items():
+        abbreviation = (entry.get("position") or {}).get("abbreviation")
+        if abbreviation not in DEPTH_CHART_POSITIONS:
+            continue
+        result[code] = {
+            "position": {"abbreviation": abbreviation},
+            "athletes": [{"id": athlete["id"]} for athlete in entry.get("athletes", []) if "id" in athlete],
+        }
+    return result
 
 
 def _enrich_events(events: list[dict], season: int, nfl_client: NFLClient, core_client: EspnCoreApiClient) -> None:

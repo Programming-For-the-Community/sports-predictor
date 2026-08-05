@@ -24,8 +24,8 @@ ModelCard _classifierCard({List<ModelCandidate>? candidates, String? candidatesR
       candidatesRankedBy: candidatesRankedBy,
     );
 
-ModelCard _regressorCard({List<ModelCandidate>? candidates, String? candidatesRankedBy}) => ModelCard(
-      modelName: 'score-margin',
+ModelCard _regressorCard({List<ModelCandidate>? candidates, String? candidatesRankedBy, String modelName = 'score-margin'}) => ModelCard(
+      modelName: modelName,
       algorithm: 'xgboost',
       version: 2,
       trainedAt: '2026-01-01T00:00:00Z',
@@ -41,6 +41,22 @@ ModelCard _regressorCard({List<ModelCandidate>? candidates, String? candidatesRa
     );
 
 void main() {
+  testWidgets('VS BASELINE uses the same relative-percentage format for a classifier and a regressor', (tester) async {
+    // Previously the classifier showed a percentage-POINT lift ("+6.2
+    // PTS") while every regressor showed a relative percentage ("23%
+    // BETTER") under the identical "VS BASELINE" label -- a real
+    // inconsistency a user reported live. accuracy=0.63 vs
+    // naiveBaselineAccuracy=0.57 -> (0.63-0.57)/0.57*100 ~= 10.5% -> "11%".
+    await _pump(tester, _classifierCard());
+    expect(find.text('+11% BETTER'), findsOneWidget);
+  });
+
+  testWidgets('VS BASELINE for a regressor is also a relative percentage', (tester) async {
+    // mae=7.4 vs naiveBaselineMae=9.6 -> (9.6-7.4)/9.6*100 ~= 22.9% -> "23%".
+    await _pump(tester, _regressorCard());
+    expect(find.text('+23% BETTER'), findsOneWidget);
+  });
+
   testWidgets('hides the comparison section when no candidates were recorded', (tester) async {
     await _pump(tester, _classifierCard());
 
@@ -79,15 +95,13 @@ void main() {
     expect(find.text('58.0%'), findsOneWidget);
     // Never renders the raw log_loss anywhere in the comparison.
     expect(find.text('0.65'), findsNothing);
-    // Names the metric that actually decided the ranking, since it isn't
-    // the percentage shown per row.
-    expect(find.text('Ranked by log loss, not the value shown'), findsOneWidget);
   });
 
-  testWidgets('shows every candidate as a +/- error range for a regressor', (tester) async {
+  testWidgets('shows every candidate as a +/- error range with its unit for a regressor', (tester) async {
     await _pump(
       tester,
       _regressorCard(
+        modelName: 'score-margin',
         candidatesRankedBy: 'rmse',
         candidates: const [
           ModelCandidate(algorithm: 'xgboost', score: 7.4, rankScore: 9.8),
@@ -96,10 +110,26 @@ void main() {
       ),
     );
 
-    expect(find.text('±7.4'), findsOneWidget);
-    expect(find.text('±9.1'), findsOneWidget);
+    expect(find.text('±7.4 PTS'), findsOneWidget);
+    expect(find.text('±9.1 PTS'), findsOneWidget);
     expect(find.text('ElasticNet'), findsOneWidget);
-    expect(find.text('Ranked by RMSE, not the value shown'), findsOneWidget);
+  });
+
+  testWidgets('uses the unit matching the target stat for a player-prop model', (tester) async {
+    await _pump(
+      tester,
+      _regressorCard(
+        modelName: 'player-prop-passing-yards',
+        candidatesRankedBy: 'rmse',
+        candidates: const [
+          ModelCandidate(algorithm: 'xgboost', score: 24.6, rankScore: 31.2),
+          ModelCandidate(algorithm: 'mlp_regressor', score: 27.1, rankScore: 33.5),
+        ],
+      ),
+    );
+
+    expect(find.text('±24.6 YDS'), findsOneWidget);
+    expect(find.text('±27.1 YDS'), findsOneWidget);
   });
 
   testWidgets('marks the currently promoted algorithm', (tester) async {
@@ -116,17 +146,5 @@ void main() {
 
     expect(find.text('PROMOTED'), findsOneWidget);
     expect(find.text('Random Forest'), findsOneWidget);
-  });
-
-  testWidgets('falls back to a generic phrase when candidatesRankedBy is missing', (tester) async {
-    await _pump(
-      tester,
-      _classifierCard(candidates: const [
-        ModelCandidate(algorithm: 'xgboost', score: 0.63, rankScore: 0.65),
-        ModelCandidate(algorithm: 'logistic_regression', score: 0.58, rankScore: 0.71),
-      ]),
-    );
-
-    expect(find.text('Ranked by a different metric, not the value shown'), findsOneWidget);
   });
 }

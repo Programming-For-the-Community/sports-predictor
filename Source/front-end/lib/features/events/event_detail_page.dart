@@ -14,6 +14,17 @@ import '../../static/nfl_team_colors.dart';
 /// `EventPrediction.leaders` stays nullable since it's a best-effort field
 /// server-side (see handler.py's _predict_event_leaders): the panel simply
 /// doesn't render if the backend couldn't compute it for a given event.
+///
+/// A completed event does NOT call the live prediction endpoint -- same
+/// rule game_row.dart's own docstring already documents for the list
+/// view, which this page previously didn't follow: a fresh "live"
+/// prediction for an already-played game is built from rolling stats
+/// that may already include this game's own now-normalized result,
+/// making it a misleading, circular-looking number, not an honest
+/// pre-game prediction. Completed games instead use
+/// event.predictionComparison, the prediction actually logged before the
+/// game was played (already fetched as part of the completed events
+/// list, no extra request needed) -- see MatchupResultHero.
 class EventDetailPage extends ConsumerWidget {
   const EventDetailPage({super.key, required this.sportId, required this.eventId});
 
@@ -34,53 +45,58 @@ class EventDetailPage extends ConsumerWidget {
     // checked rather than assuming 'scheduled'.
     final scheduledAsync = ref.watch(eventsListProvider((sport: sportId, status: 'scheduled')));
     final completedAsync = ref.watch(eventsListProvider((sport: sportId, status: 'completed')));
-    final predictionAsync = ref.watch(eventPredictionProvider((sport: sportId, eventId: eventId)));
+
+    if (scheduledAsync.isLoading || completedAsync.isLoading) {
+      return const Center(child: CircularProgressIndicator());
+    }
+    // Surface a real error instead of silently treating it as "no
+    // events" and misreporting "Event not found" for what might be a
+    // session/network failure.
+    if (scheduledAsync.hasError) {
+      return Text('Couldn\'t load events: ${scheduledAsync.error}', style: AppTextStyles.body(color: AppColors.neg));
+    }
+    if (completedAsync.hasError) {
+      return Text('Couldn\'t load events: ${completedAsync.error}', style: AppTextStyles.body(color: AppColors.neg));
+    }
+
+    final scheduled = scheduledAsync.value ?? const <SportEvent>[];
+    final completed = completedAsync.value ?? const <SportEvent>[];
+    final event = _findEvent(scheduled) ?? _findEvent(completed);
+
+    if (event == null) {
+      return Text('Event not found.', style: AppTextStyles.body(color: AppColors.neg));
+    }
+
+    if (event.status == 'completed') {
+      return SingleChildScrollView(
+        padding: const EdgeInsets.all(24),
+        child: MatchupResultHero(event: event, comparison: event.predictionComparison),
+      );
+    }
 
     return SingleChildScrollView(
       padding: const EdgeInsets.all(24),
-      child: predictionAsync.when(
-        data: (prediction) {
-          if (scheduledAsync.isLoading || completedAsync.isLoading) {
-            return const Center(child: CircularProgressIndicator());
-          }
-          // Loading is already handled above, so by this point each of
-          // these is either data or error -- surface a real error instead
-          // of silently treating it as "no events" and misreporting
-          // "Event not found" for what might be a session/network failure.
-          if (scheduledAsync.hasError) {
-            return Text('Couldn\'t load events: ${scheduledAsync.error}', style: AppTextStyles.body(color: AppColors.neg));
-          }
-          if (completedAsync.hasError) {
-            return Text('Couldn\'t load events: ${completedAsync.error}', style: AppTextStyles.body(color: AppColors.neg));
-          }
-
-          final scheduled = scheduledAsync.value ?? const <SportEvent>[];
-          final completed = completedAsync.value ?? const <SportEvent>[];
-          final event = _findEvent(scheduled) ?? _findEvent(completed);
-
-          if (event == null) {
-            return Text('Event not found.', style: AppTextStyles.body(color: AppColors.neg));
-          }
-
-          final leaders = prediction.leaders;
-          return Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              MatchupHero(event: event, prediction: prediction),
-              if (leaders != null) ...[
-                const SizedBox(height: 20),
-                TeamLeadersPanel(
-                  homeAbbr: nflTeam(event.home.entityId).abbreviation,
-                  awayAbbr: nflTeam(event.away.entityId).abbreviation,
-                  leaders: leaders,
-                ),
-              ],
-            ],
-          );
-        },
-        loading: () => const Center(child: CircularProgressIndicator()),
-        error: (error, _) => Text('Couldn\'t load prediction: $error', style: AppTextStyles.body(color: AppColors.neg)),
-      ),
+      child: ref.watch(eventPredictionProvider((sport: sportId, eventId: eventId))).when(
+            data: (prediction) {
+              final leaders = prediction.leaders;
+              return Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  MatchupHero(event: event, prediction: prediction),
+                  if (leaders != null) ...[
+                    const SizedBox(height: 20),
+                    TeamLeadersPanel(
+                      homeAbbr: nflTeam(event.home.entityId).abbreviation,
+                      awayAbbr: nflTeam(event.away.entityId).abbreviation,
+                      leaders: leaders,
+                    ),
+                  ],
+                ],
+              );
+            },
+            loading: () => const Center(child: CircularProgressIndicator()),
+            error: (error, _) => Text('Couldn\'t load prediction: $error', style: AppTextStyles.body(color: AppColors.neg)),
+          ),
     );
   }
 }

@@ -76,9 +76,9 @@ class GameRow extends ConsumerWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  _TeamLine(color: home.primary, abbr: home.abbreviation, score: event.home.result?.score),
+                  _TeamLine(color: home.primary, abbr: home.abbreviation, role: 'H', score: event.home.result?.score),
                   const SizedBox(height: 4),
-                  _TeamLine(color: away.primary, abbr: away.abbreviation, score: event.away.result?.score),
+                  _TeamLine(color: away.primary, abbr: away.abbreviation, role: 'A', score: event.away.result?.score),
                 ],
               ),
             ),
@@ -155,9 +155,10 @@ class _ComparisonSummary extends StatelessWidget {
 }
 
 class _TeamLine extends StatelessWidget {
-  const _TeamLine({required this.color, required this.abbr, this.score});
+  const _TeamLine({required this.color, required this.abbr, required this.role, this.score});
   final Color color;
   final String abbr;
+  final String role; // 'H' or 'A' -- kept to a single letter, this row is compact
   final double? score;
 
   @override
@@ -168,6 +169,8 @@ class _TeamLine extends StatelessWidget {
         Container(width: 8, height: 8, decoration: BoxDecoration(shape: BoxShape.circle, color: color)),
         const SizedBox(width: 8),
         Text(abbr, style: AppTextStyles.body(color: AppColors.ink)),
+        const SizedBox(width: 4),
+        Text(role, style: AppTextStyles.microLabel(color: AppColors.inkMute)),
         if (score != null) ...[
           const SizedBox(width: 8),
           Text(score!.toStringAsFixed(0), style: AppTextStyles.metricValue(color: AppColors.ink)),

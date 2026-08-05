@@ -300,6 +300,34 @@ class TestFilterDepthChart:
     def test_empty_when_no_positions_key(self):
         assert nfl_ingest._filter_depth_chart({}) == {}
 
+    def test_trims_each_athlete_down_to_just_id(self):
+        # Confirmed live: ESPN's real athlete objects carry ~289KB/team of
+        # link metadata (player card, stats, splits, game log, news, bio,
+        # each with web + sportscenter:// variants) this project never
+        # reads -- only "id" may survive into what gets stored.
+        raw = {
+            "positions": {
+                "qb": {
+                    "position": {"abbreviation": "QB", "name": "Quarterback", "id": "8"},
+                    "athletes": [{
+                        "id": "1", "uid": "s:20~l:28~a:1", "guid": "abc",
+                        "links": [{"rel": ["playercard"], "href": "https://espn.com/..."}],
+                    }],
+                },
+            },
+        }
+
+        result = nfl_ingest._filter_depth_chart(raw)
+
+        assert result == {"qb": {"position": {"abbreviation": "QB"}, "athletes": [{"id": "1"}]}}
+
+    def test_athlete_missing_id_is_dropped(self):
+        raw = {"positions": {"qb": {"position": {"abbreviation": "QB"}, "athletes": [{"noId": "x"}]}}}
+
+        result = nfl_ingest._filter_depth_chart(raw)
+
+        assert result == {"qb": {"position": {"abbreviation": "QB"}, "athletes": []}}
+
 
 class TestEnrichEvents:
     def test_attaches_coach_injuries_and_depth_chart_to_home_and_away(self):

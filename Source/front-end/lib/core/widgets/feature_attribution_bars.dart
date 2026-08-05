@@ -43,17 +43,31 @@ class _FeatureBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // Flex-based, not fixed pixel widths -- a fixed SizedBox wide enough
+    // for a long feature name (e.g. "away_coach_season_win_pct") either
+    // overflows a narrow phone-width card or forces the card wider than
+    // it should ever need to be just to fit that one row. Expanded
+    // shares whatever width the card actually has proportionally, so
+    // this scales down gracefully on a small screen instead of doing
+    // either of those -- the Tooltip is what covers a name that still
+    // doesn't fully fit at any given width, not a wider fixed column.
     return Row(
       children: [
-        SizedBox(
-          width: 160,
-          child: Text(
-            feature.feature,
-            style: AppTextStyles.microLabel(color: AppColors.inkSub),
-            overflow: TextOverflow.ellipsis,
+        Expanded(
+          flex: 3,
+          child: Tooltip(
+            message: feature.feature,
+            child: Text(
+              feature.feature,
+              style: AppTextStyles.microLabel(color: AppColors.inkSub),
+              overflow: TextOverflow.ellipsis,
+              maxLines: 1,
+            ),
           ),
         ),
+        const SizedBox(width: 10),
         Expanded(
+          flex: 4,
           child: ClipRRect(
             borderRadius: BorderRadius.circular(999),
             child: SizedBox(
@@ -71,11 +85,13 @@ class _FeatureBar extends StatelessWidget {
           ),
         ),
         const SizedBox(width: 10),
-        SizedBox(
-          width: 56,
+        Expanded(
+          flex: 2,
           child: Text(
             feature.importance.toStringAsFixed(2),
             textAlign: TextAlign.right,
+            overflow: TextOverflow.ellipsis,
+            maxLines: 1,
             style: AppTextStyles.metricValue(color: AppColors.cyan),
           ),
         ),

@@ -22,18 +22,23 @@
 # Gateway, no ECR VPC Interface Endpoints, so a private subnet can't pull
 # this task's image).
 #
-# Wednesday 11:00 UTC -- one hour after the Wednesday ingest run (10:00
-# UTC, see scheduler-nfl-ingest.tf), so this always reads a complete
-# week's data rather than racing a still-in-progress ingest run. Ingest
-# itself finishes in well under a minute at this data volume (and
+# Daily at 11:00 UTC -- one hour after that day's ingest run (now also
+# daily at 10:00 UTC, see scheduler-nfl-ingest.tf's own comment on why
+# ingest moved off a Tue/Wed-only cadence), so this always reads a
+# complete day's data rather than racing a still-in-progress ingest run.
+# Ingest itself finishes in well under a minute at this data volume (and
 # normalize's own fan-out work is a handful of fast DynamoDB writes), so
-# one hour is still generous margin, not a tight dependency.
+# one hour is still generous margin, not a tight dependency. Matches
+# ingest's own daily cadence so a same-day training run (whether the
+# scheduled Wednesday retrain or a manual one) always has the freshest
+# coach/injury/depth-chart data flowing through, not just whatever the
+# most recent Tue/Wed ingest happened to capture.
 resource "aws_scheduler_schedule" "nfl_feature_engineering" {
   name        = "${var.project}-nfl-feature-engineering"
-  description = "Rebuilds NFL training datasets (Aug-Feb, Wed 11:00 UTC, after that day's ingest run)"
+  description = "Rebuilds NFL training datasets (Aug-Feb, daily 11:00 UTC, after that day's ingest run)"
   group_name  = aws_scheduler_schedule_group.sports_predictor.name
 
-  schedule_expression          = "cron(0 11 ? 8-12,1-2 WED *)"
+  schedule_expression          = "cron(0 11 ? 8-12,1-2 * *)"
   schedule_expression_timezone = "UTC"
 
   flexible_time_window {

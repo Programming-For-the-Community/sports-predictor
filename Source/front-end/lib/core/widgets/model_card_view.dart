@@ -25,29 +25,42 @@ class ModelCardView extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(
+          // Title on its own full-width line(s), badges wrapped below --
+          // a Row with both competing for width was truncating the title
+          // even after the max-1-line ellipsis "fix" earlier (that only
+          // stopped the RenderFlex overflow crash, it didn't make the
+          // full name visible). maxLines: 2 covers every real model name
+          // this project has; the Tooltip is a safety net for names that
+          // still don't fit, so the full name is never truly unreachable.
+          Tooltip(
+            message: _displayName(model.modelName),
+            child: Text(
+              _displayName(model.modelName),
+              style: AppTextStyles.cardTitle(),
+              overflow: TextOverflow.ellipsis,
+              maxLines: 2,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
             children: [
-              Expanded(
-                child: Text(
-                  _displayName(model.modelName),
-                  style: AppTextStyles.cardTitle(),
-                  overflow: TextOverflow.ellipsis,
-                  maxLines: 1,
-                ),
-              ),
-              const SizedBox(width: 8),
               _Badge(text: model.algorithm.toUpperCase()),
-              const SizedBox(width: 8),
               _Badge(text: 'v${model.version}'),
             ],
           ),
           const SizedBox(height: 18),
-          Row(
+          // Wrap, not a plain Row -- an unconstrained Row of _MetricStats
+          // has no flexible children, so a wide value string ("+23%
+          // BETTER"/"-100.0 PTS") could overflow it outright on a narrow
+          // phone-width card. Wrap reflows onto a second line instead of
+          // overflowing, same fix as the badges below.
+          Wrap(
+            spacing: 32,
+            runSpacing: 12,
             children: [
-              for (final metric in _metrics()) ...[
-                _MetricStat(label: metric.$1, value: metric.$2),
-                const SizedBox(width: 32),
-              ],
+              for (final metric in _metrics()) _MetricStat(label: metric.$1, value: metric.$2),
             ],
           ),
           const SizedBox(height: 20),
@@ -57,20 +70,13 @@ class ModelCardView extends StatelessWidget {
           if ((model.candidates?.length ?? 0) > 1) ...[
             const SizedBox(height: 20),
             Text('COMPARED AGAINST', style: AppTextStyles.microLabel()),
-            const SizedBox(height: 4),
-            // Candidates are ranked by rank_score (log_loss/rmse), not by
-            // the score value shown per row -- without this line, a
-            // candidate with a higher displayed score sitting below the
-            // promoted one looks like a bug rather than a real, common
-            // outcome (better raw accuracy doesn't always mean
-            // better-calibrated probabilities). See ModelCandidate's own
-            // docs in model_card.dart.
-            Text(
-              'Ranked by ${_metricLabel(model.candidatesRankedBy)}, not the value shown',
-              style: AppTextStyles.body(color: AppColors.inkMute),
-            ),
             const SizedBox(height: 8),
-            _CandidateComparison(candidates: model.candidates!, currentAlgorithm: model.algorithm, isClassifier: model.isClassifier),
+            _CandidateComparison(
+              candidates: model.candidates!,
+              currentAlgorithm: model.algorithm,
+              isClassifier: model.isClassifier,
+              unit: _unitLabel(model.modelName),
+            ),
           ],
         ],
       ),
@@ -99,35 +105,39 @@ class ModelCardView extends StatelessWidget {
     ];
   }
 
-  /// "log loss" / "rmse" -- human-cased for the caption above the
-  /// candidate list. Falls back to a generic phrase for any card
-  /// predating candidatesRankedBy, or an unrecognized metric name (new
-  /// gate metrics land in code before they'd ever reach this UI, so this
-  /// is a defensive fallback, not an expected path).
-  String _metricLabel(String? metricKey) {
-    switch (metricKey) {
-      case 'log_loss':
-        return 'log loss';
-      case 'rmse':
-        return 'RMSE';
-      default:
-        return 'a different metric';
-    }
+  /// Unit for a regressor candidate's +/- value in the comparison list
+  /// (e.g. "±7.4 YDS") -- without it, "±7.4" doesn't say whether that's
+  /// yards, touchdowns, or sacks, which matters since this card could be
+  /// showing any of the seven player-prop stats or a score target.
+  /// Pattern-matched on modelName rather than an exhaustive per-stat
+  /// switch, so a future player-prop stat whose name contains "yards"/
+  /// "touchdowns"/"sacks" (the only units this project's targets use)
+  /// picks up the right label with no change needed here.
+  String _unitLabel(String modelName) {
+    if (modelName.contains('yards')) return 'YDS';
+    if (modelName.contains('touchdowns')) return 'TDS';
+    if (modelName.contains('sacks')) return 'SACKS';
+    return 'PTS'; // score-margin / home-score / away-score
   }
 
-  /// "+6.2 PTS" (classifier: percentage-point lift over always picking the
-  /// home team) or "23% BETTER" (regressor: relative reduction in average
-  /// miss versus predicting the rolling average) -- '--' if either value
-  /// is missing, which happens for any model card trained before these
-  /// baseline fields existed.
+  /// Always "+X% BETTER" (or "-X% WORSE" in the rare case a promoted
+  /// card's own baseline comparison went slightly negative) -- same
+  /// relative-improvement formula for every card type, classifier or
+  /// regressor: how much better the actual value is than the baseline,
+  /// as a fraction of the baseline itself. Previously the classifier
+  /// showed a percentage-POINT lift ("+6.2 PTS") while every regressor
+  /// showed a relative percentage ("23% BETTER") -- two different units
+  /// under the identical "VS BASELINE" label read as a real
+  /// inconsistency, not two deliberately different metrics. '--' if
+  /// either value is missing, which happens for any model card trained
+  /// before these baseline fields existed.
   String _vsBaseline(double? actual, double? baseline, {required bool higherIsBetter}) {
     if (actual == null || baseline == null || baseline == 0) return '--';
-    if (higherIsBetter) {
-      final points = (actual - baseline) * 100;
-      return '${points >= 0 ? '+' : ''}${points.toStringAsFixed(1)} PTS';
-    }
-    final improvement = (baseline - actual) / baseline * 100;
-    return '${improvement >= 0 ? '+' : ''}${improvement.toStringAsFixed(0)}% BETTER';
+    final relativeChange = higherIsBetter
+        ? (actual - baseline) / baseline * 100 // classifier: relative lift in accuracy
+        : (baseline - actual) / baseline * 100; // regressor: relative reduction in error
+    final label = relativeChange >= 0 ? 'BETTER' : 'WORSE';
+    return '${relativeChange >= 0 ? '+' : ''}${relativeChange.toStringAsFixed(0)}% $label';
   }
 }
 
@@ -138,11 +148,14 @@ class ModelCardView extends StatelessWidget {
 /// still carry the real evaluation numbers for anyone who wants them
 /// (see model_card.dart), this widget just never renders those directly.
 class _CandidateComparison extends StatelessWidget {
-  const _CandidateComparison({required this.candidates, required this.currentAlgorithm, required this.isClassifier});
+  const _CandidateComparison({
+    required this.candidates, required this.currentAlgorithm, required this.isClassifier, required this.unit,
+  });
 
   final List<ModelCandidate> candidates;
   final String currentAlgorithm;
   final bool isClassifier;
+  final String unit;
 
   static const _algorithmLabels = {
     'xgboost': 'XGBoost',
@@ -162,7 +175,9 @@ class _CandidateComparison extends StatelessWidget {
         for (final candidate in candidates) ...[
           _CandidateRow(
             label: _algorithmLabels[candidate.algorithm] ?? candidate.algorithm,
-            value: isClassifier ? '${(candidate.score * 100).toStringAsFixed(1)}%' : '±${candidate.score.toStringAsFixed(1)}',
+            value: isClassifier
+                ? '${(candidate.score * 100).toStringAsFixed(1)}%'
+                : '±${candidate.score.toStringAsFixed(1)} $unit',
             isCurrent: candidate.algorithm == currentAlgorithm,
           ),
           const SizedBox(height: 8),
