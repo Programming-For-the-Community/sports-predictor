@@ -60,7 +60,7 @@ data "aws_iam_policy_document" "stepfunctions_orchestrator_permissions" {
   statement {
     sid       = "ManageEcsSyncEventRule"
     actions   = ["events:PutTargets", "events:PutRule", "events:DescribeRule"]
-    resources = ["arn:aws:events:${var.region}:${var.account_id}:rule/StepFunctionsGetEventForECSTaskRule"]
+    resources = ["arn:aws:events:${var.region}:${var.account_id}:rule/StepFunctionsGetEventsForECSTaskRule"]
   }
 }
 
