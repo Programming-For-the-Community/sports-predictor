@@ -37,30 +37,27 @@ class MatchupHero extends StatelessWidget {
             children: [
               Expanded(
                 child: _TeamColumn(
-                  color: home.primary,
-                  abbr: home.abbreviation,
-                  role: 'HOME',
-                  probability: prediction.homeWinProbability,
-                  favored: homeFavored,
-                ),
-              ),
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 16),
-                // Deliberately just "vs", not "@" -- "@" conventionally
-                // reads as "away @ home" in American sports (the away
-                // team is the one traveling), but this column order is
-                // home-then-away, which "@" would misleadingly reverse.
-                // Each team's own HOME/AWAY label above is the real,
-                // unambiguous signal either way.
-                child: Text('vs', style: AppTextStyles.sectionTitle(color: AppColors.inkMute)),
-              ),
-              Expanded(
-                child: _TeamColumn(
                   color: away.primary,
                   abbr: away.abbreviation,
                   role: 'AWAY',
                   probability: 1 - prediction.homeWinProbability,
                   favored: !homeFavored,
+                ),
+              ),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+                // "@" reads as "away @ home" in American sports (the away
+                // team is the one traveling) -- away is the LEFT column
+                // above specifically so this ordering matches that.
+                child: Text('@', style: AppTextStyles.sectionTitle(color: AppColors.inkMute)),
+              ),
+              Expanded(
+                child: _TeamColumn(
+                  color: home.primary,
+                  abbr: home.abbreviation,
+                  role: 'HOME',
+                  probability: prediction.homeWinProbability,
+                  favored: homeFavored,
                 ),
               ),
             ],

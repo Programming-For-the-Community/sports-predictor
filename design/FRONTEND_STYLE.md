@@ -124,9 +124,9 @@ labels are UPPERCASE mono.
   `translateY(-2px)` and brightens the border to cyan. Inactive (model not live) cards are
   non-interactive with a muted "VIEW-ONLY" CTA.
 - **Game row (list)** — full-width rounded card, `display:flex; flex-wrap:wrap`, with a 4px
-  **left accent bar in the favored team's color**. Slot (mono) · two stacked team lines (color
-  dot + abbr + mono record; favored team is `--ink`/600, underdog `--ink-sub`/400) · a
-  win-probability split bar · margin (18px 700) · a confidence pill. Hover brightens + lifts 1px.
+  **left accent bar in the favored team's color**. Slot (mono) · a single team line (color dot +
+  abbr + score per side, "away `@` home") · a win-probability split bar · margin (18px 700) · a
+  confidence pill. Hover brightens + lifts 1px.
 - **Matchup hero (detail)** — gradient-tinted panel, two columns of team + record + big
   percentage (favored side gradient-clipped cyan), an `@` pill between, a 12px split bar, then a
   Pick / Pred margin / Pred total stat trio.

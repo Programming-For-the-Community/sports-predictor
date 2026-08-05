@@ -20,7 +20,14 @@ import 'api_exception.dart';
 class ApiClient {
   ApiClient(this._ref, {http.Client? httpClient}) : _httpClient = httpClient ?? http.Client();
 
-  static const _timeout = Duration(seconds: 15);
+  // 30s, not 15s -- API Gateway's integration timeout for every route here
+  // is a hard 29s (see Terraform/lambda-nfl-predict.tf), so a 15s client
+  // timeout was giving up before the backend's own authoritative response
+  // (success OR its 504) could ever arrive, most visibly on /nfl/season
+  // (its multi-model leaderboard computation routinely ran 26-29s). 30s
+  // gives just enough margin to actually observe that 504 instead of
+  // masking it with a misleading client-side "timed out" message.
+  static const _timeout = Duration(seconds: 30);
 
   final Ref _ref;
   final http.Client _httpClient;

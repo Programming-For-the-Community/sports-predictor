@@ -354,54 +354,76 @@ def _leaderboards(storage: FeatureStorage, s3, model_cache: dict, season_inputs:
     for row in season_player_stats:
         player_team.setdefault(row["entity_id"], row.get("team_id"))
 
+    # Current-season totals for every stat, computed first and entirely
+    # from season_player_stats (already fetched once above) -- no storage
+    # calls here, so the full cross-stat candidate set is known before any
+    # live feature row gets built below.
+    current_totals_by_stat: dict[str, dict[str, float]] = {stat: {} for stat in PLAYER_PROP_STATS}
+    for row in season_player_stats:
+        entity_id = row["entity_id"]
+        stat_line = row.get("stat_line", {})
+        for stat in PLAYER_PROP_STATS:
+            value = stat_line.get(stat)
+            if value is not None:
+                totals = current_totals_by_stat[stat]
+                totals[entity_id] = totals.get(entity_id, 0) + value
+
+    # A candidate who records more than one tracked stat (nearly every real
+    # QB shows up in both passing_yards and passing_touchdowns; a
+    # dual-threat QB or receiving RB shows up across even more) used to get
+    # a fresh build_live_player_features call -- and its own
+    # get_event/get_entity/get_player_game_stats round-trips -- once PER
+    # STAT it appeared in. build_live_player_features returns every stat
+    # category's rolling averages in one row regardless of which model
+    # later reads it, so there's nothing stat-specific to redo: building
+    # this UNION of candidates once, up front, and reusing the same row for
+    # every stat's projection is what actually fixes this route's chronic
+    # 26-29s duration against the Lambda's own 29s timeout -- confirmed
+    # live via CloudWatch that get_event/get_entity/get_player_game_stats
+    # were each being re-fetched once per stat for the same repeat players,
+    # on top of what current_ratings/team_last_event_dates below already
+    # save (those two, reused from _season_standings_inputs, avoid a
+    # separate full-history Elo recompute per candidate).
+    all_candidates = {entity_id for totals in current_totals_by_stat.values() for entity_id in totals}
+
+    def _build_row(entity_id: str) -> tuple[str, dict | None]:
+        next_event_key = season_inputs["team_next_event"].get(player_team.get(entity_id))
+        if next_event_key is None:
+            return entity_id, None
+        try:
+            feature_row = live_features.build_live_player_features(
+                storage, SPORT, next_event_key, entity_id,
+                current_ratings=season_inputs["current_ratings"],
+                team_last_event_dates=season_inputs["team_last_completed_date"],
+            )
+            return entity_id, feature_row
+        except live_features.EventNotFoundError:
+            return entity_id, None
+        except Exception:
+            logger.exception("Failed to build live features for %s", entity_id)
+            return entity_id, None
+
+    feature_row_cache: dict[str, dict] = {}
+    with ThreadPoolExecutor(max_workers=max(1, min(len(all_candidates), 10))) as executor:
+        for entity_id, feature_row in executor.map(_build_row, all_candidates):
+            if feature_row is not None:
+                feature_row_cache[entity_id] = feature_row
+
     leaderboards: dict[str, list[dict]] = {}
     for stat in PLAYER_PROP_STATS:
-        current_totals: dict[str, float] = {}
-        for row in season_player_stats:
-            value = row.get("stat_line", {}).get(stat)
-            if value is not None:
-                entity_id = row["entity_id"]
-                current_totals[entity_id] = current_totals.get(entity_id, 0) + value
-
+        current_totals = current_totals_by_stat[stat]
         model_name = _model_name_to_prop(stat)
-        per_game_projections: dict[str, float] = {}
         try:
             booster, model_card = _get_cached_model(model_cache, s3, model_name)
         except model_loader.NoPromotedModelError:
             booster = None
 
-        # Loading the model once above (single-threaded, before fan-out)
-        # avoids a check-then-set race in _get_cached_model's dict if
-        # candidates for the same stat resolved it concurrently instead.
-        # current_ratings/team_last_event_dates reuse what
-        # _season_standings_inputs already computed once for the whole
-        # request -- without them, build_live_player_features would redo
-        # a full-history Elo recompute per candidate per stat, which is
-        # what actually blew this route's 29s budget (confirmed live via
-        # CloudWatch: every /nfl/season request here was timing out).
+        per_game_projections: dict[str, float] = {}
         if booster is not None:
-            def _project(entity_id: str) -> tuple[str, float] | None:
-                next_event_key = season_inputs["team_next_event"].get(player_team.get(entity_id))
-                if next_event_key is None:
-                    return None
-                try:
-                    feature_row = live_features.build_live_player_features(
-                        storage, SPORT, next_event_key, entity_id,
-                        current_ratings=season_inputs["current_ratings"],
-                        team_last_event_dates=season_inputs["team_last_completed_date"],
-                    )
-                    return entity_id, model_loader.predict(booster, model_card, feature_row)
-                except live_features.EventNotFoundError:
-                    return None
-                except Exception:
-                    logger.exception("Failed to project %s for %s", stat, entity_id)
-                    return None
-
-            with ThreadPoolExecutor(max_workers=max(1, min(len(current_totals), 10))) as executor:
-                for result in executor.map(_project, current_totals):
-                    if result is not None:
-                        entity_id, value = result
-                        per_game_projections[entity_id] = value
+            for entity_id in current_totals:
+                feature_row = feature_row_cache.get(entity_id)
+                if feature_row is not None:
+                    per_game_projections[entity_id] = model_loader.predict(booster, model_card, feature_row)
 
         games_remaining = {
             entity_id: season_inputs["games_remaining"].get(player_team.get(entity_id), 0)

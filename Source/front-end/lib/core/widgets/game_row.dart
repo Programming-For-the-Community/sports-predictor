@@ -72,14 +72,9 @@ class GameRow extends ConsumerWidget {
             ),
             Expanded(
               flex: 2,
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  _TeamLine(color: home.primary, abbr: home.abbreviation, role: 'H', score: event.home.result?.score),
-                  const SizedBox(height: 4),
-                  _TeamLine(color: away.primary, abbr: away.abbreviation, role: 'A', score: event.away.result?.score),
-                ],
+              child: _MatchupLine(
+                awayColor: away.primary, awayAbbr: away.abbreviation, awayScore: event.away.result?.score,
+                homeColor: home.primary, homeAbbr: home.abbreviation, homeScore: event.home.result?.score,
               ),
             ),
             const SizedBox(width: 16),
@@ -154,26 +149,42 @@ class _ComparisonSummary extends StatelessWidget {
   }
 }
 
-class _TeamLine extends StatelessWidget {
-  const _TeamLine({required this.color, required this.abbr, required this.role, this.score});
-  final Color color;
-  final String abbr;
-  final String role; // 'H' or 'A' -- kept to a single letter, this row is compact
-  final double? score;
+/// Single "away @ home" line -- "@" is the standard American-sports
+/// shorthand for "traveling to" (the away team is always on the left),
+/// so this ordering is the only one "@" reads correctly for.
+class _MatchupLine extends StatelessWidget {
+  const _MatchupLine({
+    required this.awayColor, required this.awayAbbr, this.awayScore,
+    required this.homeColor, required this.homeAbbr, this.homeScore,
+  });
+  final Color awayColor;
+  final String awayAbbr;
+  final double? awayScore;
+  final Color homeColor;
+  final String homeAbbr;
+  final double? homeScore;
 
   @override
   Widget build(BuildContext context) {
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
-        Container(width: 8, height: 8, decoration: BoxDecoration(shape: BoxShape.circle, color: color)),
+        Container(width: 8, height: 8, decoration: BoxDecoration(shape: BoxShape.circle, color: awayColor)),
         const SizedBox(width: 8),
-        Text(abbr, style: AppTextStyles.body(color: AppColors.ink)),
-        const SizedBox(width: 4),
-        Text(role, style: AppTextStyles.microLabel(color: AppColors.inkMute)),
-        if (score != null) ...[
-          const SizedBox(width: 8),
-          Text(score!.toStringAsFixed(0), style: AppTextStyles.metricValue(color: AppColors.ink)),
+        Text(awayAbbr, style: AppTextStyles.body(color: AppColors.ink)),
+        if (awayScore != null) ...[
+          const SizedBox(width: 6),
+          Text(awayScore!.toStringAsFixed(0), style: AppTextStyles.metricValue(color: AppColors.ink)),
+        ],
+        const SizedBox(width: 8),
+        Text('@', style: AppTextStyles.microLabel(color: AppColors.inkMute)),
+        const SizedBox(width: 8),
+        Container(width: 8, height: 8, decoration: BoxDecoration(shape: BoxShape.circle, color: homeColor)),
+        const SizedBox(width: 8),
+        Text(homeAbbr, style: AppTextStyles.body(color: AppColors.ink)),
+        if (homeScore != null) ...[
+          const SizedBox(width: 6),
+          Text(homeScore!.toStringAsFixed(0), style: AppTextStyles.metricValue(color: AppColors.ink)),
         ],
       ],
     );
