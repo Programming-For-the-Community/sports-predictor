@@ -31,32 +31,44 @@ resource "aws_sfn_state_machine" "ingest_orchestrator" {
       "Type": "Task",
       "Resource": "arn:aws:states:::aws-sdk:dynamodb:scan",
       "Parameters": {
-        "TableName": "${aws_dynamodb_table.sport_registry.name}",
-        "FilterExpression": "active = :active",
-        "ExpressionAttributeValues": {
-          ":active": {"BOOL": true}
-        }
+        "TableName": "${aws_dynamodb_table.sport_registry.name}"
       },
       "ResultSelector": {
-        "sports.$": "$.Items[*].sport.S"
+        "items.$": "$.Items"
       },
-      "Next": "ForEachActiveSport"
+      "Next": "ForEachSport"
     },
-    "ForEachActiveSport": {
+    "ForEachSport": {
       "Type": "Map",
-      "ItemsPath": "$.sports",
+      "ItemsPath": "$.items",
       "MaxConcurrency": 5,
       "ItemProcessor": {
         "ProcessorConfig": {
           "Mode": "INLINE"
         },
-        "StartAt": "InvokeIngestLambda",
+        "StartAt": "IsActive",
         "States": {
+          "IsActive": {
+            "Type": "Choice",
+            "Comment": "Filtered here, not in the Scan above -- Step Functions' aws-sdk:dynamodb:scan integration schema rejects a BOOL-typed ExpressionAttributeValue in a FilterExpression.",
+            "Choices": [
+              {
+                "Variable": "$.active.BOOL",
+                "BooleanEquals": true,
+                "Next": "InvokeIngestLambda"
+              }
+            ],
+            "Default": "SportInactive"
+          },
+          "SportInactive": {
+            "Type": "Pass",
+            "End": true
+          },
           "InvokeIngestLambda": {
             "Type": "Task",
             "Resource": "arn:aws:states:::lambda:invoke",
             "Parameters": {
-              "FunctionName.$": "States.Format('${var.project}-{}-ingest', $)"
+              "FunctionName.$": "States.Format('${var.project}-{}-ingest', $.sport.S)"
             },
             "Catch": [
               {
