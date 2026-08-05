@@ -115,7 +115,7 @@ class XGBoostAdapter:
 
 
 # Shared across classifier and regressor -- same search shape
-# train_model.py/train_score_model.py/train_player_prop_model.py each used
+# train_win_probability_model.py/train_score_model.py/train_player_prop_model.py each used
 # independently before this module existed. max_depth floors at 2, not 1:
 # a depth-1 decision stump can't model any feature interaction -- two
 # consecutive real retrains landing on max_depth=1 showed paired features
@@ -500,7 +500,7 @@ class MLPRegressorAdapter(_MLPAdapterBase):
 #
 # 5 algorithm families (xgboost, logistic regression, elastic net, random
 # forest, mlp), 7 registry entries -- see model-training/nfl/
-# train_model.py's CANDIDATES and train_score_model.py/
+# train_win_probability_model.py's CANDIDATES and train_score_model.py/
 # train_player_prop_model.py's own candidate lists for which ones actually
 # compete for which target; not every entry here is necessarily in every
 # target's candidate list.

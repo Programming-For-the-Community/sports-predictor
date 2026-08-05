@@ -57,7 +57,19 @@ class ModelCardView extends StatelessWidget {
           if ((model.candidates?.length ?? 0) > 1) ...[
             const SizedBox(height: 20),
             Text('COMPARED AGAINST', style: AppTextStyles.microLabel()),
-            const SizedBox(height: 12),
+            const SizedBox(height: 4),
+            // Candidates are ranked by rank_score (log_loss/rmse), not by
+            // the score value shown per row -- without this line, a
+            // candidate with a higher displayed score sitting below the
+            // promoted one looks like a bug rather than a real, common
+            // outcome (better raw accuracy doesn't always mean
+            // better-calibrated probabilities). See ModelCandidate's own
+            // docs in model_card.dart.
+            Text(
+              'Ranked by ${_metricLabel(model.candidatesRankedBy)}, not the value shown',
+              style: AppTextStyles.body(color: AppColors.inkMute),
+            ),
+            const SizedBox(height: 8),
             _CandidateComparison(candidates: model.candidates!, currentAlgorithm: model.algorithm, isClassifier: model.isClassifier),
           ],
         ],
@@ -85,6 +97,22 @@ class ModelCardView extends StatelessWidget {
       ('AVG MISS', model.mae?.toStringAsFixed(1) ?? '--'),
       ('VS BASELINE', _vsBaseline(model.mae, model.naiveBaselineMae, higherIsBetter: false)),
     ];
+  }
+
+  /// "log loss" / "rmse" -- human-cased for the caption above the
+  /// candidate list. Falls back to a generic phrase for any card
+  /// predating candidatesRankedBy, or an unrecognized metric name (new
+  /// gate metrics land in code before they'd ever reach this UI, so this
+  /// is a defensive fallback, not an expected path).
+  String _metricLabel(String? metricKey) {
+    switch (metricKey) {
+      case 'log_loss':
+        return 'log loss';
+      case 'rmse':
+        return 'RMSE';
+      default:
+        return 'a different metric';
+    }
   }
 
   /// "+6.2 PTS" (classifier: percentage-point lift over always picking the

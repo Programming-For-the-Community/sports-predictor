@@ -11,7 +11,7 @@
 # plus iam:PassRole on aws_iam_role.ecs_pipeline. No new IAM needed.
 #
 # Slots 2-4 of the 11-task, 30-minute stagger described in
-# scheduler-nfl-train-model.tf (12:30, 13:00, 13:30 UTC) -- each target's
+# scheduler-nfl-train-win-probability-model.tf (12:30, 13:00, 13:30 UTC) -- each target's
 # map value is its own "minute hour" pair, not just the target name,
 # since a set/list for_each has no stable per-item ordering to derive a
 # time offset from. Launching every NFL training task at the same instant

@@ -3,7 +3,7 @@ NFL game score model training -- one model per score target:
 SCORE_TARGET=margin for the game's final margin (home score minus away
 score), SCORE_TARGET=home_score or SCORE_TARGET=away_score for each
 team's actual final score. Reads the exact same event_features.parquet as
-train_model.py -- same feature columns, same chronological split -- and
+train_win_probability_model.py -- same feature columns, same chronological split -- and
 derives whichever label SCORE_TARGET asks for from the already-present
 label_home_score/label_away_score columns at training time. No new
 feature engineering needed for any of the three.
@@ -17,7 +17,7 @@ Terraform/scheduler-nfl-train-score-model.tf, which schedules all three).
 
 Runs every CANDIDATES adapter as a competing candidate against the same
 holdout split via library.ml.backtest.run_backtest, and promotes
-whichever wins on rmse -- see train_model.py's own docstring for the
+whichever wins on rmse -- see train_win_probability_model.py's own docstring for the
 reasoning behind this roster, which mirrors it (same four algorithms,
 this target's regression-capable candidates instead of win-probability's
 classification-capable ones).
@@ -47,7 +47,7 @@ SPORT = "nfl"
 EVENT_FEATURES_KEY = "nfl/training-data/event_features.parquet"
 
 # Identifiers, never model inputs -- same event-level dataset and
-# exclusion set as train_model.py, since this is the same features,
+# exclusion set as train_win_probability_model.py, since this is the same features,
 # different label.
 NON_FEATURE_COLUMNS = {"event_key", "event_date", "home_entity_id", "away_entity_id", "venue_city", "venue_state"}
 LABEL_COLUMN = "label_score_target"

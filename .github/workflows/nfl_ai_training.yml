@@ -4,15 +4,16 @@
 #
 # This stage builds more than one image (see design/ARCHITECTURE.md's
 # "Scheduled Training" subgraph: separate Feature Engineering and Train
-# Model Fargate tasks). Both exist now; a future score-margin or
-# player-prop training task would get its own job here too, shaped
-# exactly like the two below.
+# Win-Probability Model Fargate tasks). Both exist now; a future
+# score-margin or player-prop training task would get its own job here
+# too, shaped exactly like the two below.
 #
 # Each image gets its OWN version constant below, bumped independently --
-# feature engineering and train model are unrelated Fargate tasks with
-# unrelated code, so a change to one has no reason to force a version bump
-# (and a new image tag/deploy) of the other. Bump only the constant for
-# whichever image actually changed, never both just to keep them in sync.
+# feature engineering and train win-probability model are unrelated
+# Fargate tasks with unrelated code, so a change to one has no reason to
+# force a version bump (and a new image tag/deploy) of the other. Bump
+# only the constant for whichever image actually changed, never both just
+# to keep them in sync.
 
 name: NFL AI Training
 
@@ -22,7 +23,7 @@ on:
 
 env:
   FEATURE_ENGINEERING_IMAGE_VERSION: '1.0.0'
-  TRAIN_MODEL_IMAGE_VERSION: '1.0.0'
+  TRAIN_WIN_PROBABILITY_MODEL_IMAGE_VERSION: '1.0.0'
 
 permissions:
   id-token: write
@@ -43,9 +44,9 @@ jobs:
   # writes Parquet, never trains or evaluates a model) -- library/tests/ml/
   # needs those (see library/ml/model_types.py's own imports) and is
   # excluded here rather than bloating this job's install for a component
-  # that doesn't use it. train-model's own job below DOES already have
-  # every one of those (pandas/pyarrow/scikit-learn/xgboost), so it needs
-  # no such exclusion.
+  # that doesn't use it. train-win-probability-model's own job below DOES
+  # already have every one of those (pandas/pyarrow/scikit-learn/xgboost),
+  # so it needs no such exclusion.
   test-feature-engineering:
     name: Run feature engineering tests
     uses: ./.github/workflows/run_python_tests.yml
@@ -53,8 +54,8 @@ jobs:
       test_path: 'Source/tests/library/ Source/tests/feature-engineering/ --ignore=Source/tests/library/ml'
       requirements_files: 'Source/feature-engineering/nfl/requirements.txt'
 
-  test-train-model:
-    name: Run train model tests
+  test-train-win-probability-model:
+    name: Run train win-probability model tests
     uses: ./.github/workflows/run_python_tests.yml
     with:
       test_path: 'Source/tests/library/ Source/tests/model-training/'
@@ -65,12 +66,12 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       feature_engineering_version: ${{ steps.out.outputs.feature_engineering_version }}
-      train_model_version: ${{ steps.out.outputs.train_model_version }}
+      train_win_probability_model_version: ${{ steps.out.outputs.train_win_probability_model_version }}
     steps:
       - id: out
         run: |
           echo "feature_engineering_version=${{ env.FEATURE_ENGINEERING_IMAGE_VERSION }}" >> "$GITHUB_OUTPUT"
-          echo "train_model_version=${{ env.TRAIN_MODEL_IMAGE_VERSION }}" >> "$GITHUB_OUTPUT"
+          echo "train_win_probability_model_version=${{ env.TRAIN_WIN_PROBABILITY_MODEL_IMAGE_VERSION }}" >> "$GITHUB_OUTPUT"
 
   build-feature-engineering-image:
     name: Build and push feature engineering image
@@ -83,13 +84,13 @@ jobs:
       image_name: 'nfl-feature-engineering'
       image_version: ${{ needs.set-versions.outputs.feature_engineering_version }}
 
-  build-train-model-image:
-    name: Build and push train model image
-    needs: [set-versions, test-train-model]
+  build-train-win-probability-model-image:
+    name: Build and push train win-probability model image
+    needs: [set-versions, test-train-win-probability-model]
     uses: ./.github/workflows/docker_build_push.yml
     secrets: inherit
     with:
       dockerfile_path: 'Source/model-training/nfl/Dockerfile'
       docker_context: 'Source'
-      image_name: 'nfl-train-model'
-      image_version: ${{ needs.set-versions.outputs.train_model_version }}
+      image_name: 'nfl-train-win-probability-model'
+      image_version: ${{ needs.set-versions.outputs.train_win_probability_model_version }}

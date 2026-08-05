@@ -15,16 +15,17 @@ algorithm for this target changes as more seasons of data come in, a
 future scheduled run can promote a different one automatically -- no
 code change needed, since every retrain re-runs the full tournament.
 
-Scheduled -- see Terraform/scheduler-nfl-train-model.tf -- but every bit
-as runnable manually via `aws ecs run-task`, same as
-Source/feature-engineering/nfl (see Terraform/ecs-task-nfl-train-model.tf).
+Scheduled -- see Terraform/scheduler-nfl-train-win-probability-model.tf --
+but every bit as runnable manually via `aws ecs run-task`, same as
+Source/feature-engineering/nfl (see
+Terraform/ecs-task-nfl-train-win-probability-model.tf).
 
 Required environment variables:
     MODEL_ARTIFACTS_BUCKET_NAME
     AWS_REGION
 
 Usage:
-    python train_model.py
+    python train_win_probability_model.py
 """
 import logging
 import os

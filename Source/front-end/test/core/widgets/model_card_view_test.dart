@@ -8,7 +8,7 @@ Future<void> _pump(WidgetTester tester, ModelCard model) async {
   await tester.pumpWidget(MaterialApp(home: Scaffold(body: ModelCardView(model: model))));
 }
 
-ModelCard _classifierCard({List<ModelCandidate>? candidates}) => ModelCard(
+ModelCard _classifierCard({List<ModelCandidate>? candidates, String? candidatesRankedBy}) => ModelCard(
       modelName: 'win-probability',
       algorithm: 'xgboost',
       version: 6,
@@ -21,9 +21,10 @@ ModelCard _classifierCard({List<ModelCandidate>? candidates}) => ModelCard(
       mae: null,
       naiveBaselineMae: null,
       candidates: candidates,
+      candidatesRankedBy: candidatesRankedBy,
     );
 
-ModelCard _regressorCard({List<ModelCandidate>? candidates}) => ModelCard(
+ModelCard _regressorCard({List<ModelCandidate>? candidates, String? candidatesRankedBy}) => ModelCard(
       modelName: 'score-margin',
       algorithm: 'xgboost',
       version: 2,
@@ -36,6 +37,7 @@ ModelCard _regressorCard({List<ModelCandidate>? candidates}) => ModelCard(
       mae: 7.4,
       naiveBaselineMae: 9.6,
       candidates: candidates,
+      candidatesRankedBy: candidatesRankedBy,
     );
 
 void main() {
@@ -46,7 +48,10 @@ void main() {
   });
 
   testWidgets('hides the comparison section for a single-candidate run', (tester) async {
-    await _pump(tester, _classifierCard(candidates: const [ModelCandidate(algorithm: 'xgboost', score: 0.63)]));
+    await _pump(
+      tester,
+      _classifierCard(candidates: const [ModelCandidate(algorithm: 'xgboost', score: 0.63, rankScore: 0.65)]),
+    );
 
     expect(find.text('COMPARED AGAINST'), findsNothing);
   });
@@ -54,10 +59,13 @@ void main() {
   testWidgets('shows every candidate as an accuracy percentage for a classifier', (tester) async {
     await _pump(
       tester,
-      _classifierCard(candidates: const [
-        ModelCandidate(algorithm: 'xgboost', score: 0.63),
-        ModelCandidate(algorithm: 'logistic_regression', score: 0.58),
-      ]),
+      _classifierCard(
+        candidatesRankedBy: 'log_loss',
+        candidates: const [
+          ModelCandidate(algorithm: 'xgboost', score: 0.63, rankScore: 0.65),
+          ModelCandidate(algorithm: 'logistic_regression', score: 0.58, rankScore: 0.71),
+        ],
+      ),
     );
 
     expect(find.text('COMPARED AGAINST'), findsOneWidget);
@@ -71,32 +79,54 @@ void main() {
     expect(find.text('58.0%'), findsOneWidget);
     // Never renders the raw log_loss anywhere in the comparison.
     expect(find.text('0.65'), findsNothing);
+    // Names the metric that actually decided the ranking, since it isn't
+    // the percentage shown per row.
+    expect(find.text('Ranked by log loss, not the value shown'), findsOneWidget);
   });
 
   testWidgets('shows every candidate as a +/- error range for a regressor', (tester) async {
     await _pump(
       tester,
-      _regressorCard(candidates: const [
-        ModelCandidate(algorithm: 'xgboost', score: 7.4),
-        ModelCandidate(algorithm: 'elastic_net', score: 9.1),
-      ]),
+      _regressorCard(
+        candidatesRankedBy: 'rmse',
+        candidates: const [
+          ModelCandidate(algorithm: 'xgboost', score: 7.4, rankScore: 9.8),
+          ModelCandidate(algorithm: 'elastic_net', score: 9.1, rankScore: 10.4),
+        ],
+      ),
     );
 
     expect(find.text('±7.4'), findsOneWidget);
     expect(find.text('±9.1'), findsOneWidget);
     expect(find.text('ElasticNet'), findsOneWidget);
+    expect(find.text('Ranked by RMSE, not the value shown'), findsOneWidget);
   });
 
   testWidgets('marks the currently promoted algorithm', (tester) async {
     await _pump(
       tester,
-      _classifierCard(candidates: const [
-        ModelCandidate(algorithm: 'xgboost', score: 0.63),
-        ModelCandidate(algorithm: 'random_forest_classifier', score: 0.60),
-      ]),
+      _classifierCard(
+        candidatesRankedBy: 'log_loss',
+        candidates: const [
+          ModelCandidate(algorithm: 'xgboost', score: 0.63, rankScore: 0.65),
+          ModelCandidate(algorithm: 'random_forest_classifier', score: 0.66, rankScore: 0.68),
+        ],
+      ),
     );
 
     expect(find.text('PROMOTED'), findsOneWidget);
     expect(find.text('Random Forest'), findsOneWidget);
+  });
+
+  testWidgets('falls back to a generic phrase when candidatesRankedBy is missing', (tester) async {
+    await _pump(
+      tester,
+      _classifierCard(candidates: const [
+        ModelCandidate(algorithm: 'xgboost', score: 0.63, rankScore: 0.65),
+        ModelCandidate(algorithm: 'logistic_regression', score: 0.58, rankScore: 0.71),
+      ]),
+    );
+
+    expect(find.text('Ranked by a different metric, not the value shown'), findsOneWidget);
   });
 }

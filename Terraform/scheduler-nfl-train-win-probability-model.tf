@@ -1,5 +1,5 @@
-# EventBridge Scheduler resource that triggers the NFL train-model Fargate
-# task (see Terraform/ecs-task-nfl-train-model.tf for the task itself).
+# EventBridge Scheduler resource that triggers the NFL train-win-probability-model
+# Fargate task (see Terraform/ecs-task-nfl-train-win-probability-model.tf for the task itself).
 # Same shape as scheduler-nfl-feature-engineering.tf -- ECS RunTask target,
 # not a Lambda; the target ARN at the top level is the ECS CLUSTER, and
 # which task definition to run is specified inside ecs_parameters.
@@ -30,8 +30,8 @@
 # a single algorithm -- each task now takes real, not-yet-precisely-
 # measured longer to finish, and 15 minutes was already a tight fit
 # against a single fit's own runtime.
-resource "aws_scheduler_schedule" "nfl_train_model" {
-  name        = "${var.project}-nfl-train-model"
+resource "aws_scheduler_schedule" "nfl_train_win_probability_model" {
+  name        = "${var.project}-nfl-train-win-probability-model"
   description = "Retrains the NFL win-probability model (Aug-Feb, Wed 12:00 UTC, after that day's feature engineering run)"
   group_name  = aws_scheduler_schedule_group.sports_predictor.name
 
@@ -47,7 +47,7 @@ resource "aws_scheduler_schedule" "nfl_train_model" {
     role_arn = aws_iam_role.eventbridge_invoke.arn
 
     ecs_parameters {
-      task_definition_arn = aws_ecs_task_definition.nfl_train_model.arn
+      task_definition_arn = aws_ecs_task_definition.nfl_train_win_probability_model.arn
       launch_type         = "FARGATE"
 
       network_configuration {

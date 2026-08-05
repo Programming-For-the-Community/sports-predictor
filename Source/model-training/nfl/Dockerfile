@@ -12,20 +12,21 @@
 # architectures, so `pip install` still just downloads a wheel; no
 # compiler needed in either stage.
 #
-# One image, three entrypoint scripts (train_model.py for the
-# win-probability target, train_score_model.py for the
+# One image, three entrypoint scripts (train_win_probability_model.py for
+# the win-probability target, train_score_model.py for the
 # margin/home-score/away-score targets, train_player_prop_model.py for
 # every player-prop stat) -- they share every dependency in
 # requirements.txt, so a second image/build job per script would just
-# duplicate this one. CMD picks train_model.py by default; the other two
-# task definitions override the container command to run their own
-# script instead (see Terraform/ecs-task-nfl-train-score-model.tf and
+# duplicate this one. CMD picks train_win_probability_model.py by
+# default; the other two task definitions override the container command
+# to run their own script instead (see
+# Terraform/ecs-task-nfl-train-score-model.tf and
 # Terraform/ecs-task-nfl-train-player-prop-model.tf). All three now run
 # their own multi-algorithm candidate tournament through
 # library/ml/backtest.py (shipped in library/, not copied per-script the
 # way model_common.py used to be) -- there's no separate
-# train_baseline_model.py/task anymore (see train_model.py's own
-# docstring for why), and no model_common.py either.
+# train_baseline_model.py/task anymore (see train_win_probability_model.py's
+# own docstring for why), and no model_common.py either.
 
 FROM python:3.12-slim AS builder
 
@@ -49,10 +50,10 @@ ENV PYTHONPATH=/app/deps \
     PYTHONUNBUFFERED=1
 
 COPY --from=builder /install /app/deps
-COPY model-training/nfl/train_model.py \
+COPY model-training/nfl/train_win_probability_model.py \
      model-training/nfl/train_score_model.py model-training/nfl/train_player_prop_model.py ./
 
 USER train-model
 
 ENTRYPOINT ["python"]
-CMD ["train_model.py"]
+CMD ["train_win_probability_model.py"]

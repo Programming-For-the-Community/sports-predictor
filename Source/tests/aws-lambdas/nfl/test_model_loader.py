@@ -7,7 +7,7 @@ now be asked to serve -- see library/ml/model_types.py's ADAPTERS
 registry, which model_loader.py dispatches through instead of hardcoding
 XGBoost. S3 access itself is mocked; only the model bytes/model_card
 content are real. This is a different concern from model-training's
-"never touch real fitting" tests (see test_train_model.py) -- those exist
+"never touch real fitting" tests (see test_train_win_probability_model.py) -- those exist
 to avoid an expensive hyperparameter search running by accident; this is
 a handful of rows that takes milliseconds and is the actual thing under
 test.

@@ -15,19 +15,31 @@ class ModelFeatureImportance {
 }
 
 /// One algorithm library.ml.backtest.run_backtest tried for this target on
-/// this run, and its own score on whatever metric this card's own gate
-/// metric is (log_loss for a classifier, rmse for a regressor) -- lower is
-/// always better, regardless of task. `score` is a fixed key name on the
-/// wire precisely so this model doesn't need to know which metric it is.
+/// this run. Carries TWO numbers, deliberately not one: `score` is the
+/// same human-readable metric as the card's own top-level accuracy/mae
+/// (easy to eyeball, but NOT what decided the ranking), while `rankScore`
+/// is the value of whatever ModelCard.candidatesRankedBy names (log_loss/
+/// rmse -- always lower-is-better) for this candidate specifically. The
+/// two can disagree in ranking direction -- a candidate with the highest
+/// `score` isn't guaranteed to be first in ModelCard.candidates, because a
+/// better raw accuracy doesn't always mean better-calibrated
+/// probabilities. Confirmed confusing in practice without rankScore
+/// visible: a real run promoted xgboost over a candidate with higher raw
+/// accuracy, because xgboost had the better log_loss -- correct, but
+/// looked like a bug when only `score` was shown. `rankScore` is nullable
+/// since it's absent on any candidate list written before this field
+/// existed (older cards only ever had `score`).
 class ModelCandidate {
-  const ModelCandidate({required this.algorithm, required this.score});
+  const ModelCandidate({required this.algorithm, required this.score, required this.rankScore});
 
   final String algorithm;
   final double score;
+  final double? rankScore;
 
   factory ModelCandidate.fromJson(Map<String, dynamic> json) => ModelCandidate(
         algorithm: json['algorithm'] as String,
         score: (json['score'] as num).toDouble(),
+        rankScore: (json['rank_score'] as num?)?.toDouble(),
       );
 }
 
@@ -45,6 +57,7 @@ class ModelCard {
     required this.mae,
     required this.naiveBaselineMae,
     required this.candidates,
+    required this.candidatesRankedBy,
   });
 
   final String modelName;
@@ -74,6 +87,10 @@ class ModelCard {
   // -- null (not empty) on any model card trained before the backtesting
   // harness existed, distinct from a hypothetical single-candidate run.
   final List<ModelCandidate>? candidates;
+  // Which metric each candidate's rankScore is ("log_loss"/"rmse") -- see
+  // ModelCandidate's own docs for why this needs to be visible at all.
+  // Null alongside candidates on any card predating this field.
+  final String? candidatesRankedBy;
 
   bool get isClassifier => accuracy != null;
 
@@ -94,5 +111,6 @@ class ModelCard {
         candidates: (json['candidates'] as List<dynamic>?)
             ?.map((c) => ModelCandidate.fromJson(c as Map<String, dynamic>))
             .toList(),
+        candidatesRankedBy: json['candidates_ranked_by'] as String?,
       );
 }

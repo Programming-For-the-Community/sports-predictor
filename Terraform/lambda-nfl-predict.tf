@@ -14,7 +14,7 @@
 #
 # image_uri references the shared ECR repo's floating "-latest" tag for
 # this component, same convention ECS task definitions use (see
-# ecs-task-nfl-train-model.tf) -- a floating tag means the URI string
+# ecs-task-nfl-train-win-probability-model.tf) -- a floating tag means the URI string
 # itself never changes between deploys, so (unlike the zip Lambdas'
 # placeholder/ignore_changes dance) there's nothing here for a later
 # `terraform apply` to fight with. The one thing this DOESN'T solve on

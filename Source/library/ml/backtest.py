@@ -46,19 +46,27 @@ def run_backtest(
     every candidate's model card identically so they're all compared
     against the same baseline.
 
-    Writes a full versioned artifact + model card for EVERY candidate
-    (nothing is discarded, matching the existing "held-back versions stay
-    available for review" philosophy) -- each card also carries a
-    `candidates` summary of every algorithm tried this run, ranked
+    Every candidate gets tuned, fit, and evaluated on the identical
+    holdout split, but only the WINNER (best promotion_metric) gets a
+    versioned artifact actually written to S3 -- losing candidates are
+    scored and compared in memory only, never persisted. Deliberately not
+    "keep every candidate around for review": with 4-5 candidates per
+    target and 11 targets retraining weekly, versioning every candidate
+    would mean 40+ new S3 objects a week that are never read again (only
+    the promoted -- or, on a held-back run, the single new best-scoring --
+    version ever gets loaded by anything). The winning card still carries
+    a `candidates` summary of every algorithm tried this run, ranked
     best-first by promotion_metric (the correct scoring rule for deciding
     a winner) but DISPLAYING each one's accuracy (classification) or mae
-    (regression) instead -- human-readable, unlike log_loss/rmse -- so any
-    one of them shows what it competed against. Then promotes whichever
-    candidate scored best on promotion_metric via the existing,
-    algorithm-agnostic training_common.promote_if_better -- the
-    runner-up(s) stay versioned and inspectable, just not promoted.
+    (regression) instead -- human-readable, unlike log_loss/rmse -- so the
+    one artifact that does get saved still shows what it competed against.
+    Then promotes it via the existing, algorithm-agnostic
+    training_common.promote_if_better, same as if only one algorithm had
+    ever been tried.
 
-    Returns {"winner": winner_card, "promoted": bool, "candidates": [card, ...]}.
+    Returns {"winner": winner_card, "promoted": bool, "candidates": [summary, ...]}
+    -- "candidates" here is the lightweight score summary (see above), not
+    full model cards, since no other candidate has one.
     """
     evaluated = []
     for adapter in candidates:
@@ -97,36 +105,50 @@ def run_backtest(
     # highest (accuracy) or lowest (mae) -- the frontend just renders this
     # list in order, with no need to know or encode which direction is
     # better.
+    #
+    # rank_score carries promotion_metric's own value alongside "score" --
+    # without it, a candidate with the highest displayed "score" not
+    # winning looks like a bug (confirmed confusing in practice: a real
+    # run promoted xgboost over a candidate with higher raw accuracy,
+    # because xgboost had the better log_loss, which is what actually
+    # decides -- correct, but invisible in the raw JSON before this
+    # field existed). candidates_ranked_by, alongside the list rather than
+    # repeated per-entry, names which metric rank_score is.
     display_metric = "accuracy" if task == "classification" else "mae"
     ranked = sorted(evaluated, key=lambda e: e["metrics"][promotion_metric])
     candidate_summary = [
-        {"algorithm": e["adapter"].algorithm, "score": e["metrics"][display_metric]}
+        {
+            "algorithm": e["adapter"].algorithm,
+            "score": e["metrics"][display_metric],
+            "rank_score": e["metrics"][promotion_metric],
+        }
         for e in ranked
     ]
 
-    cards = []
-    for e in evaluated:
-        adapter = e["adapter"]
-        metadata = {
-            **extra_metadata,
-            **e["metrics"],
-            **naive_baseline_metrics,
-            "feature_importances": e["feature_importances"],
-            "hyperparameters": e["hyperparameters"],
-            "candidates": candidate_summary,
-        }
-        card = training_common.save_model_artifact(
-            s3, sport, model_name, adapter.algorithm,
-            adapter.serialize(e["estimator"]), adapter.artifact_filename,
-            metadata, summary_metrics,
-        )
-        cards.append(card)
-
-    winner = min(cards, key=lambda card: card[promotion_metric])
-    logger.info(
-        "%s/%s: %s (%s) wins this run's %d-candidate tournament (%s=%.4f)",
-        sport, model_name, winner["algorithm"], winner["version"], len(cards), promotion_metric, winner[promotion_metric],
+    # ranked[0] is the winner -- sorted by promotion_metric above, and
+    # that sort never changes regardless of how many candidates there
+    # are, so no separate "find the best one" step is needed here.
+    winner = ranked[0]
+    adapter = winner["adapter"]
+    metadata = {
+        **extra_metadata,
+        **winner["metrics"],
+        **naive_baseline_metrics,
+        "feature_importances": winner["feature_importances"],
+        "hyperparameters": winner["hyperparameters"],
+        "candidates": candidate_summary,
+        "candidates_ranked_by": promotion_metric,
+    }
+    winner_card = training_common.save_model_artifact(
+        s3, sport, model_name, adapter.algorithm,
+        adapter.serialize(winner["estimator"]), adapter.artifact_filename,
+        metadata, summary_metrics,
     )
-    promoted = training_common.promote_if_better(s3, sport, model_name, winner["version"], winner, promotion_metric)
+    logger.info(
+        "%s/%s: %s wins this run's %d-candidate tournament (%s=%.4f) -- only this candidate's artifact is saved (v%d)",
+        sport, model_name, adapter.algorithm, len(evaluated), promotion_metric, winner["metrics"][promotion_metric],
+        winner_card["version"],
+    )
+    promoted = training_common.promote_if_better(s3, sport, model_name, winner_card["version"], winner_card, promotion_metric)
 
-    return {"winner": winner, "promoted": promoted, "candidates": cards}
+    return {"winner": winner_card, "promoted": promoted, "candidates": candidate_summary}

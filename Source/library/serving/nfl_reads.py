@@ -214,11 +214,14 @@ def _load_model_summary(s3, sport: str, model_name: str) -> dict | None:
         )},
         "top_features": top_features,
         # Every algorithm library.ml.backtest.run_backtest tried for this
-        # target this run, and its own score -- absent on a model card
-        # trained before the backtesting harness existed. "score" is a
-        # fixed key regardless of the underlying metric (log_loss/rmse)
-        # -- see run_backtest's own comment on why.
+        # target this run -- absent on a model card trained before the
+        # backtesting harness existed. Each candidate carries "score" (the
+        # same human-readable metric as this card's own top-level
+        # accuracy/mae) and "rank_score" (the value of candidates_ranked_by
+        # -- what actually decided the ranking, since the two can disagree
+        # in direction -- see run_backtest's own comment on why both exist).
         "candidates": card.get("candidates"),
+        "candidates_ranked_by": card.get("candidates_ranked_by"),
     }
 
 

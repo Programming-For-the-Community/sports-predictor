@@ -194,6 +194,44 @@ class TestBuildLiveEventLeaderCandidates:
         # roster doesn't leak into the other's candidates.
         assert candidates["away"] == {"passing": [], "receiving": [], "rushing": [], "sacks": []}
 
+    def test_computes_elo_ratings_once_regardless_of_candidate_count(self):
+        """Regression test for a real production timeout: before this fix,
+        every candidate's own _build_player_feature_row call independently
+        recomputed Elo from the full completed-events history (see
+        _live_elo_ratings' docstring) -- with up to ~15 candidates per
+        event (QB + 3 receivers + 2 rushers + 3 pass-rushers, per team),
+        that meant get_all_events + a full Elo walk up to 15 times in one
+        request. Confirmed live via CloudWatch that this was hitting the
+        29s Lambda timeout on /nfl/predictions/events/{id}. Threading
+        current_ratings through every candidate (same fix already applied
+        to handler.py's season leaderboards) means exactly one call
+        regardless of how many candidates get identified."""
+        storage = MagicMock()
+        target = _event("E3", "2025-09-21", "KC", "LAC")
+        last_game = _event("E2", "2025-09-14", "KC", "DEN", 24, 17)
+        storage.get_event.return_value = target
+        storage.get_all_events.return_value = [last_game]
+        storage.get_team_game_stats_for_team.return_value = []
+        # Only the home team has a prior game -- same pattern as
+        # test_identifies_candidates_across_categories_for_the_home_team.
+        # Four distinct candidates (QB, 2 receivers, 1 rusher) is already
+        # enough to prove the fix: pre-fix, each one would have separately
+        # triggered its own get_all_events + Elo recompute.
+        storage.get_team_events.side_effect = lambda sport, entity_id, before_date=None, limit=None: (
+            [last_game] if entity_id == "KC" and limit == 1 else []
+        )
+        storage.get_player_game_stats_for_event.return_value = [
+            {"entity_id": "qb1", "team_id": "KC", "stat_line": {"passing_attempts": 30}},
+            {"entity_id": "wr1", "team_id": "KC", "stat_line": {"receiving_targets": 10}},
+            {"entity_id": "wr2", "team_id": "KC", "stat_line": {"receiving_targets": 6}},
+            {"entity_id": "rb1", "team_id": "KC", "stat_line": {"rushing_attempts": 18}},
+        ]
+        storage.get_player_game_stats.return_value = []
+
+        live_features.build_live_event_leader_candidates(storage, "nfl", "E3")
+
+        assert storage.get_all_events.call_count == 1
+
     def test_sacks_ranked_by_own_average_not_last_game_volume(self):
         storage = MagicMock()
         target = _event("E3", "2025-09-21", "KC", "LAC")

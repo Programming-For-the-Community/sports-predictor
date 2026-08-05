@@ -15,11 +15,11 @@ resource "aws_cloudwatch_log_group" "nfl_train_player_prop_model" {
 # override, same mechanism described below. Every bit as runnable
 # manually via `aws ecs run-task` with your own override if you want to
 # retrain and inspect one stat without waiting for Wednesday.
-# Reuses the exact same image as ecs-task-nfl-train-model.tf (all four
+# Reuses the exact same image as ecs-task-nfl-train-win-probability-model.tf (all four
 # training scripts live in one Dockerfile, see
 # Source/model-training/nfl/Dockerfile) and overrides the container
 # command to run train_player_prop_model.py instead of the default
-# train_model.py.
+# train_win_probability_model.py.
 #
 # Deliberately does NOT set TARGET_STAT here -- it's the one thing that
 # varies between a passing-yards run and a rushing-yards run, so it's
@@ -36,8 +36,8 @@ resource "aws_cloudwatch_log_group" "nfl_train_player_prop_model" {
 # needed for this task.
 #
 # cpu=4096/memory=16384 -- same hyperparameter search shape (and the
-# same quota-driven 4 vCPU step-down -- see ecs-task-nfl-train-model.tf's
-# comment) as ecs-task-nfl-train-model.tf, so the same compute sizing
+# same quota-driven 4 vCPU step-down -- see ecs-task-nfl-train-win-probability-model.tf's
+# comment) as ecs-task-nfl-train-win-probability-model.tf, so the same compute sizing
 # applies regardless of which stat is being trained.
 resource "aws_ecs_task_definition" "nfl_train_player_prop_model" {
   family                   = "${var.project}-nfl-train-player-prop-model"
@@ -51,7 +51,7 @@ resource "aws_ecs_task_definition" "nfl_train_player_prop_model" {
   container_definitions = jsonencode([
     {
       name      = "nfl-train-player-prop-model"
-      image     = "${var.ecr_repo_url}:nfl-train-model-latest"
+      image     = "${var.ecr_repo_url}:nfl-train-win-probability-model-latest"
       command   = ["train_player_prop_model.py"]
       essential = true
       environment = [

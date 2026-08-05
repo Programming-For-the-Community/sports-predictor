@@ -109,7 +109,7 @@ def _presumptive_leader_and_history(
 
 def build_live_event_features(storage, sport: str, event_key: str, window: int = DEFAULT_ROLLING_WINDOW) -> dict:
     """One event-level feature row for event_key, in the exact shape
-    train_model.py/train_score_model.py were trained on (label_* fields
+    train_win_probability_model.py/train_score_model.py were trained on (label_* fields
     will be None/absent for an unplayed game -- callers only read the
     feature columns off the result, never the labels)."""
     event = storage.get_event(event_key)
@@ -231,25 +231,47 @@ def build_live_event_leader_candidates(
     same as build_live_player_features. Deliberately doesn't touch S3 or
     load any model -- scoring these against the right player-prop model
     per category is the caller's job (handler.py), same separation
-    build_live_player_features/model_loader.py already have."""
+    build_live_player_features/model_loader.py already have.
+
+    Computes current_ratings ONCE here and threads it through every
+    candidate (up to ~15 per event: QB + 3 receivers + 2 rushers + 3
+    pass-rushers, per team) -- without this, each candidate's own
+    _build_player_feature_row call would separately pay _live_elo_ratings'
+    full-history recompute (see that function's docstring for why a loop
+    like this is exactly the condition that stops being cheap). Confirmed
+    live via CloudWatch: /nfl/predictions/events/{id} requests were
+    hitting the full 29s Lambda timeout before this fix, the same failure
+    mode _leaderboards (handler.py's /nfl/season route) had until it got
+    the identical treatment -- this was the one remaining call site that
+    hadn't."""
     event = storage.get_event(event_key)
     if event is None:
         raise EventNotFoundError(f"No event found for {event_key}")
     home_id, away_id = _home_away_ids(event)
 
+    _, current_ratings = compute_elo_ratings(storage.get_all_events(sport))
+
     return {
-        "home": _team_leader_candidates(storage, sport, event, home_id, away_id, home_id, window),
-        "away": _team_leader_candidates(storage, sport, event, home_id, away_id, away_id, window),
+        "home": _team_leader_candidates(storage, sport, event, home_id, away_id, home_id, window, current_ratings),
+        "away": _team_leader_candidates(storage, sport, event, home_id, away_id, away_id, window, current_ratings),
     }
 
 
 def _team_leader_candidates(
     storage, sport: str, event: dict, home_id: str, away_id: str, team_id: str, window: int,
+    current_ratings: dict | None = None,
 ) -> dict:
     before_date = event["event_date"]
     last_events = storage.get_team_events(sport, team_id, before_date=before_date, limit=1)
     if not last_events:
         return {"passing": [], "receiving": [], "rushing": [], "sacks": []}
+
+    # This team's own previous-game date is already known from last_events
+    # above -- reusing it here (instead of letting each candidate's own
+    # _build_player_feature_row call separately re-derive it via its own
+    # storage.get_team_events call) is the second half of this function's
+    # fix, alongside current_ratings.
+    team_last_event_dates = {team_id: last_events[0]["event_date"]}
 
     last_event_players = storage.get_player_game_stats_for_event(last_events[0]["event_key"])
     team_players = [row for row in last_event_players if row.get("team_id") == team_id]
@@ -259,7 +281,10 @@ def _team_leader_candidates(
         for candidate in candidates:
             entity_id = candidate["entity_id"]
             prior_games = storage.get_player_game_stats(entity_id, before_date=before_date, limit=window)
-            rows.append(_build_player_feature_row(storage, sport, event, home_id, away_id, entity_id, team_id, prior_games, window))
+            rows.append(_build_player_feature_row(
+                storage, sport, event, home_id, away_id, entity_id, team_id, prior_games, window,
+                current_ratings, team_last_event_dates,
+            ))
         return rows
 
     qb = identify_starting_qb(team_players)
@@ -278,7 +303,10 @@ def _team_leader_candidates(
     }
     top_sack_ids = rank_by_average_stat(histories, "defensive_sacks", 3)
     sacks_rows = [
-        _build_player_feature_row(storage, sport, event, home_id, away_id, entity_id, team_id, histories[entity_id], window)
+        _build_player_feature_row(
+            storage, sport, event, home_id, away_id, entity_id, team_id, histories[entity_id], window,
+            current_ratings, team_last_event_dates,
+        )
         for entity_id in top_sack_ids
     ]
 

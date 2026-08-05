@@ -21,7 +21,7 @@ flowchart TD
         direction LR
         BACKFILL["Fargate: nfl-backfill<br/>(manual run-task, historical only)"]
         FEAT["Fargate: nfl-feature-engineering"]
-        TRAIN["Fargate: train-model /<br/>train-score-model /<br/>train-player-prop-model"]
+        TRAIN["Fargate: train-win-probability-model /<br/>train-score-model /<br/>train-player-prop-model"]
     end
 
     subgraph StorageBox["Storage"]

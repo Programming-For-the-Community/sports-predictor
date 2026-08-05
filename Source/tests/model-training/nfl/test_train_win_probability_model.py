@@ -2,12 +2,12 @@
 Unit tests for the NFL win-probability training entrypoint.
 
 library.ml.backtest.run_backtest is mocked here -- these tests verify
-train_model.py's own orchestration (column selection, chronological
+train_win_probability_model.py's own orchestration (column selection, chronological
 split, naive-baseline computation, and what gets handed to run_backtest),
 not the tournament itself (see Source/tests/library/ml/test_backtest.py)
 or any real algorithm fitting (see Source/tests/library/ml/
 test_model_types.py). Same "never touch real training" boundary this
-suite always drew, just moved up a layer now that train_model.py delegates
+suite always drew, just moved up a layer now that train_win_probability_model.py delegates
 the actual fitting to run_backtest instead of doing it inline.
 """
 import io
@@ -17,7 +17,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-import train_model
+import train_win_probability_model
 
 
 def _make_df(n=10):
@@ -52,7 +52,7 @@ class TestFeatureColumns:
     def test_excludes_identifiers_and_every_label_column(self):
         df = _make_df()
 
-        columns = train_model._feature_columns(df)
+        columns = train_win_probability_model._feature_columns(df)
 
         assert columns == ["home_elo", "elo_diff"]
 
@@ -65,7 +65,7 @@ class TestFeatureColumns:
         df["venue_city"] = ["Kansas City"] * len(df)
         df["venue_state"] = ["MO"] * len(df)
 
-        columns = train_model._feature_columns(df)
+        columns = train_win_probability_model._feature_columns(df)
 
         assert "venue_indoor" in columns
         assert "venue_city" not in columns
@@ -76,12 +76,12 @@ class TestTrain:
     def test_calls_run_backtest_with_both_candidates_and_classification_task(self):
         df = _make_df(10)
 
-        with patch.object(train_model.backtest, "run_backtest", return_value=_fake_result()) as mock_run:
-            result = train_model.train(MagicMock(), df)
+        with patch.object(train_win_probability_model.backtest, "run_backtest", return_value=_fake_result()) as mock_run:
+            result = train_win_probability_model.train(MagicMock(), df)
 
         call = mock_run.call_args
         assert call.kwargs["task"] == "classification"
-        assert call.kwargs["candidates"] == train_model.CANDIDATES
+        assert call.kwargs["candidates"] == train_win_probability_model.CANDIDATES
         assert {type(c).__name__ for c in call.kwargs["candidates"]} == {
             "XGBoostClassifierAdapter", "LogisticRegressionAdapter",
             "RandomForestClassifierAdapter", "MLPClassifierAdapter",
@@ -91,8 +91,8 @@ class TestTrain:
     def test_splits_chronologically_and_builds_numeric_frames_of_the_right_columns(self):
         df = _make_df(10)
 
-        with patch.object(train_model.backtest, "run_backtest", return_value=_fake_result()) as mock_run:
-            train_model.train(MagicMock(), df)
+        with patch.object(train_win_probability_model.backtest, "run_backtest", return_value=_fake_result()) as mock_run:
+            train_win_probability_model.train(MagicMock(), df)
 
         call = mock_run.call_args
         assert list(call.kwargs["X_train"].columns) == ["home_elo", "elo_diff"]
@@ -110,16 +110,16 @@ class TestTrain:
         # right.
         df = _make_df(10)
 
-        with patch.object(train_model.backtest, "run_backtest", return_value=_fake_result()) as mock_run:
-            train_model.train(MagicMock(), df)
+        with patch.object(train_win_probability_model.backtest, "run_backtest", return_value=_fake_result()) as mock_run:
+            train_win_probability_model.train(MagicMock(), df)
 
         assert mock_run.call_args.kwargs["naive_baseline_metrics"] == {"naive_baseline_accuracy": 0.5}
 
     def test_passes_row_counts_and_date_ranges_in_extra_metadata(self):
         df = _make_df(10)
 
-        with patch.object(train_model.backtest, "run_backtest", return_value=_fake_result()) as mock_run:
-            train_model.train(MagicMock(), df)
+        with patch.object(train_win_probability_model.backtest, "run_backtest", return_value=_fake_result()) as mock_run:
+            train_win_probability_model.train(MagicMock(), df)
 
         extra = mock_run.call_args.kwargs["extra_metadata"]
         assert extra["train_rows"] == 8
@@ -130,8 +130,8 @@ class TestTrain:
     def test_promotion_metric_is_log_loss(self):
         df = _make_df(10)
 
-        with patch.object(train_model.backtest, "run_backtest", return_value=_fake_result()) as mock_run:
-            train_model.train(MagicMock(), df)
+        with patch.object(train_win_probability_model.backtest, "run_backtest", return_value=_fake_result()) as mock_run:
+            train_win_probability_model.train(MagicMock(), df)
 
         assert mock_run.call_args.kwargs["promotion_metric"] == "log_loss"
 
@@ -144,8 +144,8 @@ class TestTrain:
         df = _make_df(10)
         df["weather_temperature"] = [None] * len(df)  # entirely null -- object dtype from Parquet
 
-        with patch.object(train_model.backtest, "run_backtest", return_value=_fake_result()) as mock_run:
-            train_model.train(MagicMock(), df)
+        with patch.object(train_win_probability_model.backtest, "run_backtest", return_value=_fake_result()) as mock_run:
+            train_win_probability_model.train(MagicMock(), df)
 
         assert mock_run.call_args.kwargs["X_train"]["weather_temperature"].dtype == np.float64
 
@@ -156,43 +156,36 @@ class TestMain:
         df = _make_df(10)
         mock_s3 = MagicMock()
 
-        with patch.object(train_model, "S3Manager", return_value=mock_s3), \
-             patch.object(train_model.training_common, "load_features", return_value=df) as mock_load, \
-             patch.object(train_model, "train", return_value=_fake_result()) as mock_train:
-            train_model.main()
+        with patch.object(train_win_probability_model, "S3Manager", return_value=mock_s3), \
+             patch.object(train_win_probability_model.training_common, "load_features", return_value=df) as mock_load, \
+             patch.object(train_win_probability_model, "train", return_value=_fake_result()) as mock_train:
+            train_win_probability_model.main()
 
-        mock_load.assert_called_once_with(mock_s3, train_model.EVENT_FEATURES_KEY)
+        mock_load.assert_called_once_with(mock_s3, train_win_probability_model.EVENT_FEATURES_KEY)
         mock_train.assert_called_once_with(mock_s3, df)
 
     def test_requires_bucket_env_var(self, monkeypatch):
         monkeypatch.delenv("MODEL_ARTIFACTS_BUCKET_NAME", raising=False)
 
         with pytest.raises(KeyError):
-            train_model.main()
+            train_win_probability_model.main()
 
 
 class TestEndToEndWithRealBacktest:
     """One test that lets run_backtest itself run for real, with every
     candidate adapter's own tune_and_fit mocked (the same "never touch
     real fitting" boundary every other test in this pipeline draws) --
-    proves train_model.py's arguments actually thread through
+    proves train_win_probability_model.py's arguments actually thread through
     run_backtest -> save_model_artifact -> promote_if_better correctly
-    end to end, not just that train_model.py calls run_backtest with
+    end to end, not just that train_win_probability_model.py calls run_backtest with
     plausible-looking arguments in isolation."""
 
-    def test_writes_every_candidate_and_promotes_the_best_one(self, monkeypatch):
+    def test_writes_only_the_winner_and_promotes_it(self, monkeypatch):
         monkeypatch.setenv("MODEL_ARTIFACTS_BUCKET_NAME", "test-bucket")
         df = _make_df(10)
         mock_s3 = MagicMock()
         mock_s3.get_bytes.return_value = _parquet_bytes(df)
-        # Reflects what's actually been "written" so far via put_bytes,
-        # rather than a fixed empty list -- otherwise every candidate in
-        # the tournament would compute the same next_model_version(1),
-        # since a static mock return value doesn't track state the way
-        # real S3 would across run_backtest's per-candidate save calls.
-        mock_s3.list_keys.side_effect = lambda prefix: [
-            call.args[0] for call in mock_s3.put_bytes.call_args_list if call.args[0].startswith(prefix)
-        ]
+        mock_s3.list_keys.return_value = []
         mock_s3.object_exists.return_value = False
 
         # True test-set labels are [True, False] (see _make_df) --
@@ -206,27 +199,28 @@ class TestEndToEndWithRealBacktest:
             "MLPClassifierAdapter": (np.array([0.5, 0.5]), b"mlp-bytes"),
         }
         patches = []
-        for adapter in train_model.CANDIDATES:
+        for adapter in train_win_probability_model.CANDIDATES:
             predictions, model_bytes = candidate_predictions[type(adapter).__name__]
             patches.append(patch.object(adapter, "tune_and_fit", return_value=(f"{adapter.algorithm}-estimator", {})))
             patches.append(patch.object(adapter, "predict", return_value=predictions))
             patches.append(patch.object(adapter, "feature_importances", return_value={}))
             patches.append(patch.object(adapter, "serialize", return_value=model_bytes))
 
-        with patch.object(train_model, "S3Manager", return_value=mock_s3):
+        with patch.object(train_win_probability_model, "S3Manager", return_value=mock_s3):
             for p in patches:
                 p.start()
             try:
-                train_model.main()
+                train_win_probability_model.main()
             finally:
                 for p in patches:
                     p.stop()
 
+        # Only the winner (xgboost) ever gets a versioned artifact --
+        # every other candidate was tuned/fit/evaluated (see
+        # candidate_predictions above, all four are given real, distinct
+        # predictions) but never written to S3.
         written_models = {call.args[0]: call.args[1] for call in mock_s3.put_bytes.call_args_list}
-        assert written_models["nfl/win-probability/v1/model.xgb"] == b"xgb-bytes"
-        assert written_models["nfl/win-probability/v2/model.joblib"] == b"logistic-bytes"
-        assert written_models["nfl/win-probability/v3/model.joblib"] == b"rf-bytes"
-        assert written_models["nfl/win-probability/v4/model.joblib"] == b"mlp-bytes"
+        assert written_models == {"nfl/win-probability/v1/model.xgb": b"xgb-bytes"}
 
         # xgboost's predictions ([0.95, 0.05] vs true [True, False]) are
         # perfect; logistic's ([0.6, 0.4]) are directionally right but

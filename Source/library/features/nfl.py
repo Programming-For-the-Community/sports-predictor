@@ -415,7 +415,7 @@ def build_event_features(
         # dome neutralizes weather entirely, and cold/heat plausibly
         # affects passing/kicking games); venue_city/venue_state are
         # carried through for reference only -- raw strings aren't
-        # model-consumable without encoding, so train_model.py excludes
+        # model-consumable without encoding, so train_win_probability_model.py excludes
         # them from its feature columns (see DATA_SCHEMA.md).
         "venue_indoor": event.get("venue_indoor"),
         "venue_city": event.get("venue_city"),

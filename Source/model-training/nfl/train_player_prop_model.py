@@ -18,7 +18,7 @@ Terraform task definition, or one image) per stat -- TARGET_STAT is the
 only thing that varies between a passing-yards run and a rushing-yards
 run; the dataset, split, evaluation, artifact writing, and promotion are
 all identical, and live in library/ml/training_common.py and
-library/ml/backtest.py alongside train_model.py and train_score_model.py.
+library/ml/backtest.py alongside train_win_probability_model.py and train_score_model.py.
 Run a given stat by overriding the TARGET_STAT environment variable at
 `aws ecs run-task` time (see
 Terraform/ecs-task-nfl-train-player-prop-model.tf) rather than deploying
@@ -26,7 +26,7 @@ a new task definition per stat.
 
 Runs every CANDIDATES adapter as a competing candidate against the same
 holdout split via library.ml.backtest.run_backtest, and promotes
-whichever wins on rmse -- see train_model.py's own docstring for the
+whichever wins on rmse -- see train_win_probability_model.py's own docstring for the
 reasoning behind this roster, which mirrors it (same four algorithms,
 this target's regression-capable candidates instead of win-probability's
 classification-capable ones).

@@ -213,6 +213,7 @@ class TestListModels:
         # This card predates the backtesting harness -- no candidates key
         # at all, not an empty list.
         assert model["candidates"] is None
+        assert model["candidates_ranked_by"] is None
 
     def test_includes_the_candidate_tournament_summary_when_present(self):
         s3 = MagicMock()
@@ -224,18 +225,21 @@ class TestListModels:
                 "model_name": "win-probability", "algorithm": "xgboost", "version": 6,
                 "trained_at": "2026-01-01T00:00:00Z", "accuracy": 0.63, "log_loss": 0.65,
                 "feature_importances": {},
+                "candidates_ranked_by": "log_loss",
                 "candidates": [
-                    {"algorithm": "xgboost", "score": 0.65},
-                    {"algorithm": "logistic_regression", "score": 0.71},
+                    {"algorithm": "xgboost", "score": 0.63, "rank_score": 0.65},
+                    {"algorithm": "logistic_regression", "score": 0.66, "rank_score": 0.71},
                 ],
             },
         ]
 
         result = nfl_reads.list_models(s3, "nfl")
 
-        assert result["models"][0]["candidates"] == [
-            {"algorithm": "xgboost", "score": 0.65},
-            {"algorithm": "logistic_regression", "score": 0.71},
+        model = result["models"][0]
+        assert model["candidates_ranked_by"] == "log_loss"
+        assert model["candidates"] == [
+            {"algorithm": "xgboost", "score": 0.63, "rank_score": 0.65},
+            {"algorithm": "logistic_regression", "score": 0.66, "rank_score": 0.71},
         ]
 
     def test_returns_a_summary_per_model_when_multiple_are_loaded_concurrently(self):

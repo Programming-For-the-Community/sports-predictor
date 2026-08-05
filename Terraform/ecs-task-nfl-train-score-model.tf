@@ -16,11 +16,11 @@ resource "aws_cloudwatch_log_group" "nfl_train_score_model" {
 # mechanism as scheduler-nfl-train-player-prop-model.tf. Every bit as
 # runnable manually via `aws ecs run-task` with your own override.
 #
-# Reuses the exact same image as ecs-task-nfl-train-model.tf (all four
+# Reuses the exact same image as ecs-task-nfl-train-win-probability-model.tf (all four
 # training scripts live in one Dockerfile, see
 # Source/model-training/nfl/Dockerfile) and overrides the container
 # command to run train_score_model.py instead of the default
-# train_model.py. Reads the same event_features.parquet as the
+# train_win_probability_model.py. Reads the same event_features.parquet as the
 # win-probability task -- no separate feature engineering dependency.
 #
 # Deliberately does NOT set SCORE_TARGET here, same reasoning as
@@ -34,7 +34,7 @@ resource "aws_cloudwatch_log_group" "nfl_train_score_model" {
 #
 # Uses the shared aws_iam_role.ecs_pipeline (iam-ecs-pipeline.tf). Same
 # cpu/memory sizing (and the same quota-driven 4 vCPU step-down -- see
-# that file's comment) as ecs-task-nfl-train-model.tf -- identical
+# that file's comment) as ecs-task-nfl-train-win-probability-model.tf -- identical
 # hyperparameter search shape (PARAM_DISTRIBUTIONS, SEARCH_ITERATIONS,
 # CV_SPLITS), so the same compute rationale applies.
 resource "aws_ecs_task_definition" "nfl_train_score_model" {
@@ -49,7 +49,7 @@ resource "aws_ecs_task_definition" "nfl_train_score_model" {
   container_definitions = jsonencode([
     {
       name      = "nfl-train-score-model"
-      image     = "${var.ecr_repo_url}:nfl-train-model-latest"
+      image     = "${var.ecr_repo_url}:nfl-train-win-probability-model-latest"
       command   = ["train_score_model.py"]
       essential = true
       environment = [

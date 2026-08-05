@@ -71,11 +71,12 @@ Lists every currently-promoted model, with its latest model card summary.
       "log_loss": 0.65,
       "naive_baseline_accuracy": 0.57,
       "top_features": [{"feature": "elo_diff", "importance": 0.22}],
+      "candidates_ranked_by": "log_loss",
       "candidates": [
-        {"algorithm": "xgboost", "score": 0.65},
-        {"algorithm": "logistic_regression", "score": 0.71},
-        {"algorithm": "random_forest_classifier", "score": 0.69},
-        {"algorithm": "mlp_classifier", "score": 0.74}
+        {"algorithm": "xgboost", "score": 0.63, "rank_score": 0.65},
+        {"algorithm": "random_forest_classifier", "score": 0.66, "rank_score": 0.68},
+        {"algorithm": "logistic_regression", "score": 0.61, "rank_score": 0.69},
+        {"algorithm": "mlp_classifier", "score": 0.59, "rank_score": 0.74}
       ]
     },
     {
@@ -88,18 +89,19 @@ Lists every currently-promoted model, with its latest model card summary.
       "naive_baseline_rmse": 12.1,
       "naive_baseline_mae": 9.6,
       "top_features": [{"feature": "elo_diff", "importance": 0.19}],
+      "candidates_ranked_by": "rmse",
       "candidates": [
-        {"algorithm": "xgboost", "score": 9.8},
-        {"algorithm": "elastic_net", "score": 10.4},
-        {"algorithm": "random_forest_regressor", "score": 10.1},
-        {"algorithm": "mlp_regressor", "score": 11.2}
+        {"algorithm": "xgboost", "score": 7.4, "rank_score": 9.8},
+        {"algorithm": "random_forest_regressor", "score": 7.6, "rank_score": 10.1},
+        {"algorithm": "elastic_net", "score": 7.9, "rank_score": 10.4},
+        {"algorithm": "mlp_regressor", "score": 8.5, "rank_score": 11.2}
       ]
     }
   ]
 }
 ```
 
-`accuracy`/`log_loss` are present for a classification-task model (`win-probability`); `rmse`/`mae` are present for every regression-task model (`score-margin`, `home-score`, `away-score`, and each `player-prop-<stat>` model). `naive_baseline_accuracy` (classifier) and `naive_baseline_rmse`/`naive_baseline_mae` (regressors) are the same metric against a trivial baseline (classifier: always pick the home team; regressor: predict the player's own rolling average) -- the frontend uses these to show skill relative to that baseline instead of surfacing `log_loss`/`rmse` directly, which aren't intuitive without ML background. `candidates` is every algorithm `library.ml.backtest.run_backtest` actually tried for this target on this run, each with a `score` on the same metric this card's own gate metric uses (lower is always better) -- see `library/ml/model_types.py` for the full algorithm roster, which differs by task (a classifier target competes among `xgboost`/`logistic_regression`/`random_forest_classifier`/`mlp_classifier`; a regressor target among `xgboost`/`elastic_net`/`random_forest_regressor`/`mlp_regressor`). Both `naive_baseline_*` and `candidates` are `null`/absent on any model card trained before the relevant feature existed. `top_features` is pre-sorted descending by importance and capped at 5 server-side.
+`accuracy`/`log_loss` are present for a classification-task model (`win-probability`); `rmse`/`mae` are present for every regression-task model (`score-margin`, `home-score`, `away-score`, and each `player-prop-<stat>` model). `naive_baseline_accuracy` (classifier) and `naive_baseline_rmse`/`naive_baseline_mae` (regressors) are the same metric against a trivial baseline (classifier: always pick the home team; regressor: predict the player's own rolling average) -- the frontend uses these to show skill relative to that baseline instead of surfacing `log_loss`/`rmse` directly, which aren't intuitive without ML background. `candidates` is every algorithm `library.ml.backtest.run_backtest` actually tried for this target on this run, ranked best-first -- see `library/ml/model_types.py` for the full algorithm roster, which differs by task (a classifier target competes among `xgboost`/`logistic_regression`/`random_forest_classifier`/`mlp_classifier`; a regressor target among `xgboost`/`elastic_net`/`random_forest_regressor`/`mlp_regressor`). Each candidate carries two numbers, deliberately not one: `score` is the same human-readable metric as this card's own top-level `accuracy`/`mae` (easy to eyeball, but NOT what decided the ranking), while `rank_score` is the value of `candidates_ranked_by` (`log_loss`/`rmse` -- always lower-is-better, the metric that actually determined promotion) for that candidate specifically. The two can disagree in ranking direction -- a candidate with the highest `score` isn't guaranteed to be first in the list, because a better raw accuracy doesn't always mean better-calibrated probabilities. Trust `rank_score`'s ordering, not `score`'s. `naive_baseline_*`, `candidates`, `candidates_ranked_by`, and `rank_score` are all `null`/absent on any model card trained before the relevant feature existed. `top_features` is pre-sorted descending by importance and capped at 5 server-side.
 
 A model that's never had a version promoted simply doesn't appear in this list.
 
