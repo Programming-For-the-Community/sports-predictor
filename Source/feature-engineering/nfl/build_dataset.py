@@ -35,10 +35,10 @@ from collections import defaultdict
 import pandas as pd
 
 from library.aws.s3_manager import S3Manager
+from library.features.common import compute_elo_ratings
 from library.features.nfl import (
     build_event_features,
     build_player_features,
-    compute_elo_ratings,
     identify_lead_receiver,
     identify_lead_rusher,
     identify_starting_qb,
@@ -106,8 +106,8 @@ def build_event_dataset(storage: FeatureStorage, window: int) -> list[dict]:
     events = [e for e in events if is_real_franchise_matchup(e)]
     logger.info("Loaded %d completed events (excluding exhibition games)", len(events))
 
-    player_games_by_event_team = _group_player_games_by_event_and_team(storage.get_all_player_game_stats())
-    team_game_stats_by_event_team = _index_team_game_stats(storage.get_all_team_game_stats())
+    player_games_by_event_team = _group_player_games_by_event_and_team(storage.get_all_player_game_stats(SPORT))
+    team_game_stats_by_event_team = _index_team_game_stats(storage.get_all_team_game_stats(SPORT))
 
     elo_ratings, _ = compute_elo_ratings(events)  # only the pre-game side is used here
     events_ascending = sorted(events, key=lambda e: e.get("event_date", ""))
@@ -227,7 +227,7 @@ def build_player_dataset(storage: FeatureStorage, window: int) -> list[dict]:
     elo_ratings, _ = compute_elo_ratings(events)  # only the pre-game side is used here
     team_previous_event_dates = _team_previous_event_dates(events)
 
-    player_games = storage.get_all_player_game_stats()
+    player_games = storage.get_all_player_game_stats(SPORT)
     logger.info("Loaded %d player-game rows", len(player_games))
 
     games_by_player = _group_player_games_by_player(player_games)

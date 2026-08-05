@@ -34,7 +34,7 @@ One row per game, match, tournament, or race.
 | `venue_indoor`, `venue_city`, `venue_state` | `false`, `"Green Bay"`, `"WI"` | From the source API's venue data — the same response already fetched for `participants`, not a separate call. `venue_indoor` is a real feature input; city/state are carried for reference but excluded from training (raw strings aren't model-consumable without encoding) |
 | `weather_temperature` | `52` or `null` | Frequently `null` — most reliably for indoor games, where it doesn't apply, but also for outdoor games the source API simply didn't report on. A partial signal, not a guaranteed one |
 | `home_coach_id`, `home_coach_name`, `home_coach_experience`, `home_coach_season_win_pct` (+ `away_*`) | `"4872749"`, `"Mike LaFleur"`, `0`, `0.4706` | NFL-only so far. Attached by ingest (`aws-lambdas/nfl/ingest/handler.py`'s `_enrich_events`, via ESPN's other "core" API) before every event write, so every event carries whatever coach data was current as of its most recent ingest cycle. `experience`/`season_win_pct` are ESPN's own numbers (tenure with this team, this season's win rate), used directly as feature inputs — no derivation. `*_coach_id`/`*_coach_name` are identifiers only, never fed to a model, same rule as every other raw id/name field here. Absent entirely on any event ingested before this shipped — forward-only, no historical backfill (ESPN's coach data is current-state only, no historical-as-of-date endpoint exists) |
-| `home_injuries`, `away_injuries` | `[{"entity_id": "4912218", "status": "Questionable"}, ...]` | NFL-only so far. Each team's current injury report as of the most recent ingest cycle, same enrichment as coach data above. Re-fetched daily (not just the historical Tue/Wed ingest cadence) since injury reports genuinely change through the week in a way box scores and coach data don't — see `Terraform/scheduler-nfl-ingest.tf`. An empty list is real signal ("checked, nobody's hurt"), distinct from the key being absent entirely ("never checked") |
+| `home_injuries`, `away_injuries` | `[{"entity_id": "4912218", "status": "Questionable"}, ...]` | NFL-only so far. Each team's current injury report as of the most recent ingest cycle, same enrichment as coach data above. Re-fetched daily (not just the historical Tue/Wed ingest cadence) since injury reports genuinely change through the week in a way box scores and coach data don't — see `Terraform/sfn-ingest-orchestrator.tf`'s daily schedule. An empty list is real signal ("checked, nobody's hurt"), distinct from the key being absent entirely ("never checked") |
 | `home_depth_chart`, `away_depth_chart` | `{"qb": {"position": {...}, "athletes": [{"id": "4912218"}, ...]}, ...}` | NFL-only so far. Filtered to QB/RB/WR only (the positions live prediction's leader-selection needs — see `aws-lambdas/nfl/predict/live_features.py`), not ESPN's full ~25-position payload. Same enrichment/refresh cadence as injuries above |
 
 **Head-to-head `participants` shape** (NFL, NCAA FB, NBA, NCAA MBB):
@@ -101,19 +101,31 @@ The inference Lambda (`Source/aws-lambdas/nfl/predict/handler.py`) sits behind A
 
 `event_id`/`entity_id` are raw ESPN ids, translated internally to `SPORT#NFL#EVENT#...`/`SPORT#NFL#ENTITY#...` keys the same way every other NFL adapter does — callers never construct a DynamoDB key themselves. Packaged as a container image rather than the zip format `ingest`/`normalize` use (`Terraform/lambda-nfl-predict.tf`) — xgboost pulls in numpy and scipy, which alone measure ~225MB unzipped for this runtime, leaving almost no headroom under Lambda's 250MB unzipped zip limit; container Lambdas get a 10GB image limit instead.
 
-## Sport registry table (added in Phase 4)
+## Sport registry table (live as of Phase 4)
 
-Drives the Step Functions Map state — this is what makes onboarding a new sport a data change rather than a code change to shared orchestration.
+Drives both orchestrator state machines' Map states (`Terraform/sfn-ingest-orchestrator.tf`, `Terraform/sfn-training-orchestrator.tf`) — this is what makes onboarding a new sport a data change (a new registry row plus that sport's own Lambdas/ECS task definitions, deployed under the naming convention below) rather than a code change to shared orchestration. Populated via `Terraform/dynamodb-sport-registry.tf` (`aws_dynamodb_table_item`, not applied by hand), one row per sport.
 
 | Attribute | Example | Notes |
 |---|---|---|
-| `sport_key` | `SPORT#PGA` | |
-| `sport` | `pga` | |
-| `event_type` | `field` | |
-| `adapter_module` | `adapters.pga` | Where the orchestrator looks for `fetch()`, `normalize()`, etc. |
-| `polling_cadence` | `weekly` | Drives how often the Map state invokes this adapter |
-| `current_model_version` | `v1` | Which model version the inference Lambda should serve by default |
-| `active` | `true` | Lets you pause a sport (e.g., off-season) without deleting its configuration |
+| `sport_key` | `SPORT#NFL` | |
+| `sport` | `nfl` | |
+| `event_type` | `head_to_head` | `field` for PGA/F1 once Phase 5 adds them — not yet consumed by either orchestrator, which only handles head-to-head sports so far |
+| `polling_cadence` | `daily` | Informational for now — both orchestrators' own EventBridge schedules run year-round at a fixed cadence (daily for ingest, weekly for training) and rely on `active` for season gating, not a per-sport cadence lookup. Revisit once a second sport's real cadence differs enough to need it |
+| `active` | `true` | The season on/off switch — both orchestrators scan for `active = true` and skip everything else. Replaces what used to be an Aug-Feb cron window baked into `scheduler-nfl-ingest.tf`; flip to `false` after a sport's season ends and back before the next one starts |
+| `training_targets` | see below | List of every model this sport trains, read by the training-orchestrator's inner Map state instead of what used to be Terraform `for_each` maps (`local.nfl_score_targets`, `local.nfl_player_prop_stats`) |
+| `current_model_version` | *(not yet set)* | Reserved for the Phase 7 model-promotion approval flow — which model version the inference Lambda should serve by default. Not written by Terraform on purpose; that pointer is meant to move only on human approval, not on every `terraform apply` |
+
+**`training_targets` shape** — one entry per model the training-orchestrator should train for this sport:
+```json
+{
+  "model_name": "player-prop-passing-yards",
+  "task_definition_suffix": "train-player-prop-model",
+  "container_name": "nfl-train-player-prop-model",
+  "env_name": "TARGET_STAT",
+  "env_value": "passing_yards"
+}
+```
+`task_definition_suffix` resolves the ECS task-definition family at runtime as `<project>-<sport>-<task_definition_suffix>` (e.g. `sports-predictor-nfl-train-player-prop-model`) — the same `${project}-${sport}-<stage>` convention every Lambda/ECS resource in this project already follows (`sports-predictor-nfl-ingest`, `sports-predictor-nfl-feature-engineering`, etc.), which is what lets the state machines resolve a resource name from `sport` alone rather than needing a stored ARN per row. `env_name`/`env_value` is a single optional override pair, not a list — every training script this project has needed so far takes at most one (`SCORE_TARGET` or `TARGET_STAT`); a target with no real override (`win-probability`) gets a harmless no-op (`AWS_REGION` re-asserted at its own value) rather than a variable-length-list special case the state machine would otherwise need to branch on.
 
 ## Access patterns and indexes
 

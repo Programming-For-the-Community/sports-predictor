@@ -9,8 +9,13 @@ ESPN endpoint for something that essentially never changes.
 Coordinates are each team's home city/market, not exact stadium
 geolocation -- sufficient precision for a travel-distance feature at
 this scale (see travel_distances_km).
+
+is_divisional_game/is_international_game/travel_distances_km below are
+thin wrappers binding library.features.geo's sport-agnostic mechanism to
+this module's own NFL-only data, keeping every existing caller's call
+signature unchanged.
 """
-import math
+from library.features import geo
 
 TEAM_DIVISIONS: dict[str, str] = {
     "2": "AFC East", "15": "AFC East", "17": "AFC East", "20": "AFC East",
@@ -90,49 +95,15 @@ INTERNATIONAL_VENUES: dict[str, tuple[float, float]] = {
 }
 
 
-def _haversine_km(coord1: tuple[float, float], coord2: tuple[float, float]) -> float:
-    earth_radius_km = 6371.0
-    lat1, lon1 = coord1
-    lat2, lon2 = coord2
-    phi1, phi2 = math.radians(lat1), math.radians(lat2)
-    dphi = math.radians(lat2 - lat1)
-    dlambda = math.radians(lon2 - lon1)
-    a = math.sin(dphi / 2) ** 2 + math.cos(phi1) * math.cos(phi2) * math.sin(dlambda / 2) ** 2
-    return 2 * earth_radius_km * math.asin(math.sqrt(a))
-
-
 def is_divisional_game(home_id: str, away_id: str) -> bool | None:
-    """None if either team's division isn't known, rather than defaulting
-    to False -- an unknown division shouldn't silently read as "not
-    divisional"."""
-    home_division = TEAM_DIVISIONS.get(home_id)
-    away_division = TEAM_DIVISIONS.get(away_id)
-    if home_division is None or away_division is None:
-        return None
-    return home_division == away_division
+    return geo.is_divisional_game(home_id, away_id, TEAM_DIVISIONS)
 
 
 def is_international_game(venue_city: str | None) -> bool:
-    return venue_city in INTERNATIONAL_VENUES
+    return geo.is_international_game(venue_city, INTERNATIONAL_VENUES)
 
 
 def travel_distances_km(
     away_id: str, home_id: str, venue_city: str | None
 ) -> tuple[float | None, float | None]:
-    """Returns (home_travel_km, away_travel_km) -- the distance each team
-    travels from their own home market to the actual game site. For an
-    ordinary game the site IS the home team's market, so home travel is
-    always 0 and away travel is the distance between the two teams'
-    markets. For a game at one of INTERNATIONAL_VENUES, neither team is
-    at their own market, so both get a real distance computed from that
-    venue instead.
-    """
-    away_coords = TEAM_COORDINATES.get(away_id)
-    home_coords = TEAM_COORDINATES.get(home_id)
-    if away_coords is None or home_coords is None:
-        return None, None
-
-    venue_coords = INTERNATIONAL_VENUES.get(venue_city) if venue_city else None
-    if venue_coords is not None:
-        return _haversine_km(home_coords, venue_coords), _haversine_km(away_coords, venue_coords)
-    return 0.0, _haversine_km(away_coords, home_coords)
+    return geo.travel_distances_km(away_id, home_id, venue_city, TEAM_COORDINATES, INTERNATIONAL_VENUES)

@@ -154,13 +154,16 @@ class TestGetTeamEvents:
 
 
 class TestGetAllTeamGameStats:
-    def test_scans_team_game_stats_table(self, storage_env):
+    def test_scans_team_game_stats_table_and_filters_by_sport_prefix(self, storage_env):
         storage, _, _, _, mock_team_stats = _make_storage(storage_env)
-        mock_team_stats.scan.return_value = [{"team_id": "KC"}]
+        mock_team_stats.scan.return_value = [
+            {"team_id": "KC", "event_key": "SPORT#NFL#EVENT#1"},
+            {"team_id": "OSU", "event_key": "SPORT#NCAA_FB#EVENT#1"},  # different sport, excluded
+        ]
 
-        result = storage.get_all_team_game_stats()
+        result = storage.get_all_team_game_stats("nfl")
 
-        assert result == [{"team_id": "KC"}]
+        assert result == [{"team_id": "KC", "event_key": "SPORT#NFL#EVENT#1"}]
         mock_team_stats.scan.assert_called_once()
 
 
@@ -168,15 +171,15 @@ class TestGetTeamGameStatsForTeam:
     def test_filters_by_team_sorts_and_respects_before_date_and_limit(self, storage_env):
         storage, _, _, _, mock_team_stats = _make_storage(storage_env)
         mock_team_stats.scan.return_value = [
-            {"team_id": "KC", "event_date": "2025-09-01"},
-            {"team_id": "LAC", "event_date": "2025-09-08"},  # different team
-            {"team_id": "KC", "event_date": "2025-09-15"},
-            {"team_id": "KC", "event_date": "2025-09-22"},
+            {"team_id": "KC", "event_date": "2025-09-01", "event_key": "SPORT#NFL#EVENT#1"},
+            {"team_id": "LAC", "event_date": "2025-09-08", "event_key": "SPORT#NFL#EVENT#2"},  # different team
+            {"team_id": "KC", "event_date": "2025-09-15", "event_key": "SPORT#NFL#EVENT#3"},
+            {"team_id": "KC", "event_date": "2025-09-22", "event_key": "SPORT#NFL#EVENT#4"},
         ]
 
-        result = storage.get_team_game_stats_for_team("KC", before_date="2025-09-20", limit=1)
+        result = storage.get_team_game_stats_for_team("nfl", "KC", before_date="2025-09-20", limit=1)
 
-        assert result == [{"team_id": "KC", "event_date": "2025-09-15"}]
+        assert result == [{"team_id": "KC", "event_date": "2025-09-15", "event_key": "SPORT#NFL#EVENT#3"}]
 
 
 class TestGetPlayerGameStatsForEvent:

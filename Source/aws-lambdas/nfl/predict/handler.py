@@ -63,7 +63,7 @@ from datetime import datetime, timezone
 
 from library.aws.dynamodb_table import DynamoDBTable
 from library.aws.s3_manager import S3Manager
-from library.features.nfl import compute_elo_ratings
+from library.features.common import compute_elo_ratings
 from library.features.nfl_teams import is_real_franchise_matchup
 from library.schema.keys import entity_key as build_entity_key
 from library.schema.keys import event_key as build_event_key
@@ -346,7 +346,7 @@ def _leaderboards(storage: FeatureStorage, s3, model_cache: dict, season_inputs:
     see season_simulation.project_leaderboard's own docstring for why
     this is a flat estimate rather than a per-opponent simulation."""
     season_player_stats = [
-        row for row in storage.get_all_player_game_stats()
+        row for row in storage.get_all_player_game_stats(SPORT)
         if row.get("event_key") in season_inputs["completed_event_keys"]
     ]
 

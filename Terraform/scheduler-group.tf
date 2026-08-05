@@ -1,8 +1,10 @@
-# Shared EventBridge Scheduler group for every schedule in this
-# application (currently just NFL ingest; NCAA FB/NBA/NCAA MBB/PGA/F1
-# schedules will join this same group as their adapters come online, per
-# the Phase 4 registry-driven orchestration plan in
-# design/PROJECT_PLAN.md). One explicit group, rather than each schedule
+# Shared EventBridge Scheduler group holding this application's two
+# orchestrator schedules (scheduler-ingest-orchestrator.tf,
+# scheduler-training-orchestrator.tf). Onboarding NCAA FB/NBA/NCAA MBB/PGA/F1
+# doesn't add new schedules here -- both orchestrator state machines scan
+# the sport registry at runtime (dynamodb-sport-registry.tf) and fan out
+# to whichever sports are active, so a new sport is a new registry row,
+# not a new schedule. One explicit group, rather than each schedule
 # implicitly landing in AWS's own "default" group, so this project's
 # schedules are grouped and identifiable on their own in the Scheduler
 # console.

@@ -24,7 +24,7 @@ record, etc.) are not implemented.
 """
 import random
 
-from library.features.nfl import DEFAULT_HOME_ADVANTAGE, DEFAULT_K_FACTOR, DEFAULT_STARTING_RATING, expected_score
+from library.features.common import DEFAULT_HOME_ADVANTAGE, DEFAULT_K_FACTOR, DEFAULT_STARTING_RATING, expected_score
 from library.features.nfl_teams import TEAM_DIVISIONS
 
 DEFAULT_SIMULATIONS = 2000

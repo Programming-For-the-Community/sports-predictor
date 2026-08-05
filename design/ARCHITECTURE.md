@@ -55,7 +55,9 @@ flowchart TD
 
 ## Multi-sport architecture
 
-This is the target state once Phase 4 is complete: a sport registry and a single orchestration layer fan out to per-sport adapters, all converging on the same shared storage and serving layers. Onboarding sport #7 means adding one adapter and one registry row — nothing else on this diagram changes.
+The orchestration half of this (sport registry + Step Functions Map states) is live as of Phase 4, ahead of the original Phase 2/3 sequencing — see `design/PROJECT_PLAN.md`'s Phase 4 note on why. Only NFL is actually registered today; the diagram below shows where NCAA FB/NBA/NCAA MBB/PGA/F1 land once their own adapters exist, not a built state.
+
+There are two orchestrator state machines, not one, split by how differently ingest and training actually need to run: `Terraform/sfn-ingest-orchestrator.tf` fans out to each active sport's ingest Lambda once daily, and `Terraform/sfn-training-orchestrator.tf` fans out to each active sport's feature-engineering task and then, per sport, an inner Map over that sport's own `training_targets` list (win-probability, score, and every player-prop model) once weekly — collapsing what used to be up to a dozen separate EventBridge Scheduler resources and hand-picked cron time slots per sport into two schedules total, regardless of how many sports or training targets exist. Both read the same sport registry table; onboarding a new sport means deploying its own Lambdas/ECS task definitions under the existing `<project>-<sport>-<stage>` naming convention and adding one registry row — nothing on this diagram or in either state machine's definition changes.
 
 ```mermaid
 flowchart TD
@@ -120,7 +122,7 @@ flowchart TD
     APIGW -->|"JSON response"| BROWSER
 ```
 
-**What changed from the single-sport version:** EventBridge no longer triggers one ingest Lambda directly — it triggers a Step Functions Map state that reads the sport registry and fans out to whichever adapters are due to run. Storage and serving stay exactly the same shape, just partitioned by a `sport` key so six sports' data coexists in the same tables without colliding.
+**What changed from the single-sport version:** EventBridge no longer triggers ingest/training Lambdas and Fargate tasks directly — it starts one of the two state machines above, which reads the sport registry and fans out to whichever sports are active (see the registry's `active` flag in `design/DATA_SCHEMA.md`, which also replaced the old NFL-only Aug-Feb cron window as the season on/off switch). Storage and serving stay exactly the same shape, just partitioned by a `sport` key so six sports' data coexists in the same tables without colliding.
 
 ## Access control
 

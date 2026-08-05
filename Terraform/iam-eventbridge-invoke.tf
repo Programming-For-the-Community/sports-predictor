@@ -1,15 +1,14 @@
-# Assumed by EventBridge Scheduler to trigger the ingest Lambdas on their
-# polling cadence and to run the Fargate training pipeline on its training
-# schedule. (Normalize is triggered by an S3 event notification on the raw
-# bucket, not by EventBridge, so it isn't covered by this role.)
+# Assumed by EventBridge Scheduler to start the two orchestrator state
+# machines (sfn-ingest-orchestrator.tf, sfn-training-orchestrator.tf) on
+# their own cron. (Normalize is triggered by an S3 event notification on
+# the raw bucket, not by EventBridge, so it isn't covered by this role.)
 #
-# iam:PassRole is scoped to the one ECS role in iam-ecs-pipeline.tf, since
-# ecs:RunTask requires handing that role to ECS -- never grant PassRole on
-# "*".
-#
-# The Step Functions orchestrator role (Phase 4) isn't created yet, since
-# the state machine itself doesn't exist until that phase -- see the
-# orchestration step in docs/PROJECT_PLAN.md.
+# Used to also carry lambda:InvokeFunction/ecs:RunTask/iam:PassRole
+# directly, back when EventBridge Scheduler invoked each sport's ingest
+# Lambda and training ECS tasks itself. Now that a Step Functions state
+# machine sits in between (see iam-stepfunctions-orchestrator.tf, which
+# carries those permissions instead), this role only ever needs to start
+# an execution.
 data "aws_iam_policy_document" "eventbridge_invoke_assume" {
   statement {
     actions = ["sts:AssumeRole"]
@@ -32,21 +31,12 @@ resource "aws_iam_role" "eventbridge_invoke" {
 
 data "aws_iam_policy_document" "eventbridge_invoke_permissions" {
   statement {
-    sid       = "InvokeIngestLambdas"
-    actions   = ["lambda:InvokeFunction"]
-    resources = ["arn:aws:lambda:${var.region}:${var.account_id}:function:${var.project}-*-ingest"]
-  }
-
-  statement {
-    sid       = "RunTrainingTask"
-    actions   = ["ecs:RunTask"]
-    resources = ["arn:aws:ecs:${var.region}:${var.account_id}:task-definition/${var.project}-*"]
-  }
-
-  statement {
-    sid       = "PassEcsPipelineRole"
-    actions   = ["iam:PassRole"]
-    resources = [aws_iam_role.ecs_pipeline.arn]
+    sid     = "StartOrchestratorExecutions"
+    actions = ["states:StartExecution"]
+    resources = [
+      aws_sfn_state_machine.ingest_orchestrator.arn,
+      aws_sfn_state_machine.training_orchestrator.arn,
+    ]
   }
 }
 

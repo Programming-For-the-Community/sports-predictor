@@ -7,7 +7,7 @@ A phased checklist in implementation order. Each phase assumes the previous one 
 - [ ] Define entity/event schema (see `DATA_SCHEMA.md`)
 - [ ] Set up IAM roles for Lambda, Fargate, and Step Functions with least-privilege access to the specific tables/buckets they need
 - [ ] Create S3 buckets: raw data lake, model artifacts, frontend hosting
-- [ ] Create DynamoDB tables: entities, events, player_game_stats, predictions (sport registry table comes in Phase 4)
+- [ ] Create DynamoDB tables: entities, events, player_game_stats, predictions (sport registry table's schema comes in Phase 4, but the empty table itself is created here — see Phase 4)
 - [ ] Apply the tagging strategy to every resource at creation time (see `TAGGING_STRATEGY.md`) — don't defer this, retrofitting tags later means re-auditing every resource
 - [ ] Set up Cognito User Pool + App Client, create your own user, disable self-signup
 - [ ] Stand up API Gateway with a Cognito authorizer attached (no routes yet — just the auth scaffold)
@@ -42,10 +42,12 @@ A phased checklist in implementation order. Each phase assumes the previous one 
 
 ## Phase 4 — Generalize orchestration
 
-- [ ] Build the sport registry table (adapter reference, polling cadence, current model version)
-- [ ] Replace the four per-sport EventBridge rules with a single Step Functions Map state driven by the registry
-- [ ] Extract shared feature-engineering primitives (rolling windows, rating updates, rest/travel calculations) into a common library used by all head-to-head adapters
-- [ ] Build a shared backtesting harness that produces the same accuracy/calibration report regardless of which sport's model it's pointed at
+Pulled forward ahead of Phases 2/3: with NFL's real Terraform footprint in hand (13 EventBridge Scheduler resources for one sport alone, most of them per-training-target `for_each` maps with hand-picked cron slots), it was clear that generalizing orchestration after a second or third sport had already copied that pattern would mean unwinding several sports' worth of deployed infra at once instead of a one-sport refactor. All four items below are done.
+
+- [x] Build the sport registry table (adapter reference, polling cadence, current model version) — done in Phase 0 (empty table) and populated for NFL in this pass (`Terraform/dynamodb-sport-registry.tf`); see `design/DATA_SCHEMA.md`'s registry section for the schema actually shipped, which added a `training_targets` list beyond what was originally sketched here
+- [x] Replace the four per-sport EventBridge rules with a single Step Functions Map state driven by the registry — shipped as *two* state machines, not one (`Terraform/sfn-ingest-orchestrator.tf`, `Terraform/sfn-training-orchestrator.tf`), since ingest and training fan out differently (training needs a nested Map: per sport, then per training target within that sport). See `design/ARCHITECTURE.md`'s multi-sport section
+- [x] Extract shared feature-engineering primitives (rolling windows, rating updates, rest/travel calculations) into a common library used by all head-to-head adapters — `library/features/common.py` (Elo, rolling averages, streaks, rest days, injury helpers) and `library/features/geo.py` (divisional/travel mechanism, parameterized by data rather than hardcoded to NFL's teams); `library/features/nfl.py` now holds only genuinely NFL-specific logic (QB/RB/WR leader identification, event/player feature assembly)
+- [x] Build a shared backtesting harness that produces the same accuracy/calibration report regardless of which sport's model it's pointed at — already done ahead of schedule before this pass; see `library/ml/backtest.py` and `library/ml/training_common.py`, both sport-agnostic (take `sport` as an explicit parameter throughout)
 
 ## Phase 5 — PGA Tour adapter (field-event schema)
 

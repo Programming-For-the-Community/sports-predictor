@@ -17,7 +17,9 @@ A personal-use AI/ML platform that predicts outcomes and statistics for six spor
 
 ## Build order
 
-See `docs/PROJECT_PLAN.md` for the full checklist. Short version: get NFL working end to end first (proof of architecture), then NCAA FB (validates the head-to-head adapter actually generalizes), then NBA + NCAA MBB together (stress-tests pipeline volume and cadence), then refactor into the registry/Step Functions pattern, then add PGA Tour and F1 last since they require extending the schema to field events rather than head-to-head matchups.
+See `docs/PROJECT_PLAN.md` for the full checklist. Short version: get NFL working end to end first (proof of architecture), then NCAA FB (validates the head-to-head adapter actually generalizes), then NBA + NCAA MBB together (stress-tests pipeline volume and cadence), then add PGA Tour and F1 last since they require extending the schema to field events rather than head-to-head matchups.
+
+**Deviation from that sequencing, and why:** the registry/Step Functions refactor (originally planned as Phase 4, after NCAA FB/NBA/NCAA MBB) was pulled forward and done right after NFL alone, before NCAA FB started. NFL's real Terraform footprint (13 EventBridge Scheduler resources, several as hand-cron-scheduled `for_each` maps) made it clear that pattern would only get more expensive to unwind the more sports copied it — see `design/PROJECT_PLAN.md`'s Phase 4 section for the full reasoning. NCAA FB (and every sport after it) is the first to actually onboard through the registry-driven path rather than needing its own bespoke orchestration Terraform.
 
 ## Where to look for what
 

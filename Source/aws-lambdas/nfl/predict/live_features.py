@@ -18,17 +18,15 @@ rating" snapshot -- NFL's ~2,700 completed games is the same cost
 build_dataset.py already treats as cheap-enough-to-scan, and this project
 has no request volume that would make that recomputation a real cost.
 """
+from library.features.common import DEFAULT_STARTING_RATING, compute_elo_ratings, rank_by_average_stat
 from library.features.nfl import (
-    DEFAULT_STARTING_RATING,
     build_event_features,
     build_player_features,
-    compute_elo_ratings,
     identify_lead_receiver,
     identify_lead_rusher,
     identify_starting_qb,
     identify_top_receivers,
     identify_top_rushers,
-    rank_by_average_stat,
 )
 from library.schema.keys import player_key
 
@@ -183,8 +181,8 @@ def build_live_event_features(storage, sport: str, event_key: str, window: int =
 
     home_events = storage.get_team_events(sport, home_id, before_date=event["event_date"], limit=window)
     away_events = storage.get_team_events(sport, away_id, before_date=event["event_date"], limit=window)
-    home_box = storage.get_team_game_stats_for_team(home_id, before_date=event["event_date"], limit=window)
-    away_box = storage.get_team_game_stats_for_team(away_id, before_date=event["event_date"], limit=window)
+    home_box = storage.get_team_game_stats_for_team(sport, home_id, before_date=event["event_date"], limit=window)
+    away_box = storage.get_team_game_stats_for_team(sport, away_id, before_date=event["event_date"], limit=window)
 
     # Depth chart/injuries are the event's own ingest-time snapshot (see
     # library/normalize/espn.py) -- absent for any event ingested before

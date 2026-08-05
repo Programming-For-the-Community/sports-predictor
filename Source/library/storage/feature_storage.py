@@ -19,6 +19,15 @@ from library.aws.dynamodb_table import DynamoDBTable
 from library.schema.keys import entity_key
 
 
+def _sport_prefix(sport: str) -> str:
+    """The leading `SPORT#<sport>#EVENT#` segment of an event_key (see
+    library.schema.keys.event_key) -- player_game_stats/team_game_stats
+    rows don't carry their own `sport` attribute, but every row's
+    event_key does, so filtering on this prefix is how get_all_player_game_stats/
+    get_all_team_game_stats scope a scan to one sport."""
+    return f"SPORT#{sport.upper()}#EVENT#"
+
+
 def _require_env(name: str) -> str:
     value = os.environ.get(name)
     if not value:
@@ -110,33 +119,36 @@ class FeatureStorage:
         )
         return [item for item in items if item.get("sport") == sport]
 
-    def get_all_player_game_stats(self) -> list[dict]:
-        """Every player_game_stats row, unsorted. Meant for batch jobs that
-        need to group by player in memory rather than issue one
-        entity-history Query per player (there can be thousands of
-        distinct players across a full history).
+    def get_all_player_game_stats(self, sport: str) -> list[dict]:
+        """Every player_game_stats row for one sport, unsorted. Meant for
+        batch jobs that need to group by player in memory rather than
+        issue one entity-history Query per player (there can be thousands
+        of distinct players across a full history).
 
-        No sport filter -- player_game_stats rows don't carry a `sport`
-        attribute directly (see design/DATA_SCHEMA.md), and only NFL data
-        exists today. Once a second sport's data lands, filter by parsing
-        the sport out of event_key's SPORT#<sport>#EVENT#... prefix.
+        player_game_stats rows don't carry a `sport` attribute directly
+        (see design/DATA_SCHEMA.md), so this filters on the `SPORT#<sport>#
+        EVENT#` prefix of each row's own event_key instead (see
+        _sport_prefix) -- required now that a second sport's data can
+        land in the same table, not just NFL's.
         """
-        return self._player_game_stats_table.scan()
+        prefix = _sport_prefix(sport)
+        return [row for row in self._player_game_stats_table.scan() if row.get("event_key", "").startswith(prefix)]
 
-    def get_all_team_game_stats(self) -> list[dict]:
-        """Every team_game_stats row, unsorted. Same batch-job rationale
-        as get_all_player_game_stats -- one scan instead of a per-team
-        Query, and no sport filter since only NFL data exists today."""
-        return self._team_game_stats_table.scan()
+    def get_all_team_game_stats(self, sport: str) -> list[dict]:
+        """Every team_game_stats row for one sport, unsorted. Same
+        batch-job rationale and sport-prefix filter as
+        get_all_player_game_stats."""
+        prefix = _sport_prefix(sport)
+        return [row for row in self._team_game_stats_table.scan() if row.get("event_key", "").startswith(prefix)]
 
     def get_team_game_stats_for_team(
-        self, entity_id: str, before_date: str | None = None, limit: int | None = None
+        self, sport: str, entity_id: str, before_date: str | None = None, limit: int | None = None
     ) -> list[dict]:
         """A team's own completed team_game_stats rows, most recent first.
         Same one-team-at-a-time lookup shape as get_team_events, and the
         same reasoning for scanning rather than needing a GSI -- see
         Terraform/dynamodb-team-game-stats.tf."""
-        rows = self.get_all_team_game_stats()
+        rows = self.get_all_team_game_stats(sport)
         team_rows = [
             row
             for row in rows
