@@ -12,35 +12,35 @@ resource "aws_lambda_permission" "eventbridge_invoke_nfl_ingest" {
   source_arn    = aws_scheduler_schedule.nfl_ingest.arn
 }
 
-# August through February, Tuesdays and Wednesdays at 10:00 UTC. One
-# schedule covering the whole window (rather than a tighter in-season-only
-# cadence) so a season start/end date shifting by a week or two never
-# falls outside it -- ESPN having no games on a given day is a no-op
-# fetch, not a problem worth optimizing away. No schedule covers March
-# through July, so the pipeline runs (and bills) zero times in the
-# off-season.
+# August through February, every day at 10:00 UTC. One schedule covering
+# the whole window (rather than a tighter in-season-only cadence) so a
+# season start/end date shifting by a week or two never falls outside it
+# -- ESPN having no games on a given day is a no-op fetch, not a problem
+# worth optimizing away. No schedule covers March through July, so the
+# pipeline runs (and bills) zero times in the off-season.
 #
-# Tuesday is the earliest day a full NFL week (including Monday Night
-# Football, which typically wraps ~04:00-05:00 UTC Tuesday) is guaranteed
-# complete, with comfortable margin past that. Wednesday is a retry for
-# anything ESPN hadn't finalized as of Tuesday, and it's also what the
-# feature-engineering schedule (scheduler-nfl-feature-engineering.tf,
-# later the same Wednesday) depends on having already run.
-#
-# Both runs can safely share one schedule/time now -- the handler resolves
-# its target week from the most recent Sunday's date (see handler.py's
-# module docstring), which is identical on Tuesday and Wednesday within
-# the same NFL week. An earlier version of this schedule had Tuesday and
-# Wednesday as two separate resources at different times, to dodge an
-# undocumented ESPN day-of-week rollover the handler used to depend on --
-# that dependency is gone, so the single combined schedule is correct
-# again, not just simpler.
+# Daily, not just Tue/Wed, specifically because of injury data: coach
+# data and box scores barely change day to day (box scores are already
+# skip-if-exists in handler.py, coaches change maybe once a season), but
+# injury reports genuinely update through the week as teams file new
+# ones -- a Tue/Wed-only cadence would serve a stale injury snapshot for
+# most of the week. handler.py's target-week resolution (most recent
+# Sunday's date) is the same value every day within a given NFL week, so
+# a daily run just re-derives and re-writes that same week's scoreboard
+# key with freshly-fetched coach/injury/depth-chart data each time --
+# see handler.py's own docstring for why re-embedding everything on every
+# run (rather than a lighter "injuries-only" mode) is the design: a
+# lighter mode that skipped re-fetching coach/depth-chart data would
+# silently wipe those fields on the next normalize rebuild, since
+# scoreboard_event_to_event_item rebuilds the whole event item from
+# scratch every time -- confirmed as a real bug in an earlier version of
+# this design, not just a theoretical concern.
 resource "aws_scheduler_schedule" "nfl_ingest" {
   name        = "${var.project}-nfl-ingest"
-  description = "NFL Data Ingest Schedule (Aug-Feb, Tue/Wed 10:00 UTC)"
+  description = "NFL Data Ingest Schedule (Aug-Feb, daily 10:00 UTC)"
   group_name  = aws_scheduler_schedule_group.sports_predictor.name
 
-  schedule_expression          = "cron(0 10 ? 8-12,1-2 TUE,WED *)"
+  schedule_expression          = "cron(0 10 ? 8-12,1-2 * *)"
   schedule_expression_timezone = "UTC"
 
   flexible_time_window {

@@ -8,7 +8,7 @@ it wrong previously meant a QB's passing stats landed under keys
 (library.features.nfl's build_event_features) never checked for, which
 silently zeroed out those columns in production.
 """
-from library.normalize.espn import boxscore_to_player_game_stats, boxscore_to_team_game_stats
+from library.normalize.espn import boxscore_to_player_game_stats, boxscore_to_team_game_stats, scoreboard_event_to_event_item
 
 
 def _summary(statistics):
@@ -169,3 +169,73 @@ class TestBoxscoreToTeamGameStats:
         items = boxscore_to_team_game_stats(summary, "nfl", TEAM_COMPOUND_KEY_SPLITS)
 
         assert items[0]["stat_line"] == {"interceptions": 1}
+
+
+def _scoreboard_event(event_id="401547417", home_id="12", away_id="24", **extra):
+    return {
+        "id": event_id,
+        "date": "2025-09-28T20:25Z",
+        "status": {"type": {"completed": False}},
+        "season": {"year": 2025, "type": 2},
+        "week": {"number": 4},
+        "competitions": [{
+            "competitors": [
+                {"homeAway": "home", "team": {"id": home_id}, "score": "0", "winner": False},
+                {"homeAway": "away", "team": {"id": away_id}, "score": "0", "winner": False},
+            ],
+        }],
+        **extra,
+    }
+
+
+class TestScoreboardEventToEventItemCoachInjuryDepthChart:
+    """Coach/injuries/depth-chart are attached by ingest's _enrich_events
+    (aws-lambdas/nfl/ingest/handler.py) before this function ever sees
+    the event -- these fields are absent entirely on any event ingested
+    before that shipped, or where a fetch failed, same sparse-optional
+    convention weather_temperature already established."""
+
+    def test_absent_when_not_present_on_raw_event(self):
+        item = scoreboard_event_to_event_item(_scoreboard_event(), "nfl")
+
+        for key in (
+            "home_coach_id", "home_coach_name", "home_coach_experience", "home_coach_season_win_pct",
+            "away_coach_id", "away_coach_name", "away_coach_experience", "away_coach_season_win_pct",
+            "home_injuries", "away_injuries", "home_depth_chart", "away_depth_chart",
+        ):
+            assert key not in item
+
+    def test_coach_flattened_into_top_level_attributes(self):
+        raw = _scoreboard_event(
+            home_coach={"coach_id": "1", "coach_name": "Andy Reid", "experience": 27, "season_win_pct": 0.7},
+            away_coach={"coach_id": "2", "coach_name": "Jim Harbaugh", "experience": 1, "season_win_pct": 0.4},
+        )
+
+        item = scoreboard_event_to_event_item(raw, "nfl")
+
+        assert item["home_coach_id"] == "1"
+        assert item["home_coach_name"] == "Andy Reid"
+        assert item["home_coach_experience"] == 27
+        assert item["home_coach_season_win_pct"] == 0.7
+        assert item["away_coach_id"] == "2"
+        assert item["away_coach_name"] == "Jim Harbaugh"
+
+    def test_empty_injuries_list_is_kept_not_treated_as_absent(self):
+        # An empty list is real signal ("checked, nobody's hurt"), not
+        # the same as "never checked" -- must survive as [], not be
+        # dropped the way a None value would be.
+        raw = _scoreboard_event(home_injuries=[], away_injuries=[{"entity_id": "99", "status": "Out"}])
+
+        item = scoreboard_event_to_event_item(raw, "nfl")
+
+        assert item["home_injuries"] == []
+        assert item["away_injuries"] == [{"entity_id": "99", "status": "Out"}]
+
+    def test_depth_chart_passed_through_as_is(self):
+        depth_chart = {"qb": {"position": {"abbreviation": "QB"}, "athletes": [{"id": "1"}]}}
+        raw = _scoreboard_event(home_depth_chart=depth_chart)
+
+        item = scoreboard_event_to_event_item(raw, "nfl")
+
+        assert item["home_depth_chart"] == depth_chart
+        assert "away_depth_chart" not in item

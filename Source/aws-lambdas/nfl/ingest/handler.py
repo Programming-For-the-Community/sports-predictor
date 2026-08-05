@@ -1,11 +1,23 @@
 """
 NFL ingest Lambda. Triggered by EventBridge Scheduler -- see
-Terraform/scheduler-nfl-ingest.tf, which runs this twice a week (a
-Tuesday primary run and a Wednesday retry for anything ESPN hadn't
-finalized yet). Fetches that week's scoreboard and completed box scores
-from ESPN and writes raw JSON to S3. The normalize Lambda is triggered
+Terraform/scheduler-nfl-ingest.tf, which runs this daily during the
+season. Fetches that week's scoreboard and completed box scores from
+ESPN and writes raw JSON to S3. The normalize Lambda is triggered
 automatically by the resulting S3 PutObject events, so this function
 never touches DynamoDB directly.
+
+Also enriches every event in that scoreboard payload with each
+participating team's current head coach, injury report, and depth chart
+(see _enrich_events) before writing it -- embedded directly into the
+same scoreboard JSON, not a separate S3 object, both to keep the write
+atomic (normalize's _process_scoreboard reads it all from one place) and
+because scoreboard_event_to_event_item (library/normalize/espn.py)
+rebuilds the whole event item from scratch every time it runs -- so this
+enrichment has to happen on EVERY ingest run, not a lighter subset of
+runs, or a run that omitted it would silently wipe out a previous run's
+coach/injury/depth-chart fields on the next normalize rebuild. This is
+also why ingest runs daily now instead of just Tue/Wed: injury reports
+change through the week in a way box scores and coach data don't.
 
 EventBridge can override any default via the schedule's input payload:
     { "season": 2025, "season_type": 2, "week": 4 }
@@ -35,6 +47,7 @@ from datetime import date, timedelta
 import boto3
 from botocore.exceptions import ClientError
 
+from library.http.espn_core import EspnCoreApiClient
 from library.http.nfl import NFLClient
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
@@ -42,6 +55,11 @@ logger = logging.getLogger("nfl-ingest")
 
 RAW_BUCKET = os.environ["RAW_BUCKET_NAME"]
 PRESEASON_TYPE = 1
+# Depth chart positions leader-selection actually needs (see
+# aws-lambdas/nfl/predict/live_features.py) -- not the full ~25-position
+# payload ESPN returns, most of which (offensive line, special teams,
+# individual defensive line spots) this project never predicts for.
+DEPTH_CHART_POSITIONS = {"QB", "RB", "WR"}
 
 _s3 = boto3.client("s3")
 
@@ -73,6 +91,91 @@ def _put_json(key: str, payload: dict) -> None:
     logger.info("Wrote s3://%s/%s", RAW_BUCKET, key)
 
 
+def _home_away_team_ids(event: dict) -> tuple[str, str] | None:
+    """Same navigation path as scoreboard_event_to_event_item
+    (library/normalize/espn.py) -- competitions[0].competitors[], each
+    carrying its own team id and homeAway role. Returns None for a
+    malformed event rather than raising, since enrichment is best-effort
+    and shouldn't take down the whole ingest run over one bad event."""
+    try:
+        competitors = event["competitions"][0]["competitors"]
+        home = next(c for c in competitors if c.get("homeAway") == "home")
+        away = next(c for c in competitors if c.get("homeAway") == "away")
+        return str(home["team"]["id"]), str(away["team"]["id"])
+    except (KeyError, IndexError, StopIteration):
+        return None
+
+
+def _filter_depth_chart(raw_depth_chart: dict) -> dict:
+    """Keeps only the positions leader-selection actually needs (see
+    DEPTH_CHART_POSITIONS) -- ESPN's full depth chart has roughly 25
+    entries per team (offensive line, special teams, individual
+    defensive-line spots) this project has no use for. Filters on each
+    entry's position.abbreviation rather than the outer dict key, since
+    that key's exact casing/format was only confirmed live for
+    non-skill-position codes (e.g. "lde" for Left Defensive End)."""
+    positions = raw_depth_chart.get("positions") or {}
+    return {
+        code: entry
+        for code, entry in positions.items()
+        if (entry.get("position") or {}).get("abbreviation") in DEPTH_CHART_POSITIONS
+    }
+
+
+def _enrich_events(events: list[dict], season: int, nfl_client: NFLClient, core_client: EspnCoreApiClient) -> None:
+    """Attaches home_coach/away_coach, home_injuries/away_injuries, and
+    home_depth_chart/away_depth_chart onto each event dict in place,
+    before the scoreboard payload is written to S3 -- see this module's
+    own docstring for why this has to run on every ingest cycle rather
+    than a lighter subset of them. Best-effort throughout: a coach/
+    injury/depth-chart fetch failure is logged and that field is simply
+    omitted, never allowed to take down the scoreboard write itself,
+    which every other feature depends on regardless of this enrichment's
+    success.
+
+    Takes both clients as parameters rather than constructing its own --
+    lambda_handler already builds one NFLClient for the scoreboard/box
+    score fetches above, and a second, independent instantiation here
+    would both duplicate that and, in tests, silently escape whatever
+    mock a caller patched the module-level NFLClient/EspnCoreApiClient
+    constructor with."""
+    team_ids: set[str] = set()
+    for event in events:
+        ids = _home_away_team_ids(event)
+        if ids is not None:
+            team_ids.update(ids)
+
+    try:
+        coaches = core_client.get_season_coaches(season)
+    except Exception:
+        logger.exception("Failed fetching season coaches for %d -- coach fields will be omitted", season)
+        coaches = {}
+
+    injuries_by_team: dict[str, list[dict]] = {}
+    depth_chart_by_team: dict[str, dict] = {}
+    for team_id in team_ids:
+        try:
+            injuries_by_team[team_id] = core_client.get_team_injuries(team_id)
+        except Exception:
+            logger.exception("Failed fetching injuries for team %s -- injuries field will be omitted", team_id)
+        try:
+            depth_chart_by_team[team_id] = _filter_depth_chart(nfl_client.get_depth_chart(team_id))
+        except Exception:
+            logger.exception("Failed fetching depth chart for team %s -- depth chart field will be omitted", team_id)
+
+    for event in events:
+        ids = _home_away_team_ids(event)
+        if ids is None:
+            continue
+        home_id, away_id = ids
+        event["home_coach"] = coaches.get(home_id)
+        event["away_coach"] = coaches.get(away_id)
+        event["home_injuries"] = injuries_by_team.get(home_id)
+        event["away_injuries"] = injuries_by_team.get(away_id)
+        event["home_depth_chart"] = depth_chart_by_team.get(home_id)
+        event["away_depth_chart"] = depth_chart_by_team.get(away_id)
+
+
 def lambda_handler(event: dict, context) -> dict:
     season = event.get("season")
     season_type = event.get("season_type")
@@ -83,6 +186,7 @@ def lambda_handler(event: dict, context) -> dict:
         return {"processed": 0, "skipped": 0, "failed": 0}
 
     client = NFLClient()
+    core_client = EspnCoreApiClient()
 
     if week is None:
         # See the module docstring for why this resolves against the most
@@ -101,11 +205,17 @@ def lambda_handler(event: dict, context) -> dict:
     else:
         scoreboard = client.get_scoreboard(season, season_type, week)
 
-    scoreboard_key = f"nfl/scoreboard/{season}/{season_type}/{week}.json"
-    _put_json(scoreboard_key, scoreboard)
-
     events = scoreboard.get("events", [])
     logger.info("Found %d events in season %d type %d week %d", len(events), season, season_type, week)
+
+    # Mutates each event dict in place -- scoreboard["events"] holds the
+    # same list/dict objects, so this enrichment is already reflected in
+    # `scoreboard` by the time it's written below. See this module's own
+    # docstring for why this runs on every ingest cycle unconditionally.
+    _enrich_events(events, season, client, core_client)
+
+    scoreboard_key = f"nfl/scoreboard/{season}/{season_type}/{week}.json"
+    _put_json(scoreboard_key, scoreboard)
 
     processed = skipped = failed = 0
     for evt in events:

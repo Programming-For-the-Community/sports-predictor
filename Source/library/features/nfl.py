@@ -313,6 +313,46 @@ def _rate(averages: dict, numerator_key: str, denominator_key: str) -> float | N
     return averages[numerator_key] / denominator
 
 
+# Ordinal, not one-hot -- these statuses form a real severity order (a
+# tree model can split on "status >= Doubtful" directly), matching the
+# confirmed severity threshold used for live leader-selection exclusion
+# (Out AND Doubtful, not just Out -- see live_features.py). Any status
+# string ESPN reports that isn't one of these three (rare -- IR/PUP-style
+# season-ending designations mostly show up as "Out" already) falls back
+# to 1, a conservative "something's reported" floor rather than silently
+# treating an unrecognized status as healthy.
+_INJURY_STATUS_ORDINAL = {"Questionable": 1, "Doubtful": 2, "Out": 3}
+_TEAM_INJURY_COUNT_STATUSES = {"Doubtful", "Out"}
+
+
+def _injury_status_ordinal(injuries: list[dict] | None, entity_id: str | None) -> int | None:
+    """0=no report (checked, this player's healthy), 1=Questionable,
+    2=Doubtful, 3=Out. None specifically means "never checked" (the event
+    has no injuries data at all -- either older than this feature, or a
+    fetch failure) -- distinct from 0, and left as None (not coerced to
+    0) so it reaches training as a real missing value a tree model can
+    treat as such, rather than a false "definitely healthy" signal for
+    every pre-existing historical row."""
+    if injuries is None or entity_id is None:
+        return None
+    for injury in injuries:
+        if injury.get("entity_id") == entity_id:
+            return _INJURY_STATUS_ORDINAL.get(injury.get("status"), 1)
+    return 0
+
+
+def _team_injury_count(injuries: list[dict] | None) -> int | None:
+    """Count of players Doubtful or Out -- Questionable isn't counted
+    here, same reasoning _injury_status_ordinal's severity order and the
+    live leader-selection threshold both use: most Questionable players
+    do play, so counting them would dilute this into a much noisier
+    signal. None (not 0) when injuries data is entirely absent -- same
+    missing-vs-zero distinction as _injury_status_ordinal."""
+    if injuries is None:
+        return None
+    return sum(1 for injury in injuries if injury.get("status") in _TEAM_INJURY_COUNT_STATUSES)
+
+
 def build_event_features(
     event: dict,
     elo_ratings: dict[str, dict[str, float]],
@@ -380,6 +420,17 @@ def build_event_features(
 
     home_win_streak = current_streak(home_team_events, home_id)
     away_win_streak = current_streak(away_team_events, away_id)
+
+    # Injury status is scoped to the presumptive QB specifically, not
+    # every position -- keeps the initial feature set small and tied to
+    # the position that most affects win probability, worth revisiting
+    # once this has real signal behind it. home_qb_games/away_qb_games'
+    # rows all belong to the same identified player (see this function's
+    # own docstring), so the first row's entity_id is that player's id.
+    home_qb_entity_id = home_qb_games[0].get("entity_id") if home_qb_games else None
+    away_qb_entity_id = away_qb_games[0].get("entity_id") if away_qb_games else None
+    home_injuries = event.get("home_injuries")
+    away_injuries = event.get("away_injuries")
 
     venue_city = event.get("venue_city")
     # Every domestic US venue address has a state; international ones
@@ -463,12 +514,22 @@ def build_event_features(
         "home_avg_turnovers": home_box_stats.get("avg_turnovers"),
         "home_avg_total_yards": home_box_stats.get("avg_total_yards"),
         "home_avg_possession_time_seconds": home_box_stats.get("avg_possession_time_seconds"),
+        # penalties/penalty_yards have been in team_game_stats.stat_line
+        # since normalize.py's _TEAM_COMPOUND_KEY_SPLITS was written (see
+        # "totalPenaltiesYards"), for the full historical backfill --
+        # rolling_player_stat_averages already averages them generically
+        # like every other stat_line key, they just weren't read into this
+        # return dict until now.
+        "home_avg_penalties": home_box_stats.get("avg_penalties"),
+        "home_avg_penalty_yards": home_box_stats.get("avg_penalty_yards"),
         "home_third_down_pct": home_third_down_pct,
         "home_red_zone_pct": home_red_zone_pct,
         "home_box_games_played": home_box_stats["games_played"],
         "away_avg_turnovers": away_box_stats.get("avg_turnovers"),
         "away_avg_total_yards": away_box_stats.get("avg_total_yards"),
         "away_avg_possession_time_seconds": away_box_stats.get("avg_possession_time_seconds"),
+        "away_avg_penalties": away_box_stats.get("avg_penalties"),
+        "away_avg_penalty_yards": away_box_stats.get("avg_penalty_yards"),
         "away_third_down_pct": away_third_down_pct,
         "away_red_zone_pct": away_red_zone_pct,
         "away_box_games_played": away_box_stats["games_played"],
@@ -478,6 +539,22 @@ def build_event_features(
         "away_travel_km": away_travel_km,
         "home_win_streak": home_win_streak,
         "away_win_streak": away_win_streak,
+        # Coach/injury fields all land on `event` via ingest's
+        # _enrich_events + scoreboard_event_to_event_item (see
+        # library/normalize/espn.py) -- absent (None) for any event
+        # ingested before this shipped, same sparse-optional convention
+        # weather_temperature already established. experience/
+        # season_win_pct are ESPN's own numbers, used directly -- no
+        # derivation, and raw coach identity is still never a feature
+        # here, same rule as team/player ids.
+        "home_coach_experience": event.get("home_coach_experience"),
+        "away_coach_experience": event.get("away_coach_experience"),
+        "home_coach_season_win_pct": event.get("home_coach_season_win_pct"),
+        "away_coach_season_win_pct": event.get("away_coach_season_win_pct"),
+        "home_qb_injury_status": _injury_status_ordinal(home_injuries, home_qb_entity_id),
+        "away_qb_injury_status": _injury_status_ordinal(away_injuries, away_qb_entity_id),
+        "home_team_injury_count": _team_injury_count(home_injuries),
+        "away_team_injury_count": _team_injury_count(away_injuries),
         # Labels -- the training targets (win/loss and final score), not
         # model inputs. None when this is called to build a live feature
         # vector for a not-yet-played event.

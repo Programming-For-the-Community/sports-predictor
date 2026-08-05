@@ -7,7 +7,9 @@ FeatureStorage would return.
 import pytest
 
 from library.features.nfl import (
+    _injury_status_ordinal,
     _mov_multiplier,
+    _team_injury_count,
     build_event_features,
     build_player_features,
     compute_elo_ratings,
@@ -28,6 +30,9 @@ from library.features.nfl import (
 def _event(
     event_key, event_date, home_id, away_id, home_score=None, away_score=None, week=1, season_type=2,
     venue_indoor=None, venue_city=None, venue_state=None, weather_temperature=None,
+    home_coach_experience=None, away_coach_experience=None,
+    home_coach_season_win_pct=None, away_coach_season_win_pct=None,
+    home_injuries=None, away_injuries=None,
 ):
     home_result = {"score": home_score, "won": home_score is not None and home_score > away_score}
     away_result = {"score": away_score, "won": away_score is not None and away_score > home_score}
@@ -40,6 +45,12 @@ def _event(
         "venue_city": venue_city,
         "venue_state": venue_state,
         "weather_temperature": weather_temperature,
+        "home_coach_experience": home_coach_experience,
+        "away_coach_experience": away_coach_experience,
+        "home_coach_season_win_pct": home_coach_season_win_pct,
+        "away_coach_season_win_pct": away_coach_season_win_pct,
+        "home_injuries": home_injuries,
+        "away_injuries": away_injuries,
         "participants": [
             {"entity_id": home_id, "role": "home", "result": home_result},
             {"entity_id": away_id, "role": "away", "result": away_result},
@@ -655,6 +666,7 @@ class TestBuildEventFeatures:
                     "turnovers": 1, "total_yards": 350, "possession_time_seconds": 1800,
                     "third_down_conversions": 6, "third_down_attempts": 12,
                     "red_zone_conversions": 2, "red_zone_attempts": 4,
+                    "penalties": 5, "penalty_yards": 45,
                 },
             },
         ]
@@ -664,6 +676,8 @@ class TestBuildEventFeatures:
         assert row["home_avg_turnovers"] == 1
         assert row["home_avg_total_yards"] == 350
         assert row["home_avg_possession_time_seconds"] == 1800
+        assert row["home_avg_penalties"] == 5
+        assert row["home_avg_penalty_yards"] == 45
         assert row["home_third_down_pct"] == 0.5
         assert row["home_red_zone_pct"] == 0.5
         assert row["home_box_games_played"] == 1
@@ -675,6 +689,8 @@ class TestBuildEventFeatures:
         row = build_event_features(event, {}, [], [])
 
         assert row["home_avg_turnovers"] is None
+        assert row["home_avg_penalties"] is None
+        assert row["home_avg_penalty_yards"] is None
         assert row["home_third_down_pct"] is None
         assert row["home_red_zone_pct"] is None
         assert row["home_box_games_played"] == 0
@@ -763,6 +779,103 @@ class TestBuildEventFeatures:
 
         assert row["home_win_streak"] == 2
         assert row["away_win_streak"] == 0
+
+    def test_coach_fields_read_straight_off_the_event(self):
+        event = _event(
+            "E1", "2025-09-07", "KC", "LAC", 27, 20,
+            home_coach_experience=27, away_coach_experience=1,
+            home_coach_season_win_pct=0.7, away_coach_season_win_pct=0.4,
+        )
+
+        row = build_event_features(event, {}, [], [])
+
+        assert row["home_coach_experience"] == 27
+        assert row["away_coach_experience"] == 1
+        assert row["home_coach_season_win_pct"] == 0.7
+        assert row["away_coach_season_win_pct"] == 0.4
+
+    def test_coach_fields_are_none_when_absent_from_event(self):
+        event = _event("E1", "2025-09-07", "KC", "LAC", 27, 20)
+
+        row = build_event_features(event, {}, [], [])
+
+        assert row["home_coach_experience"] is None
+        assert row["home_coach_season_win_pct"] is None
+
+    def test_qb_injury_status_looks_up_the_presumptive_qb_by_entity_id(self):
+        event = _event(
+            "E1", "2025-09-07", "KC", "LAC", 27, 20,
+            home_injuries=[{"entity_id": "mahomes", "status": "Questionable"}],
+        )
+        home_qb_games = [{"entity_id": "mahomes", "event_date": "2025-08-31", "stat_line": {}}]
+
+        row = build_event_features(event, {}, [], [], home_qb_games=home_qb_games)
+
+        assert row["home_qb_injury_status"] == 1
+        assert row["away_qb_injury_status"] is None  # no away_qb_games given, no away_injuries either
+
+    def test_team_injury_count_from_event_level_injuries(self):
+        event = _event(
+            "E1", "2025-09-07", "KC", "LAC", 27, 20,
+            home_injuries=[
+                {"entity_id": "1", "status": "Out"},
+                {"entity_id": "2", "status": "Doubtful"},
+                {"entity_id": "3", "status": "Questionable"},  # not counted
+            ],
+        )
+
+        row = build_event_features(event, {}, [], [])
+
+        assert row["home_team_injury_count"] == 2
+
+    def test_injury_fields_are_none_not_zero_when_event_has_no_injuries_data(self):
+        # Missing entirely (older event, or a fetch failure) must reach
+        # training as a real missing value, not a false "definitely
+        # healthy" zero -- see _injury_status_ordinal's own docstring.
+        event = _event("E1", "2025-09-07", "KC", "LAC", 27, 20)
+
+        row = build_event_features(event, {}, [], [])
+
+        assert row["home_qb_injury_status"] is None
+        assert row["home_team_injury_count"] is None
+
+
+class TestInjuryStatusOrdinal:
+    def test_none_when_injuries_is_none(self):
+        assert _injury_status_ordinal(None, "mahomes") is None
+
+    def test_none_when_entity_id_is_none(self):
+        assert _injury_status_ordinal([{"entity_id": "mahomes", "status": "Out"}], None) is None
+
+    def test_zero_when_player_not_on_the_report(self):
+        assert _injury_status_ordinal([{"entity_id": "someone-else", "status": "Out"}], "mahomes") == 0
+
+    def test_zero_when_report_is_empty_list(self):
+        assert _injury_status_ordinal([], "mahomes") == 0
+
+    @pytest.mark.parametrize("status,expected", [("Questionable", 1), ("Doubtful", 2), ("Out", 3)])
+    def test_maps_known_statuses_to_severity_order(self, status, expected):
+        assert _injury_status_ordinal([{"entity_id": "mahomes", "status": status}], "mahomes") == expected
+
+    def test_unrecognized_status_falls_back_to_1(self):
+        assert _injury_status_ordinal([{"entity_id": "mahomes", "status": "Injured Reserve"}], "mahomes") == 1
+
+
+class TestTeamInjuryCount:
+    def test_none_when_injuries_is_none(self):
+        assert _team_injury_count(None) is None
+
+    def test_zero_for_empty_report(self):
+        assert _team_injury_count([]) == 0
+
+    def test_counts_only_doubtful_and_out(self):
+        injuries = [
+            {"entity_id": "1", "status": "Out"},
+            {"entity_id": "2", "status": "Doubtful"},
+            {"entity_id": "3", "status": "Questionable"},
+            {"entity_id": "4", "status": "Out"},
+        ]
+        assert _team_injury_count(injuries) == 3
 
 
 class TestBuildPlayerFeatures:

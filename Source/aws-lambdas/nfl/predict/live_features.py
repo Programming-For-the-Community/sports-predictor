@@ -34,6 +34,16 @@ from library.schema.keys import player_key
 
 DEFAULT_ROLLING_WINDOW = 5
 
+# Matches the severity threshold library/features/nfl.py's
+# _TEAM_INJURY_COUNT_STATUSES uses for the injury-count feature, and the
+# threshold confirmed with the user for candidacy exclusion specifically
+# (Out AND Doubtful, not just Out) -- kept as its own local constant
+# rather than importing nfl.py's private one, same reasoning
+# predict/model_loader.py's own docstring gives for not importing
+# model_common.py: this module and nfl.py are different consumers of the
+# same business rule, not the same code reused twice.
+_INJURY_EXCLUDED_STATUSES = frozenset({"Out", "Doubtful"})
+
 
 class EventNotFoundError(Exception):
     pass
@@ -84,18 +94,72 @@ def _live_elo_ratings(
     }
 
 
+def _depth_chart_entry(depth_chart: dict | None, position_abbreviation: str) -> dict | None:
+    """Finds depth_chart's entry for position_abbreviation ("QB"/"RB"/"WR")
+    by each entry's own position.abbreviation field, not by assuming a
+    specific outer dict key -- ingest's _filter_depth_chart
+    (aws-lambdas/nfl/ingest/handler.py) does the same match-by-abbreviation
+    rather than relying on ESPN's exact key casing/format, which was only
+    confirmed live for non-skill-position codes."""
+    if not depth_chart:
+        return None
+    for entry in depth_chart.values():
+        if (entry.get("position") or {}).get("abbreviation") == position_abbreviation:
+            return entry
+    return None
+
+
+def _healthy_athlete_ids(depth_chart_entry: dict, injuries: list[dict] | None) -> list[str]:
+    """Every entity_id in depth_chart_entry's own rank order, minus
+    anyone injuries lists as Out or Doubtful (_INJURY_EXCLUDED_STATUSES).
+    Rank order is exactly ESPN's own athletes[] ordering -- starter
+    first -- so index 0 of the result (when non-empty) is the
+    highest-ranked healthy player at this position."""
+    injured_ids = {
+        injury.get("entity_id") for injury in (injuries or [])
+        if injury.get("status") in _INJURY_EXCLUDED_STATUSES
+    }
+    return [
+        str(athlete["id"]) for athlete in depth_chart_entry.get("athletes", [])
+        if "id" in athlete and str(athlete["id"]) not in injured_ids
+    ]
+
+
 def _presumptive_leader_and_history(
     storage, sport: str, team_id: str, before_date: str, identify_fn, window: int,
+    depth_chart: dict | None = None, injuries: list[dict] | None = None, position_abbreviation: str | None = None,
 ) -> list[dict]:
     """A future game has no player_game_stats of its own yet to identify
     a starting QB/lead rusher/lead receiver from (identify_starting_qb et
     al. all work by finding whoever had the most volume IN a given game).
-    Approximates "who's likely to play that role next" as "whoever held
-    it last game" -- pulls that team's most recent completed event, the
-    stat lines from it, identifies the leader the same way training does,
-    then returns that player's own rolling history. Empty list (not None)
-    when no prior event or no identifiable leader exists, matching
+
+    Prefers a real depth chart (position_abbreviation's rank order,
+    filtered to exclude anyone Out/Doubtful) when depth_chart/injuries
+    data is available -- this beats the last-game-volume fallback below
+    in exactly the case that matters most: a starter is ruled out and a
+    genuine backup who simply hadn't played much yet takes over, someone
+    the volume-based fallback would never surface (near-zero recent
+    stats). If the depth chart is known but everyone at this position is
+    currently Out/Doubtful, that's treated as a real "no leader
+    available" result (empty list), not a reason to fall back to
+    volume-based selection -- falling back there would risk re-selecting
+    the very player the depth chart just ruled out.
+
+    Falls back to "whoever held this role last game" (pulls that team's
+    most recent completed event, the stat lines from it, identifies the
+    leader the same way training does, then returns that player's own
+    rolling history) only when depth chart data isn't available at all
+    for this team/position -- older events, or a fetch failure. Empty
+    list (not None) in every no-leader-found case, matching
     build_event_features' own home_qb_games=None-or-list contract."""
+    if position_abbreviation is not None:
+        entry = _depth_chart_entry(depth_chart, position_abbreviation)
+        if entry is not None:
+            healthy_ids = _healthy_athlete_ids(entry, injuries)
+            if not healthy_ids:
+                return []
+            return storage.get_player_game_stats(healthy_ids[0], before_date=before_date, limit=window)
+
     last_events = storage.get_team_events(sport, team_id, before_date=before_date, limit=1)
     if not last_events:
         return []
@@ -122,6 +186,16 @@ def build_live_event_features(storage, sport: str, event_key: str, window: int =
     home_box = storage.get_team_game_stats_for_team(home_id, before_date=event["event_date"], limit=window)
     away_box = storage.get_team_game_stats_for_team(away_id, before_date=event["event_date"], limit=window)
 
+    # Depth chart/injuries are the event's own ingest-time snapshot (see
+    # library/normalize/espn.py) -- absent for any event ingested before
+    # this shipped, in which case every _presumptive_leader_and_history
+    # call below transparently falls back to its own last-game-volume
+    # logic (see that function's docstring).
+    home_depth_chart = event.get("home_depth_chart")
+    away_depth_chart = event.get("away_depth_chart")
+    home_injuries = event.get("home_injuries")
+    away_injuries = event.get("away_injuries")
+
     return build_event_features(
         event,
         _live_elo_ratings(storage, sport, event, home_id, away_id),
@@ -129,17 +203,23 @@ def build_live_event_features(storage, sport: str, event_key: str, window: int =
         away_events,
         window,
         home_qb_games=_presumptive_leader_and_history(
-            storage, sport, home_id, event["event_date"], identify_starting_qb, window),
+            storage, sport, home_id, event["event_date"], identify_starting_qb, window,
+            home_depth_chart, home_injuries, "QB"),
         away_qb_games=_presumptive_leader_and_history(
-            storage, sport, away_id, event["event_date"], identify_starting_qb, window),
+            storage, sport, away_id, event["event_date"], identify_starting_qb, window,
+            away_depth_chart, away_injuries, "QB"),
         home_rb_games=_presumptive_leader_and_history(
-            storage, sport, home_id, event["event_date"], identify_lead_rusher, window),
+            storage, sport, home_id, event["event_date"], identify_lead_rusher, window,
+            home_depth_chart, home_injuries, "RB"),
         away_rb_games=_presumptive_leader_and_history(
-            storage, sport, away_id, event["event_date"], identify_lead_rusher, window),
+            storage, sport, away_id, event["event_date"], identify_lead_rusher, window,
+            away_depth_chart, away_injuries, "RB"),
         home_wr_games=_presumptive_leader_and_history(
-            storage, sport, home_id, event["event_date"], identify_lead_receiver, window),
+            storage, sport, home_id, event["event_date"], identify_lead_receiver, window,
+            home_depth_chart, home_injuries, "WR"),
         away_wr_games=_presumptive_leader_and_history(
-            storage, sport, away_id, event["event_date"], identify_lead_receiver, window),
+            storage, sport, away_id, event["event_date"], identify_lead_receiver, window,
+            away_depth_chart, away_injuries, "WR"),
         home_team_box_stats=home_box,
         away_team_box_stats=away_box,
     )
@@ -252,14 +332,40 @@ def build_live_event_leader_candidates(
     _, current_ratings = compute_elo_ratings(storage.get_all_events(sport))
 
     return {
-        "home": _team_leader_candidates(storage, sport, event, home_id, away_id, home_id, window, current_ratings),
-        "away": _team_leader_candidates(storage, sport, event, home_id, away_id, away_id, window, current_ratings),
+        "home": _team_leader_candidates(
+            storage, sport, event, home_id, away_id, home_id, window, current_ratings,
+            event.get("home_depth_chart"), event.get("home_injuries"),
+        ),
+        "away": _team_leader_candidates(
+            storage, sport, event, home_id, away_id, away_id, window, current_ratings,
+            event.get("away_depth_chart"), event.get("away_injuries"),
+        ),
     }
+
+
+def _leader_candidates_for_position(
+    depth_chart: dict | None, injuries: list[dict] | None, position_abbreviation: str, n: int,
+    fallback: list[dict],
+) -> list[dict]:
+    """Up to n candidates for position_abbreviation, preferring real
+    depth-chart rank order (filtered to exclude Out/Doubtful, see
+    _healthy_athlete_ids) over `fallback` (the existing last-game-volume
+    selection) -- same depth-chart-beats-volume reasoning as
+    _presumptive_leader_and_history, just returning up to n candidates
+    instead of one. Falls back to `fallback` only when depth chart data
+    isn't available for this team/position at all; if it IS available
+    but fewer than n players are healthy, returns however many are --
+    never pads out with a volume-based pick, which would risk
+    re-surfacing someone the depth chart just excluded."""
+    entry = _depth_chart_entry(depth_chart, position_abbreviation)
+    if entry is None:
+        return fallback
+    return [{"entity_id": entity_id} for entity_id in _healthy_athlete_ids(entry, injuries)[:n]]
 
 
 def _team_leader_candidates(
     storage, sport: str, event: dict, home_id: str, away_id: str, team_id: str, window: int,
-    current_ratings: dict | None = None,
+    current_ratings: dict | None = None, depth_chart: dict | None = None, injuries: list[dict] | None = None,
 ) -> dict:
     before_date = event["event_date"]
     last_events = storage.get_team_events(sport, team_id, before_date=before_date, limit=1)
@@ -288,9 +394,12 @@ def _team_leader_candidates(
         return rows
 
     qb = identify_starting_qb(team_players)
-    passing_rows = rows_for([qb]) if qb else []
-    receiving_rows = rows_for(identify_top_receivers(team_players))
-    rushing_rows = rows_for(identify_top_rushers(team_players))
+    passing_rows = rows_for(_leader_candidates_for_position(
+        depth_chart, injuries, "QB", 1, [qb] if qb else []))
+    receiving_rows = rows_for(_leader_candidates_for_position(
+        depth_chart, injuries, "WR", 3, identify_top_receivers(team_players)))
+    rushing_rows = rows_for(_leader_candidates_for_position(
+        depth_chart, injuries, "RB", 2, identify_top_rushers(team_players)))
 
     # Sacks: ranked by each candidate's OWN rolling average, not
     # single-game volume -- see rank_by_average_stat's docstring. Every

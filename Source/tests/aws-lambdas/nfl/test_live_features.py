@@ -13,7 +13,10 @@ import pytest
 import live_features
 
 
-def _event(event_key, event_date, home_id, away_id, home_score=None, away_score=None):
+def _event(
+    event_key, event_date, home_id, away_id, home_score=None, away_score=None,
+    home_depth_chart=None, away_depth_chart=None, home_injuries=None, away_injuries=None,
+):
     home_result = {"score": home_score, "won": home_score is not None and home_score > away_score}
     away_result = {"score": away_score, "won": away_score is not None and away_score > home_score}
     return {
@@ -25,11 +28,30 @@ def _event(event_key, event_date, home_id, away_id, home_score=None, away_score=
         "venue_city": "Kansas City",
         "venue_state": "MO",
         "weather_temperature": 40,
+        "home_depth_chart": home_depth_chart,
+        "away_depth_chart": away_depth_chart,
+        "home_injuries": home_injuries,
+        "away_injuries": away_injuries,
         "participants": [
             {"entity_id": home_id, "role": "home", "result": home_result},
             {"entity_id": away_id, "role": "away", "result": away_result},
         ],
     }
+
+
+def _depth_chart(qb=None, rb=None, wr=None):
+    """Builds a filtered depth chart matching ingest's _filter_depth_chart
+    output shape -- {position_code: {"position": {"abbreviation": ...},
+    "athletes": [{"id": ...}, ...]}}. Each of qb/rb/wr is a plain list of
+    entity_id strings, already in rank order."""
+    chart = {}
+    if qb is not None:
+        chart["qb"] = {"position": {"abbreviation": "QB"}, "athletes": [{"id": eid} for eid in qb]}
+    if rb is not None:
+        chart["rb"] = {"position": {"abbreviation": "RB"}, "athletes": [{"id": eid} for eid in rb]}
+    if wr is not None:
+        chart["wr"] = {"position": {"abbreviation": "WR"}, "athletes": [{"id": eid} for eid in wr]}
+    return chart
 
 
 class TestBuildLiveEventFeatures:
@@ -94,6 +116,133 @@ class TestBuildLiveEventFeatures:
         # have fetched rolling history for.
         called_entity_ids = {c.args[0] for c in storage.get_player_game_stats.call_args_list}
         assert "mahomes-patrick" in called_entity_ids
+
+    def test_qb_selected_from_depth_chart_when_available_not_last_game_volume(self):
+        storage = MagicMock()
+        # Depth chart says "backup-qb" is QB1 -- volume-based selection
+        # (most passing attempts last game) would pick "mahomes-patrick"
+        # instead; depth chart must win when both are available.
+        target = _event("E3", "2025-09-21", "KC", "LAC", home_depth_chart=_depth_chart(qb=["backup-qb"]))
+        last_game = _event("E2", "2025-09-14", "KC", "DEN", 24, 17)
+        storage.get_event.return_value = target
+        storage.get_all_events.return_value = [last_game]
+        storage.get_team_game_stats_for_team.return_value = []
+        storage.get_team_events.side_effect = lambda sport, entity_id, before_date=None, limit=None: (
+            [last_game] if entity_id == "KC" and limit == 1 else []
+        )
+        storage.get_player_game_stats_for_event.return_value = [
+            {"entity_id": "mahomes-patrick", "team_id": "KC", "stat_line": {"passing_attempts": 30}},
+        ]
+        storage.get_player_game_stats.return_value = []
+
+        live_features.build_live_event_features(storage, "nfl", "E3")
+
+        called_entity_ids = {c.args[0] for c in storage.get_player_game_stats.call_args_list}
+        assert "backup-qb" in called_entity_ids
+        assert "mahomes-patrick" not in called_entity_ids
+
+    def test_injured_qb_skipped_for_next_ranked_healthy_depth_chart_entry(self):
+        storage = MagicMock()
+        target = _event(
+            "E3", "2025-09-21", "KC", "LAC",
+            home_depth_chart=_depth_chart(qb=["starter-qb", "backup-qb"]),
+            home_injuries=[{"entity_id": "starter-qb", "status": "Out"}],
+        )
+        storage.get_event.return_value = target
+        storage.get_all_events.return_value = []
+        storage.get_team_game_stats_for_team.return_value = []
+        storage.get_team_events.return_value = []
+        storage.get_player_game_stats.return_value = []
+
+        live_features.build_live_event_features(storage, "nfl", "E3")
+
+        called_entity_ids = {c.args[0] for c in storage.get_player_game_stats.call_args_list}
+        assert "backup-qb" in called_entity_ids
+        assert "starter-qb" not in called_entity_ids
+
+    def test_no_healthy_depth_chart_entry_returns_empty_not_a_fallback_pick(self):
+        # Both listed QBs are hurt -- must NOT fall back to volume-based
+        # selection, which could re-surface the very player just excluded.
+        storage = MagicMock()
+        target = _event(
+            "E3", "2025-09-21", "KC", "LAC",
+            home_depth_chart=_depth_chart(qb=["starter-qb", "backup-qb"]),
+            home_injuries=[
+                {"entity_id": "starter-qb", "status": "Out"},
+                {"entity_id": "backup-qb", "status": "Doubtful"},
+            ],
+        )
+        last_game = _event("E2", "2025-09-14", "KC", "DEN", 24, 17)
+        storage.get_event.return_value = target
+        storage.get_all_events.return_value = [last_game]
+        storage.get_team_game_stats_for_team.return_value = []
+        storage.get_team_events.side_effect = lambda sport, entity_id, before_date=None, limit=None: (
+            [last_game] if entity_id == "KC" and limit == 1 else []
+        )
+        storage.get_player_game_stats_for_event.return_value = [
+            {"entity_id": "starter-qb", "team_id": "KC", "stat_line": {"passing_attempts": 30}},
+        ]
+        storage.get_player_game_stats.return_value = []
+
+        row = live_features.build_live_event_features(storage, "nfl", "E3")
+
+        assert row["home_qb_avg_passing_yards"] is None  # no candidate -> empty history, matches no-leader shape
+        called_entity_ids = {c.args[0] for c in storage.get_player_game_stats.call_args_list}
+        assert "starter-qb" not in called_entity_ids
+
+    def test_falls_back_to_last_game_volume_when_no_depth_chart_present(self):
+        # No home_depth_chart on this event (older event, or a fetch
+        # failure) -- must behave exactly like before depth charts existed.
+        storage = MagicMock()
+        target = _event("E3", "2025-09-21", "KC", "LAC")  # no depth chart
+        last_game = _event("E2", "2025-09-14", "KC", "DEN", 24, 17)
+        storage.get_event.return_value = target
+        storage.get_all_events.return_value = [last_game]
+        storage.get_team_game_stats_for_team.return_value = []
+        storage.get_team_events.side_effect = lambda sport, entity_id, before_date=None, limit=None: (
+            [last_game] if entity_id == "KC" and limit == 1 else []
+        )
+        storage.get_player_game_stats_for_event.return_value = [
+            {"entity_id": "mahomes-patrick", "team_id": "KC", "stat_line": {"passing_attempts": 30}},
+        ]
+        storage.get_player_game_stats.return_value = []
+
+        live_features.build_live_event_features(storage, "nfl", "E3")
+
+        called_entity_ids = {c.args[0] for c in storage.get_player_game_stats.call_args_list}
+        assert "mahomes-patrick" in called_entity_ids
+
+
+class TestDepthChartEntry:
+    def test_finds_entry_by_abbreviation_regardless_of_outer_key(self):
+        chart = {"weird-key": {"position": {"abbreviation": "QB"}, "athletes": [{"id": "1"}]}}
+        assert live_features._depth_chart_entry(chart, "QB") == chart["weird-key"]
+
+    def test_none_when_depth_chart_is_none(self):
+        assert live_features._depth_chart_entry(None, "QB") is None
+
+    def test_none_when_no_matching_position(self):
+        chart = {"rb": {"position": {"abbreviation": "RB"}, "athletes": []}}
+        assert live_features._depth_chart_entry(chart, "QB") is None
+
+
+class TestHealthyAthleteIds:
+    def test_returns_all_ids_in_rank_order_when_no_injuries(self):
+        entry = {"athletes": [{"id": "1"}, {"id": "2"}, {"id": "3"}]}
+        assert live_features._healthy_athlete_ids(entry, None) == ["1", "2", "3"]
+
+    def test_excludes_out_and_doubtful_keeps_questionable(self):
+        entry = {"athletes": [{"id": "1"}, {"id": "2"}, {"id": "3"}]}
+        injuries = [
+            {"entity_id": "1", "status": "Out"},
+            {"entity_id": "2", "status": "Questionable"},
+        ]
+        assert live_features._healthy_athlete_ids(entry, injuries) == ["2", "3"]
+
+    def test_all_excluded_returns_empty_list(self):
+        entry = {"athletes": [{"id": "1"}]}
+        injuries = [{"entity_id": "1", "status": "Doubtful"}]
+        assert live_features._healthy_athlete_ids(entry, injuries) == []
 
 
 class TestBuildLivePlayerFeatures:
@@ -264,3 +413,49 @@ class TestBuildLiveEventLeaderCandidates:
         # sack total naively winning outright with no averaging at all.
         sack_ids = [row["entity_id"] for row in candidates["home"]["sacks"]]
         assert sack_ids == ["dl1", "dl2"]
+
+    def test_receiving_candidates_from_depth_chart_skip_injured(self):
+        storage = MagicMock()
+        # Depth chart lists 3 WRs, wr2 is Out -- expect wr1 and wr3, NOT
+        # the volume-based wr1/wr2 the last-game stat_line would pick.
+        target = _event(
+            "E3", "2025-09-21", "KC", "LAC",
+            home_depth_chart=_depth_chart(wr=["wr1", "wr2", "wr3"]),
+            home_injuries=[{"entity_id": "wr2", "status": "Out"}],
+        )
+        last_game = _event("E2", "2025-09-14", "KC", "DEN", 24, 17)
+        storage.get_event.return_value = target
+        storage.get_all_events.return_value = [last_game]
+        storage.get_team_game_stats_for_team.return_value = []
+        storage.get_team_events.side_effect = lambda sport, entity_id, before_date=None, limit=None: (
+            [last_game] if entity_id == "KC" and limit == 1 else []
+        )
+        storage.get_player_game_stats_for_event.return_value = [
+            {"entity_id": "wr1", "team_id": "KC", "stat_line": {"receiving_targets": 10}},
+            {"entity_id": "wr2", "team_id": "KC", "stat_line": {"receiving_targets": 8}},
+        ]
+        storage.get_player_game_stats.return_value = []
+
+        candidates = live_features.build_live_event_leader_candidates(storage, "nfl", "E3")
+
+        receiving_ids = {row["entity_id"] for row in candidates["home"]["receiving"]}
+        assert receiving_ids == {"wr1", "wr3"}
+
+    def test_receiving_candidates_fall_back_to_volume_when_no_depth_chart(self):
+        storage = MagicMock()
+        target = _event("E3", "2025-09-21", "KC", "LAC")  # no depth chart
+        last_game = _event("E2", "2025-09-14", "KC", "DEN", 24, 17)
+        storage.get_event.return_value = target
+        storage.get_all_events.return_value = [last_game]
+        storage.get_team_game_stats_for_team.return_value = []
+        storage.get_team_events.side_effect = lambda sport, entity_id, before_date=None, limit=None: (
+            [last_game] if entity_id == "KC" and limit == 1 else []
+        )
+        storage.get_player_game_stats_for_event.return_value = [
+            {"entity_id": "wr1", "team_id": "KC", "stat_line": {"receiving_targets": 10}},
+        ]
+        storage.get_player_game_stats.return_value = []
+
+        candidates = live_features.build_live_event_leader_candidates(storage, "nfl", "E3")
+
+        assert {row["entity_id"] for row in candidates["home"]["receiving"]} == {"wr1"}

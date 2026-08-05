@@ -51,7 +51,7 @@ def scoreboard_event_to_event_item(event: dict, sport: str) -> dict:
     venue = competition.get("venue") or {}
     venue_address = venue.get("address") or {}
     weather = competition.get("weather") or {}
-    return {
+    item = {
         "event_key": event_key(sport, event_id),
         "event_id": event_id,
         "sport": sport,
@@ -67,6 +67,42 @@ def scoreboard_event_to_event_item(event: dict, sport: str) -> dict:
         "venue_state": venue_address.get("state"),
         "weather_temperature": weather.get("temperature"),
     }
+
+    # Coach/injuries/depth-chart are absent on any event not enriched by
+    # ingest's _enrich_events (aws-lambdas/nfl/ingest/handler.py) -- older
+    # events already in S3 before this shipped, or a coach/injury/depth-
+    # chart fetch that failed there. Omitted rather than written as None/
+    # empty, same sparse-optional-field convention weather_temperature
+    # already established (frequently null for outdoor games ESPN simply
+    # didn't report on). Coach is flattened into separate top-level
+    # attributes (not a nested map) to match every other feature-ready
+    # field on this item; injuries/depth-chart stay as their own
+    # list/dict since they're not single scalar values.
+    #
+    # Distinguishes "no data" (omit) from "fetched, genuinely empty"
+    # (keep) via `is not None` rather than a truthiness check for
+    # injuries/depth-chart specifically -- an empty injuries list is real
+    # signal ("checked, nobody's hurt"), not the same as "never checked".
+    if home_coach := event.get("home_coach"):
+        item["home_coach_id"] = home_coach.get("coach_id")
+        item["home_coach_name"] = home_coach.get("coach_name")
+        item["home_coach_experience"] = home_coach.get("experience")
+        item["home_coach_season_win_pct"] = home_coach.get("season_win_pct")
+    if away_coach := event.get("away_coach"):
+        item["away_coach_id"] = away_coach.get("coach_id")
+        item["away_coach_name"] = away_coach.get("coach_name")
+        item["away_coach_experience"] = away_coach.get("experience")
+        item["away_coach_season_win_pct"] = away_coach.get("season_win_pct")
+    if (home_injuries := event.get("home_injuries")) is not None:
+        item["home_injuries"] = home_injuries
+    if (away_injuries := event.get("away_injuries")) is not None:
+        item["away_injuries"] = away_injuries
+    if (home_depth_chart := event.get("home_depth_chart")) is not None:
+        item["home_depth_chart"] = home_depth_chart
+    if (away_depth_chart := event.get("away_depth_chart")) is not None:
+        item["away_depth_chart"] = away_depth_chart
+
+    return item
 
 
 def boxscore_to_player_game_stats(

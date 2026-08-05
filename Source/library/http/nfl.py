@@ -26,3 +26,12 @@ class NFLClient(EspnBaseClient):
 
     def get_summary(self, event_id: str) -> dict:
         return self._get("summary", params={"event": event_id})
+
+    def get_depth_chart(self, team_id: str) -> dict:
+        """One team's current depth chart -- `positions.<code>.athletes[]`,
+        ordered by depth rank (starter first). Confirmed live on this same
+        site.api.espn.com host/single-response style, NOT on ESPN's other
+        "core" API (sports.core.api.espn.com/.../teams/{id}/depthcharts
+        404s) -- see library/http/espn_core.py's own docstring for why
+        coach/injury data lives on that other client instead of here."""
+        return self._get(f"teams/{team_id}/depthcharts", params={})

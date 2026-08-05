@@ -46,7 +46,18 @@ class HttpClient:
         self._rate_limiter = RateLimiter(min_interval_seconds)
 
     def _get(self, path: str, params: dict) -> dict:
-        url = f"{self.base_url}/{path.lstrip('/')}"
+        return self._request(f"{self.base_url}/{path.lstrip('/')}", params)
+
+    def get_absolute(self, url: str, params: dict | None = None) -> dict:
+        """Same retry/rate-limit behavior as _get, but against an arbitrary
+        absolute URL rather than one built from self.base_url -- for
+        dereferencing a `$ref` a list-style response returned (ESPN's
+        sports.core.api.espn.com host returns links, not embedded data;
+        see library/http/espn_core.py), which by definition isn't under
+        this client's own base_url."""
+        return self._request(url, params or {})
+
+    def _request(self, url: str, params: dict) -> dict:
         last_exc: Exception | None = None
         for attempt in range(1, MAX_RETRIES + 1):
             self._rate_limiter.wait()
@@ -59,7 +70,7 @@ class HttpClient:
                 sleep_for = BACKOFF_BASE_SECONDS * (2 ** (attempt - 1))
                 logger.warning(
                     "Request failed (attempt %d/%d) for %s %s: %s -- retrying in %.1fs",
-                    attempt, MAX_RETRIES, path, params, exc, sleep_for,
+                    attempt, MAX_RETRIES, url, params, exc, sleep_for,
                 )
                 time.sleep(sleep_for)
         raise RuntimeError(f"Request to {url} {params} failed after {MAX_RETRIES} attempts") from last_exc
