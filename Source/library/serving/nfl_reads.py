@@ -16,6 +16,7 @@ lifecycle concerns (lazy singletons, env var lookups) -- this module is
 pure request-shaping logic, the same boundary library.ml.backtest draws
 around training orchestration vs. algorithm specifics.
 """
+import re
 from concurrent.futures import ThreadPoolExecutor
 
 from boto3.dynamodb.conditions import Key
@@ -26,6 +27,25 @@ from library.storage.season_projections import season_projection_key
 
 WIN_PROBABILITY_MODEL = "win-probability"
 SCORE_MODELS = {"margin": "score-margin", "home_score": "home-score", "away_score": "away-score"}
+
+# Mirrors predict/handler.py's LEADER_CATEGORY_STATS, inverted (stat ->
+# category instead of category -> stats) -- duplicated rather than
+# imported since predict-read never imports predict/handler.py (that's
+# the whole point of this module's own split, see its own docstring).
+_STAT_CATEGORY = {
+    "passing_yards": "passing", "passing_touchdowns": "passing",
+    "receiving_yards": "receiving", "receiving_touchdowns": "receiving",
+    "rushing_yards": "rushing", "rushing_touchdowns": "rushing",
+    "defensive_sacks": "sacks",
+}
+
+# Matches predict/handler.py's _record_prediction model_key shape for a
+# player-prop prediction (MODEL#player-prop-passing-yards#v3#PLAYER#qb1)
+# -- written both by a manually-queried single player+stat
+# (_predict_player_prop) and, as of the leaders-comparison feature, by
+# every scored leader candidate (_score_leader_candidate) -- both are
+# interchangeable here, this doesn't care which wrote a given row.
+_PLAYER_PROP_MODEL_KEY_RE = re.compile(r"^MODEL#player-prop-([a-z-]+)#v\d+#PLAYER#(.+)$")
 
 # season_type=3 (postseason) week -> round name, confirmed live against
 # ESPN's own scoreboard (season 2020: week 1=Wild Card, 2=Divisional,
@@ -140,6 +160,80 @@ def _prediction_comparison(predictions_table, event: dict) -> dict | None:
     }
 
 
+def _leaders_comparison(storage, predictions_table, sport: str, event: dict) -> dict | None:
+    """Player-prop predicted-vs-actual for a completed event -- the
+    player-level counterpart to _prediction_comparison, same "read the
+    audit trail, never recompute" reasoning: recomputing live features for
+    an already-played game would leak that game's own now-normalized
+    result into its own "prediction" (see event_detail_page.dart's own
+    comment on the frontend side of this same rule). None if no leader/
+    player-prop prediction was ever recorded for this event -- nobody
+    viewed its detail page while it was still scheduled, same honest gap
+    _prediction_comparison already has for the team-level comparison, not
+    a bug.
+
+    Shape mirrors the (predicted-only) `leaders` block
+    predict/handler.py's _predict_event_leaders returns: `passing` is a
+    single entry or null per team (only one passing candidate is ever
+    scored), `receiving`/`rushing`/`sacks` are lists."""
+    home_away = _home_and_away(event)
+    if home_away is None:
+        return None
+    home_id, away_id = home_away
+
+    rows = predictions_table.query(Key("event_key").eq(event["event_key"]))
+    predicted_by_entity: dict[str, dict[str, float]] = {}
+    for row in rows:
+        match = _PLAYER_PROP_MODEL_KEY_RE.match(row["model_key"])
+        if match is None:
+            continue
+        stat = match.group(1).replace("-", "_")
+        entity_id = match.group(2)
+        predicted_by_entity.setdefault(entity_id, {})[stat] = row["predicted_value"]["value"]
+
+    if not predicted_by_entity:
+        return None
+
+    actual_by_entity = {
+        row["entity_id"]: row.get("stat_line", {})
+        for row in storage.get_player_game_stats_for_event(event["event_key"])
+    }
+
+    home: dict[str, list[dict] | dict | None] = {"passing": None, "receiving": [], "rushing": [], "sacks": []}
+    away: dict[str, list[dict] | dict | None] = {"passing": None, "receiving": [], "rushing": [], "sacks": []}
+
+    for entity_id, predicted_stats in predicted_by_entity.items():
+        category = next((_STAT_CATEGORY[stat] for stat in predicted_stats if stat in _STAT_CATEGORY), None)
+        if category is None:
+            continue
+        entity = storage.get_entity(sport, entity_id)
+        team_id = (entity.get("metadata") or {}).get("team_id") if entity else None
+        if team_id == home_id:
+            bucket = home
+        elif team_id == away_id:
+            bucket = away
+        else:
+            # Traded/waived since the prediction was recorded, or a
+            # lookup failure -- skip rather than guess which side.
+            continue
+
+        actual_stats = actual_by_entity.get(entity_id, {})
+        entry = {
+            "entity_id": entity_id,
+            "predicted": predicted_stats,
+            "actual": {stat: actual_stats[stat] for stat in predicted_stats if stat in actual_stats},
+        }
+        if entity and entity.get("name"):
+            entry["name"] = entity["name"]
+
+        if category == "passing":
+            bucket["passing"] = entry
+        else:
+            bucket[category].append(entry)
+
+    return {"home": home, "away": away}
+
+
 def _round_label(event: dict) -> str | None:
     """None for regular season (season_type=2) or any postseason week not
     in POSTSEASON_ROUND_LABELS -- a raw week number means nothing for the
@@ -163,8 +257,11 @@ def list_events(storage, predictions_table, sport: str, status: str) -> dict:
     rather than recomputing one now). Every event also carries `round` --
     the playoff round name (Wild Card/Divisional/Conference Championship/
     Super Bowl) for a postseason game, `null` for regular season -- see
-    _round_label. Excludes the Pro Bowl and any other exhibition game
-    entirely (see is_real_franchise_matchup)."""
+    _round_label. A completed event also carries `leaders_comparison` --
+    player-prop predicted-vs-actual, `null` under the same "nobody
+    recorded one before the game" condition as `prediction_comparison`,
+    see _leaders_comparison. Excludes the Pro Bowl and any other
+    exhibition game entirely (see is_real_franchise_matchup)."""
     events = [e for e in storage.get_all_events(sport, status=status) if is_real_franchise_matchup(e)]
 
     if status == "completed":
@@ -185,6 +282,7 @@ def list_events(storage, predictions_table, sport: str, status: str) -> dict:
         }
         if status == "completed":
             entry["prediction_comparison"] = _prediction_comparison(predictions_table, e)
+            entry["leaders_comparison"] = _leaders_comparison(storage, predictions_table, sport, e)
         return entry
 
     return {"sport": sport, "events": [_entry(e) for e in events]}

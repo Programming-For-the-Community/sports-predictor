@@ -167,7 +167,9 @@ def _get_cached_model(model_cache: dict, s3, model_name: str):
     return model_cache[model_name]
 
 
-def _score_leader_candidate(storage, s3, model_cache: dict, feature_row: dict, stats: list[str]) -> dict:
+def _score_leader_candidate(
+    storage, s3, model_cache: dict, feature_row: dict, stats: list[str], event_key_value: str,
+) -> dict:
     entity_id = feature_row["entity_id"]
     entity = storage.get_entity(SPORT, entity_id)
     result = {"entity_id": entity_id}
@@ -183,7 +185,21 @@ def _score_leader_candidate(storage, s3, model_cache: dict, feature_row: dict, s
             # out of the candidate's result rather than failing the whole
             # event prediction over a gap in an enhancement field.
             continue
-        result[stat] = model_loader.predict(booster, model_card, feature_row)
+        value = model_loader.predict(booster, model_card, feature_row)
+        result[stat] = value
+        # Same model_key shape _predict_player_prop already writes for a
+        # manually-queried single player+stat -- makes a leader's
+        # prediction and a manual one interchangeable in the audit trail,
+        # which is what lets nfl_reads._leaders_comparison read either
+        # kind back for a completed event later. Best-effort like every
+        # other call in this function: a write failure here shouldn't take
+        # down the leaders block over what's purely an audit-trail concern.
+        try:
+            _record_prediction(
+                event_key_value, f"MODEL#{model_name}#v{model_card['version']}#PLAYER#{entity_id}", {"value": value},
+            )
+        except Exception:
+            logger.exception("Failed recording leader prediction for %s/%s", entity_id, stat)
     return result
 
 
@@ -205,18 +221,24 @@ def _predict_event_leaders(storage, s3, event_key_value: str) -> dict | None:
         passing = team_candidates["passing"]
         return {
             "passing": _score_leader_candidate(
-                storage, s3, model_cache, passing[0], LEADER_CATEGORY_STATS["passing"],
+                storage, s3, model_cache, passing[0], LEADER_CATEGORY_STATS["passing"], event_key_value,
             ) if passing else None,
             "receiving": [
-                _score_leader_candidate(storage, s3, model_cache, row, LEADER_CATEGORY_STATS["receiving"])
+                _score_leader_candidate(
+                    storage, s3, model_cache, row, LEADER_CATEGORY_STATS["receiving"], event_key_value,
+                )
                 for row in team_candidates["receiving"]
             ],
             "rushing": [
-                _score_leader_candidate(storage, s3, model_cache, row, LEADER_CATEGORY_STATS["rushing"])
+                _score_leader_candidate(
+                    storage, s3, model_cache, row, LEADER_CATEGORY_STATS["rushing"], event_key_value,
+                )
                 for row in team_candidates["rushing"]
             ],
             "sacks": [
-                _score_leader_candidate(storage, s3, model_cache, row, LEADER_CATEGORY_STATS["sacks"])
+                _score_leader_candidate(
+                    storage, s3, model_cache, row, LEADER_CATEGORY_STATS["sacks"], event_key_value,
+                )
                 for row in team_candidates["sacks"]
             ],
         }

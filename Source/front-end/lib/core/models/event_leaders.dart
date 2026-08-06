@@ -58,3 +58,72 @@ class EventLeaders {
         away: TeamLeaders.fromJson(json['away'] as Map<String, dynamic>),
       );
 }
+
+/// Mirrors the `leaders_comparison` block on a completed event from
+/// GET /{sport}/events?status=completed (see
+/// Source/library/serving/nfl_reads.py's _leaders_comparison) --
+/// predicted-vs-actual player-prop stats for whichever leader candidates
+/// had a prediction recorded before the game. Same shape as
+/// TeamLeaders/EventLeaders above (passing singular, others lists), just
+/// with `predicted`/`actual` sub-maps per player instead of flat stat
+/// values -- null throughout under the same "nobody recorded one before
+/// the game" condition PredictionComparison already documents at the
+/// team level (see event.dart).
+class PlayerStatLineComparison {
+  const PlayerStatLineComparison({
+    required this.entityId, required this.name, required this.predicted, required this.actual,
+  });
+
+  final String entityId;
+  final String? name;
+  final Map<String, double> predicted;
+  final Map<String, double> actual;
+
+  String get displayName => name ?? entityId;
+
+  factory PlayerStatLineComparison.fromJson(Map<String, dynamic> json) => PlayerStatLineComparison(
+        entityId: json['entity_id'] as String,
+        name: json['name'] as String?,
+        predicted: _stats(json['predicted']),
+        actual: _stats(json['actual']),
+      );
+
+  static Map<String, double> _stats(dynamic value) =>
+      (value as Map<String, dynamic>? ?? {}).map((key, v) => MapEntry(key, (v as num).toDouble()));
+}
+
+class TeamLeadersComparison {
+  const TeamLeadersComparison({
+    required this.passing, required this.receiving, required this.rushing, required this.sacks,
+  });
+
+  final PlayerStatLineComparison? passing;
+  final List<PlayerStatLineComparison> receiving;
+  final List<PlayerStatLineComparison> rushing;
+  final List<PlayerStatLineComparison> sacks;
+
+  factory TeamLeadersComparison.fromJson(Map<String, dynamic> json) => TeamLeadersComparison(
+        passing: json['passing'] != null
+            ? PlayerStatLineComparison.fromJson(json['passing'] as Map<String, dynamic>)
+            : null,
+        receiving: _list(json['receiving']),
+        rushing: _list(json['rushing']),
+        sacks: _list(json['sacks']),
+      );
+
+  static List<PlayerStatLineComparison> _list(dynamic value) => (value as List<dynamic>? ?? [])
+      .map((e) => PlayerStatLineComparison.fromJson(e as Map<String, dynamic>))
+      .toList();
+}
+
+class EventLeadersComparison {
+  const EventLeadersComparison({required this.home, required this.away});
+
+  final TeamLeadersComparison home;
+  final TeamLeadersComparison away;
+
+  factory EventLeadersComparison.fromJson(Map<String, dynamic> json) => EventLeadersComparison(
+        home: TeamLeadersComparison.fromJson(json['home'] as Map<String, dynamic>),
+        away: TeamLeadersComparison.fromJson(json['away'] as Map<String, dynamic>),
+      );
+}

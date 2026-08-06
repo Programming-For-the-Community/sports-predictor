@@ -68,9 +68,23 @@ class EventDetailPage extends ConsumerWidget {
     }
 
     if (event.status == 'completed') {
+      final leadersComparison = event.leadersComparison;
       return SingleChildScrollView(
         padding: const EdgeInsets.all(24),
-        child: MatchupResultHero(event: event, comparison: event.predictionComparison),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            MatchupResultHero(event: event, comparison: event.predictionComparison),
+            if (leadersComparison != null) ...[
+              const SizedBox(height: 20),
+              TeamLeadersComparisonPanel(
+                homeAbbr: nflTeam(event.home.entityId).abbreviation,
+                awayAbbr: nflTeam(event.away.entityId).abbreviation,
+                comparison: leadersComparison,
+              ),
+            ],
+          ],
+        ),
       );
     }
 

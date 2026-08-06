@@ -96,4 +96,64 @@ void main() {
 
     expect(event.predictionComparison, isNull);
   });
+
+  test('parses leaders_comparison predicted-vs-actual for a completed event', () {
+    final event = SportEvent.fromJson({
+      'event_id': '401547417',
+      'event_date': '2025-09-28',
+      'status': 'completed',
+      'week': 4,
+      'participants': [
+        {
+          'entity_id': 'KC', 'role': 'home',
+          'result': {'score': 24, 'won': true},
+        },
+        {
+          'entity_id': 'LAC', 'role': 'away',
+          'result': {'score': 17, 'won': false},
+        },
+      ],
+      'leaders_comparison': {
+        'home': {
+          'passing': {
+            'entity_id': 'qb1', 'name': 'Patrick Mahomes',
+            'predicted': {'passing_yards': 267.0},
+            'actual': {'passing_yards': 289.0},
+          },
+          'receiving': [],
+          'rushing': [],
+          'sacks': [],
+        },
+        'away': {'passing': null, 'receiving': [], 'rushing': [], 'sacks': []},
+      },
+    });
+
+    final passing = event.leadersComparison!.home.passing!;
+    expect(passing.displayName, 'Patrick Mahomes');
+    expect(passing.predicted['passing_yards'], 267.0);
+    expect(passing.actual['passing_yards'], 289.0);
+    expect(event.leadersComparison!.away.passing, isNull);
+  });
+
+  test('leaders_comparison is null when nobody recorded a prediction before the game', () {
+    final event = SportEvent.fromJson({
+      'event_id': '401547417',
+      'event_date': '2025-09-28',
+      'status': 'completed',
+      'week': 4,
+      'participants': [
+        {
+          'entity_id': 'KC', 'role': 'home',
+          'result': {'score': 24, 'won': true},
+        },
+        {
+          'entity_id': 'LAC', 'role': 'away',
+          'result': {'score': 17, 'won': false},
+        },
+      ],
+      'leaders_comparison': null,
+    });
+
+    expect(event.leadersComparison, isNull);
+  });
 }

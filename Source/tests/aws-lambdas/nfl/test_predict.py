@@ -258,6 +258,67 @@ class TestEventOutcomeRouteLeaders:
         assert passing["name"] == "Patrick Mahomes"
         assert passing["passing_yards"] == 267.0
 
+    def test_leader_predictions_are_recorded_same_as_a_manual_player_prop_query(self):
+        # Same model_key shape _predict_player_prop already writes -- what
+        # lets nfl_reads._leaders_comparison read either kind back later
+        # for a completed event, see TestEventOutcomeRoute's own
+        # audits-one-write-per-model test for the core-prediction
+        # counterpart of this.
+        nfl_predict._storage = MagicMock()
+        nfl_predict._model_bucket = MagicMock()
+        nfl_predict._predictions_table = MagicMock()
+        nfl_predict._storage.get_entity.return_value = {"entity_id": "qb1", "name": "Patrick Mahomes"}
+
+        candidates = {
+            "home": {"passing": [_candidate_row("qb1")], "receiving": [], "rushing": [], "sacks": []},
+            "away": {"passing": [], "receiving": [], "rushing": [], "sacks": []},
+        }
+
+        with patch.object(live_features, "build_live_event_features", return_value={"home_elo": 1500}), \
+             patch.object(live_features, "build_live_event_leader_candidates", return_value=candidates), \
+             patch.object(model_loader, "load_current_model", return_value=(MagicMock(), _model_card(3))), \
+             patch.object(model_loader, "predict", return_value=267.0):
+            nfl_predict.lambda_handler(
+                _api_event("/nfl/predictions/events/{event_id}", {"event_id": "401547417"}), None,
+            )
+
+        # 4 core predictions + 2 leader stats (passing_yards, passing_touchdowns
+        # -- LEADER_CATEGORY_STATS["passing"]) for the one passing candidate.
+        assert nfl_predict._predictions_table.put_item.call_count == 6
+        leader_calls = [
+            c for c in nfl_predict._predictions_table.put_item.call_args_list
+            if "PLAYER#qb1" in c.args[0]["model_key"]
+        ]
+        assert len(leader_calls) == 2
+        assert leader_calls[0].args[0]["model_key"] == "MODEL#player-prop-passing-yards#v3#PLAYER#qb1"
+        assert leader_calls[0].args[0]["predicted_value"] == {"value": 267.0}
+
+    def test_leader_prediction_recording_failure_does_not_break_the_leaders_block(self):
+        nfl_predict._storage = MagicMock()
+        nfl_predict._model_bucket = MagicMock()
+        nfl_predict._predictions_table = MagicMock()
+        nfl_predict._storage.get_entity.return_value = {"entity_id": "qb1", "name": "Patrick Mahomes"}
+        # First 4 put_item calls (core predictions) succeed; the leader
+        # writes are what should fail here without taking anything down.
+        nfl_predict._predictions_table.put_item.side_effect = [None, None, None, None, Exception("DynamoDB down")]
+
+        candidates = {
+            "home": {"passing": [_candidate_row("qb1")], "receiving": [], "rushing": [], "sacks": []},
+            "away": {"passing": [], "receiving": [], "rushing": [], "sacks": []},
+        }
+
+        with patch.object(live_features, "build_live_event_features", return_value={"home_elo": 1500}), \
+             patch.object(live_features, "build_live_event_leader_candidates", return_value=candidates), \
+             patch.object(model_loader, "load_current_model", return_value=(MagicMock(), _model_card(3))), \
+             patch.object(model_loader, "predict", return_value=267.0):
+            response = nfl_predict.lambda_handler(
+                _api_event("/nfl/predictions/events/{event_id}", {"event_id": "401547417"}), None,
+            )
+
+        assert response["statusCode"] == 200
+        passing = json.loads(response["body"])["leaders"]["home"]["passing"]
+        assert passing["passing_yards"] == 267.0
+
     def test_leaders_is_none_when_candidate_building_fails_but_core_predictions_still_succeed(self):
         nfl_predict._storage = MagicMock()
         nfl_predict._model_bucket = MagicMock()

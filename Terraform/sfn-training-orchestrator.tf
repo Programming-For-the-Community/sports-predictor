@@ -50,10 +50,10 @@ resource "aws_sfn_state_machine" "training_orchestrator" {
         "States": {
           "IsActive": {
             "Type": "Choice",
-            "Comment": "Filtered here, not in the Scan above -- Step Functions' aws-sdk:dynamodb:scan integration schema rejects a BOOL-typed ExpressionAttributeValue in a FilterExpression.",
+            "Comment": "Filtered here, not in the Scan above -- Step Functions' aws-sdk:dynamodb:scan integration schema rejects a BOOL-typed ExpressionAttributeValue in a FilterExpression. Variable is $.active.Bool, not $.active.BOOL -- confirmed live via a real execution's Choice-state input that the aws-sdk: integration marshals DynamoDB's Boolean attribute type as \"Bool\", not the raw API's \"BOOL\" (S/M/L come through as expected) -- a JSONPath mismatch here throws States.Runtime (\"Invalid path\"), it does not fall through to Default.",
             "Choices": [
               {
-                "Variable": "$.active.BOOL",
+                "Variable": "$.active.Bool",
                 "BooleanEquals": true,
                 "Next": "RunFeatureEngineering"
               }

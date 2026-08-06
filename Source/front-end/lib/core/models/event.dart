@@ -1,3 +1,5 @@
+import 'event_leaders.dart';
+
 /// Mirrors GET /{sport}/events' response shape (see
 /// Source/aws-lambdas/nfl/predict/handler.py's _list_events) -- deliberately
 /// no team display names/colors here, that's static/nfl_team_colors.dart's
@@ -80,6 +82,7 @@ class SportEvent {
     required this.round,
     required this.participants,
     required this.predictionComparison,
+    required this.leadersComparison,
   });
 
   final String eventId;
@@ -92,6 +95,11 @@ class SportEvent {
   final String? round;
   final List<Participant> participants;
   final PredictionComparison? predictionComparison;
+  // Player-prop predicted-vs-actual -- only ever present alongside
+  // predictionComparison (both are completed-event-only, see
+  // nfl_reads.list_events), same "null means nobody recorded one before
+  // the game" condition as that field.
+  final EventLeadersComparison? leadersComparison;
 
   factory SportEvent.fromJson(Map<String, dynamic> json) => SportEvent(
         eventId: json['event_id'] as String,
@@ -104,6 +112,9 @@ class SportEvent {
             .toList(),
         predictionComparison: json['prediction_comparison'] != null
             ? PredictionComparison.fromJson(json['prediction_comparison'] as Map<String, dynamic>)
+            : null,
+        leadersComparison: json['leaders_comparison'] != null
+            ? EventLeadersComparison.fromJson(json['leaders_comparison'] as Map<String, dynamic>)
             : null,
       );
 

@@ -81,8 +81,12 @@ class GameRow extends ConsumerWidget {
             Expanded(
               flex: 3,
               child: isCompleted
-                  ? _ComparisonSummary(comparison: event.predictionComparison)
-                  : _LivePrediction(sport: sport, eventId: event.eventId),
+                  ? _ComparisonSummary(
+                      comparison: event.predictionComparison, homeAbbr: home.abbreviation, awayAbbr: away.abbreviation,
+                    )
+                  : _LivePrediction(
+                      sport: sport, eventId: event.eventId, homeAbbr: home.abbreviation, awayAbbr: away.abbreviation,
+                    ),
             ),
           ],
         ),
@@ -92,26 +96,44 @@ class GameRow extends ConsumerWidget {
 }
 
 class _LivePrediction extends ConsumerWidget {
-  const _LivePrediction({required this.sport, required this.eventId});
+  const _LivePrediction({required this.sport, required this.eventId, required this.homeAbbr, required this.awayAbbr});
   final String sport;
   final String eventId;
+  final String homeAbbr;
+  final String awayAbbr;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final prediction = ref.watch(eventPredictionProvider((sport: sport, eventId: eventId)));
     return prediction.when(
-      data: (p) => Row(
-        children: [
-          Expanded(child: WinProbabilityBar(homeWinProbability: p.homeWinProbability)),
-          const SizedBox(width: 12),
-          Text(
-            '${(p.homeWinProbability * 100).round()}%',
-            style: AppTextStyles.metricValueLarge(color: AppColors.cyan),
-          ),
-          const SizedBox(width: 8),
-          ConfidencePill(homeWinProbability: p.homeWinProbability),
-        ],
-      ),
+      data: (p) {
+        final pickAbbr = p.homeWinProbability >= 0.5 ? homeAbbr : awayAbbr;
+        return Row(
+          children: [
+            Expanded(child: WinProbabilityBar(homeWinProbability: p.homeWinProbability)),
+            const SizedBox(width: 12),
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.end,
+              children: [
+                Text(
+                  '${(p.homeWinProbability * 100).round()}%',
+                  style: AppTextStyles.metricValueLarge(color: AppColors.cyan),
+                ),
+                // Predicted winner + margin + score, up front on the list
+                // card rather than only after clicking into the event
+                // (MatchupHero's own PICK/PRED MARGIN/PRED TOTAL trio).
+                Text(
+                  '$pickAbbr -${p.margin.abs().toStringAsFixed(1)} '
+                  '(${p.homeScore.round()}-${p.awayScore.round()})',
+                  style: AppTextStyles.microLabel(color: AppColors.inkMute),
+                ),
+              ],
+            ),
+            const SizedBox(width: 8),
+            ConfidencePill(homeWinProbability: p.homeWinProbability),
+          ],
+        );
+      },
       loading: () => const WinProbabilityBar(homeWinProbability: 0.5),
       error: (_, __) => Text('--', style: AppTextStyles.body(color: AppColors.inkMute)),
     );
@@ -119,8 +141,10 @@ class _LivePrediction extends ConsumerWidget {
 }
 
 class _ComparisonSummary extends StatelessWidget {
-  const _ComparisonSummary({required this.comparison});
+  const _ComparisonSummary({required this.comparison, required this.homeAbbr, required this.awayAbbr});
   final PredictionComparison? comparison;
+  final String homeAbbr;
+  final String awayAbbr;
 
   @override
   Widget build(BuildContext context) {
@@ -128,6 +152,10 @@ class _ComparisonSummary extends StatelessWidget {
     if (c == null) {
       return Text('No prediction recorded', style: AppTextStyles.body(color: AppColors.inkMute));
     }
+    final pickAbbr = c.predictedHomeWon ? homeAbbr : awayAbbr;
+    final predictedScore = c.predictedHomeScore != null && c.predictedAwayScore != null
+        ? ' (${c.predictedHomeScore!.round()}-${c.predictedAwayScore!.round()})'
+        : '';
     return Row(
       children: [
         Icon(
@@ -138,8 +166,9 @@ class _ComparisonSummary extends StatelessWidget {
         const SizedBox(width: 8),
         Expanded(
           child: Text(
-            'Predicted ${(c.predictedHomeWinProbability * 100).round()}% home win'
-            '${c.predictedMargin != null ? ' -- margin ${c.predictedMargin!.toStringAsFixed(1)}' : ''}',
+            'Predicted $pickAbbr'
+            '${c.predictedMargin != null ? ' by ${c.predictedMargin!.abs().toStringAsFixed(1)}' : ''}'
+            '$predictedScore',
             style: AppTextStyles.body(color: AppColors.inkSub),
             overflow: TextOverflow.ellipsis,
           ),
