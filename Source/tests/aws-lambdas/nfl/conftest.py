@@ -36,6 +36,7 @@ def _load_handler(module_name: str, relative_path: str) -> None:
 
 _load_handler("nfl_ingest", "aws-lambdas/nfl/ingest/handler.py")
 _load_handler("nfl_normalize", "aws-lambdas/nfl/normalize/handler.py")
+_load_handler("nfl_schedule_sync", "aws-lambdas/nfl/schedule-sync/handler.py")
 
 # predict/'s own modules (live_features.py, model_loader.py) have unique
 # names, unlike handler.py -- a plain sys.path entry is enough for them,

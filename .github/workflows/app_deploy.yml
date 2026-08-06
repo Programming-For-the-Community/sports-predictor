@@ -85,6 +85,7 @@ jobs:
     with:
       ingest_function_name: ${{ needs.infra.outputs.nfl_ingest_function_name }}
       normalize_function_name: ${{ needs.infra.outputs.nfl_normalize_function_name }}
+      schedule_sync_function_name: ${{ needs.infra.outputs.nfl_schedule_sync_function_name }}
 
   nfl_predict_read_deploy:
     name: NFL predict-read (deploy)

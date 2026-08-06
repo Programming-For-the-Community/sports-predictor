@@ -1,7 +1,9 @@
 # Builds and deploys the NFL recurring data pipeline Lambdas: nfl-ingest
-# (EventBridge-triggered, writes raw JSON to S3) and nfl-normalize
-# (S3-triggered, writes to DynamoDB). Both are deployed in parallel since
-# they are independent -- a failure in one does not block the other.
+# (EventBridge-triggered, writes raw JSON to S3), nfl-normalize
+# (S3-triggered, writes to DynamoDB), and nfl-schedule-sync (EventBridge-
+# triggered, writes raw JSON to S3 for every week of the current season).
+# All three are deployed in parallel since they are independent -- a
+# failure in one does not block the others.
 #
 # Lambda function names are supplied by the caller (nfl_deploy.yml) from
 # Terraform outputs so this workflow never hard-codes names that Terraform
@@ -28,6 +30,11 @@ on:
         required: false
         type: string
         default: 'sports-predictor-nfl-normalize'
+      schedule_sync_function_name:
+        description: 'NFL schedule-sync Lambda function name (from Terraform output nfl_schedule_sync_function_name)'
+        required: false
+        type: string
+        default: 'sports-predictor-nfl-schedule-sync'
 
 permissions:
   id-token: write
@@ -72,4 +79,21 @@ jobs:
     with:
       function_name: ${{ inputs.normalize_function_name || 'sports-predictor-nfl-normalize' }}
       handler_dir: 'Source/aws-lambdas/nfl/normalize'
+      library_path: 'Source/library'
+
+  test-schedule-sync:
+    name: Run nfl-schedule-sync tests
+    uses: ./.github/workflows/run_python_tests.yml
+    with:
+      test_path: 'Source/tests/aws-lambdas/nfl/test_schedule_sync.py'
+      requirements_files: 'Source/aws-lambdas/nfl/schedule-sync/requirements.txt'
+
+  deploy-schedule-sync:
+    name: Deploy nfl-schedule-sync Lambda
+    needs: test-schedule-sync
+    uses: ./.github/workflows/python_lambda_build.yml
+    secrets: inherit
+    with:
+      function_name: ${{ inputs.schedule_sync_function_name || 'sports-predictor-nfl-schedule-sync' }}
+      handler_dir: 'Source/aws-lambdas/nfl/schedule-sync'
       library_path: 'Source/library'

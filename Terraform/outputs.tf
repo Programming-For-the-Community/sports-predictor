@@ -80,6 +80,11 @@ output "nfl_normalize_function_name" {
   value       = aws_lambda_function.nfl_normalize.function_name
 }
 
+output "nfl_schedule_sync_function_name" {
+  description = "NFL schedule-sync Lambda function name -- passed to nfl_data_pipeline workflow for `aws lambda update-function-code`"
+  value       = aws_lambda_function.nfl_schedule_sync.function_name
+}
+
 output "nfl_predict_function_name" {
   description = "NFL predict Lambda function name -- passed to nfl_ai_hosting workflow for `aws lambda update-function-code`"
   value       = aws_lambda_function.nfl_predict.function_name

@@ -36,19 +36,25 @@ data "aws_iam_policy_document" "eventbridge_invoke_permissions" {
     resources = [
       aws_sfn_state_machine.ingest_orchestrator.arn,
       aws_sfn_state_machine.training_orchestrator.arn,
-      aws_sfn_state_machine.nfl_season_schedule_sync.arn,
     ]
   }
 
   # Deliberate exception to this role's "goes through a state machine"
-  # rule above (see this file's own docstring) -- scheduler-nfl-season-
-  # projection.tf invokes nfl_predict directly since that job is one
-  # computation with no per-sport/per-target fan-out to justify a state
-  # machine in between.
+  # rule above (see this file's own docstring) -- both of these are single-
+  # Lambda jobs with no per-sport/per-target fan-out to justify a state
+  # machine in between: scheduler-nfl-season-projection.tf invokes
+  # nfl_predict directly (one computation), and scheduler-nfl-schedule-
+  # sync.tf invokes nfl_schedule_sync directly (walks all 23 weeks of a
+  # season in one invocation internally -- see that Lambda's own docstring
+  # for why an earlier Step-Functions-fan-out version of it was actually
+  # the wrong shape).
   statement {
-    sid       = "InvokeSeasonProjectionLambda"
-    actions   = ["lambda:InvokeFunction"]
-    resources = [aws_lambda_function.nfl_predict.arn]
+    sid     = "InvokeDirectLambdaJobs"
+    actions = ["lambda:InvokeFunction"]
+    resources = [
+      aws_lambda_function.nfl_predict.arn,
+      aws_lambda_function.nfl_schedule_sync.arn,
+    ]
   }
 }
 

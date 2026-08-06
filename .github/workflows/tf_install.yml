@@ -47,6 +47,9 @@ on:
       nfl_normalize_function_name:
         description: 'NFL normalize Lambda function name'
         value: ${{ jobs.terraform.outputs.nfl_normalize_function_name }}
+      nfl_schedule_sync_function_name:
+        description: 'NFL schedule-sync Lambda function name'
+        value: ${{ jobs.terraform.outputs.nfl_schedule_sync_function_name }}
       nfl_predict_function_name:
         description: 'NFL predict Lambda function name'
         value: ${{ jobs.terraform.outputs.nfl_predict_function_name }}
@@ -97,6 +100,7 @@ jobs:
     outputs:
       nfl_ingest_function_name: ${{ steps.tf_outputs.outputs.nfl_ingest_function_name }}
       nfl_normalize_function_name: ${{ steps.tf_outputs.outputs.nfl_normalize_function_name }}
+      nfl_schedule_sync_function_name: ${{ steps.tf_outputs.outputs.nfl_schedule_sync_function_name }}
       nfl_predict_function_name: ${{ steps.tf_outputs.outputs.nfl_predict_function_name }}
       cognito_user_pool_id: ${{ steps.tf_outputs.outputs.cognito_user_pool_id }}
       cognito_client_id: ${{ steps.tf_outputs.outputs.cognito_client_id }}
@@ -213,6 +217,7 @@ jobs:
 
         capture_output nfl_ingest_function_name
         capture_output nfl_normalize_function_name
+        capture_output nfl_schedule_sync_function_name
         capture_output nfl_predict_function_name
         capture_output cognito_user_pool_id
         capture_output cognito_client_id

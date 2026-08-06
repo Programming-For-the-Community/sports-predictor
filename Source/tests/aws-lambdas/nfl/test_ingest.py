@@ -10,7 +10,9 @@ also sets RAW_BUCKET_NAME before the module is imported (it's read at
 module level by the handler).
 """
 import nfl_ingest
-from datetime import date
+import json
+from datetime import date, datetime, timedelta, timezone
+from io import BytesIO
 from unittest.mock import MagicMock, patch
 
 from botocore.exceptions import ClientError
@@ -40,17 +42,43 @@ def _scoreboard(events: list, week: int = 5, season_year: int = SEASON_YEAR, sea
 
 
 def _make_s3(existing_keys: set | None = None):
-    """Return a mock S3 client where head_object raises 404 for unknown keys."""
+    """Return a mock S3 client backed by an in-memory dict -- head_object/
+    get_object see whatever's actually been put_object'd (including by the
+    code under test itself, e.g. _cached_or_fetch's own cache writes), and
+    404 for anything else. `existing_keys` seeds head_object-only
+    existence (no real body) for tests that only ever check existence,
+    same as before this became stateful."""
     mock_s3 = MagicMock()
-    existing = existing_keys or set()
+    store: dict[str, bytes] = {}
 
     def _head(**kwargs):
-        if kwargs.get("Key") in existing:
+        key = kwargs.get("Key")
+        if key in store or key in (existing_keys or set()):
             return {}
         raise ClientError({"Error": {"Code": "404", "Message": "Not Found"}}, "HeadObject")
 
+    def _get(**kwargs):
+        key = kwargs.get("Key")
+        if key in store:
+            return {"Body": BytesIO(store[key])}
+        raise ClientError({"Error": {"Code": "404", "Message": "Not Found"}}, "GetObject")
+
+    def _put(**kwargs):
+        body = kwargs.get("Body")
+        store[kwargs.get("Key")] = body.encode("utf-8") if isinstance(body, str) else body
+
     mock_s3.head_object.side_effect = _head
+    mock_s3.get_object.side_effect = _get
+    mock_s3.put_object.side_effect = _put
     return mock_s3
+
+
+def _prime_cache(mock_s3, key: str, data, fetched_at: str = "2026-01-01T00:00:00+00:00") -> None:
+    """Seeds a cache HIT for exactly `key` in a _make_s3 mock, in the same
+    shape _cached_or_fetch itself writes via _put_json -- routes through
+    the mock's own put_object side_effect, so it lands in the same
+    in-memory store _cached_or_fetch's later reads see."""
+    mock_s3.put_object(Key=key, Body=json.dumps({"fetched_at": fetched_at, "data": data}))
 
 
 def _make_client(scoreboard: dict, summary: dict | None = None):
@@ -153,23 +181,6 @@ class TestIngestLambdaHandler:
         # instead of get_scoreboard's explicit-week path.
         mock_client.get_scoreboard_for_date.assert_called_once()
         mock_client.get_scoreboard.assert_not_called()
-
-    def test_resolves_season_from_calendar_when_only_week_and_type_given(self):
-        # No "season" key at all -- the shape Terraform/scheduler-nfl-
-        # season-schedule-sync.tf's Map state uses for every week of the
-        # current season.
-        board = _scoreboard([])
-        mock_s3 = _make_s3()
-        mock_client = _make_client(board)
-
-        with patch.object(nfl_ingest, "_s3", mock_s3), \
-             patch.object(nfl_ingest, "NFLClient", return_value=mock_client), \
-             patch.object(nfl_ingest, "EspnCoreApiClient", return_value=_make_core_client()), \
-             patch.object(nfl_ingest, "_current_nfl_season", return_value=2026):
-            nfl_ingest.lambda_handler({"season_type": 2, "week": 3}, None)
-
-        mock_client.get_scoreboard.assert_called_once_with(2026, 2, 3)
-        mock_client.get_scoreboard_for_date.assert_not_called()
 
     def test_skips_preseason_given_explicitly(self):
         mock_s3 = _make_s3()
@@ -276,34 +287,6 @@ class TestMostRecentSunday:
         assert result.isdigit()
 
 
-class TestCurrentNflSeason:
-    def test_september_resolves_to_this_year(self):
-        assert nfl_ingest._current_nfl_season(date(2026, 9, 1)) == 2026
-
-    def test_december_resolves_to_this_year(self):
-        assert nfl_ingest._current_nfl_season(date(2026, 12, 31)) == 2026
-
-    def test_january_resolves_to_last_year(self):
-        # Still finishing that season's playoffs.
-        assert nfl_ingest._current_nfl_season(date(2027, 1, 15)) == 2026
-
-    def test_february_resolves_to_last_year(self):
-        # The Super Bowl is in February.
-        assert nfl_ingest._current_nfl_season(date(2027, 2, 8)) == 2026
-
-    def test_march_resolves_to_this_year(self):
-        # The upcoming, not-yet-started season -- this is what lets the
-        # off-season sync seed next season's schedule before Week 1.
-        assert nfl_ingest._current_nfl_season(date(2027, 3, 1)) == 2027
-
-    def test_august_resolves_to_this_year(self):
-        assert nfl_ingest._current_nfl_season(date(2027, 8, 31)) == 2027
-
-    def test_defaults_to_actual_today_when_not_given(self):
-        result = nfl_ingest._current_nfl_season()
-        assert isinstance(result, int)
-
-
 def _competition_event(event_id: str, home_id: str, away_id: str) -> dict:
     return {
         "id": event_id,
@@ -375,6 +358,12 @@ class TestFilterDepthChart:
 
 
 class TestEnrichEvents:
+    """Every test here runs against a cold cache (_make_s3's get_object
+    404s for everything unless a test primes a key via _prime_cache) --
+    same "always fetches fresh" assumption these tests had before
+    coaches/depth-charts were cached, since a miss falls straight through
+    to fetch. Cache-hit behavior itself is covered by TestCachedOrFetch."""
+
     def test_attaches_coach_injuries_and_depth_chart_to_home_and_away(self):
         events = [_competition_event("1", "12", "24")]
         nfl_client = MagicMock()
@@ -387,7 +376,8 @@ class TestEnrichEvents:
         }
         core_client.get_team_injuries.side_effect = lambda team_id: [{"entity_id": f"p-{team_id}", "status": "Out"}]
 
-        nfl_ingest._enrich_events(events, 2025, nfl_client, core_client)
+        with patch.object(nfl_ingest, "_s3", _make_s3()):
+            nfl_ingest._enrich_events(events, 2025, nfl_client, core_client)
 
         event = events[0]
         assert event["home_coach"] == {"coach_id": "1", "coach_name": "Andy Reid", "experience": 27, "season_win_pct": 0.7}
@@ -402,7 +392,8 @@ class TestEnrichEvents:
         core_client = MagicMock()
         core_client.get_season_coaches.return_value = {}
 
-        nfl_ingest._enrich_events(events, 2025, nfl_client, core_client)  # must not raise
+        with patch.object(nfl_ingest, "_s3", _make_s3()):
+            nfl_ingest._enrich_events(events, 2025, nfl_client, core_client)  # must not raise
 
         assert "home_coach" not in events[0]
         core_client.get_team_injuries.assert_not_called()
@@ -415,7 +406,8 @@ class TestEnrichEvents:
         core_client.get_season_coaches.side_effect = Exception("ESPN 500")
         core_client.get_team_injuries.return_value = []
 
-        nfl_ingest._enrich_events(events, 2025, nfl_client, core_client)  # must not raise
+        with patch.object(nfl_ingest, "_s3", _make_s3()):
+            nfl_ingest._enrich_events(events, 2025, nfl_client, core_client)  # must not raise
 
         assert events[0]["home_coach"] is None
         assert events[0]["away_coach"] is None
@@ -434,7 +426,8 @@ class TestEnrichEvents:
 
         core_client.get_team_injuries.side_effect = flaky_injuries
 
-        nfl_ingest._enrich_events(events, 2025, nfl_client, core_client)  # must not raise
+        with patch.object(nfl_ingest, "_s3", _make_s3()):
+            nfl_ingest._enrich_events(events, 2025, nfl_client, core_client)  # must not raise
 
         assert events[0]["home_injuries"] is None
         assert events[0]["away_injuries"] == [{"entity_id": "p-24", "status": "Questionable"}]
@@ -447,10 +440,89 @@ class TestEnrichEvents:
         core_client.get_season_coaches.return_value = {}
         core_client.get_team_injuries.return_value = []
 
-        nfl_ingest._enrich_events(events, 2025, nfl_client, core_client)  # must not raise
+        with patch.object(nfl_ingest, "_s3", _make_s3()):
+            nfl_ingest._enrich_events(events, 2025, nfl_client, core_client)  # must not raise
 
         assert events[0]["home_depth_chart"] is None
         assert events[0]["away_depth_chart"] is None
+
+    def test_injuries_are_never_cached_even_when_coaches_and_depth_chart_are(self):
+        events = [_competition_event("1", "12", "24")]
+        nfl_client = MagicMock()
+        nfl_client.get_depth_chart.return_value = {"positions": {}}
+        core_client = MagicMock()
+        core_client.get_season_coaches.return_value = {}
+        core_client.get_team_injuries.return_value = []
+
+        mock_s3 = _make_s3()
+        with patch.object(nfl_ingest, "_s3", mock_s3):
+            nfl_ingest._enrich_events(events, 2025, nfl_client, core_client)
+            nfl_ingest._enrich_events(events, 2025, nfl_client, core_client)
+
+        # Coaches/depth-chart each got cached after their first fetch, so
+        # the second _enrich_events call within the same (still-fresh)
+        # cache window shouldn't refetch them -- but injuries have no
+        # cache at all, so every call hits ESPN.
+        assert core_client.get_season_coaches.call_count == 1
+        # 2 teams (home + away), each its own cache key -- both fetched
+        # once on the first _enrich_events call, neither refetched on the
+        # second.
+        assert nfl_client.get_depth_chart.call_count == 2
+        assert core_client.get_team_injuries.call_count == 4
+
+
+class TestCachedOrFetch:
+    def test_cache_miss_calls_fetch_and_writes_the_result_back(self):
+        mock_s3 = _make_s3()
+        fetch = MagicMock(return_value={"value": 42})
+
+        with patch.object(nfl_ingest, "_s3", mock_s3):
+            result = nfl_ingest._cached_or_fetch("some/key.json", 7, fetch)
+
+        assert result == {"value": 42}
+        fetch.assert_called_once()
+        written_key, written_body = mock_s3.put_object.call_args.kwargs["Key"], mock_s3.put_object.call_args.kwargs["Body"]
+        assert written_key == "some/key.json"
+        written = json.loads(written_body)
+        assert written["data"] == {"value": 42}
+        assert "fetched_at" in written
+
+    def test_fresh_cache_hit_does_not_call_fetch(self):
+        mock_s3 = _make_s3()
+        fresh = (datetime.now(timezone.utc) - timedelta(days=1)).isoformat()
+        _prime_cache(mock_s3, "some/key.json", {"value": 1}, fetched_at=fresh)
+        fetch = MagicMock()
+
+        with patch.object(nfl_ingest, "_s3", mock_s3):
+            result = nfl_ingest._cached_or_fetch("some/key.json", 7, fetch)
+
+        assert result == {"value": 1}
+        fetch.assert_not_called()
+
+    def test_stale_cache_past_ttl_calls_fetch(self):
+        mock_s3 = _make_s3()
+        stale = (datetime.now(timezone.utc) - timedelta(days=10)).isoformat()
+        _prime_cache(mock_s3, "some/key.json", {"value": 1}, fetched_at=stale)
+        fetch = MagicMock(return_value={"value": 2})
+
+        with patch.object(nfl_ingest, "_s3", mock_s3):
+            result = nfl_ingest._cached_or_fetch("some/key.json", 7, fetch)
+
+        assert result == {"value": 2}
+        fetch.assert_called_once()
+
+    def test_fetch_failure_propagates_rather_than_masking_with_stale_data(self):
+        mock_s3 = _make_s3()
+        stale = (datetime.now(timezone.utc) - timedelta(days=10)).isoformat()
+        _prime_cache(mock_s3, "some/key.json", {"value": 1}, fetched_at=stale)
+        fetch = MagicMock(side_effect=RuntimeError("ESPN 500"))
+
+        with patch.object(nfl_ingest, "_s3", mock_s3):
+            try:
+                nfl_ingest._cached_or_fetch("some/key.json", 7, fetch)
+                assert False, "expected RuntimeError to propagate"
+            except RuntimeError:
+                pass
 
 
 class TestIngestHelpers:
