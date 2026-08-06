@@ -29,11 +29,16 @@ class TeamLeadersPanel extends StatelessWidget {
           Text('PLAYER LEADERS', style: AppTextStyles.microLabel()),
           const SizedBox(height: 16),
           Row(
+            // Away-left/home-right, "@" between -- same convention as
+            // matchup_hero.dart and game_row.dart's _MatchupLine.
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Expanded(child: _TeamLeadersColumn(label: homeAbbr, team: leaders.home)),
-              const SizedBox(width: 24),
               Expanded(child: _TeamLeadersColumn(label: awayAbbr, team: leaders.away)),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 12),
+                child: Text('@', style: AppTextStyles.microLabel(color: AppColors.inkMute)),
+              ),
+              Expanded(child: _TeamLeadersColumn(label: homeAbbr, team: leaders.home)),
             ],
           ),
         ],

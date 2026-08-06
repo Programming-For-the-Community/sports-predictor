@@ -8,11 +8,22 @@ checks auth.
 Routes:
     GET /nfl/events?status=scheduled|completed
     GET /nfl/models
+    GET /nfl/season
 
 See library.serving.nfl_reads (Source/library/serving/nfl_reads.py) for
 the actual request-shaping logic, shared with the main predict Lambda
 (Source/aws-lambdas/nfl/predict/handler.py) -- that module's docstring
-covers the exact response contract for both routes.
+covers the exact response contract for all three routes.
+
+GET /nfl/season reads a cached S3 object (get_season_projection) rather
+than computing anything -- the projection itself (standings + per-stat
+leaderboards) is computed once a week by the predict Lambda's own
+ScheduledSeasonProjection branch, not per-request; see that module's
+docstring for why (26-29s of computation cannot be served synchronously
+through API Gateway's 29s integration ceiling). Serving the cached read
+from here instead of the predict Lambda is the same cold-start reasoning
+as events/models below: this route never loads or deserializes an ML
+model artifact either.
 
 This Lambda exists ONLY to give these two routes a light cold start.
 Neither ever loads or deserializes an ML model artifact (list_models only
@@ -31,7 +42,7 @@ import os
 
 from library.aws.dynamodb_table import DynamoDBTable
 from library.aws.s3_manager import S3Manager
-from library.serving.nfl_reads import list_events, list_models
+from library.serving.nfl_reads import get_season_projection, list_events, list_models
 from library.storage.feature_storage import FeatureStorage
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
@@ -92,6 +103,12 @@ def lambda_handler(event, context):
 
         if resource == "/nfl/models":
             body = list_models(_get_model_bucket(), SPORT)
+            return _response(200, body)
+
+        if resource == "/nfl/season":
+            body = get_season_projection(_get_model_bucket(), SPORT)
+            if body is None:
+                return _response(503, {"error": "Season projection not yet available -- check back after the next scheduled update"})
             return _response(200, body)
 
         return _response(404, {"error": f"No route for resource {resource!r}"})

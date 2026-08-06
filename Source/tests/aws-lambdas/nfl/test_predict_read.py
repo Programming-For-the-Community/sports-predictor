@@ -90,6 +90,28 @@ class TestModelsRoute:
         assert body["models"][0]["model_name"] == "win-probability"
 
 
+class TestSeasonRoute:
+    def test_returns_the_cached_projection(self):
+        nfl_predict_read._model_bucket = MagicMock()
+        nfl_predict_read._model_bucket.object_exists.return_value = True
+        nfl_predict_read._model_bucket.get_json.return_value = {"sport": "nfl", "season": 2025, "standings": []}
+
+        response = nfl_predict_read.lambda_handler(_api_event("/nfl/season"), None)
+
+        assert response["statusCode"] == 200
+        body = json.loads(response["body"])
+        assert body["season"] == 2025
+        nfl_predict_read._model_bucket.get_json.assert_called_once_with("season-projections/nfl/latest.json")
+
+    def test_returns_503_when_the_scheduled_job_hasnt_written_one_yet(self):
+        nfl_predict_read._model_bucket = MagicMock()
+        nfl_predict_read._model_bucket.object_exists.return_value = False
+
+        response = nfl_predict_read.lambda_handler(_api_event("/nfl/season"), None)
+
+        assert response["statusCode"] == 503
+
+
 class TestRouting:
     def test_unknown_resource_is_a_404(self):
         response = nfl_predict_read.lambda_handler(_api_event("/nfl/predictions/events/{event_id}"), None)

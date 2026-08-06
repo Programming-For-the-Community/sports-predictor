@@ -33,26 +33,30 @@ Routes (see Terraform/lambda-nfl-predict.tf for the API Gateway wiring):
            must be one of the trained TARGET_STAT values (see
            Terraform/scheduler-nfl-train-player-prop-model.tf's
            nfl_player_prop_stats).
-    GET /nfl/season
-        -> the current season's standings (real record so far + Elo Monte
-           Carlo projected final wins, division-winner/playoff/
-           championship probability per team -- see season_simulation.py)
-           and, per tracked player-prop stat, a top-10 season-long
-           leaderboard projected from each candidate's current total plus
-           their own model's prediction for their team's next game.
-           `leaderboards` is `null` if it couldn't be computed --
-           best-effort, same reasoning as `leaders` above.
 
 {event_id}/{entity_id} are raw ESPN ids (e.g. "401547417",
 "3139477"), not the internal SPORT#NFL#EVENT#... key -- translated via
 library.schema.keys the same way every other NFL adapter does.
 
-Every prediction is computed live on every request (no caching, no
-serving a previously-computed value back) and logged to the predictions
-table for the audit trail -- see design/DATA_SCHEMA.md's Predictions
-table. The predictions table's IAM grant is PutItem-only (see
+Both routes above compute live on every request (no caching, no serving
+a previously-computed value back) and log to the predictions table for
+the audit trail -- see design/DATA_SCHEMA.md's Predictions table. The
+predictions table's IAM grant is PutItem-only (see
 Terraform/iam-lambda-inference.tf); this function never reads a past
 prediction back.
+
+GET /nfl/season is NOT served here either, despite this being the only
+Lambda that ever computes it -- see Terraform/lambda-nfl-predict-read.tf.
+_leaderboards alone takes 26-29s against API Gateway's hard, non-
+configurable 29s integration ceiling (confirmed live via CloudWatch and
+direct invoke -- see memory/project-nfl-season-timeout-regression.md), a
+duration no per-request optimization can reliably stay under. Instead,
+this Lambda is invoked directly by Terraform/scheduler-nfl-season-
+projection.tf's weekly EventBridge Scheduler target (see the
+ScheduledSeasonProjection branch in lambda_handler below), which computes
+once and writes the result to S3; GET /nfl/season itself is served from
+that cached object by the light predict-read Lambda (library.serving.
+nfl_reads.get_season_projection).
 """
 from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
@@ -70,6 +74,7 @@ from library.schema.keys import event_key as build_event_key
 from library.serving.nfl_reads import SCORE_MODELS, WIN_PROBABILITY_MODEL
 from library.serving.nfl_reads import _home_and_away
 from library.storage.feature_storage import FeatureStorage
+from library.storage.season_projections import season_projection_key
 import live_features
 import model_loader
 import season_simulation
@@ -480,15 +485,31 @@ def _season_projection() -> dict:
     }
 
 
+def _run_scheduled_season_projection() -> dict:
+    """Entry point for Terraform/scheduler-nfl-season-projection.tf's
+    weekly EventBridge Scheduler -> Lambda direct invoke (see this
+    module's own docstring for why GET /nfl/season doesn't compute this
+    live anymore) -- computes _season_projection() once and writes it to
+    S3 instead of returning it through API Gateway. Not wrapped in the
+    same try/except as the API-Gateway-triggered routes below: there's no
+    HTTP caller waiting on a status code here, so a real failure should
+    propagate and show up as a Lambda error/CloudWatch alarm, not get
+    silently reshaped into a 500 nobody reads."""
+    result = _season_projection()
+    _get_model_bucket().put_json(season_projection_key(SPORT), result)
+    logger.info("Wrote season projection for %s to S3", SPORT)
+    return {"status": "ok"}
+
+
 def lambda_handler(event, context):
+    if event.get("detail-type") == "ScheduledSeasonProjection":
+        return _run_scheduled_season_projection()
+
     path_params = event.get("pathParameters") or {}
     query_params = event.get("queryStringParameters") or {}
     resource = event.get("resource", "")
 
     try:
-        if resource == "/nfl/season":
-            return _response(200, _season_projection())
-
         if resource == "/nfl/predictions/events/{event_id}/players/{entity_id}":
             target_stat = query_params.get("stat")
             if not target_stat:

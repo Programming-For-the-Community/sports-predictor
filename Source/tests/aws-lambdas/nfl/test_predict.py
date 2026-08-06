@@ -175,6 +175,15 @@ class TestRouting:
         assert nfl_predict.lambda_handler(_api_event("/nfl/events"), None)["statusCode"] == 404
         assert nfl_predict.lambda_handler(_api_event("/nfl/models"), None)["statusCode"] == 404
 
+    def test_season_is_not_served_here(self):
+        # Same reasoning, moved even later -- see TestScheduledSeasonProjection
+        # above and predict/handler.py's own docstring. API Gateway is
+        # repointed to nfl_predict_read (api-gateway-nfl-predict.tf); a
+        # GET /nfl/season request should never reach this Lambda, but if
+        # it somehow did, it must 404, not resurrect the old live-compute
+        # route.
+        assert nfl_predict.lambda_handler(_api_event("/nfl/season"), None)["statusCode"] == 404
+
 
 class TestErrorMapping:
     def test_event_not_found_is_a_404(self):
@@ -376,8 +385,15 @@ class TestSeasonStandingsInputs:
         assert inputs["games_remaining"]["12"] == 2
 
 
-class TestSeasonProjectionRoute:
-    def test_returns_standings_sorted_by_projected_wins(self):
+class TestScheduledSeasonProjection:
+    """GET /nfl/season no longer terminates on this Lambda at all -- moved
+    to predict-read/handler.py (see TestRouting.test_season_is_not_served_here
+    below and Source/tests/aws-lambdas/nfl/test_predict_read.py). This
+    Lambda instead computes the projection on Terraform/scheduler-nfl-
+    season-projection.tf's weekly direct EventBridge Scheduler invoke and
+    writes it to S3 -- see predict/handler.py's own docstring for why."""
+
+    def test_writes_the_season_projection_to_s3_under_the_expected_key(self):
         nfl_predict._storage = MagicMock()
         nfl_predict._model_bucket = MagicMock()
         nfl_predict._storage.get_all_events.side_effect = lambda sport, status: {
@@ -391,15 +407,17 @@ class TestSeasonProjectionRoute:
             "24": {"projected_wins": 6.0, "division_winner_probability": 0.1, "playoff_probability": 0.3, "championship_probability": 0.01},
         }
         with patch.object(season_simulation, "simulate_season", return_value=simulated):
-            response = nfl_predict.lambda_handler(_api_event("/nfl/season"), None)
+            response = nfl_predict.lambda_handler({"detail-type": "ScheduledSeasonProjection"}, None)
 
-        assert response["statusCode"] == 200
-        body = json.loads(response["body"])
+        assert response == {"status": "ok"}
+        nfl_predict._model_bucket.put_json.assert_called_once()
+        key, body = nfl_predict._model_bucket.put_json.call_args[0]
+        assert key == "season-projections/nfl/latest.json"
         assert body["season"] == 2025
         assert [row["team_id"] for row in body["standings"]] == ["12", "24"]
         assert body["standings"][0]["wins"] == 1
 
-    def test_leaderboards_is_none_when_building_them_fails_but_standings_still_return(self):
+    def test_leaderboards_is_none_when_building_them_fails_but_standings_still_write(self):
         nfl_predict._storage = MagicMock()
         nfl_predict._model_bucket = MagicMock()
         nfl_predict._storage.get_all_events.side_effect = lambda sport, status: {
@@ -409,10 +427,9 @@ class TestSeasonProjectionRoute:
         nfl_predict._storage.get_all_player_game_stats.side_effect = RuntimeError("boom")
 
         with patch.object(season_simulation, "simulate_season", return_value={}):
-            response = nfl_predict.lambda_handler(_api_event("/nfl/season"), None)
+            nfl_predict.lambda_handler({"detail-type": "ScheduledSeasonProjection"}, None)
 
-        assert response["statusCode"] == 200
-        body = json.loads(response["body"])
+        body = nfl_predict._model_bucket.put_json.call_args[0][1]
         assert body["leaderboards"] is None
         assert body["standings"] == []
 
@@ -432,9 +449,9 @@ class TestSeasonProjectionRoute:
              patch.object(live_features, "build_live_player_features", return_value={"entity_id": "qb1"}), \
              patch.object(model_loader, "load_current_model", return_value=(MagicMock(), _model_card(1))), \
              patch.object(model_loader, "predict", return_value=280.0):
-            response = nfl_predict.lambda_handler(_api_event("/nfl/season"), None)
+            nfl_predict.lambda_handler({"detail-type": "ScheduledSeasonProjection"}, None)
 
-        body = json.loads(response["body"])
+        body = nfl_predict._model_bucket.put_json.call_args[0][1]
         passing_leaders = body["leaderboards"]["passing_yards"]
         assert len(passing_leaders) <= 10
         assert passing_leaders[0]["name"] == "Patrick Mahomes"

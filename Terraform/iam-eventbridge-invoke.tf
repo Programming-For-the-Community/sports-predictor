@@ -38,6 +38,17 @@ data "aws_iam_policy_document" "eventbridge_invoke_permissions" {
       aws_sfn_state_machine.training_orchestrator.arn,
     ]
   }
+
+  # Deliberate exception to this role's "goes through a state machine"
+  # rule above (see this file's own docstring) -- scheduler-nfl-season-
+  # projection.tf invokes nfl_predict directly since that job is one
+  # computation with no per-sport/per-target fan-out to justify a state
+  # machine in between.
+  statement {
+    sid       = "InvokeSeasonProjectionLambda"
+    actions   = ["lambda:InvokeFunction"]
+    resources = [aws_lambda_function.nfl_predict.arn]
+  }
 }
 
 resource "aws_iam_role_policy" "eventbridge_invoke_permissions" {

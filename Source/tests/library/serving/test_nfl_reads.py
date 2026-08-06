@@ -278,3 +278,24 @@ class TestListModels:
         result = nfl_reads.list_models(s3, "nfl")
 
         assert result["models"] == []
+
+
+class TestGetSeasonProjection:
+    def test_returns_the_cached_projection_from_its_own_key(self):
+        s3 = MagicMock()
+        s3.object_exists.return_value = True
+        s3.get_json.return_value = {"sport": "nfl", "season": 2025, "standings": []}
+
+        result = nfl_reads.get_season_projection(s3, "nfl")
+
+        assert result == {"sport": "nfl", "season": 2025, "standings": []}
+        s3.get_json.assert_called_once_with("season-projections/nfl/latest.json")
+
+    def test_returns_none_when_the_scheduled_job_hasnt_written_one_yet(self):
+        s3 = MagicMock()
+        s3.object_exists.return_value = False
+
+        result = nfl_reads.get_season_projection(s3, "nfl")
+
+        assert result is None
+        s3.get_json.assert_not_called()

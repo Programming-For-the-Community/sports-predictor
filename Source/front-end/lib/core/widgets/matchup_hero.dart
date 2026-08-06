@@ -39,7 +39,6 @@ class MatchupHero extends StatelessWidget {
                 child: _TeamColumn(
                   color: away.primary,
                   abbr: away.abbreviation,
-                  role: 'AWAY',
                   probability: 1 - prediction.homeWinProbability,
                   favored: !homeFavored,
                 ),
@@ -48,14 +47,16 @@ class MatchupHero extends StatelessWidget {
                 padding: const EdgeInsets.symmetric(horizontal: 16),
                 // "@" reads as "away @ home" in American sports (the away
                 // team is the one traveling) -- away is the LEFT column
-                // above specifically so this ordering matches that.
+                // above specifically so this ordering matches that. This
+                // is the only marker of which side is home/away -- no
+                // separate "HOME"/"AWAY" label, same convention as
+                // game_row.dart's _MatchupLine.
                 child: Text('@', style: AppTextStyles.sectionTitle(color: AppColors.inkMute)),
               ),
               Expanded(
                 child: _TeamColumn(
                   color: home.primary,
                   abbr: home.abbreviation,
-                  role: 'HOME',
                   probability: prediction.homeWinProbability,
                   favored: homeFavored,
                 ),
@@ -85,12 +86,9 @@ class MatchupHero extends StatelessWidget {
 }
 
 class _TeamColumn extends StatelessWidget {
-  const _TeamColumn({
-    required this.color, required this.abbr, required this.role, required this.probability, required this.favored,
-  });
+  const _TeamColumn({required this.color, required this.abbr, required this.probability, required this.favored});
   final Color color;
   final String abbr;
-  final String role; // 'HOME' or 'AWAY'
   final double probability;
   final bool favored;
 
@@ -103,8 +101,6 @@ class _TeamColumn extends StatelessWidget {
         Container(width: 10, height: 10, decoration: BoxDecoration(shape: BoxShape.circle, color: color)),
         const SizedBox(height: 8),
         Text(abbr, style: AppTextStyles.cardTitle()),
-        const SizedBox(height: 2),
-        Text(role, style: AppTextStyles.microLabel(color: AppColors.inkMute)),
         const SizedBox(height: 8),
         favored
             ? ShaderMask(
@@ -153,18 +149,26 @@ class MatchupResultHero extends StatelessWidget {
             children: [
               Expanded(
                 child: _ResultTeamColumn(
-                  color: home.primary, abbr: home.abbreviation, role: 'HOME',
-                  score: event.home.result?.score, won: homeWon,
+                  color: away.primary, abbr: away.abbreviation,
+                  score: event.away.result?.score, won: !homeWon,
                 ),
               ),
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 16),
-                child: Text('FINAL', style: AppTextStyles.sectionTitle(color: AppColors.inkMute)),
+                // Away-left/home-right + "@" -- same convention as
+                // MatchupHero and game_row.dart's _MatchupLine, "FINAL"
+                // underneath just adds the completed-game status on top.
+                child: Column(
+                  children: [
+                    Text('@', style: AppTextStyles.sectionTitle(color: AppColors.inkMute)),
+                    Text('FINAL', style: AppTextStyles.microLabel(color: AppColors.inkMute)),
+                  ],
+                ),
               ),
               Expanded(
                 child: _ResultTeamColumn(
-                  color: away.primary, abbr: away.abbreviation, role: 'AWAY',
-                  score: event.away.result?.score, won: !homeWon,
+                  color: home.primary, abbr: home.abbreviation,
+                  score: event.home.result?.score, won: homeWon,
                 ),
               ),
             ],
@@ -178,10 +182,9 @@ class MatchupResultHero extends StatelessWidget {
 }
 
 class _ResultTeamColumn extends StatelessWidget {
-  const _ResultTeamColumn({required this.color, required this.abbr, required this.role, required this.score, required this.won});
+  const _ResultTeamColumn({required this.color, required this.abbr, required this.score, required this.won});
   final Color color;
   final String abbr;
-  final String role;
   final double? score;
   final bool won;
 
@@ -194,8 +197,6 @@ class _ResultTeamColumn extends StatelessWidget {
         Container(width: 10, height: 10, decoration: BoxDecoration(shape: BoxShape.circle, color: color)),
         const SizedBox(height: 8),
         Text(abbr, style: AppTextStyles.cardTitle()),
-        const SizedBox(height: 2),
-        Text(role, style: AppTextStyles.microLabel(color: AppColors.inkMute)),
         const SizedBox(height: 8),
         won
             ? ShaderMask(

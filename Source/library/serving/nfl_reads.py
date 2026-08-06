@@ -22,6 +22,7 @@ from boto3.dynamodb.conditions import Key
 
 from library.features.nfl_teams import is_real_franchise_matchup
 from library.storage.model_artifacts import current_version_key, model_artifact_key
+from library.storage.season_projections import season_projection_key
 
 WIN_PROBABILITY_MODEL = "win-probability"
 SCORE_MODELS = {"margin": "score-margin", "home_score": "home-score", "away_score": "away-score"}
@@ -244,3 +245,16 @@ def list_models(s3, sport: str) -> dict:
         results = executor.map(lambda name: _load_model_summary(s3, sport, name), model_names)
 
     return {"sport": sport, "models": [card for card in results if card is not None]}
+
+
+def get_season_projection(s3, sport: str) -> dict | None:
+    """GET /nfl/season -- reads the standings + leaderboard projection
+    written weekly by the scheduled compute path (predict/handler.py's
+    ScheduledSeasonProjection branch), never computed live here. None if
+    the schedule hasn't fired yet (e.g. right after a fresh deploy) --
+    the caller is expected to surface that as "not yet available" rather
+    than treat it like a real 500."""
+    key = season_projection_key(sport)
+    if not s3.object_exists(key):
+        return None
+    return s3.get_json(key)

@@ -52,6 +52,17 @@ data "aws_iam_policy_document" "lambda_inference_permissions" {
     resources = ["arn:aws:s3:::${local.model_artifacts_bucket}"]
   }
 
+  # Scoped to the season-projections/ prefix only, not the whole bucket --
+  # this Lambda's ScheduledSeasonProjection branch (predict/handler.py)
+  # writes the cached season projection there; everything else under this
+  # bucket (versioned model artifacts) stays write-protected from this
+  # role, written only by the training Fargate task (iam-ecs-pipeline.tf).
+  statement {
+    sid       = "WriteSeasonProjection"
+    actions   = ["s3:PutObject"]
+    resources = ["arn:aws:s3:::${local.model_artifacts_bucket}/season-projections/*"]
+  }
+
   statement {
     sid     = "ReadFeatureData"
     actions = ["dynamodb:GetItem", "dynamodb:Query", "dynamodb:Scan"]
