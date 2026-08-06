@@ -23,7 +23,6 @@ from datetime import datetime, timezone
 
 import numpy as np
 import pandas as pd
-import pyarrow
 from sklearn.metrics import accuracy_score, log_loss, mean_absolute_error, root_mean_squared_error
 
 from library.aws.s3_manager import S3Manager
@@ -62,7 +61,15 @@ def load_features(s3: S3Manager, key: str) -> pd.DataFrame:
     than failing the whole training run over one bad S3 GET -- seen in
     practice for several concurrent training tasks reading the same key
     (Terraform's TrainAllTargets Map state), transient enough that a
-    second attempt reads the object cleanly."""
+    second attempt reads the object cleanly.
+
+    Imports pyarrow locally rather than at module level -- it's not one
+    of library's own declared dependencies (see pyproject.toml), only its
+    training-script callers' own requirements.txt, and a module-level
+    import would make every caller of this module need it installed just
+    to import training_common at all, not just to call this function."""
+    import pyarrow
+
     last_exc: Exception | None = None
     for attempt in range(1, LOAD_FEATURES_MAX_ATTEMPTS + 1):
         data = s3.get_bytes(key)

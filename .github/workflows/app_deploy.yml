@@ -32,6 +32,20 @@ on:
       - main
   workflow_call:
 
+# Shared with nfl_deploy.yml/frontend_deploy.yml -- all three can reach
+# tf_install.yml's terraform apply, and Terraform/main.tf's S3 backend has
+# no state locking configured, so this queues a second trigger rather than
+# running it concurrently. Not applied to tf_install.yml's own standalone
+# tf/* trigger -- concurrency behavior for a reusable workflow invoked via
+# `uses:` from an already-grouped caller isn't something to layer another
+# group on top of without confirming it can't deadlock the two against
+# each other. cancel-in-progress: false on purpose: killing an in-flight
+# terraform apply can leave real AWS resources half-applied, unlike
+# cancelling a Docker build.
+concurrency:
+  group: terraform-deploy-pipeline
+  cancel-in-progress: false
+
 permissions:
   id-token: write
   contents: read

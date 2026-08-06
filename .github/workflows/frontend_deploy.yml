@@ -27,6 +27,13 @@ on:
       - 'front-end/**'
   workflow_call:
 
+# See app_deploy.yml's own comment -- shared group across every workflow
+# that can reach tf_install.yml's terraform apply, since
+# Terraform/main.tf's S3 backend has no state locking configured.
+concurrency:
+  group: terraform-deploy-pipeline
+  cancel-in-progress: false
+
 permissions:
   id-token: write
   contents: read
