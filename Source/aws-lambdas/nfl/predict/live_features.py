@@ -33,13 +33,12 @@ from library.schema.keys import player_key
 DEFAULT_ROLLING_WINDOW = 5
 
 # Matches the severity threshold library/features/nfl.py's
-# _TEAM_INJURY_COUNT_STATUSES uses for the injury-count feature, and the
-# threshold confirmed with the user for candidacy exclusion specifically
-# (Out AND Doubtful, not just Out) -- kept as its own local constant
-# rather than importing nfl.py's private one, same reasoning
-# predict/model_loader.py's own docstring gives for not importing
-# model_common.py: this module and nfl.py are different consumers of the
-# same business rule, not the same code reused twice.
+# _TEAM_INJURY_COUNT_STATUSES uses for the injury-count feature (Out AND
+# Doubtful, not just Out) -- kept as its own local constant rather than
+# importing nfl.py's private one, same reasoning predict/model_loader.py's
+# own docstring gives for not importing model_common.py: this module and
+# nfl.py are different consumers of the same business rule, not the same
+# code reused twice.
 _INJURY_EXCLUDED_STATUSES = frozenset({"Out", "Doubtful"})
 
 
@@ -97,8 +96,7 @@ def _depth_chart_entry(depth_chart: dict | None, position_abbreviation: str) -> 
     by each entry's own position.abbreviation field, not by assuming a
     specific outer dict key -- ingest's _filter_depth_chart
     (aws-lambdas/nfl/ingest/handler.py) does the same match-by-abbreviation
-    rather than relying on ESPN's exact key casing/format, which was only
-    confirmed live for non-skill-position codes."""
+    rather than relying on ESPN's exact key casing/format."""
     if not depth_chart:
         return None
     for entry in depth_chart.values():
@@ -316,12 +314,7 @@ def build_live_event_leader_candidates(
     pass-rushers, per team) -- without this, each candidate's own
     _build_player_feature_row call would separately pay _live_elo_ratings'
     full-history recompute (see that function's docstring for why a loop
-    like this is exactly the condition that stops being cheap). Confirmed
-    live via CloudWatch: /nfl/predictions/events/{id} requests were
-    hitting the full 29s Lambda timeout before this fix, the same failure
-    mode _leaderboards (handler.py's /nfl/season route) had until it got
-    the identical treatment -- this was the one remaining call site that
-    hadn't."""
+    like this is exactly the condition that stops being cheap)."""
     event = storage.get_event(event_key)
     if event is None:
         raise EventNotFoundError(f"No event found for {event_key}")

@@ -1,15 +1,11 @@
-# NFL read-only serving Lambda -- GET /nfl/events and GET /nfl/models,
-# split out of the main predict Lambda (lambda-nfl-predict.tf) specifically
-# for cold start. Neither route ever loads or deserializes an ML model
-# artifact (see Source/library/serving/nfl_reads.py's own docstring), so
-# this Lambda needs nothing beyond boto3 + the shared library package --
-# no xgboost/scikit-learn/pandas, none of the predict Lambda's real,
-# confirmed-live cold-start cost (CloudWatch showed repeated INIT_REPORT
-# Phase: init Status: timeout entries at Lambda's non-configurable 10s
-# init-phase ceiling). Zip-packaged like ingest/normalize, not a container
-# image -- this Lambda's whole dependency footprint fits comfortably under
-# the 250MB unzipped zip limit that forced the predict Lambda onto a
-# container image in the first place.
+# NFL read-only serving Lambda -- GET /nfl/events and GET /nfl/models.
+# Separate from the main predict Lambda (lambda-nfl-predict.tf) because
+# neither route loads or deserializes an ML model artifact (see
+# Source/library/serving/nfl_reads.py's own docstring), so this Lambda
+# needs nothing beyond boto3 + the shared library package -- no
+# xgboost/scikit-learn/pandas. Zip-packaged like ingest/normalize, not a
+# container image -- its dependency footprint fits under the 250MB
+# unzipped zip limit that the predict Lambda exceeds.
 #
 # Code is deployed by the nfl_deploy workflow (via `aws lambda
 # update-function-code`) -- NOT by Terraform. The placeholder ZIP below

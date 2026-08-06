@@ -1,8 +1,7 @@
 # Single public entry point for the whole app -- the frontend (default
-# behavior, S3 origin) and the existing NFL API (path-routed to API
-# Gateway's own execute-api endpoint), both under local.domain. Replaces
-# API Gateway's own custom-domain feature (formerly api-gateway-domain.tf)
-# -- see acm.tf/route53.tf for the matching cert/DNS changes.
+# behavior, S3 origin) and the NFL API (path-routed to API Gateway's own
+# execute-api endpoint), both under local.domain. See acm.tf/route53.tf
+# for the matching cert/DNS records.
 #
 # One list entry per active sport's API prefix -- adding a second sport's
 # API later is one more entry here, not a hand-written cache behavior.
@@ -67,19 +66,11 @@ resource "aws_cloudfront_distribution" "main" {
       cache_policy_id = "4135ea2d-6df8-44a3-9df3-4b5a84be39ad"
       # Managed-AllViewerExceptHostHeader -- forwards Authorization + all
       # query strings (needed for the Cognito authorizer and player-prop
-      # `?stat=` params), same as Managed-AllViewer, but drops the
-      # viewer's own Host header instead of forwarding it verbatim.
-      # Confirmed live: with plain AllViewer, CloudFront forwarded this
-      # distribution's own domain as the Host header to the nfl-api
-      # origin: API Gateway's regional execute-api endpoint rejects that
-      # with a 403 (it doesn't match its own domain), which this
-      # distribution's custom_error_response then silently rewrote into
-      # the SPA fallback (index.html, 200) -- every /nfl/* request,
-      # valid or not, was actually failing this way, not reaching the
-      # Lambda at all. AllViewerExceptHostHeader is AWS's own documented
-      # fix for API Gateway/Lambda Function URL origins specifically:
-      # CloudFront substitutes the origin's own domain as the Host header
-      # instead of forwarding the viewer's.
+      # `?stat=` params), same as Managed-AllViewer, but substitutes the
+      # origin's own domain as the Host header instead of forwarding the
+      # viewer's. API Gateway's regional execute-api endpoint rejects a
+      # Host header that doesn't match its own domain, so plain AllViewer
+      # 403s every request to this origin.
       origin_request_policy_id = "b689b0a8-53d0-40ab-baf2-68738e2966ac"
     }
   }

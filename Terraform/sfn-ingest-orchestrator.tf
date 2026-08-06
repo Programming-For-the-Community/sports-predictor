@@ -1,22 +1,17 @@
-# Replaces scheduler-nfl-ingest.tf's direct EventBridge -> Lambda wiring
-# with a registry-driven fan-out: scans the sport registry for active
-# sports and invokes each one's own ingest Lambda by name, resolved at
-# runtime via the "${var.project}-<sport>-ingest" naming convention every
-# ingest Lambda already follows (see lambda-nfl-ingest.tf). Onboarding a
-# new sport means deploying its own ingest Lambda under that name and
-# adding a registry row -- no state machine change.
-#
-# Triggered by scheduler-ingest-orchestrator.tf, once daily, year-round --
-# season-gating that used to be scheduler-nfl-ingest.tf's Aug-Feb cron
-# window is now each sport's own `active` flag on its registry row (see
+# Registry-driven fan-out: scans the sport registry for active sports and
+# invokes each one's own ingest Lambda by name, resolved at runtime via
+# the "${var.project}-<sport>-ingest" naming convention every ingest
+# Lambda follows (see lambda-nfl-ingest.tf). Onboarding a new sport means
+# deploying its own ingest Lambda under that name and adding a registry
+# row -- no state machine change. Triggered by
+# scheduler-ingest-orchestrator.tf, once daily, year-round -- season
+# gating is each sport's own `active` flag on its registry row (see
 # dynamodb-sport-registry.tf).
 #
 # Standard, not Express: this project's volume (single-digit sports,
-# daily cadence) is a few hundred state transitions/month at most, well
-# inside Step Functions' always-free 4,000/month tier -- see this
-# session's cost comparison in the design/PROJECT_PLAN.md Phase 4 update.
-# Standard's 90-day execution history is also a real debugging aid for a
-# low-frequency personal pipeline that Express doesn't provide.
+# daily cadence) is a few hundred state transitions/month, well inside
+# Step Functions' always-free 4,000/month tier, and Standard's 90-day
+# execution history is a real debugging aid for a low-frequency pipeline.
 resource "aws_sfn_state_machine" "ingest_orchestrator" {
   name     = "${var.project}-ingest-orchestrator"
   role_arn = aws_iam_role.stepfunctions_orchestrator.arn
@@ -50,7 +45,7 @@ resource "aws_sfn_state_machine" "ingest_orchestrator" {
         "States": {
           "IsActive": {
             "Type": "Choice",
-            "Comment": "Filtered here, not in the Scan above -- Step Functions' aws-sdk:dynamodb:scan integration schema rejects a BOOL-typed ExpressionAttributeValue in a FilterExpression. Variable is $.active.Bool, not $.active.BOOL -- confirmed live via a real execution's Choice-state input that the aws-sdk: integration marshals DynamoDB's Boolean attribute type as \"Bool\", not the raw API's \"BOOL\" (S/M/L come through as expected) -- a JSONPath mismatch here throws States.Runtime (\"Invalid path\"), it does not fall through to Default.",
+            "Comment": "Filtered here, not in the Scan above -- aws-sdk:dynamodb:scan rejects a BOOL-typed FilterExpression value. Variable is $.active.Bool: the aws-sdk: integration marshals DynamoDB's Boolean type as \"Bool\", not \"BOOL\".",
             "Choices": [
               {
                 "Variable": "$.active.Bool",

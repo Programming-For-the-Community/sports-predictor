@@ -4,13 +4,10 @@
 # the field-event case, the participant entity IS the player, so there is
 # no separate player_game_stats row needed.
 #
-# status-index GSI added once "this week's games" (GET /nfl/events, GET
-# /nfl/season) became a real, frequently-hit access pattern -- confirmed
-# live that FeatureStorage.get_all_events's full-table Scan was a real
-# contributor to that route's latency. Query(status=X) via this index
-# replaces the Scan entirely; range_key=event_date also means the index
-# already returns results in the order get_all_events wants (most recent
-# first, scan_index_forward=False) without a separate Python sort.
+# status-index GSI serves "this week's games" (GET /nfl/events, GET
+# /nfl/season) via Query(status=X) instead of a full-table Scan;
+# range_key=event_date returns results in the order get_all_events wants
+# (most recent first, scan_index_forward=False) with no separate sort.
 #
 # The entity_id GSI from docs/DATA_SCHEMA.md ("this team's full event
 # history" frontend view) stays deferred -- no route needs it yet.

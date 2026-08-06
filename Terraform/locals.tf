@@ -1,9 +1,7 @@
 # Naming convention shared between IAM policies (in iam-*.tf) and the
-# S3/DynamoDB resources that will be created in a later pass. Defined here
-# first so IAM scoping and the eventual resource names can't drift apart --
-# the buckets and tables below don't exist as Terraform resources yet, but
-# IAM policies are just ARN strings, so referencing them ahead of time is
-# safe as long as whatever creates them later uses these same names.
+# S3/DynamoDB resources they reference -- keeps IAM scoping and resource
+# names from drifting apart, since IAM policies below reference these as
+# plain ARN strings rather than resource references.
 locals {
   raw_bucket_name         = "${var.project}-raw-data-lake-${var.account_id}"
   model_artifacts_bucket  = "${var.project}-model-artifacts-${var.account_id}"
@@ -17,7 +15,7 @@ locals {
 
   # The one public domain for the whole app -- CloudFront (cloudfront.tf)
   # serves the frontend at the default behavior and the API at /nfl/*
-  # (path-routed to API Gateway), so this is no longer API-specific.
+  # (path-routed to API Gateway).
   domain = "${var.project}.${var.domain_name}"
 
   common_tags = {

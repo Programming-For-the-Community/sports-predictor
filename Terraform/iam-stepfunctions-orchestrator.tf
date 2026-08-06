@@ -1,9 +1,7 @@
-# Assumed by both Step Functions state machines that replaced the old
-# per-sport EventBridge Scheduler -> Lambda/ECS direct-invoke pattern (see
-# sfn-ingest-orchestrator.tf, sfn-training-orchestrator.tf). One role for
-# both state machines -- they read the same registry table and invoke the
-# same shape of Lambda/ECS resources, so there's no least-privilege reason
-# to split them.
+# Assumed by both Step Functions orchestrators (sfn-ingest-orchestrator.tf,
+# sfn-training-orchestrator.tf). One role for both -- they read the same
+# registry table and invoke the same shape of Lambda/ECS resources, so
+# there's no least-privilege reason to split them.
 data "aws_iam_policy_document" "stepfunctions_orchestrator_assume" {
   statement {
     actions = ["sts:AssumeRole"]

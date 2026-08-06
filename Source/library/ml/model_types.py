@@ -12,10 +12,7 @@ scheduler entry, and nothing to change in model_loader.py.
 predict() always means the same thing regardless of algorithm or which
 side of the train/serve boundary is calling it: positive-class probability
 for a classification-task target, the predicted continuous value for a
-regression-task target -- exactly what model_loader.py's predict() already
-documented before this module existed ("Works identically for a
-classifier... or a regressor... only what the returned float means
-differs"). Every method operates on a pandas DataFrame -- both
+regression-task target. Every method operates on a pandas DataFrame -- both
 training-time holdout evaluation (many rows) and serving-time live
 prediction (one row, wrapped in a 1-row DataFrame by model_loader.py) go
 through the exact same code path. Accuracy (which needs a thresholded
@@ -114,12 +111,11 @@ class XGBoostAdapter:
         return booster
 
 
-# Shared across classifier and regressor -- same search shape
-# train_win_probability_model.py/train_score_model.py/train_player_prop_model.py each used
-# independently before this module existed. max_depth floors at 2, not 1:
-# a depth-1 decision stump can't model any feature interaction -- two
-# consecutive real retrains landing on max_depth=1 showed paired features
-# like home_travel_km/away_travel_km with one real and one exactly-zero
+# Shared search shape across classifier and regressor, used by
+# train_win_probability_model.py/train_score_model.py/train_player_prop_model.py.
+# max_depth floors at 2, not 1: a depth-1 decision stump can't model any
+# feature interaction -- it shows up as paired features like
+# home_travel_km/away_travel_km with one real and one exactly-zero
 # importance, the fingerprint of a stump arbitrarily picking one of two
 # similar features to split on.
 _XGB_PARAM_DISTRIBUTIONS = {

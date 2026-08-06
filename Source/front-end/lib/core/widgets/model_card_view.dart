@@ -26,12 +26,9 @@ class ModelCardView extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           // Title on its own full-width line(s), badges wrapped below --
-          // a Row with both competing for width was truncating the title
-          // even after the max-1-line ellipsis "fix" earlier (that only
-          // stopped the RenderFlex overflow crash, it didn't make the
-          // full name visible). maxLines: 2 covers every real model name
-          // this project has; the Tooltip is a safety net for names that
-          // still don't fit, so the full name is never truly unreachable.
+          // a Row with both competing for width would truncate the title.
+          // maxLines: 2 covers every model name this project has; the
+          // Tooltip is a safety net for names that still don't fit.
           Tooltip(
             message: _displayName(model.modelName),
             child: Text(
@@ -124,13 +121,9 @@ class ModelCardView extends StatelessWidget {
   /// card's own baseline comparison went slightly negative) -- same
   /// relative-improvement formula for every card type, classifier or
   /// regressor: how much better the actual value is than the baseline,
-  /// as a fraction of the baseline itself. Previously the classifier
-  /// showed a percentage-POINT lift ("+6.2 PTS") while every regressor
-  /// showed a relative percentage ("23% BETTER") -- two different units
-  /// under the identical "VS BASELINE" label read as a real
-  /// inconsistency, not two deliberately different metrics. '--' if
-  /// either value is missing, which happens for any model card trained
-  /// before these baseline fields existed.
+  /// as a fraction of the baseline itself. '--' if either value is
+  /// missing, which happens for any model card trained before these
+  /// baseline fields existed.
   String _vsBaseline(double? actual, double? baseline, {required bool higherIsBetter}) {
     if (actual == null || baseline == null || baseline == 0) return '--';
     final relativeChange = higherIsBetter

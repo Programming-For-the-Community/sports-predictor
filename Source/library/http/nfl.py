@@ -20,8 +20,8 @@ class NFLClient(EspnBaseClient):
     def get_scoreboard_for_date(self, date: str) -> dict:
         """Fetch the scoreboard for the NFL week containing a specific date
         (YYYYMMDD). ESPN infers season/season_type/week entirely from this
-        one parameter -- confirmed live: dates=20260913 (a Sunday) returned
-        week 1, season.type 2, with no seasontype param needed alongside it."""
+        one parameter -- no separate season/seasontype param is needed
+        alongside it."""
         return self._get("scoreboard", params={"dates": date})
 
     def get_summary(self, event_id: str) -> dict:

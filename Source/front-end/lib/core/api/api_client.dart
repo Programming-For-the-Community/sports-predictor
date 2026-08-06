@@ -14,9 +14,7 @@ import 'api_exception.dart';
 /// authorizer expects an ID token specifically when a method has no
 /// authorization_scopes configured (true of every route here); it only
 /// accepts an access token when scopes ARE configured. See
-/// AuthRepository.getValidIdToken's own doc comment -- confirmed live
-/// against the real deployed API after the access token was rejected with
-/// a 401 regardless of freshness.
+/// AuthRepository.getValidIdToken's own doc comment.
 class ApiClient {
   ApiClient(this._ref, {http.Client? httpClient}) : _httpClient = httpClient ?? http.Client();
 

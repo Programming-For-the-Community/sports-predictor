@@ -21,3 +21,13 @@ def player_key(sport: str, entity_id: str) -> str:
 
 def team_key(team_id: str) -> str:
     return f"TEAM#{team_id}"
+
+
+def sport_from_event_key(event_key: str) -> str:
+    """Inverse of event_key() -- recovers the lowercase sport string from
+    an existing SPORT#<SPORT>#EVENT#<event_id> key. Used by
+    Source/migrations/backfill_sport_attribute.py to derive the sport
+    attribute for rows written before player_game_stats/team_game_stats
+    stored it directly -- every row already encodes it here, so this
+    reads it back rather than needing any other data source."""
+    return event_key.split("#")[1].lower()

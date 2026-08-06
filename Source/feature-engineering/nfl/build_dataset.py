@@ -266,8 +266,7 @@ def _write_parquet(rows: list[dict]) -> bytes:
     library.features.nfl.rolling_player_stat_averages) -- pandas'
     DataFrame constructor already unions every row's keys and fills NaN
     for whichever rows are missing a given column, so no manual fieldname
-    bookkeeping is needed here (CSV's DictWriter needed exactly that,
-    which this replaces).
+    bookkeeping is needed here.
 
     Any dict-valued field (currently just label_stat_line) is JSON-encoded
     rather than stored as a native nested column -- Arrow structs need a
@@ -276,14 +275,13 @@ def _write_parquet(rows: list[dict]) -> bytes:
 
     Builds the DataFrame directly from `rows` rather than a full
     intermediate copy, and only the dict-valued columns get touched
-    afterward (a per-column .apply, not a second copy of every row).
+    afterward (a per-column .apply, not a second copy of every row) --
+    avoids holding the original list, the DataFrame, and a second
+    dict-copy all in memory at once for a large (~150K-row) dataset.
     Which columns need it is read off just the first row -- every row
     shares the same schema, since they're all built by the same
     build_event_features/build_player_features call, so there's no need
-    to scan the whole dataset to find out. A real ~150K-row run hit an
-    OutOfMemoryError, and this full second copy -- alive at the same time
-    as the original list, the DataFrame, and pyarrow's own Table during
-    to_parquet() -- was the proximate cause.
+    to scan the whole dataset to find out.
     """
     if not rows:
         return b""

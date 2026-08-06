@@ -19,15 +19,6 @@ from library.aws.dynamodb_table import DynamoDBTable
 from library.schema.keys import entity_key
 
 
-def _sport_prefix(sport: str) -> str:
-    """The leading `SPORT#<sport>#EVENT#` segment of an event_key (see
-    library.schema.keys.event_key) -- player_game_stats/team_game_stats
-    rows don't carry their own `sport` attribute, but every row's
-    event_key does, so filtering on this prefix is how get_all_player_game_stats/
-    get_all_team_game_stats scope a scan to one sport."""
-    return f"SPORT#{sport.upper()}#EVENT#"
-
-
 def _require_env(name: str) -> str:
     value = os.environ.get(name)
     if not value:
@@ -104,15 +95,12 @@ class FeatureStorage:
         just one team's) -- one Query instead of one Query per team.
 
         Queries the status-index GSI (Terraform/dynamodb-events.tf) rather
-        than scanning the whole table -- confirmed live that the Scan this
-        replaced was a real contributor to /nfl/events and /nfl/season's
-        latency. scan_index_forward=False means the index already returns
-        results most-recent-first (its range key is event_date), so no
-        separate Python sort is needed the way the Scan-based version
-        needed one. sport is still filtered in Python since the index is
-        keyed on status alone -- cheap once status has already narrowed
-        the result set via the index, unlike filtering sport out of a full
-        table scan.
+        than scanning the whole table. scan_index_forward=False means the
+        index already returns results most-recent-first (its range key is
+        event_date), so no separate Python sort is needed. sport is still
+        filtered in Python since the index is keyed on status alone --
+        cheap once status has already narrowed the result set via the
+        index, unlike filtering sport out of a full table scan.
         """
         items = self._events_table.query(
             Key("status").eq(status), index_name="status-index", scan_index_forward=False,
@@ -125,29 +113,30 @@ class FeatureStorage:
         issue one entity-history Query per player (there can be thousands
         of distinct players across a full history).
 
-        player_game_stats rows don't carry a `sport` attribute directly
-        (see design/DATA_SCHEMA.md), so this filters on the `SPORT#<sport>#
-        EVENT#` prefix of each row's own event_key instead (see
-        _sport_prefix) -- required now that a second sport's data can
-        land in the same table, not just NFL's.
-        """
-        prefix = _sport_prefix(sport)
-        return [row for row in self._player_game_stats_table.scan() if row.get("event_key", "").startswith(prefix)]
+        Queries the sport-index GSI (Terraform/dynamodb-player-game-stats.tf)
+        rather than scanning the whole table and filtering by event_key
+        prefix in Python -- that Scan-based version read every OTHER
+        sport's rows too once a second sport lands in this shared table.
+        `sport` is written directly onto every row now (library.normalize.
+        espn.boxscore_to_player_game_stats); older rows need
+        Source/migrations/backfill_sport_attribute.py run once first, or
+        this Query simply won't see them (a GSI is sparse -- a row missing
+        any of its key attributes isn't in the index at all)."""
+        return self._player_game_stats_table.query(Key("sport").eq(sport), index_name="sport-index")
 
     def get_all_team_game_stats(self, sport: str) -> list[dict]:
         """Every team_game_stats row for one sport, unsorted. Same
-        batch-job rationale and sport-prefix filter as
-        get_all_player_game_stats."""
-        prefix = _sport_prefix(sport)
-        return [row for row in self._team_game_stats_table.scan() if row.get("event_key", "").startswith(prefix)]
+        sport-index GSI rationale as get_all_player_game_stats."""
+        return self._team_game_stats_table.query(Key("sport").eq(sport), index_name="sport-index")
 
     def get_team_game_stats_for_team(
         self, sport: str, entity_id: str, before_date: str | None = None, limit: int | None = None
     ) -> list[dict]:
         """A team's own completed team_game_stats rows, most recent first.
-        Same one-team-at-a-time lookup shape as get_team_events, and the
-        same reasoning for scanning rather than needing a GSI -- see
-        Terraform/dynamodb-team-game-stats.tf."""
+        Same one-team-at-a-time lookup shape as get_team_events -- no
+        dedicated per-team GSI, so this filters get_all_team_game_stats'
+        sport-scoped result down to one team in Python, same as
+        get_team_events does against get_all_events."""
         rows = self.get_all_team_game_stats(sport)
         team_rows = [
             row

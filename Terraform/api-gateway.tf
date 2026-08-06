@@ -52,15 +52,12 @@ resource "aws_api_gateway_gateway_response" "missing_auth_token" {
 # Every OTHER error API Gateway generates itself -- before the request ever
 # reaches the Lambda -- also has no CORS headers by default. That includes
 # UNAUTHORIZED/ACCESS_DENIED (the Cognito authorizer rejecting a missing or
-# expired token) and THROTTLED (the usage plan's rate limit). Confirmed live:
-# a request with an invalid token got back a real 401, but with no
-# Access-Control-Allow-Origin header at all -- a browser blocks a
-# cross-origin response like that from ever reaching application code, so it
-# surfaces as a generic "Failed to fetch" instead of a readable 401 the app's
-# own ApiClient.get() retry-on-401 logic could react to. DEFAULT_4XX/
-# DEFAULT_5XX cover every such API-Gateway-generated error uniformly, not
-# just the two known today -- unlike missing_auth_token above, these don't
-# override the status code or body, only add the missing header.
+# expired token) and THROTTLED (the usage plan's rate limit); without a CORS
+# header a browser blocks the response before it reaches application code,
+# surfacing as a generic "Failed to fetch" instead of a readable status the
+# app's own ApiClient.get() retry-on-401 logic can react to. DEFAULT_4XX/
+# DEFAULT_5XX cover every such error uniformly -- unlike missing_auth_token
+# above, these don't override the status code or body, only add the header.
 resource "aws_api_gateway_gateway_response" "default_4xx" {
   rest_api_id   = aws_api_gateway_rest_api.main.id
   response_type = "DEFAULT_4XX"

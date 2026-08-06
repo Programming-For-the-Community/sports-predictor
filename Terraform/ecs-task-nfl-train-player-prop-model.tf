@@ -12,33 +12,19 @@ resource "aws_cloudwatch_log_group" "nfl_train_player_prop_model" {
 # Standalone Fargate task, one definition shared by every player-prop
 # stat -- see scheduler-nfl-train-player-prop-model.tf, which schedules
 # it once per stat in nfl_player_prop_stats via a per-schedule TARGET_STAT
-# override, same mechanism described below. Every bit as runnable
-# manually via `aws ecs run-task` with your own override if you want to
-# retrain and inspect one stat without waiting for Wednesday.
-# Reuses the exact same image as ecs-task-nfl-train-win-probability-model.tf (all four
-# training scripts live in one Dockerfile, see
+# override. Runnable manually via `aws ecs run-task` with your own override.
+# Reuses the same image as ecs-task-nfl-train-win-probability-model.tf (all
+# four training scripts live in one Dockerfile, see
 # Source/model-training/nfl/Dockerfile) and overrides the container
-# command to run train_player_prop_model.py instead of the default
-# train_win_probability_model.py.
+# command to run train_player_prop_model.py.
 #
-# Deliberately does NOT set TARGET_STAT here -- it's the one thing that
-# varies between a passing-yards run and a rushing-yards run, so it's
-# passed as a `containerOverrides[].environment` override on each
-# invocation (scheduled or manual) instead of being baked into the task
-# definition. Running the task without that override fails loudly
-# (train_player_prop_model.py reads it via os.environ["TARGET_STAT"],
-# raising KeyError) rather than silently training an unintended stat.
+# Does not set TARGET_STAT here -- it varies per run, so it's passed as a
+# `containerOverrides[].environment` override on each invocation instead
+# of baked into the task definition. train_player_prop_model.py reads it
+# via os.environ["TARGET_STAT"], raising KeyError if it's missing.
 #
-# Uses the shared aws_iam_role.ecs_pipeline (iam-ecs-pipeline.tf) -- its
-# S3 permissions are already scoped generically to the model artifacts
-# bucket (both player_features.parquet under nfl/training-data/ and every
-# model_name's own nfl/<model_name>/ prefix), so no IAM changes were
-# needed for this task.
-#
-# cpu=4096/memory=16384 -- same hyperparameter search shape (and the
-# same quota-driven 4 vCPU step-down -- see ecs-task-nfl-train-win-probability-model.tf's
-# comment) as ecs-task-nfl-train-win-probability-model.tf, so the same compute sizing
-# applies regardless of which stat is being trained.
+# Uses the shared aws_iam_role.ecs_pipeline (iam-ecs-pipeline.tf). Same
+# cpu/memory sizing as ecs-task-nfl-train-win-probability-model.tf.
 resource "aws_ecs_task_definition" "nfl_train_player_prop_model" {
   family                   = "${var.project}-nfl-train-player-prop-model"
   requires_compatibilities = ["FARGATE"]

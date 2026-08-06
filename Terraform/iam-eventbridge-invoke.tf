@@ -1,14 +1,8 @@
 # Assumed by EventBridge Scheduler to start the two orchestrator state
 # machines (sfn-ingest-orchestrator.tf, sfn-training-orchestrator.tf) on
-# their own cron. (Normalize is triggered by an S3 event notification on
-# the raw bucket, not by EventBridge, so it isn't covered by this role.)
-#
-# Used to also carry lambda:InvokeFunction/ecs:RunTask/iam:PassRole
-# directly, back when EventBridge Scheduler invoked each sport's ingest
-# Lambda and training ECS tasks itself. Now that a Step Functions state
-# machine sits in between (see iam-stepfunctions-orchestrator.tf, which
-# carries those permissions instead), this role only ever needs to start
-# an execution.
+# their own cron, plus the two direct-invoke Lambda jobs below. (Normalize
+# is triggered by an S3 event notification on the raw bucket, not by
+# EventBridge, so it isn't covered by this role.)
 data "aws_iam_policy_document" "eventbridge_invoke_assume" {
   statement {
     actions = ["sts:AssumeRole"]
@@ -39,15 +33,11 @@ data "aws_iam_policy_document" "eventbridge_invoke_permissions" {
     ]
   }
 
-  # Deliberate exception to this role's "goes through a state machine"
-  # rule above (see this file's own docstring) -- both of these are single-
-  # Lambda jobs with no per-sport/per-target fan-out to justify a state
-  # machine in between: scheduler-nfl-season-projection.tf invokes
-  # nfl_predict directly (one computation), and scheduler-nfl-schedule-
-  # sync.tf invokes nfl_schedule_sync directly (walks all 23 weeks of a
-  # season in one invocation internally -- see that Lambda's own docstring
-  # for why an earlier Step-Functions-fan-out version of it was actually
-  # the wrong shape).
+  # Direct invoke, not through a state machine -- both are single-Lambda
+  # jobs with no per-sport/per-target fan-out to justify one:
+  # scheduler-nfl-season-projection.tf invokes nfl_predict (one
+  # computation), scheduler-nfl-schedule-sync.tf invokes
+  # nfl_schedule_sync (walks all 23 weeks of a season internally).
   statement {
     sid     = "InvokeDirectLambdaJobs"
     actions = ["lambda:InvokeFunction"]

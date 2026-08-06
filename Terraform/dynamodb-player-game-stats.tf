@@ -11,16 +11,16 @@
 # attribute type. No separate tables per sport are needed; the Map type
 # already handles the variation at zero schema cost.
 #
-# ENTITY_ID GSI: added now rather than deferred (unlike the events-table
-# GSIs), because the primary key is event-first (PK = SPORT#...#EVENT#...),
-# which means "this player's last N games" -- the core input to every
-# player-prop feature -- isn't a Query on the base table, it's a Scan.
-# That makes the GSI load-bearing for feature engineering from day one.
+# entity-history GSI: the primary key is event-first (PK =
+# SPORT#...#EVENT#...), so "this player's last N games" -- the core input
+# to every player-prop feature -- needs a Query on entity_id, not the
+# base table. event_date is stored as ISO 8601 so it can serve as the
+# range key; ScanIndexForward=false then gives "most recent first" with
+# no extra sorting.
 #
-# event_date is stored as ISO 8601 ("2025-09-28") in each row alongside the
-# stat_line so it can serve as the GSI range key. ISO 8601 dates are
-# lexicographically sortable, so ScanIndexForward=false gives "most recent
-# first" with no extra work in the application layer.
+# sport-index GSI: get_all_player_game_stats(sport) (feature engineering's
+# whole-history pull, and predict/handler.py's season leaderboards) Queries
+# this by sport instead of scanning the whole table.
 resource "aws_dynamodb_table" "player_game_stats" {
   name         = local.player_game_stats_table
   billing_mode = "PAY_PER_REQUEST"
@@ -47,9 +47,21 @@ resource "aws_dynamodb_table" "player_game_stats" {
     type = "S"
   }
 
+  attribute {
+    name = "sport"
+    type = "S"
+  }
+
   global_secondary_index {
     name            = "entity-history"
     hash_key        = "entity_id"
+    range_key       = "event_date"
+    projection_type = "ALL"
+  }
+
+  global_secondary_index {
+    name            = "sport-index"
+    hash_key        = "sport"
     range_key       = "event_date"
     projection_type = "ALL"
   }

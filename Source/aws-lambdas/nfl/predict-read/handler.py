@@ -30,11 +30,10 @@ Neither ever loads or deserializes an ML model artifact (list_models only
 reads a model card's JSON metadata; list_events only reads events +
 already-logged predictions from DynamoDB), so this Lambda's own
 requirements.txt needs nothing beyond boto3 (pre-installed in the Lambda
-runtime) -- no xgboost, no scikit-learn, no pandas, none of the
-predict Lambda's real, confirmed-live-to-occasionally-exceed-10-seconds
-import cost. Zip-packaged (like ingest/normalize), not the container
-image the predict Lambda needs for its own much larger dependency
-footprint -- see Terraform/lambda-nfl-predict-read.tf.
+runtime) -- no xgboost, no scikit-learn, no pandas. Zip-packaged (like
+ingest/normalize), not the container image the predict Lambda needs for
+its own much larger dependency footprint -- see
+Terraform/lambda-nfl-predict-read.tf.
 """
 import json
 import logging

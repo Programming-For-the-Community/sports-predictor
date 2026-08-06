@@ -16,12 +16,11 @@ import '../../static/nfl_team_colors.dart';
 /// doesn't render if the backend couldn't compute it for a given event.
 ///
 /// A completed event does NOT call the live prediction endpoint -- same
-/// rule game_row.dart's own docstring already documents for the list
-/// view, which this page previously didn't follow: a fresh "live"
-/// prediction for an already-played game is built from rolling stats
-/// that may already include this game's own now-normalized result,
-/// making it a misleading, circular-looking number, not an honest
-/// pre-game prediction. Completed games instead use
+/// rule game_row.dart's own docstring documents for the list view: a
+/// fresh "live" prediction for an already-played game is built from
+/// rolling stats that may already include this game's own now-normalized
+/// result, making it a misleading, circular-looking number, not an
+/// honest pre-game prediction. Completed games instead use
 /// event.predictionComparison, the prediction actually logged before the
 /// game was played (already fetched as part of the completed events
 /// list, no extra request needed) -- see MatchupResultHero.

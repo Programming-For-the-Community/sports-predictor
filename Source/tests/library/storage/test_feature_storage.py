@@ -153,24 +153,36 @@ class TestGetTeamEvents:
         assert [e["event_id"] for e in result] == ["2", "3"]
 
 
+class TestGetAllPlayerGameStats:
+    def test_queries_sport_index(self, storage_env):
+        storage, _, _, mock_stats, _ = _make_storage(storage_env)
+        mock_stats.query.return_value = [{"entity_id": "mahomes-patrick", "sport": "nfl"}]
+
+        result = storage.get_all_player_game_stats("nfl")
+
+        assert result == [{"entity_id": "mahomes-patrick", "sport": "nfl"}]
+        call = mock_stats.query.call_args
+        assert call.args[0] == Key("sport").eq("nfl")
+        assert call.kwargs["index_name"] == "sport-index"
+
+
 class TestGetAllTeamGameStats:
-    def test_scans_team_game_stats_table_and_filters_by_sport_prefix(self, storage_env):
+    def test_queries_sport_index(self, storage_env):
         storage, _, _, _, mock_team_stats = _make_storage(storage_env)
-        mock_team_stats.scan.return_value = [
-            {"team_id": "KC", "event_key": "SPORT#NFL#EVENT#1"},
-            {"team_id": "OSU", "event_key": "SPORT#NCAA_FB#EVENT#1"},  # different sport, excluded
-        ]
+        mock_team_stats.query.return_value = [{"team_id": "KC", "sport": "nfl"}]
 
         result = storage.get_all_team_game_stats("nfl")
 
-        assert result == [{"team_id": "KC", "event_key": "SPORT#NFL#EVENT#1"}]
-        mock_team_stats.scan.assert_called_once()
+        assert result == [{"team_id": "KC", "sport": "nfl"}]
+        call = mock_team_stats.query.call_args
+        assert call.args[0] == Key("sport").eq("nfl")
+        assert call.kwargs["index_name"] == "sport-index"
 
 
 class TestGetTeamGameStatsForTeam:
     def test_filters_by_team_sorts_and_respects_before_date_and_limit(self, storage_env):
         storage, _, _, _, mock_team_stats = _make_storage(storage_env)
-        mock_team_stats.scan.return_value = [
+        mock_team_stats.query.return_value = [
             {"team_id": "KC", "event_date": "2025-09-01", "event_key": "SPORT#NFL#EVENT#1"},
             {"team_id": "LAC", "event_date": "2025-09-08", "event_key": "SPORT#NFL#EVENT#2"},  # different team
             {"team_id": "KC", "event_date": "2025-09-15", "event_key": "SPORT#NFL#EVENT#3"},

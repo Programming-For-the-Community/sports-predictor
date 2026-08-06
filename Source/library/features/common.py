@@ -278,8 +278,8 @@ def _rate(averages: dict, numerator_key: str, denominator_key: str) -> float | N
 
 # Ordinal, not one-hot -- these statuses form a real severity order (a
 # tree model can split on "status >= Doubtful" directly), matching the
-# confirmed severity threshold used for live leader-selection exclusion
-# (Out AND Doubtful, not just Out -- see live_features.py). Any status
+# severity threshold used for live leader-selection exclusion (Out AND
+# Doubtful, not just Out -- see live_features.py). Any status
 # string ESPN reports that isn't one of these three (rare -- IR/PUP-style
 # season-ending designations mostly show up as "Out" already) falls back
 # to 1, a conservative "something's reported" floor rather than silently

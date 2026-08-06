@@ -50,13 +50,7 @@ resource "aws_lambda_function" "nfl_normalize" {
       # PipelineStorage's constructor requires all four table names
       # regardless of which one a given invocation actually writes to
       # (_process_scoreboard only needs entities/events, box-score
-      # processing also needs player_game_stats/team_game_stats) -- same
-      # reasoning lambda-nfl-predict-read.tf's own comment documents for
-      # FeatureStorage. Was missing here entirely -- confirmed live via
-      # CloudWatch (RuntimeError: Required environment variable
-      # TEAM_GAME_STATS_TABLE_NAME is not set) once a full terraform apply
-      # actually reconciled this Lambda's environment block for the first
-      # time in a while.
+      # processing also needs player_game_stats/team_game_stats).
       TEAM_GAME_STATS_TABLE_NAME = aws_dynamodb_table.team_game_stats.name
     }
   }

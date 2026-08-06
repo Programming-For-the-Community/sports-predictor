@@ -2,10 +2,9 @@
 # partition key (SPORT#NFL#ENTITY#KC) so per-sport queries stay in a single
 # partition rather than scanning the whole table.
 #
-# No GSI yet -- "show me all teams/players for sport X" is a Scan with a
-# filter for now. The entity set is small (hundreds of teams, thousands of
-# players across six sports), so a scan is acceptable until a specific
-# frontend feature makes a GSI worthwhile (see docs/DATA_SCHEMA.md).
+# No GSI -- "show me all teams/players for sport X" is a Scan with a
+# filter. The entity set is small (hundreds of teams, thousands of players
+# across six sports), so a scan is acceptable (see docs/DATA_SCHEMA.md).
 resource "aws_dynamodb_table" "entities" {
   name         = local.entities_table
   billing_mode = "PAY_PER_REQUEST"

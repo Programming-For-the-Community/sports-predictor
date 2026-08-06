@@ -1,9 +1,7 @@
 # Cost allocation tags must be Active before any tag-scoped budget or Cost
 # Explorer report shows data for them. AWS rejects activation for a tag key
-# that has never appeared in cost and usage data, so this is off by default
-# -- flip activate_cost_allocation_tags to true once the first Phase 0/1
-# resources carrying these tags actually exist. See docs/TAGGING_STRATEGY.md
-# for the manual console steps this replaces.
+# that has never appeared in cost and usage data, so activate_cost_allocation_tags
+# defaults to false until tagged resources exist. See docs/TAGGING_STRATEGY.md.
 resource "aws_ce_cost_allocation_tag" "tags" {
   for_each = var.activate_cost_allocation_tags ? toset(["Project", "Sport", "Component", "Environment"]) : []
 

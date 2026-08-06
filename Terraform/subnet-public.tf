@@ -1,7 +1,7 @@
-# Three public subnets spread across three availability zones. Nothing in the
-# current architecture deploys here directly -- these exist for any future
-# load balancer or NAT gateway if one is ever added. The route table sends
-# 0.0.0.0/0 to the IGW created in networking.tf.
+# Three public subnets spread across three availability zones. Fargate
+# tasks needing public internet egress (fargate_internet_egress security
+# group) run here with a public IP. The route table sends 0.0.0.0/0 to the
+# IGW created in networking.tf.
 resource "aws_subnet" "public_1" {
   vpc_id                  = var.vpc_id
   cidr_block              = var.public1_subnet_cidr

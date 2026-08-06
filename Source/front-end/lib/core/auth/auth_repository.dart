@@ -104,9 +104,7 @@ class AuthRepository extends StateNotifier<AuthState> {
   /// COGNITO_USER_POOLS authorizer only accepts access tokens for methods
   /// with authorization_scopes configured (see Terraform/api-gateway-nfl-
   /// predict.tf's aws_api_gateway_method resources -- none set any), and
-  /// falls back to expecting an ID token otherwise. Confirmed live: an
-  /// access token was rejected with a real 401 regardless of how freshly
-  /// it was issued, which is what led here.
+  /// falls back to expecting an ID token otherwise.
   ///
   /// forceRefresh skips the isNearExpiry check -- ApiClient's 401-retry
   /// path needs this: a token can be rejected server-side (revoked, clock

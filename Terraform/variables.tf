@@ -119,7 +119,7 @@ variable "ecr_repo_url" {
 }
 
 variable "espn_api_root_url" {
-  description = "Root URL of ESPN's public (unofficial) site API, shared by every sport-specific task that uses it (NFL, and eventually NBA/NCAA MBB/PGA per docs/DATA_SOURCES.md) -- each task appends its own sport path (e.g. football/nfl). Defaults to the current known-working root; override via TF_VAR_espn_api_root_url from a GitHub Actions variable only if ESPN's domain changes."
+  description = "Root URL of ESPN's public (unofficial) site API, shared by every sport-specific task that uses it -- each task appends its own sport path (e.g. football/nfl). Override via TF_VAR_espn_api_root_url from a GitHub Actions variable if ESPN's domain changes."
   type        = string
   default     = "https://site.api.espn.com/apis/site/v2/sports"
   nullable    = false

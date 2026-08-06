@@ -39,14 +39,10 @@ MODEL_CARD_FILENAME = "model_card.json"
 # How much worse (as a fraction of the current production version's gate
 # metric -- log_loss for a classifier, rmse for a regressor, always a
 # lower-is-better metric) a newly trained version is allowed to be and
-# still get promoted automatically. Calibrated loosely against the
-# run-to-run spread already observed across real win-probability retrains
-# (well under 1% despite meaningfully different features and
-# hyperparameters between them) -- this exists to catch a genuine
-# regression (a bug, or a hyperparameter search landing somewhere
-# pathological, e.g. the max_depth=1 decision stumps two consecutive
-# retrains landed on before max_depth got a floor), not to adjudicate
-# between two versions within normal noise of each other.
+# still get promoted automatically. Set to catch a genuine regression (a
+# bug, or a hyperparameter search landing somewhere pathological, e.g.
+# unfloored max_depth landing on a depth-1 decision stump), not to
+# adjudicate between two versions within normal run-to-run noise.
 PROMOTION_TOLERANCE = 0.02
 
 # Fraction of events (most recent, by date) held out for evaluation.
@@ -73,14 +69,13 @@ def chronological_split(df: pd.DataFrame, test_fraction: float) -> tuple[pd.Data
 
 def numeric_frame(df: pd.DataFrame, columns: list[str]) -> pd.DataFrame:
     """A feature column that's entirely null in the training window (e.g.
-    weather_temperature, which real ESPN history frequently doesn't
-    report) has no non-null value for pandas to infer a numeric dtype
-    from, so it comes back from Parquet as dtype `object` rather than
-    float64 -- and both XGBoost and scikit-learn reject `object` columns
-    outright, even when every value is just a missing float. Coercing
-    explicitly (bools included) guarantees every feature column is
-    numeric before it ever reaches a model, regardless of how sparse any
-    single column is."""
+    weather_temperature, which ESPN history frequently doesn't report) has
+    no non-null value for pandas to infer a numeric dtype from, so it
+    comes back from Parquet as dtype `object` rather than float64 -- and
+    both XGBoost and scikit-learn reject `object` columns outright, even
+    when every value is just a missing float. Coercing explicitly (bools
+    included) guarantees every feature column is numeric before it ever
+    reaches a model, regardless of how sparse any single column is."""
     return df[columns].apply(pd.to_numeric, errors="coerce")
 
 
@@ -93,8 +88,7 @@ def evaluate_holdout(probabilities, y_test: pd.Series) -> dict:
     predictions = np.asarray(probabilities) >= 0.5
     return {
         # float() casts -- sklearn returns numpy scalar types, which
-        # json.dumps() (via S3Manager.put_json) doesn't know how to
-        # serialize, the same lesson learned from DynamoDB's Decimal.
+        # json.dumps() (via S3Manager.put_json) can't serialize.
         "accuracy": float(accuracy_score(y_test, predictions)),
         "log_loss": float(log_loss(y_test, probabilities)),
     }

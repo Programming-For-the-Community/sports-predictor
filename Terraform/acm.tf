@@ -1,9 +1,8 @@
 # TLS certificate for the app's one public domain (frontend + API, both
 # served through CloudFront -- see cloudfront.tf). Must be requested in
 # us-east-1 regardless of the stack's primary region (var.region is
-# us-east-2) -- this is a hard CloudFront requirement, unlike a regional
-# API Gateway custom domain (the previous setup), which needed the cert in
-# its own region. Uses the aws.us_east_1 provider alias (main.tf).
+# us-east-2) -- a hard CloudFront requirement. Uses the aws.us_east_1
+# provider alias (main.tf).
 #
 # DNS validation is automatic because the hosted zone is managed in Route 53
 # (see route53.tf). The validation CNAME records are created here alongside

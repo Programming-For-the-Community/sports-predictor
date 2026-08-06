@@ -104,8 +104,8 @@ def _rate(averages: dict, numerator_key: str, denominator_key: str) -> float | N
 
 # Ordinal, not one-hot -- these statuses form a real severity order (a
 # tree model can split on "status >= Doubtful" directly), matching the
-# confirmed severity threshold used for live leader-selection exclusion
-# (Out AND Doubtful, not just Out -- see live_features.py). Any status
+# severity threshold used for live leader-selection exclusion (Out AND
+# Doubtful, not just Out -- see live_features.py). Any status
 # string ESPN reports that isn't one of these three (rare -- IR/PUP-style
 # season-ending designations mostly show up as "Out" already) falls back
 # to 1, a conservative "something's reported" floor rather than silently
@@ -330,12 +330,11 @@ def build_event_features(
         "away_win_streak": away_win_streak,
         # Coach/injury fields all land on `event` via ingest's
         # _enrich_events + scoreboard_event_to_event_item (see
-        # library/normalize/espn.py) -- absent (None) for any event
-        # ingested before this shipped, same sparse-optional convention
-        # weather_temperature already established. experience/
-        # season_win_pct are ESPN's own numbers, used directly -- no
-        # derivation, and raw coach identity is still never a feature
-        # here, same rule as team/player ids.
+        # library/normalize/espn.py) -- absent (None) if that enrichment
+        # didn't run, same sparse-optional convention weather_temperature
+        # uses. experience/season_win_pct are ESPN's own numbers, used
+        # directly -- no derivation, and raw coach identity is never a
+        # feature here, same rule as team/player ids.
         "home_coach_experience": event.get("home_coach_experience"),
         "away_coach_experience": event.get("away_coach_experience"),
         "home_coach_season_win_pct": event.get("home_coach_season_win_pct"),

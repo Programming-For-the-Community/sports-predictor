@@ -23,6 +23,20 @@ def _stat_line(statistics):
     return stats_items[0]["stat_line"]
 
 
+class TestBoxscoreToPlayerGameStats:
+    def test_item_carries_sport_directly_not_just_embedded_in_event_key(self):
+        # What lets get_all_player_game_stats Query the sport-index GSI
+        # instead of scanning the whole (eventually multi-sport) table.
+        stats_items, _ = boxscore_to_player_game_stats(
+            _summary([{"name": "passing", "keys": ["passingYards"], "athletes": [
+                {"athlete": {"id": "1", "displayName": "QB One"}, "stats": ["250"]},
+            ]}]),
+            "nfl", compound_key_splits={},
+        )
+
+        assert stats_items[0]["sport"] == "nfl"
+
+
 class TestBoxscoreToPlayerGameStatsFieldNames:
     def test_key_already_carrying_the_category_is_not_double_prefixed(self):
         # ESPN's own key ("passingYards") already bakes in the category
@@ -114,6 +128,10 @@ class TestBoxscoreToTeamGameStats:
         assert items[0]["team_key"] == "TEAM#9"
         assert items[0]["event_key"] == "SPORT#NFL#EVENT#E1"
         assert items[0]["event_date"] == "2025-09-07"
+        # Stored directly now, not just embedded in event_key -- what lets
+        # get_all_team_game_stats Query the sport-index GSI instead of
+        # scanning the whole (eventually multi-sport) table.
+        assert items[0]["sport"] == "nfl"
 
     def test_flat_stat_name_is_snake_cased_directly_no_category_prefix(self):
         # Team stats are a flat list (no category grouping like player

@@ -12,10 +12,10 @@ list_models only reads a model card's JSON metadata; list_events only
 reads events + already-logged predictions from DynamoDB), so they're
 served by a separate, much lighter Lambda that never imports xgboost/
 scikit-learn/pandas at all -- this Lambda's own cold start (real, heavy
-dependency chain, confirmed live to occasionally exceed Lambda's
-non-configurable 10-second init-phase ceiling) shouldn't be paid by
-routes that never need it, especially since those two are also this
-API's most frequently hit traffic.
+dependency chain that can exceed Lambda's non-configurable 10-second
+init-phase ceiling) shouldn't be paid by routes that never need it,
+especially since those two are also this API's most frequently hit
+traffic.
 
 Routes (see Terraform/lambda-nfl-predict.tf for the API Gateway wiring):
     GET /nfl/predictions/events/{event_id}
@@ -48,9 +48,8 @@ prediction back.
 GET /nfl/season is NOT served here either, despite this being the only
 Lambda that ever computes it -- see Terraform/lambda-nfl-predict-read.tf.
 _leaderboards alone takes 26-29s against API Gateway's hard, non-
-configurable 29s integration ceiling (confirmed live via CloudWatch and
-direct invoke -- see memory/project-nfl-season-timeout-regression.md), a
-duration no per-request optimization can reliably stay under. Instead,
+configurable 29s integration ceiling, a duration no per-request
+optimization can reliably stay under. Instead,
 this Lambda is invoked directly by Terraform/scheduler-nfl-season-
 projection.tf's weekly EventBridge Scheduler target (see the
 ScheduledSeasonProjection branch in lambda_handler below), which computes
@@ -405,20 +404,15 @@ def _leaderboards(storage: FeatureStorage, s3, model_cache: dict, season_inputs:
 
     # A candidate who records more than one tracked stat (nearly every real
     # QB shows up in both passing_yards and passing_touchdowns; a
-    # dual-threat QB or receiving RB shows up across even more) used to get
-    # a fresh build_live_player_features call -- and its own
-    # get_event/get_entity/get_player_game_stats round-trips -- once PER
-    # STAT it appeared in. build_live_player_features returns every stat
+    # dual-threat QB or receiving RB shows up across even more) still needs
+    # only one build_live_player_features call: it returns every stat
     # category's rolling averages in one row regardless of which model
-    # later reads it, so there's nothing stat-specific to redo: building
-    # this UNION of candidates once, up front, and reusing the same row for
-    # every stat's projection is what actually fixes this route's chronic
-    # 26-29s duration against the Lambda's own 29s timeout -- confirmed
-    # live via CloudWatch that get_event/get_entity/get_player_game_stats
-    # were each being re-fetched once per stat for the same repeat players,
-    # on top of what current_ratings/team_last_event_dates below already
-    # save (those two, reused from _season_standings_inputs, avoid a
-    # separate full-history Elo recompute per candidate).
+    # later reads it. Building this UNION of candidates once, up front, and
+    # reusing the same row for every stat's projection avoids re-fetching
+    # get_event/get_entity/get_player_game_stats once per stat for the same
+    # repeat players, on top of what current_ratings/team_last_event_dates
+    # below already save (those two, reused from _season_standings_inputs,
+    # avoid a separate full-history Elo recompute per candidate).
     all_candidates = {entity_id for totals in current_totals_by_stat.values() for entity_id in totals}
 
     def _build_row(entity_id: str) -> tuple[str, dict | None]:

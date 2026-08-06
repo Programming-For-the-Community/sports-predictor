@@ -69,12 +69,11 @@ def scoreboard_event_to_event_item(event: dict, sport: str) -> dict:
     }
 
     # Coach/injuries/depth-chart are absent on any event not enriched by
-    # ingest's _enrich_events (aws-lambdas/nfl/ingest/handler.py) -- older
-    # events already in S3 before this shipped, or a coach/injury/depth-
-    # chart fetch that failed there. Omitted rather than written as None/
-    # empty, same sparse-optional-field convention weather_temperature
-    # already established (frequently null for outdoor games ESPN simply
-    # didn't report on). Coach is flattened into separate top-level
+    # ingest's _enrich_events (aws-lambdas/nfl/ingest/handler.py), or where
+    # that fetch failed. Omitted rather than written as None/empty, same
+    # sparse-optional-field convention weather_temperature uses (frequently
+    # null for outdoor games ESPN simply didn't report on). Coach is
+    # flattened into separate top-level
     # attributes (not a nested map) to match every other feature-ready
     # field on this item; injuries/depth-chart stay as their own
     # list/dict since they're not single scalar values.
@@ -178,6 +177,7 @@ def boxscore_to_player_game_stats(
             "entity_id": athlete_id,
             "team_id": team_id,
             "event_date": event_date,
+            "sport": sport,
             "stat_line": line,
         })
         player_entities.append({
@@ -262,6 +262,7 @@ def boxscore_to_team_game_stats(
             "team_key": team_key(team_id),
             "team_id": team_id,
             "event_date": event_date,
+            "sport": sport,
             "stat_line": line,
         })
     return items

@@ -12,31 +12,22 @@ resource "aws_cloudwatch_log_group" "nfl_train_score_model" {
 # Standalone Fargate task, one definition shared by all three score
 # targets (margin, home_score, away_score) -- see
 # scheduler-nfl-train-score-model.tf, which schedules it once per target
-# in nfl_score_targets via a per-schedule SCORE_TARGET override, same
-# mechanism as scheduler-nfl-train-player-prop-model.tf. Every bit as
-# runnable manually via `aws ecs run-task` with your own override.
+# in nfl_score_targets via a per-schedule SCORE_TARGET override. Runnable
+# manually via `aws ecs run-task` with your own override.
 #
-# Reuses the exact same image as ecs-task-nfl-train-win-probability-model.tf (all four
-# training scripts live in one Dockerfile, see
+# Reuses the same image as ecs-task-nfl-train-win-probability-model.tf
+# (all four training scripts live in one Dockerfile, see
 # Source/model-training/nfl/Dockerfile) and overrides the container
-# command to run train_score_model.py instead of the default
-# train_win_probability_model.py. Reads the same event_features.parquet as the
-# win-probability task -- no separate feature engineering dependency.
+# command to run train_score_model.py. Reads the same event_features.parquet
+# as the win-probability task.
 #
-# Deliberately does NOT set SCORE_TARGET here, same reasoning as
-# TARGET_STAT on the player-prop task definition -- it's the one thing
-# that varies between a margin run and a home-score run, so it's passed
-# as a `containerOverrides[].environment` override on each invocation
-# instead of being baked into the task definition. Running the task
-# without that override fails loudly (train_score_model.py reads it via
-# os.environ["SCORE_TARGET"], raising KeyError) rather than silently
-# training an unintended target.
+# Does not set SCORE_TARGET here -- it varies per run, so it's passed as a
+# `containerOverrides[].environment` override on each invocation instead
+# of baked into the task definition. train_score_model.py reads it via
+# os.environ["SCORE_TARGET"], raising KeyError if it's missing.
 #
 # Uses the shared aws_iam_role.ecs_pipeline (iam-ecs-pipeline.tf). Same
-# cpu/memory sizing (and the same quota-driven 4 vCPU step-down -- see
-# that file's comment) as ecs-task-nfl-train-win-probability-model.tf -- identical
-# hyperparameter search shape (PARAM_DISTRIBUTIONS, SEARCH_ITERATIONS,
-# CV_SPLITS), so the same compute rationale applies.
+# cpu/memory sizing as ecs-task-nfl-train-win-probability-model.tf.
 resource "aws_ecs_task_definition" "nfl_train_score_model" {
   family                   = "${var.project}-nfl-train-score-model"
   requires_compatibilities = ["FARGATE"]

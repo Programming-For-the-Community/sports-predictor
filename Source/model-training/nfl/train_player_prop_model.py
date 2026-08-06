@@ -75,36 +75,26 @@ CANDIDATES = [
 # A player must have recorded TARGET_STAT in at least this many of their
 # own windowed prior games, not just the game being labeled -- excludes
 # one-off gadget plays (e.g. a WR's single career pass attempt) whose
-# rolling avg_<stat> would otherwise be undefined/NaN anyway. A real
-# starter or regular backup at the relevant position trivially clears
-# this; it's the fluke rows this is meant to catch. Left at a low bar
-# rather than raised further -- MIN_AVG_FRACTION_OF_MEDIAN below is what
-# catches a player who clears this count but at trivial volume, so this
-# constant doesn't also need to do that job (and raising it would cost
-# legitimate new starters with only a couple of games of history).
+# rolling avg_<stat> would otherwise be undefined/NaN.
+# MIN_AVG_FRACTION_OF_MEDIAN below catches a player who clears this count
+# at trivial volume, so this stays a low bar.
 MIN_PRIOR_GAMES_WITH_STAT = 2
 
 # A player can pass the games_with_<stat> bar above by recurring at low
-# volume rather than one-off (e.g. a WR who's run a real wildcat passing
-# package in a couple of recent games while remaining primarily a
-# receiver) -- their own avg_<stat> stays far below what a real
-# participant in this stat category posts. Scale-invariant relative to
-# the stat's own filtered population median rather than an absolute
-# floor, so the same fraction applies whether TARGET_STAT is yards
-# (large, continuous) or something like sacks (small, discrete) without
+# volume rather than one-off (e.g. a WR running a wildcat package in a
+# couple of recent games) -- their avg_<stat> stays far below a real
+# participant's. Scale-invariant relative to the stat's own filtered
+# population median rather than an absolute floor, so the same fraction
+# applies across differently-scaled stats (yards vs. sacks) without
 # per-stat calibration.
 MIN_AVG_FRACTION_OF_MEDIAN = 0.35
 
-# A column surviving _feature_columns' all-null check with even one real
-# value isn't enough -- a handful of anomalous rows (a data quirk, or a
-# genuine but vanishingly rare two-way player) can still give a shallow
-# tree an irrelevant column to exploit (see v3's player-prop-passing-yards
-# model card: games_with_defensive_sacks, a defensive stat, showing real
-# importance for a passing target). Requiring a real fraction of rows to
-# have a value, not just one, still keeps genuinely common cross-category
-# signal (e.g. avg_rushing_yards for dual-threat QBs, which plenty of
-# real quarterbacks clear) while excluding columns whose few non-null
-# values come from anomalous rows rather than a real, common pattern.
+# A column surviving an all-null check with even one real value isn't
+# enough -- a handful of anomalous rows can still give a shallow tree an
+# irrelevant column to exploit. Requiring a real fraction of rows to have
+# a value, not just one, keeps genuinely common cross-category signal
+# (e.g. avg_rushing_yards for dual-threat QBs) while excluding columns
+# whose few non-null values come from anomalous rows.
 MIN_NON_NULL_FRACTION = 0.05
 
 # ESPN category names (see boxscore_to_player_game_stats in
@@ -115,14 +105,7 @@ MIN_NON_NULL_FRACTION = 0.05
 # function's category-prefixing rule. "fumbles" is deliberately left out
 # of both -- ball carriers AND defenders forcing/recovering fumbles are
 # both real, so it isn't cleanly one side's stat; MIN_NON_NULL_FRACTION
-# decides its fate on prevalence instead. Verified against real ESPN
-# data: a QB occasionally picking up a real, correctly-attributed
-# "defensive" stat line (e.g. tackling after an interception) is common
-# enough to survive MIN_NON_NULL_FRACTION on its own, even though it's
-# real signal, not corruption -- see the player-prop-passing-yards v3/v4
-# model cards. That signal is already captured more directly by
-# avg_passing_interceptions, so excluding the other side's category
-# outright is a deliberate modeling choice, not a bug fix.
+# decides its fate on prevalence instead.
 OFFENSIVE_CATEGORIES = {"passing", "rushing", "receiving"}
 DEFENSIVE_CATEGORIES = {"defensive", "interceptions"}
 
@@ -134,28 +117,21 @@ def _model_name(target_stat: str) -> str:
 def _filter_to_target_stat(df: pd.DataFrame, target_stat: str) -> pd.DataFrame:
     """Not every player-game recorded target_stat (a kicker never has
     passing_yards) -- label_stat_line is JSON-encoded (see
-    build_player_features in library/features/nfl.py, and _write_parquet
-    in feature-engineering/nfl/build_dataset.py for why), so it has to be
+    build_player_features in library/features/nfl.py), so it has to be
     parsed before it can be filtered on or turned into a label.
 
-    Also requires MIN_PRIOR_GAMES_WITH_STAT prior games with this stat,
-    via the games_with_<stat> column (rolling_player_stat_averages in
-    library/features/nfl.py). Without this, a one-off gadget-play row
+    Also requires MIN_PRIOR_GAMES_WITH_STAT prior games with this stat, via
+    the games_with_<stat> column (rolling_player_stat_averages in
+    library/features/nfl.py) -- without this, a one-off gadget-play row
     (e.g. a WR's single career pass attempt) still passes the has_stat
-    check above, and its avg_<other-position>_* features -- genuinely
-    populated from that player's real history, unlike the near-universal
-    NaN they'd be for an actual QB -- give a shallow tree an easy way to
-    isolate that single fluke label instead of learning real QB
-    performance patterns. A real starter or regular backup trivially
-    clears this bar every week; a true one-off doesn't.
+    check above, and its avg_<other-position>_* features give a shallow
+    tree an easy way to isolate that single fluke label.
 
     Also requires avg_<stat> to be at least MIN_AVG_FRACTION_OF_MEDIAN of
-    the remaining population's own median avg_<stat> -- catches a player
-    who clears the games_with_<stat> bar by recurring at trivial volume
-    rather than by being a true one-off (see MIN_AVG_FRACTION_OF_MEDIAN).
-    The median is computed AFTER the games_with_<stat> filter above, not
-    before -- otherwise the one-off flukes that filter excludes would
-    still be dragging the median down and weakening this threshold.
+    the remaining population's own median avg_<stat> (see
+    MIN_AVG_FRACTION_OF_MEDIAN). The median is computed after the
+    games_with_<stat> filter above, not before, so the flukes that filter
+    excludes don't drag the median down first.
     """
     stat_lines = df["label_stat_line"].apply(json.loads)
     has_stat = stat_lines.apply(lambda stat_line: target_stat in stat_line)
@@ -203,23 +179,21 @@ def _strip_metric_prefix(column: str) -> str:
 
 
 def _feature_columns(df: pd.DataFrame, target_stat: str) -> list[str]:
-    """player_features.parquet has ONE schema spanning every position in
+    """player_features.parquet has one schema spanning every position in
     the league (build_dataset.py's _write_parquet unions every row's
-    columns) -- after _filter_to_target_stat narrows to one stat's real
+    columns) -- after _filter_to_target_stat narrows to one stat's
     population, most other positions' columns (kicking, punting,
-    defensive, ...) are structurally inapplicable to every remaining row,
-    not just occasionally sparse the way win-probability's
-    weather_temperature is. Dropping columns below MIN_NON_NULL_FRACTION
-    here, scoped to this script rather than
-    library.ml.training_common.feature_columns, keeps the other two
-    scripts' feature schema stable regardless of a given week's null
-    pattern -- see training_common.feature_columns' own callers.
+    defensive, ...) are structurally inapplicable to every remaining row.
+    Dropping columns below MIN_NON_NULL_FRACTION here, scoped to this
+    script rather than library.ml.training_common.feature_columns, keeps
+    the other two scripts' feature schema stable regardless of a given
+    week's null pattern.
 
     Also excludes the opposing side of the ball outright (see
-    OFFENSIVE_CATEGORIES/DEFENSIVE_CATEGORIES) -- a deliberate modeling
-    choice, not something MIN_NON_NULL_FRACTION would ever catch on its
-    own, since e.g. a QB's real (if indirect) defensive stat line from
-    tackling after an interception is common enough to clear that bar."""
+    OFFENSIVE_CATEGORIES/DEFENSIVE_CATEGORIES) -- MIN_NON_NULL_FRACTION
+    alone wouldn't catch this, since a QB's indirect defensive stat line
+    (e.g. tackling after an interception) is common enough to clear that
+    bar on its own."""
     candidates = training_common.feature_columns(df, NON_FEATURE_COLUMNS)
     minimum_non_null = len(df) * MIN_NON_NULL_FRACTION
     candidates = [col for col in candidates if df[col].notna().sum() >= minimum_non_null]

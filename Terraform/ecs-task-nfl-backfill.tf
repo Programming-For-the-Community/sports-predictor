@@ -13,7 +13,10 @@ resource "aws_cloudwatch_log_group" "nfl_backfill" {
 }
 
 # Standalone Fargate task (launched via `aws ecs run-task`, not a Service
-# -- this runs to completion and stops, no always-on cost). Runs in a
+# -- this runs to completion and stops, no always-on cost). Pass
+# --propagate-tags TASK_DEFINITION on that command (or the equivalent
+# console option) or the running task won't carry this file's tags for
+# cost allocation -- RunTask doesn't propagate them by default. Runs in a
 # public subnet with a public IP rather than a private subnet + NAT
 # Gateway, since it needs to reach ESPN's public API and a NAT Gateway
 # alone (~$32/month) exceeds this project's $15/month budget. See

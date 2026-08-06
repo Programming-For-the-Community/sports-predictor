@@ -23,12 +23,9 @@ class ModelFeatureImportance {
 /// two can disagree in ranking direction -- a candidate with the highest
 /// `score` isn't guaranteed to be first in ModelCard.candidates, because a
 /// better raw accuracy doesn't always mean better-calibrated
-/// probabilities. Confirmed confusing in practice without rankScore
-/// visible: a real run promoted xgboost over a candidate with higher raw
-/// accuracy, because xgboost had the better log_loss -- correct, but
-/// looked like a bug when only `score` was shown. `rankScore` is nullable
-/// since it's absent on any candidate list written before this field
-/// existed (older cards only ever had `score`).
+/// probabilities. `rankScore` is nullable since it's absent on any
+/// candidate list written before this field existed (older cards only
+/// ever had `score`).
 class ModelCandidate {
   const ModelCandidate({required this.algorithm, required this.score, required this.rankScore});
 

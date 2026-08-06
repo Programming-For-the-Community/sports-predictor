@@ -2,8 +2,8 @@
 # Lambda to (re)compute the season projection (standings + per-stat player
 # prop leaderboards) and write it to S3 -- see that Lambda's own docstring
 # and the ScheduledSeasonProjection branch in its lambda_handler
-# (Source/aws-lambdas/nfl/predict/handler.py) for why GET /nfl/season
-# can't compute this live per-request anymore (26-29s against API
+# (Source/aws-lambdas/nfl/predict/handler.py). GET /nfl/season serves the
+# cached result instead of computing it live (26-29s against API
 # Gateway's hard 29s integration ceiling).
 #
 # Direct Scheduler -> Lambda invoke, NOT routed through a Step Functions

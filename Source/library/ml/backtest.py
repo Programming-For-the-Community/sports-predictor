@@ -108,12 +108,10 @@ def run_backtest(
     #
     # rank_score carries promotion_metric's own value alongside "score" --
     # without it, a candidate with the highest displayed "score" not
-    # winning looks like a bug (confirmed confusing in practice: a real
-    # run promoted xgboost over a candidate with higher raw accuracy,
-    # because xgboost had the better log_loss, which is what actually
-    # decides -- correct, but invisible in the raw JSON before this
-    # field existed). candidates_ranked_by, alongside the list rather than
-    # repeated per-entry, names which metric rank_score is.
+    # winning looks like a bug, since the ranking is driven by
+    # promotion_metric (e.g. log_loss), not the display metric.
+    # candidates_ranked_by, alongside the list rather than repeated
+    # per-entry, names which metric rank_score is.
     display_metric = "accuracy" if task == "classification" else "mae"
     ranked = sorted(evaluated, key=lambda e: e["metrics"][promotion_metric])
     candidate_summary = [
@@ -136,15 +134,10 @@ def run_backtest(
         **naive_baseline_metrics,
         # The exact column order/selection model_loader.predict() (serving
         # side) needs to build a live feature_row into what the estimator
-        # was actually trained on -- was missing from every model card this
-        # produced until now (confirmed live: every prediction request
-        # crashed with KeyError: 'feature_columns'), since none of the
-        # three train_*.py callers passed it via extra_metadata and this
-        # function itself never added it despite already having X_train in
-        # scope for feature_importances just above. One fix here covers
-        # every target -- X_train is identical across every candidate, so
-        # capturing it once off the winner's own training data is correct
-        # regardless of which candidate won.
+        # was actually trained on. Captured once here, off the winner's
+        # own training data -- X_train is identical across every
+        # candidate, so this covers every target regardless of which
+        # candidate won.
         "feature_columns": list(X_train.columns),
         "feature_importances": winner["feature_importances"],
         "hyperparameters": winner["hyperparameters"],

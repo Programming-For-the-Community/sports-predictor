@@ -5,38 +5,19 @@
 # prediction on every request, and audits it to the predictions table.
 # See Source/aws-lambdas/nfl/predict/handler.py.
 #
-# Container image, not the zip packaging ingest/normalize use (see
-# lambda-nfl-ingest.tf) -- xgboost pulls in numpy and scipy, which alone
-# measure ~225MB unzipped for this runtime, leaving almost no headroom
-# under Lambda's 250MB unzipped zip limit. Container Lambdas get a 10GB
-# image limit instead. Code is built and pushed by the nfl_ai_hosting
-# GitHub Actions workflow -- NOT by Terraform.
-#
-# image_uri references the shared ECR repo's floating "-latest" tag for
-# this component, same convention ECS task definitions use (see
-# ecs-task-nfl-train-win-probability-model.tf) -- a floating tag means the URI string
-# itself never changes between deploys, so (unlike the zip Lambdas'
-# placeholder/ignore_changes dance) there's nothing here for a later
-# `terraform apply` to fight with. The one thing this DOESN'T solve on
-# its own: Lambda's CreateFunction API validates the image exists in ECR
-# at creation time (ECS task definitions don't -- they only check at
-# run-task). nfl_deploy.yml handles this by running nfl_ai_hosting's
-# build+push BEFORE tf_install's apply, so the tag always already exists
-# by the time this resource is created -- see nfl_deploy.yml's own
-# top-of-file comment for the full ordering and the one path
-# (tf_install.yml run standalone, outside nfl_deploy.yml, against a
-# never-before-deployed account) that ordering doesn't cover.
+# Container image, not the zip packaging ingest/normalize use -- xgboost
+# pulls in numpy and scipy, which alone leave almost no headroom under
+# Lambda's 250MB unzipped zip limit; container Lambdas get a 10GB image
+# limit instead. Code is built and pushed by the nfl_ai_hosting GitHub
+# Actions workflow, not Terraform. image_uri references the shared ECR
+# repo's floating "-latest" tag, so the URI string itself never changes
+# between deploys.
 #
 # VPC-attached (unlike ingest/normalize) -- this is the one Lambda
 # reachable from outside the account, so it stays inside the private
 # subnets on the dedicated aws_security_group.lambda_inference
 # (security-groups.tf), reaching DynamoDB/S3 only via the VPC Gateway
-# Endpoints in vpc-endpoints.tf. This is a defense-in-depth network
-# boundary, not a functional requirement -- the container image pull
-# itself is handled by the Lambda service's own infrastructure outside
-# your VPC regardless of this function's VPC config, so (unlike Fargate
-# pulling from private subnets, see security-groups.tf's ecs_pipeline
-# comment) no ECR VPC endpoint is needed here.
+# Endpoints in vpc-endpoints.tf.
 resource "aws_cloudwatch_log_group" "nfl_predict" {
   name              = "/aws/lambda/${var.project}-nfl-predict"
   retention_in_days = 30
@@ -53,33 +34,17 @@ resource "aws_lambda_function" "nfl_predict" {
   role          = aws_iam_role.lambda_inference.arn
   package_type  = "Image"
   image_uri     = "${var.ecr_repo_url}:nfl-predict-latest"
-  # API Gateway's REST API integration timeout is a hard, non-configurable
-  # 29s ceiling for the API-Gateway-triggered routes (predictions/events,
-  # predictions/players) -- API Gateway itself cuts those off with a 504
-  # at 29s regardless of what's set here, so this value can't help or hurt
-  # them either way.
-  #
-  # Set well above that anyway because this Lambda is ALSO invoked directly
-  # by EventBridge Scheduler for the ScheduledSeasonProjection path (see
-  # scheduler-nfl-season-projection.tf, predict/handler.py's
-  # _run_scheduled_season_projection) -- that path never goes through API
-  # Gateway at all, and _season_projection() genuinely needs more than 29s
-  # (confirmed live: hit Sandbox.Timedout at exactly 29.00s when this was
-  # still pinned to API Gateway's ceiling). 120s gives comfortable headroom
-  # over the 26-29s this was measured at pre-fix.
+  # API Gateway's own REST API integration timeout is a hard,
+  # non-configurable 29s ceiling for the API-Gateway-triggered routes, so
+  # this can't help or hurt those. Set to 120s for the
+  # ScheduledSeasonProjection path (scheduler-nfl-season-projection.tf),
+  # which is invoked directly by EventBridge Scheduler, bypasses API
+  # Gateway entirely, and needs more than 29s to compute.
   timeout = 120
-  # Lambda CPU scales with memory (roughly linear up to ~1,769MB = 1 vCPU).
-  # Bumped from 1024 -- confirmed live via CloudWatch that this Lambda's
-  # cold start repeatedly hit Lambda's own non-configurable 10-second
-  # INIT PHASE ceiling (INIT_REPORT ... Phase: init Status: timeout,
-  # independent of this resource's own `timeout` above) even before
-  # scikit-learn/pandas/joblib were added to requirements.txt for the
-  # backtesting harness -- AWS's own documented guidance for exactly this
-  # failure mode is more memory/CPU during init, not a longer timeout
-  # (which can't help anyway, since the init-phase cap isn't governed by
-  # it). Runtime memory usage measured well under 512MB even on the
-  # heaviest requests seen (season leaderboards) -- this is sized for
-  # import/init CPU, not actual memory need.
+  # Lambda CPU scales with memory (roughly linear up to ~1,769MB = 1
+  # vCPU) -- sized for import/init CPU (xgboost/scikit-learn/pandas), not
+  # runtime memory need, which stays well under 512MB even on the
+  # heaviest requests.
   memory_size = 3008
 
   environment {

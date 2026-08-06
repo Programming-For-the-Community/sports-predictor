@@ -30,13 +30,11 @@ resource "aws_iam_role_policy_attachment" "ecs_pipeline_execution" {
 }
 
 data "aws_iam_policy_document" "ecs_pipeline_permissions" {
-  # dynamodb:Scan is needed alongside Query/GetItem because
-  # get_all_player_game_stats/get_all_team_game_stats scan their base
-  # tables directly (no GSI exists for either) rather than issuing one
-  # Query per team/player. get_all_events is different -- it Queries the
-  # events table's status-index GSI (FeatureStorage.get_all_events,
-  # Terraform/dynamodb-events.tf), not a Scan, so it needs the separate
-  # /index/* resource below.
+  # dynamodb:Scan is needed alongside Query/GetItem for entities (looked
+  # up one at a time or scanned in bulk depending on caller). A table's
+  # GSI is a distinct IAM resource from the table itself, so
+  # get_all_events/get_all_player_game_stats/get_all_team_game_stats each
+  # need their own /index/* resource below alongside the base table ARN.
   statement {
     sid     = "ReadTrainingData"
     actions = ["dynamodb:Query", "dynamodb:GetItem", "dynamodb:Scan"]
@@ -45,13 +43,9 @@ data "aws_iam_policy_document" "ecs_pipeline_permissions" {
       "arn:aws:dynamodb:${var.region}:${var.account_id}:table/${local.events_table}",
       "arn:aws:dynamodb:${var.region}:${var.account_id}:table/${local.player_game_stats_table}",
       "arn:aws:dynamodb:${var.region}:${var.account_id}:table/${local.team_game_stats_table}",
-      # A table's GSI is a distinct IAM resource from the table itself --
-      # confirmed live via CloudWatch (AccessDeniedException on
-      # get_all_events' status-index Query) that the base events_table
-      # ARN above doesn't also cover its own GSI, the same gotcha
-      # iam-lambda-inference.tf already documents and was already fixed
-      # for there.
       "arn:aws:dynamodb:${var.region}:${var.account_id}:table/${local.events_table}/index/*",
+      "arn:aws:dynamodb:${var.region}:${var.account_id}:table/${local.player_game_stats_table}/index/*",
+      "arn:aws:dynamodb:${var.region}:${var.account_id}:table/${local.team_game_stats_table}/index/*",
     ]
   }
 

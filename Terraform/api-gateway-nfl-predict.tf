@@ -7,20 +7,16 @@
 #   GET /nfl/predictions/events/{event_id}                        -> nfl_predict (lambda-nfl-predict.tf)
 #   GET /nfl/predictions/events/{event_id}/players/{entity_id}    -> nfl_predict (lambda-nfl-predict.tf)
 #
-# events/models/season all point at the read-only Lambda -- events/models
-# for cold start (see lambda-nfl-predict-read.tf's own comment), season
-# because it's now a cached S3 read rather than a live computation (see
-# predict/handler.py's own docstring and scheduler-nfl-season-
-# projection.tf: nfl_predict computes it once a week and writes it to S3,
-# nfl_predict_read just serves that cached object). Everything else stays
-# on the main predict Lambda, which needs the full ML dependency chain
-# regardless. See Source/aws-lambdas/nfl/predict/handler.py's and
-# Source/aws-lambdas/nfl/predict-read/handler.py's own docstrings for the
-# exact request/response contract each route serves.
+# events/models/season point at the read-only Lambda: events/models for
+# cold start (see lambda-nfl-predict-read.tf), season because nfl_predict
+# writes it to S3 once a week and nfl_predict_read just serves that cached
+# object (scheduler-nfl-season-projection.tf). Everything else stays on
+# the main predict Lambda, which needs the full ML dependency chain. See
+# Source/aws-lambdas/nfl/predict/handler.py's and predict-read/handler.py's
+# docstrings for each route's request/response contract.
 #
-# This is also where the deployment/stage/usage plan api-gateway.tf
-# deferred live -- AWS won't accept those until at least one method
-# exists, and this is the first (and so far only) route added.
+# Deployment/stage/usage plan resources also live here -- api-gateway.tf
+# defers them since AWS requires at least one method to exist first.
 
 resource "aws_api_gateway_resource" "nfl" {
   rest_api_id = aws_api_gateway_rest_api.main.id
@@ -268,11 +264,10 @@ resource "aws_api_gateway_deployment" "main" {
       aws_api_gateway_integration.nfl_events.id,
       # .uri explicitly, not just .id -- aws_api_gateway_integration's id
       # is a stable composite key (rest_api_id/resource_id/http_method)
-      # that does NOT change when only uri is updated in place, so
-      # repointing this integration at a different Lambda (as this one
-      # now is, see lambda-nfl-predict-read.tf) would otherwise never
-      # trigger a new deployment -- confirmed by reading how this
-      # resource's id is actually computed, not assumed.
+      # that does not change when only uri is updated in place, so
+      # repointing this integration at a different Lambda (see
+      # lambda-nfl-predict-read.tf) would otherwise never trigger a new
+      # deployment.
       aws_api_gateway_integration.nfl_events.uri,
       aws_api_gateway_resource.nfl_models.id,
       aws_api_gateway_method.nfl_models.id,

@@ -47,15 +47,11 @@ _STAT_CATEGORY = {
 # interchangeable here, this doesn't care which wrote a given row.
 _PLAYER_PROP_MODEL_KEY_RE = re.compile(r"^MODEL#player-prop-([a-z-]+)#v\d+#PLAYER#(.+)$")
 
-# season_type=3 (postseason) week -> round name, confirmed live against
-# ESPN's own scoreboard (season 2020: week 1=Wild Card, 2=Divisional,
-# 3=Conference Championship, 4=Pro Bowl, 5=Super Bowl). Week 4 is
-# deliberately absent -- that's always the Pro Bowl, already excluded
-# entirely by is_real_franchise_matchup before this mapping is consulted,
-# so a real week=4 postseason game should never occur. This numbering has
-# been stable across this project's whole 2016-2025+ window -- the
-# playoff field expanded to 7 teams per conference in 2020, but the
-# round *count* and week numbering didn't change.
+# season_type=3 (postseason) week -> round name (season 2020: week
+# 1=Wild Card, 2=Divisional, 3=Conference Championship, 4=Pro Bowl,
+# 5=Super Bowl). Week 4 is deliberately absent -- that's always the Pro
+# Bowl, already excluded by is_real_franchise_matchup before this mapping
+# is consulted, so a real week=4 postseason game should never occur.
 POSTSEASON_ROUND_LABELS = {1: "Wild Card", 2: "Divisional", 3: "Conference Championship", 5: "Super Bowl"}
 
 

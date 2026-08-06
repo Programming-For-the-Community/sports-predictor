@@ -23,17 +23,15 @@ Coach and depth-chart data are cached in S3 with their own TTLs (see
 _cached_or_fetch, COACHES_CACHE_TTL_DAYS/DEPTH_CHART_CACHE_TTL_DAYS) --
 "every ingest run" above is about what gets WRITTEN each time (always the
 complete picture, for the reason above), not what gets FETCHED from ESPN
-each time. Confirmed live that get_season_coaches alone costs ~65 ESPN
-calls (ESPN's core API pages this via two rounds of $ref resolution,
-listing -> 32 coach details -> 32 separate win-record lookups) for data
-that barely changes day to day -- a coach's identity/tenure almost never
-changes mid-week, and season_win_pct only changes once a week, after that
-week's games. Depth charts (32 calls/day, one per team playing that week)
-shift with roster moves, but not meaningfully within a single day either,
-and injury-driven changes are already separately captured by the
-(uncached, genuinely-daily) injuries call. Caching these two categories
-cuts roughly a third of this Lambda's daily ESPN call volume without
-changing what ends up in DynamoDB on any given day.
+each time. get_season_coaches alone costs ~65 ESPN calls (ESPN's core API
+pages this via two rounds of $ref resolution, listing -> 32 coach details
+-> 32 separate win-record lookups) for data that barely changes day to
+day -- a coach's identity/tenure almost never changes mid-week, and
+season_win_pct only changes once a week, after that week's games. Depth
+charts (32 calls/day, one per team playing that week) shift with roster
+moves, but not meaningfully within a single day either, and
+injury-driven changes are already separately captured by the (uncached,
+genuinely-daily) injuries call.
 
 EventBridge can override any default via the schedule's input payload:
     { "season": 2025, "season_type": 2, "week": 4 }
@@ -179,19 +177,13 @@ def _filter_depth_chart(raw_depth_chart: dict) -> dict:
     """Keeps only the positions leader-selection actually needs (see
     DEPTH_CHART_POSITIONS), AND trims each retained athlete down to just
     the id live_features.py's _healthy_athlete_ids actually reads --
-    confirmed live that ESPN's full depth chart response is ~289KB for
-    ONE team, almost entirely per-athlete link metadata (player card,
-    stats, splits, game log, news, bio -- each with a web AND a
-    sportscenter:// deep-link variant) this project never uses. Filtering
-    by position alone (an earlier version of this function) kept every
-    retained athlete's full raw object, which silently bloated every
-    event item with tens of KB of unused data per team -- confirmed live
-    via CloudWatch as a real contributor to the predict Lambda's memory
-    and latency (Max Memory Used roughly doubled, some requests hitting
-    the full 29s timeout) once this shipped. Filters on each entry's
+    ESPN's full depth chart response is ~289KB for ONE team, almost
+    entirely per-athlete link metadata (player card, stats, splits, game
+    log, news, bio -- each with a web AND a sportscenter:// deep-link
+    variant) this project never uses. Filters on each entry's
     position.abbreviation rather than the outer dict key, since that
-    key's exact casing/format was only confirmed live for non-skill-
-    position codes (e.g. "lde" for Left Defensive End)."""
+    key's exact casing/format is only verified for non-skill-position
+    codes (e.g. "lde" for Left Defensive End)."""
     positions = raw_depth_chart.get("positions") or {}
     result = {}
     for code, entry in positions.items():

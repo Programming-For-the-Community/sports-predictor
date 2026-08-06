@@ -7,14 +7,13 @@ already uses. This host paginates via `$ref` links: a list call returns
 GET to resolve into real data. Used for two things site.api.espn.com
 doesn't expose at all: season-wide head coach info (experience, this
 season's win rate with their current team) and per-team current injury
-reports. Both confirmed live before this client was written -- see
-design/... coach/injury planning notes for the exact response shapes.
+reports.
 
 Depth charts are NOT here despite being coach/injury-adjacent -- ESPN's
-core-API depth chart path 404s (confirmed live); the real one lives on
-site.api.espn.com in the same single-response style everything else on
-NFLClient already uses, so it's a plain new method there instead
-(library/http/nfl.py), not on this client.
+core-API depth chart path 404s; the real one lives on site.api.espn.com
+in the same single-response style everything else on NFLClient already
+uses, so it's a plain new method there instead (library/http/nfl.py),
+not on this client.
 """
 import os
 import re

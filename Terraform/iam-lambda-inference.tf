@@ -28,12 +28,9 @@ resource "aws_iam_role_policy_attachment" "lambda_inference_logs" {
   policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
 }
 
-# Required because this Lambda is VPC-attached (lambda-nfl-predict.tf's
-# vpc_config) -- unlike lambda_pipeline (ingest/normalize's role), which
-# never needs this since those functions have no vpc_config block at all.
-# Lambda provisions an ENI per subnet/security-group combination to reach
-# the private subnets, which needs ec2:CreateNetworkInterface and friends
-# on the execution role -- this AWS-managed policy grants exactly that.
+# This Lambda is VPC-attached (lambda-nfl-predict.tf's vpc_config), which
+# needs ec2:CreateNetworkInterface and friends to provision an ENI per
+# subnet/security-group -- this AWS-managed policy grants exactly that.
 resource "aws_iam_role_policy_attachment" "lambda_inference_vpc_access" {
   role       = aws_iam_role.lambda_inference.name
   policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole"
@@ -72,23 +69,20 @@ data "aws_iam_policy_document" "lambda_inference_permissions" {
       "arn:aws:dynamodb:${var.region}:${var.account_id}:table/${local.player_game_stats_table}",
       "arn:aws:dynamodb:${var.region}:${var.account_id}:table/${local.team_game_stats_table}",
       # A table's GSI is a distinct IAM resource from the table itself --
-      # Query against status-index/entity-history was silently AccessDenied
-      # even though the base-table ARNs above were already granted (confirmed
-      # live via CloudWatch: get_player_game_stats's entity-history Query
-      # threw AccessDeniedException in production despite this same statement
-      # already covering GetItem/Query/Scan on the base player_game_stats
-      # table). Only these two tables have a GSI today (dynamodb-events.tf's
-      # status-index, dynamodb-player-game-stats.tf's entity-history).
+      # each Query'd GSI needs its own /index/* entry alongside the base
+      # table ARN. team_game_stats_table/index/* covers get_all_team_game_stats,
+      # reached from this role's live-inference path via
+      # live_features.py's get_team_game_stats_for_team.
       "arn:aws:dynamodb:${var.region}:${var.account_id}:table/${local.events_table}/index/*",
       "arn:aws:dynamodb:${var.region}:${var.account_id}:table/${local.player_game_stats_table}/index/*",
+      "arn:aws:dynamodb:${var.region}:${var.account_id}:table/${local.team_game_stats_table}/index/*",
     ]
   }
 
   statement {
     sid = "ReadWritePredictions"
-    # Query added alongside PutItem -- GET /nfl/events?status=completed now
-    # reads back each event's own logged prediction (via the event_key
-    # partition key) to show predicted-vs-actual, not just write new rows.
+    # Query lets GET /nfl/events?status=completed read back each event's
+    # logged prediction (via event_key) to show predicted-vs-actual.
     actions   = ["dynamodb:PutItem", "dynamodb:Query"]
     resources = ["arn:aws:dynamodb:${var.region}:${var.account_id}:table/${local.predictions_table}"]
   }

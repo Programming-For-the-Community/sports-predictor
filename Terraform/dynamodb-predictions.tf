@@ -7,8 +7,8 @@
 # Kept separate from the events table so re-running a model for the same
 # event appends a new SK row rather than overwriting the raw result.
 #
-# No GSI now -- "all predictions for player X" (across events) is a
-# deferred access pattern not yet needed by the serving layer.
+# No GSI -- the serving layer never queries "all predictions for player X"
+# across events, only per-event lookups via the base table.
 resource "aws_dynamodb_table" "predictions" {
   name         = local.predictions_table
   billing_mode = "PAY_PER_REQUEST"

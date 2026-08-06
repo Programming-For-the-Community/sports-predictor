@@ -14,29 +14,17 @@ resource "aws_cloudwatch_log_group" "nfl_train_win_probability_model" {
 # ecs-task-nfl-feature-engineering.tf). Reads event_features.parquet,
 # trains the NFL win-probability model, and writes a versioned artifact
 # plus metadata to the model artifacts bucket -- see
-# Source/model-training/nfl/train_win_probability_model.py. Named to match
-# train-score-model/train-player-prop-model's convention of naming the
-# task/image after what it actually trains, rather than the generic
-# "train-model" this originally shipped as (the only one of the three not
-# already following that pattern).
+# Source/model-training/nfl/train_win_probability_model.py.
 #
 # Scheduled -- see scheduler-nfl-train-win-probability-model.tf -- but
-# every bit as runnable manually via `aws ecs run-task` if you want to
-# retrain and inspect a specific run's output without waiting for
-# Wednesday.
+# also runnable manually via `aws ecs run-task`.
 #
 # Uses the shared aws_iam_role.ecs_pipeline (iam-ecs-pipeline.tf), same as
 # feature engineering. cpu=4096 (4 vCPU) gives _tune_hyperparameters'
 # n_jobs=-1 RandomizedSearchCV actual cores to spread its ~2,400
-# (candidate, fold) fits across -- confirmed CPU-bound, not I/O-bound, by
-# CloudWatch Container Insights showing a 2 vCPU allocation pegged near
-# 100% utilization throughout the search, so more cores translate almost
-# directly into a shorter run. Stepped down from an earlier 8 vCPU after
-# hitting the account's Fargate on-demand vCPU quota trying to launch
-# every NFL training task at once -- see scheduler-nfl-train-win-probability-model.tf's
-# 30-minute stagger, the other half of that fix. memory=16384 is well
-# within Fargate's valid range at 4 vCPU (8-30GB) and well above what
-# this workload's ~2,700-row dataset needs on its own.
+# (candidate, fold) fits across. memory=16384 is well within Fargate's
+# valid range at 4 vCPU (8-30GB) and well above what this workload's
+# ~2,700-row dataset needs on its own.
 resource "aws_ecs_task_definition" "nfl_train_win_probability_model" {
   family                   = "${var.project}-nfl-train-win-probability-model"
   requires_compatibilities = ["FARGATE"]

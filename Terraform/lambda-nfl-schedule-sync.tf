@@ -5,9 +5,7 @@
 # existing S3 trigger picks these up automatically, no separate wiring
 # needed. See Source/aws-lambdas/nfl/schedule-sync/handler.py's own
 # docstring for why this is a dedicated Lambda rather than routed through
-# ingest/handler.py (enrichment is meaningless months ahead of a game, and
-# was the actual cause of an earlier Step-Functions-fan-out version of this
-# job generating ~1,500 ESPN calls in one run).
+# ingest/handler.py.
 #
 # Code is deployed by the nfl_data_pipeline workflow (via `aws lambda
 # update-function-code`) -- NOT by Terraform. Same placeholder-ZIP +
@@ -53,32 +51,12 @@ resource "aws_lambda_function" "nfl_schedule_sync" {
   filename         = data.archive_file.nfl_schedule_sync_placeholder.output_path
   source_code_hash = data.archive_file.nfl_schedule_sync_placeholder.output_base64sha256
 
-  # ESPN_API_ROOT_URL/ESPN_USER_AGENT deliberately DIFFERENT from
-  # var.espn_api_root_url/the shared HttpClient default that ingest,
-  # normalize, and the historical backfill all use -- this Lambda alone
-  # was hitting a deterministic 403 Forbidden from site.api.espn.com on
-  # every retry, even after the fully-sequential/single-rate-limiter
-  # redesign ruled out request volume as the cause (confirmed live, same
-  # error on week 2 of a fresh run). Testing two community-reported
-  # mitigations (see the akeaswaran ESPN hidden-API gist -- 1,000+ stars,
-  # long-running community doc for this exact unofficial API) at once,
-  # scoped to only this Lambda so daily ingest's already-working config
-  # stays untouched:
-  #   - site.web.api.espn.com instead of site.api.espn.com -- same path
-  #     structure (confirmed live: identical query against this host
-  #     returns the same JSON shape -- season/week/events -- that
-  #     site.api.espn.com would), different host, apparently not subject
-  #     to the same block.
-  #   - A plain, honestly-non-browser User-Agent instead of the spoofed-
-  #     Chrome default -- counterintuitive, but one developer's fix was
-  #     exactly this: a UA that CLAIMS to be Chrome without the rest of a
-  #     real browser's fingerprint (TLS handshake, JS execution, full
-  #     header set, cookies) can read as MORE suspicious to some WAFs than
-  #     an honest, low-key non-browser client identifying itself as what
-  #     it actually is.
-  # If this holds up in production, worth promoting to daily ingest too;
-  # if it doesn't, revert this block back to var.espn_api_root_url/the
-  # HttpClient default and look elsewhere.
+  # ESPN_API_ROOT_URL/ESPN_USER_AGENT deliberately differ from
+  # var.espn_api_root_url/the shared HttpClient default that ingest and
+  # normalize use -- this Lambda's ESPN calls need site.web.api.espn.com
+  # (same request/response shape as site.api.espn.com) and a plain
+  # non-browser User-Agent to get through, scoped to just this Lambda so
+  # ingest/normalize's own config stays untouched.
   environment {
     variables = {
       RAW_BUCKET_NAME   = aws_s3_bucket.raw_data_lake.bucket

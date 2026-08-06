@@ -1,25 +1,9 @@
-# Replaces scheduler-nfl-feature-engineering.tf + scheduler-nfl-train-
-# win-probability-model.tf + the deleted scheduler-nfl-train-score-model.tf/
-# scheduler-nfl-train-player-prop-model.tf (4 files, 11 EventBridge
-# Scheduler resources for NFL alone) with one registry-driven state
-# machine: for each active sport, run its feature-engineering task, then
-# fan out over its own training_targets list (see dynamodb-sport-
-# registry.tf) to run every training target as its own ECS task.
-#
-# Feature-engineering is now a real upstream dependency of training
-# within one execution, not just an earlier cron slot with an assumed
-# margin (the old design's 11:00/12:00 UTC gap just hoped feature
-# engineering finished within the hour). The inner Map's MaxConcurrency
-# replaces the old design's hand-picked 30-minute stagger between
-# training schedules, which existed purely to stay under the account's
-# Fargate on-demand vCPU quota -- a declarative concurrency cap does the
-# same job without needing a new time slot picked by hand for every
-# additional target.
-#
-# Task definitions/images themselves are untouched by this migration --
-# see ecs-task-nfl-feature-engineering.tf and the three
-# ecs-task-nfl-train-*.tf files, none of which changed. Only what
-# triggers them did.
+# One registry-driven state machine: for each active sport, run its
+# feature-engineering task, then fan out over its own training_targets
+# list (see dynamodb-sport-registry.tf) to run every training target as
+# its own ECS task. The inner Map's MaxConcurrency caps how many training
+# tasks run at once, to stay under the account's Fargate on-demand vCPU
+# quota.
 resource "aws_sfn_state_machine" "training_orchestrator" {
   name     = "${var.project}-training-orchestrator"
   role_arn = aws_iam_role.stepfunctions_orchestrator.arn
@@ -50,7 +34,7 @@ resource "aws_sfn_state_machine" "training_orchestrator" {
         "States": {
           "IsActive": {
             "Type": "Choice",
-            "Comment": "Filtered here, not in the Scan above -- Step Functions' aws-sdk:dynamodb:scan integration schema rejects a BOOL-typed ExpressionAttributeValue in a FilterExpression. Variable is $.active.Bool, not $.active.BOOL -- confirmed live via a real execution's Choice-state input that the aws-sdk: integration marshals DynamoDB's Boolean attribute type as \"Bool\", not the raw API's \"BOOL\" (S/M/L come through as expected) -- a JSONPath mismatch here throws States.Runtime (\"Invalid path\"), it does not fall through to Default.",
+            "Comment": "Filtered here, not in the Scan above -- aws-sdk:dynamodb:scan rejects a BOOL-typed FilterExpression value. Variable is $.active.Bool: the aws-sdk: integration marshals DynamoDB's Boolean type as \"Bool\", not \"BOOL\".",
             "Choices": [
               {
                 "Variable": "$.active.Bool",
@@ -71,6 +55,7 @@ resource "aws_sfn_state_machine" "training_orchestrator" {
               "Cluster": "${aws_ecs_cluster.main.arn}",
               "TaskDefinition.$": "States.Format('${var.project}-{}-feature-engineering', $.sport.S)",
               "LaunchType": "FARGATE",
+              "PropagateTags": "TASK_DEFINITION",
               "NetworkConfiguration": {
                 "AwsvpcConfiguration": {
                   "Subnets": ["${aws_subnet.public_1.id}", "${aws_subnet.public_2.id}", "${aws_subnet.public_3.id}"],
@@ -114,6 +99,7 @@ resource "aws_sfn_state_machine" "training_orchestrator" {
                     "Cluster": "${aws_ecs_cluster.main.arn}",
                     "TaskDefinition.$": "States.Format('${var.project}-{}-{}', $.sport, $.target.M.task_definition_suffix.S)",
                     "LaunchType": "FARGATE",
+                    "PropagateTags": "TASK_DEFINITION",
                     "NetworkConfiguration": {
                       "AwsvpcConfiguration": {
                         "Subnets": ["${aws_subnet.public_1.id}", "${aws_subnet.public_2.id}", "${aws_subnet.public_3.id}"],

@@ -17,24 +17,17 @@ events list (library.serving.nfl_reads._next_week_events) had nothing to
 look ahead into.
 
 Deliberately does NOT call ingest/handler.py or its _enrich_events
-(coach/injury/depth-chart data), and does not fetch box scores. Both are
-meaningless months ahead of a game that hasn't been played, and were the
-actual cause of a first version of this job (fanned out via Step
-Functions to 23 separate ingest/handler.py invocations, each running the
-FULL enrichment pipeline) generating ~1,500 ESPN calls in a single run --
-confirmed live to trip ESPN's WAF. Daily ingest remains the ONLY source
-of injury/depth-chart freshness (its own docstring already documents why
-that needs daily granularity) and of box-score fetches, as each week
-actually completes.
+(coach/injury/depth-chart data), and does not fetch box scores -- both
+are meaningless months ahead of a game that hasn't been played. Daily
+ingest remains the ONLY source of injury/depth-chart freshness (its own
+docstring documents why that needs daily granularity) and of box-score
+fetches, as each week actually completes.
 
 ONE shared NFLClient for the whole run, not a separate client per week --
-this is what actually fixes the ESPN WAF trip: every one of this run's
-~23 requests is paced by the SAME RateLimiter instance, the same
-guarantee data-backfills/nfl/backfill.py's own season-wide sweep already
-relies on. The Step Functions version's per-invocation clients had no
-cross-invocation coordination, so its own MaxConcurrency setting was the
-only thing standing between it and a burst -- moot now, there's no
-concurrency to configure.
+every one of this run's ~23 requests is paced by the SAME RateLimiter
+instance, the same guarantee data-backfills/nfl/backfill.py's own
+season-wide sweep relies on, so nothing here can burst past ESPN's rate
+limit regardless of how many weeks are being synced.
 """
 import json
 import logging
