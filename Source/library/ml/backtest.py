@@ -134,6 +134,18 @@ def run_backtest(
         **extra_metadata,
         **winner["metrics"],
         **naive_baseline_metrics,
+        # The exact column order/selection model_loader.predict() (serving
+        # side) needs to build a live feature_row into what the estimator
+        # was actually trained on -- was missing from every model card this
+        # produced until now (confirmed live: every prediction request
+        # crashed with KeyError: 'feature_columns'), since none of the
+        # three train_*.py callers passed it via extra_metadata and this
+        # function itself never added it despite already having X_train in
+        # scope for feature_importances just above. One fix here covers
+        # every target -- X_train is identical across every candidate, so
+        # capturing it once off the winner's own training data is correct
+        # regardless of which candidate won.
+        "feature_columns": list(X_train.columns),
         "feature_importances": winner["feature_importances"],
         "hyperparameters": winner["hyperparameters"],
         "candidates": candidate_summary,

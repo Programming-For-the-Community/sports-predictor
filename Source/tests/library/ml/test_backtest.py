@@ -108,6 +108,33 @@ class TestRunBacktest:
         # full cards -- there's only ever one real card now.
         assert {c["algorithm"] for c in result["candidates"]} == {"xgboost", "logistic_regression"}
 
+    def test_winner_card_carries_feature_columns_for_serving_to_read(self):
+        """Regression test: model_loader.predict() (serving side) reads
+        model_card["feature_columns"] to know which columns/order to build
+        a live feature row into -- confirmed live this was missing from
+        every promoted card (KeyError: 'feature_columns' on every real
+        prediction request) since neither this function nor any of the
+        three train_*.py callers ever added it."""
+        X_train, y_train, X_test, y_test = _xy()
+        adapter = _FakeAdapter("xgboost", np.array([0.9, 0.1, 0.9, 0.1]))
+
+        def fake_save(s3, sport, model_name, algorithm, model_bytes, artifact_filename, metadata, summary_metrics):
+            return {"model_name": model_name, "algorithm": algorithm, "version": 1, **metadata}
+
+        with patch.object(backtest.training_common, "save_model_artifact", side_effect=fake_save), \
+             patch.object(backtest.training_common, "promote_if_better", return_value=True):
+            result = backtest.run_backtest(
+                s3=MagicMock(), sport="nfl", model_name="win-probability", task="classification",
+                X_train=X_train, y_train=y_train, X_test=X_test, y_test=y_test,
+                candidates=[adapter],
+                naive_baseline_metrics={},
+                extra_metadata={"train_rows": 4, "test_rows": 4},
+                summary_metrics=["accuracy", "log_loss"],
+                promotion_metric="log_loss",
+            )
+
+        assert result["winner"]["feature_columns"] == ["a"]
+
     def test_candidates_expose_the_metric_that_actually_decided_ranking(self):
         """Regression test for a real, reported confusion: a run where the
         candidate with the HIGHER displayed accuracy wasn't promoted,
