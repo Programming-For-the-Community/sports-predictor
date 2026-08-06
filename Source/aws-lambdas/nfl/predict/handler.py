@@ -291,6 +291,14 @@ def _season_standings_inputs(storage: FeatureStorage) -> dict:
     current_season = max(
         (e.get("season") for e in scheduled + completed if e.get("season") is not None), default=None,
     )
+    # Scoping `completed` to just this season before it reaches
+    # compute_elo_ratings below is what resets every team to
+    # DEFAULT_STARTING_RATING at the start of each season, ignoring how the
+    # previous one ended -- intentional, not incidental: a brand-new season
+    # with no completed games yet passes an empty list in, so
+    # compute_elo_ratings returns empty ratings and simulate_season's own
+    # `ratings.get(team_id, DEFAULT_STARTING_RATING)` fallback applies to
+    # every team equally.
     scheduled = [e for e in scheduled if e.get("season") == current_season]
     completed = [e for e in completed if e.get("season") == current_season]
 

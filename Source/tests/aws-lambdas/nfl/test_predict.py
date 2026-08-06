@@ -368,6 +368,21 @@ class TestSeasonStandingsInputs:
         # The 2024 completed game shouldn't leak into this season's record.
         assert inputs["wins"] == {}
 
+    def test_elo_resets_to_default_each_season_ignoring_how_last_one_ended(self):
+        # A blowout in the prior season would have swung team "12"'s Elo
+        # rating well above DEFAULT_STARTING_RATING -- confirm none of that
+        # carries into the new season's current_ratings, which
+        # simulate_season's Monte Carlo starts every remaining game from.
+        storage = MagicMock()
+        storage.get_all_events.side_effect = lambda sport, status: {
+            "completed": [_completed_event("E1", 2024, "12", "24", 45, 3)],
+            "scheduled": [_scheduled_event("E2", 2025, "2025-09-21", "12", "7")],
+        }[status]
+
+        inputs = nfl_predict._season_standings_inputs(storage)
+
+        assert inputs["current_ratings"] == {}
+
     def test_remaining_games_and_team_next_event_reflect_chronological_order(self):
         storage = MagicMock()
         storage.get_all_events.side_effect = lambda sport, status: {

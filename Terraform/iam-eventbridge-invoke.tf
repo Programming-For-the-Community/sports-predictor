@@ -36,6 +36,7 @@ data "aws_iam_policy_document" "eventbridge_invoke_permissions" {
     resources = [
       aws_sfn_state_machine.ingest_orchestrator.arn,
       aws_sfn_state_machine.training_orchestrator.arn,
+      aws_sfn_state_machine.nfl_season_schedule_sync.arn,
     ]
   }
 

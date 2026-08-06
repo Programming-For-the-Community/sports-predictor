@@ -22,16 +22,27 @@ change through the week in a way box scores and coach data don't.
 EventBridge can override any default via the schedule's input payload:
     { "season": 2025, "season_type": 2, "week": 4 }
 
-All three must be given together for a manual override (e.g. reprocessing
-one specific past week) -- there's no partial-override path. Omitting all
-three (the normal scheduled case) auto-detects the target week from the
-most recent Sunday's date rather than from "today": ESPN's scoreboard
-endpoint resolves season/type/week entirely from a `dates=YYYYMMDD` param
-(confirmed live), and "most recent Sunday" is the same value on both the
-Tuesday run and the Wednesday retry within the same NFL week, unlike
-"today" -- which would otherwise depend on exactly when ESPN's own
-scoreboard calendar rolls over to the next week, an undocumented detail
-this function has no business depending on.
+All three given together is a full manual override (e.g. reprocessing one
+specific past week). Omitting all three (the normal daily scheduled case)
+auto-detects the target week from the most recent Sunday's date rather
+than from "today": ESPN's scoreboard endpoint resolves season/type/week
+entirely from a `dates=YYYYMMDD` param (confirmed live), and "most recent
+Sunday" is the same value on both the Tuesday run and the Wednesday retry
+within the same NFL week, unlike "today" -- which would otherwise depend
+on exactly when ESPN's own scoreboard calendar rolls over to the next
+week, an undocumented detail this function has no business depending on.
+
+A third shape, `season_type`+`week` given with `season` omitted, resolves
+`season` from the calendar instead (see _current_nfl_season) -- this is
+what Terraform/scheduler-nfl-season-schedule-sync.tf's weekly Step
+Functions Map state uses to walk every week of the current season (not
+just whichever single week auto-detect would pick), so the full remaining
+schedule -- not just this week's -- is always available for season
+simulation and the frontend's upcoming-events list. Safe to call for a
+week that hasn't been played yet: the box-score fetch below only runs for
+an event whose own `status.type.completed` is true, so an unplayed game
+just gets its schedule entry (and enrichment) written, never a
+box-score fetch attempted early and wrongly cached as "already fetched."
 
 Preseason (season_type 1) is never ingested, whether auto-detected or
 passed explicitly -- backup-heavy preseason rosters and results aren't
@@ -71,6 +82,20 @@ def _most_recent_sunday(today: date | None = None) -> str:
     today = today or date.today()
     days_since_sunday = (today.weekday() + 1) % 7
     return (today - timedelta(days=days_since_sunday)).strftime("%Y%m%d")
+
+
+def _current_nfl_season(today: date | None = None) -> int:
+    """The NFL season year for `today`: Sep-Dec resolves to this year (the
+    season in progress), Jan-Feb resolves to last year (still finishing
+    that season's playoffs -- the Super Bowl is in February), and Mar-Aug
+    resolves to this year (the upcoming, not-yet-started season). Used by
+    lambda_handler's season-omitted branch below -- unlike
+    _most_recent_sunday, this has to resolve correctly even when there's
+    no recent game to anchor off of (e.g. deep off-season), since it's
+    what lets Terraform/scheduler-nfl-season-schedule-sync.tf seed next
+    season's full schedule before Week 1 has even been played."""
+    today = today or date.today()
+    return today.year if today.month >= 3 else today.year - 1
 
 
 def _object_exists(key: str) -> bool:
@@ -217,6 +242,15 @@ def lambda_handler(event: dict, context) -> dict:
 
         logger.info("Auto-detected season %d type %d week %d", season, season_type, week)
     else:
+        if season is None:
+            # season_type+week given without season -- Terraform/
+            # scheduler-nfl-season-schedule-sync.tf's Map state invokes
+            # this way for every week of the current season, since the
+            # season number is a runtime fact (this has to keep working
+            # correctly every year without a Terraform edit), not
+            # something safe to bake into that state machine's static
+            # week list.
+            season = _current_nfl_season()
         scoreboard = client.get_scoreboard(season, season_type, week)
 
     events = scoreboard.get("events", [])

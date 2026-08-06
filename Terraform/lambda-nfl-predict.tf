@@ -54,9 +54,20 @@ resource "aws_lambda_function" "nfl_predict" {
   package_type  = "Image"
   image_uri     = "${var.ecr_repo_url}:nfl-predict-latest"
   # API Gateway's REST API integration timeout is a hard, non-configurable
-  # 29s ceiling -- any value here at or above that just gets cut off by API
-  # Gateway with a 504 before this timeout would ever fire.
-  timeout = 29
+  # 29s ceiling for the API-Gateway-triggered routes (predictions/events,
+  # predictions/players) -- API Gateway itself cuts those off with a 504
+  # at 29s regardless of what's set here, so this value can't help or hurt
+  # them either way.
+  #
+  # Set well above that anyway because this Lambda is ALSO invoked directly
+  # by EventBridge Scheduler for the ScheduledSeasonProjection path (see
+  # scheduler-nfl-season-projection.tf, predict/handler.py's
+  # _run_scheduled_season_projection) -- that path never goes through API
+  # Gateway at all, and _season_projection() genuinely needs more than 29s
+  # (confirmed live: hit Sandbox.Timedout at exactly 29.00s when this was
+  # still pinned to API Gateway's ceiling). 120s gives comfortable headroom
+  # over the 26-29s this was measured at pre-fix.
+  timeout = 120
   # Lambda CPU scales with memory (roughly linear up to ~1,769MB = 1 vCPU).
   # Bumped from 1024 -- confirmed live via CloudWatch that this Lambda's
   # cold start repeatedly hit Lambda's own non-configurable 10-second

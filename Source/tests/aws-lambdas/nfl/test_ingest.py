@@ -154,6 +154,23 @@ class TestIngestLambdaHandler:
         mock_client.get_scoreboard_for_date.assert_called_once()
         mock_client.get_scoreboard.assert_not_called()
 
+    def test_resolves_season_from_calendar_when_only_week_and_type_given(self):
+        # No "season" key at all -- the shape Terraform/scheduler-nfl-
+        # season-schedule-sync.tf's Map state uses for every week of the
+        # current season.
+        board = _scoreboard([])
+        mock_s3 = _make_s3()
+        mock_client = _make_client(board)
+
+        with patch.object(nfl_ingest, "_s3", mock_s3), \
+             patch.object(nfl_ingest, "NFLClient", return_value=mock_client), \
+             patch.object(nfl_ingest, "EspnCoreApiClient", return_value=_make_core_client()), \
+             patch.object(nfl_ingest, "_current_nfl_season", return_value=2026):
+            nfl_ingest.lambda_handler({"season_type": 2, "week": 3}, None)
+
+        mock_client.get_scoreboard.assert_called_once_with(2026, 2, 3)
+        mock_client.get_scoreboard_for_date.assert_not_called()
+
     def test_skips_preseason_given_explicitly(self):
         mock_s3 = _make_s3()
         mock_client = _make_client(_scoreboard([]))
@@ -257,6 +274,34 @@ class TestMostRecentSunday:
         result = nfl_ingest._most_recent_sunday()
         assert len(result) == 8
         assert result.isdigit()
+
+
+class TestCurrentNflSeason:
+    def test_september_resolves_to_this_year(self):
+        assert nfl_ingest._current_nfl_season(date(2026, 9, 1)) == 2026
+
+    def test_december_resolves_to_this_year(self):
+        assert nfl_ingest._current_nfl_season(date(2026, 12, 31)) == 2026
+
+    def test_january_resolves_to_last_year(self):
+        # Still finishing that season's playoffs.
+        assert nfl_ingest._current_nfl_season(date(2027, 1, 15)) == 2026
+
+    def test_february_resolves_to_last_year(self):
+        # The Super Bowl is in February.
+        assert nfl_ingest._current_nfl_season(date(2027, 2, 8)) == 2026
+
+    def test_march_resolves_to_this_year(self):
+        # The upcoming, not-yet-started season -- this is what lets the
+        # off-season sync seed next season's schedule before Week 1.
+        assert nfl_ingest._current_nfl_season(date(2027, 3, 1)) == 2027
+
+    def test_august_resolves_to_this_year(self):
+        assert nfl_ingest._current_nfl_season(date(2027, 8, 31)) == 2027
+
+    def test_defaults_to_actual_today_when_not_given(self):
+        result = nfl_ingest._current_nfl_season()
+        assert isinstance(result, int)
 
 
 def _competition_event(event_id: str, home_id: str, away_id: str) -> dict:
