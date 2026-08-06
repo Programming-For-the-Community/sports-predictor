@@ -51,7 +51,7 @@ jobs:
     name: Run nfl-ingest tests
     uses: ./.github/workflows/run_python_tests.yml
     with:
-      test_path: 'Source/tests/aws-lambdas/nfl/test_ingest.py'
+      test_path: 'Source/tests/aws-lambdas/nfl/test_ingest.py Source/tests/aws-lambdas/nfl/test_enrichment.py'
       requirements_files: 'Source/aws-lambdas/nfl/ingest/requirements.txt'
 
   test-normalize:
@@ -70,6 +70,7 @@ jobs:
       function_name: ${{ inputs.ingest_function_name || 'sports-predictor-nfl-ingest' }}
       handler_dir: 'Source/aws-lambdas/nfl/ingest'
       library_path: 'Source/library'
+      extra_source_files: 'Source/aws-lambdas/nfl/ingest/enrichment.py'
 
   deploy-normalize:
     name: Deploy nfl-normalize Lambda

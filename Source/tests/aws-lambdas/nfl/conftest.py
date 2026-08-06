@@ -34,6 +34,10 @@ def _load_handler(module_name: str, relative_path: str) -> None:
     sys.modules[module_name] = mod
 
 
+# ingest/'s own enrichment.py has a unique name, unlike handler.py -- a
+# plain sys.path entry is enough for it, same as predict/'s sibling
+# modules below.
+sys.path.insert(0, os.path.join(_src, "aws-lambdas", "nfl", "ingest"))
 _load_handler("nfl_ingest", "aws-lambdas/nfl/ingest/handler.py")
 _load_handler("nfl_normalize", "aws-lambdas/nfl/normalize/handler.py")
 _load_handler("nfl_schedule_sync", "aws-lambdas/nfl/schedule-sync/handler.py")

@@ -4,7 +4,11 @@ model_loader are the real modules (already covered by their own test
 files, test_live_features.py/test_model_loader.py) -- FeatureStorage,
 S3Manager, and the predictions DynamoDBTable are mocked here, since this
 file's only job is verifying lambda_handler's own routing, response
-shaping, and error-to-status-code mapping.
+shaping, and error-to-status-code mapping. event_prediction.py's and
+season_projection.py's own request-shaping logic (the actual prediction
+building) is covered here too, driven through lambda_handler exactly as
+API Gateway/EventBridge would invoke it, rather than as separate unit
+tests against those modules directly.
 
 The nfl_predict module is registered in sys.modules by conftest.py.
 """
@@ -16,6 +20,7 @@ import pytest
 import live_features
 import model_loader
 import nfl_predict
+import season_projection
 import season_simulation
 
 
@@ -189,6 +194,7 @@ class TestErrorMapping:
     def test_event_not_found_is_a_404(self):
         nfl_predict._storage = MagicMock()
         nfl_predict._model_bucket = MagicMock()
+        nfl_predict._predictions_table = MagicMock()
         with patch.object(live_features, "build_live_event_features", side_effect=live_features.EventNotFoundError("nope")):
             response = nfl_predict.lambda_handler(
                 _api_event("/nfl/predictions/events/{event_id}", {"event_id": "missing"}), None,
@@ -199,6 +205,7 @@ class TestErrorMapping:
     def test_malformed_event_is_a_422(self):
         nfl_predict._storage = MagicMock()
         nfl_predict._model_bucket = MagicMock()
+        nfl_predict._predictions_table = MagicMock()
         with patch.object(live_features, "build_live_event_features", side_effect=live_features.MalformedEventError("bad")):
             response = nfl_predict.lambda_handler(
                 _api_event("/nfl/predictions/events/{event_id}", {"event_id": "401547417"}), None,
@@ -209,6 +216,7 @@ class TestErrorMapping:
     def test_no_promoted_model_is_a_503(self):
         nfl_predict._storage = MagicMock()
         nfl_predict._model_bucket = MagicMock()
+        nfl_predict._predictions_table = MagicMock()
         with patch.object(live_features, "build_live_event_features", return_value={}), \
              patch.object(model_loader, "load_current_model", side_effect=model_loader.NoPromotedModelError("none yet")):
             response = nfl_predict.lambda_handler(
@@ -220,6 +228,7 @@ class TestErrorMapping:
     def test_unexpected_exception_is_a_500_not_a_raw_502(self):
         nfl_predict._storage = MagicMock()
         nfl_predict._model_bucket = MagicMock()
+        nfl_predict._predictions_table = MagicMock()
         with patch.object(live_features, "build_live_event_features", side_effect=RuntimeError("boom")):
             response = nfl_predict.lambda_handler(
                 _api_event("/nfl/predictions/events/{event_id}", {"event_id": "401547417"}), None,
@@ -409,7 +418,7 @@ class TestSeasonStandingsInputs:
             "scheduled": [],
         }[status]
 
-        inputs = nfl_predict._season_standings_inputs(storage)
+        inputs = season_projection._season_standings_inputs(storage)
 
         assert inputs["wins"]["12"] == 1
         assert inputs["losses"]["24"] == 1
@@ -423,7 +432,7 @@ class TestSeasonStandingsInputs:
             "scheduled": [_scheduled_event("E2", 2025, "2025-09-21", "12", "7")],
         }[status]
 
-        inputs = nfl_predict._season_standings_inputs(storage)
+        inputs = season_projection._season_standings_inputs(storage)
 
         assert inputs["current_season"] == 2025
         # The 2024 completed game shouldn't leak into this season's record.
@@ -440,7 +449,7 @@ class TestSeasonStandingsInputs:
             "scheduled": [_scheduled_event("E2", 2025, "2025-09-21", "12", "7")],
         }[status]
 
-        inputs = nfl_predict._season_standings_inputs(storage)
+        inputs = season_projection._season_standings_inputs(storage)
 
         assert inputs["current_ratings"] == {}
 
@@ -454,7 +463,7 @@ class TestSeasonStandingsInputs:
             ],
         }[status]
 
-        inputs = nfl_predict._season_standings_inputs(storage)
+        inputs = season_projection._season_standings_inputs(storage)
 
         assert inputs["remaining_games"] == [("12", "7"), ("12", "25")]
         assert inputs["team_next_event"]["12"] == "E1"  # earliest game, not insertion order

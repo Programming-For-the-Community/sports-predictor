@@ -44,6 +44,8 @@ FROM public.ecr.aws/lambda/python:3.12 AS runtime
 
 COPY --from=builder /install ${LAMBDA_TASK_ROOT}
 COPY aws-lambdas/nfl/predict/handler.py aws-lambdas/nfl/predict/live_features.py \
-     aws-lambdas/nfl/predict/model_loader.py aws-lambdas/nfl/predict/season_simulation.py ${LAMBDA_TASK_ROOT}/
+     aws-lambdas/nfl/predict/model_loader.py aws-lambdas/nfl/predict/season_simulation.py \
+     aws-lambdas/nfl/predict/event_prediction.py aws-lambdas/nfl/predict/season_projection.py \
+     ${LAMBDA_TASK_ROOT}/
 
 CMD ["handler.lambda_handler"]
