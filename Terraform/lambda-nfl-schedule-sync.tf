@@ -53,10 +53,37 @@ resource "aws_lambda_function" "nfl_schedule_sync" {
   filename         = data.archive_file.nfl_schedule_sync_placeholder.output_path
   source_code_hash = data.archive_file.nfl_schedule_sync_placeholder.output_base64sha256
 
+  # ESPN_API_ROOT_URL/ESPN_USER_AGENT deliberately DIFFERENT from
+  # var.espn_api_root_url/the shared HttpClient default that ingest,
+  # normalize, and the historical backfill all use -- this Lambda alone
+  # was hitting a deterministic 403 Forbidden from site.api.espn.com on
+  # every retry, even after the fully-sequential/single-rate-limiter
+  # redesign ruled out request volume as the cause (confirmed live, same
+  # error on week 2 of a fresh run). Testing two community-reported
+  # mitigations (see the akeaswaran ESPN hidden-API gist -- 1,000+ stars,
+  # long-running community doc for this exact unofficial API) at once,
+  # scoped to only this Lambda so daily ingest's already-working config
+  # stays untouched:
+  #   - site.web.api.espn.com instead of site.api.espn.com -- same path
+  #     structure (confirmed live: identical query against this host
+  #     returns the same JSON shape -- season/week/events -- that
+  #     site.api.espn.com would), different host, apparently not subject
+  #     to the same block.
+  #   - A plain, honestly-non-browser User-Agent instead of the spoofed-
+  #     Chrome default -- counterintuitive, but one developer's fix was
+  #     exactly this: a UA that CLAIMS to be Chrome without the rest of a
+  #     real browser's fingerprint (TLS handshake, JS execution, full
+  #     header set, cookies) can read as MORE suspicious to some WAFs than
+  #     an honest, low-key non-browser client identifying itself as what
+  #     it actually is.
+  # If this holds up in production, worth promoting to daily ingest too;
+  # if it doesn't, revert this block back to var.espn_api_root_url/the
+  # HttpClient default and look elsewhere.
   environment {
     variables = {
       RAW_BUCKET_NAME   = aws_s3_bucket.raw_data_lake.bucket
-      ESPN_API_ROOT_URL = var.espn_api_root_url
+      ESPN_API_ROOT_URL = "https://site.web.api.espn.com/apis/site/v2/sports"
+      ESPN_USER_AGENT   = "python-requests/2.31.0"
     }
   }
 
