@@ -48,7 +48,8 @@ resource "aws_sfn_state_machine" "nfl_season_schedule_sync" {
     "ForEachWeek": {
       "Type": "Map",
       "ItemsPath": "$.weeks",
-      "MaxConcurrency": 3,
+      "Comment": "Sequential (MaxConcurrency 1), not parallel -- each SyncWeek invocation gets its own independent NFLClient/rate limiter (ingest/handler.py's lambda_handler constructs a fresh one per invocation), so that per-invocation pacing does nothing to prevent several concurrent invocations from bursting ESPN's scoreboard endpoint at once. Confirmed live: MaxConcurrency 3 caused roughly half of the 23 weeks to fail with 'failed after 5 attempts' -- library/http/client.py's own comment already documents ESPN's WAF blocking non-browser-looking traffic, and a burst of simultaneous requests is exactly that shape. This job has no tight time budget (runs once a week), so trading concurrency for reliability costs nothing real.",
+      "MaxConcurrency": 1,
       "ItemProcessor": {
         "ProcessorConfig": {
           "Mode": "INLINE"
@@ -62,6 +63,14 @@ resource "aws_sfn_state_machine" "nfl_season_schedule_sync" {
               "FunctionName": "${aws_lambda_function.nfl_ingest.function_name}",
               "Payload.$": "$"
             },
+            "Retry": [
+              {
+                "ErrorEquals": ["States.ALL"],
+                "IntervalSeconds": 30,
+                "MaxAttempts": 3,
+                "BackoffRate": 2.0
+              }
+            ],
             "Catch": [
               {
                 "ErrorEquals": ["States.ALL"],
