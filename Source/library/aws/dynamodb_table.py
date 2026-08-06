@@ -9,6 +9,7 @@ import logging
 from decimal import Decimal
 
 import boto3
+from botocore.exceptions import ClientError
 
 logger = logging.getLogger(__name__)
 
@@ -61,8 +62,23 @@ class DynamoDBTable:
         self.table_name = table_name
         self._table = boto3.resource("dynamodb", region_name=region).Table(table_name)
 
-    def put_item(self, item: dict) -> None:
-        self._table.put_item(Item=_to_dynamodb_safe(item))
+    def put_item(self, item: dict, condition_expression=None) -> bool:
+        """Writes item, returning True if it was written. condition_expression
+        (a boto3.dynamodb.conditions expression, e.g. Attr(...).lte(...))
+        makes the write conditional -- ConditionalCheckFailedException is
+        treated as an expected "some other write already satisfies this"
+        outcome (returns False), not an error, since DynamoDB has no other
+        way to express "write only if X" atomically."""
+        kwargs = {"Item": _to_dynamodb_safe(item)}
+        if condition_expression is not None:
+            kwargs["ConditionExpression"] = condition_expression
+        try:
+            self._table.put_item(**kwargs)
+            return True
+        except ClientError as exc:
+            if exc.response["Error"]["Code"] == "ConditionalCheckFailedException":
+                return False
+            raise
 
     def get_item(self, key: dict) -> dict | None:
         response = self._table.get_item(Key=key)

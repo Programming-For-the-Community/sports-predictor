@@ -1,13 +1,18 @@
 """
 Unit tests for DynamoDBTable's query/scan pagination and passthrough
-behavior, added for feature engineering's read path. put_item/batch_write
-predate this file and aren't covered here -- get_item is, but only for
-its Decimal-conversion behavior (see TestDecimalConversion), added after
-a real feature-engineering run crashed on json.dumps(Decimal(...)) while
-building player-prop training rows from a live DynamoDB read.
+behavior, added for feature engineering's read path. put_item's plain
+(unconditional) path predates this file and isn't covered here --
+TestConditionalPutItem below covers its ConditionExpression support,
+added for PipelineStorage.upsert_player_entity. get_item is covered, but
+only for its Decimal-conversion behavior (see TestDecimalConversion),
+added after a real feature-engineering run crashed on
+json.dumps(Decimal(...)) while building player-prop training rows from a
+live DynamoDB read.
 """
 from decimal import Decimal
 from unittest.mock import MagicMock, patch
+
+from botocore.exceptions import ClientError
 
 from library.aws.dynamodb_table import DynamoDBTable, _from_dynamodb_safe
 
@@ -29,6 +34,48 @@ def _make_table(
         mock_boto3.resource.return_value.Table.return_value = mock_boto_table
         table = DynamoDBTable("test-table", region="us-east-1")
     return table, mock_boto_table
+
+
+class TestConditionalPutItem:
+    def test_unconditional_write_returns_true(self):
+        table, mock_boto_table = _make_table()
+
+        result = table.put_item({"entity_id": "12"})
+
+        mock_boto_table.put_item.assert_called_once_with(Item={"entity_id": "12"})
+        assert result is True
+
+    def test_condition_expression_is_passed_through(self):
+        table, mock_boto_table = _make_table()
+        condition = object()
+
+        table.put_item({"entity_id": "12"}, condition_expression=condition)
+
+        mock_boto_table.put_item.assert_called_once_with(
+            Item={"entity_id": "12"}, ConditionExpression=condition,
+        )
+
+    def test_conditional_check_failure_returns_false_not_raise(self):
+        table, mock_boto_table = _make_table()
+        mock_boto_table.put_item.side_effect = ClientError(
+            {"Error": {"Code": "ConditionalCheckFailedException", "Message": "boom"}}, "PutItem",
+        )
+
+        result = table.put_item({"entity_id": "12"}, condition_expression=object())
+
+        assert result is False
+
+    def test_other_client_errors_still_propagate(self):
+        table, mock_boto_table = _make_table()
+        mock_boto_table.put_item.side_effect = ClientError(
+            {"Error": {"Code": "ProvisionedThroughputExceededException", "Message": "boom"}}, "PutItem",
+        )
+
+        try:
+            table.put_item({"entity_id": "12"}, condition_expression=object())
+            assert False, "expected ClientError to propagate"
+        except ClientError:
+            pass
 
 
 class TestQuery:

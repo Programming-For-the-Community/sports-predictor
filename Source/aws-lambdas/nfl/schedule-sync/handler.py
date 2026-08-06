@@ -16,12 +16,13 @@ Source/aws-lambdas/nfl/predict/handler.py's season simulation
 events list (library.serving.nfl_reads._next_week_events) had nothing to
 look ahead into.
 
-Deliberately does NOT call ingest/handler.py or its _enrich_events
-(coach/injury/depth-chart data), and does not fetch box scores -- both
-are meaningless months ahead of a game that hasn't been played. Daily
-ingest remains the ONLY source of injury/depth-chart freshness (its own
-docstring documents why that needs daily granularity) and of box-score
-fetches, as each week actually completes.
+Deliberately does NOT call ingest/handler.py or its _enrich_events for
+coach/injury data, and does not fetch box scores -- both are meaningless
+months ahead of a game that hasn't been played. Daily ingest remains the
+ONLY source of coach/injury freshness and of box-score fetches.
+
+Does attach depth charts (library.storage.depth_chart_cache) -- position
+assignments don't need daily refreshing the way injuries do.
 
 ONE shared NFLClient for the whole run, not a separate client per week --
 every one of this run's ~23 requests is paced by the SAME RateLimiter
@@ -37,6 +38,7 @@ from datetime import date
 import boto3
 
 from library.http.nfl import NFLClient
+from library.storage.depth_chart_cache import attach_depth_charts
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger("nfl-schedule-sync")
@@ -88,6 +90,7 @@ def lambda_handler(event: dict, context) -> dict:
         for week in weeks:
             try:
                 scoreboard = client.get_scoreboard(season, season_type, week)
+                attach_depth_charts(scoreboard.get("events", []), client, _s3, RAW_BUCKET)
                 _put_json(f"nfl/scoreboard/{season}/{season_type}/{week}.json", scoreboard)
                 synced += 1
             except Exception:

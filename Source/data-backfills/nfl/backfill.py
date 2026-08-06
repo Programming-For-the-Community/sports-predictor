@@ -84,7 +84,7 @@ def process_game(client: NFLClient, storage: PipelineStorage, season: int, event
     storage.put_raw_json(raw_key, summary)
     stats_items, player_entities = normalize.boxscore_to_player_game_stats(summary)
     for entity in player_entities:
-        storage.upsert_entity(entity)
+        storage.upsert_player_entity(entity)
     storage.write_player_game_stats(stats_items)
     storage.write_team_game_stats(normalize.boxscore_to_team_game_stats(summary))
 

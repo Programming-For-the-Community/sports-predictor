@@ -438,11 +438,13 @@ class TestSeasonStandingsInputs:
         # The 2024 completed game shouldn't leak into this season's record.
         assert inputs["wins"] == {}
 
-    def test_elo_resets_to_default_each_season_ignoring_how_last_one_ended(self):
-        # A blowout in the prior season would have swung team "12"'s Elo
-        # rating well above DEFAULT_STARTING_RATING -- confirm none of that
-        # carries into the new season's current_ratings, which
-        # simulate_season's Monte Carlo starts every remaining game from.
+    def test_elo_carries_over_regressed_into_a_new_season_not_a_hard_reset(self):
+        # A blowout in the prior season swings team "12"'s Elo rating well
+        # above DEFAULT_STARTING_RATING -- confirm the new season's
+        # current_ratings reflects a PARTIAL carryover (regressed toward
+        # the default per compute_elo_ratings' season_carryover), not a
+        # full reset to empty/default the way this used to work, and not
+        # the full unregressed rating either.
         storage = MagicMock()
         storage.get_all_events.side_effect = lambda sport, status: {
             "completed": [_completed_event("E1", 2024, "12", "24", 45, 3)],
@@ -451,7 +453,8 @@ class TestSeasonStandingsInputs:
 
         inputs = season_projection._season_standings_inputs(storage)
 
-        assert inputs["current_ratings"] == {}
+        assert 1500 < inputs["current_ratings"]["12"] < 1531
+        assert 1469 < inputs["current_ratings"]["24"] < 1500
 
     def test_remaining_games_and_team_next_event_reflect_chronological_order(self):
         storage = MagicMock()

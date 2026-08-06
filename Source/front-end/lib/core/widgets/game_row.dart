@@ -26,6 +26,19 @@ String _weekLabel(SportEvent event) {
   return event.week != null ? 'WK ${event.week}' : '';
 }
 
+/// "1:00 PM" in the viewer's own local time -- '' if kickoffTime is
+/// absent (an event ingested before that field existed).
+String _kickoffTimeLabel(SportEvent event) {
+  final kickoff = event.kickoffTime;
+  if (kickoff == null) return '';
+  final local = DateTime.tryParse(kickoff)?.toLocal();
+  if (local == null) return '';
+  final hour12 = local.hour % 12 == 0 ? 12 : local.hour % 12;
+  final minute = local.minute.toString().padLeft(2, '0');
+  final period = local.hour < 12 ? 'AM' : 'PM';
+  return '$hour12:$minute $period';
+}
+
 /// design/FRONTEND_STYLE.md's "Game row (list)" component.
 ///
 /// Scheduled events fetch their own live prediction (one request per
@@ -65,9 +78,13 @@ class GameRow extends ConsumerWidget {
           children: [
             SizedBox(
               width: 56,
-              child: Text(
-                _weekLabel(event),
-                style: AppTextStyles.microLabel(),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(_weekLabel(event), style: AppTextStyles.microLabel()),
+                  if (_kickoffTimeLabel(event).isNotEmpty)
+                    Text(_kickoffTimeLabel(event), style: AppTextStyles.microLabel(color: AppColors.inkMute)),
+                ],
               ),
             ),
             Expanded(

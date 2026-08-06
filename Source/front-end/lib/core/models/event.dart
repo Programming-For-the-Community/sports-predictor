@@ -77,6 +77,7 @@ class SportEvent {
   const SportEvent({
     required this.eventId,
     required this.eventDate,
+    required this.kickoffTime,
     required this.status,
     required this.week,
     required this.round,
@@ -87,6 +88,10 @@ class SportEvent {
 
   final String eventId;
   final String eventDate;
+  // Full ISO 8601 kickoff timestamp -- null for an event ingested before
+  // this field existed. Prefer this over eventDate for sorting/display;
+  // eventDate is day-only.
+  final String? kickoffTime;
   final String status;
   final int? week;
   // Playoff round name (Wild Card/Divisional/Conference Championship/Super
@@ -104,6 +109,7 @@ class SportEvent {
   factory SportEvent.fromJson(Map<String, dynamic> json) => SportEvent(
         eventId: json['event_id'] as String,
         eventDate: json['event_date'] as String? ?? '',
+        kickoffTime: json['kickoff_time'] as String?,
         status: json['status'] as String? ?? '',
         week: json['week'] as int?,
         round: json['round'] as String?,

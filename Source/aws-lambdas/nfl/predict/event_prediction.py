@@ -38,6 +38,14 @@ def model_name_to_prop(target_stat: str) -> str:
     return f"player-prop-{target_stat.replace('_', '-')}"
 
 
+def non_negative(value: float) -> float:
+    """Floors a regression prediction at 0 -- points, sacks, and every
+    player-prop stat are counting stats and can't be negative, but
+    ElasticNet in particular can output one for a low-volume player. Not
+    applied to margin, which is a signed value."""
+    return max(0.0, value)
+
+
 def record_prediction(predictions_table, event_key_value: str, model_key: str, value) -> None:
     predictions_table.put_item({
         "event_key": event_key_value,
@@ -75,7 +83,7 @@ def _score_leader_candidate(
             # out of the candidate's result rather than failing the whole
             # event prediction over a gap in an enhancement field.
             continue
-        value = model_loader.predict(booster, model_card, feature_row)
+        value = non_negative(model_loader.predict(booster, model_card, feature_row))
         result[stat] = value
         # Same model_key shape predict_player_prop already writes for a
         # manually-queried single player+stat -- makes a leader's
@@ -158,6 +166,8 @@ def predict_event(storage, s3, predictions_table, event_id: str) -> dict:
     for target, model_name in SCORE_MODELS.items():
         booster, model_card = model_loader.load_current_model(s3, SPORT, model_name)
         value = model_loader.predict(booster, model_card, feature_row)
+        if target != "margin":
+            value = non_negative(value)
         predictions[target] = {"value": value, "model_version": model_card["version"]}
         record_prediction(predictions_table, event_key_value, f"MODEL#{model_name}#v{model_card['version']}", predictions[target])
 
@@ -175,7 +185,7 @@ def predict_player_prop(storage, s3, predictions_table, event_id: str, entity_id
 
     model_name = model_name_to_prop(target_stat)
     booster, model_card = model_loader.load_current_model(s3, SPORT, model_name)
-    value = model_loader.predict(booster, model_card, feature_row)
+    value = non_negative(model_loader.predict(booster, model_card, feature_row))
 
     entity_key_value = build_entity_key(SPORT, entity_id)
     record_prediction(

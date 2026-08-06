@@ -68,8 +68,8 @@ class TestListEvents:
         storage = MagicMock()
         storage.get_all_events.return_value = [
             {
-                "event_id": "401547417", "event_date": "2025-09-28", "status": "scheduled",
-                "season": 2025, "season_type": 2, "week": 4,
+                "event_id": "401547417", "event_date": "2025-09-28", "kickoff_time": "2025-09-28T20:25Z",
+                "status": "scheduled", "season": 2025, "season_type": 2, "week": 4,
                 "participants": [{"entity_id": "12", "role": "home"}, {"entity_id": "24", "role": "away"}],
             },
         ]
@@ -78,6 +78,7 @@ class TestListEvents:
 
         assert result["sport"] == "nfl"
         assert result["events"][0]["event_id"] == "401547417"
+        assert result["events"][0]["kickoff_time"] == "2025-09-28T20:25Z"
         storage.get_all_events.assert_called_once_with("nfl", status="scheduled")
 
     def test_completed_status_scopes_to_the_most_recent_week_only(self):

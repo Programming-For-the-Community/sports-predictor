@@ -2,9 +2,45 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/data/events_repository.dart';
+import '../../core/models/event.dart';
 import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_text_styles.dart';
 import '../../core/widgets/game_row.dart';
+
+const _weekdayNames = [
+  'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday',
+];
+const _monthNames = [
+  'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
+];
+
+/// kickoffTime sorts/groups correctly down to the minute; eventDate (used
+/// only when an older event has no kickoffTime) is day-only, so games on
+/// the same day but different times can't be told apart by it.
+String _sortKey(SportEvent event) => event.kickoffTime ?? event.eventDate;
+
+/// "Thursday, Sep 11" from an ISO date/timestamp -- falls back to the raw
+/// string for anything that doesn't parse.
+String _dateHeading(String isoDateOrTimestamp) {
+  final date = DateTime.tryParse(isoDateOrTimestamp);
+  if (date == null) return isoDateOrTimestamp;
+  return '${_weekdayNames[date.weekday - 1]}, ${_monthNames[date.month - 1]} ${date.day}';
+}
+
+/// Groups already-sorted events into (heading, events) buckets, one per
+/// distinct calendar day.
+List<(String, List<SportEvent>)> _groupByDate(List<SportEvent> events) {
+  final groups = <(String, List<SportEvent>)>[];
+  for (final event in events) {
+    final heading = _dateHeading(_sortKey(event));
+    if (groups.isNotEmpty && groups.last.$1 == heading) {
+      groups.last.$2.add(event);
+    } else {
+      groups.add((heading, [event]));
+    }
+  }
+  return groups;
+}
 
 class EventListPage extends ConsumerStatefulWidget {
   const EventListPage({super.key, required this.sportId});
@@ -55,11 +91,26 @@ class _EventListPageState extends ConsumerState<EventListPage> {
                 final message = _status == 'scheduled' ? 'Coming Soon' : 'No games found.';
                 return Text(message, style: AppTextStyles.body(color: AppColors.inkSub));
               }
+              // Soonest-first for Upcoming, most-recent-first for
+              // Completed -- both read top-to-bottom as "closest to now
+              // at the top" for their own tab.
+              final sorted = [...list]..sort(
+                  (a, b) => _status == 'scheduled'
+                      ? _sortKey(a).compareTo(_sortKey(b))
+                      : _sortKey(b).compareTo(_sortKey(a)),
+                );
               return Column(
                 children: [
-                  for (final event in list) ...[
-                    GameRow(sport: widget.sportId, event: event),
-                    const SizedBox(height: 12),
+                  for (final (heading, dayEvents) in _groupByDate(sorted)) ...[
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 8),
+                      child: Text(heading.toUpperCase(), style: AppTextStyles.microLabel(color: AppColors.inkSub)),
+                    ),
+                    for (final event in dayEvents) ...[
+                      GameRow(sport: widget.sportId, event: event),
+                      const SizedBox(height: 12),
+                    ],
+                    const SizedBox(height: 8),
                   ],
                 ],
               );

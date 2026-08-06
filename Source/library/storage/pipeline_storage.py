@@ -9,6 +9,8 @@ deployment, not the code.
 """
 import os
 
+from boto3.dynamodb.conditions import Attr
+
 from library.aws.dynamodb_table import DynamoDBTable
 from library.aws.s3_manager import S3Manager
 
@@ -44,6 +46,16 @@ class PipelineStorage:
 
     def upsert_entity(self, item: dict) -> None:
         self._entities_table.put_item(item)
+
+    def upsert_player_entity(self, item: dict) -> None:
+        """Same as upsert_entity, but only overwrites metadata.team_id if
+        item's own metadata.team_id_as_of (see boxscore_to_player_game_stats)
+        is the same age or newer than what's already stored. Silently
+        skips the write otherwise -- no retry, nothing else for the
+        caller to do."""
+        as_of = item["metadata"]["team_id_as_of"]
+        condition = Attr("metadata.team_id_as_of").not_exists() | Attr("metadata.team_id_as_of").lte(as_of)
+        self._entities_table.put_item(item, condition_expression=condition)
 
     def upsert_event(self, item: dict) -> None:
         self._events_table.put_item(item)

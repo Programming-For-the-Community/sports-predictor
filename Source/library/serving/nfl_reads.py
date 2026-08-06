@@ -269,6 +269,7 @@ def list_events(storage, predictions_table, sport: str, status: str) -> dict:
         entry = {
             "event_id": e["event_id"],
             "event_date": e.get("event_date"),
+            "kickoff_time": e.get("kickoff_time"),
             "status": e.get("status"),
             "season": e.get("season"),
             "season_type": e.get("season_type"),

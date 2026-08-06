@@ -7,6 +7,7 @@ void main() {
     final event = SportEvent.fromJson({
       'event_id': '401547417',
       'event_date': '2025-09-28',
+      'kickoff_time': '2025-09-28T20:25Z',
       'status': 'scheduled',
       'week': 4,
       'participants': [
@@ -16,11 +17,27 @@ void main() {
     });
 
     expect(event.eventId, '401547417');
+    expect(event.kickoffTime, '2025-09-28T20:25Z');
     expect(event.home.entityId, 'KC');
     expect(event.away.entityId, 'LAC');
     expect(event.home.result, isNull);
     expect(event.predictionComparison, isNull);
     expect(event.round, isNull);
+  });
+
+  test('kickoffTime is null when absent (an event ingested before it existed)', () {
+    final event = SportEvent.fromJson({
+      'event_id': '401547417',
+      'event_date': '2025-09-28',
+      'status': 'scheduled',
+      'week': 4,
+      'participants': [
+        {'entity_id': 'KC', 'role': 'home'},
+        {'entity_id': 'LAC', 'role': 'away'},
+      ],
+    });
+
+    expect(event.kickoffTime, isNull);
   });
 
   test('parses a playoff round label for a postseason event', () {

@@ -10,6 +10,8 @@ at module level by the handler).
 from datetime import date
 from unittest.mock import MagicMock, patch
 
+from botocore.exceptions import ClientError
+
 import nfl_schedule_sync
 
 
@@ -17,6 +19,18 @@ def _make_client(scoreboard: dict | None = None):
     mock = MagicMock()
     mock.get_scoreboard.return_value = scoreboard or {"events": []}
     return mock
+
+
+def _make_s3():
+    """A stateless S3 mock is enough for most tests here -- they never
+    read anything back. attach_depth_charts's own cache read/write DOES
+    round-trip through get_object/put_object though, so the one test that
+    exercises it (test_attaches_depth_charts_to_seeded_events) needs a
+    real 404-until-written mock, same pattern as
+    tests/library/storage/test_depth_chart_cache.py's own _make_s3."""
+    mock_s3 = MagicMock()
+    mock_s3.get_object.side_effect = ClientError({"Error": {"Code": "404", "Message": "Not Found"}}, "GetObject")
+    return mock_s3
 
 
 class TestLambdaHandler:
@@ -104,13 +118,34 @@ class TestLambdaHandler:
         assert result["season"] == 2027
         assert mock_client.get_scoreboard.call_args_list[0].args[0] == 2027
 
-    def test_never_enriches_or_fetches_box_scores(self):
-        # The entire reason this Lambda exists instead of reusing
-        # ingest/handler.py for every week -- confirm there's no
-        # EspnCoreApiClient/get_summary/get_depth_chart call anywhere in
-        # this module.
+    def test_never_enriches_coach_injury_data_or_fetches_box_scores(self):
+        # Coach/injury enrichment and box scores stay ingest-only --
+        # confirm there's no EspnCoreApiClient/get_summary call anywhere
+        # in this module. Depth charts ARE attached (see
+        # test_attaches_depth_charts_to_seeded_events below).
         assert not hasattr(nfl_schedule_sync, "EspnCoreApiClient")
         assert not hasattr(nfl_schedule_sync, "_enrich_events")
+
+    def test_attaches_depth_charts_to_seeded_events(self):
+        event = {
+            "id": "1",
+            "competitions": [{"competitors": [
+                {"homeAway": "home", "team": {"id": "12"}},
+                {"homeAway": "away", "team": {"id": "7"}},
+            ]}],
+        }
+        mock_s3 = _make_s3()
+        mock_client = _make_client({"events": [event]})
+        mock_client.get_depth_chart.side_effect = lambda team_id: {
+            "positions": {"qb": {"position": {"abbreviation": "QB"}, "athletes": [{"id": f"qb-{team_id}"}]}},
+        }
+
+        with patch.object(nfl_schedule_sync, "_s3", mock_s3), \
+             patch.object(nfl_schedule_sync, "NFLClient", return_value=mock_client):
+            nfl_schedule_sync.lambda_handler({"season": 2026, "season_type": 2, "week": 1}, None)
+
+        assert event["home_depth_chart"] == {"qb": {"position": {"abbreviation": "QB"}, "athletes": [{"id": "qb-12"}]}}
+        assert event["away_depth_chart"] == {"qb": {"position": {"abbreviation": "QB"}, "athletes": [{"id": "qb-7"}]}}
 
     def test_one_weeks_failure_does_not_block_the_rest(self):
         mock_s3 = MagicMock()

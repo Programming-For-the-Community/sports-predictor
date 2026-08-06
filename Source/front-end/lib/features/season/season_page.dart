@@ -21,6 +21,35 @@ const _statLabels = {
   'defensive_sacks': 'Sacks',
 };
 
+// Conventional division reading order -- teams.division (server-side, see
+// season_projection.py) only carries the division name itself, not a
+// display order, so this is what sorts the section headings below.
+const _divisionOrder = [
+  'AFC East', 'AFC North', 'AFC South', 'AFC West',
+  'NFC East', 'NFC North', 'NFC South', 'NFC West',
+];
+
+/// Buckets standings by division, preserving each team's relative order --
+/// standings arrives already sorted by projected_wins descending (see
+/// SeasonProjection's own doc comment), so each division's own bucket is
+/// automatically best-to-worst with no separate sort needed here.
+List<MapEntry<String, List<TeamStanding>>> _groupByDivision(List<TeamStanding> standings) {
+  final byDivision = <String, List<TeamStanding>>{};
+  for (final team in standings) {
+    byDivision.putIfAbsent(team.division ?? 'Other', () => []).add(team);
+  }
+  final divisions = byDivision.keys.toList()
+    ..sort((a, b) {
+      final ai = _divisionOrder.indexOf(a);
+      final bi = _divisionOrder.indexOf(b);
+      if (ai == -1 && bi == -1) return a.compareTo(b);
+      if (ai == -1) return 1;
+      if (bi == -1) return -1;
+      return ai.compareTo(bi);
+    });
+  return [for (final division in divisions) MapEntry(division, byDivision[division]!)];
+}
+
 class SeasonPage extends ConsumerWidget {
   const SeasonPage({super.key, required this.sportId});
 
@@ -43,8 +72,15 @@ class SeasonPage extends ConsumerWidget {
             const SizedBox(height: 24),
             Text('Standings & Playoff Odds', style: AppTextStyles.sectionTitle()),
             const SizedBox(height: 12),
-            _StandingsTable(standings: season.standings),
-            const SizedBox(height: 32),
+            for (final division in _groupByDivision(season.standings)) ...[
+              Padding(
+                padding: const EdgeInsets.only(bottom: 8),
+                child: Text(division.key.toUpperCase(), style: AppTextStyles.microLabel(color: AppColors.cyan)),
+              ),
+              _StandingsTable(standings: division.value),
+              const SizedBox(height: 20),
+            ],
+            const SizedBox(height: 12),
             Text('Player Prop Leaders', style: AppTextStyles.sectionTitle()),
             const SizedBox(height: 12),
             _Leaderboards(leaderboards: season.leaderboards),

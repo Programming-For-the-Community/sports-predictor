@@ -1,6 +1,9 @@
 """
-Unit tests for ingest/enrichment.py -- coach/injury/depth-chart
-enrichment and its S3 TTL cache. All AWS calls are mocked; enrichment.py
+Unit tests for ingest/enrichment.py -- coach/injury enrichment and its S3
+TTL cache. Depth-chart handling itself (home_away_team_ids,
+filter_depth_chart, attach_depth_charts) lives in library.storage.
+depth_chart_cache and is covered in tests/library/storage/
+test_depth_chart_cache.py. All AWS calls here are mocked; enrichment.py
 takes its S3 client and bucket as explicit function arguments rather than
 holding its own, so these tests pass a mock directly instead of patching
 module-level state.
@@ -71,63 +74,6 @@ def _competition_event(event_id: str, home_id: str, away_id: str) -> dict:
             ],
         }],
     }
-
-
-class TestHomeAwayTeamIds:
-    def test_extracts_home_and_away_ids(self):
-        event = _competition_event("1", "12", "24")
-        assert enrichment.home_away_team_ids(event) == ("12", "24")
-
-    def test_none_for_event_with_no_competitions(self):
-        assert enrichment.home_away_team_ids({"id": "1"}) is None
-
-    def test_none_for_event_missing_a_side(self):
-        event = {"id": "1", "competitions": [{"competitors": [{"homeAway": "home", "team": {"id": "12"}}]}]}
-        assert enrichment.home_away_team_ids(event) is None
-
-
-class TestFilterDepthChart:
-    def test_keeps_only_qb_rb_wr_positions(self):
-        raw = {
-            "positions": {
-                "qb": {"position": {"abbreviation": "QB"}, "athletes": [{"id": "1"}]},
-                "lde": {"position": {"abbreviation": "LDE"}, "athletes": [{"id": "2"}]},
-                "wr": {"position": {"abbreviation": "WR"}, "athletes": [{"id": "3"}]},
-            },
-        }
-        result = enrichment.filter_depth_chart(raw)
-        assert set(result.keys()) == {"qb", "wr"}
-
-    def test_empty_when_no_positions_key(self):
-        assert enrichment.filter_depth_chart({}) == {}
-
-    def test_trims_each_athlete_down_to_just_id(self):
-        # ESPN's real athlete objects carry ~289KB/team of link metadata
-        # (player card, stats, splits, game log, news, bio, each with web
-        # + sportscenter:// variants) this project never reads -- only
-        # "id" may survive into what gets stored.
-        raw = {
-            "positions": {
-                "qb": {
-                    "position": {"abbreviation": "QB", "name": "Quarterback", "id": "8"},
-                    "athletes": [{
-                        "id": "1", "uid": "s:20~l:28~a:1", "guid": "abc",
-                        "links": [{"rel": ["playercard"], "href": "https://espn.com/..."}],
-                    }],
-                },
-            },
-        }
-
-        result = enrichment.filter_depth_chart(raw)
-
-        assert result == {"qb": {"position": {"abbreviation": "QB"}, "athletes": [{"id": "1"}]}}
-
-    def test_athlete_missing_id_is_dropped(self):
-        raw = {"positions": {"qb": {"position": {"abbreviation": "QB"}, "athletes": [{"noId": "x"}]}}}
-
-        result = enrichment.filter_depth_chart(raw)
-
-        assert result == {"qb": {"position": {"abbreviation": "QB"}, "athletes": []}}
 
 
 class TestEnrichEvents:

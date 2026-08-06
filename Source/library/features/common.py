@@ -17,6 +17,11 @@ DEFAULT_ROLLING_WINDOW = 5
 DEFAULT_STARTING_RATING = 1500.0
 DEFAULT_K_FACTOR = 20.0
 DEFAULT_HOME_ADVANTAGE = 55.0
+# Fraction of a team's rating DEVIATION from starting_rating that survives
+# a season boundary -- see compute_elo_ratings' own docstring. 2/3 matches
+# FiveThirtyEight's published NFL Elo methodology (revert ratings 1/3 of
+# the way back to the league-average baseline between seasons).
+DEFAULT_SEASON_CARRYOVER = 2 / 3
 # FiveThirtyEight's NFL Elo margin-of-victory constant -- see _mov_multiplier.
 # These are NFL-tuned defaults; a second sport's adapter should pass its own
 # tuned overrides rather than inherit NFL's silently.
@@ -51,6 +56,8 @@ def compute_elo_ratings(
     starting_rating: float = DEFAULT_STARTING_RATING,
     mov_base: float = DEFAULT_MOV_BASE,
     mov_divisor: float = DEFAULT_MOV_DIVISOR,
+    season_carryover: float = DEFAULT_SEASON_CARRYOVER,
+    as_of_season: int | None = None,
 ) -> tuple[dict[str, dict[str, float]], dict[str, float]]:
     """Walks head-to-head events in chronological order, updating a running
     Elo-style rating per team. Returns (pre_game_ratings, current_ratings):
@@ -68,11 +75,34 @@ def compute_elo_ratings(
     margin from). Events without both a home/away role or a final score
     still get a pre-game rating recorded, they just don't produce a
     rating update.
+
+    Crossing a season boundary (detected from each event's own `season`
+    field) regresses every existing rating toward starting_rating by
+    season_carryover. Events with no `season` field never trigger this,
+    so a caller that already scopes its own events to one season is
+    unaffected.
+
+    as_of_season applies one more trailing regression after the loop if
+    the season it names differs from the last event actually processed --
+    covers a caller whose `events` has no completed game yet in the new
+    season for the loop to ever see.
     """
     ratings: dict[str, float] = {}
     pre_game_ratings: dict[str, dict[str, float]] = {}
+    current_season = None
+
+    def _regress(ratings: dict[str, float]) -> dict[str, float]:
+        return {
+            team_id: starting_rating + season_carryover * (rating - starting_rating)
+            for team_id, rating in ratings.items()
+        }
 
     for event in sorted(events, key=lambda e: e["event_date"]):
+        event_season = event.get("season")
+        if event_season is not None and current_season is not None and event_season != current_season:
+            ratings = _regress(ratings)
+        current_season = event_season
+
         participants = event.get("participants", [])
         home = next((p for p in participants if p.get("role") == "home"), None)
         away = next((p for p in participants if p.get("role") == "away"), None)
@@ -113,6 +143,9 @@ def compute_elo_ratings(
 
         ratings[home_id] = home_rating + k_factor * mov_multiplier * (home_actual - expected_home)
         ratings[away_id] = away_rating + k_factor * mov_multiplier * (away_actual - expected_away)
+
+    if as_of_season is not None and current_season is not None and as_of_season != current_season:
+        ratings = _regress(ratings)
 
     return pre_game_ratings, ratings
 

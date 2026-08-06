@@ -82,7 +82,7 @@ def _live_elo_ratings(
     true."""
     if current_ratings is None:
         completed_events = storage.get_all_events(sport)
-        _, current_ratings = compute_elo_ratings(completed_events)
+        _, current_ratings = compute_elo_ratings(completed_events, as_of_season=event.get("season"))
     return {
         event["event_key"]: {
             "home_pre_rating": current_ratings.get(home_id, DEFAULT_STARTING_RATING),
@@ -320,7 +320,7 @@ def build_live_event_leader_candidates(
         raise EventNotFoundError(f"No event found for {event_key}")
     home_id, away_id = _home_away_ids(event)
 
-    _, current_ratings = compute_elo_ratings(storage.get_all_events(sport))
+    _, current_ratings = compute_elo_ratings(storage.get_all_events(sport), as_of_season=event.get("season"))
 
     return {
         "home": _team_leader_candidates(

@@ -41,6 +41,7 @@ class MatchupHero extends StatelessWidget {
                   abbr: away.abbreviation,
                   probability: 1 - prediction.homeWinProbability,
                   favored: !homeFavored,
+                  predictedScore: prediction.awayScore,
                 ),
               ),
               Padding(
@@ -59,6 +60,7 @@ class MatchupHero extends StatelessWidget {
                   abbr: home.abbreviation,
                   probability: prediction.homeWinProbability,
                   favored: homeFavored,
+                  predictedScore: prediction.homeScore,
                 ),
               ),
             ],
@@ -86,11 +88,15 @@ class MatchupHero extends StatelessWidget {
 }
 
 class _TeamColumn extends StatelessWidget {
-  const _TeamColumn({required this.color, required this.abbr, required this.probability, required this.favored});
+  const _TeamColumn({
+    required this.color, required this.abbr, required this.probability, required this.favored,
+    required this.predictedScore,
+  });
   final Color color;
   final String abbr;
   final double probability;
   final bool favored;
+  final double predictedScore;
 
   @override
   Widget build(BuildContext context) {
@@ -109,6 +115,10 @@ class _TeamColumn extends StatelessWidget {
                 child: numeral,
               )
             : Opacity(opacity: 0.6, child: numeral),
+        const SizedBox(height: 4),
+        // Each team's own predicted score -- PRED TOTAL below is the
+        // combined over/under figure, a different stat from this.
+        Text('${predictedScore.round()} PTS', style: AppTextStyles.microLabel(color: AppColors.inkMute)),
       ],
     );
   }

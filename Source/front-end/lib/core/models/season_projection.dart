@@ -3,6 +3,7 @@
 class TeamStanding {
   const TeamStanding({
     required this.teamId,
+    required this.division,
     required this.wins,
     required this.losses,
     required this.projectedWins,
@@ -12,6 +13,11 @@ class TeamStanding {
   });
 
   final String teamId;
+  // "AFC East"/"NFC West"/etc, for grouping standings by division (see
+  // season_page.dart) -- null only for a non-franchise participant that
+  // slipped past is_real_franchise_matchup somehow, not expected in
+  // practice.
+  final String? division;
   final int wins;
   final int losses;
   final double projectedWins;
@@ -21,6 +27,7 @@ class TeamStanding {
 
   factory TeamStanding.fromJson(Map<String, dynamic> json) => TeamStanding(
         teamId: json['team_id'] as String,
+        division: json['division'] as String?,
         wins: json['wins'] as int,
         losses: json['losses'] as int,
         projectedWins: (json['projected_wins'] as num).toDouble(),

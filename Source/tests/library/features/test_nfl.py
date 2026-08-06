@@ -24,7 +24,7 @@ def _event(
     venue_indoor=None, venue_city=None, venue_state=None, weather_temperature=None,
     home_coach_experience=None, away_coach_experience=None,
     home_coach_season_win_pct=None, away_coach_season_win_pct=None,
-    home_injuries=None, away_injuries=None,
+    home_injuries=None, away_injuries=None, kickoff_time=None,
 ):
     home_result = {"score": home_score, "won": home_score is not None and home_score > away_score}
     away_result = {"score": away_score, "won": away_score is not None and away_score > home_score}
@@ -33,6 +33,7 @@ def _event(
         "event_date": event_date,
         "week": week,
         "season_type": season_type,
+        "kickoff_time": kickoff_time,
         "venue_indoor": venue_indoor,
         "venue_city": venue_city,
         "venue_state": venue_state,
@@ -215,6 +216,20 @@ class TestBuildEventFeatures:
 
         assert row["home_elo"] is None
         assert row["elo_diff"] is None
+
+    def test_surfaces_kickoff_hour_utc_from_kickoff_time(self):
+        event = _event("E1", "2025-09-07", "KC", "LAC", 27, 20, kickoff_time="2025-09-07T20:25Z")
+
+        row = build_event_features(event, {}, [], [])
+
+        assert row["kickoff_hour_utc"] == 20
+
+    def test_kickoff_hour_utc_is_none_when_kickoff_time_missing(self):
+        event = _event("E1", "2025-09-07", "KC", "LAC", 27, 20)
+
+        row = build_event_features(event, {}, [], [])
+
+        assert row["kickoff_hour_utc"] is None
 
     def test_surfaces_venue_and_weather_from_the_event(self):
         event = _event(
@@ -545,6 +560,15 @@ class TestBuildPlayerFeatures:
         assert row["week"] == 2
         assert row["season_type"] == 2
         assert row["rest_days"] == 7
+
+    def test_surfaces_kickoff_hour_utc_from_the_event(self):
+        player_game = self._player_game()
+        event = _event("E2", "2025-09-14", "KC", "LAC", 27, 20, kickoff_time="2025-09-14T17:00Z")
+        elo_ratings = {"E2": {"home_pre_rating": 1550.0, "away_pre_rating": 1490.0}}
+
+        row = build_player_features(player_game, [], event, elo_ratings, "2025-09-07")
+
+        assert row["kickoff_hour_utc"] == 17
 
     def test_away_side_gets_away_context_not_home(self):
         # Same event, but team_id now matches the away side -- own/opponent

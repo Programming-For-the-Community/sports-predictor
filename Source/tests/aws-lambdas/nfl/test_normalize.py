@@ -92,7 +92,7 @@ class TestDispatch:
              patch.object(nfl_normalize, "boxscore_to_team_game_stats", return_value=team_stats):
             nfl_normalize._dispatch("test-bucket", "nfl/boxscore/2025/401547603.json")
 
-        mock_storage.upsert_entity.assert_called_once_with(entities[0])
+        mock_storage.upsert_player_entity.assert_called_once_with(entities[0])
         mock_storage.write_player_game_stats.assert_called_once_with(stats)
         mock_storage.write_team_game_stats.assert_called_once_with(team_stats)
 
@@ -106,6 +106,7 @@ class TestDispatch:
             nfl_normalize._dispatch("test-bucket", "nfl/random/unknown.json")
 
         mock_storage.upsert_entity.assert_not_called()
+        mock_storage.upsert_player_entity.assert_not_called()
         mock_storage.upsert_event.assert_not_called()
         mock_storage.write_player_game_stats.assert_not_called()
         mock_storage.write_team_game_stats.assert_not_called()

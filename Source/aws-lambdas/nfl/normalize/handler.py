@@ -81,7 +81,7 @@ def _process_boxscore(payload: dict, key: str) -> None:
     storage = _get_storage()
     stats_items, player_entities = boxscore_to_player_game_stats(payload, SPORT, _COMPOUND_KEY_SPLITS)
     for entity in player_entities:
-        storage.upsert_entity(entity)
+        storage.upsert_player_entity(entity)
     storage.write_player_game_stats(stats_items)
     logger.info(
         "Wrote %d player stat lines and %d player entities from %s",

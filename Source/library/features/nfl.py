@@ -17,6 +17,7 @@ probabilities repeatedly (a model/predict.py concern), built entirely on
 top of the event-level features below.
 """
 import logging
+from datetime import datetime
 
 from library.features.common import (
     DEFAULT_ROLLING_WINDOW,
@@ -100,6 +101,20 @@ def _rate(averages: dict, numerator_key: str, denominator_key: str) -> float | N
     if not denominator:
         return None
     return averages[numerator_key] / denominator
+
+
+def _kickoff_hour_utc(kickoff_time: str | None) -> int | None:
+    """UTC hour (0-23) from an event's kickoff_time -- NFL kickoff slots
+    are scheduled in Eastern time regardless of stadium, so this reliably
+    distinguishes the standard broadcast windows (early/late Sunday, SNF,
+    MNF, TNF) without needing per-stadium timezone conversion. None for a
+    missing or unparseable timestamp."""
+    if not kickoff_time:
+        return None
+    try:
+        return datetime.fromisoformat(kickoff_time.replace("Z", "+00:00")).hour
+    except ValueError:
+        return None
 
 
 # Ordinal, not one-hot -- these statuses form a real severity order (a
@@ -251,6 +266,7 @@ def build_event_features(
         # differently even at the same week number.
         "week": event.get("week"),
         "season_type": event.get("season_type"),
+        "kickoff_hour_utc": _kickoff_hour_utc(event.get("kickoff_time")),
         # venue_indoor and weather_temperature are real feature inputs (a
         # dome neutralizes weather entirely, and cold/heat plausibly
         # affects passing/kicking games); venue_city/venue_state are
@@ -408,6 +424,7 @@ def build_player_features(
         "is_home": is_home,
         "week": event.get("week"),
         "season_type": event.get("season_type"),
+        "kickoff_hour_utc": _kickoff_hour_utc(event.get("kickoff_time")),
         "venue_indoor": event.get("venue_indoor"),
         "weather_temperature": event.get("weather_temperature"),
         "rest_days": rest_days(player_game["event_date"], own_previous_event_date),

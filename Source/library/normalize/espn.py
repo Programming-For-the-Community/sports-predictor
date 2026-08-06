@@ -57,6 +57,10 @@ def scoreboard_event_to_event_item(event: dict, sport: str) -> dict:
         "sport": sport,
         "event_type": "head_to_head",
         "event_date": event["date"][:10],
+        # Full ISO 8601 timestamp, unlike event_date above -- kickoff time
+        # of day is a feature input (see library.features.nfl) and lets
+        # the frontend sort/group by actual kickoff, not just calendar day.
+        "kickoff_time": event["date"],
         "status": _event_status(event.get("status", {})),
         "participants": participants,
         "season": event["season"]["year"],
@@ -188,6 +192,12 @@ def boxscore_to_player_game_stats(
             "name": display_name,
             "metadata": {
                 "team_id": team_id,
+                # This game's own event_date -- lets upsert_player_entity
+                # guard against an out-of-order write (a concurrent backfill
+                # processing games out of chronological order) clobbering a
+                # player's team_id with a stale one. See that method's own
+                # docstring.
+                "team_id_as_of": event_date,
                 "jersey": jersey,
             },
         })

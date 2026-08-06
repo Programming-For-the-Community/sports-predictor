@@ -206,6 +206,16 @@ def _scoreboard_event(event_id="401547417", home_id="12", away_id="24", **extra)
     }
 
 
+class TestScoreboardEventToEventItem:
+    def test_event_date_is_truncated_to_the_date(self):
+        item = scoreboard_event_to_event_item(_scoreboard_event(), "nfl")
+        assert item["event_date"] == "2025-09-28"
+
+    def test_kickoff_time_keeps_the_full_timestamp(self):
+        item = scoreboard_event_to_event_item(_scoreboard_event(), "nfl")
+        assert item["kickoff_time"] == "2025-09-28T20:25Z"
+
+
 class TestScoreboardEventToEventItemCoachInjuryDepthChart:
     """Coach/injuries/depth-chart are attached by ingest's _enrich_events
     (aws-lambdas/nfl/ingest/handler.py) before this function ever sees

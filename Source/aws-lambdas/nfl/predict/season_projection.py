@@ -19,7 +19,7 @@ import live_features
 import model_loader
 import season_simulation
 from library.features.common import compute_elo_ratings
-from library.features.nfl_teams import is_real_franchise_matchup
+from library.features.nfl_teams import TEAM_DIVISIONS, is_real_franchise_matchup
 from library.serving.nfl_reads import _home_and_away
 from library.storage.feature_storage import FeatureStorage
 from library.storage.season_projections import season_projection_key
@@ -48,20 +48,16 @@ def _season_standings_inputs(storage: FeatureStorage) -> dict:
     # one would otherwise count as a real win/loss and Elo update for a
     # non-existent team_id.
     scheduled = [e for e in storage.get_all_events(SPORT, status="scheduled") if is_real_franchise_matchup(e)]
-    completed = [e for e in storage.get_all_events(SPORT, status="completed") if is_real_franchise_matchup(e)]
+    all_completed = [e for e in storage.get_all_events(SPORT, status="completed") if is_real_franchise_matchup(e)]
     current_season = max(
-        (e.get("season") for e in scheduled + completed if e.get("season") is not None), default=None,
+        (e.get("season") for e in scheduled + all_completed if e.get("season") is not None), default=None,
     )
-    # Scoping `completed` to just this season before it reaches
-    # compute_elo_ratings below is what resets every team to
-    # DEFAULT_STARTING_RATING at the start of each season, ignoring how the
-    # previous one ended -- intentional, not incidental: a brand-new season
-    # with no completed games yet passes an empty list in, so
-    # compute_elo_ratings returns empty ratings and simulate_season's own
-    # `ratings.get(team_id, DEFAULT_STARTING_RATING)` fallback applies to
-    # every team equally.
     scheduled = [e for e in scheduled if e.get("season") == current_season]
-    completed = [e for e in completed if e.get("season") == current_season]
+    # Wins/losses/point-differential are scoped to just this season --
+    # standings reset every year regardless of Elo. compute_elo_ratings
+    # below gets the FULL (unscoped) history instead, since it does its
+    # own season-boundary regression (see that function's docstring).
+    completed = [e for e in all_completed if e.get("season") == current_season]
 
     wins: dict[str, int] = {}
     losses: dict[str, int] = {}
@@ -85,7 +81,7 @@ def _season_standings_inputs(storage: FeatureStorage) -> dict:
             if event_date > team_last_completed_date.get(entity_id, ""):
                 team_last_completed_date[entity_id] = event_date
 
-    _, current_ratings = compute_elo_ratings(completed)
+    _, current_ratings = compute_elo_ratings(all_completed, as_of_season=current_season)
 
     scheduled_sorted = sorted(scheduled, key=lambda e: e.get("event_date", ""))
     remaining_games = []
@@ -192,7 +188,8 @@ def _leaderboards(storage: FeatureStorage, s3, model_cache: dict, season_inputs:
             for entity_id in current_totals:
                 feature_row = feature_row_cache.get(entity_id)
                 if feature_row is not None:
-                    per_game_projections[entity_id] = model_loader.predict(booster, model_card, feature_row)
+                    prediction = model_loader.predict(booster, model_card, feature_row)
+                    per_game_projections[entity_id] = event_prediction.non_negative(prediction)
 
         games_remaining = {
             entity_id: season_inputs["games_remaining"].get(player_team.get(entity_id), 0)
@@ -218,10 +215,15 @@ def build_season_projection(storage: FeatureStorage, s3) -> dict:
         season_inputs["remaining_games"], season_inputs["current_ratings"],
     )
 
+    # division lets the frontend group standings by division (see
+    # season_page.dart) without duplicating TEAM_DIVISIONS client-side.
+    # Sorted by projected_wins descending BEFORE grouping, so each
+    # division's own teams are already best-to-worst within their group.
     standings = sorted(
         (
             {
                 "team_id": team_id,
+                "division": TEAM_DIVISIONS.get(team_id),
                 "wins": season_inputs["wins"].get(team_id, 0),
                 "losses": season_inputs["losses"].get(team_id, 0),
                 **projection,

@@ -18,19 +18,13 @@ from botocore.exceptions import ClientError
 
 from library.http.espn_core import EspnCoreApiClient
 from library.http.nfl import NFLClient
+from library.storage.depth_chart_cache import attach_depth_charts, home_away_team_ids
 
 logger = logging.getLogger("nfl-ingest")
-
-# Depth chart positions leader-selection actually needs (see
-# aws-lambdas/nfl/predict/live_features.py) -- not the full ~25-position
-# payload ESPN returns, most of which (offensive line, special teams,
-# individual defensive line spots) this project never predicts for.
-DEPTH_CHART_POSITIONS = {"QB", "RB", "WR"}
 
 # Injuries are deliberately NOT cached (no TTL constant here), they're
 # fetched fresh every run -- see this module's own docstring.
 COACHES_CACHE_TTL_DAYS = 7  # tied to the weekly training cadence
-DEPTH_CHART_CACHE_TTL_DAYS = 3
 
 _T = TypeVar("_T")
 
@@ -75,51 +69,8 @@ def _cached_or_fetch(s3, bucket: str, key: str, ttl_days: int, fetch: Callable[[
     return data
 
 
-def home_away_team_ids(event: dict) -> tuple[str, str] | None:
-    """Same navigation path as scoreboard_event_to_event_item
-    (library/normalize/espn.py) -- competitions[0].competitors[], each
-    carrying its own team id and homeAway role. Returns None for a
-    malformed event rather than raising, since enrichment is best-effort
-    and shouldn't take down the whole ingest run over one bad event."""
-    try:
-        competitors = event["competitions"][0]["competitors"]
-        home = next(c for c in competitors if c.get("homeAway") == "home")
-        away = next(c for c in competitors if c.get("homeAway") == "away")
-        return str(home["team"]["id"]), str(away["team"]["id"])
-    except (KeyError, IndexError, StopIteration):
-        return None
-
-
-def filter_depth_chart(raw_depth_chart: dict) -> dict:
-    """Keeps only the positions leader-selection actually needs (see
-    DEPTH_CHART_POSITIONS), AND trims each retained athlete down to just
-    the id live_features.py's _healthy_athlete_ids actually reads --
-    ESPN's full depth chart response is ~289KB for ONE team, almost
-    entirely per-athlete link metadata (player card, stats, splits, game
-    log, news, bio -- each with a web AND a sportscenter:// deep-link
-    variant) this project never uses. Filters on each entry's
-    position.abbreviation rather than the outer dict key, since that
-    key's exact casing/format is only verified for non-skill-position
-    codes (e.g. "lde" for Left Defensive End)."""
-    positions = raw_depth_chart.get("positions") or {}
-    result = {}
-    for code, entry in positions.items():
-        abbreviation = (entry.get("position") or {}).get("abbreviation")
-        if abbreviation not in DEPTH_CHART_POSITIONS:
-            continue
-        result[code] = {
-            "position": {"abbreviation": abbreviation},
-            "athletes": [{"id": athlete["id"]} for athlete in entry.get("athletes", []) if "id" in athlete],
-        }
-    return result
-
-
 def _coaches_cache_key(season: int) -> str:
     return f"nfl/cache/season-coaches/{season}.json"
-
-
-def _depth_chart_cache_key(team_id: str) -> str:
-    return f"nfl/cache/depth-charts/{team_id}.json"
 
 
 def enrich_events(
@@ -157,21 +108,13 @@ def enrich_events(
         coaches = {}
 
     injuries_by_team: dict[str, list[dict]] = {}
-    depth_chart_by_team: dict[str, dict] = {}
     for team_id in team_ids:
         try:
-            # Not cached, unlike coaches/depth-charts below -- see this
-            # module's own docstring for why injuries need daily freshness.
+            # Not cached, unlike coaches -- see this module's own
+            # docstring for why injuries need daily freshness.
             injuries_by_team[team_id] = core_client.get_team_injuries(team_id)
         except Exception:
             logger.exception("Failed fetching injuries for team %s -- injuries field will be omitted", team_id)
-        try:
-            depth_chart_by_team[team_id] = _cached_or_fetch(
-                s3, bucket, _depth_chart_cache_key(team_id), DEPTH_CHART_CACHE_TTL_DAYS,
-                lambda team_id=team_id: filter_depth_chart(nfl_client.get_depth_chart(team_id)),
-            )
-        except Exception:
-            logger.exception("Failed fetching depth chart for team %s -- depth chart field will be omitted", team_id)
 
     for event in events:
         ids = home_away_team_ids(event)
@@ -182,5 +125,5 @@ def enrich_events(
         event["away_coach"] = coaches.get(away_id)
         event["home_injuries"] = injuries_by_team.get(home_id)
         event["away_injuries"] = injuries_by_team.get(away_id)
-        event["home_depth_chart"] = depth_chart_by_team.get(home_id)
-        event["away_depth_chart"] = depth_chart_by_team.get(away_id)
+
+    attach_depth_charts(events, nfl_client, s3, bucket)
