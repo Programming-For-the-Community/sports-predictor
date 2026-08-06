@@ -18,10 +18,12 @@ particular algorithm turns a feature matrix into a prediction.
 """
 import io
 import logging
+import time
 from datetime import datetime, timezone
 
 import numpy as np
 import pandas as pd
+import pyarrow
 from sklearn.metrics import accuracy_score, log_loss, mean_absolute_error, root_mean_squared_error
 
 from library.aws.s3_manager import S3Manager
@@ -33,6 +35,9 @@ from library.storage.model_artifacts import (
 )
 
 logger = logging.getLogger("model-training")
+
+LOAD_FEATURES_MAX_ATTEMPTS = 3
+LOAD_FEATURES_BACKOFF_SECONDS = 2.0
 
 MODEL_CARD_FILENAME = "model_card.json"
 
@@ -53,8 +58,25 @@ TEST_FRACTION = 0.2
 
 
 def load_features(s3: S3Manager, key: str) -> pd.DataFrame:
-    data = s3.get_bytes(key)
-    return pd.read_parquet(io.BytesIO(data))
+    """Retries on a truncated/corrupt read (pyarrow.ArrowInvalid) rather
+    than failing the whole training run over one bad S3 GET -- seen in
+    practice for several concurrent training tasks reading the same key
+    (Terraform's TrainAllTargets Map state), transient enough that a
+    second attempt reads the object cleanly."""
+    last_exc: Exception | None = None
+    for attempt in range(1, LOAD_FEATURES_MAX_ATTEMPTS + 1):
+        data = s3.get_bytes(key)
+        try:
+            return pd.read_parquet(io.BytesIO(data))
+        except pyarrow.ArrowInvalid as exc:
+            last_exc = exc
+            logger.warning(
+                "Failed reading %s as parquet (attempt %d/%d): %s -- retrying",
+                key, attempt, LOAD_FEATURES_MAX_ATTEMPTS, exc,
+            )
+            if attempt < LOAD_FEATURES_MAX_ATTEMPTS:
+                time.sleep(LOAD_FEATURES_BACKOFF_SECONDS)
+    raise RuntimeError(f"Failed reading {key} as parquet after {LOAD_FEATURES_MAX_ATTEMPTS} attempts") from last_exc
 
 
 def feature_columns(df: pd.DataFrame, non_feature_columns: set[str]) -> list[str]:

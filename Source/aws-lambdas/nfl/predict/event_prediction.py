@@ -46,6 +46,21 @@ def non_negative(value: float) -> float:
     return max(0.0, value)
 
 
+def reconcile_scores(margin: float, home_score: float, away_score: float) -> dict[str, float]:
+    """margin/home_score/away_score are three independently trained
+    regressors -- nothing constrains raw home_score - away_score to equal
+    the raw margin prediction. Splits the discrepancy evenly between
+    home_score and away_score, preserving their combined total, so the
+    reconciled pair agrees exactly with margin instead of the two
+    predictions silently disagreeing on which team is even favored."""
+    adjustment = ((home_score - away_score) - margin) / 2
+    return {
+        "margin": margin,
+        "home_score": non_negative(home_score - adjustment),
+        "away_score": non_negative(away_score + adjustment),
+    }
+
+
 def record_prediction(predictions_table, event_key_value: str, model_key: str, value) -> None:
     predictions_table.put_item({
         "event_key": event_key_value,
@@ -163,12 +178,17 @@ def predict_event(storage, s3, predictions_table, event_id: str) -> dict:
         f"MODEL#{WIN_PROBABILITY_MODEL}#v{model_card['version']}", predictions["win_probability"],
     )
 
+    raw_values = {}
+    score_model_cards = {}
     for target, model_name in SCORE_MODELS.items():
         booster, model_card = model_loader.load_current_model(s3, SPORT, model_name)
-        value = model_loader.predict(booster, model_card, feature_row)
-        if target != "margin":
-            value = non_negative(value)
-        predictions[target] = {"value": value, "model_version": model_card["version"]}
+        raw_values[target] = model_loader.predict(booster, model_card, feature_row)
+        score_model_cards[target] = model_card
+
+    reconciled = reconcile_scores(raw_values["margin"], raw_values["home_score"], raw_values["away_score"])
+    for target, model_name in SCORE_MODELS.items():
+        model_card = score_model_cards[target]
+        predictions[target] = {"value": reconciled[target], "model_version": model_card["version"]}
         record_prediction(predictions_table, event_key_value, f"MODEL#{model_name}#v{model_card['version']}", predictions[target])
 
     return {

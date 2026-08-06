@@ -50,14 +50,21 @@ List<MapEntry<String, List<TeamStanding>>> _groupByDivision(List<TeamStanding> s
   return [for (final division in divisions) MapEntry(division, byDivision[division]!)];
 }
 
-class SeasonPage extends ConsumerWidget {
+class SeasonPage extends ConsumerStatefulWidget {
   const SeasonPage({super.key, required this.sportId});
 
   final String sportId;
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final projection = ref.watch(seasonProjectionProvider(sportId));
+  ConsumerState<SeasonPage> createState() => _SeasonPageState();
+}
+
+class _SeasonPageState extends ConsumerState<SeasonPage> {
+  String _tab = 'standings';
+
+  @override
+  Widget build(BuildContext context) {
+    final projection = ref.watch(seasonProjectionProvider(widget.sportId));
 
     return SingleChildScrollView(
       padding: const EdgeInsets.all(24),
@@ -69,26 +76,90 @@ class SeasonPage extends ConsumerWidget {
               season.season != null ? '${season.season} Season' : 'Season',
               style: AppTextStyles.pageH1(),
             ),
-            const SizedBox(height: 24),
-            Text('Standings & Playoff Odds', style: AppTextStyles.sectionTitle()),
-            const SizedBox(height: 12),
-            for (final division in _groupByDivision(season.standings)) ...[
-              Padding(
-                padding: const EdgeInsets.only(bottom: 8),
-                child: Text(division.key.toUpperCase(), style: AppTextStyles.microLabel(color: AppColors.cyan)),
-              ),
-              _StandingsTable(standings: division.value),
-              const SizedBox(height: 20),
-            ],
-            const SizedBox(height: 12),
-            Text('Player Prop Leaders', style: AppTextStyles.sectionTitle()),
-            const SizedBox(height: 12),
-            _Leaderboards(leaderboards: season.leaderboards),
+            const SizedBox(height: 20),
+            // Standings and player props each stand alone (a toggle, not
+            // both stacked on one page) -- both are already tall multi-
+            // column sections on their own, and stacking them turns this
+            // into a very long scroll for no reason once a viewer only
+            // wants one or the other.
+            Row(
+              children: [
+                _StatusToggle(
+                  label: 'Standings & Playoff Odds',
+                  selected: _tab == 'standings',
+                  onTap: () => setState(() => _tab = 'standings'),
+                ),
+                const SizedBox(width: 8),
+                _StatusToggle(
+                  label: 'Player Prop Leaders',
+                  selected: _tab == 'props',
+                  onTap: () => setState(() => _tab = 'props'),
+                ),
+              ],
+            ),
+            const SizedBox(height: 20),
+            if (_tab == 'standings')
+              // Fixed-width division cards in a Wrap -- multiple divisions
+              // per row on a wide screen, same pattern the leaderboard
+              // cards use, instead of one division per full-width row.
+              Wrap(
+                spacing: 20,
+                runSpacing: 20,
+                children: [
+                  for (final division in _groupByDivision(season.standings))
+                    SizedBox(
+                      width: 480,
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Padding(
+                            padding: const EdgeInsets.only(bottom: 8),
+                            child: Text(division.key.toUpperCase(), style: AppTextStyles.microLabel(color: AppColors.cyan)),
+                          ),
+                          _StandingsTable(standings: division.value),
+                        ],
+                      ),
+                    ),
+                ],
+              )
+            else
+              _Leaderboards(leaderboards: season.leaderboards),
           ],
         ),
         loading: () => const Center(child: Padding(padding: EdgeInsets.all(40), child: CircularProgressIndicator())),
         error: (error, _) =>
             Text('Couldn\'t load season projection: $error', style: AppTextStyles.body(color: AppColors.neg)),
+      ),
+    );
+  }
+}
+
+// Same toggle-pill shape as events/event_list_page.dart's own
+// _StatusToggle -- not shared code between the two pages, but the
+// smallest of the two features (StatelessWidget wrapping InkWell) doesn't
+// carry its own weight as a cross-page core/widgets export yet.
+class _StatusToggle extends StatelessWidget {
+  const _StatusToggle({required this.label, required this.selected, required this.onTap});
+  final String label;
+  final bool selected;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(999),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+        decoration: BoxDecoration(
+          color: selected ? AppColors.surface : null,
+          border: Border.all(color: selected ? AppColors.cyan : AppColors.border),
+          borderRadius: BorderRadius.circular(999),
+        ),
+        child: Text(
+          label,
+          style: AppTextStyles.microLabel(color: selected ? AppColors.cyan : AppColors.inkMute),
+        ),
       ),
     );
   }

@@ -109,12 +109,47 @@ def _season_standings_inputs(storage: FeatureStorage) -> dict:
     }
 
 
+def _season_wide_candidate_rows(storage: FeatureStorage, season_inputs: dict) -> dict[str, list[dict]]:
+    """Every candidate likely to lead at least one team in a tracked stat
+    category (passing/receiving/rushing/sacks), sourced from each team's
+    own next scheduled event's depth chart via
+    live_features.build_live_event_leader_candidates -- run once per
+    unique next event, not per team, since the two teams playing each
+    other share one."""
+    next_event_keys = {key for key in season_inputs["team_next_event"].values() if key}
+    rows_by_category: dict[str, list[dict]] = {"passing": [], "receiving": [], "rushing": [], "sacks": []}
+
+    def _candidates_for_event(event_key: str) -> dict | None:
+        try:
+            return live_features.build_live_event_leader_candidates(storage, SPORT, event_key)
+        except Exception:
+            logger.exception("Failed building season-wide candidates for %s", event_key)
+            return None
+
+    with ThreadPoolExecutor(max_workers=max(1, min(len(next_event_keys), 10))) as executor:
+        for candidates in executor.map(_candidates_for_event, next_event_keys):
+            if candidates is None:
+                continue
+            for side in ("home", "away"):
+                team_candidates = candidates[side]
+                if team_candidates["passing"]:
+                    rows_by_category["passing"].append(team_candidates["passing"][0])
+                rows_by_category["receiving"].extend(team_candidates["receiving"])
+                rows_by_category["rushing"].extend(team_candidates["rushing"])
+                rows_by_category["sacks"].extend(team_candidates["sacks"])
+
+    return rows_by_category
+
+
 def _leaderboards(storage: FeatureStorage, s3, model_cache: dict, season_inputs: dict) -> dict:
     """Top-10 season-long leaderboard per tracked player-prop stat,
     projected as current season-to-date total + (their own model's
     prediction for their team's NEXT scheduled game * games remaining) --
     see season_simulation.project_leaderboard's own docstring for why
-    this is a flat estimate rather than a per-opponent simulation."""
+    this is a flat estimate rather than a per-opponent simulation. With
+    zero current-season total (before Week 1, or a candidate who simply
+    hasn't recorded this particular stat yet), this reduces to a pure
+    full-season projection, so the same formula covers both cases."""
     season_player_stats = [
         row for row in storage.get_all_player_game_stats(SPORT)
         if row.get("event_key") in season_inputs["completed_event_keys"]
@@ -124,10 +159,6 @@ def _leaderboards(storage: FeatureStorage, s3, model_cache: dict, season_inputs:
     for row in season_player_stats:
         player_team.setdefault(row["entity_id"], row.get("team_id"))
 
-    # Current-season totals for every stat, computed first and entirely
-    # from season_player_stats (already fetched once above) -- no storage
-    # calls here, so the full cross-stat candidate set is known before any
-    # live feature row gets built below.
     current_totals_by_stat: dict[str, dict[str, float]] = {stat: {} for stat in PLAYER_PROP_STATS}
     for row in season_player_stats:
         entity_id = row["entity_id"]
@@ -138,18 +169,26 @@ def _leaderboards(storage: FeatureStorage, s3, model_cache: dict, season_inputs:
                 totals = current_totals_by_stat[stat]
                 totals[entity_id] = totals.get(entity_id, 0) + value
 
-    # A candidate who records more than one tracked stat (nearly every real
-    # QB shows up in both passing_yards and passing_touchdowns; a
-    # dual-threat QB or receiving RB shows up across even more) still needs
-    # only one build_live_player_features call: it returns every stat
-    # category's rolling averages in one row regardless of which model
-    # later reads it. Building this UNION of candidates once, up front, and
-    # reusing the same row for every stat's projection avoids re-fetching
-    # get_event/get_entity/get_player_game_stats once per stat for the same
-    # repeat players, on top of what current_ratings/team_last_event_dates
-    # below already save (those two, reused from _season_standings_inputs,
-    # avoid a separate full-history Elo recompute per candidate).
-    all_candidates = {entity_id for totals in current_totals_by_stat.values() for entity_id in totals}
+    # feature_row_cache pre-populated from the depth-chart-sourced rows --
+    # build_live_event_leader_candidates already returns a full live
+    # feature row per candidate, so those never need a separate
+    # build_live_player_features call the way a this-season-stats-only
+    # candidate below still does.
+    feature_row_cache: dict[str, dict] = {}
+    stat_candidates: dict[str, set[str]] = {stat: set(current_totals_by_stat[stat]) for stat in PLAYER_PROP_STATS}
+    for category, rows in _season_wide_candidate_rows(storage, season_inputs).items():
+        for row in rows:
+            entity_id = row["entity_id"]
+            feature_row_cache[entity_id] = row
+            player_team.setdefault(entity_id, row.get("team_id"))
+            for stat in event_prediction.LEADER_CATEGORY_STATS[category]:
+                stat_candidates[stat].add(entity_id)
+
+    # Any candidate not already covered above (this-season stats exist,
+    # but they weren't in their team's depth-chart snapshot -- a backup
+    # who got real volume, say) still needs its own feature row built.
+    all_candidates = {entity_id for entity_ids in stat_candidates.values() for entity_id in entity_ids}
+    remaining = all_candidates - feature_row_cache.keys()
 
     def _build_row(entity_id: str) -> tuple[str, dict | None]:
         next_event_key = season_inputs["team_next_event"].get(player_team.get(entity_id))
@@ -168,15 +207,15 @@ def _leaderboards(storage: FeatureStorage, s3, model_cache: dict, season_inputs:
             logger.exception("Failed to build live features for %s", entity_id)
             return entity_id, None
 
-    feature_row_cache: dict[str, dict] = {}
-    with ThreadPoolExecutor(max_workers=max(1, min(len(all_candidates), 10))) as executor:
-        for entity_id, feature_row in executor.map(_build_row, all_candidates):
+    with ThreadPoolExecutor(max_workers=max(1, min(len(remaining), 10))) as executor:
+        for entity_id, feature_row in executor.map(_build_row, remaining):
             if feature_row is not None:
                 feature_row_cache[entity_id] = feature_row
 
     leaderboards: dict[str, list[dict]] = {}
     for stat in PLAYER_PROP_STATS:
-        current_totals = current_totals_by_stat[stat]
+        candidates = stat_candidates[stat]
+        current_totals = {entity_id: current_totals_by_stat[stat].get(entity_id, 0.0) for entity_id in candidates}
         model_name = event_prediction.model_name_to_prop(stat)
         try:
             booster, model_card = event_prediction.get_cached_model(model_cache, s3, model_name)
@@ -185,7 +224,7 @@ def _leaderboards(storage: FeatureStorage, s3, model_cache: dict, season_inputs:
 
         per_game_projections: dict[str, float] = {}
         if booster is not None:
-            for entity_id in current_totals:
+            for entity_id in candidates:
                 feature_row = feature_row_cache.get(entity_id)
                 if feature_row is not None:
                     prediction = model_loader.predict(booster, model_card, feature_row)
@@ -193,7 +232,7 @@ def _leaderboards(storage: FeatureStorage, s3, model_cache: dict, season_inputs:
 
         games_remaining = {
             entity_id: season_inputs["games_remaining"].get(player_team.get(entity_id), 0)
-            for entity_id in current_totals
+            for entity_id in candidates
         }
 
         top = season_simulation.project_leaderboard(current_totals, per_game_projections, games_remaining, top_n=10)

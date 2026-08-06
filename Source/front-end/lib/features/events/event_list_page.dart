@@ -100,6 +100,7 @@ class _EventListPageState extends ConsumerState<EventListPage> {
                       : _sortKey(b).compareTo(_sortKey(a)),
                 );
               return Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   for (final (heading, dayEvents) in _groupByDate(sorted)) ...[
                     Padding(
