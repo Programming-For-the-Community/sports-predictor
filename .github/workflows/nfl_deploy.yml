@@ -132,6 +132,20 @@ jobs:
     with:
       function_name: ${{ needs.infra.outputs.nfl_predict_read_function_name }}
 
+  # nfl-live-scores -- GET /nfl/live-scores plus the EventBridge-triggered
+  # cache refresh (Terraform/lambda-nfl-live-scores.tf). Same reusable-
+  # workflow reasoning as predict_read_deploy above.
+  live_scores_deploy:
+    name: NFL live-scores (test + deploy)
+    needs: [approval, infra]
+    if: |
+      always() &&
+      (needs.approval.result == 'success' || needs.approval.result == 'skipped')
+    uses: ./.github/workflows/nfl_live_scores_deploy.yml
+    secrets: inherit
+    with:
+      function_name: ${{ needs.infra.outputs.nfl_live_scores_function_name }}
+
   data_pipeline:
     name: Data pipeline
     needs: infra

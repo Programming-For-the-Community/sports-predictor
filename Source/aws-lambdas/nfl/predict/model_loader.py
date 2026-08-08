@@ -15,12 +15,30 @@ change from one retrain to the next. See
 Source/aws-lambdas/nfl/predict/requirements.txt for the scikit-learn/
 joblib/pandas this pulls in on top of xgboost as a result.
 """
+import time
+
 import pandas as pd
 
 from library.ml.model_types import ADAPTERS
 from library.storage.model_artifacts import current_version_key, model_artifact_key
 
 MODEL_CARD_FILENAME = "model_card.json"
+
+# Module-level, not per-request -- a Lambda execution environment reuses
+# this module's state across every invocation it stays warm for (AWS's
+# own documented behavior, not something this code has to opt into), so
+# a plain dict here means one promoted model gets fetched from S3 once
+# per warm container instead of once per request. GameRow's own docstring
+# (Source/front-end/lib/core/widgets/game_row.dart) already notes the
+# upcoming-games list fires one prediction request per visible row
+# (~16/week) -- each of those was independently re-fetching all four
+# models (win-probability, margin, home-score, away-score) from scratch
+# before this cache existed. Keyed by (sport, model_name); TTL'd rather
+# than cached forever so a newly-promoted model (weekly retrain cadence)
+# doesn't stay stale for a container's whole potentially-hours-long warm
+# lifetime under sustained traffic.
+_MODEL_CACHE_TTL_SECONDS = 300
+_model_cache: dict[tuple[str, str], tuple[float, tuple]] = {}
 
 
 class NoPromotedModelError(Exception):
@@ -45,7 +63,21 @@ def load_current_model(s3, sport: str, model_name: str):
     order, since neither an XGBoost Booster nor an sklearn Pipeline has
     any other way to know what a raw byte-loaded artifact's columns
     mean. model_card['algorithm'] picks which adapter deserializes the
-    artifact -- see library.ml.model_types.ADAPTERS."""
+    artifact -- see library.ml.model_types.ADAPTERS.
+
+    Cached at module level for _MODEL_CACHE_TTL_SECONDS -- see this
+    module's own top-of-file comment. NoPromotedModelError/
+    UnknownAlgorithmError are never cached -- both are rare, and caching
+    a negative result would mean a model that gets promoted mid-TTL
+    stays invisible to a warm container for up to _MODEL_CACHE_TTL_SECONDS
+    longer than it needs to."""
+    cache_key = (sport, model_name)
+    cached = _model_cache.get(cache_key)
+    if cached is not None:
+        cached_at, result = cached
+        if time.monotonic() - cached_at < _MODEL_CACHE_TTL_SECONDS:
+            return result
+
     pointer_key = current_version_key(sport, model_name)
     if not s3.object_exists(pointer_key):
         raise NoPromotedModelError(f"No promoted version exists for {sport}/{model_name}")
@@ -58,7 +90,9 @@ def load_current_model(s3, sport: str, model_name: str):
 
     model_bytes = s3.get_bytes(model_artifact_key(sport, model_name, version, adapter.artifact_filename))
     estimator = adapter.deserialize(model_bytes)
-    return estimator, model_card
+    result = (estimator, model_card)
+    _model_cache[cache_key] = (time.monotonic(), result)
+    return result
 
 
 def predict(estimator, model_card: dict, feature_row: dict) -> float:

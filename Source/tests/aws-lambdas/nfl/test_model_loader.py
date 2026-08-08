@@ -12,7 +12,7 @@ to avoid an expensive hyperparameter search running by accident; this is
 a handful of rows that takes milliseconds and is the actual thing under
 test.
 """
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pandas as pd
 import pytest
@@ -20,6 +20,19 @@ import xgboost as xgb
 
 import model_loader
 from library.ml.model_types import LogisticRegressionAdapter
+
+
+@pytest.fixture(autouse=True)
+def _clear_model_cache():
+    """model_loader._model_cache is module-level by design (see its own
+    top-of-file comment -- it has to survive across requests within a
+    warm Lambda container), which means it'd otherwise survive across
+    tests too: every test in this file loads "nfl"/"win-probability", so
+    without this, whichever test runs first would populate the cache and
+    every test after it would silently skip its own mocked S3 calls."""
+    model_loader._model_cache.clear()
+    yield
+    model_loader._model_cache.clear()
 
 
 def _tiny_booster_bytes(feature_columns):
@@ -84,6 +97,60 @@ class TestLoadCurrentModel:
 
         assert hasattr(estimator, "predict_proba")
         s3.get_bytes.assert_called_once_with("nfl/win-probability/v8/model.joblib")
+
+    def test_a_second_call_within_the_ttl_does_not_hit_s3_again(self):
+        feature_columns = ["home_elo", "away_elo"]
+        s3 = MagicMock()
+        s3.object_exists.return_value = True
+        s3.get_json.side_effect = [
+            {"version": 6},
+            {"algorithm": "xgboost", "feature_columns": feature_columns},
+        ]
+        s3.get_bytes.return_value = _tiny_booster_bytes(feature_columns)
+
+        first = model_loader.load_current_model(s3, "nfl", "win-probability")
+        second = model_loader.load_current_model(s3, "nfl", "win-probability")
+
+        assert first is second
+        s3.get_bytes.assert_called_once()
+        s3.object_exists.assert_called_once()
+
+    def test_a_call_after_the_ttl_expires_hits_s3_again(self):
+        feature_columns = ["home_elo", "away_elo"]
+        s3 = MagicMock()
+        s3.object_exists.return_value = True
+        s3.get_json.side_effect = [
+            {"version": 6},
+            {"algorithm": "xgboost", "feature_columns": feature_columns},
+            {"version": 7},
+            {"algorithm": "xgboost", "feature_columns": feature_columns},
+        ]
+        s3.get_bytes.return_value = _tiny_booster_bytes(feature_columns)
+
+        with patch("model_loader.time.monotonic", side_effect=[0.0, 0.0]):
+            model_loader.load_current_model(s3, "nfl", "win-probability")
+        with patch("model_loader.time.monotonic", side_effect=[model_loader._MODEL_CACHE_TTL_SECONDS + 1, 0.0]):
+            model_loader.load_current_model(s3, "nfl", "win-probability")
+
+        assert s3.get_bytes.call_count == 2
+        assert s3.object_exists.call_count == 2
+
+    def test_different_model_names_are_cached_independently(self):
+        feature_columns = ["home_elo", "away_elo"]
+        s3 = MagicMock()
+        s3.object_exists.return_value = True
+        s3.get_json.side_effect = [
+            {"version": 6},
+            {"algorithm": "xgboost", "feature_columns": feature_columns},
+            {"version": 3},
+            {"algorithm": "xgboost", "feature_columns": feature_columns},
+        ]
+        s3.get_bytes.return_value = _tiny_booster_bytes(feature_columns)
+
+        model_loader.load_current_model(s3, "nfl", "win-probability")
+        model_loader.load_current_model(s3, "nfl", "margin")
+
+        assert s3.get_bytes.call_count == 2
 
     def test_raises_on_an_algorithm_this_lambda_doesnt_recognize(self):
         s3 = MagicMock()

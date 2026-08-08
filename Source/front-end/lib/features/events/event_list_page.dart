@@ -1,8 +1,12 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/data/events_repository.dart';
+import '../../core/data/live_scores_repository.dart';
 import '../../core/models/event.dart';
+import '../../core/models/live_score.dart';
 import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_text_styles.dart';
 import '../../core/widgets/game_row.dart';
@@ -53,10 +57,44 @@ class EventListPage extends ConsumerStatefulWidget {
 
 class _EventListPageState extends ConsumerState<EventListPage> {
   String _status = 'scheduled';
+  Timer? _liveScoresTimer;
+
+  @override
+  void initState() {
+    super.initState();
+    _scheduleLiveScoresPoll();
+  }
+
+  @override
+  void dispose() {
+    _liveScoresTimer?.cancel();
+    super.dispose();
+  }
+
+  // Only while showing Upcoming -- a live game is never relevant on the
+  // Completed tab. Torn down and rebuilt on every status change (see
+  // _setStatus) so switching to Completed actually stops the ticking
+  // rather than just hiding its effect.
+  void _scheduleLiveScoresPoll() {
+    _liveScoresTimer?.cancel();
+    if (_status != 'scheduled') return;
+    _liveScoresTimer = Timer.periodic(const Duration(seconds: 30), (_) {
+      ref.invalidate(liveScoresProvider(widget.sportId));
+    });
+  }
+
+  void _setStatus(String status) {
+    setState(() => _status = status);
+    _scheduleLiveScoresPoll();
+  }
 
   @override
   Widget build(BuildContext context) {
     final events = ref.watch(eventsListProvider((sport: widget.sportId, status: _status)));
+    // Only fetched/watched for the Upcoming tab -- see _scheduleLiveScoresPoll.
+    final liveScores = _status == 'scheduled'
+        ? ref.watch(liveScoresProvider(widget.sportId)).value ?? const <String, LiveEventState>{}
+        : const <String, LiveEventState>{};
 
     return SingleChildScrollView(
       padding: const EdgeInsets.all(24),
@@ -68,17 +106,24 @@ class _EventListPageState extends ConsumerState<EventListPage> {
               _StatusToggle(
                 label: 'Upcoming',
                 selected: _status == 'scheduled',
-                onTap: () => setState(() => _status = 'scheduled'),
+                onTap: () => _setStatus('scheduled'),
               ),
               const SizedBox(width: 8),
               _StatusToggle(
                 label: 'Completed',
                 selected: _status == 'completed',
-                onTap: () => setState(() => _status = 'completed'),
+                onTap: () => _setStatus('completed'),
               ),
             ],
           ),
-          const SizedBox(height: 20),
+          const SizedBox(height: 8),
+          // Stated once for the whole list rather than repeated on every
+          // GameRow -- every kickoff time below is already in this same
+          // local time (game_row.dart's own _kickoffTimeLabel), so
+          // repeating it per row would just be noise, and there's no
+          // spare width in that row's tight time column for it anyway.
+          Text('Times shown in your local time (${localTimezoneLabel()})', style: AppTextStyles.microLabel()),
+          const SizedBox(height: 12),
           events.when(
             data: (list) {
               if (list.isEmpty) {
@@ -108,7 +153,7 @@ class _EventListPageState extends ConsumerState<EventListPage> {
                       child: Text(heading.toUpperCase(), style: AppTextStyles.microLabel(color: AppColors.inkSub)),
                     ),
                     for (final event in dayEvents) ...[
-                      GameRow(sport: widget.sportId, event: event),
+                      GameRow(sport: widget.sportId, event: event, liveState: liveScores[event.eventId]),
                       const SizedBox(height: 12),
                     ],
                     const SizedBox(height: 8),

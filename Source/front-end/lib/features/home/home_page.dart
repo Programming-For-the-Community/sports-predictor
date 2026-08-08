@@ -7,6 +7,7 @@ import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_text_styles.dart';
 import '../../core/widgets/brand_mark.dart';
 import '../../core/widgets/page_glow.dart';
+import '../../core/widgets/responsive.dart';
 import '../../core/widgets/sport_card.dart';
 
 class HomePage extends ConsumerWidget {
@@ -29,8 +30,17 @@ class HomePage extends ConsumerWidget {
                     children: [
                       const BrandMark(),
                       const SizedBox(width: 12),
-                      Text('sports-predictor', style: AppTextStyles.sectionTitle()),
-                      const Spacer(),
+                      // Expanded, not a bare Text -- on a narrow (mobile)
+                      // viewport the title needs to be able to give
+                      // ground and ellipsize rather than push the sign-out
+                      // button past the edge of the screen.
+                      Expanded(
+                        child: Text(
+                          'sports-predictor',
+                          style: AppTextStyles.sectionTitle(),
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
                       TextButton(
                         onPressed: () => ref.read(authRepositoryProvider.notifier).logout(),
                         child: Text('Sign out', style: AppTextStyles.body(color: AppColors.inkSub)),
@@ -40,13 +50,18 @@ class HomePage extends ConsumerWidget {
                   const SizedBox(height: 40),
                   Text('Sports', style: AppTextStyles.pageH1()),
                   const SizedBox(height: 24),
-                  Wrap(
-                    spacing: 20,
-                    runSpacing: 20,
-                    children: [
-                      for (final sport in kSports)
-                        SizedBox(width: 340, child: SportCard(sport: sport)),
-                    ],
+                  LayoutBuilder(
+                    builder: (context, constraints) {
+                      final width = cardWidth(340, constraints.maxWidth);
+                      return Wrap(
+                        spacing: 20,
+                        runSpacing: 20,
+                        children: [
+                          for (final sport in kSports)
+                            SizedBox(width: width, child: SportCard(sport: sport)),
+                        ],
+                      );
+                    },
                   ),
                 ],
               ),

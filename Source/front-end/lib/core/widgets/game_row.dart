@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 
 import '../data/events_repository.dart';
 import '../models/event.dart';
+import '../models/live_score.dart';
 import '../theme/app_colors.dart';
 import '../theme/app_text_styles.dart';
 import '../../static/nfl_team_colors.dart';
@@ -39,6 +40,19 @@ String _kickoffTimeLabel(SportEvent event) {
   return '$hour12:$minute $period';
 }
 
+/// The viewer's own UTC offset, formatted like "UTC-5" -- every kickoff
+/// time on this list is shown in this same local time (_kickoffTimeLabel
+/// above), so event_list_page.dart states it once for the whole list
+/// rather than repeating it on every row. Not DateTime.timeZoneName
+/// ("EST"/"CDT") -- Flutter Web frequently can't produce a real
+/// abbreviation there (browser/ICU-data dependent); a numeric UTC offset
+/// works identically on every platform this app runs on.
+String localTimezoneLabel() {
+  final offset = DateTime.now().timeZoneOffset;
+  final sign = offset.isNegative ? '-' : '+';
+  return 'UTC$sign${offset.abs().inHours}';
+}
+
 /// design/FRONTEND_STYLE.md's "Game row (list)" component.
 ///
 /// Scheduled events fetch their own live prediction (one request per
@@ -53,16 +67,22 @@ String _kickoffTimeLabel(SportEvent event) {
 /// normalized result) and wouldn't answer "how did the model do", which
 /// is the whole point of the completed tab.
 class GameRow extends ConsumerWidget {
-  const GameRow({super.key, required this.sport, required this.event});
+  const GameRow({super.key, required this.sport, required this.event, this.liveState});
 
   final String sport;
   final SportEvent event;
+  // From liveScoresProvider (core/data/live_scores_repository.dart) --
+  // null for the vast majority of rows (anything not within 15 minutes
+  // of its own kickoff, per live_scores.py's own POLL_START_BEFORE_KICKOFF),
+  // not an error or a loading state.
+  final LiveEventState? liveState;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final home = nflTeam(event.home.entityId);
     final away = nflTeam(event.away.entityId);
     final isCompleted = event.status == 'completed';
+    final isLive = liveState?.live ?? false;
 
     return InkWell(
       onTap: () => context.go('/$sport/events/${event.eventId}'),
@@ -77,33 +97,54 @@ class GameRow extends ConsumerWidget {
         child: Row(
           children: [
             SizedBox(
-              width: 56,
+              // Wide enough for "1:00 PM" on one line -- 56 was sized for
+              // the week label ("WK 2"/"DIV") above it, not this longer
+              // string, which was wrapping onto a second line as a
+              // result. maxLines/softWrap are a backstop, not the fix
+              // itself -- a time value truncating would be worse than it
+              // wrapping.
+              width: 72,
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(_weekLabel(event), style: AppTextStyles.microLabel()),
                   if (_kickoffTimeLabel(event).isNotEmpty)
-                    Text(_kickoffTimeLabel(event), style: AppTextStyles.microLabel(color: AppColors.inkMute)),
+                    Text(
+                      _kickoffTimeLabel(event),
+                      style: AppTextStyles.microLabel(color: AppColors.inkMute),
+                      maxLines: 1,
+                      softWrap: false,
+                    ),
                 ],
               ),
             ),
             Expanded(
               flex: 2,
               child: _MatchupLine(
-                awayColor: away.primary, awayAbbr: away.abbreviation, awayScore: event.away.result?.score,
-                homeColor: home.primary, homeAbbr: home.abbreviation, homeScore: event.home.result?.score,
+                awayColor: away.primary, awayAbbr: away.abbreviation,
+                awayScore: isLive ? liveState!.awayScore : event.away.result?.score,
+                homeColor: home.primary, homeAbbr: home.abbreviation,
+                homeScore: isLive ? liveState!.homeScore : event.home.result?.score,
               ),
             ),
             const SizedBox(width: 16),
             Expanded(
               flex: 3,
-              child: isCompleted
-                  ? _ComparisonSummary(
-                      comparison: event.predictionComparison, homeAbbr: home.abbreviation, awayAbbr: away.abbreviation,
-                    )
-                  : _LivePrediction(
-                      sport: sport, eventId: event.eventId, homeAbbr: home.abbreviation, awayAbbr: away.abbreviation,
-                    ),
+              // Live takes priority over completed/scheduled -- a pre-game
+              // prediction next to an actual in-progress score would be
+              // confusing, and a "completed" status hasn't caught up yet
+              // (see event.dart's own status field -- it only ever
+              // reflects yesterday's batch ingest, never today's game in
+              // progress).
+              child: isLive
+                  ? _LiveStatus(detail: liveState!.detail)
+                  : isCompleted
+                      ? _ComparisonSummary(
+                          comparison: event.predictionComparison, homeAbbr: home.abbreviation, awayAbbr: away.abbreviation,
+                        )
+                      : _LivePrediction(
+                          sport: sport, eventId: event.eventId, homeAbbr: home.abbreviation, awayAbbr: away.abbreviation,
+                        ),
             ),
           ],
         ),
@@ -153,6 +194,40 @@ class _LivePrediction extends ConsumerWidget {
       },
       loading: () => const WinProbabilityBar(homeWinProbability: 0.5),
       error: (_, __) => Text('--', style: AppTextStyles.body(color: AppColors.inkMute)),
+    );
+  }
+}
+
+/// The pulsing-dot "LIVE" pill plus ESPN's own game-clock text (e.g. "Q3
+/// 08:14") -- replaces the pre-game prediction/completed-comparison slot
+/// while an event is actually in progress (see GameRow.build).
+class _LiveStatus extends StatelessWidget {
+  const _LiveStatus({required this.detail});
+  final String? detail;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+          decoration: BoxDecoration(color: AppColors.live.withValues(alpha: 0.15), borderRadius: BorderRadius.circular(999)),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(width: 6, height: 6, decoration: BoxDecoration(shape: BoxShape.circle, color: AppColors.live)),
+              const SizedBox(width: 6),
+              Text('LIVE', style: AppTextStyles.microLabel(color: AppColors.live)),
+            ],
+          ),
+        ),
+        if (detail != null) ...[
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(detail!, style: AppTextStyles.body(color: AppColors.inkSub), overflow: TextOverflow.ellipsis),
+          ),
+        ],
+      ],
     );
   }
 }
@@ -213,24 +288,45 @@ class _MatchupLine extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Row(
-      mainAxisSize: MainAxisSize.min,
       children: [
         Container(width: 8, height: 8, decoration: BoxDecoration(shape: BoxShape.circle, color: awayColor)),
         const SizedBox(width: 8),
-        Text(awayAbbr, style: AppTextStyles.body(color: AppColors.ink)),
+        // Flexible+ellipsis, not a bare Text -- this whole line is
+        // squeezed into a fixed flex slice of GameRow's own Row (see
+        // GameRow.build), tight enough on a phone-width screen that even
+        // a normal 2-3 letter abbreviation needs somewhere to give
+        // ground rather than overflow (nflTeam's own fallback for an
+        // unrecognized team_id is worse still -- the raw, much longer
+        // entity_id string).
+        Flexible(child: Text(awayAbbr, style: AppTextStyles.body(color: AppColors.ink), overflow: TextOverflow.ellipsis)),
         if (awayScore != null) ...[
           const SizedBox(width: 6),
-          Text(awayScore!.toStringAsFixed(0), style: AppTextStyles.metricValue(color: AppColors.ink)),
+          // Flexible here too -- a real (not just placeholder-null) score
+          // is now common content on this line once an event goes live,
+          // not something that was ever exercised at this width before.
+          Flexible(
+            child: Text(
+              awayScore!.toStringAsFixed(0),
+              style: AppTextStyles.metricValue(color: AppColors.ink),
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
         ],
         const SizedBox(width: 8),
         Text('@', style: AppTextStyles.microLabel(color: AppColors.inkMute)),
         const SizedBox(width: 8),
         Container(width: 8, height: 8, decoration: BoxDecoration(shape: BoxShape.circle, color: homeColor)),
         const SizedBox(width: 8),
-        Text(homeAbbr, style: AppTextStyles.body(color: AppColors.ink)),
+        Flexible(child: Text(homeAbbr, style: AppTextStyles.body(color: AppColors.ink), overflow: TextOverflow.ellipsis)),
         if (homeScore != null) ...[
           const SizedBox(width: 6),
-          Text(homeScore!.toStringAsFixed(0), style: AppTextStyles.metricValue(color: AppColors.ink)),
+          Flexible(
+            child: Text(
+              homeScore!.toStringAsFixed(0),
+              style: AppTextStyles.metricValue(color: AppColors.ink),
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
         ],
       ],
     );

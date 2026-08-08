@@ -56,8 +56,18 @@ class SportCard extends StatelessWidget {
                           ),
                         ),
                         const SizedBox(width: 10),
-                        Text(sport.displayName, style: AppTextStyles.cardTitle()),
-                        const Spacer(),
+                        // Expanded, not Spacer -- on a narrow (mobile)
+                        // card it's the display name that needs to give
+                        // ground and ellipsize, not just consume
+                        // otherwise-empty space between it and the pill.
+                        Expanded(
+                          child: Text(
+                            sport.displayName,
+                            style: AppTextStyles.cardTitle(),
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                        const SizedBox(width: 8),
                         _StatusPill(active: active),
                       ],
                     ),
@@ -73,9 +83,12 @@ class SportCard extends StatelessWidget {
                       child: Row(
                         mainAxisAlignment: MainAxisAlignment.spaceBetween,
                         children: [
-                          Text(
-                            active ? 'View predictions' : 'Coming soon',
-                            style: AppTextStyles.body(color: AppColors.inkSub),
+                          Flexible(
+                            child: Text(
+                              active ? 'View predictions' : 'Coming soon',
+                              style: AppTextStyles.body(color: AppColors.inkSub),
+                              overflow: TextOverflow.ellipsis,
+                            ),
                           ),
                           if (active)
                             Icon(Icons.arrow_forward, size: 16, color: sport.accentColor)

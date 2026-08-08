@@ -28,6 +28,15 @@ class SportShellPage extends StatelessWidget {
             ? _SportTab.season
             : _SportTab.events;
 
+    // '/:sport/events/:eventId' has 4 segments (leading '' + sport +
+    // 'events' + eventId); the events list itself only has 3. Only that
+    // deeper, event-detail case should back out one level -- every other
+    // tab (events list, season, models) is already top-level within this
+    // shell, so '/' is still correct for it.
+    final segments = location.split('/');
+    final onEventDetail = segments.length > 3 && segments[2] == 'events';
+    final backDestination = onEventDetail ? '/$sportId/events' : '/';
+
     return Scaffold(
       backgroundColor: AppColors.bg,
       body: Stack(
@@ -41,13 +50,34 @@ class SportShellPage extends StatelessWidget {
                   child: Row(
                     children: [
                       IconButton(
-                        onPressed: () => context.go('/'),
+                        onPressed: () => context.go(backDestination),
                         icon: const Icon(Icons.arrow_back, color: AppColors.inkSub),
                       ),
                       const SizedBox(width: 8),
-                      Text(sport.displayName, style: AppTextStyles.sectionTitle()),
-                      const Spacer(),
-                      _TabToggle(sportId: sportId, activeTab: activeTab),
+                      // Expanded, not a bare Text -- on a narrow (mobile)
+                      // viewport the title needs to give ground and
+                      // ellipsize rather than push the Events/Season/
+                      // Models toggle past the edge of the screen.
+                      Expanded(
+                        child: Text(
+                          sport.displayName,
+                          style: AppTextStyles.sectionTitle(),
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                      // Flexible+horizontal-scroll, not a bare widget --
+                      // even with the title above fully ellipsized down,
+                      // three tap-target-sized pills don't fit next to
+                      // the back button on a phone-width screen. Scrolls
+                      // invisibly (no visible scrollbar needed) on any
+                      // viewport wide enough to show it in full, same as
+                      // it always has.
+                      Flexible(
+                        child: SingleChildScrollView(
+                          scrollDirection: Axis.horizontal,
+                          child: _TabToggle(sportId: sportId, activeTab: activeTab),
+                        ),
+                      ),
                     ],
                   ),
                 ),

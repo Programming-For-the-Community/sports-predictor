@@ -464,6 +464,20 @@ class TestSeasonStandingsInputs:
         assert inputs["point_differential"]["12"] == 7
         assert inputs["point_differential"]["24"] == -7
 
+    def test_a_tie_counts_toward_neither_teams_wins_or_losses(self):
+        storage = MagicMock()
+        storage.get_all_events.side_effect = lambda sport, status: {
+            "completed": [_completed_event("E1", 2025, "12", "24", 20, 20)],
+            "scheduled": [],
+        }[status]
+
+        inputs = season_projection._season_standings_inputs(storage)
+
+        assert inputs["ties"]["12"] == 1
+        assert inputs["ties"]["24"] == 1
+        assert inputs["wins"].get("12", 0) == 0
+        assert inputs["losses"].get("12", 0) == 0
+
     def test_current_season_is_the_max_season_across_both_statuses(self):
         storage = MagicMock()
         storage.get_all_events.side_effect = lambda sport, status: {
@@ -543,6 +557,7 @@ class TestScheduledSeasonProjection:
         assert body["season"] == 2025
         assert [row["team_id"] for row in body["standings"]] == ["12", "24"]
         assert body["standings"][0]["wins"] == 1
+        assert body["standings"][0]["ties"] == 0
 
     def test_leaderboards_is_none_when_building_them_fails_but_standings_still_write(self):
         nfl_predict._storage = MagicMock()

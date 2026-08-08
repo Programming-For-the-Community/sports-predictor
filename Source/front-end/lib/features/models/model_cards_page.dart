@@ -6,6 +6,7 @@ import '../../core/models/model_card.dart';
 import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_text_styles.dart';
 import '../../core/widgets/model_card_view.dart';
+import '../../core/widgets/responsive.dart';
 
 const _cardWidth = 420.0;
 const _cardSpacing = 20.0;
@@ -56,6 +57,10 @@ class _ModelCardGrid extends StatelessWidget {
     return LayoutBuilder(
       builder: (context, constraints) {
         final perRow = ((constraints.maxWidth + _cardSpacing) / (_cardWidth + _cardSpacing)).floor().clamp(1, 999);
+        // perRow floors at 1 even when the viewport itself is narrower
+        // than one card (a phone screen) -- capped here so that lone card
+        // shrinks to fit instead of overflowing the Row that lays it out.
+        final width = cardWidth(_cardWidth, constraints.maxWidth);
 
         final rows = <List<ModelCard>>[];
         for (var i = 0; i < models.length; i += perRow) {
@@ -71,7 +76,7 @@ class _ModelCardGrid extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
                     for (final model in row) ...[
-                      SizedBox(width: _cardWidth, child: ModelCardView(model: model)),
+                      SizedBox(width: width, child: ModelCardView(model: model)),
                       if (model != row.last) const SizedBox(width: _cardSpacing),
                     ],
                   ],

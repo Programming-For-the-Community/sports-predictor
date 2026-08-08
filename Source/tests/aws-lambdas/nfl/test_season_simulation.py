@@ -96,6 +96,25 @@ class TestSimulateSeason:
 
         assert result[self.STRONG_TEAM]["projected_wins"] > result[self.WEAK_TEAM]["projected_wins"]
 
+    def test_projected_wins_and_losses_sum_to_games_played(self):
+        # 2 remaining games each (see remaining_games below) on top of an
+        # 0-0 start -- every simulated season path plays exactly 2 games
+        # per team, so wins+losses must land on exactly 2 every time,
+        # regardless of which side of each game a team happens to win.
+        current_wins = {self.STRONG_TEAM: 0, self.WEAK_TEAM: 0}
+        current_losses = {self.STRONG_TEAM: 0, self.WEAK_TEAM: 0}
+        remaining_games = [(self.STRONG_TEAM, self.WEAK_TEAM), (self.WEAK_TEAM, self.STRONG_TEAM)]
+        current_ratings = {self.STRONG_TEAM: 1900, self.WEAK_TEAM: 1300}
+
+        result = season_simulation.simulate_season(
+            current_wins, current_losses, {}, remaining_games, current_ratings,
+            simulations=200, rng=random.Random(7),
+        )
+
+        for team_id in (self.STRONG_TEAM, self.WEAK_TEAM):
+            total = result[team_id]["projected_wins"] + result[team_id]["projected_losses"]
+            assert total == pytest.approx(2.0)
+
     def test_probabilities_are_fractions_between_zero_and_one(self):
         current_wins = {self.STRONG_TEAM: 5, self.WEAK_TEAM: 5}
         current_losses = {self.STRONG_TEAM: 0, self.WEAK_TEAM: 0}

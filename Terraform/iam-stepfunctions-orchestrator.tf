@@ -74,6 +74,28 @@ data "aws_iam_policy_document" "stepfunctions_orchestrator_permissions" {
       "arn:aws:states:${var.region}:${var.account_id}:execution:${aws_sfn_state_machine.training_orchestrator.name}:*",
     ]
   }
+
+  # training_orchestrator's logging_configuration (sfn-training-
+  # orchestrator.tf) needs these to deliver execution logs to CloudWatch.
+  # Resource "*" is per AWS's own documented policy for this feature, not
+  # a broadening of scope by choice -- the log delivery API these actions
+  # cover (CreateLogDelivery/ListLogDeliveries/etc.) operates on the
+  # account's log delivery configurations generally, not any one
+  # resource, so it can't be scoped to a specific log group ARN.
+  statement {
+    sid = "DeliverExecutionLogsToCloudWatch"
+    actions = [
+      "logs:CreateLogDelivery",
+      "logs:GetLogDelivery",
+      "logs:UpdateLogDelivery",
+      "logs:DeleteLogDelivery",
+      "logs:ListLogDeliveries",
+      "logs:PutResourcePolicy",
+      "logs:DescribeResourcePolicies",
+      "logs:DescribeLogGroups",
+    ]
+    resources = ["*"]
+  }
 }
 
 resource "aws_iam_role_policy" "stepfunctions_orchestrator_permissions" {

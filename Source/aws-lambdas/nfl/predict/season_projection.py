@@ -61,6 +61,7 @@ def _season_standings_inputs(storage: FeatureStorage) -> dict:
 
     wins: dict[str, int] = {}
     losses: dict[str, int] = {}
+    ties: dict[str, int] = {}
     point_differential: dict[str, int] = {}
     team_last_completed_date: dict[str, str] = {}
     for event in completed:
@@ -76,6 +77,7 @@ def _season_standings_inputs(storage: FeatureStorage) -> dict:
                 continue
             wins[entity_id] = wins.get(entity_id, 0) + (1 if score > opponent_score else 0)
             losses[entity_id] = losses.get(entity_id, 0) + (1 if score < opponent_score else 0)
+            ties[entity_id] = ties.get(entity_id, 0) + (1 if score == opponent_score else 0)
             point_differential[entity_id] = point_differential.get(entity_id, 0) + (score - opponent_score)
             event_date = event.get("event_date", "")
             if event_date > team_last_completed_date.get(entity_id, ""):
@@ -100,6 +102,7 @@ def _season_standings_inputs(storage: FeatureStorage) -> dict:
         "completed_event_keys": {e["event_key"] for e in completed},
         "wins": wins,
         "losses": losses,
+        "ties": ties,
         "point_differential": point_differential,
         "current_ratings": current_ratings,
         "remaining_games": remaining_games,
@@ -265,6 +268,7 @@ def build_season_projection(storage: FeatureStorage, s3) -> dict:
                 "division": TEAM_DIVISIONS.get(team_id),
                 "wins": season_inputs["wins"].get(team_id, 0),
                 "losses": season_inputs["losses"].get(team_id, 0),
+                "ties": season_inputs["ties"].get(team_id, 0),
                 **projection,
             }
             for team_id, projection in simulation.items()

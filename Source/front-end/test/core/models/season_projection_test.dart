@@ -12,7 +12,9 @@ void main() {
           'team_id': '12',
           'wins': 8,
           'losses': 2,
+          'ties': 0,
           'projected_wins': 13.4,
+          'projected_losses': 3.6,
           'division_winner_probability': 0.91,
           'playoff_probability': 0.98,
           'championship_probability': 0.22,
@@ -30,6 +32,24 @@ void main() {
     expect(season.standings.single.teamId, '12');
     expect(season.standings.single.projectedWins, 13.4);
     expect(season.leaderboards!['passing_yards']!.single.displayName, 'Patrick Mahomes');
+  });
+
+  test('ties/projected_losses default rather than throw when a stale payload omits them', () {
+    // Real scenario, not hypothetical -- the season projection is a
+    // weekly-precomputed S3 payload, so a frontend deploy can land
+    // before the backend has next run with these two fields present.
+    final standing = TeamStanding.fromJson({
+      'team_id': '12',
+      'wins': 8,
+      'losses': 2,
+      'projected_wins': 13.4,
+      'division_winner_probability': 0.91,
+      'playoff_probability': 0.98,
+      'championship_probability': 0.22,
+    });
+
+    expect(standing.ties, 0);
+    expect(standing.projectedLosses, 0.0);
   });
 
   test('leaderboards is null when the backend could not compute it', () {

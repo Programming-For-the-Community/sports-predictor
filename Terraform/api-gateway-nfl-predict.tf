@@ -188,6 +188,7 @@ locals {
     season         = aws_api_gateway_resource.nfl_season.id
     predict_event  = aws_api_gateway_resource.nfl_predictions_event.id
     predict_player = aws_api_gateway_resource.nfl_predictions_event_player.id
+    live_scores    = aws_api_gateway_resource.nfl_live_scores.id
   }
 }
 
@@ -282,6 +283,12 @@ resource "aws_api_gateway_deployment" "main" {
       # integration was just repointed from nfl_predict to
       # nfl_predict_read.
       aws_api_gateway_integration.nfl_season.uri,
+      # live-scores -- resource/method/integration declared in
+      # api-gateway-nfl-live-scores.tf, a third Lambda target.
+      aws_api_gateway_resource.nfl_live_scores.id,
+      aws_api_gateway_method.nfl_live_scores.id,
+      aws_api_gateway_integration.nfl_live_scores.id,
+      aws_api_gateway_integration.nfl_live_scores.uri,
       sha1(jsonencode(values(aws_api_gateway_method.cors)[*].id)),
       sha1(jsonencode(values(aws_api_gateway_integration.cors)[*].id)),
       sha1(jsonencode(values(aws_api_gateway_integration_response.cors)[*].id)),

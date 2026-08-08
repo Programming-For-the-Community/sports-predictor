@@ -33,17 +33,19 @@ data "aws_iam_policy_document" "eventbridge_invoke_permissions" {
     ]
   }
 
-  # Direct invoke, not through a state machine -- both are single-Lambda
-  # jobs with no per-sport/per-target fan-out to justify one:
+  # Direct invoke, not through a state machine -- none of the three are
+  # per-sport/per-target fan-outs that would justify one:
   # scheduler-nfl-season-projection.tf invokes nfl_predict (one
   # computation), scheduler-nfl-schedule-sync.tf invokes
-  # nfl_schedule_sync (walks all 23 weeks of a season internally).
+  # nfl_schedule_sync (walks all 23 weeks of a season internally),
+  # scheduler-nfl-live-scores.tf invokes nfl_live_scores every 60s.
   statement {
     sid     = "InvokeDirectLambdaJobs"
     actions = ["lambda:InvokeFunction"]
     resources = [
       aws_lambda_function.nfl_predict.arn,
       aws_lambda_function.nfl_schedule_sync.arn,
+      aws_lambda_function.nfl_live_scores.arn,
     ]
   }
 }

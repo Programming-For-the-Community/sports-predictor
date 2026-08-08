@@ -53,3 +53,8 @@ _load_handler("nfl_predict", "aws-lambdas/nfl/predict/handler.py")
 # sibling modules the way predict/'s model_loader.py etc. are) -- no
 # sys.path insert needed, just the same unique-module-name registration.
 _load_handler("nfl_predict_read", "aws-lambdas/nfl/predict-read/handler.py")
+
+# live-scores/'s own live_scores.py has a unique name, unlike handler.py --
+# same pattern as ingest/'s enrichment.py above.
+sys.path.insert(0, os.path.join(_src, "aws-lambdas", "nfl", "live-scores"))
+_load_handler("nfl_live_scores", "aws-lambdas/nfl/live-scores/handler.py")

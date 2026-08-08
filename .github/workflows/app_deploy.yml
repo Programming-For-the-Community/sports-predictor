@@ -109,6 +109,14 @@ jobs:
     with:
       function_name: ${{ needs.infra.outputs.nfl_predict_read_function_name }}
 
+  nfl_live_scores_deploy:
+    name: NFL live-scores (deploy)
+    needs: infra
+    uses: ./.github/workflows/nfl_live_scores_deploy.yml
+    secrets: inherit
+    with:
+      function_name: ${{ needs.infra.outputs.nfl_live_scores_function_name }}
+
   # No config `with:` block for either -- both read directly from
   # Terraform state instead of relaying it through needs.infra.outputs.*,
   # which proved unreliable in practice (see frontend_hosting.yml's

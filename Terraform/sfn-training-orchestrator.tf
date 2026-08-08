@@ -1,3 +1,19 @@
+# CloudWatch Logs destination for training_orchestrator's
+# logging_configuration below -- Distributed Map's own per-iteration
+# status (dispatched/succeeded/failed child executions) shows up here,
+# not just in the top-level execution's own graph, which renders
+# TrainAllTargets as a single node with no per-iteration detail the way
+# INLINE Map's iteration array used to.
+resource "aws_cloudwatch_log_group" "training_orchestrator" {
+  name              = "/aws/vendedlogs/states/${var.project}-training-orchestrator"
+  retention_in_days = 30
+
+  tags = merge(local.common_tags, {
+    Sport     = "shared"
+    Component = "orchestration"
+  })
+}
+
 # One registry-driven state machine: for each active sport, run its
 # feature-engineering task, then fan out over its own training_targets
 # list (see dynamodb-sport-registry.tf) to run every training target as
@@ -13,6 +29,12 @@ resource "aws_sfn_state_machine" "training_orchestrator" {
   name     = "${var.project}-training-orchestrator"
   role_arn = aws_iam_role.stepfunctions_orchestrator.arn
   type     = "STANDARD"
+
+  logging_configuration {
+    log_destination        = "${aws_cloudwatch_log_group.training_orchestrator.arn}:*"
+    include_execution_data = true
+    level                  = "ALL"
+  }
 
   definition = <<EOF
 {

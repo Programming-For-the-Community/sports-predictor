@@ -112,8 +112,15 @@ def simulate_season(
     ordered list of (home_id, away_id) pairs -- each game appears once,
     not once per team.
 
-    Returns {team_id: {"projected_wins": float, "division_winner_probability":
-    float, "playoff_probability": float, "championship_probability": float}}.
+    Returns {team_id: {"projected_wins": float, "projected_losses": float,
+    "division_winner_probability": float, "playoff_probability": float,
+    "championship_probability": float}}. projected_losses is tracked
+    directly in the simulation loop (current_losses forward through each
+    simulated remaining game) rather than derived from projected_wins and
+    a hardcoded season length, since it needs no assumption about how
+    many games a team has left. No projected_ties -- home_won below is a
+    strict win/loss draw, the same simplification this function's own
+    docstring already documents for margin-of-victory.
 
     Simulated rating updates use a plain K-factor adjustment, no
     margin-of-victory scaling (compute_elo_ratings' own MOV multiplier
@@ -130,6 +137,7 @@ def simulate_season(
     teams = set(TEAM_DIVISIONS)
 
     win_totals = {team_id: 0.0 for team_id in teams}
+    loss_totals = {team_id: 0.0 for team_id in teams}
     division_titles = {team_id: 0 for team_id in teams}
     playoff_berths = {team_id: 0 for team_id in teams}
     championships = {team_id: 0 for team_id in teams}
@@ -138,6 +146,7 @@ def simulate_season(
 
     for _ in range(simulations):
         wins = {team_id: current_wins.get(team_id, 0) for team_id in teams}
+        losses = {team_id: current_losses.get(team_id, 0) for team_id in teams}
         ratings = dict(current_ratings)
 
         for home_id, away_id in remaining_games:
@@ -147,6 +156,7 @@ def simulate_season(
             home_won = rng.random() < home_win_probability
 
             wins[home_id if home_won else away_id] += 1
+            losses[away_id if home_won else home_id] += 1
 
             actual_home = 1.0 if home_won else 0.0
             ratings[home_id] = home_rating + k_factor * (actual_home - home_win_probability)
@@ -154,6 +164,7 @@ def simulate_season(
 
         for team_id in teams:
             win_totals[team_id] += wins[team_id]
+            loss_totals[team_id] += losses[team_id]
 
         for conference, division_teams in conferences.items():
             seeds, division_winners = _seed_conference(division_teams, wins, point_differential)
@@ -174,6 +185,7 @@ def simulate_season(
     return {
         team_id: {
             "projected_wins": win_totals[team_id] / simulations,
+            "projected_losses": loss_totals[team_id] / simulations,
             "division_winner_probability": division_titles[team_id] / simulations,
             "playoff_probability": playoff_berths[team_id] / simulations,
             "championship_probability": championships[team_id] / simulations,

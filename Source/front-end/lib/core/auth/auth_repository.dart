@@ -6,6 +6,16 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'cognito_auth_client.dart';
 
 const _prefsKey = 'cognito_tokens';
+const _lastActivityPrefsKey = 'last_activity_at';
+
+/// How long the app tolerates zero authenticated activity before forcing
+/// a fresh login -- independent of whether the refresh token itself
+/// (Terraform/cognito-app-client.tf's refresh_token_validity = 30 days)
+/// is still valid. Without this, staying silently signed in depends only
+/// on touching the app once every 30 days, not on any real usage cadence
+/// -- closing the window and coming back a week later would otherwise
+/// refresh right through, with no re-login ever required.
+const inactivityTtl = Duration(minutes: 30);
 
 sealed class AuthState {}
 
@@ -50,6 +60,16 @@ class AuthRepository extends StateNotifier<AuthState> {
       return;
     }
 
+    // Checked before even attempting a refresh -- there's no point
+    // refreshing a session inactivityTtl is about to invalidate anyway,
+    // and this is the exact "closed the window, came back later" path
+    // inactivityTtl exists for.
+    if (await _isInactive()) {
+      await _clear();
+      state = AuthUnauthenticated();
+      return;
+    }
+
     var tokens = CognitoTokens.fromJson(jsonDecode(raw) as Map<String, dynamic>);
     if (tokens.isNearExpiry) {
       try {
@@ -61,6 +81,7 @@ class AuthRepository extends StateNotifier<AuthState> {
         return;
       }
     }
+    await _touchActivity();
     state = AuthAuthenticated(tokens);
   }
 
@@ -86,6 +107,7 @@ class AuthRepository extends StateNotifier<AuthState> {
     switch (result) {
       case CognitoAuthSuccess(:final tokens):
         await _persist(tokens);
+        await _touchActivity();
         state = AuthAuthenticated(tokens);
       case CognitoNewPasswordRequired(:final session, :final username):
         state = AuthNeedsNewPassword(session, username);
@@ -116,6 +138,16 @@ class AuthRepository extends StateNotifier<AuthState> {
     if (current is! AuthAuthenticated) {
       throw StateError('No authenticated session');
     }
+    // Every real call through here IS "using the site" -- checked before
+    // the normal near-expiry refresh below so a session that's merely
+    // idle-too-long gets bounced to a fresh login even when its token
+    // technically still has time left on the clock.
+    if (await _isInactive()) {
+      await _clear();
+      state = AuthUnauthenticated();
+      throw StateError('Session expired after $inactivityTtl of inactivity');
+    }
+    await _touchActivity();
     if (!forceRefresh && !current.tokens.isNearExpiry) {
       return current.tokens.idToken;
     }
@@ -144,6 +176,24 @@ class AuthRepository extends StateNotifier<AuthState> {
   Future<void> _clear() async {
     final prefs = await _prefsInstance;
     await prefs.remove(_prefsKey);
+    await prefs.remove(_lastActivityPrefsKey);
+  }
+
+  Future<void> _touchActivity() async {
+    final prefs = await _prefsInstance;
+    await prefs.setString(_lastActivityPrefsKey, DateTime.now().toIso8601String());
+  }
+
+  /// False when no activity has ever been recorded (e.g. a session
+  /// persisted by a build before this existed) -- treated as active
+  /// rather than instantly expiring every existing signed-in user the
+  /// moment this ships.
+  Future<bool> _isInactive() async {
+    final prefs = await _prefsInstance;
+    final raw = prefs.getString(_lastActivityPrefsKey);
+    if (raw == null) return false;
+    final lastActivity = DateTime.parse(raw);
+    return DateTime.now().isAfter(lastActivity.add(inactivityTtl));
   }
 }
 

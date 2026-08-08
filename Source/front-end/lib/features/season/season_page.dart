@@ -5,6 +5,7 @@ import '../../core/data/season_repository.dart';
 import '../../core/models/season_projection.dart';
 import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_text_styles.dart';
+import '../../core/widgets/responsive.dart';
 import '../../static/nfl_team_colors.dart';
 
 // Source of truth is Terraform/scheduler-nfl-train-player-prop-model.tf's
@@ -82,45 +83,58 @@ class _SeasonPageState extends ConsumerState<SeasonPage> {
             // column sections on their own, and stacking them turns this
             // into a very long scroll for no reason once a viewer only
             // wants one or the other.
-            Row(
-              children: [
-                _StatusToggle(
-                  label: 'Standings & Playoff Odds',
-                  selected: _tab == 'standings',
-                  onTap: () => setState(() => _tab = 'standings'),
-                ),
-                const SizedBox(width: 8),
-                _StatusToggle(
-                  label: 'Player Prop Leaders',
-                  selected: _tab == 'props',
-                  onTap: () => setState(() => _tab = 'props'),
-                ),
-              ],
+            // Horizontal-scroll, not a bare Row -- these two labels
+            // together don't fit a phone-width screen (see
+            // sport_shell_page.dart's _TabToggle for the same pattern).
+            SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: Row(
+                children: [
+                  _StatusToggle(
+                    label: 'Standings & Playoff Odds',
+                    selected: _tab == 'standings',
+                    onTap: () => setState(() => _tab = 'standings'),
+                  ),
+                  const SizedBox(width: 8),
+                  _StatusToggle(
+                    label: 'Player Prop Leaders',
+                    selected: _tab == 'props',
+                    onTap: () => setState(() => _tab = 'props'),
+                  ),
+                ],
+              ),
             ),
             const SizedBox(height: 20),
             if (_tab == 'standings')
-              // Fixed-width division cards in a Wrap -- multiple divisions
-              // per row on a wide screen, same pattern the leaderboard
-              // cards use, instead of one division per full-width row.
-              Wrap(
-                spacing: 20,
-                runSpacing: 20,
-                children: [
-                  for (final division in _groupByDivision(season.standings))
-                    SizedBox(
-                      width: 480,
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Padding(
-                            padding: const EdgeInsets.only(bottom: 8),
-                            child: Text(division.key.toUpperCase(), style: AppTextStyles.microLabel(color: AppColors.cyan)),
+              // Fixed-width (capped by the viewport -- see
+              // core/widgets/responsive.dart) division cards in a Wrap --
+              // multiple divisions per row on a wide screen, same pattern
+              // the leaderboard cards use, instead of one division per
+              // full-width row.
+              LayoutBuilder(
+                builder: (context, constraints) {
+                  final width = cardWidth(480, constraints.maxWidth);
+                  return Wrap(
+                    spacing: 20,
+                    runSpacing: 20,
+                    children: [
+                      for (final division in _groupByDivision(season.standings))
+                        SizedBox(
+                          width: width,
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Padding(
+                                padding: const EdgeInsets.only(bottom: 8),
+                                child: Text(division.key.toUpperCase(), style: AppTextStyles.microLabel(color: AppColors.cyan)),
+                              ),
+                              _StandingsTable(standings: division.value),
+                            ],
                           ),
-                          _StandingsTable(standings: division.value),
-                        ],
-                      ),
-                    ),
-                ],
+                        ),
+                    ],
+                  );
+                },
               )
             else
               _Leaderboards(leaderboards: season.leaderboards),
@@ -198,16 +212,29 @@ class _StandingsTable extends StatelessWidget {
 class _StandingsHeaderRow extends StatelessWidget {
   const _StandingsHeaderRow();
 
+  static const _labels = ['TEAM', 'PROJ', 'REC', 'DIV%', 'PO%', 'SB%'];
+  static const _flexes = [3, 2, 2, 2, 2, 2];
+
   @override
   Widget build(BuildContext context) {
     return Row(
       children: [
-        Expanded(flex: 3, child: Text('TEAM', style: AppTextStyles.microLabel())),
-        Expanded(flex: 2, child: Text('RECORD', style: AppTextStyles.microLabel(), textAlign: TextAlign.center)),
-        Expanded(flex: 2, child: Text('PROJ W', style: AppTextStyles.microLabel(), textAlign: TextAlign.center)),
-        Expanded(flex: 2, child: Text('DIV %', style: AppTextStyles.microLabel(), textAlign: TextAlign.center)),
-        Expanded(flex: 2, child: Text('PLAYOFF %', style: AppTextStyles.microLabel(), textAlign: TextAlign.center)),
-        Expanded(flex: 2, child: Text('SB %', style: AppTextStyles.microLabel(), textAlign: TextAlign.center)),
+        for (var i = 0; i < _labels.length; i++)
+          Expanded(
+            flex: _flexes[i],
+            child: Text(
+              _labels[i],
+              style: AppTextStyles.microLabel(),
+              textAlign: i == 0 ? TextAlign.start : TextAlign.center,
+              // Short, fixed-abbreviation labels sized to comfortably fit
+              // this column width -- maxLines/softWrap/ellipsis here are
+              // a hard backstop against ever silently wrapping to a
+              // second line, not the actual fit strategy.
+              maxLines: 1,
+              softWrap: false,
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
       ],
     );
   }
@@ -229,19 +256,35 @@ class _StandingsRow extends StatelessWidget {
             children: [
               Container(width: 8, height: 8, decoration: BoxDecoration(shape: BoxShape.circle, color: info.primary)),
               const SizedBox(width: 10),
-              Text(info.abbreviation, style: AppTextStyles.body(color: AppColors.ink)),
+              Flexible(
+                child: Text(
+                  info.abbreviation,
+                  style: AppTextStyles.body(color: AppColors.ink),
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
             ],
           ),
         ),
         Expanded(
           flex: 2,
-          child: Text('${team.wins}-${team.losses}', style: AppTextStyles.metricValue(), textAlign: TextAlign.center),
+          child: Text(
+            // Rounded to whole games -- projectedWins/projectedLosses are
+            // Monte Carlo averages (e.g. 10.6-6.4), not something that
+            // can land on a real final record digit-for-digit.
+            '${team.projectedWins.round()}-${team.projectedLosses.round()}',
+            style: AppTextStyles.metricValue(color: AppColors.cyan),
+            textAlign: TextAlign.center,
+          ),
         ),
         Expanded(
           flex: 2,
           child: Text(
-            team.projectedWins.toStringAsFixed(1),
-            style: AppTextStyles.metricValue(color: AppColors.cyan),
+            // Ties only appended when this team actually has one -- most
+            // teams most seasons don't, and a universal "-0" reads as
+            // noise on every other row.
+            team.ties > 0 ? '${team.wins}-${team.losses}-${team.ties}' : '${team.wins}-${team.losses}',
+            style: AppTextStyles.metricValue(),
             textAlign: TextAlign.center,
           ),
         ),
@@ -282,15 +325,26 @@ class _Leaderboards extends StatelessWidget {
         style: AppTextStyles.body(color: AppColors.inkSub),
       );
     }
-    final cards = [
+    final entries = [
       for (final entry in _statLabels.entries)
-        if (boards[entry.key]?.isNotEmpty ?? false)
-          SizedBox(width: 320, child: _LeaderboardCard(label: entry.value, entries: boards[entry.key]!)),
+        if (boards[entry.key]?.isNotEmpty ?? false) entry,
     ];
-    if (cards.isEmpty) {
+    if (entries.isEmpty) {
       return Text('No leaderboard data yet.', style: AppTextStyles.body(color: AppColors.inkSub));
     }
-    return Wrap(spacing: 20, runSpacing: 20, children: cards);
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final width = cardWidth(320, constraints.maxWidth);
+        return Wrap(
+          spacing: 20,
+          runSpacing: 20,
+          children: [
+            for (final entry in entries)
+              SizedBox(width: width, child: _LeaderboardCard(label: entry.value, entries: boards[entry.key]!)),
+          ],
+        );
+      },
+    );
   }
 }
 
@@ -327,7 +381,19 @@ class _LeaderboardCard extends StatelessWidget {
                       overflow: TextOverflow.ellipsis,
                     ),
                   ),
-                  Text(entries[i].projectedTotal.toStringAsFixed(0), style: AppTextStyles.metricValue()),
+                  // Actual season-to-date total -> projected season-end
+                  // total -- both, not just the projection, so this reads
+                  // as "how far along" a leader is, not just where they'll
+                  // land.
+                  Text(
+                    entries[i].currentTotal.toStringAsFixed(0),
+                    style: AppTextStyles.metricValue(color: AppColors.inkMute),
+                  ),
+                  Text(' → ', style: AppTextStyles.microLabel(color: AppColors.inkMute)),
+                  Text(
+                    entries[i].projectedTotal.toStringAsFixed(0),
+                    style: AppTextStyles.metricValue(color: AppColors.cyan),
+                  ),
                 ],
               ),
             ),

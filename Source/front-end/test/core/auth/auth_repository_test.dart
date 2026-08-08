@@ -149,6 +149,45 @@ void main() {
     expect(prefs.getString('cognito_tokens'), isNull);
   });
 
+  test('a session persisted past inactivityTtl restores as unauthenticated', () async {
+    final staleActivity = DateTime.now().subtract(inactivityTtl + const Duration(minutes: 1));
+    SharedPreferences.setMockInitialValues({
+      'cognito_tokens': jsonEncode(CognitoTokens(
+        accessToken: 'a', idToken: 'i', refreshToken: 'r',
+        expiresAt: DateTime.now().add(const Duration(hours: 1)), // token itself still valid
+      ).toJson()),
+      'last_activity_at': staleActivity.toIso8601String(),
+    });
+    final repo = AuthRepository(authClient: CognitoAuthClient(httpClient: MockClient((r) async => _tokenResponse())));
+
+    final state = await _firstRealState(repo);
+
+    expect(state, isA<AuthUnauthenticated>());
+    final prefs = await SharedPreferences.getInstance();
+    expect(prefs.getString('cognito_tokens'), isNull);
+  });
+
+  test('getValidIdToken forces re-login once inactivityTtl has passed, even with a still-valid token', () async {
+    final repo = AuthRepository(
+      authClient: CognitoAuthClient(httpClient: MockClient((r) async => _tokenResponse(expiresIn: 3600))),
+    );
+    await _firstRealState(repo);
+    await repo.login(username: 'chamar', password: 'hunter2');
+
+    // Simulate time passing without any further activity being recorded --
+    // the token itself (1hr expiry) is nowhere near needing a refresh.
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(
+      'last_activity_at',
+      DateTime.now().subtract(inactivityTtl + const Duration(minutes: 1)).toIso8601String(),
+    );
+
+    await expectLater(repo.getValidIdToken(), throwsStateError);
+
+    expect(repo.state, isA<AuthUnauthenticated>());
+    expect(prefs.getString('cognito_tokens'), isNull);
+  });
+
   test('logout clears state and persisted storage', () async {
     final repo = AuthRepository(authClient: CognitoAuthClient(httpClient: MockClient((r) async => _tokenResponse())));
     await _firstRealState(repo);

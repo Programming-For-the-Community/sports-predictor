@@ -9,8 +9,9 @@ import 'confidence_pill.dart';
 import 'win_probability_bar.dart';
 
 /// design/FRONTEND_STYLE.md's "Matchup hero (detail)" component: two
-/// columns of team + big percentage (favored side gradient-clipped cyan),
-/// a split bar, then a Pick / Pred margin / Pred total stat trio.
+/// columns of team + win probability % (favored side gradient-clipped
+/// cyan, small -- supporting context, not the headline number), a split
+/// bar, then the big PRED TOTAL figure, then a Pick / Pred margin duo.
 class MatchupHero extends StatelessWidget {
   const MatchupHero({super.key, required this.event, required this.prediction});
 
@@ -70,15 +71,26 @@ class MatchupHero extends StatelessWidget {
           const SizedBox(height: 12),
           Center(child: ConfidencePill(homeWinProbability: prediction.homeWinProbability)),
           const SizedBox(height: 24),
+          // The combined predicted score -- the one number this hero
+          // leads with, above the smaller PICK/PRED MARGIN stats below.
+          Center(
+            child: Column(
+              children: [
+                Text('PRED TOTAL', style: AppTextStyles.microLabel()),
+                const SizedBox(height: 4),
+                Text(
+                  (prediction.homeScore + prediction.awayScore).toStringAsFixed(1),
+                  style: AppTextStyles.bigStatNumeral(),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 24),
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceAround,
             children: [
               _StatTrio(label: 'PICK', value: homeFavored ? home.abbreviation : away.abbreviation),
               _StatTrio(label: 'PRED MARGIN', value: prediction.margin.toStringAsFixed(1)),
-              _StatTrio(
-                label: 'PRED TOTAL',
-                value: (prediction.homeScore + prediction.awayScore).toStringAsFixed(1),
-              ),
             ],
           ),
         ],
@@ -100,7 +112,10 @@ class _TeamColumn extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final numeral = Text('${(probability * 100).round()}%', style: AppTextStyles.bigStatNumeral());
+    // Small -- the win-probability % is supporting context for the big
+    // PRED TOTAL number below the split bar, not the headline figure
+    // itself (see MatchupHero's own comment).
+    final numeral = Text('${(probability * 100).round()}%', style: AppTextStyles.metricValueLarge());
 
     return Column(
       children: [
