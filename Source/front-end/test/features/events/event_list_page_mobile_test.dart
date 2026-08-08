@@ -105,4 +105,34 @@ void main() {
       expect(tester.takeException(), isNull);
     });
   }
+
+  testWidgets('team abbreviations render at a legible width, not just without overflow', (tester) async {
+    // "No overflow" alone doesn't catch this class of bug: a Flexible
+    // Text squeezed by sibling content can render at an effectively
+    // invisible sliver of a width without ever throwing an exception --
+    // confirmed live (real report: team names weren't showing at all,
+    // just the color dot + score). Live scores present, same worst case
+    // event_list_page_mobile_test.dart's other tests already flag as the
+    // first time this line had to carry real (non-null) score content.
+    await pumpAtWidth(
+      tester,
+      360,
+      ProviderScope(
+        overrides: [
+          eventsListProvider.overrideWith((ref, query) async => [_scheduledEvent('401547417', '2026-09-14T17:00:00Z', week: 2)]),
+          liveScoresProvider.overrideWith(
+            (ref, sport) async => {
+              '401547417': const LiveEventState(live: true, detail: 'Q3 08:14', homeScore: 17, awayScore: 14),
+            },
+          ),
+        ],
+        child: const MaterialApp(home: Scaffold(body: EventListPage(sportId: 'nfl'))),
+      ),
+    );
+
+    // '12' = KC (home), '13' = LV (away) -- see nfl_team_colors.dart.
+    const minLegibleWidth = 15.0;
+    expect(tester.getSize(find.text('KC')).width, greaterThan(minLegibleWidth));
+    expect(tester.getSize(find.text('LV')).width, greaterThan(minLegibleWidth));
+  });
 }

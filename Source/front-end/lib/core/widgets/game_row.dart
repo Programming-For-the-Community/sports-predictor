@@ -12,6 +12,11 @@ import 'confidence_pill.dart';
 import 'live_status_pill.dart';
 import 'win_probability_bar.dart';
 
+// Below this width, GameRow stacks the matchup and prediction sections
+// onto their own lines instead of splitting one row between them -- see
+// GameRow.build's own comment.
+const _stackBreakpoint = 600.0;
+
 // Abbreviated for this compact row -- the backend's full round names
 // ("Conference Championship") don't fit the fixed-width week/round slot
 // this list uses. See core/models/event.dart's SportEvent.round.
@@ -103,6 +108,48 @@ class GameRow extends ConsumerWidget {
     final isCompleted = event.status == 'completed';
     final isLive = liveState?.live ?? false;
 
+    final weekTime = SizedBox(
+      // Wide enough for "1:00 PM" on one line -- 56 was sized for the
+      // week label ("WK 2"/"DIV") above it, not this longer string,
+      // which was wrapping onto a second line as a result. maxLines/
+      // softWrap are a backstop, not the fix itself -- a time value
+      // truncating would be worse than it wrapping.
+      width: 72,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(_weekLabel(event), style: AppTextStyles.microLabel()),
+          if (_kickoffTimeLabel(event).isNotEmpty)
+            Text(
+              _kickoffTimeLabel(event),
+              style: AppTextStyles.microLabel(color: AppColors.inkMute),
+              maxLines: 1,
+              softWrap: false,
+            ),
+        ],
+      ),
+    );
+    final matchup = _MatchupLine(
+      awayColor: away.primary, awayAbbr: away.abbreviation,
+      awayScore: isLive ? liveState!.awayScore : event.away.result?.score,
+      homeColor: home.primary, homeAbbr: home.abbreviation,
+      homeScore: isLive ? liveState!.homeScore : event.home.result?.score,
+    );
+    // Live takes priority over completed/scheduled -- a pre-game
+    // prediction next to an actual in-progress score would be confusing,
+    // and a "completed" status hasn't caught up yet (see event.dart's
+    // own status field -- it only ever reflects yesterday's batch
+    // ingest, never today's game in progress).
+    final predictionArea = isLive
+        ? _LiveStatus(detail: liveState!.detail)
+        : isCompleted
+            ? _ComparisonSummary(
+                comparison: event.predictionComparison, homeAbbr: home.abbreviation, awayAbbr: away.abbreviation,
+              )
+            : _LivePrediction(
+                sport: sport, eventId: event.eventId, homeAbbr: home.abbreviation, awayAbbr: away.abbreviation,
+              );
+
     return InkWell(
       onTap: () => context.go('/$sport/events/${event.eventId}'),
       borderRadius: BorderRadius.circular(16),
@@ -113,59 +160,33 @@ class GameRow extends ConsumerWidget {
           borderRadius: BorderRadius.circular(16),
           border: Border.all(color: AppColors.border),
         ),
-        child: Row(
-          children: [
-            SizedBox(
-              // Wide enough for "1:00 PM" on one line -- 56 was sized for
-              // the week label ("WK 2"/"DIV") above it, not this longer
-              // string, which was wrapping onto a second line as a
-              // result. maxLines/softWrap are a backstop, not the fix
-              // itself -- a time value truncating would be worse than it
-              // wrapping.
-              width: 72,
-              child: Column(
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            // Two team dots/names/scores, plus a percentage/pill/margin
+            // line, together need more width than a phone-size card has
+            // to split between them on one shared row -- confirmed live:
+            // team names rendered at an effectively invisible sliver of
+            // a width. Each section gets the card's full width on its
+            // own line instead, below _stackBreakpoint.
+            if (constraints.maxWidth < _stackBreakpoint) {
+              return Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(_weekLabel(event), style: AppTextStyles.microLabel()),
-                  if (_kickoffTimeLabel(event).isNotEmpty)
-                    Text(
-                      _kickoffTimeLabel(event),
-                      style: AppTextStyles.microLabel(color: AppColors.inkMute),
-                      maxLines: 1,
-                      softWrap: false,
-                    ),
+                  Row(children: [weekTime, const SizedBox(width: 16), Expanded(child: matchup)]),
+                  const SizedBox(height: 12),
+                  predictionArea,
                 ],
-              ),
-            ),
-            Expanded(
-              flex: 2,
-              child: _MatchupLine(
-                awayColor: away.primary, awayAbbr: away.abbreviation,
-                awayScore: isLive ? liveState!.awayScore : event.away.result?.score,
-                homeColor: home.primary, homeAbbr: home.abbreviation,
-                homeScore: isLive ? liveState!.homeScore : event.home.result?.score,
-              ),
-            ),
-            const SizedBox(width: 16),
-            Expanded(
-              flex: 3,
-              // Live takes priority over completed/scheduled -- a pre-game
-              // prediction next to an actual in-progress score would be
-              // confusing, and a "completed" status hasn't caught up yet
-              // (see event.dart's own status field -- it only ever
-              // reflects yesterday's batch ingest, never today's game in
-              // progress).
-              child: isLive
-                  ? _LiveStatus(detail: liveState!.detail)
-                  : isCompleted
-                      ? _ComparisonSummary(
-                          comparison: event.predictionComparison, homeAbbr: home.abbreviation, awayAbbr: away.abbreviation,
-                        )
-                      : _LivePrediction(
-                          sport: sport, eventId: event.eventId, homeAbbr: home.abbreviation, awayAbbr: away.abbreviation,
-                        ),
-            ),
-          ],
+              );
+            }
+            return Row(
+              children: [
+                weekTime,
+                Expanded(flex: 2, child: matchup),
+                const SizedBox(width: 16),
+                Expanded(flex: 3, child: predictionArea),
+              ],
+            );
+          },
         ),
       ),
     );
@@ -304,9 +325,15 @@ class _ComparisonSummary extends StatelessWidget {
   }
 }
 
-/// Single "away @ home" line -- "@" is the standard American-sports
-/// shorthand for "traveling to" (the away team is always on the left),
-/// so this ordering is the only one "@" reads correctly for.
+/// Away line stacked over home line ("@" prefixed on the home line reads
+/// as "away 27, at home 24") -- this whole block only gets a fixed 2/5
+/// flex slice of GameRow's own Row (see GameRow.build), which measured
+/// out to as little as ~74px total on a real phone width: not enough
+/// room for two team dots + names + scores + "@" side by side on one
+/// line at all (confirmed -- team names were rendering at an
+/// effectively-invisible sliver of a width). Stacking gives each team's
+/// own line the full width instead of splitting it with the other
+/// team's, which is what actually fixes it, not just squeezing further.
 class _MatchupLine extends StatelessWidget {
   const _MatchupLine({
     required this.awayColor, required this.awayAbbr, this.awayScore,
@@ -321,43 +348,46 @@ class _MatchupLine extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        _TeamLine(color: awayColor, abbr: awayAbbr, score: awayScore),
+        const SizedBox(height: 4),
+        _TeamLine(color: homeColor, abbr: homeAbbr, score: homeScore, prefix: '@ '),
+      ],
+    );
+  }
+}
+
+class _TeamLine extends StatelessWidget {
+  const _TeamLine({required this.color, required this.abbr, this.score, this.prefix});
+  final Color color;
+  final String abbr;
+  final double? score;
+  final String? prefix;
+
+  @override
+  Widget build(BuildContext context) {
     return Row(
       children: [
-        Container(width: 8, height: 8, decoration: BoxDecoration(shape: BoxShape.circle, color: awayColor)),
-        const SizedBox(width: 8),
-        // Flexible+ellipsis, not a bare Text -- this whole line is
-        // squeezed into a fixed flex slice of GameRow's own Row (see
-        // GameRow.build), tight enough on a phone-width screen that even
-        // a normal 2-3 letter abbreviation needs somewhere to give
-        // ground rather than overflow (nflTeam's own fallback for an
-        // unrecognized team_id is worse still -- the raw, much longer
-        // entity_id string).
-        Flexible(child: Text(awayAbbr, style: AppTextStyles.body(color: AppColors.ink), overflow: TextOverflow.ellipsis)),
-        if (awayScore != null) ...[
+        if (prefix != null) Text(prefix!, style: AppTextStyles.microLabel(color: AppColors.inkMute)),
+        Container(width: 8, height: 8, decoration: BoxDecoration(shape: BoxShape.circle, color: color)),
+        const SizedBox(width: 6),
+        Flexible(child: Text(abbr, style: AppTextStyles.body(color: AppColors.ink), maxLines: 1, overflow: TextOverflow.ellipsis)),
+        if (score != null) ...[
           const SizedBox(width: 6),
-          // Flexible here too -- a real (not just placeholder-null) score
-          // is now common content on this line once an event goes live,
-          // not something that was ever exercised at this width before.
+          // Flexible, not a bare Text -- a score is normally only 1-2
+          // digits, but this line's own fixed overhead (dot, prefix,
+          // spacers) is already close enough to this card's available
+          // width on a real phone that a non-flexible score risked a
+          // hard overflow on its own, independent of how much room the
+          // name got.
           Flexible(
             child: Text(
-              awayScore!.toStringAsFixed(0),
+              score!.toStringAsFixed(0),
               style: AppTextStyles.metricValue(color: AppColors.ink),
-              overflow: TextOverflow.ellipsis,
-            ),
-          ),
-        ],
-        const SizedBox(width: 8),
-        Text('@', style: AppTextStyles.microLabel(color: AppColors.inkMute)),
-        const SizedBox(width: 8),
-        Container(width: 8, height: 8, decoration: BoxDecoration(shape: BoxShape.circle, color: homeColor)),
-        const SizedBox(width: 8),
-        Flexible(child: Text(homeAbbr, style: AppTextStyles.body(color: AppColors.ink), overflow: TextOverflow.ellipsis)),
-        if (homeScore != null) ...[
-          const SizedBox(width: 6),
-          Flexible(
-            child: Text(
-              homeScore!.toStringAsFixed(0),
-              style: AppTextStyles.metricValue(color: AppColors.ink),
+              maxLines: 1,
               overflow: TextOverflow.ellipsis,
             ),
           ),

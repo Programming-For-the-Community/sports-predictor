@@ -61,8 +61,10 @@ def _depth_chart(qb=None, rb=None, wr=None):
     return chart
 
 
-def _roster(*entity_ids):
-    return [{"entity_id": eid} for eid in entity_ids]
+def _roster(*entity_ids, as_of="2025-09-21"):
+    # as_of matches every test's own event date by default -- "fresh" per
+    # _is_roster_entry_fresh. Tests exercising staleness override it.
+    return [{"entity_id": eid, "metadata": {"team_id_as_of": as_of}} for eid in entity_ids]
 
 
 class TestBuildLiveEventFeatures:
@@ -121,6 +123,30 @@ class TestBuildLiveEventFeatures:
 
         called_entity_ids = {c.args[0] for c in storage.get_player_game_stats.call_args_list}
         assert "mahomes-patrick" in called_entity_ids
+
+    def test_retired_player_with_stale_roster_entry_falls_back_instead_of_surfacing(self):
+        # Roster sync only ever upserts who IS on a fetched roster -- a
+        # retired/cut player's entity row just sits frozen at whatever
+        # team_id_as_of it last had, with nothing to ever clear it. Stale
+        # by more than _ROSTER_STALENESS_DAYS must not be trusted as
+        # "currently on this team", even though the box-score fallback
+        # (older, no depth chart here either) has nothing for KC at all.
+        storage = MagicMock()
+        target = _event("E3", "2025-09-21", "KC", "LAC")
+        storage.get_event.return_value = target
+        storage.get_all_events.return_value = []
+        storage.get_team_game_stats_for_team.return_value = []
+        storage.get_team_events.return_value = []
+        storage.get_team_entities.side_effect = lambda sport, team_id: (
+            _roster("retired-qb", as_of="2020-01-01") if team_id == "KC" else []
+        )
+        storage.get_player_game_stats.return_value = []
+
+        row = live_features.build_live_event_features(storage, "nfl", "E3")
+
+        assert row["home_qb_avg_passing_yards"] is None
+        called_entity_ids = {c.args[0] for c in storage.get_player_game_stats.call_args_list}
+        assert "retired-qb" not in called_entity_ids
 
     def test_traded_player_surfaces_under_new_team_using_past_performance(self):
         # mahomes-patrick's only game log is with DEN (his old team,
@@ -277,6 +303,33 @@ class TestHealthyAthleteIds:
         entry = {"athletes": [{"id": "1"}]}
         injuries = [{"entity_id": "1", "status": "Doubtful"}]
         assert live_features._healthy_athlete_ids(entry, injuries) == []
+
+
+class TestIsRosterEntryFresh:
+    def test_same_day_is_fresh(self):
+        entity = {"metadata": {"team_id_as_of": "2025-09-21"}}
+        assert live_features._is_roster_entry_fresh(entity, "2025-09-21") is True
+
+    def test_within_staleness_window_is_fresh(self):
+        entity = {"metadata": {"team_id_as_of": "2025-09-10"}}
+        assert live_features._is_roster_entry_fresh(entity, "2025-09-21") is True  # 11 days
+
+    def test_beyond_staleness_window_is_not_fresh(self):
+        entity = {"metadata": {"team_id_as_of": "2025-08-01"}}
+        assert live_features._is_roster_entry_fresh(entity, "2025-09-21") is False  # 51 days
+
+    def test_years_stale_is_not_fresh(self):
+        # The exact reported bug: a retired player's roster entry frozen
+        # years in the past.
+        entity = {"metadata": {"team_id_as_of": "2020-01-01"}}
+        assert live_features._is_roster_entry_fresh(entity, "2025-09-21") is False
+
+    def test_missing_team_id_as_of_is_not_fresh(self):
+        assert live_features._is_roster_entry_fresh({"metadata": {}}, "2025-09-21") is False
+
+    def test_malformed_date_is_not_fresh(self):
+        entity = {"metadata": {"team_id_as_of": "not-a-date"}}
+        assert live_features._is_roster_entry_fresh(entity, "2025-09-21") is False
 
 
 class TestBuildLivePlayerFeatures:

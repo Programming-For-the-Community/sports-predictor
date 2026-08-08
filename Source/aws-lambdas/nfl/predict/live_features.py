@@ -21,6 +21,8 @@ rating" snapshot -- NFL's ~2,700 completed games is the same cost
 build_dataset.py already treats as cheap-enough-to-scan, and this project
 has no request volume that would make that recomputation a real cost.
 """
+from datetime import date
+
 from library.features.common import DEFAULT_STARTING_RATING, compute_elo_ratings, rank_by_average_stat
 from library.features.nfl import (
     build_event_features,
@@ -130,14 +132,37 @@ def _healthy_athlete_ids(depth_chart_entry: dict, injuries: list[dict] | None) -
 # candidate's own history instead of read off one specific game.
 _LEADER_VOLUME_STAT = {"QB": "passing_attempts", "RB": "rushing_attempts", "WR": "receiving_targets"}
 
+# Roster sync fetches all 32 teams daily (see ingest/handler.py), so an
+# entity actually still on a team gets its team_id_as_of refreshed every
+# day. Roster sync only ever upserts who IS on a fetched roster -- nobody
+# ever tells the entities table "this player left the league entirely"
+# (retired, cut, unsigned), so a departed player's row just sits frozen
+# at whatever team_id_as_of it last had. This many days without a
+# refresh is treated as "no longer confirmed on this team" rather than
+# trusted indefinitely -- generous enough to tolerate a few missed
+# ingest days, tight enough to exclude someone retired for years.
+_ROSTER_STALENESS_DAYS = 14
+
+
+def _is_roster_entry_fresh(entity: dict, before_date: str) -> bool:
+    as_of = entity.get("metadata", {}).get("team_id_as_of")
+    if as_of is None:
+        return False
+    try:
+        return abs((date.fromisoformat(before_date) - date.fromisoformat(as_of)).days) <= _ROSTER_STALENESS_DAYS
+    except ValueError:
+        return False
+
 
 def _team_candidate_histories(storage, sport: str, team_id: str, before_date: str, window: int) -> dict[str, list]:
     """entity_id -> rolling game history (regardless of which team each
     game was recorded under) for every player CURRENTLY rostered to
     team_id, per the entities table's team-index (kept fresh by roster
-    sync's daily upsert -- see normalize/espn.py). {} if roster sync
-    hasn't reached this team yet, signaling callers to fall back to the
-    older last-game-box-score approach below.
+    sync's daily upsert -- see normalize/espn.py), filtered to entries
+    roster sync has actually confirmed recently (_is_roster_entry_fresh).
+    {} if roster sync hasn't reached this team yet or has nothing fresh
+    for it, signaling callers to fall back to the older last-game-box-
+    score approach below.
 
     This is what makes a just-traded player show up under their NEW team
     immediately: their entity record's team_id already reflects the
@@ -145,7 +170,7 @@ def _team_candidate_histories(storage, sport: str, team_id: str, before_date: st
     team their own most recent game log says -- unlike the box-score
     fallback, which can only ever find them via a game they actually
     played for this specific team."""
-    roster = storage.get_team_entities(sport, team_id)
+    roster = [entity for entity in storage.get_team_entities(sport, team_id) if _is_roster_entry_fresh(entity, before_date)]
     if not roster:
         return {}
     return {
