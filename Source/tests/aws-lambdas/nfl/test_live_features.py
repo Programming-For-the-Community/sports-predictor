@@ -5,6 +5,13 @@ orchestration (which storage methods get called with what, how a
 not-yet-played event's Elo/leader context gets built), not
 build_event_features/build_player_features themselves, which already
 have their own extensive coverage in tests/library/features/test_nfl.py.
+
+storage.get_team_entities defaults to [] in every test that reaches
+presumptive-leader selection but isn't specifically exercising the
+roster-driven path -- MagicMock's default return value is a truthy,
+non-iterable Mock, which _team_candidate_histories would crash trying to
+iterate. Tests that ARE about roster-driven selection set it explicitly
+to real roster rows instead.
 """
 from unittest.mock import MagicMock
 
@@ -54,6 +61,10 @@ def _depth_chart(qb=None, rb=None, wr=None):
     return chart
 
 
+def _roster(*entity_ids):
+    return [{"entity_id": eid} for eid in entity_ids]
+
+
 class TestBuildLiveEventFeatures:
     def test_raises_when_event_not_found(self):
         storage = MagicMock()
@@ -78,6 +89,7 @@ class TestBuildLiveEventFeatures:
         storage.get_event.return_value = target
         storage.get_all_events.return_value = [_event("E1", "2025-09-07", "KC", "LAC", 27, 20)]
         storage.get_team_events.return_value = []
+        storage.get_team_entities.return_value = []
         storage.get_team_game_stats_for_team.return_value = []
         storage.get_player_game_stats_for_event.return_value = []
         storage.get_player_game_stats.return_value = []
@@ -90,56 +102,79 @@ class TestBuildLiveEventFeatures:
         assert row["home_elo"] > 1500
         assert row["away_elo"] < 1500
 
-    def test_presumptive_qb_comes_from_the_teams_most_recent_completed_game(self):
+    def test_presumptive_qb_comes_from_roster_average_when_no_depth_chart(self):
         storage = MagicMock()
         target = _event("E3", "2025-09-21", "KC", "LAC")
-        last_game = _event("E2", "2025-09-14", "KC", "DEN", 24, 17)
         storage.get_event.return_value = target
-        storage.get_all_events.return_value = [last_game]
+        storage.get_all_events.return_value = []
         storage.get_team_game_stats_for_team.return_value = []
+        storage.get_team_events.return_value = []
+        storage.get_team_entities.side_effect = lambda sport, team_id: _roster("mahomes-patrick") if team_id == "KC" else []
 
-        def team_events(sport, entity_id, before_date=None, limit=None):
-            return [last_game] if entity_id == "KC" and limit == 1 else []
-        storage.get_team_events.side_effect = team_events
-
-        storage.get_player_game_stats_for_event.return_value = [
-            {"entity_id": "mahomes-patrick", "team_id": "KC", "stat_line": {"passing_attempts": 30}},
-            {"entity_id": "backup-qb", "team_id": "KC", "stat_line": {"passing_attempts": 2}},
-        ]
-        storage.get_player_game_stats.return_value = [
-            {"event_date": "2025-09-14", "stat_line": {"passing_yards": 300}, "started": True},
-        ]
+        def player_history(entity_id, before_date=None, limit=None):
+            if entity_id == "mahomes-patrick":
+                return [{"stat_line": {"passing_attempts": 30}, "event_date": "2025-09-14"}]
+            return []
+        storage.get_player_game_stats.side_effect = player_history
 
         live_features.build_live_event_features(storage, "nfl", "E3")
 
-        # The identified leader (most passing attempts) is who we should
-        # have fetched rolling history for.
         called_entity_ids = {c.args[0] for c in storage.get_player_game_stats.call_args_list}
         assert "mahomes-patrick" in called_entity_ids
 
-    def test_qb_selected_from_depth_chart_when_available_not_last_game_volume(self):
+    def test_traded_player_surfaces_under_new_team_using_past_performance(self):
+        # mahomes-patrick's only game log is with DEN (his old team,
+        # before the trade) -- the entities table (roster sync) already
+        # says he's on KC now. He must show up as KC's presumptive QB,
+        # scored off his DEN-recorded history, not be invisible until he
+        # logs a game for KC.
         storage = MagicMock()
-        # Depth chart says "backup-qb" is QB1 -- volume-based selection
-        # (most passing attempts last game) would pick "mahomes-patrick"
-        # instead; depth chart must win when both are available.
-        target = _event("E3", "2025-09-21", "KC", "LAC", home_depth_chart=_depth_chart(qb=["backup-qb"]))
-        last_game = _event("E2", "2025-09-14", "KC", "DEN", 24, 17)
+        target = _event("E3", "2025-09-21", "KC", "LAC")
         storage.get_event.return_value = target
-        storage.get_all_events.return_value = [last_game]
+        storage.get_all_events.return_value = []
         storage.get_team_game_stats_for_team.return_value = []
-        storage.get_team_events.side_effect = lambda sport, entity_id, before_date=None, limit=None: (
-            [last_game] if entity_id == "KC" and limit == 1 else []
-        )
-        storage.get_player_game_stats_for_event.return_value = [
-            {"entity_id": "mahomes-patrick", "team_id": "KC", "stat_line": {"passing_attempts": 30}},
+        storage.get_team_events.return_value = []
+        storage.get_team_entities.side_effect = lambda sport, team_id: _roster("mahomes-patrick") if team_id == "KC" else []
+        storage.get_player_game_stats.return_value = [
+            {"team_id": "DEN", "stat_line": {"passing_attempts": 35, "passing_yards": 260}, "event_date": "2025-09-14"},
         ]
-        storage.get_player_game_stats.return_value = []
 
-        live_features.build_live_event_features(storage, "nfl", "E3")
+        row = live_features.build_live_event_features(storage, "nfl", "E3")
 
+        assert row["home_qb_avg_passing_yards"] == 260  # scored off the DEN-recorded history, not omitted
         called_entity_ids = {c.args[0] for c in storage.get_player_game_stats.call_args_list}
-        assert "backup-qb" in called_entity_ids
-        assert "mahomes-patrick" not in called_entity_ids
+        assert "mahomes-patrick" in called_entity_ids
+
+    def test_qb_selected_from_depth_chart_when_available_not_roster_average(self):
+        storage = MagicMock()
+        # Depth chart says "backup-qb" is QB1 -- roster-average selection
+        # would pick "mahomes-patrick" instead (higher volume); depth
+        # chart must win when both are available. Building the shared
+        # roster-histories pool fetches both regardless (it's built for
+        # the whole team once, ahead of any position-specific pick -- see
+        # build_live_event_features' own comment on home_histories), so
+        # the real assertion is on which player's stats the QB feature
+        # ends up reflecting, not on who gets fetched at all.
+        target = _event("E3", "2025-09-21", "KC", "LAC", home_depth_chart=_depth_chart(qb=["backup-qb"]))
+        storage.get_event.return_value = target
+        storage.get_all_events.return_value = []
+        storage.get_team_game_stats_for_team.return_value = []
+        storage.get_team_events.return_value = []
+        storage.get_team_entities.side_effect = lambda sport, team_id: (
+            _roster("mahomes-patrick", "backup-qb") if team_id == "KC" else []
+        )
+
+        def player_history(entity_id, before_date=None, limit=None):
+            histories = {
+                "mahomes-patrick": [{"stat_line": {"passing_attempts": 30, "passing_yards": 300}}],
+                "backup-qb": [{"stat_line": {"passing_attempts": 5, "passing_yards": 40}}],
+            }
+            return histories.get(entity_id, [])
+        storage.get_player_game_stats.side_effect = player_history
+
+        row = live_features.build_live_event_features(storage, "nfl", "E3")
+
+        assert row["home_qb_avg_passing_yards"] == 40  # backup-qb's, not mahomes-patrick's higher-volume 300
 
     def test_injured_qb_skipped_for_next_ranked_healthy_depth_chart_entry(self):
         storage = MagicMock()
@@ -152,6 +187,7 @@ class TestBuildLiveEventFeatures:
         storage.get_all_events.return_value = []
         storage.get_team_game_stats_for_team.return_value = []
         storage.get_team_events.return_value = []
+        storage.get_team_entities.return_value = []
         storage.get_player_game_stats.return_value = []
 
         live_features.build_live_event_features(storage, "nfl", "E3")
@@ -161,7 +197,7 @@ class TestBuildLiveEventFeatures:
         assert "starter-qb" not in called_entity_ids
 
     def test_no_healthy_depth_chart_entry_returns_empty_not_a_fallback_pick(self):
-        # Both listed QBs are hurt -- must NOT fall back to volume-based
+        # Both listed QBs are hurt -- must NOT fall back to roster-average
         # selection, which could re-surface the very player just excluded.
         storage = MagicMock()
         target = _event(
@@ -172,16 +208,11 @@ class TestBuildLiveEventFeatures:
                 {"entity_id": "backup-qb", "status": "Doubtful"},
             ],
         )
-        last_game = _event("E2", "2025-09-14", "KC", "DEN", 24, 17)
         storage.get_event.return_value = target
-        storage.get_all_events.return_value = [last_game]
+        storage.get_all_events.return_value = []
         storage.get_team_game_stats_for_team.return_value = []
-        storage.get_team_events.side_effect = lambda sport, entity_id, before_date=None, limit=None: (
-            [last_game] if entity_id == "KC" and limit == 1 else []
-        )
-        storage.get_player_game_stats_for_event.return_value = [
-            {"entity_id": "starter-qb", "team_id": "KC", "stat_line": {"passing_attempts": 30}},
-        ]
+        storage.get_team_events.return_value = []
+        storage.get_team_entities.return_value = []
         storage.get_player_game_stats.return_value = []
 
         row = live_features.build_live_event_features(storage, "nfl", "E3")
@@ -190,15 +221,18 @@ class TestBuildLiveEventFeatures:
         called_entity_ids = {c.args[0] for c in storage.get_player_game_stats.call_args_list}
         assert "starter-qb" not in called_entity_ids
 
-    def test_falls_back_to_last_game_volume_when_no_depth_chart_present(self):
+    def test_falls_back_to_last_game_volume_when_no_depth_chart_or_roster(self):
         # No home_depth_chart on this event (older event, or a fetch
-        # failure) -- must behave exactly like before depth charts existed.
+        # failure) AND roster sync hasn't reached this team either (no
+        # team-index rows) -- must fall back to the original last-game
+        # box-score behavior.
         storage = MagicMock()
         target = _event("E3", "2025-09-21", "KC", "LAC")  # no depth chart
         last_game = _event("E2", "2025-09-14", "KC", "DEN", 24, 17)
         storage.get_event.return_value = target
         storage.get_all_events.return_value = [last_game]
         storage.get_team_game_stats_for_team.return_value = []
+        storage.get_team_entities.return_value = []
         storage.get_team_events.side_effect = lambda sport, entity_id, before_date=None, limit=None: (
             [last_game] if entity_id == "KC" and limit == 1 else []
         )
@@ -302,10 +336,11 @@ class TestBuildLiveEventLeaderCandidates:
         with pytest.raises(live_features.EventNotFoundError):
             live_features.build_live_event_leader_candidates(storage, "nfl", "SPORT#NFL#EVENT#missing")
 
-    def test_no_prior_game_returns_empty_categories(self):
+    def test_no_prior_game_or_roster_returns_empty_categories(self):
         storage = MagicMock()
         storage.get_event.return_value = _event("E1", "2025-09-14", "KC", "LAC")
         storage.get_team_events.return_value = []  # neither team has a prior game
+        storage.get_team_entities.return_value = []  # roster sync hasn't reached either team
         storage.get_all_events.return_value = []
 
         candidates = live_features.build_live_event_leader_candidates(storage, "nfl", "E1")
@@ -313,25 +348,26 @@ class TestBuildLiveEventLeaderCandidates:
         assert candidates["home"] == {"passing": [], "receiving": [], "rushing": [], "sacks": []}
         assert candidates["away"] == {"passing": [], "receiving": [], "rushing": [], "sacks": []}
 
-    def test_identifies_candidates_across_categories_for_the_home_team(self):
+    def test_identifies_candidates_across_categories_from_current_roster(self):
         storage = MagicMock()
         target = _event("E3", "2025-09-21", "KC", "LAC")
-        last_game = _event("E2", "2025-09-14", "KC", "DEN", 24, 17)
         storage.get_event.return_value = target
-        storage.get_all_events.return_value = [last_game]
+        storage.get_all_events.return_value = []
         storage.get_team_game_stats_for_team.return_value = []
+        storage.get_team_events.return_value = []
+        storage.get_team_entities.side_effect = lambda sport, team_id: (
+            _roster("qb1", "wr1", "wr2", "rb1") if team_id == "KC" else []
+        )
 
-        def team_events(sport, entity_id, before_date=None, limit=None):
-            return [last_game] if entity_id == "KC" and limit == 1 else []
-        storage.get_team_events.side_effect = team_events
-
-        storage.get_player_game_stats_for_event.return_value = [
-            {"entity_id": "qb1", "team_id": "KC", "stat_line": {"passing_attempts": 30}},
-            {"entity_id": "wr1", "team_id": "KC", "stat_line": {"receiving_targets": 10}},
-            {"entity_id": "wr2", "team_id": "KC", "stat_line": {"receiving_targets": 6}},
-            {"entity_id": "rb1", "team_id": "KC", "stat_line": {"rushing_attempts": 18}},
-        ]
-        storage.get_player_game_stats.return_value = []
+        def player_history(entity_id, before_date=None, limit=None):
+            histories = {
+                "qb1": [{"stat_line": {"passing_attempts": 30}}],
+                "wr1": [{"stat_line": {"receiving_targets": 10}}],
+                "wr2": [{"stat_line": {"receiving_targets": 6}}],
+                "rb1": [{"stat_line": {"rushing_attempts": 18}}],
+            }
+            return histories.get(entity_id, [])
+        storage.get_player_game_stats.side_effect = player_history
 
         candidates = live_features.build_live_event_leader_candidates(storage, "nfl", "E3")
 
@@ -339,9 +375,28 @@ class TestBuildLiveEventLeaderCandidates:
         assert len(home["passing"]) == 1 and home["passing"][0]["entity_id"] == "qb1"
         assert {row["entity_id"] for row in home["receiving"]} == {"wr1", "wr2"}
         assert {row["entity_id"] for row in home["rushing"]} == {"rb1"}
-        # Away has no prior game in this test -- confirms one team's
-        # roster doesn't leak into the other's candidates.
+        # Away has no roster/prior game in this test -- confirms one
+        # team's pool doesn't leak into the other's candidates.
         assert candidates["away"] == {"passing": [], "receiving": [], "rushing": [], "sacks": []}
+
+    def test_traded_player_surfaces_under_new_team_via_roster(self):
+        # wr1's only recorded game is for DEN, but the entities table
+        # (roster sync) says they're on KC now -- must show up as a KC
+        # receiving candidate, scored off their DEN-recorded history.
+        storage = MagicMock()
+        target = _event("E3", "2025-09-21", "KC", "LAC")
+        storage.get_event.return_value = target
+        storage.get_all_events.return_value = []
+        storage.get_team_game_stats_for_team.return_value = []
+        storage.get_team_events.return_value = []
+        storage.get_team_entities.side_effect = lambda sport, team_id: _roster("wr1") if team_id == "KC" else []
+        storage.get_player_game_stats.return_value = [
+            {"team_id": "DEN", "stat_line": {"receiving_targets": 9}, "event_date": "2025-09-14"},
+        ]
+
+        candidates = live_features.build_live_event_leader_candidates(storage, "nfl", "E3")
+
+        assert "wr1" in {row["entity_id"] for row in candidates["home"]["receiving"]}
 
     def test_computes_elo_ratings_once_regardless_of_candidate_count(self):
         """Regression test for a real production timeout: before this fix,
@@ -357,25 +412,26 @@ class TestBuildLiveEventLeaderCandidates:
         regardless of how many candidates get identified."""
         storage = MagicMock()
         target = _event("E3", "2025-09-21", "KC", "LAC")
-        last_game = _event("E2", "2025-09-14", "KC", "DEN", 24, 17)
         storage.get_event.return_value = target
-        storage.get_all_events.return_value = [last_game]
+        storage.get_all_events.return_value = []
         storage.get_team_game_stats_for_team.return_value = []
-        # Only the home team has a prior game -- same pattern as
-        # test_identifies_candidates_across_categories_for_the_home_team.
+        storage.get_team_events.return_value = []
         # Four distinct candidates (QB, 2 receivers, 1 rusher) is already
         # enough to prove the fix: pre-fix, each one would have separately
         # triggered its own get_all_events + Elo recompute.
-        storage.get_team_events.side_effect = lambda sport, entity_id, before_date=None, limit=None: (
-            [last_game] if entity_id == "KC" and limit == 1 else []
+        storage.get_team_entities.side_effect = lambda sport, team_id: (
+            _roster("qb1", "wr1", "wr2", "rb1") if team_id == "KC" else []
         )
-        storage.get_player_game_stats_for_event.return_value = [
-            {"entity_id": "qb1", "team_id": "KC", "stat_line": {"passing_attempts": 30}},
-            {"entity_id": "wr1", "team_id": "KC", "stat_line": {"receiving_targets": 10}},
-            {"entity_id": "wr2", "team_id": "KC", "stat_line": {"receiving_targets": 6}},
-            {"entity_id": "rb1", "team_id": "KC", "stat_line": {"rushing_attempts": 18}},
-        ]
-        storage.get_player_game_stats.return_value = []
+
+        def player_history(entity_id, before_date=None, limit=None):
+            histories = {
+                "qb1": [{"stat_line": {"passing_attempts": 30}}],
+                "wr1": [{"stat_line": {"receiving_targets": 10}}],
+                "wr2": [{"stat_line": {"receiving_targets": 6}}],
+                "rb1": [{"stat_line": {"rushing_attempts": 18}}],
+            }
+            return histories.get(entity_id, [])
+        storage.get_player_game_stats.side_effect = player_history
 
         live_features.build_live_event_leader_candidates(storage, "nfl", "E3")
 
@@ -384,17 +440,13 @@ class TestBuildLiveEventLeaderCandidates:
     def test_sacks_ranked_by_own_average_not_last_game_volume(self):
         storage = MagicMock()
         target = _event("E3", "2025-09-21", "KC", "LAC")
-        last_game = _event("E2", "2025-09-14", "KC", "DEN", 24, 17)
         storage.get_event.return_value = target
-        storage.get_all_events.return_value = [last_game]
+        storage.get_all_events.return_value = []
         storage.get_team_game_stats_for_team.return_value = []
-        storage.get_team_events.side_effect = lambda sport, entity_id, before_date=None, limit=None: (
-            [last_game] if entity_id == "KC" and limit == 1 else []
+        storage.get_team_events.return_value = []
+        storage.get_team_entities.side_effect = lambda sport, team_id: (
+            _roster("dl1", "dl2") if team_id == "KC" else []
         )
-        storage.get_player_game_stats_for_event.return_value = [
-            {"entity_id": "dl1", "team_id": "KC", "stat_line": {"defensive_sacks": 3.0}},  # one huge game
-            {"entity_id": "dl2", "team_id": "KC", "stat_line": {"defensive_sacks": 1.0}},  # consistent performer
-        ]
 
         def player_history(entity_id, before_date=None, limit=None):
             histories = {
@@ -406,48 +458,52 @@ class TestBuildLiveEventLeaderCandidates:
 
         candidates = live_features.build_live_event_leader_candidates(storage, "nfl", "E3")
 
-        # dl2's average (1.0) beats dl1's (1.5)? No -- dl1 averages 1.5,
-        # dl2 averages 1.0, so dl1 should still lead here; the real point
-        # is that this is driven by rank_by_average_stat's own average
-        # (already covered in test_nfl.py), not by dl1's single-game 3.0
-        # sack total naively winning outright with no averaging at all.
+        # dl1 averages 1.5, dl2 averages 1.0 -- dl1 should lead despite
+        # dl2's more consistent per-game total, confirming this is driven
+        # by rank_by_average_stat's own average (already covered in
+        # test_nfl.py), not a naive single-game-volume comparison.
         sack_ids = [row["entity_id"] for row in candidates["home"]["sacks"]]
         assert sack_ids == ["dl1", "dl2"]
 
     def test_receiving_candidates_from_depth_chart_skip_injured(self):
         storage = MagicMock()
         # Depth chart lists 3 WRs, wr2 is Out -- expect wr1 and wr3, NOT
-        # the volume-based wr1/wr2 the last-game stat_line would pick.
+        # the volume-based wr1/wr2 a roster-average comparison would pick.
         target = _event(
             "E3", "2025-09-21", "KC", "LAC",
             home_depth_chart=_depth_chart(wr=["wr1", "wr2", "wr3"]),
             home_injuries=[{"entity_id": "wr2", "status": "Out"}],
         )
-        last_game = _event("E2", "2025-09-14", "KC", "DEN", 24, 17)
         storage.get_event.return_value = target
-        storage.get_all_events.return_value = [last_game]
+        storage.get_all_events.return_value = []
         storage.get_team_game_stats_for_team.return_value = []
-        storage.get_team_events.side_effect = lambda sport, entity_id, before_date=None, limit=None: (
-            [last_game] if entity_id == "KC" and limit == 1 else []
+        storage.get_team_events.return_value = []
+        storage.get_team_entities.side_effect = lambda sport, team_id: (
+            _roster("wr1", "wr2", "wr3") if team_id == "KC" else []
         )
-        storage.get_player_game_stats_for_event.return_value = [
-            {"entity_id": "wr1", "team_id": "KC", "stat_line": {"receiving_targets": 10}},
-            {"entity_id": "wr2", "team_id": "KC", "stat_line": {"receiving_targets": 8}},
-        ]
-        storage.get_player_game_stats.return_value = []
+
+        def player_history(entity_id, before_date=None, limit=None):
+            histories = {
+                "wr1": [{"stat_line": {"receiving_targets": 10}}],
+                "wr2": [{"stat_line": {"receiving_targets": 8}}],
+                "wr3": [{"stat_line": {"receiving_targets": 2}}],
+            }
+            return histories.get(entity_id, [])
+        storage.get_player_game_stats.side_effect = player_history
 
         candidates = live_features.build_live_event_leader_candidates(storage, "nfl", "E3")
 
         receiving_ids = {row["entity_id"] for row in candidates["home"]["receiving"]}
         assert receiving_ids == {"wr1", "wr3"}
 
-    def test_receiving_candidates_fall_back_to_volume_when_no_depth_chart(self):
+    def test_receiving_candidates_fall_back_to_last_game_volume_when_no_depth_chart_or_roster(self):
         storage = MagicMock()
         target = _event("E3", "2025-09-21", "KC", "LAC")  # no depth chart
         last_game = _event("E2", "2025-09-14", "KC", "DEN", 24, 17)
         storage.get_event.return_value = target
         storage.get_all_events.return_value = [last_game]
         storage.get_team_game_stats_for_team.return_value = []
+        storage.get_team_entities.return_value = []  # roster sync hasn't reached this team
         storage.get_team_events.side_effect = lambda sport, entity_id, before_date=None, limit=None: (
             [last_game] if entity_id == "KC" and limit == 1 else []
         )

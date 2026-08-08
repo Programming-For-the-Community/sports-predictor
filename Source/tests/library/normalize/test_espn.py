@@ -41,6 +41,19 @@ class TestBoxscoreToPlayerGameStats:
 
         assert stats_items[0]["sport"] == "nfl"
 
+    def test_player_entity_carries_team_key(self):
+        # What lets get_team_entities Query the team-index GSI (see
+        # live_features.py's roster-driven presumptive-leader selection).
+        # _summary's team is hardcoded to "KC".
+        _, player_entities = boxscore_to_player_game_stats(
+            _summary([{"name": "passing", "keys": ["passingYards"], "athletes": [
+                {"athlete": {"id": "1", "displayName": "QB One"}, "stats": ["250"]},
+            ]}]),
+            "nfl", compound_key_splits={},
+        )
+
+        assert player_entities[0]["team_key"] == "SPORT#NFL#TEAM#KC"
+
 
 def _roster(*, team_id="23", timestamp="2026-08-08T05:05:15Z", groups):
     return {"team": {"id": team_id}, "timestamp": timestamp, "athletes": groups}
@@ -99,6 +112,7 @@ class TestRosterToPlayerEntities:
         assert entity["name"] == "Drew Allar"
         assert entity["metadata"]["team_id"] == "23"
         assert entity["metadata"]["jersey"] == "8"
+        assert entity["team_key"] == "SPORT#NFL#TEAM#23"
 
     def test_empty_roster_returns_no_entities(self):
         assert roster_to_player_entities(_roster(groups=[]), "nfl") == []

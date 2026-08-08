@@ -8,7 +8,7 @@ one string -- is passed in by the caller via compound_key_splits rather
 than hardcoded here.
 """
 from library.parsing import parse_number, snake_case
-from library.schema.keys import entity_key, event_key, player_key, team_key
+from library.schema.keys import entity_key, entity_team_key, event_key, player_key, team_key
 
 
 def team_to_entity(team: dict, sport: str) -> dict:
@@ -138,6 +138,10 @@ def roster_to_player_entities(roster: dict, sport: str) -> list[dict]:
                 "sport": sport,
                 "entity_type": "player",
                 "name": athlete.get("displayName", ""),
+                # Top-level (not nested in metadata) -- a GSI hash key
+                # must be a top-level attribute. See dynamodb-entities.tf's
+                # team-index.
+                "team_key": entity_team_key(sport, team_id),
                 "metadata": {
                     "team_id": team_id,
                     "team_id_as_of": as_of_date,
@@ -229,6 +233,9 @@ def boxscore_to_player_game_stats(
             "sport": sport,
             "entity_type": "player",
             "name": display_name,
+            # Top-level (not nested in metadata) -- a GSI hash key must be
+            # a top-level attribute. See dynamodb-entities.tf's team-index.
+            "team_key": entity_team_key(sport, team_id),
             "metadata": {
                 "team_id": team_id,
                 # This game's own event_date -- lets upsert_player_entity

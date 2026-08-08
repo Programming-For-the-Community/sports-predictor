@@ -16,7 +16,7 @@ import os
 from boto3.dynamodb.conditions import Key
 
 from library.aws.dynamodb_table import DynamoDBTable
-from library.schema.keys import entity_key
+from library.schema.keys import entity_key, entity_team_key
 
 
 def _require_env(name: str) -> str:
@@ -169,3 +169,13 @@ class FeatureStorage:
         reads events/player_game_stats/team_game_stats, which batch
         feature engineering never needs the entities table for."""
         return self._entities_table.get_item({"entity_key": entity_key(sport, entity_id)})
+
+    def get_team_entities(self, sport: str, team_id: str) -> list[dict]:
+        """Every player currently rostered to team_id (team_key, kept
+        fresh by roster sync's daily upsert -- see normalize/espn.py) --
+        the roster as it stands today, not who last recorded a stat line
+        for this team. Used by live_features.py's presumptive-leader
+        candidate selection instead of box-score history, so a just-traded
+        player shows up under their new team immediately rather than only
+        after they've played a game for it."""
+        return self._entities_table.query(Key("team_key").eq(entity_team_key(sport, team_id)), index_name="team-index")

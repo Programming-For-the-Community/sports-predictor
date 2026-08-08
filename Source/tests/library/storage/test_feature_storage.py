@@ -232,3 +232,16 @@ class TestGetEntity:
 
         assert result == {"entity_id": "mahomes-patrick"}
         mock_entities.get_item.assert_called_once_with({"entity_key": "SPORT#NFL#ENTITY#mahomes-patrick"})
+
+
+class TestGetTeamEntities:
+    def test_queries_team_index(self, storage_env):
+        storage, mock_entities, _, _, _ = _make_storage(storage_env)
+        mock_entities.query.return_value = [{"entity_id": "mahomes-patrick", "team_key": "SPORT#NFL#TEAM#KC"}]
+
+        result = storage.get_team_entities("nfl", "KC")
+
+        assert result == [{"entity_id": "mahomes-patrick", "team_key": "SPORT#NFL#TEAM#KC"}]
+        call = mock_entities.query.call_args
+        assert call.args[0] == Key("team_key").eq("SPORT#NFL#TEAM#KC")
+        assert call.kwargs["index_name"] == "team-index"

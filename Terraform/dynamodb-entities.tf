@@ -2,9 +2,13 @@
 # partition key (SPORT#NFL#ENTITY#KC) so per-sport queries stay in a single
 # partition rather than scanning the whole table.
 #
-# No GSI -- "show me all teams/players for sport X" is a Scan with a
-# filter. The entity set is small (hundreds of teams, thousands of players
-# across six sports), so a scan is acceptable (see docs/DATA_SCHEMA.md).
+# team-index -- every player entity's current team (team_key, kept fresh
+# by roster sync's daily upsert) queried directly, for live_features.py's
+# presumptive-leader candidate selection (who's actually on this team
+# right now, not who logged a stat row for it in their last game). No
+# range key needed -- one team's roster (~50-90 players including
+# practice squad) is small enough that a single Query without further
+# sorting is enough.
 resource "aws_dynamodb_table" "entities" {
   name         = local.entities_table
   billing_mode = "PAY_PER_REQUEST"
@@ -13,6 +17,17 @@ resource "aws_dynamodb_table" "entities" {
   attribute {
     name = "entity_key"
     type = "S"
+  }
+
+  attribute {
+    name = "team_key"
+    type = "S"
+  }
+
+  global_secondary_index {
+    name            = "team-index"
+    hash_key        = "team_key"
+    projection_type = "ALL"
   }
 
   deletion_protection_enabled = var.environment == "production"

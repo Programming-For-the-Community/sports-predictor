@@ -49,3 +49,4 @@ jobs:
       function_name: ${{ inputs.function_name || 'sports-predictor-nfl-live-scores' }}
       handler_dir: 'Source/aws-lambdas/nfl/live-scores'
       library_path: 'Source/library'
+      extra_source_files: 'Source/aws-lambdas/nfl/live-scores/live_scores.py'

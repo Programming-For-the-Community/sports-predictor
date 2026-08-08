@@ -72,7 +72,10 @@ data "aws_iam_policy_document" "lambda_inference_permissions" {
       # each Query'd GSI needs its own /index/* entry alongside the base
       # table ARN. team_game_stats_table/index/* covers get_all_team_game_stats,
       # reached from this role's live-inference path via
-      # live_features.py's get_team_game_stats_for_team.
+      # live_features.py's get_team_game_stats_for_team. entities_table/index/*
+      # covers get_team_entities (team-index), live_features.py's
+      # roster-driven presumptive-leader candidate selection.
+      "arn:aws:dynamodb:${var.region}:${var.account_id}:table/${local.entities_table}/index/*",
       "arn:aws:dynamodb:${var.region}:${var.account_id}:table/${local.events_table}/index/*",
       "arn:aws:dynamodb:${var.region}:${var.account_id}:table/${local.player_game_stats_table}/index/*",
       "arn:aws:dynamodb:${var.region}:${var.account_id}:table/${local.team_game_stats_table}/index/*",

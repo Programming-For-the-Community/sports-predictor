@@ -4,7 +4,7 @@ sport's normalize step uses. No dedicated coverage existed before the
 player_key sport-scoping fix; adding it now rather than leaving this
 module's key format implicit.
 """
-from library.schema.keys import entity_key, event_key, player_key, sport_from_event_key, team_key
+from library.schema.keys import entity_key, entity_team_key, event_key, player_key, sport_from_event_key, team_key
 
 
 class TestEntityKey:
@@ -34,6 +34,14 @@ class TestPlayerKey:
 class TestTeamKey:
     def test_builds_key(self):
         assert team_key("12") == "TEAM#12"
+
+
+class TestEntityTeamKey:
+    def test_builds_sport_scoped_key(self):
+        assert entity_team_key("nfl", "26") == "SPORT#NFL#TEAM#26"
+
+    def test_different_sports_never_collide_for_the_same_raw_team_id(self):
+        assert entity_team_key("nfl", "26") != entity_team_key("nba", "26")
 
 
 class TestSportFromEventKey:
