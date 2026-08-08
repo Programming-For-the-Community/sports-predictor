@@ -1,9 +1,14 @@
 # One registry-driven state machine: for each active sport, run its
 # feature-engineering task, then fan out over its own training_targets
 # list (see dynamodb-sport-registry.tf) to run every training target as
-# its own ECS task. The inner Map's MaxConcurrency caps how many training
-# tasks run at once, to stay under the account's Fargate on-demand vCPU
-# quota.
+# its own ECS task. TrainAllTargets' MaxConcurrency (locals-training-
+# compute.tf) caps how many training tasks run at once, to stay under the
+# account's Fargate on-demand vCPU quota -- and runs in Distributed mode
+# specifically because that cap can be well above Standard/INLINE Map's
+# hard 40-concurrent-iteration ceiling once training_task_vcpu is sized
+# down. ForEachSport (the outer, per-sport Map) stays INLINE -- it isn't
+# vCPU-budget-constrained the way TrainAllTargets is, and today only ever
+# fans out over one active sport.
 resource "aws_sfn_state_machine" "training_orchestrator" {
   name     = "${var.project}-training-orchestrator"
   role_arn = aws_iam_role.stepfunctions_orchestrator.arn
@@ -81,14 +86,15 @@ resource "aws_sfn_state_machine" "training_orchestrator" {
           "TrainAllTargets": {
             "Type": "Map",
             "ItemsPath": "$.training_targets.L",
-            "MaxConcurrency": 3,
+            "MaxConcurrency": ${local.training_max_concurrency},
             "ItemSelector": {
               "sport.$": "$.sport.S",
               "target.$": "$$.Map.Item.Value"
             },
             "ItemProcessor": {
               "ProcessorConfig": {
-                "Mode": "INLINE"
+                "Mode": "DISTRIBUTED",
+                "ExecutionType": "STANDARD"
               },
               "StartAt": "RunTrainingTask",
               "States": {

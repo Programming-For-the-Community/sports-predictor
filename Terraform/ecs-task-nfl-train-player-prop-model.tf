@@ -24,13 +24,14 @@ resource "aws_cloudwatch_log_group" "nfl_train_player_prop_model" {
 # via os.environ["TARGET_STAT"], raising KeyError if it's missing.
 #
 # Uses the shared aws_iam_role.ecs_pipeline (iam-ecs-pipeline.tf). Same
-# cpu/memory sizing as ecs-task-nfl-train-win-probability-model.tf.
+# cpu/memory sizing (locals-training-compute.tf) as
+# ecs-task-nfl-train-win-probability-model.tf.
 resource "aws_ecs_task_definition" "nfl_train_player_prop_model" {
   family                   = "${var.project}-nfl-train-player-prop-model"
   requires_compatibilities = ["FARGATE"]
   network_mode             = "awsvpc"
-  cpu                      = "4096"
-  memory                   = "16384"
+  cpu                      = local.training_task_cpu
+  memory                   = local.training_task_memory
   execution_role_arn       = aws_iam_role.ecs_pipeline.arn
   task_role_arn            = aws_iam_role.ecs_pipeline.arn
 
@@ -43,6 +44,12 @@ resource "aws_ecs_task_definition" "nfl_train_player_prop_model" {
       environment = [
         { name = "MODEL_ARTIFACTS_BUCKET_NAME", value = aws_s3_bucket.model_artifacts.bucket },
         { name = "AWS_REGION", value = var.region },
+        # See ecs-task-nfl-train-win-probability-model.tf's own comment --
+        # avoids BLAS oversubscribing against the outer search's own
+        # n_jobs=-1 process-level parallelism.
+        { name = "OMP_NUM_THREADS", value = "1" },
+        { name = "OPENBLAS_NUM_THREADS", value = "1" },
+        { name = "MKL_NUM_THREADS", value = "1" },
       ]
       logConfiguration = {
         logDriver = "awslogs"

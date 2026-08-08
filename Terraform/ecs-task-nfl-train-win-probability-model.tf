@@ -20,17 +20,17 @@ resource "aws_cloudwatch_log_group" "nfl_train_win_probability_model" {
 # also runnable manually via `aws ecs run-task`.
 #
 # Uses the shared aws_iam_role.ecs_pipeline (iam-ecs-pipeline.tf), same as
-# feature engineering. cpu=4096 (4 vCPU) gives _tune_hyperparameters'
-# n_jobs=-1 RandomizedSearchCV actual cores to spread its ~2,400
-# (candidate, fold) fits across. memory=16384 is well within Fargate's
-# valid range at 4 vCPU (8-30GB) and well above what this workload's
-# ~2,700-row dataset needs on its own.
+# feature engineering. cpu/memory come from locals-training-compute.tf
+# (var.training_task_vcpu / var.training_task_memory_per_vcpu_mib) --
+# every model_types.py adapter's outer search (RandomizedSearchCV/
+# GridSearchCV) sets n_jobs=-1, so this task's own vCPU count is exactly
+# how many (candidate, fold) fits it can run at once.
 resource "aws_ecs_task_definition" "nfl_train_win_probability_model" {
   family                   = "${var.project}-nfl-train-win-probability-model"
   requires_compatibilities = ["FARGATE"]
   network_mode             = "awsvpc"
-  cpu                      = "4096"
-  memory                   = "16384"
+  cpu                      = local.training_task_cpu
+  memory                   = local.training_task_memory
   execution_role_arn       = aws_iam_role.ecs_pipeline.arn
   task_role_arn            = aws_iam_role.ecs_pipeline.arn
 
@@ -42,6 +42,16 @@ resource "aws_ecs_task_definition" "nfl_train_win_probability_model" {
       environment = [
         { name = "MODEL_ARTIFACTS_BUCKET_NAME", value = aws_s3_bucket.model_artifacts.bucket },
         { name = "AWS_REGION", value = var.region },
+        # Every adapter's outer search already parallelizes across
+        # processes via n_jobs=-1 (one process per available vCPU, each
+        # fitting one candidate single-threaded -- see model_types.py's
+        # own n_jobs=1 on each estimator). Without these, numpy/scipy's
+        # BLAS backend would ALSO try to multi-thread inside each of
+        # those processes, oversubscribing this task's vCPU count several
+        # times over.
+        { name = "OMP_NUM_THREADS", value = "1" },
+        { name = "OPENBLAS_NUM_THREADS", value = "1" },
+        { name = "MKL_NUM_THREADS", value = "1" },
       ]
       logConfiguration = {
         logDriver = "awslogs"

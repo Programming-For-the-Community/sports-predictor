@@ -60,6 +60,20 @@ data "aws_iam_policy_document" "stepfunctions_orchestrator_permissions" {
     actions   = ["events:PutTargets", "events:PutRule", "events:DescribeRule"]
     resources = ["arn:aws:events:${var.region}:${var.account_id}:rule/StepFunctionsGetEventsForECSTaskRule"]
   }
+
+  # sfn-training-orchestrator.tf's TrainAllTargets Map runs in Distributed
+  # mode -- each iteration is its own child execution of this same state
+  # machine, not an in-place step, so starting/polling/stopping those
+  # iterations needs its own states: permissions on top of everything
+  # above. Per AWS's own documented requirement for Distributed Map.
+  statement {
+    sid     = "RunTrainingDistributedMapChildren"
+    actions = ["states:StartExecution", "states:DescribeExecution", "states:StopExecution"]
+    resources = [
+      aws_sfn_state_machine.training_orchestrator.arn,
+      "arn:aws:states:${var.region}:${var.account_id}:execution:${aws_sfn_state_machine.training_orchestrator.name}:*",
+    ]
+  }
 }
 
 resource "aws_iam_role_policy" "stepfunctions_orchestrator_permissions" {

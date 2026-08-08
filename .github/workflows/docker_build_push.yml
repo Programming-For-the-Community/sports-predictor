@@ -26,6 +26,11 @@ on:
         description: 'Semantic version to tag the image with'
         required: true
         type: string
+      platform:
+        description: 'Target platform passed to docker buildx build -- linux/arm64 for the arm64 (Graviton) inference Lambda, linux/amd64 (the default) for every other image, which still runs natively on this workflow''s x86_64 runner'
+        required: false
+        type: string
+        default: 'linux/amd64'
     outputs:
       versioned_tag:
         description: 'Full URI of the pushed, version-tagged image'
@@ -59,26 +64,36 @@ jobs:
       - name: Verify AWS identity
         run: aws sts get-caller-identity
 
+      # QEMU is what lets buildx cross-build linux/arm64 on this runner's
+      # native x86_64 -- a no-op setup cost for every other image here,
+      # which builds linux/amd64 (the default) and runs natively either
+      # way.
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
       - name: Build, tag, and push image to Amazon ECR
         id: build-image
         env:
           URI: ${{ secrets.ECR_URI }}
           VERSIONED_TAG: ${{ inputs.image_name }}-${{ inputs.image_version }}
           LATEST_TAG: ${{ inputs.image_name }}-latest
+          PLATFORM: ${{ inputs.platform }}
         run: |
           ECR_REGISTRY=${URI%/*}
-
-          docker build \
-            -t "$URI:$VERSIONED_TAG" \
-            -t "$URI:$LATEST_TAG" \
-            -f "${{ inputs.dockerfile_path }}" \
-            "${{ inputs.docker_context }}"
 
           aws ecr get-login-password --region ${{ vars.AWS_RESOURCE_REGION }} \
             | docker login --username AWS --password-stdin "$ECR_REGISTRY"
 
-          docker push "$URI:$VERSIONED_TAG"
-          docker push "$URI:$LATEST_TAG"
+          docker buildx build \
+            --platform "$PLATFORM" \
+            -t "$URI:$VERSIONED_TAG" \
+            -t "$URI:$LATEST_TAG" \
+            -f "${{ inputs.dockerfile_path }}" \
+            --push \
+            "${{ inputs.docker_context }}"
 
           echo "Built and pushed: $URI:$VERSIONED_TAG and $URI:$LATEST_TAG"
           echo "versioned_tag=$URI:$VERSIONED_TAG" >> "$GITHUB_OUTPUT"

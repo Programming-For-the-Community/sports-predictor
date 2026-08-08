@@ -34,6 +34,14 @@ resource "aws_lambda_function" "nfl_predict" {
   role          = aws_iam_role.lambda_inference.arn
   package_type  = "Image"
   image_uri     = "${var.ecr_repo_url}:nfl-predict-latest"
+  # Graviton -- better price/performance for inference than x86_64. Only
+  # this Lambda (the one that actually computes predictions); every other
+  # Lambda in this project stays on the default x86_64. The image itself
+  # is built for arm64 by nfl_ai_hosting.yml's docker_build_push.yml call
+  # (platform: linux/arm64) -- an architecture mismatch between this
+  # setting and the pushed image's own platform fails at invoke time, not
+  # at `terraform apply`.
+  architectures = ["arm64"]
   # API Gateway's own REST API integration timeout is a hard,
   # non-configurable 29s ceiling for the API-Gateway-triggered routes, so
   # this can't help or hurt those. Set to 120s for the

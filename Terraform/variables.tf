@@ -125,6 +125,59 @@ variable "espn_api_root_url" {
   nullable    = false
 }
 
+# ── Training compute budget ──────────────────────────────────────────────────
+# Drives local.training_max_concurrency (locals-training-compute.tf), which
+# sets TrainAllTargets' MaxConcurrency in sfn-training-orchestrator.tf and
+# the cpu/memory on every nfl-train-*-model ECS task definition. Changing
+# any one of these four values (e.g. a raised account quota, or a
+# per-task vCPU size found to be more than a training run actually uses)
+# is the single code change that reflows through to both.
+
+variable "fargate_account_vcpu_limit" {
+  description = "Account-wide Fargate on-demand concurrent vCPU quota (as shown in the Service Quotas console for 'Fargate On-Demand vCPU count')"
+  type        = number
+  default     = 250
+  nullable    = false
+}
+
+variable "training_vcpu_budget_fraction" {
+  description = "Max fraction of fargate_account_vcpu_limit the training orchestrator's concurrent ECS tasks may consume at once, leaving the rest of the quota free for feature-engineering, backfill, and ingest tasks that can run at the same time"
+  type        = number
+  default     = 0.6 # 3/5
+  nullable    = false
+
+  validation {
+    condition     = var.training_vcpu_budget_fraction > 0 && var.training_vcpu_budget_fraction <= 1
+    error_message = "training_vcpu_budget_fraction must be between 0 (exclusive) and 1 (inclusive)."
+  }
+}
+
+variable "training_task_vcpu" {
+  description = "vCPU allocated to each concurrent training ECS task (win-probability/score/player-prop). Must be a value Fargate actually supports; lowering it raises local.training_max_concurrency for the same vCPU budget"
+  type        = number
+  default     = 4
+  nullable    = false
+
+  validation {
+    condition     = contains([0.25, 0.5, 1, 2, 4, 8, 16], var.training_task_vcpu)
+    error_message = "training_task_vcpu must be one of Fargate's supported vCPU sizes: 0.25, 0.5, 1, 2, 4, 8, 16."
+  }
+}
+
+variable "training_task_memory_per_vcpu_mib" {
+  description = "Memory (MiB) provisioned per training_task_vcpu unit -- 4096 (4GB/vCPU) matches what a training task's dataset size actually needs, well within Fargate's valid memory range at every training_task_vcpu size this project uses"
+  type        = number
+  default     = 4096
+  nullable    = false
+}
+
+variable "training_min_concurrent_tasks" {
+  description = "Floor on concurrent training tasks regardless of the vCPU-budget math -- keeps a shrunken vCPU budget or an oversized training_task_vcpu from serializing training down to one task at a time"
+  type        = number
+  default     = 5
+  nullable    = false
+}
+
 # ── DNS / TLS ─────────────────────────────────────────────────────────────────
 
 variable "domain_name" {

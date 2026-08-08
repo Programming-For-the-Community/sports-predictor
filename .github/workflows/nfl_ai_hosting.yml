@@ -74,3 +74,9 @@ jobs:
       docker_context: 'Source'
       image_name: 'nfl-predict'
       image_version: ${{ needs.set-versions.outputs.predict_version }}
+      # arm64 (Graviton) -- the more cost/perf-efficient inference
+      # architecture; matches aws_lambda_function.nfl_predict's own
+      # architectures = ["arm64"] (Terraform/lambda-nfl-predict.tf). Every
+      # other image built through docker_build_push.yml keeps that
+      # input's linux/amd64 default.
+      platform: 'linux/arm64'
