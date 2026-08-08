@@ -140,12 +140,10 @@ class TestBuildLiveEventFeatures:
         called_entity_ids = {c.args[0] for c in storage.get_player_game_stats.call_args_list}
         assert "rookie-qb" in called_entity_ids
 
-    def test_ranks_by_total_career_volume_not_a_recent_average(self):
-        # veteran-qb: 3 games long ago, huge total (90 attempts) but an
-        # older/lower average than a hot-but-thin recent stretch would
-        # suggest. hot-backup: 1 recent big game (35 attempts) -- higher
-        # per-game average, but far less than veteran-qb's total. Total
-        # career volume must pick veteran-qb.
+    def test_ranks_by_recent_window_volume(self):
+        # Both candidates' fetched history sums to a different total over
+        # their own last window's worth of games -- veteran-qb's 3 games
+        # (90 attempts) outranks hot-backup's 1 game (35 attempts).
         storage = MagicMock()
         target = _event("E3", "2025-09-21", "KC", "LAC")
         storage.get_event.return_value = target
@@ -166,8 +164,12 @@ class TestBuildLiveEventFeatures:
 
         live_features.build_live_event_features(storage, "nfl", "E3")
 
-        called_entity_ids = {c.args[0] for c in storage.get_player_game_stats.call_args_list}
+        called = storage.get_player_game_stats.call_args_list
+        called_entity_ids = {c.args[0] for c in called}
         assert "veteran-qb" in called_entity_ids
+        # Bounded to the rolling window, not a full unbounded history scan --
+        # this is what keeps ranking cheap (one bounded query per candidate).
+        assert all(c.kwargs["limit"] == live_features.DEFAULT_ROLLING_WINDOW for c in called)
 
     def test_retired_player_with_stale_roster_entry_is_not_eligible(self):
         # Roster sync only ever upserts who IS on a fetched roster -- a
@@ -239,7 +241,7 @@ class TestBuildLiveEventFeatures:
 
     def test_qb_selected_from_depth_chart_when_available_not_roster_volume(self):
         storage = MagicMock()
-        # Depth chart says "backup-qb" is QB1 -- career-volume selection
+        # Depth chart says "backup-qb" is QB1 -- recent-volume selection
         # would pick "mahomes-patrick" instead (higher volume); depth
         # chart must win when both are available.
         target = _event("E3", "2025-09-21", "KC", "LAC", home_depth_chart=_depth_chart(qb=["backup-qb"]))
@@ -614,7 +616,7 @@ class TestBuildLiveEventLeaderCandidates:
 
         assert storage.get_all_events.call_count == 1
 
-    def test_sacks_ranked_by_career_volume_restricted_to_defense(self):
+    def test_sacks_ranked_by_recent_window_volume_restricted_to_defense(self):
         storage = MagicMock()
         target = _event("E3", "2025-09-21", "KC", "LAC")
         storage.get_event.return_value = target
@@ -659,7 +661,7 @@ class TestBuildLiveEventLeaderCandidates:
     def test_receiving_candidates_from_depth_chart_skip_injured(self):
         storage = MagicMock()
         # Depth chart lists 3 WRs, wr2 is Out -- expect wr1 and wr3, NOT
-        # the volume-based wr1/wr2 a career-volume comparison would pick.
+        # the volume-based wr1/wr2 a recent-volume comparison would pick.
         target = _event(
             "E3", "2025-09-21", "KC", "LAC",
             home_depth_chart=_depth_chart(wr=["wr1", "wr2", "wr3"]),

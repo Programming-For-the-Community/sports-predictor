@@ -118,7 +118,7 @@ def _healthy_athlete_ids(depth_chart_entry: dict, injuries: list[dict] | None) -
 
 
 # Maps each single-leader slot to the roster positions eligible for it,
-# ranked by career volume of the matching stat when depth chart data
+# ranked by recent volume of the matching stat when depth chart data
 # isn't available. Broader than the slot's own name -- a QB scrambling
 # for real rushing volume, or an RB catching passes out of the backfield,
 # are both common enough that excluding them would wrongly hide a real
@@ -132,7 +132,7 @@ _LEADER_VOLUME_STAT = {"QB": "passing_attempts", "RB": "rushing_attempts", "WR":
 
 # Sacks has no depth-chart source (ESPN's depth chart is offense/defense-
 # position-based, not a "top pass rushers" list), so it's always ranked
-# by career volume -- restricted to defensive positions specifically
+# by recent volume -- restricted to defensive positions specifically
 # (unlike QB/RB/WR's stat naturally zeroing out the wrong side of the
 # ball) because ranking now includes zero-history candidates: an
 # offensive player with 0 sacks would otherwise tie with a genuine
@@ -180,30 +180,34 @@ def _eligible_entity_ids(roster: list[dict], positions: set[str]) -> list[str]:
     return [entity["entity_id"] for entity in roster if entity.get("metadata", {}).get("position") in positions]
 
 
-def _career_volume(storage, entity_id: str, stat: str, before_date: str) -> tuple[float, list[dict]]:
-    """(total career volume of stat, full game history most-recent-first)
-    for one candidate -- unbounded (no window limit), since ranking by
-    career total needs the whole history, not just a recent slice. The
-    same fetch backs both: the total for ranking, and history[:window]
-    for whichever candidate wins (see _leader_history/_top_n_by_career_
-    volume) -- one query per candidate either way, not two."""
-    games = storage.get_player_game_stats(entity_id, before_date=before_date)
+def _recent_volume(storage, entity_id: str, stat: str, before_date: str, window: int) -> tuple[float, list[dict]]:
+    """(sum of stat over a candidate's most recent `window` games, that
+    same game list) for one candidate -- bounded to `window`, the same
+    rolling window every other feature in this module uses, so ranking
+    reuses exactly the query the winning candidate's own rolling
+    features need anyway (one query per candidate either way, not two).
+    A candidate with no games at all (a rookie, or a team's first event
+    for a just-traded player) sums to 0 rather than being excluded --
+    _leader_history/_top_n_by_recent_volume both rank on this pair's
+    first element, so a 0 still competes on equal footing with anyone
+    else, it just never wins over a candidate with real volume."""
+    games = storage.get_player_game_stats(entity_id, before_date=before_date, limit=window)
     total = sum(game.get("stat_line", {}).get(stat, 0) for game in games)
     return total, games
 
 
 def _leader_history(storage, entity_ids: list[str], stat: str, before_date: str, window: int) -> list[dict]:
-    """The single top candidate among entity_ids by total career volume
-    of stat, returning their most recent `window` games -- [] if
+    """The single top candidate among entity_ids by recent (last `window`
+    games) volume of stat, returning that same game list -- [] if
     entity_ids is empty. Ties (including every candidate having zero
     history, e.g. a team with an all-rookie room at this position) fall
     back to roster order rather than excluding anyone -- being on the
     roster is what makes a candidate valid here, not stat history."""
     if not entity_ids:
         return []
-    volumes = {entity_id: _career_volume(storage, entity_id, stat, before_date) for entity_id in entity_ids}
+    volumes = {entity_id: _recent_volume(storage, entity_id, stat, before_date, window) for entity_id in entity_ids}
     winner = max(volumes, key=lambda entity_id: volumes[entity_id][0])
-    return volumes[winner][1][:window]
+    return volumes[winner][1]
 
 
 def _presumptive_leader_and_history(
@@ -216,20 +220,21 @@ def _presumptive_leader_and_history(
 
     1. Depth chart (position_abbreviation's rank order, filtered to
        exclude anyone Out/Doubtful) -- preferred whenever depth_chart/
-       injuries data is available, since it beats career-volume ranking
+       injuries data is available, since it beats recent-volume ranking
        in exactly the case that matters most: a starter is ruled out and
        a genuine backup who simply hadn't played much yet takes over,
        someone volume-based selection would never surface. If the depth
        chart is known but everyone at this position is currently
        Out/Doubtful, that's a real "no leader available" result (empty
-       list), not a reason to fall through to career volume -- that would
-       risk re-selecting the player the depth chart just ruled out.
+       list), not a reason to fall through to recent-volume ranking --
+       that would risk re-selecting the player the depth chart just
+       ruled out.
     2. Currently on the roster (_fresh_roster/team_roster), filtered to
        positions eligible for position_abbreviation (_LEADER_POSITIONS)
        -- this alone is the eligibility gate; a rookie with zero recorded
        games is just as eligible as a 10-year veteran.
-    3. Ranked by total career volume of the position's stat
-       (_leader_history) when more than one candidate is eligible.
+    3. Ranked by recent (last `window` games) volume of the position's
+       stat (_leader_history) when more than one candidate is eligible.
 
     team_roster is an optional pre-fetched _fresh_roster result (build_
     live_event_features calls that once per team and threads it through
@@ -437,20 +442,20 @@ def build_live_event_leader_candidates(
     }
 
 
-def _top_n_by_career_volume(
+def _top_n_by_recent_volume(
     storage, entity_ids: list[str], stat: str, before_date: str, window: int, n: int,
 ) -> dict[str, list]:
     """entity_id -> most recent `window` games, for the top n of
-    entity_ids ranked by total career volume of stat -- the multi-
+    entity_ids ranked by that same window's volume of stat -- the multi-
     candidate counterpart to _leader_history, reusing the same
-    unbounded-fetch-once-slice-for-both approach (_career_volume) so
-    ranking and the returned feature history share one query per
-    candidate. {} if entity_ids is empty."""
+    fetch-once-use-for-both approach (_recent_volume) so ranking and the
+    returned feature history share one query per candidate. {} if
+    entity_ids is empty."""
     if not entity_ids:
         return {}
-    volumes = {entity_id: _career_volume(storage, entity_id, stat, before_date) for entity_id in entity_ids}
+    volumes = {entity_id: _recent_volume(storage, entity_id, stat, before_date, window) for entity_id in entity_ids}
     ranked = sorted(volumes, key=lambda entity_id: volumes[entity_id][0], reverse=True)[:n]
-    return {entity_id: volumes[entity_id][1][:window] for entity_id in ranked}
+    return {entity_id: volumes[entity_id][1] for entity_id in ranked}
 
 
 def _team_leader_candidates(
@@ -485,7 +490,7 @@ def _team_leader_candidates(
             ids = _healthy_athlete_ids(entry, injuries)[:n]
             return {eid: storage.get_player_game_stats(eid, before_date=before_date, limit=window) for eid in ids}
         eligible_ids = _eligible_entity_ids(roster, _LEADER_POSITIONS[position_abbreviation])
-        return _top_n_by_career_volume(
+        return _top_n_by_recent_volume(
             storage, eligible_ids, _LEADER_VOLUME_STAT[position_abbreviation], before_date, window, n,
         )
 
@@ -497,6 +502,6 @@ def _team_leader_candidates(
     # restricted to defensive positions specifically (see
     # _DEFENSIVE_POSITIONS' own comment for why).
     sacks_ids = _eligible_entity_ids(roster, _DEFENSIVE_POSITIONS)
-    sacks_rows = rows_for(_top_n_by_career_volume(storage, sacks_ids, "defensive_sacks", before_date, window, 3))
+    sacks_rows = rows_for(_top_n_by_recent_volume(storage, sacks_ids, "defensive_sacks", before_date, window, 3))
 
     return {"passing": passing_rows, "receiving": receiving_rows, "rushing": rushing_rows, "sacks": sacks_rows}
