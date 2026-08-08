@@ -81,7 +81,7 @@ def _make_client(scoreboard: dict, summary: dict | None = None):
     mock.get_scoreboard_for_date.return_value = scoreboard
     mock.get_scoreboard.return_value = scoreboard
     mock.get_summary.return_value = summary or {"header": {}, "boxscore": {}}
-    mock.get_depth_chart.return_value = {"positions": {}}
+    mock.get_depth_chart.return_value = {"depthchart": []}
     mock.get_roster.return_value = {"team": {"id": "0"}, "timestamp": "2026-08-08T00:00:00Z", "athletes": []}
     # Empty by default -- most tests here aren't exercising roster fetching
     # (now unconditional in lambda_handler, see _fetch_rosters), they just
@@ -492,7 +492,7 @@ class TestFetchDepthCharts:
     def test_one_teams_failure_does_not_block_the_others(self):
         client = _make_client(_scoreboard([]))
         client.get_teams.return_value = _teams_response("12", "13")
-        client.get_depth_chart.side_effect = [Exception("boom"), {"positions": {}}]
+        client.get_depth_chart.side_effect = [Exception("boom"), {"depthchart": []}]
         mock_s3 = _make_s3()
 
         with patch.object(nfl_ingest, "_s3", mock_s3):

@@ -23,6 +23,14 @@ import enrichment
 BUCKET = "test-bucket"
 
 
+def _raw_depth_chart(*groups: dict) -> dict:
+    """Matches ESPN's real depthcharts response shape -- see
+    library.storage.depth_chart_cache.filter_depth_chart's own docstring
+    and tests/library/storage/test_depth_chart_cache.py's own copy of
+    this helper."""
+    return {"depthchart": [{"id": str(i), "name": f"group-{i}", "positions": positions} for i, positions in enumerate(groups)]}
+
+
 def _make_s3(existing_keys: set | None = None):
     """Return a mock S3 client backed by an in-memory dict -- head_object/
     get_object see whatever's actually been put_object'd (including by
@@ -86,9 +94,9 @@ class TestEnrichEvents:
     def test_attaches_coach_injuries_and_depth_chart_to_home_and_away(self):
         events = [_competition_event("1", "12", "24")]
         nfl_client = MagicMock()
-        nfl_client.get_depth_chart.side_effect = lambda team_id: {
-            "positions": {"qb": {"position": {"abbreviation": "QB"}, "athletes": [{"id": f"qb-{team_id}"}]}},
-        }
+        nfl_client.get_depth_chart.side_effect = lambda team_id: _raw_depth_chart(
+            {"qb": {"position": {"abbreviation": "QB"}, "athletes": [{"id": f"qb-{team_id}"}]}},
+        )
         core_client = MagicMock()
         core_client.get_season_coaches.return_value = {
             "12": {"coach_id": "1", "coach_name": "Andy Reid", "experience": 27, "season_win_pct": 0.7},
@@ -118,7 +126,7 @@ class TestEnrichEvents:
     def test_coach_fetch_failure_omits_coach_fields_without_raising(self):
         events = [_competition_event("1", "12", "24")]
         nfl_client = MagicMock()
-        nfl_client.get_depth_chart.return_value = {"positions": {}}
+        nfl_client.get_depth_chart.return_value = _raw_depth_chart({})
         core_client = MagicMock()
         core_client.get_season_coaches.side_effect = Exception("ESPN 500")
         core_client.get_team_injuries.return_value = []
@@ -131,7 +139,7 @@ class TestEnrichEvents:
     def test_injury_fetch_failure_for_one_team_does_not_block_the_other(self):
         events = [_competition_event("1", "12", "24")]
         nfl_client = MagicMock()
-        nfl_client.get_depth_chart.return_value = {"positions": {}}
+        nfl_client.get_depth_chart.return_value = _raw_depth_chart({})
         core_client = MagicMock()
         core_client.get_season_coaches.return_value = {}
 
@@ -163,7 +171,7 @@ class TestEnrichEvents:
     def test_injuries_are_never_cached_even_when_coaches_and_depth_chart_are(self):
         events = [_competition_event("1", "12", "24")]
         nfl_client = MagicMock()
-        nfl_client.get_depth_chart.return_value = {"positions": {}}
+        nfl_client.get_depth_chart.return_value = _raw_depth_chart({})
         core_client = MagicMock()
         core_client.get_season_coaches.return_value = {}
         core_client.get_team_injuries.return_value = []

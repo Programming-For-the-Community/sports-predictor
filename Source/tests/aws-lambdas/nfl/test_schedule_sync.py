@@ -137,7 +137,9 @@ class TestLambdaHandler:
         mock_s3 = _make_s3()
         mock_client = _make_client({"events": [event]})
         mock_client.get_depth_chart.side_effect = lambda team_id: {
-            "positions": {"qb": {"position": {"abbreviation": "QB"}, "athletes": [{"id": f"qb-{team_id}"}]}},
+            "depthchart": [{"id": "1", "name": "group", "positions": {
+                "qb": {"position": {"abbreviation": "QB"}, "athletes": [{"id": f"qb-{team_id}"}]},
+            }}],
         }
 
         with patch.object(nfl_schedule_sync, "_s3", mock_s3), \

@@ -23,20 +23,27 @@ def filter_depth_chart(raw_depth_chart: dict) -> dict:
     ESPN's full depth chart response is ~289KB for ONE team, almost
     entirely per-athlete link metadata (player card, stats, splits, game
     log, news, bio -- each with a web AND a sportscenter:// deep-link
-    variant) this project never uses. Filters on each entry's
+    variant) this project never uses.
+
+    raw_depth_chart's own top level is `depthchart`, a list of formation-
+    specific groups (e.g. "Base 3-4 D", "Special Teams", "3WR 1TE" --
+    confirmed live), each with its OWN `positions` dict -- QB/RB/WR only
+    ever appear in one offensive-formation group, so merging every
+    group's positions into one flat result never collides for the
+    positions this project keeps. Filters on each entry's
     position.abbreviation rather than the outer dict key, since that
     key's exact casing/format is only verified for non-skill-position
     codes (e.g. "lde" for Left Defensive End)."""
-    positions = raw_depth_chart.get("positions") or {}
     result = {}
-    for code, entry in positions.items():
-        abbreviation = (entry.get("position") or {}).get("abbreviation")
-        if abbreviation not in DEPTH_CHART_POSITIONS:
-            continue
-        result[code] = {
-            "position": {"abbreviation": abbreviation},
-            "athletes": [{"id": athlete["id"]} for athlete in entry.get("athletes", []) if "id" in athlete],
-        }
+    for group in raw_depth_chart.get("depthchart") or []:
+        for code, entry in (group.get("positions") or {}).items():
+            abbreviation = (entry.get("position") or {}).get("abbreviation")
+            if abbreviation not in DEPTH_CHART_POSITIONS:
+                continue
+            result[code] = {
+                "position": {"abbreviation": abbreviation},
+                "athletes": [{"id": athlete["id"]} for athlete in entry.get("athletes", []) if "id" in athlete],
+            }
     return result
 
 

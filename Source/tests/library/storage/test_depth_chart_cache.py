@@ -77,40 +77,56 @@ class TestHomeAwayTeamIds:
         assert home_away_team_ids(event) is None
 
 
+def _raw_depth_chart(*groups: dict) -> dict:
+    """Matches ESPN's real depthcharts response shape (confirmed live via
+    curl against site.web.api.espn.com) -- a top-level `depthchart` list
+    of formation-specific groups (e.g. "Base 3-4 D", "3WR 1TE"), each
+    with its OWN `positions` dict. Each arg is one group's `positions`
+    dict; the group's own id/name don't matter to filter_depth_chart."""
+    return {"depthchart": [{"id": str(i), "name": f"group-{i}", "positions": positions} for i, positions in enumerate(groups)]}
+
+
 class TestFilterDepthChart:
     def test_keeps_only_qb_rb_wr_positions(self):
-        raw = {
-            "positions": {
-                "qb": {"position": {"abbreviation": "QB"}, "athletes": [{"id": "1"}]},
-                "lde": {"position": {"abbreviation": "LDE"}, "athletes": [{"id": "2"}]},
-                "wr": {"position": {"abbreviation": "WR"}, "athletes": [{"id": "3"}]},
-            },
-        }
+        raw = _raw_depth_chart({
+            "qb": {"position": {"abbreviation": "QB"}, "athletes": [{"id": "1"}]},
+            "lde": {"position": {"abbreviation": "LDE"}, "athletes": [{"id": "2"}]},
+            "wr1": {"position": {"abbreviation": "WR"}, "athletes": [{"id": "3"}]},
+        })
         result = filter_depth_chart(raw)
-        assert set(result.keys()) == {"qb", "wr"}
+        assert set(result.keys()) == {"qb", "wr1"}
 
-    def test_empty_when_no_positions_key(self):
+    def test_empty_when_no_depthchart_key(self):
         assert filter_depth_chart({}) == {}
 
+    def test_merges_positions_across_every_formation_group(self):
+        # The real response splits offense/defense/special-teams into
+        # separate groups -- QB/RB/WR only ever live in one of them, but
+        # filter_depth_chart still has to look at all of them to find it.
+        raw = _raw_depth_chart(
+            {"lde": {"position": {"abbreviation": "LDE"}, "athletes": [{"id": "2"}]}},
+            {"qb": {"position": {"abbreviation": "QB"}, "athletes": [{"id": "1"}]}},
+        )
+        result = filter_depth_chart(raw)
+        assert set(result.keys()) == {"qb"}
+
     def test_trims_each_athlete_down_to_just_id(self):
-        raw = {
-            "positions": {
-                "qb": {
-                    "position": {"abbreviation": "QB", "name": "Quarterback", "id": "8"},
-                    "athletes": [{
-                        "id": "1", "uid": "s:20~l:28~a:1", "guid": "abc",
-                        "links": [{"rel": ["playercard"], "href": "https://espn.com/..."}],
-                    }],
-                },
+        raw = _raw_depth_chart({
+            "qb": {
+                "position": {"abbreviation": "QB", "name": "Quarterback", "id": "8"},
+                "athletes": [{
+                    "id": "1", "uid": "s:20~l:28~a:1", "guid": "abc",
+                    "links": [{"rel": ["playercard"], "href": "https://espn.com/..."}],
+                }],
             },
-        }
+        })
 
         result = filter_depth_chart(raw)
 
         assert result == {"qb": {"position": {"abbreviation": "QB"}, "athletes": [{"id": "1"}]}}
 
     def test_athlete_missing_id_is_dropped(self):
-        raw = {"positions": {"qb": {"position": {"abbreviation": "QB"}, "athletes": [{"noId": "x"}]}}}
+        raw = _raw_depth_chart({"qb": {"position": {"abbreviation": "QB"}, "athletes": [{"noId": "x"}]}})
 
         result = filter_depth_chart(raw)
 
@@ -121,9 +137,9 @@ class TestGetCachedDepthChart:
     def test_cache_miss_fetches_filters_and_caches(self):
         mock_s3 = _make_s3()
         nfl_client = MagicMock()
-        nfl_client.get_depth_chart.return_value = {
-            "positions": {"qb": {"position": {"abbreviation": "QB"}, "athletes": [{"id": "1"}]}},
-        }
+        nfl_client.get_depth_chart.return_value = _raw_depth_chart(
+            {"qb": {"position": {"abbreviation": "QB"}, "athletes": [{"id": "1"}]}},
+        )
 
         result = get_cached_depth_chart(mock_s3, BUCKET, nfl_client, "12")
 
@@ -147,7 +163,7 @@ class TestGetCachedDepthChart:
         stale = (datetime.now(timezone.utc) - timedelta(days=10)).isoformat()
         _prime_cache(mock_s3, "nfl/cache/depth-charts/12.json", {"qb": "stale"}, fetched_at=stale)
         nfl_client = MagicMock()
-        nfl_client.get_depth_chart.return_value = {"positions": {}}
+        nfl_client.get_depth_chart.return_value = _raw_depth_chart({})
 
         get_cached_depth_chart(mock_s3, BUCKET, nfl_client, "12")
 
@@ -158,9 +174,9 @@ class TestAttachDepthCharts:
     def test_attaches_to_home_and_away(self):
         events = [_competition_event("1", "12", "24")]
         nfl_client = MagicMock()
-        nfl_client.get_depth_chart.side_effect = lambda team_id: {
-            "positions": {"qb": {"position": {"abbreviation": "QB"}, "athletes": [{"id": f"qb-{team_id}"}]}},
-        }
+        nfl_client.get_depth_chart.side_effect = lambda team_id: _raw_depth_chart(
+            {"qb": {"position": {"abbreviation": "QB"}, "athletes": [{"id": f"qb-{team_id}"}]}},
+        )
 
         attach_depth_charts(events, nfl_client, _make_s3(), BUCKET)
 
@@ -173,7 +189,7 @@ class TestAttachDepthCharts:
         # dedupes before fetching, not once per event referencing it.
         events = [_competition_event("1", "12", "24"), _competition_event("2", "12", "7")]
         nfl_client = MagicMock()
-        nfl_client.get_depth_chart.return_value = {"positions": {}}
+        nfl_client.get_depth_chart.return_value = _raw_depth_chart({})
 
         attach_depth_charts(events, nfl_client, _make_s3(), BUCKET)
 
@@ -194,7 +210,7 @@ class TestAttachDepthCharts:
         def flaky(team_id):
             if team_id == "12":
                 raise Exception("ESPN 500")
-            return {"positions": {}}
+            return _raw_depth_chart({})
 
         nfl_client.get_depth_chart.side_effect = flaky
 
