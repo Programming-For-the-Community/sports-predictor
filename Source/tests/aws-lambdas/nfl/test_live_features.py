@@ -13,6 +13,7 @@ non-iterable Mock, which _fresh_roster would crash trying to iterate.
 Tests that ARE about roster-driven selection set it explicitly to real
 roster rows instead.
 """
+from datetime import date, timedelta
 from unittest.mock import MagicMock
 
 import pytest
@@ -61,10 +62,12 @@ def _depth_chart(qb=None, rb=None, wr=None):
     return chart
 
 
-def _roster_entry(entity_id, position, as_of="2025-09-21"):
-    # as_of matches every test's own event date by default -- "fresh" per
-    # _is_roster_entry_fresh. Tests exercising staleness override it.
-    return {"entity_id": entity_id, "metadata": {"team_id_as_of": as_of, "position": position}}
+def _roster_entry(entity_id, position, as_of=None):
+    # as_of defaults to real today -- "fresh" per _is_roster_entry_fresh,
+    # which (via _fresh_roster's own default) judges freshness against
+    # today, not the event's own date. Tests exercising staleness
+    # override it with something clearly in the past.
+    return {"entity_id": entity_id, "metadata": {"team_id_as_of": as_of or date.today().isoformat(), "position": position}}
 
 
 class TestBuildLiveEventFeatures:
@@ -139,6 +142,30 @@ class TestBuildLiveEventFeatures:
 
         called_entity_ids = {c.args[0] for c in storage.get_player_game_stats.call_args_list}
         assert "rookie-qb" in called_entity_ids
+
+    def test_roster_eligible_for_an_event_far_in_the_future(self):
+        # Roster freshness is judged against today (when roster sync
+        # actually wrote team_id_as_of), not the target event's own date
+        # -- a season-simulation event two months out must not have every
+        # roster entry rejected just for being far from a game that
+        # hasn't been played yet. See _is_roster_entry_fresh's own
+        # docstring.
+        storage = MagicMock()
+        far_future_date = (date.today() + timedelta(days=60)).isoformat()
+        target = _event("E3", far_future_date, "KC", "LAC")
+        storage.get_event.return_value = target
+        storage.get_all_events.return_value = []
+        storage.get_team_game_stats_for_team.return_value = []
+        storage.get_team_events.return_value = []
+        storage.get_team_entities.side_effect = lambda sport, team_id: (
+            [_roster_entry("future-qb", "QB")] if team_id == "KC" else []  # as_of defaults to today
+        )
+        storage.get_player_game_stats.return_value = []
+
+        live_features.build_live_event_features(storage, "nfl", "E3")
+
+        called_entity_ids = {c.args[0] for c in storage.get_player_game_stats.call_args_list}
+        assert "future-qb" in called_entity_ids
 
     def test_ranks_by_recent_window_volume(self):
         # Both candidates' fetched history sums to a different total over

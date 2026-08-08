@@ -23,33 +23,44 @@ coach data don't.
 Also fetches every one of the league's 32 teams' current full roster (not
 just the depth chart's skill-position subset -- see NFLClient.get_roster,
 and get_teams for the full-league list) and writes it to its own S3
-object per team, on every run, uncached -- unlike coach/depth-chart data
-below, this one specifically exists to catch a roster move (trade,
-signing, release) as soon as possible, so caching it across days would
-defeat its own purpose. Runs unconditionally, before the preseason check
-below and independent of which teams have a game this week -- team
-membership isn't tied to either of those, and gating it the same way the
-rest of this function does would leave every roster stale for the entire
-preseason (no ingested games to derive team_ids from) and for any team on
-a bye. normalize picks each one up via the same S3 PutObject trigger as
+object per team, on every run, uncached -- this one specifically exists
+to catch a roster move (trade, signing, release) as soon as possible, so
+caching it across days would defeat its own purpose. Runs
+unconditionally, before the preseason check below and independent of
+which teams have a game this week -- team membership isn't tied to
+either of those, and gating it the same way the rest of this function
+does would leave every roster stale for the entire preseason (no
+ingested games to derive team_ids from) and for any team on a bye.
+normalize picks each one up via the same S3 PutObject trigger as
 everything else here and corrects that team's players' entity records
 (library.normalize.espn.roster_to_player_entities) -- see
 library/storage/pipeline_storage.py's upsert_player_entity docstring for
 the guard that keeps this from ever clobbering a newer fact with a stale
 one.
 
-Coach and depth-chart data are cached in S3 with their own TTLs (see
-enrichment.COACHES_CACHE_TTL_DAYS/DEPTH_CHART_CACHE_TTL_DAYS) -- "every
-ingest run" above is about what gets WRITTEN each time (always the
-complete picture, for the reason above), not what gets FETCHED from ESPN
-each time. get_season_coaches alone costs ~65 ESPN calls (ESPN's core API
-pages this via two rounds of $ref resolution, listing -> 32 coach details
--> 32 separate win-record lookups) for data that barely changes day to
-day -- a coach's identity/tenure almost never changes mid-week, and
-season_win_pct only changes once a week, after that week's games. Depth
-charts (32 calls/day, one per team playing that week) shift with roster
-moves, but not meaningfully within a single day either, and
-injury-driven changes are already separately captured by the (uncached,
+Also refreshes every one of the league's 32 teams' cached depth chart
+(library.storage.depth_chart_cache), same unconditional every-team,
+every-run cadence as the roster fetch above and for the same reason --
+depth chart used to only get refreshed as a side effect of enrich_events
+attaching one to a specific week's events, which left it stale (or, for
+preseason/a future week schedule-sync alone has reached, never even
+populated) for any team not currently in scope. Unlike the roster fetch,
+this one IS cache-backed (get_cached_depth_chart's own
+DEPTH_CHART_CACHE_TTL_DAYS) -- position assignments are stable enough
+day to day that refreshing daily just means the cache reliably GETS a
+chance to turn over on schedule, not that every run pays for 32 fresh
+ESPN calls.
+
+Coach data is cached in S3 with its own TTL (see
+enrichment.COACHES_CACHE_TTL_DAYS) -- "every ingest run" above is about
+what gets WRITTEN each time (always the complete picture, for the reason
+above), not what gets FETCHED from ESPN each time. get_season_coaches
+alone costs ~65 ESPN calls (ESPN's core API pages this via two rounds of
+$ref resolution, listing -> 32 coach details -> 32 separate win-record
+lookups) for data that barely changes day to day -- a coach's
+identity/tenure almost never changes mid-week, and season_win_pct only
+changes once a week, after that week's games. Injury-driven roster
+changes are already separately captured by the (uncached,
 genuinely-daily) injuries call.
 
 EventBridge can override any default via the schedule's input payload:
@@ -95,6 +106,7 @@ from botocore.exceptions import ClientError
 import enrichment
 from library.http.espn_core import EspnCoreApiClient
 from library.http.nfl import NFLClient
+from library.storage.depth_chart_cache import get_cached_depth_chart
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger("nfl-ingest")
@@ -159,6 +171,33 @@ def _fetch_rosters(client: NFLClient) -> tuple[int, int]:
     return fetched, failed
 
 
+def _fetch_depth_charts(client: NFLClient) -> tuple[int, int]:
+    """Refreshes every NFL team's cached depth chart (library.storage.
+    depth_chart_cache) -- same unconditional, every-team daily cadence as
+    _fetch_rosters, run before the preseason check below for the same
+    reason. Depth charts previously only got refreshed as a side effect
+    of enrich_events attaching one to a specific week's events, which left
+    a team's cache stale (or, for a team whose week enrichment never ran
+    at all -- preseason, or a future week only schedule-sync has reached
+    -- never populated) until that team's own event happened to be
+    enriched. get_cached_depth_chart's own TTL (DEPTH_CHART_CACHE_TTL_DAYS)
+    still does the real rate limiting here -- calling it daily just
+    guarantees the cache gets a chance to refresh every day regardless of
+    which week's games are in scope, matching depth charts' actual
+    volatility (position assignments are stable outside the
+    injury-driven churn injuries.py already handles separately). Best-
+    effort per team, same convention as _fetch_rosters."""
+    fetched = failed = 0
+    for team_id in _all_team_ids(client):
+        try:
+            get_cached_depth_chart(_s3, RAW_BUCKET, client, team_id)
+            fetched += 1
+        except Exception:
+            logger.exception("Failed fetching depth chart for team %s", team_id)
+            failed += 1
+    return fetched, failed
+
+
 def lambda_handler(event: dict, context) -> dict:
     season = event.get("season")
     season_type = event.get("season_type")
@@ -166,17 +205,22 @@ def lambda_handler(event: dict, context) -> dict:
 
     client = NFLClient()
 
-    # Unconditional -- see _fetch_rosters/_all_team_ids and the module
-    # docstring for why this runs before the preseason check below rather
-    # than being gated the same way as everything else in this function.
+    # Unconditional -- see _fetch_rosters/_fetch_depth_charts/_all_team_ids
+    # and the module docstring for why these run before the preseason
+    # check below rather than being gated the same way as everything else
+    # in this function.
     rosters_fetched, rosters_failed = _fetch_rosters(client)
     logger.info("Rosters: %d fetched, %d failed", rosters_fetched, rosters_failed)
+
+    depth_charts_fetched, depth_charts_failed = _fetch_depth_charts(client)
+    logger.info("Depth charts: %d fetched, %d failed", depth_charts_fetched, depth_charts_failed)
 
     if season_type == PRESEASON_TYPE:
         logger.info("season_type=%d is preseason -- skipping, not ingested by design", PRESEASON_TYPE)
         return {
             "processed": 0, "skipped": 0, "failed": 0,
             "rosters_fetched": rosters_fetched, "rosters_failed": rosters_failed,
+            "depth_charts_fetched": depth_charts_fetched, "depth_charts_failed": depth_charts_failed,
         }
 
     core_client = EspnCoreApiClient()
@@ -201,6 +245,7 @@ def lambda_handler(event: dict, context) -> dict:
             return {
                 "processed": 0, "skipped": 0, "failed": 0,
                 "rosters_fetched": rosters_fetched, "rosters_failed": rosters_failed,
+                "depth_charts_fetched": depth_charts_fetched, "depth_charts_failed": depth_charts_failed,
             }
 
         logger.info("Auto-detected season %d type %d week %d", season, season_type, week)
@@ -246,4 +291,5 @@ def lambda_handler(event: dict, context) -> dict:
     return {
         "processed": processed, "skipped": skipped, "failed": failed,
         "rosters_fetched": rosters_fetched, "rosters_failed": rosters_failed,
+        "depth_charts_fetched": depth_charts_fetched, "depth_charts_failed": depth_charts_failed,
     }

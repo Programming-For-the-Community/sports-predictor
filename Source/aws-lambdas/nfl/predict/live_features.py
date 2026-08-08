@@ -152,28 +152,40 @@ _DEFENSIVE_POSITIONS = {"DE", "DT", "NT", "LB", "ILB", "OLB", "MLB", "CB", "S", 
 _ROSTER_STALENESS_DAYS = 14
 
 
-def _is_roster_entry_fresh(entity: dict, before_date: str) -> bool:
+def _is_roster_entry_fresh(entity: dict, reference_date: str) -> bool:
+    """reference_date is when this prediction is being generated (today),
+    NOT the target event's own date -- roster sync only ever writes
+    "today's" team_id_as_of, so for any event more than
+    _ROSTER_STALENESS_DAYS out, comparing against the event's date instead
+    would make every roster entry fail this check by construction, no
+    matter how current the roster actually is. Comparing against today
+    is also the right question to ask: what matters is whether this
+    roster snapshot is still trustworthy right now, not its distance from
+    a game that hasn't been played yet."""
     as_of = entity.get("metadata", {}).get("team_id_as_of")
     if as_of is None:
         return False
     try:
-        return abs((date.fromisoformat(before_date) - date.fromisoformat(as_of)).days) <= _ROSTER_STALENESS_DAYS
+        return abs((date.fromisoformat(reference_date) - date.fromisoformat(as_of)).days) <= _ROSTER_STALENESS_DAYS
     except ValueError:
         return False
 
 
-def _fresh_roster(storage, sport: str, team_id: str, before_date: str) -> list[dict]:
+def _fresh_roster(storage, sport: str, team_id: str, reference_date: str | None = None) -> list[dict]:
     """Every entity CURRENTLY rostered to team_id, per the entities
     table's team-index (kept fresh by roster sync's daily upsert -- see
     normalize/espn.py), filtered to entries roster sync has actually
-    confirmed recently (_is_roster_entry_fresh). This is the sole
+    confirmed recently (_is_roster_entry_fresh, judged against
+    reference_date -- today by default, not the target event's own date;
+    see that function's own docstring for why). This is the sole
     eligibility gate for presumptive-leader selection below -- being on
     this list is what makes a just-traded player show up under their new
     team immediately (their entity record's team_id already reflects the
     trade) and is ALL that's required, regardless of stat history: a
     rookie who hasn't played a game yet is still eligible, since nothing
     else about them is any less "on the roster" than a veteran."""
-    return [entity for entity in storage.get_team_entities(sport, team_id) if _is_roster_entry_fresh(entity, before_date)]
+    reference = reference_date or date.today().isoformat()
+    return [entity for entity in storage.get_team_entities(sport, team_id) if _is_roster_entry_fresh(entity, reference)]
 
 
 def _eligible_entity_ids(roster: list[dict], positions: set[str]) -> list[str]:
@@ -262,7 +274,7 @@ def _presumptive_leader_and_history(
     positions = _LEADER_POSITIONS.get(position_abbreviation)
     if positions is None:
         return []
-    roster = team_roster if team_roster is not None else _fresh_roster(storage, sport, team_id, before_date)
+    roster = team_roster if team_roster is not None else _fresh_roster(storage, sport, team_id)
     eligible_ids = _eligible_entity_ids(roster, positions)
     return _leader_history(storage, eligible_ids, _LEADER_VOLUME_STAT[position_abbreviation], before_date, window)
 
@@ -297,8 +309,8 @@ def build_live_event_features(storage, sport: str, event_key: str, window: int =
     # otherwise each one would separately re-query the same roster (same
     # redundant-recompute problem _live_elo_ratings' own current_ratings
     # threading already solves elsewhere in this module).
-    home_roster = _fresh_roster(storage, sport, home_id, event["event_date"])
-    away_roster = _fresh_roster(storage, sport, away_id, event["event_date"])
+    home_roster = _fresh_roster(storage, sport, home_id)
+    away_roster = _fresh_roster(storage, sport, away_id)
 
     return build_event_features(
         event,
@@ -473,7 +485,7 @@ def _team_leader_candidates(
     # per-candidate lookup in that case.
     team_last_event_dates = {team_id: last_events[0]["event_date"]} if last_events else None
 
-    roster = _fresh_roster(storage, sport, team_id, before_date)
+    roster = _fresh_roster(storage, sport, team_id)
 
     def rows_for(histories: dict[str, list]) -> list[dict]:
         return [
