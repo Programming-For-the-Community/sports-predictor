@@ -35,3 +35,12 @@ class NFLClient(EspnBaseClient):
         404s) -- see library/http/espn_core.py's own docstring for why
         coach/injury data lives on that other client instead of here."""
         return self._get(f"teams/{team_id}/depthcharts", params={})
+
+    def get_roster(self, team_id: str) -> dict:
+        """One team's full current roster -- every position group ESPN
+        tracks (offense/defense/specialTeam/injuredReserveOrOut/suspended/
+        practiceSquad), not just the depth chart's skill-position subset.
+        `athletes` groups players by position: [{"position": "offense",
+        "items": [athlete, ...]}, ...] -- confirmed live on this same
+        site.api.espn.com host as every other method here."""
+        return self._get(f"teams/{team_id}/roster", params={})

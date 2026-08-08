@@ -13,6 +13,9 @@ Key routing (based on S3 key pattern):
     nfl/teams.json                             -> team entities
     nfl/scoreboard/{season}/{type}/{week}.json -> event records
     nfl/boxscore/{season}/{event_id}.json      -> player stats, player entities, team stats
+    nfl/roster/{team_id}.json                  -> player entities (team_id correction --
+                                                   see aws-lambdas/nfl/ingest/handler.py's own
+                                                   docstring for why this is fetched daily)
 """
 import json
 import logging
@@ -23,6 +26,7 @@ import boto3
 from library.normalize.espn import (
     boxscore_to_player_game_stats,
     boxscore_to_team_game_stats,
+    roster_to_player_entities,
     scoreboard_event_to_event_item,
     team_to_entity,
 )
@@ -77,6 +81,14 @@ def _process_scoreboard(payload: dict, key: str) -> None:
     logger.info("Upserted %d events from %s", len(events), key)
 
 
+def _process_roster(payload: dict, key: str) -> None:
+    storage = _get_storage()
+    entities = roster_to_player_entities(payload, SPORT)
+    for entity in entities:
+        storage.upsert_player_entity(entity)
+    logger.info("Upserted %d player entities from %s", len(entities), key)
+
+
 def _process_boxscore(payload: dict, key: str) -> None:
     storage = _get_storage()
     stats_items, player_entities = boxscore_to_player_game_stats(payload, SPORT, _COMPOUND_KEY_SPLITS)
@@ -103,6 +115,8 @@ def _dispatch(bucket: str, key: str) -> None:
         _process_scoreboard(payload, key)
     elif "/boxscore/" in key:
         _process_boxscore(payload, key)
+    elif "/roster/" in key:
+        _process_roster(payload, key)
     else:
         logger.warning("Unrecognized S3 key pattern, skipping: %s", key)
 

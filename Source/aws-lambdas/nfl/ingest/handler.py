@@ -20,6 +20,21 @@ rebuild. This is also why ingest runs daily now instead of just
 Tue/Wed: injury reports change through the week in a way box scores and
 coach data don't.
 
+Also fetches every participating team's current full roster (not just the
+depth chart's skill-position subset -- see NFLClient.get_roster) and
+writes it to its own S3 object per team, on every run, uncached -- unlike
+coach/depth-chart data below, this one specifically exists to catch a
+roster move (trade, signing, release) as soon as possible, so caching it
+across days would defeat its own purpose. normalize picks each one up via
+the same S3 PutObject trigger as everything else here and corrects that
+team's players' entity records (library.normalize.espn.
+roster_to_player_entities) -- see library/storage/pipeline_storage.py's
+upsert_player_entity docstring for the guard that keeps this from ever
+clobbering a newer fact with a stale one. Previously, a player's team_id
+was only ever derived from their own most recent player_game_stats row,
+which meant it stayed wrong for as long as a traded/signed player hadn't
+yet played a game for their new team.
+
 Coach and depth-chart data are cached in S3 with their own TTLs (see
 enrichment.COACHES_CACHE_TTL_DAYS/DEPTH_CHART_CACHE_TTL_DAYS) -- "every
 ingest run" above is about what gets WRITTEN each time (always the
@@ -74,6 +89,7 @@ from botocore.exceptions import ClientError
 import enrichment
 from library.http.espn_core import EspnCoreApiClient
 from library.http.nfl import NFLClient
+from library.storage.depth_chart_cache import home_away_team_ids
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger("nfl-ingest")
@@ -109,6 +125,32 @@ def _put_json(key: str, payload: dict) -> None:
         ContentType="application/json",
     )
     logger.info("Wrote s3://%s/%s", RAW_BUCKET, key)
+
+
+def _fetch_rosters(events: list[dict], client: NFLClient) -> tuple[int, int]:
+    """Fetches and writes every participating team's current roster --
+    one S3 object per team (deduplicated, same set-of-team-ids pattern
+    enrichment.enrich_events uses), always fresh, never TTL-cached (see
+    this module's own docstring for why). Best-effort per team, same
+    convention as enrich_events -- one team's fetch failing shouldn't
+    lose the others', and never blocks the scoreboard/box-score writes
+    that already ran before this."""
+    team_ids: set[str] = set()
+    for event in events:
+        ids = home_away_team_ids(event)
+        if ids is not None:
+            team_ids.update(ids)
+
+    fetched = failed = 0
+    for team_id in team_ids:
+        try:
+            roster = client.get_roster(team_id)
+            _put_json(f"nfl/roster/{team_id}.json", roster)
+            fetched += 1
+        except Exception:
+            logger.exception("Failed fetching roster for team %s", team_id)
+            failed += 1
+    return fetched, failed
 
 
 def lambda_handler(event: dict, context) -> dict:
@@ -152,6 +194,9 @@ def lambda_handler(event: dict, context) -> dict:
     scoreboard_key = f"nfl/scoreboard/{season}/{season_type}/{week}.json"
     _put_json(scoreboard_key, scoreboard)
 
+    rosters_fetched, rosters_failed = _fetch_rosters(events, client)
+    logger.info("Rosters: %d fetched, %d failed", rosters_fetched, rosters_failed)
+
     processed = skipped = failed = 0
     for evt in events:
         event_id = evt["id"]
@@ -176,4 +221,7 @@ def lambda_handler(event: dict, context) -> dict:
             failed += 1
 
     logger.info("Done: %d processed, %d skipped, %d failed", processed, skipped, failed)
-    return {"processed": processed, "skipped": skipped, "failed": failed}
+    return {
+        "processed": processed, "skipped": skipped, "failed": failed,
+        "rosters_fetched": rosters_fetched, "rosters_failed": rosters_failed,
+    }

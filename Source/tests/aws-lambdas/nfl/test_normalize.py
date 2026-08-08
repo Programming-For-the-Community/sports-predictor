@@ -96,6 +96,22 @@ class TestDispatch:
         mock_storage.write_player_game_stats.assert_called_once_with(stats)
         mock_storage.write_team_game_stats.assert_called_once_with(team_stats)
 
+    def test_routes_roster_key_to_roster_processor(self):
+        payload = {"team": {"id": "23"}, "timestamp": "2026-08-08T00:00:00Z", "athletes": []}
+        mock_s3 = MagicMock()
+        mock_s3.get_object.return_value = _s3_response(payload)
+        mock_storage = MagicMock()
+        entities = [{"pk": "nfl#player#1"}, {"pk": "nfl#player#2"}]
+
+        with patch.object(nfl_normalize, "_s3", mock_s3), \
+             patch("nfl_normalize.PipelineStorage", return_value=mock_storage), \
+             patch.object(nfl_normalize, "roster_to_player_entities", return_value=entities):
+            nfl_normalize._dispatch("test-bucket", "nfl/roster/23.json")
+
+        assert mock_storage.upsert_player_entity.call_count == 2
+        mock_storage.upsert_player_entity.assert_any_call(entities[0])
+        mock_storage.upsert_player_entity.assert_any_call(entities[1])
+
     def test_ignores_unrecognized_key_without_raising(self):
         mock_s3 = MagicMock()
         mock_s3.get_object.return_value = _s3_response({"unexpected": "shape"})

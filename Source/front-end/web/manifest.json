@@ -1,11 +1,11 @@
 {
-    "name": "front_end",
-    "short_name": "front_end",
+    "name": "Sports Predictor",
+    "short_name": "Sports Predictor",
     "start_url": ".",
     "display": "standalone",
-    "background_color": "#0175C2",
-    "theme_color": "#0175C2",
-    "description": "A new Flutter project.",
+    "background_color": "#0a0e17",
+    "theme_color": "#0a0e17",
+    "description": "AI-powered sports predictions -- win probability, scores, player props, and season projections.",
     "orientation": "portrait-primary",
     "prefer_related_applications": false,
     "icons": [

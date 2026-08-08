@@ -105,3 +105,27 @@ resource "aws_iam_role_policy" "stepfunctions_orchestrator_permissions" {
   role   = aws_iam_role.stepfunctions_orchestrator.id
   policy = data.aws_iam_policy_document.stepfunctions_orchestrator_permissions.json
 }
+
+# Separate from the IAM role's own permissions above -- CloudWatch's log
+# delivery mechanism (what training_orchestrator's logging_configuration
+# actually uses under the hood) additionally requires this account-level
+# resource policy on the log group itself, granting the log-delivery
+# service (not the state machine's own role) permission to write to it.
+# Without this, UpdateStateMachine fails with "state machine IAM Role is
+# not authorized to access the Log Destination" even though the role's
+# own policy already has every logs: action AWS's docs list -- this is
+# the one piece the console auto-creates for you that Terraform doesn't.
+resource "aws_cloudwatch_log_resource_policy" "vended_logs" {
+  policy_name = "${var.project}-vended-logs"
+  policy_document = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect    = "Allow"
+        Principal = { Service = "delivery.logs.amazonaws.com" }
+        Action    = ["logs:CreateLogStream", "logs:PutLogEvents"]
+        Resource  = "arn:aws:logs:${var.region}:${var.account_id}:log-group:/aws/vendedlogs/*:*"
+      }
+    ]
+  })
+}

@@ -78,7 +78,21 @@ def _make_client(scoreboard: dict, summary: dict | None = None):
     mock.get_scoreboard.return_value = scoreboard
     mock.get_summary.return_value = summary or {"header": {}, "boxscore": {}}
     mock.get_depth_chart.return_value = {"positions": {}}
+    mock.get_roster.return_value = {"team": {"id": "0"}, "timestamp": "2026-08-08T00:00:00Z", "athletes": []}
     return mock
+
+
+def _event_with_teams(event_id: str, home_id: str, away_id: str, completed: bool = False) -> dict:
+    return {
+        "id": event_id,
+        "status": {"type": {"completed": completed}},
+        "competitions": [{
+            "competitors": [
+                {"homeAway": "home", "team": {"id": home_id}},
+                {"homeAway": "away", "team": {"id": away_id}},
+            ],
+        }],
+    }
 
 
 def _make_core_client():
@@ -230,7 +244,7 @@ class TestIngestLambdaHandler:
              patch.object(nfl_ingest, "EspnCoreApiClient", return_value=_make_core_client()):
             result = nfl_ingest.lambda_handler({}, None)
 
-        assert result == {"processed": 1, "skipped": 2, "failed": 0}
+        assert result == {"processed": 1, "skipped": 2, "failed": 0, "rosters_fetched": 0, "rosters_failed": 0}
 
     def test_returns_empty_counts_for_empty_scoreboard(self):
         board = _scoreboard([])
@@ -242,7 +256,7 @@ class TestIngestLambdaHandler:
              patch.object(nfl_ingest, "EspnCoreApiClient", return_value=_make_core_client()):
             result = nfl_ingest.lambda_handler({}, None)
 
-        assert result == {"processed": 0, "skipped": 0, "failed": 0}
+        assert result == {"processed": 0, "skipped": 0, "failed": 0, "rosters_fetched": 0, "rosters_failed": 0}
         mock_client.get_summary.assert_not_called()
 
 
@@ -306,3 +320,82 @@ class TestIngestHelpers:
         assert call_kwargs["Key"] == "nfl/test.json"
         assert call_kwargs["ContentType"] == "application/json"
         assert '"events"' in call_kwargs["Body"]
+
+
+class TestFetchRosters:
+    def test_fetches_and_writes_one_roster_per_distinct_team(self):
+        events = [_event_with_teams("1", home_id="12", away_id="13")]
+        client = _make_client(_scoreboard(events))
+        mock_s3 = _make_s3()
+
+        with patch.object(nfl_ingest, "_s3", mock_s3):
+            fetched, failed = nfl_ingest._fetch_rosters(events, client)
+
+        assert fetched == 2
+        assert failed == 0
+        client.get_roster.assert_any_call("12")
+        client.get_roster.assert_any_call("13")
+        assert client.get_roster.call_count == 2
+
+    def test_deduplicates_a_team_appearing_in_multiple_events(self):
+        events = [
+            _event_with_teams("1", home_id="12", away_id="13"),
+            _event_with_teams("2", home_id="12", away_id="14"),
+        ]
+        client = _make_client(_scoreboard(events))
+        mock_s3 = _make_s3()
+
+        with patch.object(nfl_ingest, "_s3", mock_s3):
+            fetched, failed = nfl_ingest._fetch_rosters(events, client)
+
+        assert fetched == 3  # 12, 13, 14 -- not 12 fetched twice
+        client.get_roster.assert_any_call("12")
+        assert client.get_roster.call_count == 3
+
+    def test_writes_to_the_expected_s3_key(self):
+        events = [_event_with_teams("1", home_id="12", away_id="13")]
+        client = _make_client(_scoreboard(events))
+        mock_s3 = _make_s3()
+
+        with patch.object(nfl_ingest, "_s3", mock_s3):
+            nfl_ingest._fetch_rosters(events, client)
+
+        written_keys = {call.kwargs["Key"] for call in mock_s3.put_object.call_args_list}
+        assert written_keys == {"nfl/roster/12.json", "nfl/roster/13.json"}
+
+    def test_one_teams_failure_does_not_block_the_others(self):
+        events = [_event_with_teams("1", home_id="12", away_id="13")]
+        client = _make_client(_scoreboard(events))
+        client.get_roster.side_effect = [Exception("boom"), {"team": {"id": "13"}, "timestamp": "2026-08-08T00:00:00Z", "athletes": []}]
+        mock_s3 = _make_s3()
+
+        with patch.object(nfl_ingest, "_s3", mock_s3):
+            fetched, failed = nfl_ingest._fetch_rosters(events, client)
+
+        assert fetched == 1
+        assert failed == 1
+
+    def test_no_events_with_competitor_data_fetches_nothing(self):
+        events = [_completed_event("1")]  # no "competitions" key
+        client = _make_client(_scoreboard(events))
+        mock_s3 = _make_s3()
+
+        with patch.object(nfl_ingest, "_s3", mock_s3):
+            fetched, failed = nfl_ingest._fetch_rosters(events, client)
+
+        assert (fetched, failed) == (0, 0)
+        client.get_roster.assert_not_called()
+
+    def test_lambda_handler_wires_roster_fetch_into_its_own_run(self):
+        events = [_event_with_teams("1", home_id="12", away_id="13", completed=True)]
+        board = _scoreboard(events)
+        mock_s3 = _make_s3()
+        mock_client = _make_client(board)
+
+        with patch.object(nfl_ingest, "_s3", mock_s3), \
+             patch.object(nfl_ingest, "NFLClient", return_value=mock_client), \
+             patch.object(nfl_ingest, "EspnCoreApiClient", return_value=_make_core_client()):
+            result = nfl_ingest.lambda_handler({}, None)
+
+        assert result["rosters_fetched"] == 2
+        assert result["rosters_failed"] == 0

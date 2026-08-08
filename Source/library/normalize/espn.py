@@ -108,6 +108,45 @@ def scoreboard_event_to_event_item(event: dict, sport: str) -> dict:
     return item
 
 
+def roster_to_player_entities(roster: dict, sport: str) -> list[dict]:
+    """Every player entity item for one team's current roster (see
+    NFLClient.get_roster) -- same item shape boxscore_to_player_game_stats
+    already produces for its own player_entities return value, written
+    through the same guarded PipelineStorage.upsert_player_entity, so this
+    is a second SOURCE for that one write path, not a second write path.
+
+    Unlike a box score, a roster fetch has no game of its own to derive a
+    date from -- team_id_as_of comes from the roster payload's own
+    "timestamp" field (same [:10] truncation scoreboard_event_to_event_item
+    already applies to event_date), not "now" at normalize time, so it
+    stays correct even if normalize processes this S3 object some time
+    after ingest actually fetched it.
+
+    Includes every position group ESPN returns (offense/defense/
+    specialTeam/injuredReserveOrOut/suspended/practiceSquad) -- a player
+    on IR or the practice squad is still on this team, not some other
+    one, which is exactly the fact this function exists to keep current.
+    """
+    team_id = str(roster["team"]["id"])
+    as_of_date = roster["timestamp"][:10]
+    entities = []
+    for group in roster.get("athletes", []):
+        for athlete in group.get("items", []):
+            entities.append({
+                "entity_key": entity_key(sport, athlete["id"]),
+                "entity_id": athlete["id"],
+                "sport": sport,
+                "entity_type": "player",
+                "name": athlete.get("displayName", ""),
+                "metadata": {
+                    "team_id": team_id,
+                    "team_id_as_of": as_of_date,
+                    "jersey": athlete.get("jersey"),
+                },
+            })
+    return entities
+
+
 def boxscore_to_player_game_stats(
     summary: dict,
     sport: str,
