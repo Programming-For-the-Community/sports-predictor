@@ -86,6 +86,8 @@ data "aws_iam_policy_document" "stepfunctions_orchestrator_permissions" {
     sid = "DeliverExecutionLogsToCloudWatch"
     actions = [
       "logs:CreateLogDelivery",
+      "logs:CreateLogStream",
+      "logs:PutLogEvents",
       "logs:GetLogDelivery",
       "logs:UpdateLogDelivery",
       "logs:DeleteLogDelivery",
