@@ -33,6 +33,13 @@ DEREF_MAX_WORKERS = 10
 
 _TRAILING_ID_RE = re.compile(r"/(\d+)(?:\?|$)")
 
+# ESPN's injuries endpoint returns one entry per status change for the
+# whole season, not just who's hurt right now (confirmed: a team with 6
+# players genuinely out/questionable still returned 71 items, 65 of them
+# "Active" -- recovered). Filtered to these three so get_team_injuries'
+# output actually matches its own "current injury report" contract.
+_CURRENT_INJURY_STATUSES = {"Questionable", "Doubtful", "Out"}
+
 
 def _espn_core_root_url() -> str:
     return os.environ.get("ESPN_CORE_API_ROOT_URL", DEFAULT_ESPN_CORE_API_ROOT_URL).rstrip("/")
@@ -109,18 +116,24 @@ class EspnCoreApiClient(HttpClient):
 
     def get_team_injuries(self, team_id: str) -> list[dict]:
         """Current injury report for one team -- current-state only, no
-        historical-as-of-date equivalent exists (confirmed). Returns
+        historical-as-of-date equivalent exists (confirmed). ESPN's own
+        endpoint returns the whole season's status-change log (up to 100,
+        the largest team roster's seen so far), so this filters down to
+        _CURRENT_INJURY_STATUSES before returning -- otherwise recovered
+        players ("Active") would still show up here. Returns
         [{"entity_id", "status"}, ...], ESPN's raw status string
-        ("Questionable"/"Doubtful"/"Out"/etc.) unmapped -- severity
-        thresholding is a feature-layer concern (library/features/nfl.py),
-        not this client's."""
-        listing = self._get(f"teams/{team_id}/injuries", {})
+        unmapped -- severity thresholding is a feature-layer concern
+        (library/features/nfl.py), not this client's."""
+        listing = self._get(f"teams/{team_id}/injuries", {"limit": 100})
         injuries = self._resolve_refs(listing.get("items", []))
 
         result = []
         for injury in injuries:
+            status = injury.get("status")
+            if status not in _CURRENT_INJURY_STATUSES:
+                continue
             entity_id = _id_from_ref(injury.get("athlete", {}).get("$ref"))
             if entity_id is None:
                 continue
-            result.append({"entity_id": entity_id, "status": injury.get("status")})
+            result.append({"entity_id": entity_id, "status": status})
         return result

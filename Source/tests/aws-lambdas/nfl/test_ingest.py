@@ -34,9 +34,12 @@ SEASON_TYPE = 2
 
 
 def _scoreboard(events: list, week: int = 5, season_year: int = SEASON_YEAR, season_type: int = SEASON_TYPE) -> dict:
+    """Matches site.web.api.espn.com's real shape (confirmed via curl) --
+    no top-level "season" key; year/type live under leagues[0].season, and
+    type is itself a dict, not a bare int. week stays top-level."""
     return {
         "week": {"number": week},
-        "season": {"year": season_year, "type": season_type},
+        "leagues": [{"season": {"year": season_year, "type": {"id": str(season_type), "type": season_type}}}],
         "events": events,
     }
 

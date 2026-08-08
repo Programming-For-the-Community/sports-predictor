@@ -169,9 +169,15 @@ def lambda_handler(event: dict, context) -> dict:
         # See the module docstring for why this resolves against the most
         # recent Sunday rather than "today" -- it's what makes the
         # Tuesday run and the Wednesday retry agree on the same week.
+        # site.web.api.espn.com has no top-level "season" key (unlike the
+        # old site.api.espn.com host this was written against) -- season
+        # year/type live under leagues[0].season instead, and type is
+        # itself a dict ({"id": "2", "type": 2, ...}) rather than a bare
+        # int. week is unaffected -- still top-level.
         scoreboard = client.get_scoreboard_for_date(_most_recent_sunday())
-        season = scoreboard.get("season", {}).get("year", season)
-        season_type = scoreboard.get("season", {}).get("type", season_type)
+        league_season = (scoreboard.get("leagues") or [{}])[0].get("season", {})
+        season = league_season.get("year", season)
+        season_type = league_season.get("type", {}).get("type", season_type)
         week = scoreboard.get("week", {}).get("number", 1)
 
         if season_type == PRESEASON_TYPE:

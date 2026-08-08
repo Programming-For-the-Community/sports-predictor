@@ -121,3 +121,33 @@ class TestGetTeamInjuries:
         client._get = MagicMock(return_value={"items": []})
 
         assert client.get_team_injuries("12") == []
+
+    def test_recovered_active_status_is_filtered_out(self):
+        # ESPN's endpoint returns the whole season's status-change log,
+        # not just who's hurt now -- "Active" means recovered.
+        client = self._client()
+        client._get = MagicMock(return_value={"items": [{"$ref": "http://.../injuries/1"}]})
+        client.get_absolute = MagicMock(return_value={
+            "status": "Active",
+            "athlete": {"$ref": "http://.../athletes/1?lang=en"},
+        })
+
+        assert client.get_team_injuries("12") == []
+
+    def test_doubtful_status_is_kept(self):
+        client = self._client()
+        client._get = MagicMock(return_value={"items": [{"$ref": "http://.../injuries/1"}]})
+        client.get_absolute = MagicMock(return_value={
+            "status": "Doubtful",
+            "athlete": {"$ref": "http://.../athletes/1?lang=en"},
+        })
+
+        assert client.get_team_injuries("12") == [{"entity_id": "1", "status": "Doubtful"}]
+
+    def test_requests_limit_100_to_get_full_season_log_in_one_call(self):
+        client = self._client()
+        client._get = MagicMock(return_value={"items": []})
+
+        client.get_team_injuries("12")
+
+        client._get.assert_called_once_with("teams/12/injuries", {"limit": 100})
