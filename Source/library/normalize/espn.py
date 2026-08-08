@@ -172,6 +172,14 @@ def boxscore_to_player_game_stats(
     into one string (e.g. "24/31") onto a pair of output field names. Keys
     absent from the map are snake-cased and stored as-is. A single athlete
     appearing in multiple stat categories is merged into one stat_line.
+
+    Each returned player entity carries metadata.position, same field/shape
+    roster_to_player_entities sets from the roster feed -- upsert_player_entity
+    (library.storage.pipeline_storage) writes whichever of the two sources
+    ran most recently as a full item replacement, not a merge, so this
+    entity dropping position would blank out whatever a prior roster sync
+    had already set for an actively-playing player, exactly the case
+    live_features.py's roster-driven candidate selection depends on it for.
     """
     header = summary["header"]
     event_id = header["id"]
@@ -196,7 +204,10 @@ def boxscore_to_player_game_stats(
                 values = athlete_entry.get("stats", [])
                 line = stat_lines.setdefault(athlete_id, {})
                 athlete_team[athlete_id] = team_id
-                athlete_meta[athlete_id] = (athlete.get("displayName", ""), athlete.get("jersey"))
+                athlete_meta[athlete_id] = (
+                    athlete.get("displayName", ""), athlete.get("jersey"),
+                    (athlete.get("position") or {}).get("abbreviation"),
+                )
                 for key, value in zip(keys, values):
                     if key in compound_key_splits:
                         first_name, second_name = compound_key_splits[key]
@@ -226,7 +237,7 @@ def boxscore_to_player_game_stats(
     player_game_stats_items = []
     player_entities = []
     for athlete_id, line in stat_lines.items():
-        display_name, jersey = athlete_meta[athlete_id]
+        display_name, jersey, position = athlete_meta[athlete_id]
         team_id = athlete_team[athlete_id]
         player_game_stats_items.append({
             "event_key": event_key(sport, event_id),
@@ -255,6 +266,7 @@ def boxscore_to_player_game_stats(
                 # docstring.
                 "team_id_as_of": event_date,
                 "jersey": jersey,
+                "position": position,
             },
         })
     return player_game_stats_items, player_entities

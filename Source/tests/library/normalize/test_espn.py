@@ -54,6 +54,33 @@ class TestBoxscoreToPlayerGameStats:
 
         assert player_entities[0]["team_key"] == "SPORT#NFL#TEAM#KC"
 
+    def test_player_entity_carries_position(self):
+        # Same metadata.position field/shape roster_to_player_entities sets
+        # -- upsert_player_entity replaces the whole entity item, not just
+        # the fields a given source knows about, so this entity omitting
+        # position would blank out whatever a prior roster sync had already
+        # set for this player (live_features.py's roster-driven leader
+        # selection depends on it being there for an actively-playing
+        # player, not just a freshly-rostered one).
+        _, player_entities = boxscore_to_player_game_stats(
+            _summary([{"name": "passing", "keys": ["passingYards"], "athletes": [
+                {"athlete": {"id": "1", "displayName": "QB One", "position": {"abbreviation": "QB"}}, "stats": ["250"]},
+            ]}]),
+            "nfl", compound_key_splits={},
+        )
+
+        assert player_entities[0]["metadata"]["position"] == "QB"
+
+    def test_player_entity_position_missing_from_espn_payload_is_none(self):
+        _, player_entities = boxscore_to_player_game_stats(
+            _summary([{"name": "passing", "keys": ["passingYards"], "athletes": [
+                {"athlete": {"id": "1", "displayName": "QB One"}, "stats": ["250"]},
+            ]}]),
+            "nfl", compound_key_splits={},
+        )
+
+        assert player_entities[0]["metadata"]["position"] is None
+
 
 def _roster(*, team_id="23", timestamp="2026-08-08T05:05:15Z", groups):
     return {"team": {"id": team_id}, "timestamp": timestamp, "athletes": groups}
