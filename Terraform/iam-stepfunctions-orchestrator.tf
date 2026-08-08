@@ -66,12 +66,23 @@ data "aws_iam_policy_document" "stepfunctions_orchestrator_permissions" {
   # machine, not an in-place step, so starting/polling/stopping those
   # iterations needs its own states: permissions on top of everything
   # above. Per AWS's own documented requirement for Distributed Map.
+  #
+  # Built from var.project directly (matching sfn-training-orchestrator.tf's
+  # own `name = "${var.project}-training-orchestrator"`), not a reference
+  # to aws_sfn_state_machine.training_orchestrator.arn/.name -- a resource
+  # reference would make this policy depend on that state machine, forcing
+  # Terraform to update the state machine BEFORE this policy on every
+  # apply. That's backwards: the state machine's own logging_configuration
+  # needs the permissions below (DeliverExecutionLogsToCloudWatch) to
+  # already be in place, or its own update fails with "IAM Role is not
+  # authorized to access the Log Destination" -- which is exactly what
+  # happened until this was made deterministic instead of reference-based.
   statement {
     sid     = "RunTrainingDistributedMapChildren"
     actions = ["states:StartExecution", "states:DescribeExecution", "states:StopExecution"]
     resources = [
-      aws_sfn_state_machine.training_orchestrator.arn,
-      "arn:aws:states:${var.region}:${var.account_id}:execution:${aws_sfn_state_machine.training_orchestrator.name}:*",
+      "arn:aws:states:${var.region}:${var.account_id}:stateMachine:${var.project}-training-orchestrator",
+      "arn:aws:states:${var.region}:${var.account_id}:execution:${var.project}-training-orchestrator:*",
     ]
   }
 
