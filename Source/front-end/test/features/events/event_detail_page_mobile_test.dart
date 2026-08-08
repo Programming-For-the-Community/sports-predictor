@@ -3,7 +3,9 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:front_end/core/data/events_repository.dart';
+import 'package:front_end/core/data/live_scores_repository.dart';
 import 'package:front_end/core/models/event.dart';
+import 'package:front_end/core/models/live_score.dart';
 import 'package:front_end/core/models/prediction.dart';
 import 'package:front_end/features/events/event_detail_page.dart';
 
@@ -46,6 +48,28 @@ void main() {
           overrides: [
             eventsListProvider.overrideWith((ref, query) async => query.status == 'scheduled' ? [_event] : []),
             eventPredictionProvider.overrideWith((ref, query) async => _prediction),
+            liveScoresProvider.overrideWith((ref, sport) async => const {}),
+          ],
+          child: const MaterialApp(home: Scaffold(body: EventDetailPage(sportId: 'nfl', eventId: '401547417'))),
+        ),
+      );
+
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('renders with no overflow while live at ${width}px wide', (tester) async {
+      await pumpAtWidth(
+        tester,
+        width,
+        ProviderScope(
+          overrides: [
+            eventsListProvider.overrideWith((ref, query) async => query.status == 'scheduled' ? [_event] : []),
+            eventPredictionProvider.overrideWith((ref, query) async => _prediction),
+            liveScoresProvider.overrideWith(
+              (ref, sport) async => {
+                '401547417': const LiveEventState(live: true, detail: 'Q3 08:14', homeScore: 17, awayScore: 14),
+              },
+            ),
           ],
           child: const MaterialApp(home: Scaffold(body: EventDetailPage(sportId: 'nfl', eventId: '401547417'))),
         ),

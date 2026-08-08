@@ -49,6 +49,7 @@ resource "aws_ecs_task_definition" "nfl_backfill" {
         { name = "TEAM_GAME_STATS_TABLE_NAME", value = aws_dynamodb_table.team_game_stats.name },
         { name = "AWS_REGION", value = var.region },
         { name = "ESPN_API_ROOT_URL", value = var.espn_api_root_url },
+        { name = "ESPN_USER_AGENT", value = var.espn_user_agent },
         { name = "START_SEASON", value = "2016" },
         { name = "END_SEASON", value = "2025" },
         { name = "BATCH_SIZE", value = "2" },

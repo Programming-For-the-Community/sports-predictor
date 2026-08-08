@@ -5,7 +5,7 @@ env-var override resolution and EspnBaseClient's constructor wiring.
 import os
 from unittest.mock import MagicMock, patch
 
-from library.http.espn import DEFAULT_ESPN_API_ROOT_URL, EspnBaseClient, _espn_root_url, _espn_user_agent
+from library.http.espn import DEFAULT_ESPN_API_ROOT_URL, DEFAULT_ESPN_USER_AGENT, EspnBaseClient, _espn_root_url, _espn_user_agent
 
 
 class TestEspnRootUrl:
@@ -24,10 +24,10 @@ class TestEspnRootUrl:
 
 
 class TestEspnUserAgent:
-    def test_none_when_env_var_unset(self):
+    def test_defaults_when_env_var_unset(self):
         with patch.dict(os.environ, {}, clear=False):
             os.environ.pop("ESPN_USER_AGENT", None)
-            assert _espn_user_agent() is None
+            assert _espn_user_agent() == DEFAULT_ESPN_USER_AGENT
 
     def test_uses_env_var_override_when_set(self):
         with patch.dict(os.environ, {"ESPN_USER_AGENT": "python-requests/2.31.0"}):
@@ -48,10 +48,10 @@ class TestEspnBaseClient:
             user_agent="python-requests/2.31.0",
         )
 
-    def test_passes_none_user_agent_when_env_var_unset(self):
+    def test_passes_default_user_agent_when_env_var_unset(self):
         with patch.dict(os.environ, {}, clear=False):
             os.environ.pop("ESPN_USER_AGENT", None)
             with patch("library.http.espn.HttpClient.__init__", return_value=None) as mock_init:
                 EspnBaseClient(sport_path="football/nfl")
 
-        assert mock_init.call_args.kwargs["user_agent"] is None
+        assert mock_init.call_args.kwargs["user_agent"] == DEFAULT_ESPN_USER_AGENT

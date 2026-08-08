@@ -20,17 +20,20 @@ class ModelCardsPage extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final models = ref.watch(modelsListProvider(sportId));
 
-    return SingleChildScrollView(
-      padding: const EdgeInsets.all(24),
-      child: models.when(
-        data: (list) {
-          if (list.isEmpty) {
-            return Text('No models have been promoted yet.', style: AppTextStyles.body(color: AppColors.inkSub));
-          }
-          return _ModelCardGrid(models: list);
-        },
-        loading: () => const Center(child: Padding(padding: EdgeInsets.all(40), child: CircularProgressIndicator())),
-        error: (error, _) => Text('Couldn\'t load models: $error', style: AppTextStyles.body(color: AppColors.neg)),
+    return RefreshIndicator(
+      onRefresh: () => ref.refresh(modelsListProvider(sportId).future),
+      child: SingleChildScrollView(
+        padding: const EdgeInsets.all(24),
+        child: models.when(
+          data: (list) {
+            if (list.isEmpty) {
+              return Text('No models have been promoted yet.', style: AppTextStyles.body(color: AppColors.inkSub));
+            }
+            return _ModelCardGrid(models: list);
+          },
+          loading: () => const Center(child: Padding(padding: EdgeInsets.all(40), child: CircularProgressIndicator())),
+          error: (error, _) => Text('Couldn\'t load models: $error', style: AppTextStyles.body(color: AppColors.neg)),
+        ),
       ),
     );
   }

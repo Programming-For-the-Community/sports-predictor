@@ -96,7 +96,9 @@ class _EventListPageState extends ConsumerState<EventListPage> {
         ? ref.watch(liveScoresProvider(widget.sportId)).value ?? const <String, LiveEventState>{}
         : const <String, LiveEventState>{};
 
-    return SingleChildScrollView(
+    return RefreshIndicator(
+      onRefresh: () => ref.refresh(eventsListProvider((sport: widget.sportId, status: _status)).future),
+      child: SingleChildScrollView(
       padding: const EdgeInsets.all(24),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -165,6 +167,7 @@ class _EventListPageState extends ConsumerState<EventListPage> {
             error: (error, _) => Text('Couldn\'t load games: $error', style: AppTextStyles.body(color: AppColors.neg)),
           ),
         ],
+      ),
       ),
     );
   }

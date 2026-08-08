@@ -9,6 +9,7 @@ import '../theme/app_colors.dart';
 import '../theme/app_text_styles.dart';
 import '../../static/nfl_team_colors.dart';
 import 'confidence_pill.dart';
+import 'live_status_pill.dart';
 import 'win_probability_bar.dart';
 
 // Abbreviated for this compact row -- the backend's full round names
@@ -40,15 +41,33 @@ String _kickoffTimeLabel(SportEvent event) {
   return '$hour12:$minute $period';
 }
 
-/// The viewer's own UTC offset, formatted like "UTC-5" -- every kickoff
+const _usTimeZones = {
+  -5: ('EST', 'EDT'),
+  -6: ('CST', 'CDT'),
+  -7: ('MST', 'MDT'),
+  -8: ('PST', 'PDT'),
+  -9: ('AKST', 'AKDT'),
+  -10: ('HST', 'HST'),
+};
+
+/// The viewer's own timezone, abbreviated (e.g. "EDT") -- every kickoff
 /// time on this list is shown in this same local time (_kickoffTimeLabel
-/// above), so event_list_page.dart states it once for the whole list
-/// rather than repeating it on every row. Not DateTime.timeZoneName
-/// ("EST"/"CDT") -- Flutter Web frequently can't produce a real
-/// abbreviation there (browser/ICU-data dependent); a numeric UTC offset
-/// works identically on every platform this app runs on.
+/// above), stated once for the whole list rather than per row. Not
+/// DateTime.timeZoneName (unreliable on Flutter Web); instead derives the
+/// standard (non-DST) offset by comparing January/July, then checks
+/// whether the current offset differs from it to pick DST vs standard.
+/// Falls back to "UTC±N" outside the continental US/AK/HI.
 String localTimezoneLabel() {
-  final offset = DateTime.now().timeZoneOffset;
+  final now = DateTime.now();
+  final janOffset = DateTime(now.year, 1, 15).timeZoneOffset;
+  final julOffset = DateTime(now.year, 7, 15).timeZoneOffset;
+  final standardOffset = janOffset <= julOffset ? janOffset : julOffset;
+  final isDst = now.timeZoneOffset != standardOffset;
+
+  final names = _usTimeZones[standardOffset.inHours];
+  if (names != null) return isDst ? names.$2 : names.$1;
+
+  final offset = now.timeZoneOffset;
   final sign = offset.isNegative ? '-' : '+';
   return 'UTC$sign${offset.abs().inHours}';
 }
@@ -170,22 +189,31 @@ class _LivePrediction extends ConsumerWidget {
           children: [
             Expanded(child: WinProbabilityBar(homeWinProbability: p.homeWinProbability)),
             const SizedBox(width: 12),
-            Column(
-              crossAxisAlignment: CrossAxisAlignment.end,
-              children: [
-                Text(
-                  '${(p.homeWinProbability * 100).round()}%',
-                  style: AppTextStyles.metricValueLarge(color: AppColors.cyan),
-                ),
-                // Predicted winner + margin + score, up front on the list
-                // card rather than only after clicking into the event
-                // (MatchupHero's own PICK/PRED MARGIN/PRED TOTAL trio).
-                Text(
-                  '$pickAbbr -${p.margin.abs().toStringAsFixed(1)} '
-                  '(${p.homeScore.round()}-${p.awayScore.round()})',
-                  style: AppTextStyles.microLabel(color: AppColors.inkMute),
-                ),
-              ],
+            // Flexible+ellipsis on both lines -- on a narrow phone this
+            // column was pushing the ConfidencePill past the card's own
+            // edge instead of giving up its own width first.
+            Flexible(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: [
+                  Text(
+                    '${(p.homeWinProbability * 100).round()}%',
+                    style: AppTextStyles.metricValueLarge(color: AppColors.cyan),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  // Predicted winner + margin + score, up front on the list
+                  // card rather than only after clicking into the event
+                  // (MatchupHero's own PICK/PRED MARGIN/PRED TOTAL trio).
+                  Text(
+                    '$pickAbbr -${p.margin.abs().toStringAsFixed(1)} '
+                    '(${p.homeScore.round()}-${p.awayScore.round()})',
+                    style: AppTextStyles.microLabel(color: AppColors.inkMute),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ],
+              ),
             ),
             const SizedBox(width: 8),
             ConfidencePill(homeWinProbability: p.homeWinProbability),
@@ -209,18 +237,7 @@ class _LiveStatus extends StatelessWidget {
   Widget build(BuildContext context) {
     return Row(
       children: [
-        Container(
-          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-          decoration: BoxDecoration(color: AppColors.live.withValues(alpha: 0.15), borderRadius: BorderRadius.circular(999)),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Container(width: 6, height: 6, decoration: BoxDecoration(shape: BoxShape.circle, color: AppColors.live)),
-              const SizedBox(width: 6),
-              Text('LIVE', style: AppTextStyles.microLabel(color: AppColors.live)),
-            ],
-          ),
-        ),
+        const LiveStatusPill(),
         if (detail != null) ...[
           const SizedBox(width: 8),
           Expanded(

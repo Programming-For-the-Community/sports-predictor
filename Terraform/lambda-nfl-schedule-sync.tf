@@ -51,17 +51,11 @@ resource "aws_lambda_function" "nfl_schedule_sync" {
   filename         = data.archive_file.nfl_schedule_sync_placeholder.output_path
   source_code_hash = data.archive_file.nfl_schedule_sync_placeholder.output_base64sha256
 
-  # ESPN_API_ROOT_URL/ESPN_USER_AGENT deliberately differ from
-  # var.espn_api_root_url/the shared HttpClient default that ingest and
-  # normalize use -- this Lambda's ESPN calls need site.web.api.espn.com
-  # (same request/response shape as site.api.espn.com) and a plain
-  # non-browser User-Agent to get through, scoped to just this Lambda so
-  # ingest/normalize's own config stays untouched.
   environment {
     variables = {
       RAW_BUCKET_NAME   = aws_s3_bucket.raw_data_lake.bucket
-      ESPN_API_ROOT_URL = "https://site.web.api.espn.com/apis/site/v2/sports"
-      ESPN_USER_AGENT   = "python-requests/2.31.0"
+      ESPN_API_ROOT_URL = var.espn_api_root_url
+      ESPN_USER_AGENT   = var.espn_user_agent
     }
   }
 

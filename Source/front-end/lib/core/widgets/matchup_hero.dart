@@ -1,28 +1,34 @@
 import 'package:flutter/material.dart';
 
 import '../models/event.dart';
+import '../models/live_score.dart';
 import '../models/prediction.dart';
 import '../theme/app_colors.dart';
 import '../theme/app_text_styles.dart';
 import '../../static/nfl_team_colors.dart';
 import 'confidence_pill.dart';
+import 'live_status_pill.dart';
 import 'win_probability_bar.dart';
 
 /// design/FRONTEND_STYLE.md's "Matchup hero (detail)" component: two
-/// columns of team + win probability % (favored side gradient-clipped
-/// cyan, small -- supporting context, not the headline number), a split
-/// bar, then the big PRED TOTAL figure, then a Pick / Pred margin duo.
+/// columns of team + predicted score (favored side gradient-clipped
+/// cyan, win probability % small underneath), a split bar, then the big
+/// PICK, then a Pred total / home margin duo. liveState (from
+/// liveScoresProvider) overrides the per-team scores with live ones and
+/// swaps the confidence pill for a LIVE status line when set and live.
 class MatchupHero extends StatelessWidget {
-  const MatchupHero({super.key, required this.event, required this.prediction});
+  const MatchupHero({super.key, required this.event, required this.prediction, this.liveState});
 
   final SportEvent event;
   final EventPrediction prediction;
+  final LiveEventState? liveState;
 
   @override
   Widget build(BuildContext context) {
     final home = nflTeam(event.home.entityId);
     final away = nflTeam(event.away.entityId);
     final homeFavored = prediction.homeWinProbability >= 0.5;
+    final isLive = liveState?.live ?? false;
 
     return Container(
       padding: const EdgeInsets.all(28),
@@ -42,7 +48,7 @@ class MatchupHero extends StatelessWidget {
                   abbr: away.abbreviation,
                   probability: 1 - prediction.homeWinProbability,
                   favored: !homeFavored,
-                  predictedScore: prediction.awayScore,
+                  predictedScore: isLive ? liveState!.awayScore ?? prediction.awayScore : prediction.awayScore,
                 ),
               ),
               Padding(
@@ -61,7 +67,7 @@ class MatchupHero extends StatelessWidget {
                   abbr: home.abbreviation,
                   probability: prediction.homeWinProbability,
                   favored: homeFavored,
-                  predictedScore: prediction.homeScore,
+                  predictedScore: isLive ? liveState!.homeScore ?? prediction.homeScore : prediction.homeScore,
                 ),
               ),
             ],
@@ -69,19 +75,27 @@ class MatchupHero extends StatelessWidget {
           const SizedBox(height: 20),
           WinProbabilityBar(homeWinProbability: prediction.homeWinProbability, height: 12),
           const SizedBox(height: 12),
-          Center(child: ConfidencePill(homeWinProbability: prediction.homeWinProbability)),
+          Center(
+            child: isLive
+                ? Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const LiveStatusPill(),
+                      if (liveState!.detail != null) ...[
+                        const SizedBox(width: 8),
+                        Text(liveState!.detail!, style: AppTextStyles.body(color: AppColors.inkSub)),
+                      ],
+                    ],
+                  )
+                : ConfidencePill(homeWinProbability: prediction.homeWinProbability),
+          ),
           const SizedBox(height: 24),
-          // The combined predicted score -- the one number this hero
-          // leads with, above the smaller PICK/PRED MARGIN stats below.
           Center(
             child: Column(
               children: [
-                Text('PRED TOTAL', style: AppTextStyles.microLabel()),
+                Text('PICK', style: AppTextStyles.microLabel()),
                 const SizedBox(height: 4),
-                Text(
-                  (prediction.homeScore + prediction.awayScore).toStringAsFixed(1),
-                  style: AppTextStyles.bigStatNumeral(),
-                ),
+                Text(homeFavored ? home.abbreviation : away.abbreviation, style: AppTextStyles.bigStatNumeral()),
               ],
             ),
           ),
@@ -89,8 +103,13 @@ class MatchupHero extends StatelessWidget {
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceAround,
             children: [
-              _StatTrio(label: 'PICK', value: homeFavored ? home.abbreviation : away.abbreviation),
-              _StatTrio(label: 'PRED MARGIN', value: prediction.margin.toStringAsFixed(1)),
+              Flexible(
+                child: _StatTrio(
+                  label: 'PRED TOTAL',
+                  value: (prediction.homeScore + prediction.awayScore).toStringAsFixed(1),
+                ),
+              ),
+              Flexible(child: _StatTrio(label: 'HOME MARGIN', value: prediction.margin.toStringAsFixed(1))),
             ],
           ),
         ],
@@ -112,10 +131,7 @@ class _TeamColumn extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // Small -- the win-probability % is supporting context for the big
-    // PRED TOTAL number below the split bar, not the headline figure
-    // itself (see MatchupHero's own comment).
-    final numeral = Text('${(probability * 100).round()}%', style: AppTextStyles.metricValueLarge());
+    final scoreNumeral = Text('${predictedScore.round()} PTS', style: AppTextStyles.metricValueLarge());
 
     return Column(
       children: [
@@ -127,13 +143,11 @@ class _TeamColumn extends StatelessWidget {
             ? ShaderMask(
                 shaderCallback: (bounds) => AppColors.cyanFill.createShader(bounds),
                 blendMode: BlendMode.srcIn,
-                child: numeral,
+                child: scoreNumeral,
               )
-            : Opacity(opacity: 0.6, child: numeral),
+            : Opacity(opacity: 0.6, child: scoreNumeral),
         const SizedBox(height: 4),
-        // Each team's own predicted score -- PRED TOTAL below is the
-        // combined over/under figure, a different stat from this.
-        Text('${predictedScore.round()} PTS', style: AppTextStyles.microLabel(color: AppColors.inkMute)),
+        Text('${(probability * 100).round()}%', style: AppTextStyles.microLabel(color: AppColors.inkMute)),
       ],
     );
   }
@@ -283,8 +297,9 @@ class _StatTrio extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Column(
+      mainAxisSize: MainAxisSize.min,
       children: [
-        Text(label, style: AppTextStyles.microLabel()),
+        Text(label, style: AppTextStyles.microLabel(), maxLines: 1, overflow: TextOverflow.ellipsis),
         const SizedBox(height: 4),
         Text(value, style: AppTextStyles.metricValueLarge()),
       ],

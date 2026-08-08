@@ -67,8 +67,10 @@ class _SeasonPageState extends ConsumerState<SeasonPage> {
   Widget build(BuildContext context) {
     final projection = ref.watch(seasonProjectionProvider(widget.sportId));
 
-    return SingleChildScrollView(
-      padding: const EdgeInsets.all(24),
+    return RefreshIndicator(
+      onRefresh: () => ref.refresh(seasonProjectionProvider(widget.sportId).future),
+      child: SingleChildScrollView(
+        padding: const EdgeInsets.all(24),
       child: projection.when(
         data: (season) => Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -143,6 +145,7 @@ class _SeasonPageState extends ConsumerState<SeasonPage> {
         loading: () => const Center(child: Padding(padding: EdgeInsets.all(40), child: CircularProgressIndicator())),
         error: (error, _) =>
             Text('Couldn\'t load season projection: $error', style: AppTextStyles.body(color: AppColors.neg)),
+      ),
       ),
     );
   }

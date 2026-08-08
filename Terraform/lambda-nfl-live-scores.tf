@@ -55,6 +55,7 @@ resource "aws_lambda_function" "nfl_live_scores" {
     variables = {
       RAW_BUCKET_NAME   = aws_s3_bucket.raw_data_lake.bucket
       ESPN_API_ROOT_URL = var.espn_api_root_url
+      ESPN_USER_AGENT   = var.espn_user_agent
       # FeatureStorage's constructor requires all four of these regardless
       # of which methods actually get called (see iam-lambda-live-scores.tf's
       # own comment) -- live_scores.py only ever queries the events table.

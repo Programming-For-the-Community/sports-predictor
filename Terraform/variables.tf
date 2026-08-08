@@ -121,7 +121,14 @@ variable "ecr_repo_url" {
 variable "espn_api_root_url" {
   description = "Root URL of ESPN's public (unofficial) site API, shared by every sport-specific task that uses it -- each task appends its own sport path (e.g. football/nfl). Override via TF_VAR_espn_api_root_url from a GitHub Actions variable if ESPN's domain changes."
   type        = string
-  default     = "https://site.api.espn.com/apis/site/v2/sports"
+  default     = "https://site.web.api.espn.com/apis/site/v2/sports"
+  nullable    = false
+}
+
+variable "espn_user_agent" {
+  description = "User-Agent sent on every ESPN request. site.api.espn.com started 403ing plain scoreboard requests; site.web.api.espn.com + a non-browser UA is the confirmed-working combo."
+  type        = string
+  default     = "python-requests/2.31.0"
   nullable    = false
 }
 

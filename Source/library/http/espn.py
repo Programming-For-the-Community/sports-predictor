@@ -11,20 +11,16 @@ import os
 
 from library.http.client import HttpClient
 
-DEFAULT_ESPN_API_ROOT_URL = "https://site.api.espn.com/apis/site/v2/sports"
+DEFAULT_ESPN_API_ROOT_URL = "https://site.web.api.espn.com/apis/site/v2/sports"
+DEFAULT_ESPN_USER_AGENT = "python-requests/2.31.0"
 
 
 def _espn_root_url() -> str:
     return os.environ.get("ESPN_API_ROOT_URL", DEFAULT_ESPN_API_ROOT_URL).rstrip("/")
 
 
-def _espn_user_agent() -> str | None:
-    """None (HttpClient's own browser-UA default) unless ESPN_USER_AGENT is
-    set -- same override-via-env-var pattern as _espn_root_url above, for
-    the same reason: a Lambda that wants to test a different UA against
-    ESPN's WAF shouldn't need a code change, just its own environment
-    block (see Terraform/lambda-nfl-schedule-sync.tf)."""
-    return os.environ.get("ESPN_USER_AGENT")
+def _espn_user_agent() -> str:
+    return os.environ.get("ESPN_USER_AGENT", DEFAULT_ESPN_USER_AGENT)
 
 
 class EspnBaseClient(HttpClient):

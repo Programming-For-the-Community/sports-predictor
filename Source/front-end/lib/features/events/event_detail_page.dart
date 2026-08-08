@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/data/events_repository.dart';
+import '../../core/data/live_scores_repository.dart';
 import '../../core/models/event.dart';
 import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_text_styles.dart';
@@ -92,10 +93,11 @@ class EventDetailPage extends ConsumerWidget {
       child: ref.watch(eventPredictionProvider((sport: sportId, eventId: eventId))).when(
             data: (prediction) {
               final leaders = prediction.leaders;
+              final liveScores = ref.watch(liveScoresProvider(sportId)).value ?? const {};
               return Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  MatchupHero(event: event, prediction: prediction),
+                  MatchupHero(event: event, prediction: prediction, liveState: liveScores[eventId]),
                   if (leaders != null) ...[
                     const SizedBox(height: 20),
                     TeamLeadersPanel(
