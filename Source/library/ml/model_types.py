@@ -117,15 +117,23 @@ class XGBoostAdapter:
 # feature interaction -- it shows up as paired features like
 # home_travel_km/away_travel_km with one real and one exactly-zero
 # importance, the fingerprint of a stump arbitrarily picking one of two
-# similar features to split on.
+# similar features to split on. colsample_bytree is subsample's
+# per-tree-features counterpart (row subsampling alone leaves every tree
+# free to lean on the same dominant feature) -- searched at the same
+# granularity as subsample so neither axis is favored over the other.
 _XGB_PARAM_DISTRIBUTIONS = {
     "max_depth": [2, 3, 4, 5, 6, 7, 8, 9],
     "n_estimators": [50, 100, 200, 300, 400, 450, 500, 550, 600, 750],
     "learning_rate": [0.001, 0.002, 0.003, 0.005, 0.007, 0.01, 0.02, 0.05, 0.1, 0.2],
     "min_child_weight": [1, 3, 5, 7, 10, 15, 20],
     "subsample": [0.4, 0.45, 0.5, 0.55, 0.6, 0.65, 0.7, 0.8, 0.9, 1.0],
+    "colsample_bytree": [0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0],
 }
-_XGB_SEARCH_ITERATIONS = 300
+# Raised alongside colsample_bytree -- adding a 6th search axis grows the
+# combination space roughly 7x, and holding n_iter fixed would have let
+# RandomizedSearchCV's sample density (iterations / combinations) drop by
+# the same factor.
+_XGB_SEARCH_ITERATIONS = 400
 _XGB_CV_SPLITS = 8
 _XGB_RANDOM_STATE = 42
 
@@ -189,12 +197,15 @@ class _JoblibSerializedAdapter:
         return joblib.load(io.BytesIO(raw))
 
 
-# Exhaustive, not randomized -- 22 combinations is cheap enough to search
+# Exhaustive, not randomized -- 32 combinations is cheap enough to search
 # in full, unlike XGBoost's much larger space above. liblinear supports
 # both penalties without the extra l1_ratio parameter elasticnet would
-# need.
+# need. Denser around 0.01-1 than the decade-spaced tail ends -- that's
+# typically where a log-loss-vs-C curve bends, so it's worth resolving
+# more finely than the extremes, which mostly just confirm the curve has
+# flattened out.
 _LOGISTIC_PARAM_GRID = {
-    "model__C": [0.001, 0.003, 0.01, 0.03, 0.1, 0.3, 1, 3, 10, 30, 100],
+    "model__C": [0.001, 0.003, 0.01, 0.03, 0.05, 0.1, 0.2, 0.3, 0.5, 1, 2, 3, 5, 10, 30, 100],
     "model__penalty": ["l1", "l2"],
 }
 _LOGISTIC_CV_SPLITS = 8
@@ -265,9 +276,15 @@ class LogisticRegressionAdapter(_JoblibSerializedAdapter):
 # classification form the way LogisticRegression has no regression form,
 # so there's no shared base to factor out here beyond
 # _JoblibSerializedAdapter).
+# alpha at 3 points per decade (not 1) -- ElasticNet's loss surface is
+# often more sensitive to alpha than 5 sparse log-spaced points can
+# resolve, and a fit is cheap enough that filling in the decades costs
+# little. l1_ratio adds points near its 1.0 (pure Lasso) end specifically
+# -- behavior there is often qualitatively different from the interior,
+# not just a smooth continuation of it.
 _ELASTIC_NET_PARAM_GRID = {
-    "model__alpha": [0.001, 0.01, 0.1, 1.0, 10.0],
-    "model__l1_ratio": [0.1, 0.5, 0.9],
+    "model__alpha": [0.001, 0.003, 0.01, 0.03, 0.1, 0.3, 1.0, 3.0, 10.0],
+    "model__l1_ratio": [0.1, 0.3, 0.5, 0.7, 0.9, 0.95, 0.99],
 }
 _ELASTIC_NET_CV_SPLITS = 8
 _ELASTIC_NET_RANDOM_STATE = 42
@@ -323,17 +340,19 @@ class ElasticNetAdapter(_JoblibSerializedAdapter):
 # either way" property, since a plain sklearn classifier/regressor
 # genuinely has different methods for the two.
 _RF_PARAM_DISTRIBUTIONS = {
-    "model__n_estimators": [100, 200, 300, 400, 500],
-    "model__max_depth": [4, 6, 8, 10, 15, None],
+    "model__n_estimators": [100, 200, 300, 400, 500, 600],
+    "model__max_depth": [4, 6, 8, 10, 15, 20, None],
     "model__min_samples_leaf": [1, 2, 4, 8],
     "model__max_features": ["sqrt", "log2", None],
 }
-# Fewer than XGBoost's 300 -- an individual Random Forest fit is usually
+# Fewer than XGBoost's 400 -- an individual Random Forest fit is usually
 # cheap, but full grid coverage matters less for a bagging method whose
 # individual trees are already low-bias by construction (unlike a
 # boosting method, where each hyperparameter combination materially
-# changes what gets learned at every step).
-_RF_SEARCH_ITERATIONS = 60
+# changes what gets learned at every step). Raised alongside the wider
+# n_estimators/max_depth ranges to hold roughly the same sample density
+# (iterations / combinations) as before.
+_RF_SEARCH_ITERATIONS = 70
 _RF_CV_SPLITS = 8
 _RF_RANDOM_STATE = 42
 

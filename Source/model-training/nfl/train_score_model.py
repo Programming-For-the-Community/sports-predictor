@@ -33,6 +33,14 @@ Usage:
 import logging
 import os
 
+try:
+    # See train_win_probability_model.py's own comment -- must run before
+    # any sklearn import (including the one directly below).
+    from sklearnex import patch_sklearn
+    patch_sklearn()
+except ImportError:
+    pass
+
 import pandas as pd
 from sklearn.metrics import mean_absolute_error, root_mean_squared_error
 

@@ -30,6 +30,20 @@ Usage:
 import logging
 import os
 
+try:
+    # Patches scikit-learn's LogisticRegression/ElasticNet/RandomForest
+    # with Intel oneDAL-accelerated implementations -- must run before
+    # library.ml.model_types (or anything else importing sklearn) so the
+    # patched classes are what actually get instantiated. XGBoost has its
+    # own native optimization and isn't affected either way. Training-only
+    # (requirements.txt); never installed where library.ml.model_types is
+    # imported for arm64 serving (Source/aws-lambdas/nfl/predict), which
+    # this Intel-specific package doesn't support.
+    from sklearnex import patch_sklearn
+    patch_sklearn()
+except ImportError:
+    pass
+
 from library.aws.s3_manager import S3Manager
 from library.ml import backtest, training_common
 from library.ml.model_types import (

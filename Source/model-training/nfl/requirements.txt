@@ -2,8 +2,14 @@
 # is needed for that. xgboost is the model itself; pandas + pyarrow read
 # the Parquet training set; scikit-learn supplies accuracy/log_loss --
 # reimplementing a numerically-stable log_loss by hand is more error-prone
-# than depending on a well-tested one.
+# than depending on a well-tested one. scikit-learn-intelex patches
+# LogisticRegression/ElasticNet/RandomForest with Intel oneDAL-accelerated
+# implementations at runtime (see each train_*.py's own patch_sklearn()
+# call) -- x86_64-only, which is exactly what these Fargate training tasks
+# run on; never installed alongside library.ml.model_types on the arm64
+# predict Lambda.
 pandas>=2.2
 pyarrow>=16.0
 scikit-learn>=1.4
+scikit-learn-intelex>=2024.0
 xgboost>=2.0

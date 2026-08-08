@@ -306,6 +306,11 @@ def main() -> None:
 
     logger.info("Building event-level dataset...")
     event_rows = build_event_dataset(storage, window)
+    if not event_rows:
+        raise RuntimeError(
+            "build_event_dataset produced 0 rows -- refusing to overwrite "
+            f"s3://{bucket}/{EVENT_FEATURES_KEY} with an empty dataset",
+        )
     logger.info("Writing %d event feature rows to Parquet...", len(event_rows))
     s3.put_bytes(EVENT_FEATURES_KEY, _write_parquet(event_rows), content_type="application/octet-stream")
     logger.info("Wrote %d event feature rows to s3://%s/%s", len(event_rows), bucket, EVENT_FEATURES_KEY)
@@ -313,6 +318,11 @@ def main() -> None:
     logger.info("Building player-level dataset...")
     player_rows = build_player_dataset(storage, window)
     player_row_count = len(player_rows)
+    if not player_row_count:
+        raise RuntimeError(
+            "build_player_dataset produced 0 rows -- refusing to overwrite "
+            f"s3://{bucket}/{PLAYER_FEATURES_KEY} with an empty dataset",
+        )
     logger.info("Writing %d player feature rows to Parquet...", player_row_count)
     player_parquet = _write_parquet(player_rows)
     del player_rows  # this is the ~150K-row list -- free it before the S3 upload, not just after
