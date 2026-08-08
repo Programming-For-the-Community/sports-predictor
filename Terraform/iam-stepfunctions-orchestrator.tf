@@ -61,22 +61,11 @@ data "aws_iam_policy_document" "stepfunctions_orchestrator_permissions" {
     resources = ["arn:aws:events:${var.region}:${var.account_id}:rule/StepFunctionsGetEventsForECSTaskRule"]
   }
 
-  # sfn-training-orchestrator.tf's TrainAllTargets Map runs in Distributed
-  # mode -- each iteration is its own child execution of this same state
-  # machine, not an in-place step, so starting/polling/stopping those
-  # iterations needs its own states: permissions on top of everything
-  # above. Per AWS's own documented requirement for Distributed Map.
-  #
-  # Built from var.project directly (matching sfn-training-orchestrator.tf's
-  # own `name = "${var.project}-training-orchestrator"`), not a reference
-  # to aws_sfn_state_machine.training_orchestrator.arn/.name -- a resource
-  # reference would make this policy depend on that state machine, forcing
-  # Terraform to update the state machine BEFORE this policy on every
-  # apply. That's backwards: the state machine's own logging_configuration
-  # needs the permissions below (DeliverExecutionLogsToCloudWatch) to
-  # already be in place, or its own update fails with "IAM Role is not
-  # authorized to access the Log Destination" -- which is exactly what
-  # happened until this was made deterministic instead of reference-based.
+  # Distributed Map child-execution permissions (see sfn-training-
+  # orchestrator.tf). Resources are built from var.project directly, not
+  # a reference to aws_sfn_state_machine.training_orchestrator.arn/.name --
+  # a resource reference would make this policy depend on that state
+  # machine and invert the apply order it actually needs.
   statement {
     sid     = "RunTrainingDistributedMapChildren"
     actions = ["states:StartExecution", "states:DescribeExecution", "states:StopExecution"]
@@ -117,15 +106,10 @@ resource "aws_iam_role_policy" "stepfunctions_orchestrator_permissions" {
   policy = data.aws_iam_policy_document.stepfunctions_orchestrator_permissions.json
 }
 
-# Separate from the IAM role's own permissions above -- CloudWatch's log
-# delivery mechanism (what training_orchestrator's logging_configuration
-# actually uses under the hood) additionally requires this account-level
-# resource policy on the log group itself, granting the log-delivery
-# service (not the state machine's own role) permission to write to it.
-# Without this, UpdateStateMachine fails with "state machine IAM Role is
-# not authorized to access the Log Destination" even though the role's
-# own policy already has every logs: action AWS's docs list -- this is
-# the one piece the console auto-creates for you that Terraform doesn't.
+# Account-level resource policy letting CloudWatch's log-delivery service
+# (not the state machine's own role) write to vended-logs log groups --
+# separate from the IAM role permissions above, and required for
+# training_orchestrator's logging_configuration.
 resource "aws_cloudwatch_log_resource_policy" "vended_logs" {
   policy_name = "${var.project}-vended-logs"
   policy_document = jsonencode({
@@ -139,4 +123,20 @@ resource "aws_cloudwatch_log_resource_policy" "vended_logs" {
       }
     ]
   })
+}
+
+# Buffer for IAM/CloudWatch policy propagation -- training_orchestrator
+# (sfn-training-orchestrator.tf) depends_on this. triggers ties it to the
+# policies' actual content so it re-waits whenever either changes, not
+# just on initial creation.
+resource "time_sleep" "iam_propagation" {
+  depends_on = [
+    aws_iam_role_policy.stepfunctions_orchestrator_permissions,
+    aws_cloudwatch_log_resource_policy.vended_logs,
+  ]
+  triggers = {
+    orchestrator_policy = data.aws_iam_policy_document.stepfunctions_orchestrator_permissions.json
+    vended_logs_policy  = aws_cloudwatch_log_resource_policy.vended_logs.policy_document
+  }
+  create_duration = "15s"
 }

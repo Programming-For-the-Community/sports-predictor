@@ -30,6 +30,10 @@ resource "aws_sfn_state_machine" "training_orchestrator" {
   role_arn = aws_iam_role.stepfunctions_orchestrator.arn
   type     = "STANDARD"
 
+  # Waits for IAM/CloudWatch policy propagation -- see
+  # iam-stepfunctions-orchestrator.tf's time_sleep.iam_propagation.
+  depends_on = [time_sleep.iam_propagation]
+
   logging_configuration {
     log_destination        = "${aws_cloudwatch_log_group.training_orchestrator.arn}:*"
     include_execution_data = true

@@ -4,6 +4,16 @@ terraform {
       source  = "hashicorp/aws"
       version = "~> 5.84"
     }
+    # Used once, in iam-stepfunctions-orchestrator.tf -- a short buffer
+    # between the IAM permissions training_orchestrator's logging_configuration
+    # needs and the state machine update that actually uses them, since
+    # IAM/CloudWatch-Logs-resource-policy changes are eventually consistent
+    # (a completed Terraform apply of the policy doesn't guarantee AWS has
+    # finished propagating it yet).
+    time = {
+      source  = "hashicorp/time"
+      version = "~> 0.11"
+    }
   }
 
   backend "s3" {
