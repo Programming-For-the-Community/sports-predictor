@@ -268,9 +268,13 @@ class _PredictionRecap extends StatelessWidget {
           children: [
             Icon(c.correct ? Icons.check_circle : Icons.cancel, color: c.correct ? AppColors.live : AppColors.neg, size: 18),
             const SizedBox(width: 8),
-            Text(
-              c.correct ? 'Model picked the winner' : 'Model missed the winner',
-              style: AppTextStyles.body(color: AppColors.inkSub),
+            Flexible(
+              child: Text(
+                c.correct ? 'Model picked the winner' : 'Model missed the winner',
+                style: AppTextStyles.body(color: AppColors.inkSub),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
             ),
           ],
         ),
@@ -278,10 +282,10 @@ class _PredictionRecap extends StatelessWidget {
         Row(
           mainAxisAlignment: MainAxisAlignment.spaceAround,
           children: [
-            _StatTrio(label: 'PREDICTED', value: '${(c.predictedHomeWinProbability * 100).round()}% HOME'),
+            Flexible(child: _StatTrio(label: 'PREDICTED', value: '${(c.predictedHomeWinProbability * 100).round()}% HOME')),
             if (c.predictedMargin != null)
-              _StatTrio(label: 'PRED MARGIN', value: c.predictedMargin!.toStringAsFixed(1)),
-            _StatTrio(label: 'ACTUAL MARGIN', value: c.actualMargin.toStringAsFixed(1)),
+              Flexible(child: _StatTrio(label: 'PRED MARGIN', value: c.predictedMargin!.toStringAsFixed(1))),
+            Flexible(child: _StatTrio(label: 'ACTUAL MARGIN', value: c.actualMargin.toStringAsFixed(1))),
           ],
         ),
       ],

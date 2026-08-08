@@ -200,4 +200,51 @@ void main() {
     final prefs = await SharedPreferences.getInstance();
     expect(prefs.getString('cognito_tokens'), isNull);
   });
+
+  test('recordActivity resets a session that would otherwise have gone inactive', () async {
+    final repo = AuthRepository(authClient: CognitoAuthClient(httpClient: MockClient((r) async => _tokenResponse())));
+    await _firstRealState(repo);
+    await repo.login(username: 'chamar', password: 'hunter2');
+
+    // Same "time passed with nothing touching activity" setup as the
+    // inactivityTtl test above -- the difference here is a pointer
+    // interaction (recordActivity) happens before the next request.
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(
+      'last_activity_at',
+      DateTime.now().subtract(inactivityTtl + const Duration(minutes: 1)).toIso8601String(),
+    );
+
+    await repo.recordActivity();
+
+    expect(await repo.getValidIdToken(), isNotEmpty);
+    expect(repo.state, isA<AuthAuthenticated>());
+  });
+
+  test('recordActivity throttles repeated calls instead of writing every time', () async {
+    final repo = AuthRepository(authClient: CognitoAuthClient(httpClient: MockClient((r) async => _tokenResponse())));
+    await _firstRealState(repo);
+    await repo.login(username: 'chamar', password: 'hunter2');
+
+    final prefs = await SharedPreferences.getInstance();
+    final afterLogin = prefs.getString('last_activity_at');
+
+    // Immediately-repeated calls (well within the throttle window) must
+    // not overwrite the timestamp the login itself just wrote.
+    await repo.recordActivity();
+    await repo.recordActivity();
+
+    expect(prefs.getString('last_activity_at'), afterLogin);
+  });
+
+  test('recordActivity does nothing while unauthenticated', () async {
+    final repo = AuthRepository(authClient: CognitoAuthClient(httpClient: MockClient((r) async => _tokenResponse())));
+    await _firstRealState(repo);
+    expect(repo.state, isA<AuthUnauthenticated>());
+
+    await repo.recordActivity();
+
+    final prefs = await SharedPreferences.getInstance();
+    expect(prefs.getString('last_activity_at'), isNull);
+  });
 }

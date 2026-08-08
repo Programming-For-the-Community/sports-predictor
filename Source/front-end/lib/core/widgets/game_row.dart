@@ -184,7 +184,13 @@ class _LivePrediction extends ConsumerWidget {
     final prediction = ref.watch(eventPredictionProvider((sport: sport, eventId: eventId)));
     return prediction.when(
       data: (p) {
-        final pickAbbr = p.homeWinProbability >= 0.5 ? homeAbbr : awayAbbr;
+        final homeFavored = p.homeWinProbability >= 0.5;
+        final pickAbbr = homeFavored ? homeAbbr : awayAbbr;
+        // The favored team's own probability, not always home's -- so
+        // this number always matches the pick/margin/score printed right
+        // below it instead of flipping to "35%" whenever the away team
+        // is favored.
+        final pickWinProbability = homeFavored ? p.homeWinProbability : 1 - p.homeWinProbability;
         return Row(
           children: [
             Expanded(child: WinProbabilityBar(homeWinProbability: p.homeWinProbability)),
@@ -197,7 +203,7 @@ class _LivePrediction extends ConsumerWidget {
                 crossAxisAlignment: CrossAxisAlignment.end,
                 children: [
                   Text(
-                    '${(p.homeWinProbability * 100).round()}%',
+                    '${(pickWinProbability * 100).round()}%',
                     style: AppTextStyles.metricValueLarge(color: AppColors.cyan),
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
@@ -206,8 +212,13 @@ class _LivePrediction extends ConsumerWidget {
                   // card rather than only after clicking into the event
                   // (MatchupHero's own PICK/PRED MARGIN/PRED TOTAL trio).
                   Text(
+                    // Away-then-home, matching _MatchupLine's own
+                    // "AWY @ HOM" ordering above -- this used to always
+                    // print home-then-away regardless, reading backwards
+                    // whenever the away score happened to be the away
+                    // team's actual left-hand position in the row above.
                     '$pickAbbr -${p.margin.abs().toStringAsFixed(1)} '
-                    '(${p.homeScore.round()}-${p.awayScore.round()})',
+                    '(${p.awayScore.round()}-${p.homeScore.round()})',
                     style: AppTextStyles.microLabel(color: AppColors.inkMute),
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
@@ -262,8 +273,14 @@ class _ComparisonSummary extends StatelessWidget {
       return Text('No prediction recorded', style: AppTextStyles.body(color: AppColors.inkMute));
     }
     final pickAbbr = c.predictedHomeWon ? homeAbbr : awayAbbr;
+    // The predicted winner's own probability, not always home's -- same
+    // orientation as the pick/margin/score in the text below, so this
+    // always matches rather than reading like a different team's number
+    // whenever the away team was the pick.
+    final pickWinProbability = c.predictedHomeWon ? c.predictedHomeWinProbability : 1 - c.predictedHomeWinProbability;
+    // Away-then-home, matching _MatchupLine's own "AWY @ HOM" ordering.
     final predictedScore = c.predictedHomeScore != null && c.predictedAwayScore != null
-        ? ' (${c.predictedHomeScore!.round()}-${c.predictedAwayScore!.round()})'
+        ? ' (${c.predictedAwayScore!.round()}-${c.predictedHomeScore!.round()})'
         : '';
     return Row(
       children: [
@@ -275,7 +292,7 @@ class _ComparisonSummary extends StatelessWidget {
         const SizedBox(width: 8),
         Expanded(
           child: Text(
-            'Predicted $pickAbbr'
+            'Predicted $pickAbbr (${(pickWinProbability * 100).round()}%)'
             '${c.predictedMargin != null ? ' by ${c.predictedMargin!.abs().toStringAsFixed(1)}' : ''}'
             '$predictedScore',
             style: AppTextStyles.body(color: AppColors.inkSub),

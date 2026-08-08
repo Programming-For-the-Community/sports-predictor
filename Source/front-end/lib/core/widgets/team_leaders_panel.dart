@@ -4,6 +4,50 @@ import '../models/event_leaders.dart';
 import '../theme/app_colors.dart';
 import '../theme/app_text_styles.dart';
 
+// Below this width, two team-leader columns side by side leave too little
+// room per column for a player name and its stat values on one line --
+// each Text squeezes down to single-character-wide wrapping instead of
+// giving up first (confirmed: this is what "vertical" player names on
+// mobile actually was). Stacked (one team's full column, then the
+// other's) instead of side by side below this width.
+const _stackBreakpoint = 560.0;
+
+/// Away column then home column, side by side above _stackBreakpoint or
+/// stacked full-width below it. Shared by TeamLeadersPanel and
+/// TeamLeadersComparisonPanel -- same layout problem, same fix, for
+/// upcoming and completed events respectively.
+class _ResponsiveTeamColumns extends StatelessWidget {
+  const _ResponsiveTeamColumns({required this.away, required this.home});
+
+  final Widget away;
+  final Widget home;
+
+  @override
+  Widget build(BuildContext context) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        if (constraints.maxWidth < _stackBreakpoint) {
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [away, const SizedBox(height: 20), home],
+          );
+        }
+        return Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Expanded(child: away),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 12),
+              child: Text('@', style: AppTextStyles.microLabel(color: AppColors.inkMute)),
+            ),
+            Expanded(child: home),
+          ],
+        );
+      },
+    );
+  }
+}
+
 // Shared by _PlayerRow (predicted-only, upcoming events) and
 // _ComparisonPlayerRow (predicted-vs-actual, completed events) below --
 // same stat keys, same short display label either way.
@@ -41,18 +85,12 @@ class TeamLeadersPanel extends StatelessWidget {
         children: [
           Text('PLAYER LEADERS', style: AppTextStyles.microLabel()),
           const SizedBox(height: 16),
-          Row(
-            // Away-left/home-right, "@" between -- same convention as
-            // matchup_hero.dart and game_row.dart's _MatchupLine.
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Expanded(child: _TeamLeadersColumn(label: awayAbbr, team: leaders.away)),
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 12),
-                child: Text('@', style: AppTextStyles.microLabel(color: AppColors.inkMute)),
-              ),
-              Expanded(child: _TeamLeadersColumn(label: homeAbbr, team: leaders.home)),
-            ],
+          // Away-then-home, same convention as matchup_hero.dart and
+          // game_row.dart's _MatchupLine -- side by side or stacked, see
+          // _ResponsiveTeamColumns.
+          _ResponsiveTeamColumns(
+            away: _TeamLeadersColumn(label: awayAbbr, team: leaders.away),
+            home: _TeamLeadersColumn(label: homeAbbr, team: leaders.home),
           ),
         ],
       ),
@@ -131,8 +169,19 @@ class _PlayerRow extends StatelessWidget {
       padding: const EdgeInsets.symmetric(vertical: 3),
       child: Row(
         children: [
-          Expanded(child: Text(player.displayName, style: AppTextStyles.body())),
-          Text(values, style: AppTextStyles.metricValue(color: AppColors.cyan)),
+          Expanded(
+            child: Text(player.displayName, style: AppTextStyles.body(), maxLines: 1, overflow: TextOverflow.ellipsis),
+          ),
+          const SizedBox(width: 8),
+          Flexible(
+            child: Text(
+              values,
+              style: AppTextStyles.metricValue(color: AppColors.cyan),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              textAlign: TextAlign.end,
+            ),
+          ),
         ],
       ),
     );
@@ -167,16 +216,9 @@ class TeamLeadersComparisonPanel extends StatelessWidget {
         children: [
           Text('PLAYER PROPS -- PREDICTED VS ACTUAL', style: AppTextStyles.microLabel()),
           const SizedBox(height: 16),
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Expanded(child: _TeamLeadersComparisonColumn(label: awayAbbr, team: comparison.away)),
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 12),
-                child: Text('@', style: AppTextStyles.microLabel(color: AppColors.inkMute)),
-              ),
-              Expanded(child: _TeamLeadersComparisonColumn(label: homeAbbr, team: comparison.home)),
-            ],
+          _ResponsiveTeamColumns(
+            away: _TeamLeadersComparisonColumn(label: awayAbbr, team: comparison.away),
+            home: _TeamLeadersComparisonColumn(label: homeAbbr, team: comparison.home),
           ),
         ],
       ),
@@ -252,8 +294,19 @@ class _ComparisonPlayerRow extends StatelessWidget {
       padding: const EdgeInsets.symmetric(vertical: 3),
       child: Row(
         children: [
-          Expanded(child: Text(player.displayName, style: AppTextStyles.body())),
-          Text(segments, style: AppTextStyles.metricValue(color: AppColors.cyan)),
+          Expanded(
+            child: Text(player.displayName, style: AppTextStyles.body(), maxLines: 1, overflow: TextOverflow.ellipsis),
+          ),
+          const SizedBox(width: 8),
+          Flexible(
+            child: Text(
+              segments,
+              style: AppTextStyles.metricValue(color: AppColors.cyan),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              textAlign: TextAlign.end,
+            ),
+          ),
         ],
       ),
     );

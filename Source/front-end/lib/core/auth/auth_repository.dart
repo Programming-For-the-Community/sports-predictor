@@ -17,6 +17,9 @@ const _lastActivityPrefsKey = 'last_activity_at';
 /// refresh right through, with no re-login ever required.
 const inactivityTtl = Duration(minutes: 30);
 
+/// How often recordActivity actually writes -- see its own docstring.
+const _recordActivityThrottle = Duration(seconds: 30);
+
 sealed class AuthState {}
 
 /// App just started -- restoring a persisted session hasn't finished yet.
@@ -182,6 +185,28 @@ class AuthRepository extends StateNotifier<AuthState> {
   Future<void> _touchActivity() async {
     final prefs = await _prefsInstance;
     await prefs.setString(_lastActivityPrefsKey, DateTime.now().toIso8601String());
+  }
+
+  /// Called by app.dart's app-shell pointer listener on any real user
+  /// interaction (tap, drag, scroll) -- this is what makes inactivityTtl
+  /// track actual usage instead of just API-call cadence. Without this,
+  /// passively reading one already-loaded page (nothing on it triggers a
+  /// new request) for longer than inactivityTtl force-logs-out someone
+  /// who never stopped using the site.
+  ///
+  /// Throttled to once per _recordActivityThrottle, checked against the
+  /// same persisted timestamp _isInactive reads (not a separate in-memory
+  /// cache, which could drift from it) -- a drag/scroll gesture fires
+  /// pointer-move events many times a second, and none of that needs a
+  /// SharedPreferences write on anywhere near that cadence against a
+  /// 30-minute TTL. No-ops while unauthenticated -- there's no session's
+  /// inactivity clock to reset.
+  Future<void> recordActivity() async {
+    if (state is! AuthAuthenticated) return;
+    final prefs = await _prefsInstance;
+    final raw = prefs.getString(_lastActivityPrefsKey);
+    if (raw != null && DateTime.now().difference(DateTime.parse(raw)) < _recordActivityThrottle) return;
+    await _touchActivity();
   }
 
   /// False when no activity has ever been recorded (e.g. a session

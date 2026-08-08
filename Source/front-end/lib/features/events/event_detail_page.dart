@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -9,6 +11,24 @@ import '../../core/theme/app_text_styles.dart';
 import '../../core/widgets/matchup_hero.dart';
 import '../../core/widgets/team_leaders_panel.dart';
 import '../../static/nfl_team_colors.dart';
+
+// Mirrors live_scores.py's own POLL_START_BEFORE_KICKOFF/
+// POLL_SAFETY_CAP_AFTER_KICKOFF window -- re-fetching the prediction
+// outside this window would just repeat the exact same live-compute
+// backend call for a game whose relevant inputs (roster, injuries, Elo)
+// essentially never change minute to minute this far from kickoff.
+const _predictionPollWindowBefore = Duration(minutes: 15);
+const _predictionPollWindowAfter = Duration(hours: 7);
+
+// Same cadence as event_list_page.dart's own live-scores poll.
+const _pollInterval = Duration(seconds: 30);
+
+bool _withinPredictionPollWindow(SportEvent event) {
+  final kickoff = DateTime.tryParse(event.kickoffTime ?? '');
+  if (kickoff == null) return false;
+  final now = DateTime.now().toUtc();
+  return now.isAfter(kickoff.subtract(_predictionPollWindowBefore)) && now.isBefore(kickoff.add(_predictionPollWindowAfter));
+}
 
 /// Event-level predictions (win probability, margin, home/away score) plus
 /// player leaders per team -- see core/models/event_leaders.dart.
@@ -25,26 +45,68 @@ import '../../static/nfl_team_colors.dart';
 /// event.predictionComparison, the prediction actually logged before the
 /// game was played (already fetched as part of the completed events
 /// list, no extra request needed) -- see MatchupResultHero.
-class EventDetailPage extends ConsumerWidget {
+///
+/// Polls live scores/prediction every 30s while the event is scheduled --
+/// without this, both stay frozen at whatever they were on page load for
+/// as long as this page stays open (Riverpod caches the fetched value,
+/// there's no time-based TTL), which is stale during a live game and
+/// also meant this page never made another API call on its own, letting
+/// AuthRepository's inactivityTtl clock expire under someone who never
+/// stopped actively reading the page (see auth_repository.dart's
+/// recordActivity for the other half of that fix).
+class EventDetailPage extends ConsumerStatefulWidget {
   const EventDetailPage({super.key, required this.sportId, required this.eventId});
 
   final String sportId;
   final String eventId;
 
+  @override
+  ConsumerState<EventDetailPage> createState() => _EventDetailPageState();
+}
+
+class _EventDetailPageState extends ConsumerState<EventDetailPage> {
+  Timer? _pollTimer;
+
+  @override
+  void initState() {
+    super.initState();
+    _pollTimer = Timer.periodic(_pollInterval, (_) => _poll());
+  }
+
+  @override
+  void dispose() {
+    _pollTimer?.cancel();
+    super.dispose();
+  }
+
   SportEvent? _findEvent(List<SportEvent> events) {
     for (final event in events) {
-      if (event.eventId == eventId) return event;
+      if (event.eventId == widget.eventId) return event;
     }
     return null;
   }
 
+  // Only polls once the event is known AND still scheduled -- a
+  // completed event (or one that hasn't loaded yet) has nothing here
+  // worth refreshing.
+  void _poll() {
+    final scheduled = ref.read(eventsListProvider((sport: widget.sportId, status: 'scheduled'))).value ?? const <SportEvent>[];
+    final event = _findEvent(scheduled);
+    if (event == null) return;
+
+    ref.invalidate(liveScoresProvider(widget.sportId));
+    if (_withinPredictionPollWindow(event)) {
+      ref.invalidate(eventPredictionProvider((sport: widget.sportId, eventId: widget.eventId)));
+    }
+  }
+
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  Widget build(BuildContext context) {
     // There's no "get one event" route -- the event could be in either
     // list depending on whether it's already been played, so both are
     // checked rather than assuming 'scheduled'.
-    final scheduledAsync = ref.watch(eventsListProvider((sport: sportId, status: 'scheduled')));
-    final completedAsync = ref.watch(eventsListProvider((sport: sportId, status: 'completed')));
+    final scheduledAsync = ref.watch(eventsListProvider((sport: widget.sportId, status: 'scheduled')));
+    final completedAsync = ref.watch(eventsListProvider((sport: widget.sportId, status: 'completed')));
 
     if (scheduledAsync.isLoading || completedAsync.isLoading) {
       return const Center(child: CircularProgressIndicator());
@@ -90,14 +152,14 @@ class EventDetailPage extends ConsumerWidget {
 
     return SingleChildScrollView(
       padding: const EdgeInsets.all(24),
-      child: ref.watch(eventPredictionProvider((sport: sportId, eventId: eventId))).when(
+      child: ref.watch(eventPredictionProvider((sport: widget.sportId, eventId: widget.eventId))).when(
             data: (prediction) {
               final leaders = prediction.leaders;
-              final liveScores = ref.watch(liveScoresProvider(sportId)).value ?? const {};
+              final liveScores = ref.watch(liveScoresProvider(widget.sportId)).value ?? const {};
               return Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  MatchupHero(event: event, prediction: prediction, liveState: liveScores[eventId]),
+                  MatchupHero(event: event, prediction: prediction, liveState: liveScores[widget.eventId]),
                   if (leaders != null) ...[
                     const SizedBox(height: 20),
                     TeamLeadersPanel(
