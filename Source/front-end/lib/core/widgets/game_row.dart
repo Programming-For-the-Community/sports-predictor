@@ -10,6 +10,7 @@ import '../theme/app_text_styles.dart';
 import '../../static/nfl_team_colors.dart';
 import 'confidence_pill.dart';
 import 'live_status_pill.dart';
+import 'team_color_dot.dart';
 import 'win_probability_bar.dart';
 
 // Below this width, GameRow stacks the matchup and prediction sections
@@ -372,7 +373,7 @@ class _TeamLine extends StatelessWidget {
     return Row(
       children: [
         if (prefix != null) Text(prefix!, style: AppTextStyles.microLabel(color: AppColors.inkMute)),
-        Container(width: 8, height: 8, decoration: BoxDecoration(shape: BoxShape.circle, color: color)),
+        TeamColorDot(color: color),
         const SizedBox(width: 6),
         Flexible(child: Text(abbr, style: AppTextStyles.body(color: AppColors.ink), maxLines: 1, overflow: TextOverflow.ellipsis)),
         if (score != null) ...[

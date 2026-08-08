@@ -126,6 +126,15 @@ def roster_to_player_entities(roster: dict, sport: str) -> list[dict]:
     specialTeam/injuredReserveOrOut/suspended/practiceSquad) -- a player
     on IR or the practice squad is still on this team, not some other
     one, which is exactly the fact this function exists to keep current.
+
+    metadata.position is the athlete's own specific position abbreviation
+    ("QB"/"WR"/"CB"/etc, confirmed present on every roster athlete via
+    curl) -- distinct from `group`, ESPN's coarse offense/defense/
+    specialTeam bucket above. live_features.py's roster-driven candidate
+    selection (predict/live_features.py) uses this to know which roster
+    players are even eligible for a given slot, since a player with no
+    recorded stats yet (a rookie) has no other signal to identify their
+    position from.
     """
     team_id = str(roster["team"]["id"])
     as_of_date = roster["timestamp"][:10]
@@ -146,6 +155,7 @@ def roster_to_player_entities(roster: dict, sport: str) -> list[dict]:
                     "team_id": team_id,
                     "team_id_as_of": as_of_date,
                     "jersey": athlete.get("jersey"),
+                    "position": (athlete.get("position") or {}).get("abbreviation"),
                 },
             })
     return entities

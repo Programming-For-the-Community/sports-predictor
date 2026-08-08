@@ -8,6 +8,7 @@ import '../theme/app_text_styles.dart';
 import '../../static/nfl_team_colors.dart';
 import 'confidence_pill.dart';
 import 'live_status_pill.dart';
+import 'team_color_dot.dart';
 import 'win_probability_bar.dart';
 
 /// design/FRONTEND_STYLE.md's "Matchup hero (detail)" component: two
@@ -135,7 +136,7 @@ class _TeamColumn extends StatelessWidget {
 
     return Column(
       children: [
-        Container(width: 10, height: 10, decoration: BoxDecoration(shape: BoxShape.circle, color: color)),
+        TeamColorDot(color: color, size: 10),
         const SizedBox(height: 8),
         Text(abbr, style: AppTextStyles.cardTitle()),
         const SizedBox(height: 8),
@@ -233,7 +234,7 @@ class _ResultTeamColumn extends StatelessWidget {
 
     return Column(
       children: [
-        Container(width: 10, height: 10, decoration: BoxDecoration(shape: BoxShape.circle, color: color)),
+        TeamColorDot(color: color, size: 10),
         const SizedBox(height: 8),
         Text(abbr, style: AppTextStyles.cardTitle()),
         const SizedBox(height: 8),

@@ -59,8 +59,8 @@ def _roster(*, team_id="23", timestamp="2026-08-08T05:05:15Z", groups):
     return {"team": {"id": team_id}, "timestamp": timestamp, "athletes": groups}
 
 
-def _athlete(athlete_id, name="Athlete Name", jersey="10"):
-    return {"id": athlete_id, "displayName": name, "jersey": jersey}
+def _athlete(athlete_id, name="Athlete Name", jersey="10", position="QB"):
+    return {"id": athlete_id, "displayName": name, "jersey": jersey, "position": {"abbreviation": position}}
 
 
 # Shape verified against a real live ESPN roster response
@@ -101,7 +101,7 @@ class TestRosterToPlayerEntities:
 
     def test_entity_carries_team_id_sport_and_name(self):
         roster = _roster(team_id="23", groups=[
-            {"position": "offense", "items": [_athlete("1", name="Drew Allar", jersey="8")]},
+            {"position": "offense", "items": [_athlete("1", name="Drew Allar", jersey="8", position="QB")]},
         ])
 
         entities = roster_to_player_entities(roster, "nfl")
@@ -112,7 +112,15 @@ class TestRosterToPlayerEntities:
         assert entity["name"] == "Drew Allar"
         assert entity["metadata"]["team_id"] == "23"
         assert entity["metadata"]["jersey"] == "8"
+        assert entity["metadata"]["position"] == "QB"
         assert entity["team_key"] == "SPORT#NFL#TEAM#23"
+
+    def test_entity_position_missing_from_espn_payload_is_none(self):
+        roster = _roster(groups=[{"position": "offense", "items": [{"id": "1", "displayName": "No Position"}]}])
+
+        entities = roster_to_player_entities(roster, "nfl")
+
+        assert entities[0]["metadata"]["position"] is None
 
     def test_empty_roster_returns_no_entities(self):
         assert roster_to_player_entities(_roster(groups=[]), "nfl") == []

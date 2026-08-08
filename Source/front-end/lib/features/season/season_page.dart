@@ -6,6 +6,7 @@ import '../../core/models/season_projection.dart';
 import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_text_styles.dart';
 import '../../core/widgets/responsive.dart';
+import '../../core/widgets/team_color_dot.dart';
 import '../../static/nfl_team_colors.dart';
 
 // Source of truth is Terraform/scheduler-nfl-train-player-prop-model.tf's
@@ -257,7 +258,7 @@ class _StandingsRow extends StatelessWidget {
           flex: 3,
           child: Row(
             children: [
-              Container(width: 8, height: 8, decoration: BoxDecoration(shape: BoxShape.circle, color: info.primary)),
+              TeamColorDot(color: info.primary),
               const SizedBox(width: 10),
               Flexible(
                 child: Text(
