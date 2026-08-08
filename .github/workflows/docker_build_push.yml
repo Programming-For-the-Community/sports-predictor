@@ -74,6 +74,13 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
+      # --provenance=false --sbom=false: buildx attaches these as
+      # attestations by default on a --push build, which wraps the pushed
+      # image in an OCI image index (manifest list) even for one
+      # platform. ECR/ECS tolerate that, but Lambda's UpdateFunctionCode
+      # rejects it outright ("image manifest, config or layer media type
+      # ... is not supported") -- these two flags keep the push a plain
+      # single-manifest image, same shape `docker build` produced before.
       - name: Build, tag, and push image to Amazon ECR
         id: build-image
         env:
@@ -89,6 +96,8 @@ jobs:
 
           docker buildx build \
             --platform "$PLATFORM" \
+            --provenance=false \
+            --sbom=false \
             -t "$URI:$VERSIONED_TAG" \
             -t "$URI:$LATEST_TAG" \
             -f "${{ inputs.dockerfile_path }}" \
