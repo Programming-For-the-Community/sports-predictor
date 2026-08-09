@@ -40,6 +40,11 @@ output "raw_data_lake_bucket" {
   value       = local.raw_bucket_name
 }
 
+output "model_artifacts_bucket" {
+  description = "Model artifacts S3 bucket name -- e.g. for Source/model-training/ncaafb/sagemaker_gpu_poc/invoke.py's --bucket flag"
+  value       = local.model_artifacts_bucket
+}
+
 output "entities_table_name" {
   description = "Entities DynamoDB table name"
   value       = local.entities_table
