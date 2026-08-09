@@ -88,11 +88,19 @@ logging.basicConfig(
 )
 logger = logging.getLogger("ncaafb-backfill")
 
-# A week past the real season length just returns an empty games list,
-# harmless -- same "generous ceiling" convention as NFL's own
-# REGULAR_SEASON_WEEKS/POSTSEASON_WEEKS. Matches schedule-sync/handler.py's
-# own ranges.
-REGULAR_SEASON_WEEKS = range(0, 17)
+# Starts at 1, not 0 -- confirmed live this session that CFBD's own
+# server-side validation treats week=0 as "not provided" (a falsy-value
+# bug on their end, not ours): GET /games/players and /games/teams both
+# hard-reject week=0 with 400 ("either week, team, or conference are
+# required"), and GET /games doesn't error but silently returns the
+# ENTIRE season instead of filtering to week 0 (868 games for one 2023
+# test call, not a real single week). There is no way to request week-0
+# data specifically through this endpoint family -- any real "Week 0"
+# season-opener games are a known, accepted gap, not silently mishandled.
+# A week past the real season length is still harmless (empty games
+# list), same "generous ceiling" convention as NFL's own
+# REGULAR_SEASON_WEEKS/POSTSEASON_WEEKS.
+REGULAR_SEASON_WEEKS = range(1, 17)
 POSTSEASON_WEEKS = range(1, 6)
 SEASON_TYPES = ("regular", "postseason")
 

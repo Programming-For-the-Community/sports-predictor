@@ -43,13 +43,20 @@ logger = logging.getLogger("ncaafb-schedule-sync")
 
 RAW_BUCKET = os.environ["RAW_BUCKET_NAME"]
 
-# Generous ceiling, same reasoning as NFL's own REGULAR_SEASON_WEEKS/
-# POSTSEASON_WEEKS -- a week past the real season length just returns an
-# empty games list, harmless. FBS regular seasons run through Week 0-15
-# (conference championship week included); postseason (bowls plus the
+# Starts at 1, not 0 -- confirmed live (see data-backfills/ncaafb/
+# backfill.py's own REGULAR_SEASON_WEEKS comment for the full CFBD
+# quirk): GET /games?week=0 doesn't filter at all, it silently returns
+# the ENTIRE season (868 games for one test call), which would get
+# mislabeled and written to S3 as this season's "week 0" file and
+# double-upsert every game via normalize's S3 trigger. Any real "Week 0"
+# season-opener games are a known, accepted gap.
+#
+# A week past the real season length is still harmless (empty games
+# list), same "generous ceiling" convention as NFL's own
+# REGULAR_SEASON_WEEKS/POSTSEASON_WEEKS. Postseason (bowls plus the
 # 12-team CFP through the championship) spans a handful of weeks in
 # CFBD's own numbering.
-REGULAR_SEASON_WEEKS = range(0, 17)
+REGULAR_SEASON_WEEKS = range(1, 17)
 POSTSEASON_WEEKS = range(1, 6)
 SEASON_TYPES = ("regular", "postseason")
 
