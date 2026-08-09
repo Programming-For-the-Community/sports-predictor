@@ -1,8 +1,12 @@
-# NCAAFB ingest Lambda. Triggered by EventBridge Scheduler once its own
-# scheduler-ncaafb-ingest.tf exists. Fetches CFBD's per-week games/box-score/
-# betting-lines data and writes raw JSON to S3, plus coach/ranking enrichment
-# (see Source/aws-lambdas/ncaafb/ingest/enrichment.py) -- the normalize
-# Lambda picks up from S3 the same way lambda-nfl-normalize.tf's does.
+# NCAAFB ingest Lambda. Triggered daily by the shared
+# sfn-ingest-orchestrator.tf, which invokes every active sport's own
+# "${var.project}-<sport>-ingest" function by naming convention -- no
+# per-sport scheduler-ncaafb-ingest.tf is needed (unlike schedule-sync/
+# live-scores below, which ARE invoked directly by their own scheduler).
+# Fetches CFBD's per-week games/box-score data and writes raw JSON to S3,
+# plus coach/ranking enrichment (see
+# Source/aws-lambdas/ncaafb/ingest/enrichment.py) -- the normalize Lambda
+# picks up from S3 the same way lambda-nfl-normalize.tf's does.
 #
 # Code is deployed by the ncaafb_data_pipeline GitHub Actions workflow (via
 # `aws lambda update-function-code`) -- NOT by Terraform. Same placeholder-
