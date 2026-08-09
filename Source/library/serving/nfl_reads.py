@@ -47,6 +47,17 @@ _STAT_CATEGORY = {
 # interchangeable here, this doesn't care which wrote a given row.
 _PLAYER_PROP_MODEL_KEY_RE = re.compile(r"^MODEL#player-prop-([a-z-]+)#v\d+#PLAYER#(.+)$")
 
+# Mirrors predict/event_prediction.py's own LEADER_CATEGORY_LIMITS/
+# LEADER_CATEGORY_STATS (primary stat per category) -- duplicated for the
+# same reason _STAT_CATEGORY above is. A completed event's audit trail
+# can hold MORE than this many predicted rows for a category (either an
+# event predicted before that module started capping what it writes, or
+# any future drift between the two), so this re-sorts and re-slices
+# rather than trusting the audit trail already matches the leaders block
+# shown pre-game.
+_LEADER_CATEGORY_LIMITS = {"receiving": 3, "rushing": 2, "sacks": 3}
+_CATEGORY_PRIMARY_STAT = {"receiving": "receiving_yards", "rushing": "rushing_yards", "sacks": "defensive_sacks"}
+
 # season_type=3 (postseason) week -> round name (season 2020: week
 # 1=Wild Card, 2=Divisional, 3=Conference Championship, 4=Pro Bowl,
 # 5=Super Bowl). Week 4 is deliberately absent -- that's always the Pro
@@ -226,6 +237,12 @@ def _leaders_comparison(storage, predictions_table, sport: str, event: dict) -> 
             bucket["passing"] = entry
         else:
             bucket[category].append(entry)
+
+    for bucket in (home, away):
+        for category, limit in _LEADER_CATEGORY_LIMITS.items():
+            primary_stat = _CATEGORY_PRIMARY_STAT[category]
+            bucket[category].sort(key=lambda entry: entry["predicted"].get(primary_stat, -1), reverse=True)
+            bucket[category] = bucket[category][:limit]
 
     return {"home": home, "away": away}
 

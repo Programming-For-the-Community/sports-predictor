@@ -51,7 +51,18 @@ jobs:
     name: Run nfl-ingest tests
     uses: ./.github/workflows/run_python_tests.yml
     with:
-      test_path: 'Source/tests/aws-lambdas/nfl/test_ingest.py Source/tests/aws-lambdas/nfl/test_enrichment.py'
+      # test_ingest.py was split into several concern-scoped files
+      # (lambda_handler/helpers/rosters/depth-charts/coaches) -- listed
+      # individually here, same discipline this workflow's own comment
+      # above already calls for (a specific file list, not the whole
+      # directory).
+      test_path: >-
+        Source/tests/aws-lambdas/nfl/test_ingest_lambda_handler.py
+        Source/tests/aws-lambdas/nfl/test_ingest_helpers.py
+        Source/tests/aws-lambdas/nfl/test_ingest_rosters.py
+        Source/tests/aws-lambdas/nfl/test_ingest_depth_charts.py
+        Source/tests/aws-lambdas/nfl/test_ingest_coaches.py
+        Source/tests/aws-lambdas/nfl/test_enrichment.py
       requirements_files: 'Source/aws-lambdas/nfl/ingest/requirements.txt'
 
   test-normalize:

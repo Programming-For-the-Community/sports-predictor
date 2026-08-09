@@ -1,23 +1,16 @@
 """
-Unit tests for library.features.common's sport-agnostic feature-computation
-functions. No AWS involved -- every function here takes already-fetched
-rows and returns numbers, so these tests just hand-build the generic
-event/participant shape library.normalize.espn produces.
+Unit tests for library.features.common's Elo rating system:
+compute_elo_ratings (margin-of-victory-scaled K-factor updates, walked
+chronologically regardless of input order), season carryover (regression
+toward the starting rating at a season boundary), and expected_score (the
+underlying win-probability formula both consume). No AWS involved. Split
+out of what used to be one large test_common.py -- see
+test_common_rolling_stats.py and test_common_ranking_injury.py for this
+file's siblings, one per concern.
 """
 import pytest
 
-from library.features.common import (
-    _injury_status_ordinal,
-    _mov_multiplier,
-    _team_injury_count,
-    compute_elo_ratings,
-    current_streak,
-    expected_score,
-    rank_by_average_stat,
-    rest_days,
-    rolling_player_stat_averages,
-    rolling_team_scoring_averages,
-)
+from library.features.common import _mov_multiplier, compute_elo_ratings, expected_score
 
 
 def _event(event_key, event_date, home_id, away_id, home_score=None, away_score=None, season=None):
@@ -242,141 +235,6 @@ class TestSeasonCarryover:
         assert pre_game_ratings["E2"]["home_pre_rating"] == 1500
 
 
-class TestRestDays:
-    def test_none_when_no_previous_event(self):
-        assert rest_days("2025-09-15", None) is None
-
-    def test_computes_day_delta(self):
-        assert rest_days("2025-09-15", "2025-09-08") == 7
-
-
-class TestRollingTeamScoringAverages:
-    def _game(self, event_date, own_score, opp_score, own_id="KC", opp_id="LAC"):
-        return {
-            "event_date": event_date,
-            "participants": [
-                {"entity_id": own_id, "result": {"score": own_score}},
-                {"entity_id": opp_id, "result": {"score": opp_score}},
-            ],
-        }
-
-    def test_averages_scored_and_allowed(self):
-        team_events = [self._game("2025-09-15", 27, 20), self._game("2025-09-08", 24, 21)]
-
-        result = rolling_team_scoring_averages(team_events, "KC")
-
-        assert result["avg_points_scored"] == 25.5
-        assert result["avg_points_allowed"] == 20.5
-        assert result["games_played"] == 2
-
-    def test_respects_window_using_most_recent_first_order(self):
-        team_events = [self._game("2025-09-15", 27, 20), self._game("2025-09-08", 24, 21)]
-
-        result = rolling_team_scoring_averages(team_events, "KC", window=1)
-
-        assert result["avg_points_scored"] == 27
-        assert result["avg_points_allowed"] == 20
-        assert result["games_played"] == 1
-
-    def test_empty_history_returns_none_averages(self):
-        result = rolling_team_scoring_averages([], "KC")
-
-        assert result["avg_points_scored"] is None
-        assert result["avg_points_allowed"] is None
-        assert result["games_played"] == 0
-
-
-class TestCurrentStreak:
-    def _game(self, event_date, own_score, opp_score, own_id="KC", opp_id="LAC"):
-        return {
-            "event_date": event_date,
-            "participants": [
-                {"entity_id": own_id, "result": {"score": own_score}},
-                {"entity_id": opp_id, "result": {"score": opp_score}},
-            ],
-        }
-
-    def test_win_streak_is_positive(self):
-        team_events = [  # most recent first
-            self._game("2025-09-15", 27, 20),
-            self._game("2025-09-08", 24, 21),
-            self._game("2025-09-01", 17, 10),
-        ]
-
-        assert current_streak(team_events, "KC") == 3
-
-    def test_loss_streak_is_negative(self):
-        team_events = [
-            self._game("2025-09-15", 10, 27),
-            self._game("2025-09-08", 14, 21),
-        ]
-
-        assert current_streak(team_events, "KC") == -2
-
-    def test_streak_stops_at_direction_change(self):
-        team_events = [
-            self._game("2025-09-15", 27, 20),  # win
-            self._game("2025-09-08", 27, 20),  # win
-            self._game("2025-09-01", 10, 27),  # loss -- streak ends here
-        ]
-
-        assert current_streak(team_events, "KC") == 2
-
-    def test_tie_breaks_the_streak_rather_than_counting_as_a_loss(self):
-        team_events = [
-            self._game("2025-09-15", 20, 20),  # tie
-            self._game("2025-09-08", 27, 20),  # win -- shouldn't be reached
-        ]
-
-        assert current_streak(team_events, "KC") == 0
-
-    def test_empty_history_is_zero(self):
-        assert current_streak([], "KC") == 0
-
-
-class TestRollingPlayerStatAverages:
-    def test_averages_each_key_only_over_games_that_have_it(self):
-        games = [
-            {"event_date": "2025-09-15", "stat_line": {"passing_yards": 300, "passing_tds": 2}, "started": True},
-            {"event_date": "2025-09-08", "stat_line": {"passing_yards": 250}, "started": True},
-        ]
-
-        result = rolling_player_stat_averages(games)
-
-        assert result["avg_passing_yards"] == 275
-        assert result["avg_passing_tds"] == 2  # only one game had this key
-        assert result["games_played"] == 2
-        assert result["starts"] == 2
-        assert result["games_with_passing_yards"] == 2
-        assert result["games_with_passing_tds"] == 1
-
-    def test_respects_window(self):
-        games = [
-            {"event_date": "2025-09-15", "stat_line": {"passing_yards": 300}, "started": True},
-            {"event_date": "2025-09-08", "stat_line": {"passing_yards": 100}, "started": False},
-        ]
-
-        result = rolling_player_stat_averages(games, window=1)
-
-        assert result["avg_passing_yards"] == 300
-        assert result["games_played"] == 1
-        assert result["starts"] == 1
-
-    def test_ignores_non_numeric_stat_values(self):
-        games = [{"event_date": "2025-09-15", "stat_line": {"position": "QB", "passing_yards": 300}, "started": True}]
-
-        result = rolling_player_stat_averages(games)
-
-        assert "avg_position" not in result
-        assert "games_with_position" not in result
-        assert result["avg_passing_yards"] == 300
-
-    def test_empty_history(self):
-        result = rolling_player_stat_averages([])
-
-        assert result == {"games_played": 0, "starts": 0}
-
-
 class TestExpectedScore:
     def test_equal_ratings_no_advantage_is_a_coin_flip(self):
         assert expected_score(1500, 1500) == pytest.approx(0.5)
@@ -395,78 +253,3 @@ class TestExpectedScore:
         away = expected_score(1600, 1500, rating_advantage=-55)
 
         assert home == pytest.approx(1 - away)
-
-
-class TestRankByAverageStat:
-    def test_ranks_by_average_not_a_single_huge_game(self):
-        # "player-b" had one huge game but a lower average overall --
-        # this is exactly the case single-game volume (_identify_leader's
-        # approach) would get wrong for a bursty stat like sacks.
-        histories = {
-            "player-a": [
-                {"stat_line": {"defensive_sacks": 2.0}},
-                {"stat_line": {"defensive_sacks": 2.0}},
-                {"stat_line": {"defensive_sacks": 2.0}},
-            ],
-            "player-b": [
-                {"stat_line": {"defensive_sacks": 5.0}},
-                {"stat_line": {"defensive_sacks": 0.0}},
-                {"stat_line": {"defensive_sacks": 0.0}},
-            ],
-        }
-
-        ranked = rank_by_average_stat(histories, "defensive_sacks", n=2)
-
-        assert ranked == ["player-a", "player-b"]
-
-    def test_candidates_with_no_recorded_value_are_excluded(self):
-        histories = {"offense-player": [{"stat_line": {"passing_yards": 250}}]}
-
-        assert rank_by_average_stat(histories, "defensive_sacks", n=3) == []
-
-    def test_respects_n(self):
-        histories = {
-            "a": [{"stat_line": {"defensive_sacks": 3.0}}],
-            "b": [{"stat_line": {"defensive_sacks": 2.0}}],
-            "c": [{"stat_line": {"defensive_sacks": 1.0}}],
-        }
-
-        assert rank_by_average_stat(histories, "defensive_sacks", n=1) == ["a"]
-
-
-class TestInjuryStatusOrdinal:
-    def test_none_when_injuries_is_none(self):
-        assert _injury_status_ordinal(None, "mahomes") is None
-
-    def test_none_when_entity_id_is_none(self):
-        assert _injury_status_ordinal([{"entity_id": "mahomes", "status": "Out"}], None) is None
-
-    def test_zero_when_player_not_on_the_report(self):
-        assert _injury_status_ordinal([{"entity_id": "someone-else", "status": "Out"}], "mahomes") == 0
-
-    def test_zero_when_report_is_empty_list(self):
-        assert _injury_status_ordinal([], "mahomes") == 0
-
-    @pytest.mark.parametrize("status,expected", [("Questionable", 1), ("Doubtful", 2), ("Out", 3)])
-    def test_maps_known_statuses_to_severity_order(self, status, expected):
-        assert _injury_status_ordinal([{"entity_id": "mahomes", "status": status}], "mahomes") == expected
-
-    def test_unrecognized_status_falls_back_to_1(self):
-        assert _injury_status_ordinal([{"entity_id": "mahomes", "status": "Injured Reserve"}], "mahomes") == 1
-
-
-class TestTeamInjuryCount:
-    def test_none_when_injuries_is_none(self):
-        assert _team_injury_count(None) is None
-
-    def test_zero_for_empty_report(self):
-        assert _team_injury_count([]) == 0
-
-    def test_counts_only_doubtful_and_out(self):
-        injuries = [
-            {"entity_id": "1", "status": "Out"},
-            {"entity_id": "2", "status": "Doubtful"},
-            {"entity_id": "3", "status": "Questionable"},
-            {"entity_id": "4", "status": "Out"},
-        ]
-        assert _team_injury_count(injuries) == 3

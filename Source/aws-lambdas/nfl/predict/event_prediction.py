@@ -33,6 +33,19 @@ LEADER_CATEGORY_STATS = {
     "sacks": ["defensive_sacks"],
 }
 
+# How many make the leaders block per category -- matches
+# team_leaders_panel.dart's own documented shape ("top 3 receivers, top 2
+# rushers, top 3 in sacks"). live_features._team_leader_candidates
+# intentionally leaves the RECEIVING candidate pool UNCAPPED (every
+# eligible player across every depth-chart slot -- WR/TE/RB/QB, see that
+# function's own docstring) specifically so THIS is where the actual
+# per-candidate model predictions do the ranking, not depth-chart rank.
+# Also enforced for rushing/sacks here even though their own candidate
+# generation already caps them, so this stays the one place that decides
+# "how many make the leaders block" rather than depending on two layers
+# staying in sync.
+LEADER_CATEGORY_LIMITS = {"receiving": 3, "rushing": 2, "sacks": 3}
+
 
 def model_name_to_prop(target_stat: str) -> str:
     return f"player-prop-{target_stat.replace('_', '-')}"
@@ -80,15 +93,17 @@ def get_cached_model(model_cache: dict, s3, model_name: str):
     return model_cache[model_name]
 
 
-def _score_leader_candidate(
-    storage, s3, predictions_table, model_cache: dict, feature_row: dict, stats: list[str], event_key_value: str,
-) -> dict:
-    entity_id = feature_row["entity_id"]
-    entity = storage.get_entity(SPORT, entity_id)
-    result = {"entity_id": entity_id}
-    if entity and entity.get("name"):
-        result["name"] = entity["name"]
-
+def _score_leader_candidate(s3, model_cache: dict, feature_row: dict, stats: list[str]) -> dict:
+    """Predicted value per stat for one leader candidate -- {"entity_id",
+    stat: value, ...}, missing a stat key entirely when that stat's model
+    hasn't been promoted yet (see the NoPromotedModelError catch below).
+    Scoring only: no predictions-table write and no entity-name lookup --
+    both are deferred to the candidates that actually survive ranking
+    (see team_leaders below), since scoring itself runs over the full,
+    often much larger, unranked candidate pool (receiving in particular is
+    deliberately uncapped upstream -- see live_features.
+    _team_leader_candidates' own docstring)."""
+    result = {"entity_id": feature_row["entity_id"]}
     for stat in stats:
         model_name = model_name_to_prop(stat)
         try:
@@ -98,8 +113,35 @@ def _score_leader_candidate(
             # out of the candidate's result rather than failing the whole
             # event prediction over a gap in an enhancement field.
             continue
-        value = non_negative(model_loader.predict(booster, model_card, feature_row))
-        result[stat] = value
+        result[stat] = non_negative(model_loader.predict(booster, model_card, feature_row))
+    return result
+
+
+def _record_leader_predictions(
+    storage, s3, predictions_table, model_cache: dict, event_key_value: str, scored: dict,
+) -> dict:
+    """Writes the audit-trail prediction row for every stat in `scored`
+    (an already-ranked candidate's _score_leader_candidate result) and
+    attaches its display name -- called only for candidates that made the
+    final cut (see team_leaders below), so the predictions-table audit
+    trail (and, downstream, nfl_reads._leaders_comparison's predicted-vs-
+    actual read of it) only ever contains the players actually shown in
+    the leaders block, not the whole unranked pool scoring considered."""
+    entity_id = scored["entity_id"]
+    entity = storage.get_entity(SPORT, entity_id)
+    result = dict(scored)
+    if entity and entity.get("name"):
+        result["name"] = entity["name"]
+
+    for stat, value in scored.items():
+        if stat == "entity_id":
+            continue
+        model_name = model_name_to_prop(stat)
+        # Already in model_cache from this same candidate's own scoring
+        # pass -- this can only re-raise NoPromotedModelError if the stat
+        # somehow made it into `scored` without a successful load, which
+        # _score_leader_candidate never does.
+        _, model_card = get_cached_model(model_cache, s3, model_name)
         # Same model_key shape predict_player_prop already writes for a
         # manually-queried single player+stat -- makes a leader's
         # prediction and a manual one interchangeable in the audit trail,
@@ -131,34 +173,32 @@ def predict_event_leaders(storage, s3, predictions_table, event_key_value: str) 
 
     model_cache: dict = {}
 
+    def ranked(team_candidates: dict, category: str) -> list[dict]:
+        """Every candidate in this category, scored, ranked by its
+        primary stat (yards for receiving/rushing, sacks for sacks) and
+        cut down to LEADER_CATEGORY_LIMITS[category] -- a candidate
+        missing its primary stat entirely (model not promoted) sorts
+        last, not first, so an unpromoted model can't accidentally crowd
+        out real predictions."""
+        primary_stat = LEADER_CATEGORY_STATS[category][0]
+        scored = [_score_leader_candidate(s3, model_cache, row, LEADER_CATEGORY_STATS[category])
+                  for row in team_candidates[category]]
+        scored.sort(key=lambda result: result.get(primary_stat, -1), reverse=True)
+        winners = scored[:LEADER_CATEGORY_LIMITS[category]]
+        return [_record_leader_predictions(storage, s3, predictions_table, model_cache, event_key_value, result)
+                for result in winners]
+
     def team_leaders(team_candidates: dict) -> dict:
         passing = team_candidates["passing"]
+        passing_result = None
+        if passing:
+            scored = _score_leader_candidate(s3, model_cache, passing[0], LEADER_CATEGORY_STATS["passing"])
+            passing_result = _record_leader_predictions(storage, s3, predictions_table, model_cache, event_key_value, scored)
         return {
-            "passing": _score_leader_candidate(
-                storage, s3, predictions_table, model_cache, passing[0],
-                LEADER_CATEGORY_STATS["passing"], event_key_value,
-            ) if passing else None,
-            "receiving": [
-                _score_leader_candidate(
-                    storage, s3, predictions_table, model_cache, row,
-                    LEADER_CATEGORY_STATS["receiving"], event_key_value,
-                )
-                for row in team_candidates["receiving"]
-            ],
-            "rushing": [
-                _score_leader_candidate(
-                    storage, s3, predictions_table, model_cache, row,
-                    LEADER_CATEGORY_STATS["rushing"], event_key_value,
-                )
-                for row in team_candidates["rushing"]
-            ],
-            "sacks": [
-                _score_leader_candidate(
-                    storage, s3, predictions_table, model_cache, row,
-                    LEADER_CATEGORY_STATS["sacks"], event_key_value,
-                )
-                for row in team_candidates["sacks"]
-            ],
+            "passing": passing_result,
+            "receiving": ranked(team_candidates, "receiving"),
+            "rushing": ranked(team_candidates, "rushing"),
+            "sacks": ranked(team_candidates, "sacks"),
         }
 
     return {"home": team_leaders(candidates["home"]), "away": team_leaders(candidates["away"])}

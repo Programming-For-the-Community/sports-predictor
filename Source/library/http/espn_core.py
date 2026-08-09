@@ -75,30 +75,68 @@ class EspnCoreApiClient(HttpClient):
     def get_season_coaches(self, season: int) -> dict[str, dict]:
         """One head coach per team (32 items across the league) for
         `season`. Returns {team_id: {"coach_id", "coach_name",
-        "experience", "season_win_pct"}} -- team_id keys come from each
-        coach's own team $ref, not a separate id lookup, so a caller
-        never needs to know the coach->team mapping ahead of time.
+        "experience", "season_win_pct", "career_playoff_win_pct"}} --
+        team_id keys come from each coach's own team $ref, not a separate
+        id lookup, so a caller never needs to know the coach->team mapping
+        ahead of time.
 
-        experience/season_win_pct are ESPN's own numbers (tenure in
-        years; this season's win rate with this specific team), not
-        computed in-house -- see the project's own design notes for why:
-        no cold-start problem, available from day one, at the cost of a
-        coach's win_pct possibly reflecting games this project's own
-        completed-event history doesn't have (harmless: it's a feature
-        input, not a stat this project claims to have derived itself)."""
+        experience/season_win_pct/career_playoff_win_pct are ESPN's own
+        numbers (tenure in years; this REGULAR SEASON's win rate with this
+        specific team; this coach's win rate across every postseason game
+        of their whole career, any team), not computed in-house -- see the
+        project's own design notes for why: no cold-start problem,
+        available from day one, at the cost of a coach's win_pct possibly
+        reflecting games this project's own completed-event history
+        doesn't have (harmless: it's a feature input, not a stat this
+        project claims to have derived itself). career_playoff_win_pct
+        specifically exists ALONGSIDE season_win_pct, not instead of it --
+        THIS season's postseason record alone would be a 1-3 game sample
+        for the handful of teams that made the playoffs, and null for
+        every regular-season game industry-wide (the postseason hasn't
+        happened yet) -- a whole-career figure is non-null for every coach
+        with any tenure and reflects a far larger, more stable sample."""
         listing = self._get(f"seasons/{season}/coaches", {"limit": 50})
         coaches = self._resolve_refs(listing.get("items", []))
 
         # Second round of $ref resolution -- each coach's own win-loss
-        # record is itself a $ref, not embedded in the coach detail.
+        # record is itself a $ref, not embedded in the coach detail. A
+        # coach whose team made the playoffs has TWO records entries, one
+        # per season type ("/types/2/coaches/.../record" = regular season,
+        # "/types/3/.../record" = postseason) -- confirmed live (Sean
+        # McVay, 2025 Rams: regular season 12-5 = .706, postseason 1-1 =
+        # .5). Filtered to type 2 specifically; an unfiltered dict
+        # comprehension here used to just keep whichever entry happened to
+        # come LAST in ESPN's own list, silently swapping in the
+        # postseason record (or, in principle, a preseason one) instead of
+        # "this season's win rate" the docstring above promises.
         record_refs = {
             coach["id"]: record["record"]["$ref"]
             for coach in coaches
             for record in coach.get("records", [])
-            if record.get("record", {}).get("$ref")
+            if "/types/2/coaches/" in (record.get("record", {}).get("$ref") or "")
         }
         with ThreadPoolExecutor(max_workers=min(len(record_refs) or 1, DEREF_MAX_WORKERS)) as executor:
             resolved_records = dict(zip(record_refs.keys(), executor.map(self.get_absolute, record_refs.values())))
+
+        # Third round -- a coach's CAREER postseason record lives on their
+        # own person-level resource (.../coaches/{id}/record/3, confirmed
+        # live), a different id-scheme ("3" = Post Season) than the
+        # per-season records above but the same shape. Built directly from
+        # each coach's own id rather than resolving .../coaches/{id}'s own
+        # careerRecords list first -- the record's own URL is entirely
+        # predictable from coach_id, so this skips a whole extra round of
+        # $ref resolution for the same result. get("value") is correctly
+        # None (key absent, confirmed live) for a coach with zero career
+        # playoff games, not a ZeroDivisionError or a 0.0 that would read
+        # as "played and lost every one".
+        career_postseason_refs = {
+            coach["id"]: f"{self.base_url}/coaches/{coach['id']}/record/3"
+            for coach in coaches if coach.get("id")
+        }
+        with ThreadPoolExecutor(max_workers=min(len(career_postseason_refs) or 1, DEREF_MAX_WORKERS)) as executor:
+            resolved_career_postseason = dict(
+                zip(career_postseason_refs.keys(), executor.map(self.get_absolute, career_postseason_refs.values())),
+            )
 
         result: dict[str, dict] = {}
         for coach in coaches:
@@ -106,11 +144,13 @@ class EspnCoreApiClient(HttpClient):
             if team_id is None:
                 continue
             record = resolved_records.get(coach.get("id"))
+            career_postseason_record = resolved_career_postseason.get(coach.get("id"))
             result[team_id] = {
                 "coach_id": coach.get("id"),
                 "coach_name": f"{coach.get('firstName', '')} {coach.get('lastName', '')}".strip() or None,
                 "experience": coach.get("experience"),
                 "season_win_pct": record.get("value") if record else None,
+                "career_playoff_win_pct": career_postseason_record.get("value") if career_postseason_record else None,
             }
         return result
 

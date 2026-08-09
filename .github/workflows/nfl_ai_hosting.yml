@@ -45,7 +45,31 @@ jobs:
     name: Run nfl-predict tests
     uses: ./.github/workflows/run_python_tests.yml
     with:
-      test_path: 'Source/tests/library/ Source/tests/aws-lambdas/nfl/test_predict.py Source/tests/aws-lambdas/nfl/test_live_features.py Source/tests/aws-lambdas/nfl/test_model_loader.py'
+      # test_predict.py/test_live_features.py were each split into several
+      # concern-scoped files (predict's own event-outcome/player-props/
+      # routing/leaders/receiving-props/rushing-props/season-simulation;
+      # live_features' own event/player/leader-candidates/depth-chart/
+      # roster) -- listed individually here, same discipline this
+      # workflow's own reusable run_python_tests.yml docstring calls for
+      # (a specific file list, not a whole directory), rather than
+      # collapsing back to Source/tests/aws-lambdas/nfl/ and picking up
+      # every OTHER lambda's tests (ingest, normalize, ...) this job has
+      # no reason to run.
+      test_path: >-
+        Source/tests/library/
+        Source/tests/aws-lambdas/nfl/test_predict_event_outcome.py
+        Source/tests/aws-lambdas/nfl/test_predict_player_props.py
+        Source/tests/aws-lambdas/nfl/test_predict_routing.py
+        Source/tests/aws-lambdas/nfl/test_predict_leaders.py
+        Source/tests/aws-lambdas/nfl/test_predict_receiving_props.py
+        Source/tests/aws-lambdas/nfl/test_predict_rushing_props.py
+        Source/tests/aws-lambdas/nfl/test_predict_season_simulation.py
+        Source/tests/aws-lambdas/nfl/test_live_features_event.py
+        Source/tests/aws-lambdas/nfl/test_live_features_player.py
+        Source/tests/aws-lambdas/nfl/test_live_features_leader_candidates.py
+        Source/tests/aws-lambdas/nfl/test_live_features_depth_chart.py
+        Source/tests/aws-lambdas/nfl/test_live_features_roster.py
+        Source/tests/aws-lambdas/nfl/test_model_loader.py
       # Both requirements files -- requirements-nodeps.txt (xgboost, only
       # ever installed --no-deps in the real Dockerfile build to dodge its
       # nvidia-nccl-cu12 GPU dependency) still needs to be installed HERE

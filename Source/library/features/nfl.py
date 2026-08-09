@@ -348,13 +348,23 @@ def build_event_features(
         # _enrich_events + scoreboard_event_to_event_item (see
         # library/normalize/espn.py) -- absent (None) if that enrichment
         # didn't run, same sparse-optional convention weather_temperature
-        # uses. experience/season_win_pct are ESPN's own numbers, used
-        # directly -- no derivation, and raw coach identity is never a
-        # feature here, same rule as team/player ids.
+        # uses. experience/season_win_pct/career_playoff_win_pct are
+        # ESPN's own numbers, used directly -- no derivation, and raw
+        # coach identity is never a feature here, same rule as team/player
+        # ids. season_win_pct and career_playoff_win_pct are deliberately
+        # BOTH included, not one instead of the other -- season_win_pct is
+        # a full, stable 17-game regular-season sample but says nothing
+        # about big-game performance; career_playoff_win_pct captures that
+        # specifically, and (unlike a single season's own postseason
+        # record, which would be null for every non-playoff-team game
+        # league-wide and a 1-3 game sample even when present) stays a
+        # meaningful, non-null figure for any coach with career tenure.
         "home_coach_experience": event.get("home_coach_experience"),
         "away_coach_experience": event.get("away_coach_experience"),
         "home_coach_season_win_pct": event.get("home_coach_season_win_pct"),
         "away_coach_season_win_pct": event.get("away_coach_season_win_pct"),
+        "home_coach_career_playoff_win_pct": event.get("home_coach_career_playoff_win_pct"),
+        "away_coach_career_playoff_win_pct": event.get("away_coach_career_playoff_win_pct"),
         "home_qb_injury_status": _injury_status_ordinal(home_injuries, home_qb_entity_id),
         "away_qb_injury_status": _injury_status_ordinal(away_injuries, away_qb_entity_id),
         "home_team_injury_count": _team_injury_count(home_injuries),

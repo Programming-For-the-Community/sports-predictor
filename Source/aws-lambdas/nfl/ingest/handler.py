@@ -63,6 +63,20 @@ changes once a week, after that week's games. Injury-driven roster
 changes are already separately captured by the (uncached,
 genuinely-daily) injuries call.
 
+Also refreshes the season-coaches cache (_fetch_coaches) for the current
+-- or, off-season, upcoming -- season, same unconditional every-run
+cadence as the roster/depth-chart fetches above and run before the
+preseason check below for the same reason: enrich_events only ever
+populates this cache as a side effect of enriching a specific week's
+events, which never runs at all before Week 1 (preseason is skipped, and
+there's no week to auto-detect before the season starts) -- previously
+leaving next season's coaches unfetched for the entire off-season, only
+appearing once that season's Week 1 Tuesday ingest finally ran.
+get_cached_coaches' own TTL (COACHES_CACHE_TTL_DAYS above) still does the
+real rate limiting -- calling it daily just guarantees the cache gets a
+chance to turn over (in season) or get seeded in the first place
+(off-season).
+
 EventBridge can override any default via the schedule's input payload:
     { "season": 2025, "season_type": 2, "week": 4 }
 
@@ -171,6 +185,44 @@ def _fetch_rosters(client: NFLClient) -> tuple[int, int]:
     return fetched, failed
 
 
+def _current_nfl_season(today: date | None = None) -> int:
+    """Mirrors schedule-sync/handler.py's own _current_nfl_season (same
+    duplication convention already used elsewhere in this file, e.g.
+    REGULAR_SEASON_WEEKS's own comment in that module) -- Sep-Dec resolves
+    to this year (the season in progress), Jan-Feb resolves to last year
+    (still finishing that season's playoffs -- the Super Bowl is in
+    February), Mar-Aug resolves to this year (the upcoming, not-yet-
+    started season). Used only by _fetch_coaches below, to seed/refresh
+    NEXT season's coaches during the off-season, before there's a week to
+    auto-detect at all -- everything else in this file gets its season
+    from that week's own ESPN scoreboard response instead."""
+    today = today or date.today()
+    return today.year if today.month >= 3 else today.year - 1
+
+
+def _fetch_coaches(core_client: EspnCoreApiClient) -> bool:
+    """Refreshes the season-coaches cache for the current (in season) or
+    upcoming (off-season) season -- same unconditional, every-run cadence
+    as _fetch_rosters/_fetch_depth_charts, before the preseason check
+    below, and for the same underlying reason: enrich_events only ever
+    populates this cache as a side effect of enriching a specific week's
+    events, which never runs at all before Week 1 (preseason is skipped
+    below, and there's no week to auto-detect before the season starts) --
+    leaving the upcoming season's coaches never fetched for the entire
+    off-season. enrichment.get_cached_coaches' own TTL still does the
+    real rate limiting here -- calling it daily just guarantees the cache
+    gets a chance to turn over (in season) or get seeded in the first
+    place (off-season), matching this module's roster/depth-chart
+    reasoning above."""
+    season = _current_nfl_season()
+    try:
+        enrichment.get_cached_coaches(_s3, RAW_BUCKET, core_client, season)
+        return True
+    except Exception:
+        logger.exception("Failed fetching season coaches for %d", season)
+        return False
+
+
 def _fetch_depth_charts(client: NFLClient) -> tuple[int, int]:
     """Refreshes every NFL team's cached depth chart (library.storage.
     depth_chart_cache) -- same unconditional, every-team daily cadence as
@@ -204,16 +256,20 @@ def lambda_handler(event: dict, context) -> dict:
     week = event.get("week")
 
     client = NFLClient()
+    core_client = EspnCoreApiClient()
 
-    # Unconditional -- see _fetch_rosters/_fetch_depth_charts/_all_team_ids
-    # and the module docstring for why these run before the preseason
-    # check below rather than being gated the same way as everything else
-    # in this function.
+    # Unconditional -- see _fetch_rosters/_fetch_depth_charts/_fetch_coaches/
+    # _all_team_ids and the module docstring for why these run before the
+    # preseason check below rather than being gated the same way as
+    # everything else in this function.
     rosters_fetched, rosters_failed = _fetch_rosters(client)
     logger.info("Rosters: %d fetched, %d failed", rosters_fetched, rosters_failed)
 
     depth_charts_fetched, depth_charts_failed = _fetch_depth_charts(client)
     logger.info("Depth charts: %d fetched, %d failed", depth_charts_fetched, depth_charts_failed)
+
+    coaches_fetched = _fetch_coaches(core_client)
+    logger.info("Coaches: %s", "fetched" if coaches_fetched else "failed")
 
     if season_type == PRESEASON_TYPE:
         logger.info("season_type=%d is preseason -- skipping, not ingested by design", PRESEASON_TYPE)
@@ -221,9 +277,8 @@ def lambda_handler(event: dict, context) -> dict:
             "processed": 0, "skipped": 0, "failed": 0,
             "rosters_fetched": rosters_fetched, "rosters_failed": rosters_failed,
             "depth_charts_fetched": depth_charts_fetched, "depth_charts_failed": depth_charts_failed,
+            "coaches_fetched": coaches_fetched,
         }
-
-    core_client = EspnCoreApiClient()
 
     if week is None:
         # See the module docstring for why this resolves against the most
@@ -246,6 +301,7 @@ def lambda_handler(event: dict, context) -> dict:
                 "processed": 0, "skipped": 0, "failed": 0,
                 "rosters_fetched": rosters_fetched, "rosters_failed": rosters_failed,
                 "depth_charts_fetched": depth_charts_fetched, "depth_charts_failed": depth_charts_failed,
+                "coaches_fetched": coaches_fetched,
             }
 
         logger.info("Auto-detected season %d type %d week %d", season, season_type, week)
@@ -292,4 +348,5 @@ def lambda_handler(event: dict, context) -> dict:
         "processed": processed, "skipped": skipped, "failed": failed,
         "rosters_fetched": rosters_fetched, "rosters_failed": rosters_failed,
         "depth_charts_fetched": depth_charts_fetched, "depth_charts_failed": depth_charts_failed,
+        "coaches_fetched": coaches_fetched,
     }

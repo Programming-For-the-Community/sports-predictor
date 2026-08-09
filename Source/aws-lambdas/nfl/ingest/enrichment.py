@@ -73,6 +73,23 @@ def _coaches_cache_key(season: int) -> str:
     return f"nfl/cache/season-coaches/{season}.json"
 
 
+def get_cached_coaches(s3, bucket: str, core_client: EspnCoreApiClient, season: int) -> dict:
+    """Every currently-listed team's head coach for `season`, keyed by
+    team id -- TTL-cached (COACHES_CACHE_TTL_DAYS) in S3 under
+    _coaches_cache_key(season). Shared by enrich_events below (attaches
+    coaches to a specific week's events, whatever season that week
+    happens to be) and ingest/handler.py's own unconditional daily call
+    (seeds/refreshes the cache regardless of whether there's a week to
+    enrich at all -- see that module's own docstring for why this can't
+    rely on enrich_events alone) -- both hit the exact same cache key for
+    the same season, so during the season this is a cache hit the second
+    time either one runs that day, not a doubled ESPN cost."""
+    return _cached_or_fetch(
+        s3, bucket, _coaches_cache_key(season), COACHES_CACHE_TTL_DAYS,
+        lambda: core_client.get_season_coaches(season),
+    )
+
+
 def enrich_events(
     events: list[dict], season: int, nfl_client: NFLClient, core_client: EspnCoreApiClient, s3, bucket: str,
 ) -> None:
@@ -99,10 +116,7 @@ def enrich_events(
             team_ids.update(ids)
 
     try:
-        coaches = _cached_or_fetch(
-            s3, bucket, _coaches_cache_key(season), COACHES_CACHE_TTL_DAYS,
-            lambda: core_client.get_season_coaches(season),
-        )
+        coaches = get_cached_coaches(s3, bucket, core_client, season)
     except Exception:
         logger.exception("Failed fetching season coaches for %d -- coach fields will be omitted", season)
         coaches = {}

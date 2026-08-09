@@ -92,11 +92,13 @@ def scoreboard_event_to_event_item(event: dict, sport: str) -> dict:
         item["home_coach_name"] = home_coach.get("coach_name")
         item["home_coach_experience"] = home_coach.get("experience")
         item["home_coach_season_win_pct"] = home_coach.get("season_win_pct")
+        item["home_coach_career_playoff_win_pct"] = home_coach.get("career_playoff_win_pct")
     if away_coach := event.get("away_coach"):
         item["away_coach_id"] = away_coach.get("coach_id")
         item["away_coach_name"] = away_coach.get("coach_name")
         item["away_coach_experience"] = away_coach.get("experience")
         item["away_coach_season_win_pct"] = away_coach.get("season_win_pct")
+        item["away_coach_career_playoff_win_pct"] = away_coach.get("career_playoff_win_pct")
     if (home_injuries := event.get("home_injuries")) is not None:
         item["home_injuries"] = home_injuries
     if (away_injuries := event.get("away_injuries")) is not None:
