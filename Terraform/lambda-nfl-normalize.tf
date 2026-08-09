@@ -88,15 +88,9 @@ resource "aws_lambda_permission" "s3_invoke_nfl_normalize" {
   source_arn    = aws_s3_bucket.raw_data_lake.arn
 }
 
-resource "aws_s3_bucket_notification" "nfl_normalize_trigger" {
-  bucket = aws_s3_bucket.raw_data_lake.id
-
-  lambda_function {
-    lambda_function_arn = aws_lambda_function.nfl_normalize.arn
-    events              = ["s3:ObjectCreated:*"]
-    filter_prefix       = "nfl/"
-    filter_suffix       = ".json"
-  }
-
-  depends_on = [aws_lambda_permission.s3_invoke_nfl_normalize]
-}
+# The bucket's S3 event notification config itself lives in
+# s3-raw-data-lake-notifications.tf, one lambda_function block per sport --
+# aws_s3_bucket_notification sets a bucket's entire notification
+# configuration on every apply, so one instance of this resource per sport
+# pointed at the same bucket would silently overwrite each other rather
+# than adding a second trigger.

@@ -139,6 +139,19 @@ variable "espn_user_agent" {
   nullable    = false
 }
 
+variable "cfbd_api_root_url" {
+  description = "Root URL of CollegeFootballData.com's REST API v2, used by every NCAAFB task that calls it. No sport path suffix to append -- CFBD is football-only, unlike the shared ESPN root URLs above."
+  type        = string
+  default     = "https://api.collegefootballdata.com"
+  nullable    = false
+}
+
+variable "third_party_api_key_secret_arn" {
+  description = "ARN of the single shared Secrets Manager secret holding every sport's third-party API key as a JSON field (e.g. ncaa_fb_ingest_key, ncaa_fb_backfill_key) -- supplied via TF_VAR_third_party_api_key_secret_arn from the THIRD_PARTY_API_KEYS_SECRET_ARN GitHub Actions secret. Only the ARN is a Terraform input; the key material itself is resolved from Secrets Manager at cold start by library/http/cfbd.py, never appearing in state or CI logs."
+  type        = string
+  nullable    = false
+}
+
 # ── Training compute budget ──────────────────────────────────────────────────
 # Drives local.training_max_concurrency (locals-training-compute.tf), which
 # sets TrainAllTargets' MaxConcurrency in sfn-training-orchestrator.tf and

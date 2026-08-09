@@ -48,6 +48,22 @@ data "aws_iam_policy_document" "lambda_pipeline_permissions" {
       "arn:aws:dynamodb:${var.region}:${var.account_id}:table/${local.team_game_stats_table}",
     ]
   }
+
+  # Read access to the one shared third-party-API-key secret (see
+  # variables.tf's third_party_api_key_secret_arn) -- only NCAAFB's ingest
+  # and schedule-sync Lambdas actually call a keyed API (CFBD) today;
+  # normalize never does (it only transforms raw JSON already in S3), and
+  # NFL's ESPN endpoints are keyless. Granted at this shared role level
+  # rather than split out because DynamoDB's own per-sport IAM scoping
+  # already isn't enforceable here (see this file's top comment) -- the
+  # secret's per-field access boundary is application-level only (each
+  # task reads CFBD_API_KEY_SECRET_FIELD), same accepted tradeoff as the
+  # secret's own design.
+  statement {
+    sid       = "ReadThirdPartyApiKeySecret"
+    actions   = ["secretsmanager:GetSecretValue"]
+    resources = [var.third_party_api_key_secret_arn]
+  }
 }
 
 resource "aws_iam_role_policy" "lambda_pipeline_permissions" {

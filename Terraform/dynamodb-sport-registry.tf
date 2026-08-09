@@ -107,3 +107,87 @@ resource "aws_dynamodb_table_item" "nfl_registry" {
   # that pointer is meant to be moved by the (future, Phase 7)
   # model-promotion approval flow, not by a `terraform apply`.
 }
+
+# Same 7 player-prop stats as NFL (TARGET_STAT values verified against
+# CFBD's actual field names -- see project memory's Phase 1 notes).
+locals {
+  ncaafb_score_targets = {
+    "margin"     = true
+    "home_score" = true
+    "away_score" = true
+  }
+  ncaafb_player_prop_stats = {
+    "passing_yards"        = true
+    "passing_touchdowns"   = true
+    "rushing_yards"        = true
+    "rushing_touchdowns"   = true
+    "receiving_yards"      = true
+    "receiving_touchdowns" = true
+    "defensive_sacks"      = true
+  }
+}
+
+# NCAAFB's registry row -- same shape as nfl_registry above, plus one extra
+# training target with no real env-var override: national-ranking is a
+# team-week model, not scoped by a SCORE_TARGET/TARGET_STAT the way
+# score/player-prop targets are, so it re-asserts AWS_REGION as a no-op,
+# same as win-probability does.
+resource "aws_dynamodb_table_item" "ncaafb_registry" {
+  table_name = aws_dynamodb_table.sport_registry.name
+  hash_key   = aws_dynamodb_table.sport_registry.hash_key
+
+  item = jsonencode({
+    sport_key       = { S = "SPORT#NCAAFB" }
+    sport           = { S = "ncaafb" }
+    event_type      = { S = "head_to_head" }
+    polling_cadence = { S = "daily" }
+    active          = { BOOL = true }
+
+    training_targets = {
+      L = concat(
+        [
+          {
+            M = {
+              model_name             = { S = "win-probability" }
+              task_definition_suffix = { S = "train-win-probability-model" }
+              container_name         = { S = "ncaafb-train-win-probability-model" }
+              env_name               = { S = "AWS_REGION" }
+              env_value              = { S = var.region }
+            }
+          },
+          {
+            M = {
+              model_name             = { S = "national-ranking" }
+              task_definition_suffix = { S = "train-ranking-model" }
+              container_name         = { S = "ncaafb-train-ranking-model" }
+              env_name               = { S = "AWS_REGION" }
+              env_value              = { S = var.region }
+            }
+          },
+        ],
+        [
+          for target, _ in local.ncaafb_score_targets : {
+            M = {
+              model_name             = { S = "score-${replace(target, "_", "-")}" }
+              task_definition_suffix = { S = "train-score-model" }
+              container_name         = { S = "ncaafb-train-score-model" }
+              env_name               = { S = "SCORE_TARGET" }
+              env_value              = { S = target }
+            }
+          }
+        ],
+        [
+          for stat, _ in local.ncaafb_player_prop_stats : {
+            M = {
+              model_name             = { S = "player-prop-${replace(stat, "_", "-")}" }
+              task_definition_suffix = { S = "train-player-prop-model" }
+              container_name         = { S = "ncaafb-train-player-prop-model" }
+              env_name               = { S = "TARGET_STAT" }
+              env_value              = { S = stat }
+            }
+          }
+        ],
+      )
+    }
+  })
+}
