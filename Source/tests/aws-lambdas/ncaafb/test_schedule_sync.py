@@ -28,9 +28,9 @@ class TestLambdaHandler:
              patch.object(ncaafb_schedule_sync, "attach_venue_indoor"):
             result = ncaafb_schedule_sync.lambda_handler({"season": 2026}, None)
 
-        # 17 regular-season weeks (0-16) + 5 postseason weeks.
-        assert mock_client.get_games.call_count == 22
-        assert result == {"season": 2026, "synced": 22, "failed": 0}
+        # 16 regular-season weeks (1-16) + 5 postseason weeks.
+        assert mock_client.get_games.call_count == 21
+        assert result == {"season": 2026, "synced": 21, "failed": 0}
 
     def test_uses_one_shared_client_for_the_whole_run(self):
         mock_s3 = MagicMock()
@@ -44,7 +44,10 @@ class TestLambdaHandler:
 
         client_factory.assert_called_once()
 
-    def test_calls_regular_season_weeks_0_through_16(self):
+    def test_calls_regular_season_weeks_1_through_16(self):
+        # Starts at 1, not 0 -- CFBD's /games silently returns the whole
+        # season instead of filtering when week=0 is passed (see
+        # handler.py's own REGULAR_SEASON_WEEKS comment).
         mock_s3 = MagicMock()
         mock_client = _make_client()
 
@@ -54,7 +57,7 @@ class TestLambdaHandler:
             ncaafb_schedule_sync.lambda_handler({"season": 2026}, None)
 
         regular_calls = [c for c in mock_client.get_games.call_args_list if c.kwargs["season_type"] == "regular"]
-        assert sorted(c.kwargs["week"] for c in regular_calls) == list(range(0, 17))
+        assert sorted(c.kwargs["week"] for c in regular_calls) == list(range(1, 17))
 
     def test_calls_postseason_weeks_1_through_5(self):
         mock_s3 = MagicMock()
@@ -90,7 +93,7 @@ class TestLambdaHandler:
              patch.object(ncaafb_schedule_sync, "attach_venue_indoor") as mock_attach:
             ncaafb_schedule_sync.lambda_handler({"season": 2026}, None)
 
-        assert mock_attach.call_count == 22
+        assert mock_attach.call_count == 21
 
     def test_never_fetches_coach_or_ranking_data(self):
         # Full enrichment (coach/rankings) stays ingest-only -- confirm
@@ -127,15 +130,15 @@ class TestLambdaHandler:
     def test_one_weeks_failure_does_not_block_the_rest(self):
         mock_s3 = MagicMock()
         mock_client = _make_client()
-        mock_client.get_games.side_effect = [Exception("CFBD timeout"), *([[]] * 21)]
+        mock_client.get_games.side_effect = [Exception("CFBD timeout"), *([[]] * 20)]
 
         with patch.object(ncaafb_schedule_sync, "_s3", mock_s3), \
              patch.object(ncaafb_schedule_sync, "CFBDClient", return_value=mock_client), \
              patch.object(ncaafb_schedule_sync, "attach_venue_indoor"):
             result = ncaafb_schedule_sync.lambda_handler({"season": 2026}, None)
 
-        assert result == {"season": 2026, "synced": 21, "failed": 1}
-        assert mock_client.get_games.call_count == 22
+        assert result == {"season": 2026, "synced": 20, "failed": 1}
+        assert mock_client.get_games.call_count == 21
 
 
 class TestCurrentNcaafbSeason:
