@@ -17,7 +17,6 @@ probabilities repeatedly (a model/predict.py concern), built entirely on
 top of the event-level features below.
 """
 import logging
-from datetime import datetime
 
 from library.features.common import (
     DEFAULT_ROLLING_WINDOW,
@@ -28,6 +27,7 @@ from library.features.common import (
     _team_injury_count,
     compute_elo_ratings,
     current_streak,
+    kickoff_hour_utc,
     rest_days,
     rolling_player_stat_averages,
     rolling_team_scoring_averages,
@@ -54,14 +54,6 @@ def identify_lead_receiver(team_player_games: list[dict]) -> dict | None:
     return _identify_leader(team_player_games, "receiving_targets")
 
 
-def _identify_top_leaders(team_player_games: list[dict], volume_stat: str, n: int) -> list[dict]:
-    """Same shape as _identify_leader but returns the top n rows instead
-    of just the single leader -- used where a live prediction needs
-    several candidates per team (e.g. the top 3 receivers), not just one."""
-    candidates = [row for row in team_player_games if volume_stat in row.get("stat_line", {})]
-    return sorted(candidates, key=lambda row: row["stat_line"][volume_stat], reverse=True)[:n]
-
-
 def identify_top_receivers(team_player_games: list[dict], n: int = 3) -> list[dict]:
     """The top n players by receiving targets -- see identify_lead_receiver
     for why targets, not receptions."""
@@ -71,90 +63,6 @@ def identify_top_receivers(team_player_games: list[dict], n: int = 3) -> list[di
 def identify_top_rushers(team_player_games: list[dict], n: int = 2) -> list[dict]:
     """The top n players by rushing attempts -- see identify_lead_rusher."""
     return _identify_top_leaders(team_player_games, "rushing_attempts", n)
-
-
-def rank_by_average_stat(histories: dict[str, list[dict]], stat: str, n: int) -> list[str]:
-    """Given each candidate's own recent player_game_stats rows (most
-    recent first, e.g. from FeatureStorage.get_player_game_stats), ranks
-    by their average of `stat` over that window and returns the top n
-    entity_ids.
-
-    Unlike _identify_leader/_identify_top_leaders (which pick by volume
-    WITHIN ONE GAME's roster), this ranks by each candidate's OWN rolling
-    performance across their own history. Needed for defensive_sacks --
-    sacks are rare, bursty events, so "who had the most sacks in the last
-    game" is a much noisier signal than "who has the highest average"
-    the way passing_attempts/receiving_targets/rushing_attempts reliably
-    identify a starter within a single game.
-    """
-    averages = []
-    for entity_id, games in histories.items():
-        values = [game["stat_line"][stat] for game in games if stat in game.get("stat_line", {})]
-        if values:
-            averages.append((entity_id, sum(values) / len(values)))
-    averages.sort(key=lambda pair: pair[1], reverse=True)
-    return [entity_id for entity_id, _ in averages[:n]]
-
-
-def _rate(averages: dict, numerator_key: str, denominator_key: str) -> float | None:
-    denominator = averages.get(denominator_key)
-    if not denominator:
-        return None
-    return averages[numerator_key] / denominator
-
-
-def _kickoff_hour_utc(kickoff_time: str | None) -> int | None:
-    """UTC hour (0-23) from an event's kickoff_time -- NFL kickoff slots
-    are scheduled in Eastern time regardless of stadium, so this reliably
-    distinguishes the standard broadcast windows (early/late Sunday, SNF,
-    MNF, TNF) without needing per-stadium timezone conversion. None for a
-    missing or unparseable timestamp."""
-    if not kickoff_time:
-        return None
-    try:
-        return datetime.fromisoformat(kickoff_time.replace("Z", "+00:00")).hour
-    except ValueError:
-        return None
-
-
-# Ordinal, not one-hot -- these statuses form a real severity order (a
-# tree model can split on "status >= Doubtful" directly), matching the
-# severity threshold used for live leader-selection exclusion (Out AND
-# Doubtful, not just Out -- see live_features.py). Any status
-# string ESPN reports that isn't one of these three (rare -- IR/PUP-style
-# season-ending designations mostly show up as "Out" already) falls back
-# to 1, a conservative "something's reported" floor rather than silently
-# treating an unrecognized status as healthy.
-_INJURY_STATUS_ORDINAL = {"Questionable": 1, "Doubtful": 2, "Out": 3}
-_TEAM_INJURY_COUNT_STATUSES = {"Doubtful", "Out"}
-
-
-def _injury_status_ordinal(injuries: list[dict] | None, entity_id: str | None) -> int | None:
-    """0=no report (checked, this player's healthy), 1=Questionable,
-    2=Doubtful, 3=Out. None specifically means "never checked" (the event
-    has no injuries data at all -- either older than this feature, or a
-    fetch failure) -- distinct from 0, and left as None (not coerced to
-    0) so it reaches training as a real missing value a tree model can
-    treat as such, rather than a false "definitely healthy" signal for
-    every pre-existing historical row."""
-    if injuries is None or entity_id is None:
-        return None
-    for injury in injuries:
-        if injury.get("entity_id") == entity_id:
-            return _INJURY_STATUS_ORDINAL.get(injury.get("status"), 1)
-    return 0
-
-
-def _team_injury_count(injuries: list[dict] | None) -> int | None:
-    """Count of players Doubtful or Out -- Questionable isn't counted
-    here, same reasoning _injury_status_ordinal's severity order and the
-    live leader-selection threshold both use: most Questionable players
-    do play, so counting them would dilute this into a much noisier
-    signal. None (not 0) when injuries data is entirely absent -- same
-    missing-vs-zero distinction as _injury_status_ordinal."""
-    if injuries is None:
-        return None
-    return sum(1 for injury in injuries if injury.get("status") in _TEAM_INJURY_COUNT_STATUSES)
 
 
 def build_event_features(
@@ -266,7 +174,7 @@ def build_event_features(
         # differently even at the same week number.
         "week": event.get("week"),
         "season_type": event.get("season_type"),
-        "kickoff_hour_utc": _kickoff_hour_utc(event.get("kickoff_time")),
+        "kickoff_hour_utc": kickoff_hour_utc(event.get("kickoff_time")),
         # venue_indoor and weather_temperature are real feature inputs (a
         # dome neutralizes weather entirely, and cold/heat plausibly
         # affects passing/kicking games); venue_city/venue_state are
@@ -434,7 +342,7 @@ def build_player_features(
         "is_home": is_home,
         "week": event.get("week"),
         "season_type": event.get("season_type"),
-        "kickoff_hour_utc": _kickoff_hour_utc(event.get("kickoff_time")),
+        "kickoff_hour_utc": kickoff_hour_utc(event.get("kickoff_time")),
         "venue_indoor": event.get("venue_indoor"),
         "weather_temperature": event.get("weather_temperature"),
         "rest_days": rest_days(player_game["event_date"], own_previous_event_date),

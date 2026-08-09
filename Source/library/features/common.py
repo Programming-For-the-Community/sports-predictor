@@ -11,7 +11,7 @@ second sport's adapter can import these without also importing NFL-only
 names (identify_starting_qb, build_event_features, etc.).
 """
 import math
-from datetime import date
+from datetime import date, datetime
 
 DEFAULT_ROLLING_WINDOW = 5
 DEFAULT_STARTING_RATING = 1500.0
@@ -148,6 +148,18 @@ def compute_elo_ratings(
         ratings = _regress(ratings)
 
     return pre_game_ratings, ratings
+
+
+def kickoff_hour_utc(kickoff_time: str | None) -> int | None:
+    """UTC hour (0-23) parsed from an ISO 8601 kickoff timestamp -- both
+    ESPN's and CFBD's own kickoff_time fields use this format. None for a
+    missing or unparseable timestamp."""
+    if not kickoff_time:
+        return None
+    try:
+        return datetime.fromisoformat(kickoff_time.replace("Z", "+00:00")).hour
+    except ValueError:
+        return None
 
 
 def rest_days(event_date: str, previous_event_date: str | None) -> int | None:

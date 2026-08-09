@@ -1,0 +1,4 @@
+# Same dependency set as feature-engineering/nfl -- see that
+# requirements.txt's own comment.
+pandas>=2.2
+pyarrow>=16.0
