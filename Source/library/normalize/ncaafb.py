@@ -19,17 +19,39 @@ from library.schema.keys import entity_key, entity_team_key, event_key, player_k
 # into "c_a_r" one letter at a time, and even a clean lowercase wouldn't
 # produce the TARGET_STAT names Terraform/dynamodb-sport-registry.tf's
 # ncaafb_player_prop_stats already commits to (e.g. "YDS" -> "yds", not
-# "yards"), so each targeted abbreviation is mapped explicitly. Types not
-# listed here (rushing/receiving's CAR/REC/LONG etc., not currently a
-# training target) fall back to a plain lowercase in _stat_field_name
-# below instead.
+# "yards"), so each targeted abbreviation is mapped explicitly. CAR/REC map
+# to "attempts"/"receptions" (not a literal transliteration) so the
+# resulting field names (rushing_attempts, receiving_receptions) match
+# library/features/ncaafb.py's leader-identification volume stats -- the
+# same names library/features/nfl.py's identify_lead_rusher/
+# identify_lead_receiver already use for ESPN's own equivalent fields.
+# Types not listed here fall back to a plain lowercase in _stat_field_name
+# below instead. "C/ATT" is deliberately absent -- it's a compound value,
+# handled by _PLAYER_STAT_COMPOUND_SPLITS below before this map is ever
+# consulted.
 _STAT_TYPE_NAMES = {
     "YDS": "yards",
     "TD": "touchdowns",
     "SACKS": "sacks",
     "INT": "interceptions",
-    "C/ATT": "completions_attempts",
+    "CAR": "attempts",
+    "REC": "receptions",
     "QB HUR": "qb_hurries",
+}
+
+# CFBD packs some player-level stats as one slash-separated string, same
+# compound-value pattern as its team-level stats (_TEAM_STAT_COMPOUND_SPLITS
+# below) -- confirmed live against real 2025 data ("C/ATT": "24/38", "FG":
+# "1/2", "XP": "3/3"). Keyed by the raw type name, checked before
+# _stat_field_name/_STAT_TYPE_NAMES ever see it -- a real gap in the
+# original implementation, which stored these as unparsed strings
+# (rolling_player_stat_averages silently skips non-numeric stat_line
+# values, so passing attempts/completions and kicking makes/attempts were
+# being dropped entirely, not just mis-typed).
+_PLAYER_STAT_COMPOUND_SPLITS: dict[str, tuple[str, str]] = {
+    "C/ATT": ("completions", "attempts"),
+    "FG": ("field_goals_made", "field_goals_attempted"),
+    "XP": ("extra_points_made", "extra_points_attempted"),
 }
 
 
@@ -37,6 +59,15 @@ def _stat_field_name(category: str, type_name: str) -> str:
     category_snake = snake_case(category)
     type_snake = _STAT_TYPE_NAMES.get(type_name) or type_name.strip().lower().replace(" ", "_").replace("-", "_").replace("/", "_")
     return f"{category_snake}_{type_snake}"
+
+
+def _split_compound_value(value) -> tuple | None:
+    text = str(value)
+    sep = "/" if "/" in text else "-" if "-" in text else None
+    if sep is None:
+        return None
+    parts = text.split(sep, 1)
+    return (parse_number(parts[0]), parse_number(parts[1])) if len(parts) == 2 else None
 
 
 def _resolve_team_id(box_score: dict, home_away: str | None) -> str | None:
@@ -80,6 +111,16 @@ def team_to_entity(team: dict, sport: str) -> dict:
             "mascot": team.get("mascot"),
             "conference": team.get("conference"),
             "venue_indoor": location.get("dome"),
+            # Home-stadium coordinates -- confirmed live that CFBD's own
+            # /teams response carries these directly on `location`, unlike
+            # NFL/ESPN which has no coordinate field at all (library/
+            # features/nfl_teams.py hand-maintains a static TEAM_COORDINATES
+            # table instead). library/features/ncaafb.py's build_event_
+            # features reads these back out per team via FeatureStorage.
+            # get_entity to compute travel distance, rather than a second
+            # hardcoded table that would drift as FBS realignment happens.
+            "latitude": location.get("latitude"),
+            "longitude": location.get("longitude"),
         },
     }
 
@@ -100,6 +141,17 @@ def game_to_event_item(game: dict, sport: str) -> dict:
     (a later phase) derives the actual is_conference_game feature from
     these, falling back to a season-scoped /teams lookup for games CFBD
     hasn't computed conference_game for yet (see project plan).
+
+    is_playoff_game is derived (not passed through) from CFBD's own
+    `playoff` field -- confirmed live it's a populated object
+    ({"competition": "cfp", "round": ...}) for real 12-team CFP games and
+    None for every other game, including ordinary bowls -- a cleaner,
+    directly-verified signal than string-matching the `notes` bowl-name
+    field the project plan originally proposed. Always set (never
+    sparse), unlike the coach/rank fields below -- it needs no enrichment
+    step, only this function's own raw `game` argument.
+    library/features/ncaafb.py derives is_bowl_game from this plus
+    season_type ("postseason" and NOT a playoff game).
 
     home_coach/away_coach/home_current_rank/away_current_rank/
     venue_indoor are only present when aws-lambdas/ncaafb/ingest/
@@ -139,6 +191,7 @@ def game_to_event_item(game: dict, sport: str) -> dict:
         "home_conference": game.get("homeConference"),
         "away_conference": game.get("awayConference"),
         "conference_game": game.get("conferenceGame"),
+        "is_playoff_game": game.get("playoff") is not None,
     }
 
     if home_coach := game.get("home_coach"):
@@ -165,9 +218,10 @@ def game_player_stats_to_player_game_stats(game_box_score: dict, sport: str) -> 
     handler.py's _annotate_box_scores (see that function's own docstring
     for why the join to /games has to happen at ingest time, not here).
 
-    Each athlete's stat values are single scalars ("stat": "250"), unlike
-    ESPN's compound "24/31"-style strings -- no compound_key_splits
-    equivalent is needed here.
+    Most athlete stat values are single scalars ("stat": "250"); three
+    (passing C/ATT, kicking FG, kicking XP) are slash-separated compound
+    values instead, split via _PLAYER_STAT_COMPOUND_SPLITS the same way
+    _TEAM_STAT_COMPOUND_SPLITS below handles CFBD's team-level compounds.
 
     metadata.position is always None -- CFBD's box-score athletes carry
     no position field (unlike ESPN's); position would come from the
@@ -186,14 +240,24 @@ def game_player_stats_to_player_game_stats(game_box_score: dict, sport: str) -> 
             continue
         for category in team_block.get("categories", []):
             category_name = category.get("name", "misc")
+            category_snake = snake_case(category_name)
             for type_entry in category.get("types", []):
-                field_name = _stat_field_name(category_name, type_entry.get("name", ""))
+                type_name = type_entry.get("name", "")
+                compound_names = _PLAYER_STAT_COMPOUND_SPLITS.get(type_name)
+                field_name = None if compound_names else _stat_field_name(category_name, type_name)
                 for athlete in type_entry.get("athletes", []):
                     athlete_id = athlete.get("id")
                     if not athlete_id:
                         continue
                     athlete_id = str(athlete_id)
-                    stat_lines.setdefault(athlete_id, {})[field_name] = parse_number(athlete.get("stat"))
+                    line = stat_lines.setdefault(athlete_id, {})
+                    raw_value = athlete.get("stat")
+                    split = _split_compound_value(raw_value) if compound_names else None
+                    if split is not None:
+                        line[f"{category_snake}_{compound_names[0]}"] = split[0]
+                        line[f"{category_snake}_{compound_names[1]}"] = split[1]
+                    else:
+                        line[field_name or _stat_field_name(category_name, type_name)] = parse_number(raw_value)
                     athlete_names[athlete_id] = athlete.get("name", "")
                     athlete_team[athlete_id] = team_id
 
@@ -271,12 +335,10 @@ def game_team_stats_to_team_game_stats(game_team_box_score: dict, sport: str) ->
                 line["possession_time_seconds"] = parse_clock_to_seconds(value)
                 continue
             if category in _TEAM_STAT_COMPOUND_SPLITS:
-                first_name, second_name = _TEAM_STAT_COMPOUND_SPLITS[category]
-                sep = "/" if "/" in str(value) else "-"
-                parts = str(value).split(sep, 1)
-                if len(parts) == 2:
-                    line[first_name] = parse_number(parts[0])
-                    line[second_name] = parse_number(parts[1])
+                split = _split_compound_value(value)
+                if split is not None:
+                    first_name, second_name = _TEAM_STAT_COMPOUND_SPLITS[category]
+                    line[first_name], line[second_name] = split
                     continue
             line[snake_case(category)] = parse_number(value)
 

@@ -1,0 +1,9 @@
+# Same dependency set as model-training/nfl -- see that requirements.txt's
+# own comment. Shared by both Dockerfiles in this directory (Dockerfile and
+# Dockerfile.ranking) -- every NCAAFB training script needs the same
+# xgboost/pandas/pyarrow/scikit-learn/scikit-learn-intelex stack.
+pandas>=2.2
+pyarrow>=16.0
+scikit-learn>=1.4
+scikit-learn-intelex>=2024.0
+xgboost>=2.0

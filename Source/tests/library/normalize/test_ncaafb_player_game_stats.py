@@ -58,10 +58,14 @@ class TestGamePlayerStatsToPlayerGameStats:
 
         assert stats_items[0]["stat_line"] == {"passing_touchdowns": 3}
 
-    def test_slash_separated_type_name_maps_correctly(self):
+    def test_slash_separated_type_name_splits_into_completions_and_attempts(self):
         # Confirmed live: CFBD's real type name is "C/ATT" (slash), not
         # the dash-separated "C-ATT" this project's own Phase 1 notes
-        # assumed -- a real gap this test locks in against regressing.
+        # assumed. Also confirmed live the value itself is a compound
+        # "20/28" string -- stored unsplit (and thus silently dropped by
+        # rolling_player_stat_averages, which only sums int/float values)
+        # until this was caught; real passing-attempts volume is what
+        # identify_starting_qb needs to find a team's starting QB.
         box_score = _box_score(teams=[
             _team_block("home", [{"name": "passing", "types": [
                 {"name": "C/ATT", "athletes": [{"id": "111", "name": "Carson Beck", "stat": "20/28"}]},
@@ -70,7 +74,22 @@ class TestGamePlayerStatsToPlayerGameStats:
 
         stats_items, _ = game_player_stats_to_player_game_stats(box_score, "ncaafb")
 
-        assert stats_items[0]["stat_line"] == {"passing_completions_attempts": "20/28"}
+        assert stats_items[0]["stat_line"] == {"passing_completions": 20, "passing_attempts": 28}
+
+    def test_kicking_fg_and_xp_split_into_made_and_attempted(self):
+        box_score = _box_score(teams=[
+            _team_block("home", [{"name": "kicking", "types": [
+                {"name": "FG", "athletes": [{"id": "111", "name": "Kicker", "stat": "1/2"}]},
+                {"name": "XP", "athletes": [{"id": "111", "name": "Kicker", "stat": "3/3"}]},
+            ]}]),
+        ])
+
+        stats_items, _ = game_player_stats_to_player_game_stats(box_score, "ncaafb")
+
+        assert stats_items[0]["stat_line"] == {
+            "kicking_field_goals_made": 1, "kicking_field_goals_attempted": 2,
+            "kicking_extra_points_made": 3, "kicking_extra_points_attempted": 3,
+        }
 
     def test_unmapped_slash_separated_type_name_falls_back_to_lowercase_with_underscore(self):
         box_score = _box_score(teams=[
@@ -99,7 +118,10 @@ class TestGamePlayerStatsToPlayerGameStats:
         assert stats_items[0]["stat_line"] == {"defensive_sacks": 2}
         assert stats_items[0]["team_id"] == box_score["away_id"]
 
-    def test_unmapped_type_name_falls_back_to_snake_case(self):
+    def test_rushing_carries_maps_to_rushing_attempts(self):
+        # CAR -> "attempts" (not a literal "car" transliteration) so this
+        # matches library/features/ncaafb.py's identify_lead_rusher volume
+        # stat, the same field name NFL's own identify_lead_rusher uses.
         box_score = _box_score(teams=[
             _team_block("home", [{"name": "rushing", "types": [
                 {"name": "CAR", "athletes": [{"id": "111", "name": "Trevor Etienne", "stat": "18"}]},
@@ -108,7 +130,32 @@ class TestGamePlayerStatsToPlayerGameStats:
 
         stats_items, _ = game_player_stats_to_player_game_stats(box_score, "ncaafb")
 
-        assert stats_items[0]["stat_line"] == {"rushing_car": 18}
+        assert stats_items[0]["stat_line"] == {"rushing_attempts": 18}
+
+    def test_receiving_rec_maps_to_receiving_receptions(self):
+        # CFBD has no separate "targets" stat (unlike ESPN) -- REC
+        # (receptions) is the volume signal identify_lead_receiver uses
+        # instead, a documented divergence from NFL's targets-based pick.
+        box_score = _box_score(teams=[
+            _team_block("home", [{"name": "receiving", "types": [
+                {"name": "REC", "athletes": [{"id": "111", "name": "WR1", "stat": "6"}]},
+            ]}]),
+        ])
+
+        stats_items, _ = game_player_stats_to_player_game_stats(box_score, "ncaafb")
+
+        assert stats_items[0]["stat_line"] == {"receiving_receptions": 6}
+
+    def test_unmapped_type_name_falls_back_to_snake_case(self):
+        box_score = _box_score(teams=[
+            _team_block("home", [{"name": "rushing", "types": [
+                {"name": "LONG", "athletes": [{"id": "111", "name": "Trevor Etienne", "stat": "18"}]},
+            ]}]),
+        ])
+
+        stats_items, _ = game_player_stats_to_player_game_stats(box_score, "ncaafb")
+
+        assert stats_items[0]["stat_line"] == {"rushing_long": 18}
 
     def test_single_athlete_stats_merge_across_categories(self):
         box_score = _box_score(teams=[

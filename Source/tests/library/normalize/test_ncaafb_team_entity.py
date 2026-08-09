@@ -13,7 +13,7 @@ def _team(team_id="61", school="Georgia", **extra):
         "mascot": "Bulldogs",
         "abbreviation": "UGA",
         "conference": "SEC",
-        "location": {"dome": False, "grass": True},
+        "location": {"dome": False, "grass": True, "latitude": 33.9498, "longitude": -83.3733},
         **extra,
     }
 
@@ -39,6 +39,8 @@ class TestTeamToEntity:
             "mascot": "Bulldogs",
             "conference": "SEC",
             "venue_indoor": False,
+            "latitude": 33.9498,
+            "longitude": -83.3733,
         }
 
     def test_venue_indoor_true_for_a_dome_team(self):
@@ -50,6 +52,13 @@ class TestTeamToEntity:
         del team["location"]
         entity = team_to_entity(team, "ncaafb")
         assert entity["metadata"]["venue_indoor"] is None
+
+    def test_latitude_and_longitude_none_when_location_missing(self):
+        team = _team()
+        del team["location"]
+        entity = team_to_entity(team, "ncaafb")
+        assert entity["metadata"]["latitude"] is None
+        assert entity["metadata"]["longitude"] is None
 
     def test_numeric_team_id_is_coerced_to_string(self):
         entity = team_to_entity(_team(team_id=61), "ncaafb")

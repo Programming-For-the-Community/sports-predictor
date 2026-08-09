@@ -76,6 +76,18 @@ class TestGameToEventItem:
         item = game_to_event_item(_game(), "ncaafb")
         assert item["venue_indoor"] is None
 
+    def test_is_playoff_game_true_for_a_real_cfp_game(self):
+        item = game_to_event_item(_game(playoff={"competition": "cfp", "round": "first_round"}), "ncaafb")
+        assert item["is_playoff_game"] is True
+
+    def test_is_playoff_game_false_for_an_ordinary_bowl(self):
+        item = game_to_event_item(_game(seasonType="postseason", notes="Cricket Celebration Bowl"), "ncaafb")
+        assert item["is_playoff_game"] is False
+
+    def test_is_playoff_game_false_when_playoff_field_absent(self):
+        item = game_to_event_item(_game(), "ncaafb")
+        assert item["is_playoff_game"] is False
+
 
 class TestGameToEventItemCoachAndRank:
     """Coach/rank fields are attached by ingest's enrich_games
