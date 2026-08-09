@@ -117,6 +117,46 @@ class TestXGBoostRegressorAdapter:
         assert model_types.XGBoostRegressorAdapter().task == "regression"
 
 
+class TestXgbGpuDeviceKwargs:
+    """_XGB_GPU_DEVICE is captured from the environment once at import
+    time -- these patch the module attribute directly rather than
+    os.environ, same as every other env-var-driven module constant in
+    this codebase's own test conventions."""
+
+    def test_estimator_kwargs_empty_by_default(self):
+        with patch.object(model_types, "_XGB_GPU_DEVICE", None):
+            assert model_types._xgb_estimator_kwargs() == {}
+
+    def test_estimator_kwargs_include_device_and_tree_method_when_set(self):
+        with patch.object(model_types, "_XGB_GPU_DEVICE", "cuda"):
+            assert model_types._xgb_estimator_kwargs() == {"tree_method": "hist", "device": "cuda"}
+
+    def test_search_n_jobs_is_all_cores_by_default(self):
+        with patch.object(model_types, "_XGB_GPU_DEVICE", None):
+            assert model_types._xgb_search_n_jobs() == -1
+
+    def test_search_n_jobs_is_one_when_gpu_device_set(self):
+        # A single GPU can't be fanned out across parallel search workers
+        # the way CPU cores can -- see model_types.py's own comment.
+        with patch.object(model_types, "_XGB_GPU_DEVICE", "cuda"):
+            assert model_types._xgb_search_n_jobs() == 1
+
+    def test_regressor_tune_and_fit_passes_gpu_kwargs_through_when_device_set(self):
+        adapter = model_types.XGBoostRegressorAdapter()
+        mock_search = MagicMock()
+        mock_search.best_params_ = {"max_depth": 4}
+        mock_fitted = MagicMock()
+        mock_fitted.get_booster.return_value = "the-booster"
+
+        with patch.object(model_types, "_XGB_GPU_DEVICE", "cuda"), \
+             patch.object(model_types, "RandomizedSearchCV", return_value=mock_search) as mock_search_cls, \
+             patch.object(model_types.xgb, "XGBRegressor", return_value=mock_fitted) as mock_cls:
+            adapter.tune_and_fit(_df(), pd.Series([10.0, 20.0, 30.0, 40.0]))
+
+        assert mock_search_cls.call_args.kwargs["n_jobs"] == 1
+        mock_cls.assert_called_with(objective="reg:squarederror", max_depth=4, tree_method="hist", device="cuda")
+
+
 class TestLogisticRegressionAdapter:
     def _mock_pipeline(self, coefficients=(0.5, -0.3)):
         mock_pipeline = MagicMock()

@@ -1,12 +1,13 @@
-# Registry-driven fan-out: scans the sport registry for active sports and
-# invokes each one's own ingest Lambda by name, resolved at runtime via
-# the "${var.project}-<sport>-ingest" naming convention every ingest
+# Registry-driven fan-out: scans the sport registry for in-season sports
+# and invokes each one's own ingest Lambda by name, resolved at runtime
+# via the "${var.project}-<sport>-ingest" naming convention every ingest
 # Lambda follows (see lambda-nfl-ingest.tf). Onboarding a new sport means
 # deploying its own ingest Lambda under that name and adding a registry
 # row -- no state machine change. Triggered by
 # scheduler-ingest-orchestrator.tf, once daily, year-round -- season
-# gating is each sport's own `active` flag on its registry row (see
-# dynamodb-sport-registry.tf).
+# gating is each sport's own season_start/season_end window on its
+# registry row (see dynamodb-sport-registry.tf), checked via the
+# season-gate Lambda (lambda-season-gate.tf).
 #
 # Standard, not Express: this project's volume (single-digit sports,
 # daily cadence) is a few hundred state transitions/month, well inside
@@ -19,10 +20,10 @@ resource "aws_sfn_state_machine" "ingest_orchestrator" {
 
   definition = <<EOF
 {
-  "Comment": "Scans the sport registry for active sports and invokes each one's ingest Lambda.",
-  "StartAt": "ScanActiveSports",
+  "Comment": "Scans the sport registry for in-season sports and invokes each one's ingest Lambda.",
+  "StartAt": "ScanSportRegistry",
   "States": {
-    "ScanActiveSports": {
+    "ScanSportRegistry": {
       "Type": "Task",
       "Resource": "arn:aws:states:::aws-sdk:dynamodb:scan",
       "Parameters": {
@@ -41,14 +42,36 @@ resource "aws_sfn_state_machine" "ingest_orchestrator" {
         "ProcessorConfig": {
           "Mode": "INLINE"
         },
-        "StartAt": "IsActive",
+        "StartAt": "CheckSeason",
         "States": {
-          "IsActive": {
+          "CheckSeason": {
+            "Type": "Task",
+            "Resource": "arn:aws:states:::lambda:invoke",
+            "Comment": "season_start/season_end are year-agnostic \"MM-DD\" strings (dynamodb-sport-registry.tf) -- season-gate (lambda-season-gate.tf) recomputes membership fresh every run rather than reading a stored on/off bit.",
+            "Parameters": {
+              "FunctionName": "${aws_lambda_function.season_gate.function_name}",
+              "Payload": {
+                "season_start.$": "$.season_start.S",
+                "season_end.$": "$.season_end.S"
+              }
+            },
+            "ResultSelector": {
+              "in_season.$": "$.Payload.in_season"
+            },
+            "ResultPath": "$.season_check",
+            "Catch": [
+              {
+                "ErrorEquals": ["States.ALL"],
+                "Next": "SportInactive"
+              }
+            ],
+            "Next": "IsInSeason"
+          },
+          "IsInSeason": {
             "Type": "Choice",
-            "Comment": "Filtered here, not in the Scan above -- aws-sdk:dynamodb:scan rejects a BOOL-typed FilterExpression value. Variable is $.active.Bool: the aws-sdk: integration marshals DynamoDB's Boolean type as \"Bool\", not \"BOOL\".",
             "Choices": [
               {
-                "Variable": "$.active.Bool",
+                "Variable": "$.season_check.in_season",
                 "BooleanEquals": true,
                 "Next": "InvokeIngestLambda"
               }

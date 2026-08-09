@@ -100,3 +100,11 @@ jobs:
       ingest_function_name: ${{ needs.infra.outputs.ncaafb_ingest_function_name }}
       normalize_function_name: ${{ needs.infra.outputs.ncaafb_normalize_function_name }}
       schedule_sync_function_name: ${{ needs.infra.outputs.ncaafb_schedule_sync_function_name }}
+
+  shared_lambdas_deploy:
+    name: Shared lambdas (deploy)
+    needs: infra
+    uses: ./.github/workflows/shared_lambdas_deploy.yml
+    secrets: inherit
+    with:
+      season_gate_function_name: ${{ needs.infra.outputs.season_gate_function_name }}

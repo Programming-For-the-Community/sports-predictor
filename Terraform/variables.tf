@@ -163,7 +163,7 @@ variable "third_party_api_key_secret_arn" {
 variable "fargate_account_vcpu_limit" {
   description = "Account-wide Fargate on-demand concurrent vCPU quota (as shown in the Service Quotas console for 'Fargate On-Demand vCPU count')"
   type        = number
-  default     = 250
+  default     = 64
   nullable    = false
 }
 
@@ -182,7 +182,7 @@ variable "training_vcpu_budget_fraction" {
 variable "training_task_vcpu" {
   description = "vCPU allocated to each concurrent training ECS task (win-probability/score/player-prop). Must be a value Fargate actually supports; lowering it raises local.training_max_concurrency for the same vCPU budget"
   type        = number
-  default     = 4
+  default     = 16
   nullable    = false
 
   validation {
@@ -199,10 +199,46 @@ variable "training_task_memory_per_vcpu_mib" {
 }
 
 variable "training_min_concurrent_tasks" {
-  description = "Floor on concurrent training tasks regardless of the vCPU-budget math -- keeps a shrunken vCPU budget or an oversized training_task_vcpu from serializing training down to one task at a time"
+  description = "Target concurrency to aim for when the vCPU-budget math alone would serialize training down to just one or two tasks at a time -- a target, not an unconditional floor: locals-training-compute.tf clamps the actual result so this can never push concurrency past what training_vcpu_budget actually allows"
   type        = number
   default     = 5
   nullable    = false
+}
+
+# ── Feature-engineering compute ──────────────────────────────────────────────
+# Per-sport cpu/memory for each sport's standalone feature-engineering
+# Fargate task (ecs-task-<sport>-feature-engineering.tf). Unlike training
+# compute above, this isn't budget/concurrency math -- each sport's
+# feature-engineering task runs alone, holding its full history in memory
+# at once, and that history's size varies hugely by sport (NCAAFB's full
+# FBS backfill is already well beyond NFL's; a future non-football sport
+# could be larger still). Onboarding a new sport means adding its own
+# entry to both maps below -- no fallback default, so a missed entry fails
+# the apply instead of silently under-provisioning a new sport's task.
+
+variable "feature_engineering_task_cpu" {
+  description = "Fargate CPU units (1024 per vCPU) for each sport's feature-engineering task, keyed by sport -- left at NFL's original size since nothing has ever indicated NFL's task is CPU-bound; only bump a sport's entry here if evidence (throttling, a run that's slow rather than OOM-killed) actually points at CPU, not just because memory needed raising"
+  type        = map(number)
+  default = {
+    nfl    = 1024
+    ncaafb = 1024
+  }
+  nullable = false
+
+  validation {
+    condition     = alltrue([for v in values(var.feature_engineering_task_cpu) : contains([256, 512, 1024, 2048, 4096, 8192, 16384], v)])
+    error_message = "Every feature_engineering_task_cpu value must be one of Fargate's supported CPU units: 256, 512, 1024, 2048, 4096, 8192, 16384."
+  }
+}
+
+variable "feature_engineering_task_memory" {
+  description = "Fargate memory (MiB) for each sport's feature-engineering task, keyed by sport -- ncaafb's real 10-season FBS backfill was OOM-killed at 2048 (Reason: OutOfMemoryError), so it's raised to 8192, the max memory Fargate allows at cpu=1024 without also raising cpu; nfl is left unchanged since it has never shown a memory problem"
+  type        = map(number)
+  default = {
+    nfl    = 2048
+    ncaafb = 8192
+  }
+  nullable = false
 }
 
 # ── DNS / TLS ─────────────────────────────────────────────────────────────────

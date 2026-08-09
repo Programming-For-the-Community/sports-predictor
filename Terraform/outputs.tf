@@ -90,6 +90,16 @@ output "nfl_predict_function_name" {
   value       = aws_lambda_function.nfl_predict.function_name
 }
 
+output "season_gate_function_name" {
+  description = "Shared season-gate Lambda function name -- passed to shared_lambdas_deploy workflow for `aws lambda update-function-code`"
+  value       = aws_lambda_function.season_gate.function_name
+}
+
+output "sagemaker_gpu_poc_role_arn" {
+  description = "Execution role ARN for the one-off SageMaker GPU training benchmark -- passed to Source/model-training/ncaafb/sagemaker_gpu_poc/invoke.py via --role-arn (or read directly with `terraform output -raw sagemaker_gpu_poc_role_arn`)"
+  value       = aws_iam_role.sagemaker_gpu_poc.arn
+}
+
 output "nfl_predict_read_function_name" {
   description = "NFL predict-read Lambda function name -- passed to nfl_deploy workflow for `aws lambda update-function-code`"
   value       = aws_lambda_function.nfl_predict_read.function_name

@@ -53,6 +53,9 @@ on:
       nfl_predict_function_name:
         description: 'NFL predict Lambda function name'
         value: ${{ jobs.terraform.outputs.nfl_predict_function_name }}
+      season_gate_function_name:
+        description: 'Shared season-gate Lambda function name'
+        value: ${{ jobs.terraform.outputs.season_gate_function_name }}
       nfl_predict_read_function_name:
         description: 'NFL predict-read Lambda function name'
         value: ${{ jobs.terraform.outputs.nfl_predict_read_function_name }}
@@ -133,6 +136,7 @@ jobs:
       nfl_normalize_function_name: ${{ steps.tf_outputs.outputs.nfl_normalize_function_name }}
       nfl_schedule_sync_function_name: ${{ steps.tf_outputs.outputs.nfl_schedule_sync_function_name }}
       nfl_predict_function_name: ${{ steps.tf_outputs.outputs.nfl_predict_function_name }}
+      season_gate_function_name: ${{ steps.tf_outputs.outputs.season_gate_function_name }}
       nfl_predict_read_function_name: ${{ steps.tf_outputs.outputs.nfl_predict_read_function_name }}
       nfl_live_scores_function_name: ${{ steps.tf_outputs.outputs.nfl_live_scores_function_name }}
       ncaafb_ingest_function_name: ${{ steps.tf_outputs.outputs.ncaafb_ingest_function_name }}
@@ -270,6 +274,7 @@ jobs:
         capture_output nfl_normalize_function_name
         capture_output nfl_schedule_sync_function_name
         capture_output nfl_predict_function_name
+        capture_output season_gate_function_name
         capture_output nfl_predict_read_function_name
         capture_output nfl_live_scores_function_name
         capture_output ncaafb_ingest_function_name

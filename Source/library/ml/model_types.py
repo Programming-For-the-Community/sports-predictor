@@ -33,6 +33,7 @@ XGBoostClassifierAdapter/XGBoostRegressorAdapter subclasses to know which
 objective/scoring to tune with.
 """
 import io
+import os
 from typing import Any, Protocol
 
 import joblib
@@ -137,6 +138,33 @@ _XGB_SEARCH_ITERATIONS = 400
 _XGB_CV_SPLITS = 8
 _XGB_RANDOM_STATE = 42
 
+# Unset (the default) leaves every XGBoost fit exactly as it's always
+# been -- CPU, tree_method left at XGBoost's own default. Set to e.g.
+# "cuda" to GPU-accelerate the actual tree-building on a GPU-enabled
+# instance (SageMaker script mode, not Fargate -- see
+# Source/model-training/ncaafb/sagemaker_gpu_poc/ for the one-off
+# benchmark this exists for).
+_XGB_GPU_DEVICE = os.environ.get("XGBOOST_DEVICE")
+
+
+def _xgb_estimator_kwargs() -> dict:
+    """Extra kwargs merged into every XGBRegressor/XGBClassifier
+    construction below -- empty (today's unchanged behavior) unless
+    _XGB_GPU_DEVICE is set."""
+    if not _XGB_GPU_DEVICE:
+        return {}
+    return {"tree_method": "hist", "device": _XGB_GPU_DEVICE}
+
+
+def _xgb_search_n_jobs() -> int:
+    """RandomizedSearchCV's own n_jobs -- -1 (today's default) fans the
+    search's _XGB_SEARCH_ITERATIONS * _XGB_CV_SPLITS = 3,200 independent
+    fits out across every CPU core. That's exactly wrong for a single
+    GPU: parallel workers would contend for the one device instead of
+    speeding anything up, so this drops to 1 (fits run one at a time,
+    each one itself GPU-accelerated) whenever _XGB_GPU_DEVICE is set."""
+    return 1 if _XGB_GPU_DEVICE else -1
+
 
 class XGBoostClassifierAdapter(XGBoostAdapter):
     def __init__(self):
@@ -144,17 +172,17 @@ class XGBoostClassifierAdapter(XGBoostAdapter):
 
     def tune_and_fit(self, X_train: pd.DataFrame, y_train: pd.Series) -> tuple[xgb.Booster, dict]:
         search = RandomizedSearchCV(
-            xgb.XGBClassifier(objective="binary:logistic", eval_metric="logloss", n_jobs=1),
+            xgb.XGBClassifier(objective="binary:logistic", eval_metric="logloss", n_jobs=1, **_xgb_estimator_kwargs()),
             param_distributions=_XGB_PARAM_DISTRIBUTIONS,
             n_iter=_XGB_SEARCH_ITERATIONS,
             scoring="neg_log_loss",
             cv=TimeSeriesSplit(n_splits=_XGB_CV_SPLITS),
             random_state=_XGB_RANDOM_STATE,
             verbose=10,
-            n_jobs=-1,
+            n_jobs=_xgb_search_n_jobs(),
         )
         search.fit(X_train, y_train)
-        model = xgb.XGBClassifier(objective="binary:logistic", eval_metric="logloss", **search.best_params_)
+        model = xgb.XGBClassifier(objective="binary:logistic", eval_metric="logloss", **search.best_params_, **_xgb_estimator_kwargs())
         model.fit(X_train, y_train)
         return model.get_booster(), search.best_params_
 
@@ -165,17 +193,17 @@ class XGBoostRegressorAdapter(XGBoostAdapter):
 
     def tune_and_fit(self, X_train: pd.DataFrame, y_train: pd.Series) -> tuple[xgb.Booster, dict]:
         search = RandomizedSearchCV(
-            xgb.XGBRegressor(objective="reg:squarederror", n_jobs=1),
+            xgb.XGBRegressor(objective="reg:squarederror", n_jobs=1, **_xgb_estimator_kwargs()),
             param_distributions=_XGB_PARAM_DISTRIBUTIONS,
             n_iter=_XGB_SEARCH_ITERATIONS,
             scoring="neg_root_mean_squared_error",
             cv=TimeSeriesSplit(n_splits=_XGB_CV_SPLITS),
             random_state=_XGB_RANDOM_STATE,
             verbose=10,
-            n_jobs=-1,
+            n_jobs=_xgb_search_n_jobs(),
         )
         search.fit(X_train, y_train)
-        model = xgb.XGBRegressor(objective="reg:squarederror", **search.best_params_)
+        model = xgb.XGBRegressor(objective="reg:squarederror", **search.best_params_, **_xgb_estimator_kwargs())
         model.fit(X_train, y_train)
         return model.get_booster(), search.best_params_
 
