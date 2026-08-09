@@ -10,6 +10,7 @@ terraform.tfstate.*
 *.swp
 *.swo
 .claude/
+scratchpad/
 
 # Python
 __pycache__/

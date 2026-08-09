@@ -1,0 +1,102 @@
+# Builds, packages, and deploys the NCAAFB AI training code. Runs
+# standalone (workflow_dispatch) or called from ncaafb_deploy.yml
+# (workflow_call) -- either way the work is identical: build and push
+# image(s). Mirrors nfl_ai_training.yml's shape and reasoning exactly.
+#
+# Three images: feature engineering, win-probability/score/player-prop
+# training (one shared image -- see Source/model-training/ncaafb/
+# Dockerfile), and national-ranking training (its OWN image -- see
+# Source/model-training/ncaafb/Dockerfile.ranking and Terraform/
+# ecs-task-ncaafb-train-ranking-model.tf's own comment for why the
+# ranking model doesn't share the other three's image).
+#
+# Each image gets its OWN version constant below, bumped independently --
+# same reasoning as nfl_ai_training.yml's own comment. Bump only the
+# constant for whichever image actually changed.
+
+name: NCAAFB AI Training
+
+on:
+  workflow_dispatch:
+  workflow_call:
+
+env:
+  FEATURE_ENGINEERING_IMAGE_VERSION: '1.0.0'
+  TRAIN_WIN_PROBABILITY_MODEL_IMAGE_VERSION: '1.0.0'
+  TRAIN_RANKING_MODEL_IMAGE_VERSION: '1.0.0'
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  # Two independent test jobs, not one shared one -- same reasoning as
+  # nfl_ai_training.yml's own comment (a failing test in one component
+  # shouldn't block an unrelated image's build). One test job covers all
+  # four training scripts (win-probability/score/player-prop/ranking) --
+  # they share one requirements.txt and one tests/model-training/ncaafb/
+  # directory, unlike NFL which has no ranking model to cover.
+  test-feature-engineering:
+    name: Run feature engineering tests
+    uses: ./.github/workflows/run_python_tests.yml
+    with:
+      test_path: 'Source/tests/library/ Source/tests/feature-engineering/ncaafb/ --ignore=Source/tests/library/ml'
+      requirements_files: 'Source/feature-engineering/ncaafb/requirements.txt'
+
+  test-train-models:
+    name: Run training model tests
+    uses: ./.github/workflows/run_python_tests.yml
+    with:
+      test_path: 'Source/tests/library/ Source/tests/model-training/ncaafb/'
+      requirements_files: 'Source/model-training/ncaafb/requirements.txt'
+
+  set-versions:
+    name: Resolve image versions
+    runs-on: ubuntu-latest
+    outputs:
+      feature_engineering_version: ${{ steps.out.outputs.feature_engineering_version }}
+      train_win_probability_model_version: ${{ steps.out.outputs.train_win_probability_model_version }}
+      train_ranking_model_version: ${{ steps.out.outputs.train_ranking_model_version }}
+    steps:
+      - id: out
+        run: |
+          echo "feature_engineering_version=${{ env.FEATURE_ENGINEERING_IMAGE_VERSION }}" >> "$GITHUB_OUTPUT"
+          echo "train_win_probability_model_version=${{ env.TRAIN_WIN_PROBABILITY_MODEL_IMAGE_VERSION }}" >> "$GITHUB_OUTPUT"
+          echo "train_ranking_model_version=${{ env.TRAIN_RANKING_MODEL_IMAGE_VERSION }}" >> "$GITHUB_OUTPUT"
+
+  build-feature-engineering-image:
+    name: Build and push feature engineering image
+    needs: [set-versions, test-feature-engineering]
+    uses: ./.github/workflows/docker_build_push.yml
+    secrets: inherit
+    with:
+      dockerfile_path: 'Source/feature-engineering/ncaafb/Dockerfile'
+      docker_context: 'Source'
+      image_name: 'ncaafb-feature-engineering'
+      image_version: ${{ needs.set-versions.outputs.feature_engineering_version }}
+
+  # Also covers train_score_model.py/train_player_prop_model.py -- their
+  # own task definitions (ecs-task-ncaafb-train-score-model.tf, ecs-task-
+  # ncaafb-train-player-prop-model.tf) reference this same image tag with
+  # a container command override, same as NFL's equivalent tasks.
+  build-train-win-probability-model-image:
+    name: Build and push train win-probability/score/player-prop model image
+    needs: [set-versions, test-train-models]
+    uses: ./.github/workflows/docker_build_push.yml
+    secrets: inherit
+    with:
+      dockerfile_path: 'Source/model-training/ncaafb/Dockerfile'
+      docker_context: 'Source'
+      image_name: 'ncaafb-train-win-probability-model'
+      image_version: ${{ needs.set-versions.outputs.train_win_probability_model_version }}
+
+  build-train-ranking-model-image:
+    name: Build and push train ranking model image
+    needs: [set-versions, test-train-models]
+    uses: ./.github/workflows/docker_build_push.yml
+    secrets: inherit
+    with:
+      dockerfile_path: 'Source/model-training/ncaafb/Dockerfile.ranking'
+      docker_context: 'Source'
+      image_name: 'ncaafb-train-ranking-model'
+      image_version: ${{ needs.set-versions.outputs.train_ranking_model_version }}
