@@ -14,17 +14,30 @@ resource "aws_cloudwatch_log_group" "training_orchestrator" {
   })
 }
 
-# One registry-driven state machine: for each active sport, run its
-# feature-engineering task, then fan out over its own training_targets
-# list (see dynamodb-sport-registry.tf) to run every training target as
-# its own ECS task. TrainAllTargets' MaxConcurrency (locals-training-
-# compute.tf) caps how many training tasks run at once, to stay under the
-# account's Fargate on-demand vCPU quota -- and runs in Distributed mode
-# specifically because that cap can be well above Standard/INLINE Map's
-# hard 40-concurrent-iteration ceiling once training_task_vcpu is sized
-# down. ForEachSport (the outer, per-sport Map) stays INLINE -- it isn't
-# vCPU-budget-constrained the way TrainAllTargets is, and today only ever
-# fans out over one active sport.
+# One registry-driven state machine: for each in-season sport (per its
+# season_start/season_end window, checked via the season-gate Lambda --
+# lambda-season-gate.tf), run its feature-engineering task, then fan out
+# over its own training_targets list (see dynamodb-sport-registry.tf) to
+# run every training target as its own ECS task. TrainAllTargets'
+# MaxConcurrency (locals-training-compute.tf) caps how many training
+# tasks run at once, to stay under the account's Fargate on-demand vCPU
+# quota -- and runs in Distributed mode specifically because that cap can
+# be well above Standard/INLINE Map's hard 40-concurrent-iteration
+# ceiling once training_task_vcpu is sized down.
+#
+# ForEachSport (the outer, per-sport Map) stays INLINE, but its own
+# MaxConcurrency is pinned to 1 -- deliberately, not left at some higher
+# default. training_vcpu_budget_fraction (locals-training-compute.tf) is
+# sized as a fraction of the WHOLE account's Fargate quota, on the
+# assumption that only one sport's TrainAllTargets Map is ever spending
+# it at a time; each sport's own inner Map has no visibility into any
+# other sport's concurrently-running one, so two sports training at once
+# would each independently spend up to the full budget, together well
+# over the account's real quota. Serializing sports here, not splitting
+# the budget N ways, is what actually enforces the shared limit -- it
+# costs total training wall-clock time when multiple sports are in
+# season together (NFL and NCAAFB both are, most of the year), not
+# correctness.
 resource "aws_sfn_state_machine" "training_orchestrator" {
   name     = "${var.project}-training-orchestrator"
   role_arn = aws_iam_role.stepfunctions_orchestrator.arn
@@ -42,10 +55,10 @@ resource "aws_sfn_state_machine" "training_orchestrator" {
 
   definition = <<EOF
 {
-  "Comment": "Scans the sport registry for active sports, rebuilds each one's training dataset, then trains every one of its registered targets.",
-  "StartAt": "ScanActiveSports",
+  "Comment": "Scans the sport registry for in-season sports, rebuilds each one's training dataset, then trains every one of its registered targets.",
+  "StartAt": "ScanSportRegistry",
   "States": {
-    "ScanActiveSports": {
+    "ScanSportRegistry": {
       "Type": "Task",
       "Resource": "arn:aws:states:::aws-sdk:dynamodb:scan",
       "Parameters": {
@@ -56,19 +69,42 @@ resource "aws_sfn_state_machine" "training_orchestrator" {
     "ForEachSport": {
       "Type": "Map",
       "ItemsPath": "$.Items",
-      "MaxConcurrency": 3,
+      "MaxConcurrency": 1,
+      "Comment": "Pinned to 1, not left at a higher default -- see this file's top comment. training_vcpu_budget_fraction assumes only one sport's TrainAllTargets Map spends it at a time; running sports concurrently here would let each independently spend the full budget with no cross-sport coordination.",
       "ItemProcessor": {
         "ProcessorConfig": {
           "Mode": "INLINE"
         },
-        "StartAt": "IsActive",
+        "StartAt": "CheckSeason",
         "States": {
-          "IsActive": {
+          "CheckSeason": {
+            "Type": "Task",
+            "Resource": "arn:aws:states:::lambda:invoke",
+            "Comment": "season_start/season_end are year-agnostic \"MM-DD\" strings (dynamodb-sport-registry.tf) -- season-gate (lambda-season-gate.tf) recomputes membership fresh every run rather than reading a stored on/off bit.",
+            "Parameters": {
+              "FunctionName": "${aws_lambda_function.season_gate.function_name}",
+              "Payload": {
+                "season_start.$": "$.season_start.S",
+                "season_end.$": "$.season_end.S"
+              }
+            },
+            "ResultSelector": {
+              "in_season.$": "$.Payload.in_season"
+            },
+            "ResultPath": "$.season_check",
+            "Catch": [
+              {
+                "ErrorEquals": ["States.ALL"],
+                "Next": "SportInactive"
+              }
+            ],
+            "Next": "IsInSeason"
+          },
+          "IsInSeason": {
             "Type": "Choice",
-            "Comment": "Filtered here, not in the Scan above -- aws-sdk:dynamodb:scan rejects a BOOL-typed FilterExpression value. Variable is $.active.Bool: the aws-sdk: integration marshals DynamoDB's Boolean type as \"Bool\", not \"BOOL\".",
             "Choices": [
               {
-                "Variable": "$.active.Bool",
+                "Variable": "$.season_check.in_season",
                 "BooleanEquals": true,
                 "Next": "RunFeatureEngineering"
               }

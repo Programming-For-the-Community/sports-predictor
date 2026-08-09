@@ -35,6 +35,15 @@ data "aws_iam_policy_document" "stepfunctions_orchestrator_permissions" {
     resources = ["arn:aws:lambda:${var.region}:${var.account_id}:function:${var.project}-*-ingest"]
   }
 
+  # season-gate (lambda-season-gate.tf) -- doesn't match the *-ingest
+  # pattern above since it's shared, not per-sport, so it needs its own
+  # statement.
+  statement {
+    sid       = "InvokeSeasonGateLambda"
+    actions   = ["lambda:InvokeFunction"]
+    resources = [aws_lambda_function.season_gate.arn]
+  }
+
   statement {
     sid       = "RunTrainingTasks"
     actions   = ["ecs:RunTask", "ecs:StopTask", "ecs:DescribeTasks"]

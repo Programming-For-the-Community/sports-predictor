@@ -10,15 +10,24 @@ locals {
   training_vcpu_budget = floor(var.fargate_account_vcpu_limit * var.training_vcpu_budget_fraction)
 
   # How many training tasks, each sized at training_task_vcpu, fit in that
-  # budget -- floor()'d so concurrent usage never exceeds
-  # training_vcpu_budget, then floored at training_min_concurrent_tasks so
-  # a shrunken budget or an oversized training_task_vcpu can't serialize
-  # training down to one task at a time. Lowering training_task_vcpu (if
-  # CloudWatch/Container Insights shows a training task isn't using all of
-  # its allocated vCPU) raises this automatically, within the same budget.
+  # budget. training_min_concurrent_tasks is a TARGET floor, not an
+  # unconditional one -- min()'d against the budget-derived value below so
+  # it can never push concurrency past training_vcpu_budget, which would
+  # otherwise silently request more vCPU than the account (or the
+  # headroom this fraction deliberately reserves for feature-engineering/
+  # ingest/backfill tasks) actually has, and fail ECS RunTask calls once
+  # real concurrency hit that ceiling. That's not hypothetical: at
+  # training_task_vcpu=16 and a real 64-vCPU account quota, the raw
+  # budget-derived value is only 2 -- training_min_concurrent_tasks'
+  # default of 5 would have demanded 80 vCPU before this clamp existed.
+  # max(1, ...) still guarantees training never fully serializes to zero
+  # concurrency if the budget math rounds down that far.
   training_max_concurrency = max(
-    var.training_min_concurrent_tasks,
-    floor(local.training_vcpu_budget / var.training_task_vcpu),
+    1,
+    min(
+      var.training_min_concurrent_tasks,
+      floor(local.training_vcpu_budget / var.training_task_vcpu),
+    ),
   )
 
   # Fargate task definitions take cpu/memory as strings, in CPU units

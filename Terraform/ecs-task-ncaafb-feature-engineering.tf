@@ -19,8 +19,8 @@ resource "aws_ecs_task_definition" "ncaafb_feature_engineering" {
   family                   = "${var.project}-ncaafb-feature-engineering"
   requires_compatibilities = ["FARGATE"]
   network_mode             = "awsvpc"
-  cpu                      = "1024"
-  memory                   = "2048"
+  cpu                      = tostring(var.feature_engineering_task_cpu["ncaafb"])
+  memory                   = tostring(var.feature_engineering_task_memory["ncaafb"])
   execution_role_arn       = aws_iam_role.ecs_pipeline.arn
   task_role_arn            = aws_iam_role.ecs_pipeline.arn
 

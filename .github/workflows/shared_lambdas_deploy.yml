@@ -1,0 +1,50 @@
+# Tests and deploys the season-gate Lambda (Terraform/lambda-season-gate.tf)
+# -- shared across every sport, not owned by either sport's own pipeline,
+# so this is its own file rather than living in nfl_data_pipeline.yml or
+# ncaafb_data_pipeline.yml. Zip-packaged, so this deploys via
+# python_lambda_build.yml directly, same as nfl_live_scores_deploy.yml.
+#
+# A separate reusable workflow, not jobs inlined into nfl_deploy.yml/
+# ncaafb_deploy.yml/app_deploy.yml directly -- same reasoning as
+# nfl_live_scores_deploy.yml's own docstring: every one of those needs to
+# run this exact same test+deploy pair (season-gate is invoked by both
+# orchestrator state machines regardless of which sport's push triggered
+# the run), and duplicating it inline in each is how a deploy job gets
+# missed from one of them the first time.
+#
+# Function name is supplied by the caller from a Terraform output, with a
+# default so workflow_dispatch (manual, standalone run) still works
+# without needing that wiring -- same pattern as nfl_live_scores_deploy.yml.
+
+name: Shared Lambdas Deploy
+
+on:
+  workflow_dispatch:
+  workflow_call:
+    inputs:
+      season_gate_function_name:
+        description: 'season-gate Lambda function name (from Terraform output season_gate_function_name)'
+        required: false
+        type: string
+        default: 'sports-predictor-season-gate'
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  test_season_gate:
+    name: Run season-gate tests
+    uses: ./.github/workflows/run_python_tests.yml
+    with:
+      test_path: 'Source/tests/library/test_season.py Source/tests/aws-lambdas/shared/test_season_gate.py'
+
+  deploy_season_gate:
+    name: Deploy season-gate Lambda
+    needs: test_season_gate
+    uses: ./.github/workflows/python_lambda_build.yml
+    secrets: inherit
+    with:
+      function_name: ${{ inputs.season_gate_function_name || 'sports-predictor-season-gate' }}
+      handler_dir: 'Source/aws-lambdas/shared/season-gate'
+      library_path: 'Source/library'

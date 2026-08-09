@@ -1,8 +1,8 @@
 # Drives the ingest-orchestrator and training-orchestrator Step Functions
 # Map states (sfn-ingest-orchestrator.tf, sfn-training-orchestrator.tf) --
-# one row per sport: polling cadence, an active flag (season on/off
-# switch), and a training_targets list. See design/DATA_SCHEMA.md's Sport
-# registry table section.
+# one row per sport: polling cadence, a season_start/season_end window,
+# and a training_targets list. See design/DATA_SCHEMA.md's Sport registry
+# table section.
 resource "aws_dynamodb_table" "sport_registry" {
   name         = local.sport_registry_table
   billing_mode = "PAY_PER_REQUEST"
@@ -41,9 +41,18 @@ locals {
 }
 
 # NFL's own registry row, managed as data (not applied by hand) -- see
-# design/DATA_SCHEMA.md for the full attribute reference. `active` is the
-# season on/off switch; the orchestrators' own schedules run year-round
-# (sfn-ingest-orchestrator.tf), so this is what gates a sport in or out.
+# design/DATA_SCHEMA.md for the full attribute reference. season_start/
+# season_end ("MM-DD", inclusive, crosses the calendar year boundary same
+# as library/season.py handles) is the season on/off switch; the
+# orchestrators' own schedules run year-round (sfn-ingest-orchestrator.tf),
+# so this -- checked by the season-gate Lambda (lambda-season-gate.tf) --
+# is what actually gates a sport in or out. Deliberately NOT a runtime-
+# mutable `active` flag: that was tried first and every `terraform apply`
+# kept silently resetting it back to this file's declared value, since
+# aws_dynamodb_table_item's `item` is managed as one opaque blob with no
+# way to let something outside Terraform own just one of its fields.
+# season_start/season_end don't have that problem -- they're static,
+# intended to change only via a deliberate edit here.
 #
 # training_targets: task_definition_suffix appends to
 # "${var.project}-<sport>-" to resolve the ECS task-definition family at
@@ -62,7 +71,8 @@ resource "aws_dynamodb_table_item" "nfl_registry" {
     sport           = { S = "nfl" }
     event_type      = { S = "head_to_head" }
     polling_cadence = { S = "daily" }
-    active          = { BOOL = true }
+    season_start    = { S = "08-01" } # preseason
+    season_end      = { S = "02-28" } # Super Bowl
 
     training_targets = {
       L = concat(
@@ -141,7 +151,8 @@ resource "aws_dynamodb_table_item" "ncaafb_registry" {
     sport           = { S = "ncaafb" }
     event_type      = { S = "head_to_head" }
     polling_cadence = { S = "daily" }
-    active          = { BOOL = true }
+    season_start    = { S = "07-01" } # fall camp
+    season_end      = { S = "01-31" } # CFP championship
 
     training_targets = {
       L = concat(

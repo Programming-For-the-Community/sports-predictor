@@ -27,8 +27,8 @@ resource "aws_ecs_task_definition" "nfl_feature_engineering" {
   family                   = "${var.project}-nfl-feature-engineering"
   requires_compatibilities = ["FARGATE"]
   network_mode             = "awsvpc"
-  cpu                      = "1024"
-  memory                   = "2048"
+  cpu                      = tostring(var.feature_engineering_task_cpu["nfl"])
+  memory                   = tostring(var.feature_engineering_task_memory["nfl"])
   execution_role_arn       = aws_iam_role.ecs_pipeline.arn
   task_role_arn            = aws_iam_role.ecs_pipeline.arn
 

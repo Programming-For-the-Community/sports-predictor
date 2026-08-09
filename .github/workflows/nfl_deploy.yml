@@ -105,6 +105,14 @@ jobs:
     uses: ./.github/workflows/tf_install.yml
     secrets: inherit
 
+  shared_lambdas_deploy:
+    name: Shared lambdas (deploy)
+    needs: infra
+    uses: ./.github/workflows/shared_lambdas_deploy.yml
+    secrets: inherit
+    with:
+      season_gate_function_name: ${{ needs.infra.outputs.season_gate_function_name }}
+
   deploy_predict_lambda:
     name: AI hosting (deploy)
     needs: [infra, ai_hosting]
