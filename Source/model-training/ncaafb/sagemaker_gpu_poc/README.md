@@ -58,7 +58,7 @@ pip install sagemaker boto3
 
 python invoke.py \
     --role-arn "$(terraform -chdir=../../../../Terraform output -raw sagemaker_gpu_poc_role_arn)" \
-    --bucket <your model-artifacts bucket name>
+    --bucket "$(terraform -chdir=../../../../Terraform output -raw model_artifacts_bucket)"
 ```
 
 `invoke.py --help` for the rest of the flags (`--target-stat`,
