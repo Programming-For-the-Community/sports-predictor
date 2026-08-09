@@ -7,7 +7,7 @@ Sport-specific behaviour -- such as which stat keys pack two numbers into
 one string -- is passed in by the caller via compound_key_splits rather
 than hardcoded here.
 """
-from library.parsing import parse_number, snake_case
+from library.parsing import parse_clock_to_seconds, parse_number, snake_case
 from library.schema.keys import entity_key, entity_team_key, event_key, player_key, team_key
 
 
@@ -275,19 +275,6 @@ def boxscore_to_player_game_stats(
     return player_game_stats_items, player_entities
 
 
-def _parse_clock_to_seconds(display_value):
-    """Converts ESPN's "MM:SS" time-of-possession format (e.g. "23:45")
-    into total seconds. Falls back to the raw value unparsed if it's not
-    clock-shaped."""
-    if not isinstance(display_value, str) or ":" not in display_value:
-        return display_value
-    minutes, _, seconds = display_value.partition(":")
-    try:
-        return int(minutes) * 60 + int(seconds)
-    except ValueError:
-        return display_value
-
-
 def boxscore_to_team_game_stats(
     summary: dict,
     sport: str,
@@ -334,7 +321,7 @@ def boxscore_to_team_game_stats(
                     line[second_name] = parse_number(parts[1])
                     continue
             if name == "possessionTime":
-                line["possession_time_seconds"] = _parse_clock_to_seconds(display_value)
+                line["possession_time_seconds"] = parse_clock_to_seconds(display_value)
                 continue
             line[snake_case(name)] = parse_number(display_value)
 

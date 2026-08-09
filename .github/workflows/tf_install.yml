@@ -53,9 +53,30 @@ on:
       nfl_predict_function_name:
         description: 'NFL predict Lambda function name'
         value: ${{ jobs.terraform.outputs.nfl_predict_function_name }}
+      nfl_predict_read_function_name:
+        description: 'NFL predict-read Lambda function name'
+        value: ${{ jobs.terraform.outputs.nfl_predict_read_function_name }}
       nfl_live_scores_function_name:
         description: 'NFL live-scores Lambda function name'
         value: ${{ jobs.terraform.outputs.nfl_live_scores_function_name }}
+      ncaafb_ingest_function_name:
+        description: 'NCAAFB ingest Lambda function name'
+        value: ${{ jobs.terraform.outputs.ncaafb_ingest_function_name }}
+      ncaafb_normalize_function_name:
+        description: 'NCAAFB normalize Lambda function name'
+        value: ${{ jobs.terraform.outputs.ncaafb_normalize_function_name }}
+      ncaafb_schedule_sync_function_name:
+        description: 'NCAAFB schedule-sync Lambda function name'
+        value: ${{ jobs.terraform.outputs.ncaafb_schedule_sync_function_name }}
+      ncaafb_predict_function_name:
+        description: 'NCAAFB predict Lambda function name'
+        value: ${{ jobs.terraform.outputs.ncaafb_predict_function_name }}
+      ncaafb_predict_read_function_name:
+        description: 'NCAAFB predict-read Lambda function name'
+        value: ${{ jobs.terraform.outputs.ncaafb_predict_read_function_name }}
+      ncaafb_live_scores_function_name:
+        description: 'NCAAFB live-scores Lambda function name'
+        value: ${{ jobs.terraform.outputs.ncaafb_live_scores_function_name }}
       cognito_user_pool_id:
         description: 'Cognito User Pool ID'
         value: ${{ jobs.terraform.outputs.cognito_user_pool_id }}
@@ -96,6 +117,8 @@ env:
   TF_VAR_ecr_repo_url: ${{ secrets.ECR_URI }}
   TF_VAR_espn_api_root_url: ${{ vars.ESPN_API_ROOT_URL }}
   TF_VAR_espn_core_api_root_url: ${{ vars.ESPN_CORE_API_ROOT_URL }}
+  TF_VAR_cfbd_api_root_url: ${{ vars.CFBD_API_ROOT_URL }}
+  TF_VAR_third_party_api_key_secret_arn: ${{ secrets.THIRD_PARTY_API_KEYS_SECRET_ARN }}
   TF_VAR_fargate_account_vcpu_limit: ${{ vars.FARGATE_VCPU_LIMIT }}
   TF_VAR_training_vcpu_budget_fraction: ${{ vars.VCPU_BUDGET_FRACTION }}
   TF_VAR_training_task_vcpu: ${{ vars.TRAINING_TASK_VCPU_LIMIT }}
@@ -110,7 +133,14 @@ jobs:
       nfl_normalize_function_name: ${{ steps.tf_outputs.outputs.nfl_normalize_function_name }}
       nfl_schedule_sync_function_name: ${{ steps.tf_outputs.outputs.nfl_schedule_sync_function_name }}
       nfl_predict_function_name: ${{ steps.tf_outputs.outputs.nfl_predict_function_name }}
+      nfl_predict_read_function_name: ${{ steps.tf_outputs.outputs.nfl_predict_read_function_name }}
       nfl_live_scores_function_name: ${{ steps.tf_outputs.outputs.nfl_live_scores_function_name }}
+      ncaafb_ingest_function_name: ${{ steps.tf_outputs.outputs.ncaafb_ingest_function_name }}
+      ncaafb_normalize_function_name: ${{ steps.tf_outputs.outputs.ncaafb_normalize_function_name }}
+      ncaafb_schedule_sync_function_name: ${{ steps.tf_outputs.outputs.ncaafb_schedule_sync_function_name }}
+      ncaafb_predict_function_name: ${{ steps.tf_outputs.outputs.ncaafb_predict_function_name }}
+      ncaafb_predict_read_function_name: ${{ steps.tf_outputs.outputs.ncaafb_predict_read_function_name }}
+      ncaafb_live_scores_function_name: ${{ steps.tf_outputs.outputs.ncaafb_live_scores_function_name }}
       cognito_user_pool_id: ${{ steps.tf_outputs.outputs.cognito_user_pool_id }}
       cognito_client_id: ${{ steps.tf_outputs.outputs.cognito_client_id }}
       api_endpoint: ${{ steps.tf_outputs.outputs.api_endpoint }}
@@ -153,6 +183,14 @@ jobs:
         fi
         if [ -z "$TF_VAR_espn_core_api_root_url" ]; then
           echo "::error::ESPN_CORE_API_ROOT_URL is not set. Create it under Settings > Secrets and variables > Actions > Variables (value: https://sports.core.api.espn.com/v2/sports/football/leagues/nfl)."
+          exit 1
+        fi
+        if [ -z "$TF_VAR_cfbd_api_root_url" ]; then
+          echo "::error::CFBD_API_ROOT_URL is not set. Create it under Settings > Secrets and variables > Actions > Variables (value: https://api.collegefootballdata.com)."
+          exit 1
+        fi
+        if [ -z "$TF_VAR_third_party_api_key_secret_arn" ]; then
+          echo "::error::THIRD_PARTY_API_KEYS_SECRET_ARN is not set. Create it under Settings > Secrets and variables > Actions > Secrets (value: the ARN of the development/sports-predictor Secrets Manager secret -- get it via: aws secretsmanager describe-secret --secret-id development/sports-predictor --query ARN --output text). variables.tf has no default for this one -- every terraform plan/apply, for every sport, fails without it."
           exit 1
         fi
 
@@ -232,7 +270,14 @@ jobs:
         capture_output nfl_normalize_function_name
         capture_output nfl_schedule_sync_function_name
         capture_output nfl_predict_function_name
+        capture_output nfl_predict_read_function_name
         capture_output nfl_live_scores_function_name
+        capture_output ncaafb_ingest_function_name
+        capture_output ncaafb_normalize_function_name
+        capture_output ncaafb_schedule_sync_function_name
+        capture_output ncaafb_predict_function_name
+        capture_output ncaafb_predict_read_function_name
+        capture_output ncaafb_live_scores_function_name
         capture_output cognito_user_pool_id
         capture_output cognito_client_id
         capture_output api_endpoint

@@ -1,0 +1,4 @@
+requests>=2.31
+# boto3 is pre-installed in the Lambda Python runtime -- not bundled here.
+# The shared library (Source/library) is installed separately by the build
+# workflow via `pip install --no-deps Source/library -t package/`.
