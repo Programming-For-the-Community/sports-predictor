@@ -104,6 +104,6 @@ resource "aws_cloudfront_distribution" "main" {
 
   tags = merge(local.common_tags, {
     Sport     = "shared"
-    Component = "serving"
+    Component = "frontend"
   })
 }
