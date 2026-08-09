@@ -152,6 +152,55 @@ void main() {
     expect(event.leadersComparison!.away.passing, isNull);
   });
 
+  test('venueLabel combines name and city/state', () {
+    final event = SportEvent.fromJson({
+      'event_id': '401547417',
+      'event_date': '2025-09-28',
+      'status': 'scheduled',
+      'week': 4,
+      'participants': [
+        {'entity_id': 'KC', 'role': 'home'},
+        {'entity_id': 'LAC', 'role': 'away'},
+      ],
+      'venue_name': 'Arrowhead Stadium',
+      'venue_city': 'Kansas City',
+      'venue_state': 'MO',
+    });
+
+    expect(event.venueLabel, 'Arrowhead Stadium -- Kansas City, MO');
+  });
+
+  test('venueLabel degrades gracefully when only some venue fields are present', () {
+    final event = SportEvent.fromJson({
+      'event_id': '401547417',
+      'event_date': '2025-09-28',
+      'status': 'scheduled',
+      'week': 4,
+      'participants': [
+        {'entity_id': 'KC', 'role': 'home'},
+        {'entity_id': 'LAC', 'role': 'away'},
+      ],
+      'venue_city': 'London',
+    });
+
+    expect(event.venueLabel, 'London');
+  });
+
+  test('venueLabel is null when no venue fields are present', () {
+    final event = SportEvent.fromJson({
+      'event_id': '401547417',
+      'event_date': '2025-09-28',
+      'status': 'scheduled',
+      'week': 4,
+      'participants': [
+        {'entity_id': 'KC', 'role': 'home'},
+        {'entity_id': 'LAC', 'role': 'away'},
+      ],
+    });
+
+    expect(event.venueLabel, isNull);
+  });
+
   test('leaders_comparison is null when nobody recorded a prediction before the game', () {
     final event = SportEvent.fromJson({
       'event_id': '401547417',

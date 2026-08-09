@@ -67,6 +67,7 @@ def scoreboard_event_to_event_item(event: dict, sport: str) -> dict:
         "season_type": event["season"]["type"],
         "week": event.get("week", {}).get("number"),
         "venue_indoor": venue.get("indoor"),
+        "venue_name": venue.get("fullName"),
         "venue_city": venue_address.get("city"),
         "venue_state": venue_address.get("state"),
         "weather_temperature": weather.get("temperature"),

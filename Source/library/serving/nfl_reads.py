@@ -256,8 +256,12 @@ def list_events(storage, predictions_table, sport: str, status: str) -> dict:
     _round_label. A completed event also carries `leaders_comparison` --
     player-prop predicted-vs-actual, `null` under the same "nobody
     recorded one before the game" condition as `prediction_comparison`,
-    see _leaders_comparison. Excludes the Pro Bowl and any other
-    exhibition game entirely (see is_real_franchise_matchup)."""
+    see _leaders_comparison. Also carries `venue_name`/`venue_city`/
+    `venue_state`, straight off the stored event (already ingested for
+    the travel-distance feature -- see normalize/espn.py), `null` on any
+    of the three the venue lacked or the event was ingested before this
+    field existed. Excludes the Pro Bowl and any other exhibition game
+    entirely (see is_real_franchise_matchup)."""
     events = [e for e in storage.get_all_events(sport, status=status) if is_real_franchise_matchup(e)]
 
     if status == "completed":
@@ -276,6 +280,9 @@ def list_events(storage, predictions_table, sport: str, status: str) -> dict:
             "week": e.get("week"),
             "round": _round_label(e),
             "participants": e.get("participants"),
+            "venue_name": e.get("venue_name"),
+            "venue_city": e.get("venue_city"),
+            "venue_state": e.get("venue_state"),
         }
         if status == "completed":
             entry["prediction_comparison"] = _prediction_comparison(predictions_table, e)

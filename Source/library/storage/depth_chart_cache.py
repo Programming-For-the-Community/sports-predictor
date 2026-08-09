@@ -12,7 +12,7 @@ from botocore.exceptions import ClientError
 
 logger = logging.getLogger(__name__)
 
-DEPTH_CHART_POSITIONS = {"QB", "RB", "WR"}
+DEPTH_CHART_POSITIONS = {"QB", "RB", "WR", "TE"}
 DEPTH_CHART_CACHE_TTL_DAYS = 3
 
 
@@ -27,8 +27,8 @@ def filter_depth_chart(raw_depth_chart: dict) -> dict:
 
     raw_depth_chart's own top level is `depthchart`, a list of formation-
     specific groups (e.g. "Base 3-4 D", "Special Teams", "3WR 1TE" --
-    confirmed live), each with its OWN `positions` dict -- QB/RB/WR only
-    ever appear in one offensive-formation group, so merging every
+    confirmed live), each with its OWN `positions` dict -- QB/RB/WR/TE
+    only ever appear in one offensive-formation group, so merging every
     group's positions into one flat result never collides for the
     positions this project keeps. Filters on each entry's
     position.abbreviation rather than the outer dict key, since that
@@ -53,14 +53,25 @@ def _cache_key(team_id: str) -> str:
 
 def home_away_team_ids(event: dict) -> tuple[str, str] | None:
     """competitions[0].competitors[]'s own team id/homeAway role, from a
-    raw ESPN scoreboard event. None for a malformed event."""
+    raw ESPN scoreboard event. None for a malformed event, AND for an
+    undetermined playoff bracket slot -- ESPN represents a postseason
+    matchup nobody's qualified for yet with a placeholder team
+    (name/abbreviation "TBD", id "-1"/"-2", confirmed live against an
+    early-season postseason scoreboard), not a real team either
+    enrichment (coach/injury/depth chart) or serving code has anything
+    meaningful to fetch or predict for. Every real ESPN team id is a
+    positive integer (confirmed via NFLClient.get_teams), so a
+    non-digit id is never a real team."""
     try:
         competitors = event["competitions"][0]["competitors"]
         home = next(c for c in competitors if c.get("homeAway") == "home")
         away = next(c for c in competitors if c.get("homeAway") == "away")
-        return str(home["team"]["id"]), str(away["team"]["id"])
+        home_id, away_id = str(home["team"]["id"]), str(away["team"]["id"])
     except (KeyError, IndexError, StopIteration):
         return None
+    if not (home_id.isdigit() and away_id.isdigit()):
+        return None
+    return home_id, away_id
 
 
 def attach_depth_charts(events: list[dict], nfl_client, s3, bucket: str) -> None:

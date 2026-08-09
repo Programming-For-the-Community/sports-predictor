@@ -73,6 +73,10 @@ class MatchupHero extends StatelessWidget {
               ),
             ],
           ),
+          if (event.venueLabel != null) ...[
+            const SizedBox(height: 12),
+            Center(child: _VenueLabel(label: event.venueLabel!)),
+          ],
           const SizedBox(height: 20),
           WinProbabilityBar(homeWinProbability: prediction.homeWinProbability, height: 12),
           const SizedBox(height: 12),
@@ -213,6 +217,10 @@ class MatchupResultHero extends StatelessWidget {
               ),
             ],
           ),
+          if (event.venueLabel != null) ...[
+            const SizedBox(height: 12),
+            Center(child: _VenueLabel(label: event.venueLabel!)),
+          ],
           const SizedBox(height: 24),
           _PredictionRecap(comparison: comparison),
         ],
@@ -307,6 +315,34 @@ class _StatTrio extends StatelessWidget {
         Text(label, style: AppTextStyles.microLabel(), maxLines: 1, overflow: TextOverflow.ellipsis),
         const SizedBox(height: 4),
         Text(value, style: AppTextStyles.metricValueLarge()),
+      ],
+    );
+  }
+}
+
+/// Stadium name + city/state, between the score/probability row above and
+/// the PICK/margin section below -- see SportEvent.venueLabel. Caller
+/// skips rendering entirely when it's null; deliberately excludes
+/// venue_indoor -- location/name only.
+class _VenueLabel extends StatelessWidget {
+  const _VenueLabel({required this.label});
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Icon(Icons.location_on_outlined, size: 13, color: AppColors.inkMute),
+        const SizedBox(width: 4),
+        Flexible(
+          child: Text(
+            label,
+            style: AppTextStyles.microLabel(color: AppColors.inkMute),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+          ),
+        ),
       ],
     );
   }

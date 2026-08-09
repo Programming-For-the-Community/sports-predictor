@@ -81,6 +81,33 @@ class TestListEvents:
         assert result["events"][0]["kickoff_time"] == "2025-09-28T20:25Z"
         storage.get_all_events.assert_called_once_with("nfl", status="scheduled")
 
+    def test_venue_fields_pass_through_when_present(self):
+        storage = MagicMock()
+        storage.get_all_events.return_value = [
+            {
+                **_scheduled_event("EVT#1", 2025, "2025-09-28", "12", "24"),
+                "venue_name": "Arrowhead Stadium", "venue_city": "Kansas City", "venue_state": "MO",
+            },
+        ]
+
+        result = nfl_reads.list_events(storage, MagicMock(), "nfl", "scheduled")
+
+        entry = result["events"][0]
+        assert entry["venue_name"] == "Arrowhead Stadium"
+        assert entry["venue_city"] == "Kansas City"
+        assert entry["venue_state"] == "MO"
+
+    def test_venue_fields_are_none_when_absent(self):
+        storage = MagicMock()
+        storage.get_all_events.return_value = [_scheduled_event("EVT#1", 2025, "2025-09-28", "12", "24")]
+
+        result = nfl_reads.list_events(storage, MagicMock(), "nfl", "scheduled")
+
+        entry = result["events"][0]
+        assert entry["venue_name"] is None
+        assert entry["venue_city"] is None
+        assert entry["venue_state"] is None
+
     def test_completed_status_scopes_to_the_most_recent_week_only(self):
         storage = MagicMock()
         predictions_table = MagicMock()

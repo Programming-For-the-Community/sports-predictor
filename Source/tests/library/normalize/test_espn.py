@@ -331,6 +331,24 @@ class TestScoreboardEventToEventItem:
         item = scoreboard_event_to_event_item(_scoreboard_event(), "nfl")
         assert item["kickoff_time"] == "2025-09-28T20:25Z"
 
+    def test_venue_name_and_address_are_captured(self):
+        raw = _scoreboard_event()
+        raw["competitions"][0]["venue"] = {
+            "fullName": "Arrowhead Stadium", "indoor": False, "address": {"city": "Kansas City", "state": "MO"},
+        }
+
+        item = scoreboard_event_to_event_item(raw, "nfl")
+
+        assert item["venue_name"] == "Arrowhead Stadium"
+        assert item["venue_city"] == "Kansas City"
+        assert item["venue_state"] == "MO"
+
+    def test_venue_fields_are_none_when_venue_is_absent(self):
+        item = scoreboard_event_to_event_item(_scoreboard_event(), "nfl")
+        assert item["venue_name"] is None
+        assert item["venue_city"] is None
+        assert item["venue_state"] is None
+
 
 class TestScoreboardEventToEventItemCoachInjuryDepthChart:
     """Coach/injuries/depth-chart are attached by ingest's _enrich_events

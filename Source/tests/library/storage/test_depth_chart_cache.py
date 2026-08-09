@@ -76,6 +76,13 @@ class TestHomeAwayTeamIds:
         event = {"id": "1", "competitions": [{"competitors": [{"homeAway": "home", "team": {"id": "12"}}]}]}
         assert home_away_team_ids(event) is None
 
+    def test_none_for_undetermined_playoff_bracket_slot(self):
+        # ESPN's real placeholder for a postseason matchup nobody's
+        # qualified for yet -- confirmed live against an early-season
+        # postseason scoreboard.
+        event = _competition_event("1", "-1", "-2")
+        assert home_away_team_ids(event) is None
+
 
 def _raw_depth_chart(*groups: dict) -> dict:
     """Matches ESPN's real depthcharts response shape (confirmed live via
@@ -202,6 +209,15 @@ class TestAttachDepthCharts:
         attach_depth_charts(events, nfl_client, _make_s3(), BUCKET)  # must not raise
 
         assert "home_depth_chart" not in events[0]
+
+    def test_undetermined_playoff_bracket_slot_never_fetches_a_depth_chart(self):
+        events = [_competition_event("1", "-1", "-2")]
+        nfl_client = MagicMock()
+
+        attach_depth_charts(events, nfl_client, _make_s3(), BUCKET)  # must not raise
+
+        assert "home_depth_chart" not in events[0]
+        nfl_client.get_depth_chart.assert_not_called()
 
     def test_fetch_failure_for_one_team_omits_only_that_field(self):
         events = [_competition_event("1", "12", "24")]

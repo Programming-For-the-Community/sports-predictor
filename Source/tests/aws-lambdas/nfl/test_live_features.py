@@ -47,11 +47,15 @@ def _event(
     }
 
 
-def _depth_chart(qb=None, rb=None, wr=None):
-    """Builds a filtered depth chart matching ingest's _filter_depth_chart
-    output shape -- {position_code: {"position": {"abbreviation": ...},
-    "athletes": [{"id": ...}, ...]}}. Each of qb/rb/wr is a plain list of
-    entity_id strings, already in rank order."""
+def _depth_chart(qb=None, rb=None, wr=None, te=None, wr_slots=None):
+    """Builds a filtered depth chart matching filter_depth_chart's output
+    shape -- {position_code: {"position": {"abbreviation": ...},
+    "athletes": [{"id": ...}, ...]}}. qb/rb/te are each a plain list of
+    entity_id strings, already in rank order, for that position's one
+    depth-chart slot. wr is shorthand for a single WR slot (most tests
+    only need one); wr_slots is a list of per-slot lists for tests that
+    need ESPN's real multiple-distinct-WR-slots shape (wr1/wr2/wr3, each
+    its own backup stack -- see _depth_chart_entries' own docstring)."""
     chart = {}
     if qb is not None:
         chart["qb"] = {"position": {"abbreviation": "QB"}, "athletes": [{"id": eid} for eid in qb]}
@@ -59,6 +63,10 @@ def _depth_chart(qb=None, rb=None, wr=None):
         chart["rb"] = {"position": {"abbreviation": "RB"}, "athletes": [{"id": eid} for eid in rb]}
     if wr is not None:
         chart["wr"] = {"position": {"abbreviation": "WR"}, "athletes": [{"id": eid} for eid in wr]}
+    if te is not None:
+        chart["te"] = {"position": {"abbreviation": "TE"}, "athletes": [{"id": eid} for eid in te]}
+    for i, slot in enumerate(wr_slots or [], start=1):
+        chart[f"wr{i}"] = {"position": {"abbreviation": "WR"}, "athletes": [{"id": eid} for eid in slot]}
     return chart
 
 
@@ -357,6 +365,23 @@ class TestBuildLiveEventFeatures:
         assert row["home_qb_avg_passing_yards"] is None
 
 
+class TestDepthChartEntries:
+    def test_finds_every_entry_by_abbreviation_regardless_of_outer_key(self):
+        chart = {
+            "wr1": {"position": {"abbreviation": "WR"}, "athletes": [{"id": "1"}]},
+            "wr2": {"position": {"abbreviation": "WR"}, "athletes": [{"id": "2"}]},
+            "rb": {"position": {"abbreviation": "RB"}, "athletes": [{"id": "3"}]},
+        }
+        assert live_features._depth_chart_entries(chart, "WR") == [chart["wr1"], chart["wr2"]]
+
+    def test_empty_when_depth_chart_is_none(self):
+        assert live_features._depth_chart_entries(None, "QB") == []
+
+    def test_empty_when_no_matching_position(self):
+        chart = {"rb": {"position": {"abbreviation": "RB"}, "athletes": []}}
+        assert live_features._depth_chart_entries(chart, "QB") == []
+
+
 class TestDepthChartEntry:
     def test_finds_entry_by_abbreviation_regardless_of_outer_key(self):
         chart = {"weird-key": {"position": {"abbreviation": "QB"}, "athletes": [{"id": "1"}]}}
@@ -368,6 +393,15 @@ class TestDepthChartEntry:
     def test_none_when_no_matching_position(self):
         chart = {"rb": {"position": {"abbreviation": "RB"}, "athletes": []}}
         assert live_features._depth_chart_entry(chart, "QB") is None
+
+    def test_returns_the_first_entry_when_more_than_one_matches(self):
+        # WR's real wr1/wr2/wr3 case -- "the" single leader means wr1
+        # specifically, not an arbitrary one among the three.
+        chart = {
+            "wr1": {"position": {"abbreviation": "WR"}, "athletes": [{"id": "1"}]},
+            "wr2": {"position": {"abbreviation": "WR"}, "athletes": [{"id": "2"}]},
+        }
+        assert live_features._depth_chart_entry(chart, "WR") == chart["wr1"]
 
 
 class TestHealthyAthleteIds:
@@ -387,6 +421,42 @@ class TestHealthyAthleteIds:
         entry = {"athletes": [{"id": "1"}]}
         injuries = [{"entity_id": "1", "status": "Doubtful"}]
         assert live_features._healthy_athlete_ids(entry, injuries) == []
+
+
+class TestHealthyAthletesAcrossSlots:
+    def test_takes_each_slots_own_starter_before_any_slots_backup(self):
+        # wr1's own backup ("1b") must NOT outrank wr2/wr3's starters --
+        # round-robin by rank, not n-deep from whichever slot is first.
+        entries = [
+            {"athletes": [{"id": "1a"}, {"id": "1b"}]},
+            {"athletes": [{"id": "2a"}]},
+            {"athletes": [{"id": "3a"}]},
+        ]
+        assert live_features._healthy_athletes_across_slots(entries, None, 3) == ["1a", "2a", "3a"]
+
+    def test_single_entry_behaves_like_taking_n_deep_from_one_slot(self):
+        # QB/RB only ever pass one entry -- equivalent to the old
+        # single-slot n-deep behavior.
+        entries = [{"athletes": [{"id": "1"}, {"id": "2"}, {"id": "3"}]}]
+        assert live_features._healthy_athletes_across_slots(entries, None, 2) == ["1", "2"]
+
+    def test_falls_through_to_a_slots_backup_when_fewer_slots_than_n(self):
+        # Only one slot healthy-eligible but n=2 requested -- fills the
+        # remainder from that slot's own next-ranked athlete rather than
+        # stopping short.
+        entries = [
+            {"athletes": [{"id": "1a"}, {"id": "1b"}]},
+            {"athletes": [{"id": "2a"}]},
+        ]
+        assert live_features._healthy_athletes_across_slots(entries, None, 3) == ["1a", "2a", "1b"]
+
+    def test_excludes_injured_athletes_per_slot(self):
+        entries = [{"athletes": [{"id": "1a"}]}, {"athletes": [{"id": "2a"}]}]
+        injuries = [{"entity_id": "1a", "status": "Out"}]
+        assert live_features._healthy_athletes_across_slots(entries, injuries, 2) == ["2a"]
+
+    def test_empty_entries_returns_empty_list(self):
+        assert live_features._healthy_athletes_across_slots([], None, 3) == []
 
 
 class TestIsRosterEntryFresh:
@@ -715,6 +785,113 @@ class TestBuildLiveEventLeaderCandidates:
 
         receiving_ids = {row["entity_id"] for row in candidates["home"]["receiving"]}
         assert receiving_ids == {"wr1", "wr3"}
+
+    def test_receiving_candidates_span_every_wr_slots_own_starter(self):
+        # ESPN's real depth chart tracks three DISTINCT WR slots
+        # (wr1/wr2/wr3), each its own full backup stack -- round-robin
+        # order must put each slot's own starter ahead of any slot's
+        # backup, not wr1's own top backups ahead of wr2/wr3's starters
+        # (which is what taking n-deep from a single matched entry would
+        # return).
+        storage = MagicMock()
+        target = _event(
+            "E3", "2025-09-21", "KC", "LAC",
+            home_depth_chart=_depth_chart(wr_slots=[
+                ["wr1-starter", "wr1-backup"], ["wr2-starter"], ["wr3-starter"],
+            ]),
+        )
+        storage.get_event.return_value = target
+        storage.get_all_events.return_value = []
+        storage.get_team_game_stats_for_team.return_value = []
+        storage.get_team_events.return_value = []
+        storage.get_team_entities.return_value = []
+        storage.get_player_game_stats.return_value = []
+
+        candidates = live_features.build_live_event_leader_candidates(storage, "nfl", "E3")
+
+        receiving = candidates["home"]["receiving"]
+        assert [row["entity_id"] for row in receiving] == ["wr1-starter", "wr2-starter", "wr3-starter", "wr1-backup"]
+
+    def test_receiving_candidates_are_not_capped_at_three(self):
+        # Depth-chart RANK isn't a reliable predictor of actual production
+        # across different slots (a WR2 backup can outproduce a WR3
+        # starter) -- receiving deliberately takes every listed, healthy
+        # player rather than guessing who to cut before they're even
+        # scored, unlike QB/RB which stay capped.
+        storage = MagicMock()
+        target = _event(
+            "E3", "2025-09-21", "KC", "LAC",
+            home_depth_chart=_depth_chart(wr_slots=[
+                ["wr1-a", "wr1-b"], ["wr2-a", "wr2-b"], ["wr3-a", "wr3-b"],
+            ]),
+        )
+        storage.get_event.return_value = target
+        storage.get_all_events.return_value = []
+        storage.get_team_game_stats_for_team.return_value = []
+        storage.get_team_events.return_value = []
+        storage.get_team_entities.return_value = []
+        storage.get_player_game_stats.return_value = []
+
+        candidates = live_features.build_live_event_leader_candidates(storage, "nfl", "E3")
+
+        assert len(candidates["home"]["receiving"]) == 6
+
+    def test_receiving_candidates_include_the_starting_te(self):
+        storage = MagicMock()
+        target = _event(
+            "E3", "2025-09-21", "KC", "LAC",
+            home_depth_chart=_depth_chart(wr=["wr-starter"], te=["te-starter"]),
+        )
+        storage.get_event.return_value = target
+        storage.get_all_events.return_value = []
+        storage.get_team_game_stats_for_team.return_value = []
+        storage.get_team_events.return_value = []
+        storage.get_team_entities.return_value = []
+        storage.get_player_game_stats.return_value = []
+
+        candidates = live_features.build_live_event_leader_candidates(storage, "nfl", "E3")
+
+        receiving_ids = {row["entity_id"] for row in candidates["home"]["receiving"]}
+        assert receiving_ids == {"wr-starter", "te-starter"}
+
+    def test_receiving_candidates_include_a_pass_catching_rb(self):
+        storage = MagicMock()
+        target = _event(
+            "E3", "2025-09-21", "KC", "LAC",
+            home_depth_chart=_depth_chart(wr=["wr-starter"], rb=["rb-starter"]),
+        )
+        storage.get_event.return_value = target
+        storage.get_all_events.return_value = []
+        storage.get_team_game_stats_for_team.return_value = []
+        storage.get_team_events.return_value = []
+        storage.get_team_entities.return_value = []
+        storage.get_player_game_stats.return_value = []
+
+        candidates = live_features.build_live_event_leader_candidates(storage, "nfl", "E3")
+
+        receiving_ids = {row["entity_id"] for row in candidates["home"]["receiving"]}
+        assert receiving_ids == {"wr-starter", "rb-starter"}
+
+    def test_rushing_candidates_include_a_scrambling_qb(self):
+        storage = MagicMock()
+        target = _event(
+            "E3", "2025-09-21", "KC", "LAC",
+            home_depth_chart=_depth_chart(qb=["qb-starter"], rb=["rb-starter", "rb-backup"]),
+        )
+        storage.get_event.return_value = target
+        storage.get_all_events.return_value = []
+        storage.get_team_game_stats_for_team.return_value = []
+        storage.get_team_events.return_value = []
+        storage.get_team_entities.return_value = []
+        storage.get_player_game_stats.return_value = []
+
+        candidates = live_features.build_live_event_leader_candidates(storage, "nfl", "E3")
+
+        rushing_ids = {row["entity_id"] for row in candidates["home"]["rushing"]}
+        assert "qb-starter" in rushing_ids
+        # Still capped at 2 (unlike receiving) -- QB competes for a slot
+        # rather than being additive.
+        assert len(candidates["home"]["rushing"]) == 2
 
     def test_no_roster_data_returns_empty_categories_not_a_fallback_pick(self):
         storage = MagicMock()

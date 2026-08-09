@@ -84,6 +84,9 @@ class SportEvent {
     required this.participants,
     required this.predictionComparison,
     required this.leadersComparison,
+    this.venueName,
+    this.venueCity,
+    this.venueState,
   });
 
   final String eventId;
@@ -100,6 +103,15 @@ class SportEvent {
   final String? round;
   final List<Participant> participants;
   final PredictionComparison? predictionComparison;
+  // Stadium name/city/state, straight from ESPN's own venue payload (see
+  // normalize/espn.py's scoreboard_event_to_event_item) -- city/state were
+  // already ingested as a travel-distance feature input, venueName is new.
+  // All three are independently nullable: an indoor neutral-site game can
+  // be missing state, and any of them can be absent on an event ingested
+  // before this field existed.
+  final String? venueName;
+  final String? venueCity;
+  final String? venueState;
   // Player-prop predicted-vs-actual -- only ever present alongside
   // predictionComparison (both are completed-event-only, see
   // nfl_reads.list_events), same "null means nobody recorded one before
@@ -122,8 +134,21 @@ class SportEvent {
         leadersComparison: json['leaders_comparison'] != null
             ? EventLeadersComparison.fromJson(json['leaders_comparison'] as Map<String, dynamic>)
             : null,
+        venueName: json['venue_name'] as String?,
+        venueCity: json['venue_city'] as String?,
+        venueState: json['venue_state'] as String?,
       );
 
   Participant get home => participants.firstWhere((p) => p.role == 'home');
   Participant get away => participants.firstWhere((p) => p.role == 'away');
+
+  // "Arrowhead Stadium -- Kansas City, MO", degrading gracefully as
+  // pieces go missing (a name with no city, a city with no state, or
+  // nothing at all) -- null only when there's truly nothing to show, so
+  // callers can skip rendering entirely rather than printing an empty line.
+  String? get venueLabel {
+    final cityState = [venueCity, venueState].whereType<String>().join(', ');
+    final parts = [if (venueName != null) venueName!, if (cityState.isNotEmpty) cityState];
+    return parts.isEmpty ? null : parts.join(' -- ');
+  }
 }

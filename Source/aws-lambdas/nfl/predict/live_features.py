@@ -87,18 +87,43 @@ def _live_elo_ratings(
     }
 
 
-def _depth_chart_entry(depth_chart: dict | None, position_abbreviation: str) -> dict | None:
-    """Finds depth_chart's entry for position_abbreviation ("QB"/"RB"/"WR")
-    by each entry's own position.abbreviation field, not by assuming a
-    specific outer dict key -- ingest's _filter_depth_chart
-    (aws-lambdas/nfl/ingest/handler.py) does the same match-by-abbreviation
-    rather than relying on ESPN's exact key casing/format."""
+def _depth_chart_entries(depth_chart: dict | None, abbreviations: set[str]) -> list[dict]:
+    """Every depth_chart entry whose own position.abbreviation is in
+    abbreviations, matched on that field rather than assuming a specific
+    outer dict key -- library.storage.depth_chart_cache.filter_depth_chart
+    does the same match-by-abbreviation rather than relying on ESPN's
+    exact key casing/format.
+
+    Single-element abbreviations sets are the common case (one slot each
+    for QB/RB/TE), except WR -- ESPN's real depth chart (confirmed live)
+    tracks three separate WR slots (wr1/wr2/wr3), each its own full
+    backup stack for THAT starting receiver specifically, not one
+    combined ranked list of every receiver on the roster. Callers that
+    want candidates from more than one position (e.g. _LEADER_POSITIONS'
+    own broader nets -- a scrambling QB as a rushing candidate, a
+    pass-catching RB or the starting TE as a receiving candidate) pass a
+    multi-element set here directly; _depth_chart_entry below is the
+    single-abbreviation convenience wrapper."""
     if not depth_chart:
-        return None
-    for entry in depth_chart.values():
-        if (entry.get("position") or {}).get("abbreviation") == position_abbreviation:
-            return entry
-    return None
+        return []
+    return [entry for entry in depth_chart.values() if (entry.get("position") or {}).get("abbreviation") in abbreviations]
+
+
+def _depth_chart_entry(depth_chart: dict | None, position_abbreviation: str) -> dict | None:
+    """The single starter's depth-chart entry for exactly
+    position_abbreviation (see _depth_chart_entries) -- deliberately
+    narrow, not one of _LEADER_POSITIONS' broader nets, since "the"
+    presumptive QB/RB/WR leader for the event-level features means the
+    actual player at that slot, not whichever eligible position happens
+    to sort first in the merged depth chart (a broader net here could
+    e.g. return the starting QB for a "RB leader" lookup). For WR
+    specifically, wr1 is exactly ESPN's own "the" WR slot, not an
+    arbitrary pick among wr1/wr2/wr3, since it's always listed first
+    (confirmed live). _healthy_athletes_across_slots below is the one
+    that wants a broader, multi-entry set, for a multi-candidate pick
+    (e.g. top receivers) where other slots' own starters matter too."""
+    entries = _depth_chart_entries(depth_chart, {position_abbreviation})
+    return entries[0] if entries else None
 
 
 def _healthy_athlete_ids(depth_chart_entry: dict, injuries: list[dict] | None) -> list[str]:
@@ -115,6 +140,35 @@ def _healthy_athlete_ids(depth_chart_entry: dict, injuries: list[dict] | None) -
         str(athlete["id"]) for athlete in depth_chart_entry.get("athletes", [])
         if "id" in athlete and str(athlete["id"]) not in injured_ids
     ]
+
+
+def _healthy_athletes_across_slots(entries: list[dict], injuries: list[dict] | None, n: int | None) -> list[str]:
+    """Up to n healthy athlete ids for a position (every one of them,
+    across every entry, when n is None), drawn round-robin across every
+    one of entries' own depth-chart slots (each slot's own rank-0 healthy
+    athlete first, then each slot's rank-1, ...) rather than n-deep from
+    a single slot. Matters specifically whenever entries has more than
+    one slot (WR's distinct wr1/wr2/wr3, or a broader _LEADER_POSITIONS
+    net pulling in another position's own slot too) -- taking n from a
+    single slot would return that slot's own backups instead of every
+    slot's own starter. Depth-chart RANK still isn't a reliable proxy for
+    actual predicted production across DIFFERENT slots (a WR2's own
+    backup can easily outproduce a WR3's starter, a backup RB can easily
+    outproduce a scrambling QB) -- n=None callers (see
+    _team_leader_candidates) deliberately don't ask this function to
+    guess who to cut, they take everyone listed and let the actual
+    per-candidate model predictions do the ranking downstream instead.
+    A single entry with n given is equivalent to the old n-deep-from-
+    one-slot behavior."""
+    stacks = [_healthy_athlete_ids(entry, injuries) for entry in entries]
+    result: list[str] = []
+    for rank in range(max((len(stack) for stack in stacks), default=0)):
+        for stack in stacks:
+            if n is not None and len(result) >= n:
+                return result
+            if rank < len(stack) and stack[rank] not in result:
+                result.append(stack[rank])
+    return result
 
 
 # Maps each single-leader slot to the roster positions eligible for it,
@@ -497,9 +551,22 @@ def _team_leader_candidates(
         ]
 
     def candidates_for(position_abbreviation: str, n: int) -> dict[str, list]:
-        entry = _depth_chart_entry(depth_chart, position_abbreviation)
-        if entry is not None:
-            ids = _healthy_athlete_ids(entry, injuries)[:n]
+        # Broader than a single slot -- same net _LEADER_POSITIONS already
+        # uses for roster-fallback eligibility (a scrambling QB competing
+        # for rushing candidacy, a pass-catching RB or the starting TE
+        # competing for receiving candidacy), now applied to the
+        # depth-chart path too so it isn't only the roster-fallback that
+        # considers them.
+        entries = _depth_chart_entries(depth_chart, _LEADER_POSITIONS[position_abbreviation])
+        if entries:
+            # WR/receiving takes everyone listed across every eligible
+            # slot rather than capping at n -- depth-chart rank isn't a
+            # reliable cross-slot ranking (see _healthy_athletes_across_
+            # slots' own docstring), so this leaves the actual per-
+            # candidate model predictions to do that ranking downstream
+            # instead of guessing who to cut before they're even scored.
+            cap = None if position_abbreviation == "WR" else n
+            ids = _healthy_athletes_across_slots(entries, injuries, cap)
             return {eid: storage.get_player_game_stats(eid, before_date=before_date, limit=window) for eid in ids}
         eligible_ids = _eligible_entity_ids(roster, _LEADER_POSITIONS[position_abbreviation])
         return _top_n_by_recent_volume(
