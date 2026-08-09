@@ -4,14 +4,13 @@
 # can't be set from this file) before doing anything. Mirrors
 # nfl_deploy.yml's shape and reasoning exactly.
 #
-# Deliberately trimmed vs. nfl_deploy.yml today: only backfill and the
-# ingest/normalize/schedule-sync data pipeline exist as real CI workflows
-# so far (see project plan's build order -- training/inference/live-
+# Deliberately trimmed vs. nfl_deploy.yml today: backfill, ai_training,
+# and the ingest/normalize/schedule-sync data pipeline exist as real CI
+# workflows so far (see project plan's build order -- inference/live-
 # scores land in later phases). Add jobs here the same way NFL has them,
 # in this order, as each phase's own workflow file gets built:
-#   - ai_training (needs: approval; feeds into `infra`'s needs/if, same
-#     shape as `backfill` below)
-#   - ai_hosting (same)
+#   - ai_hosting (needs: approval; feeds into `infra`'s needs/if, same
+#     shape as `ai_training` below)
 #   - deploy_predict_lambda, predict_read_deploy, live_scores_deploy
 #     (needs: [infra, ai_hosting] or [approval, infra] -- see
 #     nfl_deploy.yml's own versions of these jobs for the exact shape)
@@ -73,12 +72,22 @@ jobs:
     uses: ./.github/workflows/ncaafb_backfill.yml
     secrets: inherit
 
-  infra:
-    name: Apply shared infrastructure
-    needs: backfill
+  ai_training:
+    name: AI training (build)
+    needs: approval
     if: |
       always() &&
-      (needs.backfill.result == 'success' || needs.backfill.result == 'skipped')
+      (needs.approval.result == 'success' || needs.approval.result == 'skipped')
+    uses: ./.github/workflows/ncaafb_ai_training.yml
+    secrets: inherit
+
+  infra:
+    name: Apply shared infrastructure
+    needs: [backfill, ai_training]
+    if: |
+      always() &&
+      (needs.backfill.result == 'success' || needs.backfill.result == 'skipped') &&
+      (needs.ai_training.result == 'success' || needs.ai_training.result == 'skipped')
     uses: ./.github/workflows/tf_install.yml
     secrets: inherit
 
