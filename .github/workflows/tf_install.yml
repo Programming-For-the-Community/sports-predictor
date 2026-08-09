@@ -95,6 +95,7 @@ env:
   TF_VAR_public3_subnet_cidr: ${{ vars.PUBLIC3_SUBNET_CIDR }}
   TF_VAR_ecr_repo_url: ${{ secrets.ECR_URI }}
   TF_VAR_espn_api_root_url: ${{ vars.ESPN_API_ROOT_URL }}
+  TF_VAR_espn_core_api_root_url: ${{ vars.ESPN_CORE_API_ROOT_URL }}
   TF_VAR_fargate_account_vcpu_limit: ${{ vars.FARGATE_VCPU_LIMIT }}
   TF_VAR_training_vcpu_budget_fraction: ${{ vars.VCPU_BUDGET_FRACTION }}
   TF_VAR_training_task_vcpu: ${{ vars.TRAINING_TASK_VCPU_LIMIT }}
@@ -148,6 +149,10 @@ jobs:
       run: |
         if [ -z "$TF_VAR_espn_api_root_url" ]; then
           echo "::error::ESPN_API_ROOT_URL is not set. Create it under Settings > Secrets and variables > Actions > Variables (value: https://site.api.espn.com/apis/site/v2/sports)."
+          exit 1
+        fi
+        if [ -z "$TF_VAR_espn_core_api_root_url" ]; then
+          echo "::error::ESPN_CORE_API_ROOT_URL is not set. Create it under Settings > Secrets and variables > Actions > Variables (value: https://sports.core.api.espn.com/v2/sports/football/leagues/nfl)."
           exit 1
         fi
 

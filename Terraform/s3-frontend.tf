@@ -8,7 +8,7 @@ resource "aws_s3_bucket" "frontend" {
 
   tags = merge(local.common_tags, {
     Sport     = "shared"
-    Component = "serving"
+    Component = "frontend"
   })
 }
 

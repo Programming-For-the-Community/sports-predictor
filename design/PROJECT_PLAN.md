@@ -4,27 +4,35 @@ A phased checklist in implementation order. Each phase assumes the previous one 
 
 ## Phase 0 — Foundations (shared infrastructure)
 
-- [ ] Define entity/event schema (see `DATA_SCHEMA.md`)
-- [ ] Set up IAM roles for Lambda, Fargate, and Step Functions with least-privilege access to the specific tables/buckets they need
-- [ ] Create S3 buckets: raw data lake, model artifacts, frontend hosting
-- [ ] Create DynamoDB tables: entities, events, player_game_stats, predictions (sport registry table's schema comes in Phase 4, but the empty table itself is created here — see Phase 4)
-- [ ] Apply the tagging strategy to every resource at creation time (see `TAGGING_STRATEGY.md`) — don't defer this, retrofitting tags later means re-auditing every resource
-- [ ] Set up Cognito User Pool + App Client, create your own user, disable self-signup
-- [ ] Stand up API Gateway with a Cognito authorizer attached (no routes yet — just the auth scaffold)
-- [ ] Set an AWS Budget alert at $10–15/month as a misconfiguration tripwire
-- [ ] Initialize repo structure (`/adapters`, `/core`, `/infra`, `/frontend`, `/docs`) and commit this documentation set
+- [x] Define entity/event schema (see `DATA_SCHEMA.md`)
+- [x] Set up IAM roles for Lambda, Fargate, and Step Functions with least-privilege access to the specific tables/buckets they need
+- [x] Create S3 buckets: raw data lake, model artifacts, frontend hosting
+- [x] Create DynamoDB tables: entities, events, player_game_stats, predictions (sport registry table's schema comes in Phase 4, but the empty table itself is created here — see Phase 4)
+- [x] Apply the tagging strategy to every resource at creation time (see `TAGGING_STRATEGY.md`) — don't defer this, retrofitting tags later means re-auditing every resource
+- [x] Set up Cognito User Pool + App Client, create your own user, disable self-signup
+- [x] Stand up API Gateway with a Cognito authorizer attached (no routes yet — just the auth scaffold)
+- [x] Set an AWS Budget alert at $10–15/month as a misconfiguration tripwire
+- [x] Initialize repo structure (`/adapters`, `/core`, `/infra`, `/frontend`, `/docs`) and commit this documentation set
 
 ## Phase 1 — NFL adapter (proof of architecture)
 
-- [ ] Write the NFL ingest function pulling from nflverse
-- [ ] Write the normalize function mapping nflverse data into the entity/event schema, including per-player box scores into `player_game_stats`
-- [ ] Backfill 10 years of historical NFL data, including player box scores
-- [ ] Build feature engineering: rolling averages, an Elo-style rating, home/away and rest-day splits (event-level), plus per-player rolling stat averages and usage rate (player-prop-level)
-- [ ] Train the first XGBoost win-probability model, store the artifact in S3
-- [ ] Train a first player-prop model for at least one stat (e.g., QB passing yards) — proves the `player_game_stats` table and the per-target train/predict split actually work before generalizing to other sports
-- [ ] Write the inference Lambda and wire it to API Gateway routes for both event-outcome and player-prop predictions
-- [ ] Build a minimal Flutter Web frontend showing one sport's event predictions and at least one player-prop prediction
-- [ ] Confirm the Cognito login gate works end to end on the live URL — log out, confirm the API rejects unauthenticated calls, log back in, confirm it works
+- [x] Write the NFL ingest function pulling from nflverse
+- [x] Write the normalize function mapping nflverse data into the entity/event schema, including per-player box scores into `player_game_stats`
+- [x] Backfill 10 years of historical NFL data, including player box scores
+- [x] Build feature engineering: rolling averages, an Elo-style rating, home/away and rest-day splits (event-level), plus per-player rolling stat averages and usage rate (player-prop-level)
+- [x] Train the first XGBoost win-probability model, store the artifact in S3
+- [x] Train a first player-prop model for at least one stat (e.g., QB passing yards) — proves the `player_game_stats` table and the per-target train/predict split actually work before generalizing to other sports
+- [x] Write the inference Lambda and wire it to API Gateway routes for both event-outcome and player-prop predictions
+- [x] Build a minimal Flutter Web frontend showing one sport's event predictions and at least one player-prop prediction
+- [x] Confirm the Cognito login gate works end to end on the live URL — log out, confirm the API rejects unauthenticated calls, log back in, confirm it works
+
+**Beyond the original Phase 1 checklist**, NFL has since grown well past "proof of architecture" scope:
+- Ingest switched from nflverse to ESPN's public site + core APIs (coach, injury, and depth-chart enrichment), with a dedicated `nfl-schedule-sync` Lambda and a daily roster-sync job fixing stale `team_id` links
+- Inference split into `predict` + `predict-read` Lambdas (cold-start isolation) plus a dedicated `nfl-live-scores` Lambda (cache-only, 60s EventBridge poll gated to near-kickoff, zero DynamoDB writes)
+- Weekly season-projection precompute + S3 cache (fixed a season-tab timeout regression)
+- `nfl-predict`'s inference image moved to arm64; the training task family did not
+- New GSIs: `entities.team-index`, `events.status-index`, a `player_game_stats`/`team_game_stats` sport-index
+- Event-level model set grew to four targets (win-probability, score-margin, home-score, away-score) plus seven player-prop stat targets, all trained through the shared harness described in Phase 4
 
 ## Phase 2 — NCAA FB adapter (validate generalization)
 

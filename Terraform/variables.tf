@@ -125,6 +125,13 @@ variable "espn_api_root_url" {
   nullable    = false
 }
 
+variable "espn_core_api_root_url" {
+  description = "Root URL of ESPN's other, undocumented 'core' API (sports.core.api.espn.com), used for coach and injury enrichment -- see library/http/espn_core.py. Override via TF_VAR_espn_core_api_root_url from a GitHub Actions variable if ESPN's domain changes."
+  type        = string
+  default     = "https://sports.core.api.espn.com/v2/sports/football/leagues/nfl"
+  nullable    = false
+}
+
 variable "espn_user_agent" {
   description = "User-Agent sent on every ESPN request. site.api.espn.com started 403ing plain scoreboard requests; site.web.api.espn.com + a non-browser UA is the confirmed-working combo."
   type        = string

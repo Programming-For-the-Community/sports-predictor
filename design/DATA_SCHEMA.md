@@ -92,12 +92,16 @@ One row per event per model per version for event-level outcomes, or one row per
 
 ## Serving layer
 
-The inference Lambda (`Source/aws-lambdas/nfl/predict/handler.py`) sits behind API Gateway (`Terraform/api-gateway-nfl-predict.tf`), authenticated by the same Cognito authorizer every other route uses (see "Access control" in `ARCHITECTURE.md`). Every prediction is computed live from current DynamoDB/S3 state on each request — nothing is pre-computed or served from a cache.
+Three Lambdas sit behind API Gateway (`Terraform/api-gateway-nfl-predict.tf`, `api-gateway-nfl-live-scores.tf`), all authenticated by the same Cognito authorizer (see "Access control" in `ARCHITECTURE.md`). `predict` and `predict-read` are split for cold-start isolation — `predict-read` never imports the ML dependency chain, so its two routes stay light. Most predictions are computed live from current DynamoDB/S3 state on each request; `GET /nfl/season` is the one exception, serving a cached S3 object that `predict` recomputes weekly rather than per-request.
 
-| Route | Returns |
-|---|---|
-| `GET /nfl/predictions/events/{event_id}` | Win probability, margin, home score, and away score for one matchup, from one shared live feature vector (`live_features.build_live_event_features`) scored against all four event-level models |
-| `GET /nfl/predictions/events/{event_id}/players/{entity_id}?stat=passing_yards` | One player-prop prediction for one player in one game (`live_features.build_live_player_features`), scored against the `player-prop-<stat>` model matching the `stat` query parameter |
+| Route | Lambda | Returns |
+|---|---|---|
+| `GET /nfl/predictions/events/{event_id}` | `predict` | Win probability, margin, home score, and away score for one matchup, from one shared live feature vector (`live_features.build_live_event_features`) scored against all four event-level models |
+| `GET /nfl/predictions/events/{event_id}/players/{entity_id}?stat=passing_yards` | `predict` | One player-prop prediction for one player in one game (`live_features.build_live_player_features`), scored against the `player-prop-<stat>` model matching the `stat` query parameter |
+| `GET /nfl/events?status=scheduled\|completed` | `predict-read` | Event list, filtered by status |
+| `GET /nfl/models` | `predict-read` | Current model versions |
+| `GET /nfl/season` | `predict-read` | Season-projection output, read from the S3 cache `predict` writes weekly (`scheduler-nfl-season-projection.tf`) |
+| `GET /nfl/live-scores` | `nfl_live_scores` | Cache-only live score refresh for events near kickoff or in progress; never writes to the Predictions table (see `ARCHITECTURE.md`'s Serving Layer note) |
 
 `event_id`/`entity_id` are raw ESPN ids, translated internally to `SPORT#NFL#EVENT#...`/`SPORT#NFL#ENTITY#...` keys the same way every other NFL adapter does — callers never construct a DynamoDB key themselves. Packaged as a container image rather than the zip format `ingest`/`normalize` use (`Terraform/lambda-nfl-predict.tf`) — xgboost pulls in numpy and scipy, which alone measure ~225MB unzipped for this runtime, leaving almost no headroom under Lambda's 250MB unzipped zip limit; container Lambdas get a 10GB image limit instead.
 

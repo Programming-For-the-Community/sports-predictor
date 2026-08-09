@@ -34,13 +34,23 @@ flowchart TD
     subgraph Serve["Serving Layer"]
         APIGW["API Gateway"]
         AUTH["Cognito Authorizer"]
-        INF["Lambda: Inference"]
+        PREDICT["Lambda: Predict<br/>(computes live, writes to Predictions table)"]
+        PREDICT_READ["Lambda: Predict-Read<br/>(reads back a stored prediction)"]
+        LIVE["Lambda: Live-Scores<br/>(cache-only, never writes Predictions)"]
+        SCH3["EventBridge Schedule<br/>(60s, gated to near-kickoff)"]
     end
-    ARTIFACT --> INF
-    DDB --> INF
+    ARTIFACT --> PREDICT
+    DDB --> PREDICT
+    DDB --> PREDICT_READ
+    DDB --> LIVE
+    SCH3 --> LIVE
     APIGW --> AUTH
-    AUTH --> INF
-    INF --> APIGW
+    AUTH --> PREDICT
+    AUTH --> PREDICT_READ
+    AUTH --> LIVE
+    PREDICT --> APIGW
+    PREDICT_READ --> APIGW
+    LIVE --> APIGW
 
     subgraph Client["You"]
         CF["CloudFront + S3: Flutter Web app"]
@@ -50,6 +60,8 @@ flowchart TD
     BROWSER -->|"HTTPS request + JWT"| APIGW
     APIGW -->|"JSON response"| BROWSER
 ```
+
+**Predict vs. predict-read, and live-scores:** inference split into two Lambdas for cold-start isolation — `predict` computes a fresh prediction from current DynamoDB/S3 state and writes an audit-trail row to the Predictions table (see `DATA_SCHEMA.md`'s Predictions table), while `predict-read` only reads a prediction already written. `live-scores` is a third, separate Lambda behind its own API Gateway route — cache-only, it never writes to the Predictions table, and is kept warm by its own 60-second EventBridge schedule (gated to events near kickoff or in progress) rather than being invoked only on a browser request.
 
 **Why these specific pieces:** every compute component is either event-triggered (Lambda) or runs only on a schedule and exits (Fargate task) — nothing is billed while idle. S3 holds anything large or rarely queried directly (raw pulls, model artifacts); DynamoDB holds anything the inference Lambda needs to read quickly by key. There's no SageMaker endpoint, no RDS instance, no NAT Gateway — each of those would add a meaningful fixed monthly cost for a benefit this project doesn't need yet.
 
