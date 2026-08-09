@@ -22,3 +22,17 @@ def parse_number(value):
         return int(value)
     except ValueError:
         return value  # not numeric (e.g. "--") -- keep as-is rather than guess
+
+
+def parse_clock_to_seconds(display_value):
+    """Converts a "MM:SS" time-of-possession string (e.g. "23:45") into
+    total seconds -- the same format both ESPN's and CFBD's team box
+    scores use for possession time. Falls back to the raw value unparsed
+    if it's not clock-shaped."""
+    if not isinstance(display_value, str) or ":" not in display_value:
+        return display_value
+    minutes, _, seconds = display_value.partition(":")
+    try:
+        return int(minutes) * 60 + int(seconds)
+    except ValueError:
+        return display_value

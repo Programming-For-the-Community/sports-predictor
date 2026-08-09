@@ -1,0 +1,102 @@
+# Builds and deploys the NCAAFB recurring data pipeline Lambdas:
+# ncaafb-ingest (invoked by the shared ingest-orchestrator Step Function,
+# writes raw CFBD JSON to S3), ncaafb-normalize (S3-triggered, writes to
+# DynamoDB), and ncaafb-schedule-sync (EventBridge-triggered, writes raw
+# JSON to S3 for every week of the current season). All three are
+# deployed in parallel since they are independent -- a failure in one
+# does not block the others. Mirrors nfl_data_pipeline.yml exactly.
+#
+# Lambda function names are supplied by the caller (ncaafb_deploy.yml)
+# from Terraform outputs so this workflow never hard-codes names that
+# Terraform owns. Defaults are provided so workflow_dispatch (manual,
+# standalone run) still works without needing the Terraform output values.
+#
+# Terraform (tf_install.yml) creates each Lambda function with a
+# placeholder ZIP and lifecycle { ignore_changes } so it never overwrites
+# what this workflow deploys. This workflow owns all subsequent code
+# updates.
+
+name: NCAAFB Data Pipeline
+
+on:
+  workflow_dispatch:
+  workflow_call:
+    inputs:
+      ingest_function_name:
+        description: 'NCAAFB ingest Lambda function name (from Terraform output ncaafb_ingest_function_name)'
+        required: false
+        type: string
+        default: 'sports-predictor-ncaafb-ingest'
+      normalize_function_name:
+        description: 'NCAAFB normalize Lambda function name (from Terraform output ncaafb_normalize_function_name)'
+        required: false
+        type: string
+        default: 'sports-predictor-ncaafb-normalize'
+      schedule_sync_function_name:
+        description: 'NCAAFB schedule-sync Lambda function name (from Terraform output ncaafb_schedule_sync_function_name)'
+        required: false
+        type: string
+        default: 'sports-predictor-ncaafb-schedule-sync'
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  # Each Lambda gets its own upstream test job, pointed at its own
+  # specific test file(s) -- not the whole Source/tests/aws-lambdas/ncaafb/
+  # directory -- same discipline as nfl_data_pipeline.yml's own comment:
+  # a failing normalize test shouldn't block the ingest deploy, or vice versa.
+  test-ingest:
+    name: Run ncaafb-ingest tests
+    uses: ./.github/workflows/run_python_tests.yml
+    with:
+      test_path: >-
+        Source/tests/aws-lambdas/ncaafb/test_ingest_lambda_handler.py
+        Source/tests/aws-lambdas/ncaafb/test_ingest_enrichment.py
+      requirements_files: 'Source/aws-lambdas/ncaafb/ingest/requirements.txt'
+
+  test-normalize:
+    name: Run ncaafb-normalize tests
+    uses: ./.github/workflows/run_python_tests.yml
+    with:
+      test_path: 'Source/tests/aws-lambdas/ncaafb/test_normalize.py'
+      requirements_files: 'Source/aws-lambdas/ncaafb/normalize/requirements.txt'
+
+  deploy-ingest:
+    name: Deploy ncaafb-ingest Lambda
+    needs: test-ingest
+    uses: ./.github/workflows/python_lambda_build.yml
+    secrets: inherit
+    with:
+      function_name: ${{ inputs.ingest_function_name || 'sports-predictor-ncaafb-ingest' }}
+      handler_dir: 'Source/aws-lambdas/ncaafb/ingest'
+      library_path: 'Source/library'
+      extra_source_files: 'Source/aws-lambdas/ncaafb/ingest/enrichment.py'
+
+  deploy-normalize:
+    name: Deploy ncaafb-normalize Lambda
+    needs: test-normalize
+    uses: ./.github/workflows/python_lambda_build.yml
+    secrets: inherit
+    with:
+      function_name: ${{ inputs.normalize_function_name || 'sports-predictor-ncaafb-normalize' }}
+      handler_dir: 'Source/aws-lambdas/ncaafb/normalize'
+      library_path: 'Source/library'
+
+  test-schedule-sync:
+    name: Run ncaafb-schedule-sync tests
+    uses: ./.github/workflows/run_python_tests.yml
+    with:
+      test_path: 'Source/tests/aws-lambdas/ncaafb/test_schedule_sync.py'
+      requirements_files: 'Source/aws-lambdas/ncaafb/schedule-sync/requirements.txt'
+
+  deploy-schedule-sync:
+    name: Deploy ncaafb-schedule-sync Lambda
+    needs: test-schedule-sync
+    uses: ./.github/workflows/python_lambda_build.yml
+    secrets: inherit
+    with:
+      function_name: ${{ inputs.schedule_sync_function_name || 'sports-predictor-ncaafb-schedule-sync' }}
+      handler_dir: 'Source/aws-lambdas/ncaafb/schedule-sync'
+      library_path: 'Source/library'

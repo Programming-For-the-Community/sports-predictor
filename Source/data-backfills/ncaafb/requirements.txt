@@ -1,0 +1,6 @@
+boto3>=1.34
+requests>=2.31
+
+# The `library` package (Source/library) is installed separately, not via
+# this file -- the Dockerfile installs it explicitly before this file, and
+# a local dev virtualenv should `pip install -e ../../library`.
