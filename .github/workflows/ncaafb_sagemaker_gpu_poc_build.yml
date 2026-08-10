@@ -1,0 +1,27 @@
+# Builds and pushes the one-off SageMaker GPU training benchmark image
+# (see Source/model-training/ncaafb/sagemaker_gpu_poc/README.md).
+# workflow_dispatch only -- unlike ncaafb_ai_training.yml this is never
+# workflow_call'd from ncaafb_deploy.yml or any other pipeline, since this
+# image isn't part of the regular pipeline at all. Run it manually once,
+# then launch a training job against the pushed image from the SageMaker
+# console.
+
+name: NCAAFB SageMaker GPU POC Build
+
+on:
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  build-push:
+    name: Build and push GPU POC image
+    uses: ./.github/workflows/docker_build_push.yml
+    secrets: inherit
+    with:
+      dockerfile_path: 'Source/model-training/ncaafb/sagemaker_gpu_poc/Dockerfile'
+      docker_context: 'Source'
+      image_name: 'ncaafb-sagemaker-gpu-poc'
+      image_version: '1.0.0'
