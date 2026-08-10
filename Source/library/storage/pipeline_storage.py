@@ -13,6 +13,7 @@ from boto3.dynamodb.conditions import Attr
 
 from library.aws.dynamodb_table import DynamoDBTable
 from library.aws.s3_manager import S3Manager
+from library.schema.keys import entity_key
 
 
 def _require_env(name: str) -> str:
@@ -59,6 +60,16 @@ class PipelineStorage:
 
     def upsert_event(self, item: dict) -> None:
         self._events_table.put_item(item)
+
+    def get_entity(self, sport: str, entity_id: str) -> dict | None:
+        """One entity (team or player) by id -- a direct GetItem. Read-side
+        counterpart to upsert_entity/upsert_player_entity, needed by
+        normalize itself (not just downstream feature engineering/serving,
+        which already has this same lookup via FeatureStorage.get_entity)
+        whenever a write needs to see the entity it's about to overwrite
+        first -- see aws-lambdas/ncaafb/normalize/handler.py's
+        _preserve_roster_position for the motivating case."""
+        return self._entities_table.get_item({"entity_key": entity_key(sport, entity_id)})
 
     def write_player_game_stats(self, items: list[dict]) -> None:
         self._player_game_stats_table.batch_write(items, key_names=["event_key", "player_key"])

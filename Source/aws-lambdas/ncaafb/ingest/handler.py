@@ -26,18 +26,22 @@ No injury or depth-chart equivalent exists for college football (see
 project plan) -- enrichment here is limited to coach info, current AP
 rank, and venue_indoor (see enrichment.enrich_games).
 
-Roster ingestion (CFBD's bulk /roster, monthly cadence per the project
-plan) is NOT wired in here yet -- deferred as a small follow-on, not
-silently dropped; player entities from this phase come only from box
-scores, so metadata.position stays None until that lands (see
-library/normalize/ncaafb.py's own docstring).
+Also fetches CFBD's bulk /roster (see CFBDClient.get_roster) on a
+monthly cadence -- see _fetch_roster_if_stale below -- and writes it to
+S3 under ncaafb/roster/{season}.json for normalize to pick up the same
+way games/boxscore/teamstats already are; this is what backfills
+metadata.position onto player entities (see library/normalize/ncaafb.py's
+roster_to_player_entities), which box scores alone can never set (CFBD's
+box-score athletes carry no position field -- see
+game_player_stats_to_player_game_stats' own docstring).
 """
 import json
 import logging
 import os
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 
 import boto3
+from botocore.exceptions import ClientError
 
 import enrichment
 from library.http.cfbd import CFBDClient
@@ -108,6 +112,54 @@ def _put_json(key: str, payload) -> None:
     _s3.put_object(Bucket=RAW_BUCKET, Key=key, Body=json.dumps(payload).encode("utf-8"), ContentType="application/json")
 
 
+ROSTER_CACHE_TTL_DAYS = 30
+
+
+def _roster_marker_key(season: int) -> str:
+    return f"ncaafb/cache/roster-fetched-at/{season}.json"
+
+
+def _roster_needs_refresh(season: int) -> bool:
+    """True if season's roster hasn't been fetched within
+    ROSTER_CACHE_TTL_DAYS -- CFBD's /roster is one ~9MB bulk call
+    covering every team, and college rosters barely move outside the
+    transfer portal windows, so this is refreshed monthly rather than on
+    ingest's own daily cadence. Marker-file pattern, same TTL-cache shape
+    as library.storage.ncaafb_team_cache.get_cached_teams, but kept local
+    to this Lambda (not shared) since, unlike teams/coaches, the roster
+    payload itself has to be written to S3 for normalize to pick up, not
+    just held in memory for in-process enrichment."""
+    try:
+        response = _s3.get_object(Bucket=RAW_BUCKET, Key=_roster_marker_key(season))
+        fetched_at = datetime.fromisoformat(json.loads(response["Body"].read())["fetched_at"])
+        return datetime.now(timezone.utc) - fetched_at >= timedelta(days=ROSTER_CACHE_TTL_DAYS)
+    except (ClientError, json.JSONDecodeError, KeyError, ValueError):
+        return True  # cache miss or malformed marker -- treat as never fetched
+
+
+def _fetch_roster_if_stale(client: CFBDClient, season: int) -> bool:
+    """Fetches and writes season's full roster to
+    ncaafb/roster/{season}.json (picked up by normalize's own S3 trigger,
+    same as games/boxscore/teamstats) if the TTL marker says it's due.
+    Returns True if a fetch actually happened, False on a cache hit -- the
+    caller reports this as roster_fetched, same "did real work or not"
+    signal teams_cached/coaches_cached already report.
+
+    Wraps the payload in a {"fetched_at", "data"} envelope, same shape
+    ncaafb_team_cache's own cache entries use -- CFBD's /roster has no
+    per-payload timestamp of its own (unlike ESPN's roster, which embeds
+    "timestamp"), so normalize reads fetched_at from here for
+    metadata.team_id_as_of (see library/normalize/ncaafb.py's
+    roster_to_player_entities)."""
+    if not _roster_needs_refresh(season):
+        return False
+    roster = client.get_roster(season)
+    now = datetime.now(timezone.utc).isoformat()
+    _put_json(f"ncaafb/roster/{season}.json", {"fetched_at": now, "data": roster})
+    _put_json(_roster_marker_key(season), {"fetched_at": now})
+    return True
+
+
 def lambda_handler(event: dict, context) -> dict:
     season = event.get("season")
     week = event.get("week")
@@ -135,13 +187,19 @@ def lambda_handler(event: dict, context) -> dict:
         logger.exception("Failed fetching season coaches for %d", resolved_season)
         coaches_cached = False
 
+    try:
+        roster_fetched = _fetch_roster_if_stale(client, resolved_season)
+    except Exception:
+        logger.exception("Failed fetching roster for %d", resolved_season)
+        roster_fetched = False
+
     if season is None or week is None or season_type is None:
         resolved = _resolve_current_week(client, resolved_season)
         if resolved is None:
             logger.info("No week has started yet for season %d -- nothing to ingest", resolved_season)
             return {
                 "processed": 0, "failed": 0,
-                "teams_cached": teams_cached, "coaches_cached": coaches_cached,
+                "teams_cached": teams_cached, "coaches_cached": coaches_cached, "roster_fetched": roster_fetched,
             }
         season_type, week = resolved
         season = resolved_season
@@ -188,5 +246,5 @@ def lambda_handler(event: dict, context) -> dict:
     logger.info("Done: %d processed, %d failed", processed, failed)
     return {
         "processed": processed, "failed": failed,
-        "teams_cached": teams_cached, "coaches_cached": coaches_cached,
+        "teams_cached": teams_cached, "coaches_cached": coaches_cached, "roster_fetched": roster_fetched,
     }

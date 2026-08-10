@@ -17,6 +17,12 @@ are bulk-per-week rather than per-game:
     ncaafb/games/{season}/{season_type}/{week}.json     -> event records
     ncaafb/boxscore/{season}/{season_type}/{week}.json  -> player stats, player entities
     ncaafb/teamstats/{season}/{season_type}/{week}.json -> team stats
+    ncaafb/roster/{season}.json                         -> player entities (position)
+                                                            -- a {"fetched_at", "data"}
+                                                            envelope, not a bare list,
+                                                            unlike the three above (see
+                                                            ingest/handler.py's
+                                                            _fetch_roster_if_stale)
 """
 import json
 import logging
@@ -28,6 +34,7 @@ from library.normalize.ncaafb import (
     game_player_stats_to_player_game_stats,
     game_team_stats_to_team_game_stats,
     game_to_event_item,
+    roster_to_player_entities,
 )
 from library.storage.pipeline_storage import PipelineStorage
 
@@ -55,17 +62,50 @@ def _process_games(payload: list, key: str) -> None:
     logger.info("Upserted %d events from %s", len(payload), key)
 
 
+def _preserve_roster_position(storage: PipelineStorage, entity: dict) -> None:
+    """CFBD's box-score athletes carry no position (see
+    game_player_stats_to_player_game_stats' own docstring) -- every entity
+    item that function produces has metadata.position=None. Without this,
+    upsert_player_entity's full-item PutItem would blank out whatever
+    position roster sync (_process_roster below) already set, every
+    single week that player's box score line gets reprocessed, since a
+    box score's own team_id_as_of (that week's game date) is always newer
+    than the last roster sync's -- exactly the condition
+    upsert_player_entity's staleness guard lets win. Best-effort: a lookup
+    failure just leaves position None for this write, same as before this
+    existed."""
+    if entity["metadata"]["position"] is not None:
+        return
+    try:
+        existing = storage.get_entity(SPORT, entity["entity_id"])
+    except Exception:
+        logger.exception("Failed looking up existing entity %s for position preservation", entity["entity_id"])
+        return
+    if existing and (existing.get("metadata") or {}).get("position") is not None:
+        entity["metadata"]["position"] = existing["metadata"]["position"]
+
+
 def _process_boxscore(payload: list, key: str) -> None:
     storage = _get_storage()
     total_stats = total_entities = 0
     for game_box_score in payload:
         stats_items, player_entities = game_player_stats_to_player_game_stats(game_box_score, SPORT)
         for entity in player_entities:
+            _preserve_roster_position(storage, entity)
             storage.upsert_player_entity(entity)
         storage.write_player_game_stats(stats_items)
         total_stats += len(stats_items)
         total_entities += len(player_entities)
     logger.info("Wrote %d player stat lines and %d player entities from %s", total_stats, total_entities, key)
+
+
+def _process_roster(payload: dict, key: str) -> None:
+    storage = _get_storage()
+    as_of_date = payload["fetched_at"][:10]
+    entities = roster_to_player_entities(payload.get("data", []), SPORT, as_of_date)
+    for entity in entities:
+        storage.upsert_player_entity(entity)
+    logger.info("Wrote %d player entities from %s", len(entities), key)
 
 
 def _process_teamstats(payload: list, key: str) -> None:
@@ -88,6 +128,8 @@ def _dispatch(bucket: str, key: str) -> None:
         _process_boxscore(payload, key)
     elif "/teamstats/" in key:
         _process_teamstats(payload, key)
+    elif "/roster/" in key:
+        _process_roster(payload, key)
     else:
         logger.warning("Unrecognized S3 key pattern, skipping: %s", key)
 

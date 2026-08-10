@@ -1,0 +1,41 @@
+# Tests and deploys the NCAAFB predict-read Lambda -- GET /ncaafb/events
+# and GET /ncaafb/models, split out of ncaafb-predict for cold start (see
+# Terraform/lambda-ncaafb-predict-read.tf). Zip-packaged like
+# ingest/normalize, not a container image -- mirrors
+# nfl_predict_read_deploy.yml exactly (see that file's own comment for
+# the full reasoning, including why this lives in its own reusable
+# workflow rather than inlined jobs).
+
+name: NCAAFB Predict Read Deploy
+
+on:
+  workflow_dispatch:
+  workflow_call:
+    inputs:
+      function_name:
+        description: 'NCAAFB predict-read Lambda function name (from Terraform output ncaafb_predict_read_function_name)'
+        required: false
+        type: string
+        default: 'sports-predictor-ncaafb-predict-read'
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  test:
+    name: Run ncaafb-predict-read tests
+    uses: ./.github/workflows/run_python_tests.yml
+    with:
+      test_path: 'Source/tests/aws-lambdas/ncaafb/test_predict_read_handler.py Source/tests/library/serving/test_ncaafb_reads.py'
+      requirements_files: 'Source/aws-lambdas/ncaafb/predict-read/requirements.txt'
+
+  deploy:
+    name: Deploy ncaafb-predict-read Lambda
+    needs: test
+    uses: ./.github/workflows/python_lambda_build.yml
+    secrets: inherit
+    with:
+      function_name: ${{ inputs.function_name || 'sports-predictor-ncaafb-predict-read' }}
+      handler_dir: 'Source/aws-lambdas/ncaafb/predict-read'
+      library_path: 'Source/library'
