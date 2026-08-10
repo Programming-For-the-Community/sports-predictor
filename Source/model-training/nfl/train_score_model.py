@@ -129,7 +129,7 @@ def _naive_prediction(df: pd.DataFrame, score_target: str) -> pd.Series:
 
 def train(s3: S3Manager, df: pd.DataFrame, score_target: str) -> dict:
     """Runs the full candidate tournament and returns run_backtest's
-    result ({"winner": card, "promoted": bool, "candidates": [card, ...]})."""
+    result ({"promotions": [card, ...], "candidates": [summary, ...]})."""
     df = _add_label(df, score_target)
     feature_columns = _feature_columns(df)
     train_df, test_df = training_common.chronological_split(df, training_common.TEST_FRACTION)
@@ -165,6 +165,7 @@ def train(s3: S3Manager, df: pd.DataFrame, score_target: str) -> dict:
         },
         summary_metrics=SUMMARY_METRICS,
         promotion_metric=PROMOTION_METRIC,
+        run_id=training_common.resolve_run_id(),
     )
 
 

@@ -33,3 +33,13 @@ def current_version_key(sport: str, model_name: str) -> str:
     prefix (not inside any v{N}/ folder), so next_model_version's /v(\\d+)/
     pattern never mistakes it for a version."""
     return f"{model_artifact_prefix(sport, model_name)}current.json"
+
+
+def run_progress_key(sport: str, model_name: str, run_id: str) -> str:
+    """Key of the resumable-progress breadcrumb for one tournament run
+    (library.ml.backtest.run_backtest) -- lives under a top-level
+    training-runs/ prefix, entirely separate from the model's own
+    <sport>/<model_name>/ prefix used above, so it never shows up in
+    next_model_version's version listing (list_keys(model_artifact_prefix(...)))
+    and can't be mistaken for a version."""
+    return f"training-runs/{sport}/{model_name}/{run_id}/progress.json"

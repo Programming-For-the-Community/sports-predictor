@@ -43,6 +43,9 @@ class S3Manager:
         response = self._client.get_object(Bucket=self.bucket, Key=key)
         return response["Body"].read()
 
+    def delete_object(self, key: str) -> None:
+        self._client.delete_object(Bucket=self.bucket, Key=key)
+
     def list_keys(self, prefix: str) -> list[str]:
         keys = []
         paginator = self._client.get_paginator("list_objects_v2")

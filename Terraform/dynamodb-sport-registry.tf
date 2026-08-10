@@ -72,7 +72,7 @@ resource "aws_dynamodb_table_item" "nfl_registry" {
     event_type      = { S = "head_to_head" }
     polling_cadence = { S = "daily" }
     season_start    = { S = "08-01" } # preseason
-    season_end      = { S = "02-28" } # Super Bowl
+    season_end      = { S = "03-01" } # Super Bowl
 
     training_targets = {
       L = concat(
@@ -151,8 +151,8 @@ resource "aws_dynamodb_table_item" "ncaafb_registry" {
     sport           = { S = "ncaafb" }
     event_type      = { S = "head_to_head" }
     polling_cadence = { S = "daily" }
-    season_start    = { S = "07-01" } # fall camp
-    season_end      = { S = "01-31" } # CFP championship
+    season_start    = { S = "08-01" } # fall camp
+    season_end      = { S = "02-01" } # CFP championship
 
     training_targets = {
       L = concat(

@@ -156,12 +156,19 @@ variable "third_party_api_key_secret_arn" {
 # Drives local.training_max_concurrency (locals-training-compute.tf), which
 # sets TrainAllTargets' MaxConcurrency in sfn-training-orchestrator.tf and
 # the cpu/memory on every nfl-train-*-model ECS task definition. Changing
-# any one of these four values (e.g. a raised account quota, or a
+# any one of these five values (e.g. a raised account quota, or a
 # per-task vCPU size found to be more than a training run actually uses)
 # is the single code change that reflows through to both.
 
 variable "fargate_account_vcpu_limit" {
-  description = "Account-wide Fargate on-demand concurrent vCPU quota (as shown in the Service Quotas console for 'Fargate On-Demand vCPU count')"
+  description = "Account-wide Fargate on-demand concurrent vCPU quota (as shown in the Service Quotas console for 'Fargate On-Demand vCPU count'; CI supplies the real value via FARGATE_VCPU_LIMIT, tf_install.yml). Consulted for both feature-engineering (local.feature_engineering_max_concurrency, locals-feature-engineering-compute.tf) and training's own on-demand fallback share -- RunTrainingTask itself launches on FARGATE_SPOT (see fargate_spot_account_vcpu_limit below), but its Catch can fall through to RunTrainingTaskOnDemand, on-demand, within that same concurrent slot"
+  type        = number
+  default     = 250
+  nullable    = false
+}
+
+variable "fargate_spot_account_vcpu_limit" {
+  description = "Account-wide Fargate SPOT concurrent vCPU quota (Service Quotas console, 'Fargate Spot vCPU count'; CI supplies the real value via FARGATE_SPOT_VCPU_LIMIT, tf_install.yml) -- a separate quota from fargate_account_vcpu_limit's on-demand one, and the one that actually constrains RunTrainingTask's CapacityProviderStrategy. Raise this default only once a Service Quotas increase is actually granted, not before, so local.training_max_concurrency never asks ECS RunTask for more concurrent Spot tasks than the account can actually satisfy"
   type        = number
   default     = 64
   nullable    = false

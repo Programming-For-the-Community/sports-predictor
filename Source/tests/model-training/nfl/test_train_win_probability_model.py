@@ -40,10 +40,46 @@ def _parquet_bytes(df: pd.DataFrame) -> bytes:
     return buffer.getvalue()
 
 
+class _StatefulFakeS3:
+    """Minimal stateful S3 stand-in -- unlike a flat MagicMock (which
+    returns the same canned value no matter how many times it's called),
+    this actually remembers what's been written so far. run_backtest's
+    incremental promotion depends on that: each candidate after the first
+    needs to see whatever an EARLIER candidate in the same run already
+    promoted (would_beat_current reads the pointer force_promote/
+    promote_if_better just set), which a static MagicMock can't simulate."""
+    bucket = "test-bucket"
+
+    def __init__(self):
+        self._objects = {}
+        self.put_bytes_calls = []
+
+    def list_keys(self, prefix):
+        return [key for key in self._objects if key.startswith(prefix)]
+
+    def object_exists(self, key):
+        return key in self._objects
+
+    def get_bytes(self, key):
+        return self._objects[key]
+
+    def put_bytes(self, key, value, content_type=None):
+        self._objects[key] = value
+        self.put_bytes_calls.append((key, value))
+
+    def get_json(self, key):
+        return self._objects[key]
+
+    def put_json(self, key, value):
+        self._objects[key] = value
+
+    def delete_object(self, key):
+        self._objects.pop(key, None)
+
+
 def _fake_result(version=1, algorithm="xgboost"):
     return {
-        "winner": {"model_name": "win-probability", "algorithm": algorithm, "version": version, "log_loss": 0.6},
-        "promoted": True,
+        "promotions": [{"model_name": "win-probability", "algorithm": algorithm, "version": version, "log_loss": 0.6}],
         "candidates": [{"algorithm": algorithm, "log_loss": 0.6}],
     }
 
@@ -180,13 +216,11 @@ class TestEndToEndWithRealBacktest:
     end to end, not just that train_win_probability_model.py calls run_backtest with
     plausible-looking arguments in isolation."""
 
-    def test_writes_only_the_winner_and_promotes_it(self, monkeypatch):
+    def test_first_candidate_wins_and_no_worse_candidate_displaces_it(self, monkeypatch):
         monkeypatch.setenv("MODEL_ARTIFACTS_BUCKET_NAME", "test-bucket")
         df = _make_df(10)
-        mock_s3 = MagicMock()
-        mock_s3.get_bytes.return_value = _parquet_bytes(df)
-        mock_s3.list_keys.return_value = []
-        mock_s3.object_exists.return_value = False
+        mock_s3 = _StatefulFakeS3()
+        mock_s3._objects[train_win_probability_model.EVENT_FEATURES_KEY] = _parquet_bytes(df)
 
         # True test-set labels are [True, False] (see _make_df) --
         # xgboost's predictions are near-perfect and confident; every
@@ -215,15 +249,13 @@ class TestEndToEndWithRealBacktest:
                 for p in patches:
                     p.stop()
 
-        # Only the winner (xgboost) ever gets a versioned artifact --
-        # every other candidate was tuned/fit/evaluated (see
-        # candidate_predictions above, all four are given real, distinct
-        # predictions) but never written to S3.
-        written_models = {call.args[0]: call.args[1] for call in mock_s3.put_bytes.call_args_list}
+        # xgboost, first in CANDIDATES, is force-promoted unconditionally
+        # the moment it finishes. Every candidate after it (logistic, RF,
+        # MLP) is directionally correct but progressively less confident
+        # than xgboost's near-perfect prediction -- none of their log_loss
+        # values beat xgboost's within PROMOTION_TOLERANCE, so none of
+        # them ever get an artifact written at all.
+        written_models = dict(mock_s3.put_bytes_calls)
         assert written_models == {"nfl/win-probability/v1/model.xgb": b"xgb-bytes"}
 
-        # xgboost's predictions ([0.95, 0.05] vs true [True, False]) are
-        # perfect; logistic's ([0.6, 0.4]) are directionally right but
-        # less confident -- xgboost must win on log_loss.
-        promotion_call = next(c for c in mock_s3.put_json.call_args_list if c.args[0] == "nfl/win-probability/current.json")
-        assert promotion_call.args[1] == {"version": 1}
+        assert mock_s3._objects["nfl/win-probability/current.json"] == {"version": 1}

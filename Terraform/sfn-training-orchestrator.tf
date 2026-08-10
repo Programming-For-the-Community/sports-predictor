@@ -70,7 +70,7 @@ resource "aws_sfn_state_machine" "training_orchestrator" {
       "Type": "Map",
       "ItemsPath": "$.Items",
       "MaxConcurrency": 1,
-      "Comment": "Pinned to 1, not left at a higher default -- see this file's top comment. training_vcpu_budget_fraction assumes only one sport's TrainAllTargets Map spends it at a time; running sports concurrently here would let each independently spend the full budget with no cross-sport coordination.",
+      "Comment": "Pinned to 1, not left at a higher default -- see this file's top comment. training_vcpu_budget_fraction assumes only one sport's TrainAllTargets Map spends it at a time; running sports concurrently here would let each independently spend the full budget with no cross-sport coordination. local.feature_engineering_max_concurrency (locals-feature-engineering-compute.tf) already computes the real on-demand headroom available if this is ever raised -- unused today since this stays at 1.",
       "ItemProcessor": {
         "ProcessorConfig": {
           "Mode": "INLINE"
@@ -163,6 +163,63 @@ resource "aws_sfn_state_machine" "training_orchestrator" {
                 "RunTrainingTask": {
                   "Type": "Task",
                   "Resource": "arn:aws:states:::ecs:runTask.sync",
+                  "Comment": "Fargate Spot (~68% cheaper than on-demand) -- library/ml/backtest.py's run_backtest now promotes each tournament candidate the moment it beats what's live, specifically so a Spot reclaim mid-run doesn't lose the whole training run's progress, just whatever candidate was actively fitting. TRAINING_RUN_ID (below, $$.Execution.Name -- not .Id, which is the full execution ARN and an uglier S3 key for no benefit) stays identical across a Retry attempt and the Catch-driven RunTrainingTaskOnDemand fallback, since both stay within this one Step Functions execution -- run_backtest uses it to key a resumable-progress breadcrumb in S3 (training_common.save_run_progress), so a relaunched attempt skips whichever candidates an earlier attempt already settled instead of redoing them. Retry absorbs a transient reclaim; if it keeps failing, the Catch below falls through to RunTrainingTaskOnDemand (guaranteed on-demand Fargate) rather than giving up on this target for the month.",
+                  "Parameters": {
+                    "Cluster": "${aws_ecs_cluster.main.arn}",
+                    "TaskDefinition.$": "States.Format('${var.project}-{}-{}', $.sport, $.target.M.task_definition_suffix.S)",
+                    "CapacityProviderStrategy": [
+                      {
+                        "CapacityProvider": "FARGATE_SPOT",
+                        "Weight": 1
+                      }
+                    ],
+                    "PropagateTags": "TASK_DEFINITION",
+                    "NetworkConfiguration": {
+                      "AwsvpcConfiguration": {
+                        "Subnets": ["${aws_subnet.public_1.id}", "${aws_subnet.public_2.id}", "${aws_subnet.public_3.id}"],
+                        "SecurityGroups": ["${aws_security_group.fargate_internet_egress.id}"],
+                        "AssignPublicIp": "ENABLED"
+                      }
+                    },
+                    "Overrides": {
+                      "ContainerOverrides": [
+                        {
+                          "Name.$": "$.target.M.container_name.S",
+                          "Environment": [
+                            {
+                              "Name.$": "$.target.M.env_name.S",
+                              "Value.$": "$.target.M.env_value.S"
+                            },
+                            {
+                              "Name": "TRAINING_RUN_ID",
+                              "Value.$": "$$.Execution.Name"
+                            }
+                          ]
+                        }
+                      ]
+                    }
+                  },
+                  "Retry": [
+                    {
+                      "ErrorEquals": ["States.ALL"],
+                      "Comment": "Absorbs a transient Spot reclaim -- a genuine failure (a real bug in the training script) just burns these 2 retries before still reaching the Catch below, same eventual outcome as no retry at all.",
+                      "MaxAttempts": 2,
+                      "IntervalSeconds": 30,
+                      "BackoffRate": 2.0
+                    }
+                  ],
+                  "Catch": [
+                    {
+                      "ErrorEquals": ["States.ALL"],
+                      "Next": "RunTrainingTaskOnDemand"
+                    }
+                  ],
+                  "End": true
+                },
+                "RunTrainingTaskOnDemand": {
+                  "Type": "Task",
+                  "Resource": "arn:aws:states:::ecs:runTask.sync",
+                  "Comment": "Fallback after RunTrainingTask's own Spot attempts were all reclaimed or failed -- guaranteed on-demand capacity, no further fallback after this one. Not budgeted against training_max_concurrency's Spot-sized vCPU math (locals-training-compute.tf) -- a rare path, and the worst case if many targets fall back at once is some of THESE on-demand launches failing on capacity, not a wider outage.",
                   "Parameters": {
                     "Cluster": "${aws_ecs_cluster.main.arn}",
                     "TaskDefinition.$": "States.Format('${var.project}-{}-{}', $.sport, $.target.M.task_definition_suffix.S)",
@@ -183,6 +240,10 @@ resource "aws_sfn_state_machine" "training_orchestrator" {
                             {
                               "Name.$": "$.target.M.env_name.S",
                               "Value.$": "$.target.M.env_value.S"
+                            },
+                            {
+                              "Name": "TRAINING_RUN_ID",
+                              "Value.$": "$$.Execution.Name"
                             }
                           ]
                         }
@@ -199,7 +260,7 @@ resource "aws_sfn_state_machine" "training_orchestrator" {
                 },
                 "TrainingTaskFailed": {
                   "Type": "Pass",
-                  "Comment": "One target's training failure doesn't block the rest of this sport's targets -- each target is independently versioned (library/ml/training_common.py), so a failed run here just means this week's retrain didn't happen for this one target.",
+                  "Comment": "One target's training failure doesn't block the rest of this sport's targets -- each target is independently versioned (library/ml/training_common.py), so a failed run here just means this cycle's retrain didn't happen for this one target.",
                   "End": true
                 }
               }
