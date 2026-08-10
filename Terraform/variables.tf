@@ -175,7 +175,7 @@ variable "fargate_spot_account_vcpu_limit" {
 }
 
 variable "training_vcpu_budget_fraction" {
-  description = "Max fraction of fargate_account_vcpu_limit the training orchestrator's concurrent ECS tasks may consume at once, leaving the rest of the quota free for feature-engineering, backfill, and ingest tasks that can run at the same time (CI supplies the real value via VCPU_BUDGET_FRACTION, tf_install.yml)"
+  description = "Max fraction of both fargate_account_vcpu_limit and fargate_spot_account_vcpu_limit the training orchestrator's concurrent ECS tasks may consume at once (CI supplies the real value via VCPU_BUDGET_FRACTION, tf_install.yml). On the on-demand side this leaves the rest of the quota free for feature-engineering, backfill, and ingest tasks that can run at the same time; on the Spot side, nothing else in this project shares that quota, so the fraction instead lowers target concurrency to reduce how often a Spot reclaim interrupts an in-flight training candidate"
   type        = number
   default     = 0.75 # 3/4
   nullable    = false
