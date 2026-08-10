@@ -8,26 +8,31 @@ code never checks auth.
 Routes:
     GET /ncaafb/events?status=scheduled|completed
     GET /ncaafb/models
+    GET /ncaafb/season
 
 See library.serving.ncaafb_reads (Source/library/serving/ncaafb_reads.py)
 for the actual request-shaping logic, shared with the main predict Lambda
 (Source/aws-lambdas/ncaafb/predict/handler.py) -- that module's docstring
-covers the exact response contract for both routes.
+covers the exact response contract for all three routes.
 
-GET /ncaafb/season has no equivalent here yet -- the National Ranking
-model's own serving story (a scheduled whole-league batch compute + S3
-cache, mirroring NFL's own season-projection precompute) is a separate,
-later phase.
+GET /ncaafb/season reads a cached S3 object (get_season_projection)
+rather than computing anything -- the projection itself (standings +
+bowl/playoff/national-championship probabilities + per-stat leaderboards)
+is computed weekly by the predict Lambda's own ScheduledSeasonProjection
+branch (Source/aws-lambdas/ncaafb/predict/season_projection.py), not
+per-request. Same reasoning as NFL's own predict-read handler.py's
+identical docstring.
 
-This Lambda exists ONLY to give these two routes a light cold start,
+This Lambda exists ONLY to give these three routes a light cold start,
 same reasoning as Source/aws-lambdas/nfl/predict-read/handler.py's own
-docstring: neither route ever loads or deserializes an ML model artifact
+docstring: none of them ever load or deserialize an ML model artifact
 (list_models only reads a model card's JSON metadata; list_events only
-reads events + already-logged predictions from DynamoDB), so this
-Lambda's own requirements.txt needs nothing beyond boto3 (pre-installed
-in the Lambda runtime) -- no xgboost, no scikit-learn, no pandas.
-Zip-packaged (like ingest/normalize), not the container image the
-predict Lambda needs for its own much larger dependency footprint -- see
+reads events + already-logged predictions from DynamoDB; get_season_
+projection only reads a cached JSON object), so this Lambda's own
+requirements.txt needs nothing beyond boto3 (pre-installed in the Lambda
+runtime) -- no xgboost, no scikit-learn, no pandas. Zip-packaged (like
+ingest/normalize), not the container image the predict Lambda needs for
+its own much larger dependency footprint -- see
 Terraform/lambda-ncaafb-predict-read.tf.
 """
 import json
@@ -36,7 +41,7 @@ import os
 
 from library.aws.dynamodb_table import DynamoDBTable
 from library.aws.s3_manager import S3Manager
-from library.serving.ncaafb_reads import list_events, list_models
+from library.serving.ncaafb_reads import get_season_projection, list_events, list_models
 from library.storage.feature_storage import FeatureStorage
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
@@ -97,6 +102,12 @@ def lambda_handler(event, context):
 
         if resource == "/ncaafb/models":
             body = list_models(_get_model_bucket(), SPORT)
+            return _response(200, body)
+
+        if resource == "/ncaafb/season":
+            body = get_season_projection(_get_model_bucket(), SPORT)
+            if body is None:
+                return _response(503, {"error": "Season projection not yet available -- check back after the next scheduled update"})
             return _response(200, body)
 
         return _response(404, {"error": f"No route for resource {resource!r}"})
