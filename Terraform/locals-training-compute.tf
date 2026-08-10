@@ -5,24 +5,24 @@
 # variables should.
 locals {
   # Total vCPU the training Step Function's concurrent ECS tasks may
-  # consume at once -- the smaller of two independently-derived caps:
+  # consume at once -- the smaller of two independently-derived caps, each
+  # holding back training_vcpu_budget_fraction of its own quota:
   #
-  #   - The FULL Spot quota, no fraction reserved. RunTrainingTask
-  #     (sfn-training-orchestrator.tf) launches on FARGATE_SPOT, and
-  #     nothing else in this project (feature-engineering, backfill,
-  #     ingest) ever launches on Spot, so there's no other Spot consumer
-  #     to leave headroom for.
-  #   - training_vcpu_budget_fraction of the ON-DEMAND quota, same as
-  #     before Spot existed. This is the rare-case safety net: if every
+  #   - The SPOT quota. RunTrainingTask (sfn-training-orchestrator.tf)
+  #     launches on FARGATE_SPOT -- nothing else in this project ever
+  #     launches on Spot, so the fraction here isn't protecting a sibling
+  #     consumer's headroom, it's a lower target concurrency to reduce how
+  #     often a Spot reclaim interrupts an in-flight candidate.
+  #   - The ON-DEMAND quota. This is the rare-case safety net: if every
   #     in-flight training task's Catch falls through to
   #     RunTrainingTaskOnDemand at once, that fallback launches on the
   #     SAME on-demand quota feature-engineering/backfill/ingest use --
-  #     the fraction still protects their headroom in that worst case.
+  #     the fraction protects their headroom in that worst case.
   #
   # floor(), not round(), on both terms -- rounding up could let actual
   # usage exceed either cap.
   training_vcpu_budget = min(
-    floor(var.fargate_spot_account_vcpu_limit),
+    floor(var.fargate_spot_account_vcpu_limit * var.training_vcpu_budget_fraction),
     floor(var.fargate_account_vcpu_limit * var.training_vcpu_budget_fraction),
   )
 
