@@ -11,7 +11,12 @@ via mock.
 The ncaafb_ingest module is registered in sys.modules by conftest.py,
 which also sets RAW_BUCKET_NAME before the module is imported.
 """
+import json
+from datetime import datetime, timedelta, timezone
+from io import BytesIO
 from unittest.mock import MagicMock, patch
+
+from botocore.exceptions import ClientError
 
 import ncaafb_ingest
 
@@ -223,6 +228,110 @@ class TestLambdaHandlerBoxScores:
         written_keys = [c.kwargs["Key"] for c in mock_s3.put_object.call_args_list]
         assert "ncaafb/games/2025/regular/4.json" in written_keys
         mock_enrich.assert_called_once()
+
+
+def _make_s3():
+    """Same dict-backed fake as test_ncaafb_team_cache.py's own _make_s3
+    -- a cache-miss GetObject raises ClientError, matching real boto3
+    behavior."""
+    mock_s3 = MagicMock()
+    store: dict[str, bytes] = {}
+
+    def _get(**kwargs):
+        key = kwargs.get("Key")
+        if key in store:
+            return {"Body": BytesIO(store[key])}
+        raise ClientError({"Error": {"Code": "404", "Message": "Not Found"}}, "GetObject")
+
+    def _put(**kwargs):
+        body = kwargs.get("Body")
+        store[kwargs.get("Key")] = body if isinstance(body, bytes) else body.encode("utf-8")
+
+    mock_s3.get_object.side_effect = _get
+    mock_s3.put_object.side_effect = _put
+    return mock_s3, store
+
+
+class TestRosterNeedsRefresh:
+    def test_true_on_cache_miss(self):
+        mock_s3, _ = _make_s3()
+        with patch.object(ncaafb_ingest, "_s3", mock_s3):
+            assert ncaafb_ingest._roster_needs_refresh(2025) is True
+
+    def test_false_within_ttl(self):
+        mock_s3, store = _make_s3()
+        fresh = (datetime.now(timezone.utc) - timedelta(days=1)).isoformat()
+        store[ncaafb_ingest._roster_marker_key(2025)] = json.dumps({"fetched_at": fresh}).encode()
+        with patch.object(ncaafb_ingest, "_s3", mock_s3):
+            assert ncaafb_ingest._roster_needs_refresh(2025) is False
+
+    def test_true_past_ttl(self):
+        mock_s3, store = _make_s3()
+        stale = (datetime.now(timezone.utc) - timedelta(days=31)).isoformat()
+        store[ncaafb_ingest._roster_marker_key(2025)] = json.dumps({"fetched_at": stale}).encode()
+        with patch.object(ncaafb_ingest, "_s3", mock_s3):
+            assert ncaafb_ingest._roster_needs_refresh(2025) is True
+
+    def test_true_on_malformed_marker(self):
+        mock_s3, store = _make_s3()
+        store[ncaafb_ingest._roster_marker_key(2025)] = b"not json"
+        with patch.object(ncaafb_ingest, "_s3", mock_s3):
+            assert ncaafb_ingest._roster_needs_refresh(2025) is True
+
+
+class TestFetchRosterIfStale:
+    def test_cache_miss_fetches_and_writes_both_roster_and_marker(self):
+        mock_s3, store = _make_s3()
+        client = MagicMock()
+        client.get_roster.return_value = [{"id": "1", "teamId": "2", "position": "QB"}]
+
+        with patch.object(ncaafb_ingest, "_s3", mock_s3):
+            result = ncaafb_ingest._fetch_roster_if_stale(client, 2025)
+
+        assert result is True
+        client.get_roster.assert_called_once_with(2025)
+        roster_payload = json.loads(store["ncaafb/roster/2025.json"])
+        assert roster_payload["data"] == [{"id": "1", "teamId": "2", "position": "QB"}]
+        assert "fetched_at" in roster_payload
+        assert ncaafb_ingest._roster_marker_key(2025) in store
+
+    def test_fresh_cache_hit_skips_the_client_call(self):
+        mock_s3, store = _make_s3()
+        fresh = (datetime.now(timezone.utc) - timedelta(days=1)).isoformat()
+        store[ncaafb_ingest._roster_marker_key(2025)] = json.dumps({"fetched_at": fresh}).encode()
+        client = MagicMock()
+
+        with patch.object(ncaafb_ingest, "_s3", mock_s3):
+            result = ncaafb_ingest._fetch_roster_if_stale(client, 2025)
+
+        assert result is False
+        client.get_roster.assert_not_called()
+
+
+class TestLambdaHandlerRosterFetch:
+    def test_roster_fetched_true_reported_in_result(self):
+        mock_client = MagicMock()
+        mock_client.get_calendar.return_value = []
+
+        with patch.object(ncaafb_ingest, "CFBDClient", return_value=mock_client), \
+             patch.object(ncaafb_ingest, "get_cached_teams"), \
+             patch.object(ncaafb_ingest.enrichment, "get_cached_coaches"), \
+             patch.object(ncaafb_ingest, "_fetch_roster_if_stale", return_value=True):
+            result = ncaafb_ingest.lambda_handler({}, None)
+
+        assert result["roster_fetched"] is True
+
+    def test_roster_fetch_failure_does_not_crash_the_run(self):
+        mock_client = MagicMock()
+        mock_client.get_calendar.return_value = []
+
+        with patch.object(ncaafb_ingest, "CFBDClient", return_value=mock_client), \
+             patch.object(ncaafb_ingest, "get_cached_teams"), \
+             patch.object(ncaafb_ingest.enrichment, "get_cached_coaches"), \
+             patch.object(ncaafb_ingest, "_fetch_roster_if_stale", side_effect=Exception("CFBD timeout")):
+            result = ncaafb_ingest.lambda_handler({}, None)
+
+        assert result["roster_fetched"] is False
 
 
 class TestCurrentNcaafbSeason:

@@ -292,6 +292,30 @@ resource "aws_api_gateway_deployment" "main" {
       sha1(jsonencode(values(aws_api_gateway_method.cors)[*].id)),
       sha1(jsonencode(values(aws_api_gateway_integration.cors)[*].id)),
       sha1(jsonencode(values(aws_api_gateway_integration_response.cors)[*].id)),
+      # NCAAFB -- every resource/method/integration declared in
+      # api-gateway-ncaafb-predict.tf, this REST API's other sport. Same
+      # single shared aws_api_gateway_deployment as every route above (one
+      # REST API, one deployment -- see that file's own comment for why
+      # its resources couldn't just define their own).
+      aws_api_gateway_resource.ncaafb.id,
+      aws_api_gateway_resource.ncaafb_events.id,
+      aws_api_gateway_method.ncaafb_events.id,
+      aws_api_gateway_integration.ncaafb_events.id,
+      aws_api_gateway_resource.ncaafb_models.id,
+      aws_api_gateway_method.ncaafb_models.id,
+      aws_api_gateway_integration.ncaafb_models.id,
+      aws_api_gateway_resource.ncaafb_predictions.id,
+      aws_api_gateway_resource.ncaafb_predictions_events.id,
+      aws_api_gateway_resource.ncaafb_predictions_event.id,
+      aws_api_gateway_resource.ncaafb_predictions_event_players.id,
+      aws_api_gateway_resource.ncaafb_predictions_event_player.id,
+      aws_api_gateway_method.ncaafb_predict_event.id,
+      aws_api_gateway_integration.ncaafb_predict_event.id,
+      aws_api_gateway_method.ncaafb_predict_player.id,
+      aws_api_gateway_integration.ncaafb_predict_player.id,
+      sha1(jsonencode(values(aws_api_gateway_method.ncaafb_cors)[*].id)),
+      sha1(jsonencode(values(aws_api_gateway_integration.ncaafb_cors)[*].id)),
+      sha1(jsonencode(values(aws_api_gateway_integration_response.ncaafb_cors)[*].id)),
     ]))
   }
 

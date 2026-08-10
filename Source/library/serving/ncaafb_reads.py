@@ -1,0 +1,283 @@
+"""
+Read-only NCAAFB serving logic -- GET /ncaafb/events and GET
+/ncaafb/models -- shared between the heavy inference Lambda
+(Source/aws-lambdas/ncaafb/predict) and the light read-only Lambda
+(Source/aws-lambdas/ncaafb/predict-read). Same split, and same reasoning,
+as library.serving.nfl_reads (see its own docstring) -- NOT a port of it,
+duplicated deliberately so this Lambda never has to import that
+NFL-named module. GET /ncaafb/season has no equivalent here yet -- the
+National Ranking model's own serving story (a scheduled whole-league
+batch compute + S3 cache, not a per-request route) is a separate, later
+phase; see design/PROJECT_PLAN.md.
+
+Callers own their own storage/s3/predictions_table objects and Lambda-
+lifecycle concerns, same boundary nfl_reads.py draws.
+"""
+import re
+from concurrent.futures import ThreadPoolExecutor
+
+from boto3.dynamodb.conditions import Key
+
+from library.features.ncaafb import is_bowl_game, is_playoff_game
+from library.storage.model_artifacts import current_version_key, model_artifact_key
+
+WIN_PROBABILITY_MODEL = "win-probability"
+SCORE_MODELS = {"margin": "score-margin", "home_score": "home-score", "away_score": "away-score"}
+
+# Mirrors predict/event_prediction.py's own LEADER_CATEGORY_STATS,
+# inverted (stat -> category instead of category -> stats) -- duplicated
+# rather than imported, same reasoning nfl_reads.py's own _STAT_CATEGORY
+# gives. defensive_sacks is deliberately absent -- no sacks leader exists
+# for NCAAFB (see predict/live_features.py's own docstring), so a
+# defensive_sacks player-prop prediction (still requestable directly by
+# entity_id) never shows up in the leaders_comparison block below.
+_STAT_CATEGORY = {
+    "passing_yards": "passing", "passing_touchdowns": "passing",
+    "receiving_yards": "receiving", "receiving_touchdowns": "receiving",
+    "rushing_yards": "rushing", "rushing_touchdowns": "rushing",
+}
+
+# Matches predict/event_prediction.py's record_prediction model_key shape
+# for a player-prop prediction (MODEL#player-prop-passing-yards#v3#PLAYER#qb1).
+_PLAYER_PROP_MODEL_KEY_RE = re.compile(r"^MODEL#player-prop-([a-z-]+)#v\d+#PLAYER#(.+)$")
+
+
+def _home_and_away(event: dict) -> tuple[str, str] | None:
+    participants = event.get("participants", [])
+    home = next((p for p in participants if p.get("role") == "home"), None)
+    away = next((p for p in participants if p.get("role") == "away"), None)
+    if home is None or away is None:
+        return None
+    return home["entity_id"], away["entity_id"]
+
+
+def _week_key(event: dict) -> tuple:
+    return (event.get("season"), event.get("season_type"), event.get("week"))
+
+
+def _previous_week_events(completed: list[dict]) -> list[dict]:
+    """Only the most recently completed week's games -- see
+    nfl_reads.py's own docstring for the identical reasoning."""
+    if not completed:
+        return []
+    latest = max(completed, key=lambda e: e.get("event_date", ""))
+    target = _week_key(latest)
+    return [e for e in completed if _week_key(e) == target]
+
+
+def _next_week_events(scheduled: list[dict]) -> list[dict]:
+    if not scheduled:
+        return []
+    earliest = min(scheduled, key=lambda e: e.get("event_date", ""))
+    target = _week_key(earliest)
+    return [e for e in scheduled if _week_key(e) == target]
+
+
+def _actual_result(event: dict) -> dict | None:
+    home_away = _home_and_away(event)
+    if home_away is None:
+        return None
+    home_id, away_id = home_away
+    participants = event.get("participants", [])
+    home = next((p for p in participants if p.get("entity_id") == home_id), None)
+    away = next((p for p in participants if p.get("entity_id") == away_id), None)
+    home_score = (home.get("result") or {}).get("score") if home else None
+    away_score = (away.get("result") or {}).get("score") if away else None
+    if home_score is None or away_score is None:
+        return None
+    return {"home_score": home_score, "away_score": away_score, "home_won": home_score > away_score}
+
+
+def _prediction_comparison(predictions_table, event: dict) -> dict | None:
+    """Compares this event's logged prediction against the actual result
+    -- reads the audit trail predict/event_prediction.py's record_prediction
+    already wrote, never recomputes one now (see nfl_reads.py's own
+    identical docstring for why)."""
+    actual = _actual_result(event)
+    if actual is None:
+        return None
+
+    rows = predictions_table.query(Key("event_key").eq(event["event_key"]))
+
+    def _row_for(model_prefix: str) -> dict | None:
+        return next((r for r in rows if r["model_key"].startswith(f"MODEL#{model_prefix}#")), None)
+
+    win_probability_row = _row_for(WIN_PROBABILITY_MODEL)
+    if win_probability_row is None:
+        return None
+
+    margin_row = _row_for(SCORE_MODELS["margin"])
+    home_score_row = _row_for(SCORE_MODELS["home_score"])
+    away_score_row = _row_for(SCORE_MODELS["away_score"])
+
+    home_win_probability = win_probability_row["predicted_value"]["home_win_probability"]
+    predicted_home_won = home_win_probability >= 0.5
+
+    return {
+        "predicted_home_win_probability": home_win_probability,
+        "predicted_home_won": predicted_home_won,
+        "actual_home_won": actual["home_won"],
+        "correct": predicted_home_won == actual["home_won"],
+        "predicted_margin": margin_row["predicted_value"]["value"] if margin_row else None,
+        "actual_margin": actual["home_score"] - actual["away_score"],
+        "predicted_home_score": home_score_row["predicted_value"]["value"] if home_score_row else None,
+        "predicted_away_score": away_score_row["predicted_value"]["value"] if away_score_row else None,
+        "actual_home_score": actual["home_score"],
+        "actual_away_score": actual["away_score"],
+    }
+
+
+def _leaders_comparison(storage, predictions_table, sport: str, event: dict) -> dict | None:
+    """Player-prop predicted-vs-actual for a completed event. Shape
+    mirrors the (predicted-only) `leaders` block
+    predict/event_prediction.py's predict_event_leaders returns: exactly
+    ONE entry-or-null per category per team (passing/receiving/rushing,
+    no sacks -- see predict/live_features.py's own docstring), unlike
+    NFL's ranked lists -- there's never more than one candidate to
+    compare here, so no sort/limit step is needed."""
+    home_away = _home_and_away(event)
+    if home_away is None:
+        return None
+    home_id, away_id = home_away
+
+    rows = predictions_table.query(Key("event_key").eq(event["event_key"]))
+    predicted_by_entity: dict[str, dict[str, float]] = {}
+    for row in rows:
+        match = _PLAYER_PROP_MODEL_KEY_RE.match(row["model_key"])
+        if match is None:
+            continue
+        stat = match.group(1).replace("-", "_")
+        entity_id = match.group(2)
+        predicted_by_entity.setdefault(entity_id, {})[stat] = row["predicted_value"]["value"]
+
+    if not predicted_by_entity:
+        return None
+
+    actual_by_entity = {
+        row["entity_id"]: row.get("stat_line", {})
+        for row in storage.get_player_game_stats_for_event(event["event_key"])
+    }
+
+    home: dict[str, dict | None] = {"passing": None, "receiving": None, "rushing": None}
+    away: dict[str, dict | None] = {"passing": None, "receiving": None, "rushing": None}
+
+    for entity_id, predicted_stats in predicted_by_entity.items():
+        category = next((_STAT_CATEGORY[stat] for stat in predicted_stats if stat in _STAT_CATEGORY), None)
+        if category is None:
+            continue
+        entity = storage.get_entity(sport, entity_id)
+        team_id = (entity.get("metadata") or {}).get("team_id") if entity else None
+        if team_id == home_id:
+            bucket = home
+        elif team_id == away_id:
+            bucket = away
+        else:
+            # Transferred/left the program since the prediction was
+            # recorded, or a lookup failure -- skip rather than guess
+            # which side.
+            continue
+
+        actual_stats = actual_by_entity.get(entity_id, {})
+        entry = {
+            "entity_id": entity_id,
+            "predicted": predicted_stats,
+            "actual": {stat: actual_stats[stat] for stat in predicted_stats if stat in actual_stats},
+        }
+        if entity and entity.get("name"):
+            entry["name"] = entity["name"]
+        bucket[category] = entry
+
+    return {"home": home, "away": away}
+
+
+def _round_label(event: dict) -> str | None:
+    """None for a regular-season game or a completed-but-not-yet-flagged
+    one; "CFP" for a real 12-team playoff game (is_playoff_game); "Bowl"
+    for any other postseason game. Coarser than NFL's own week-number ->
+    round-name mapping (POSTSEASON_ROUND_LABELS) -- CFBD's postseason week
+    numbering has no equivalent stable per-round meaning across ~40
+    unaffiliated bowls plus the CFP, so this is the resolution the data
+    actually supports."""
+    if event.get("season_type") != "postseason":
+        return None
+    return "CFP" if is_playoff_game(event) else "Bowl" if is_bowl_game(event) else None
+
+
+def list_events(storage, predictions_table, sport: str, status: str) -> dict:
+    """GET /ncaafb/events?status=scheduled|completed -- scoped to exactly
+    one week, not the whole matching history, same convention as
+    nfl_reads.list_events (see its own docstring). No exhibition-game
+    filter -- unlike NFL's is_real_franchise_matchup, NCAAFB has no
+    equivalent contamination to exclude (see
+    Source/feature-engineering/ncaafb/build_dataset.py's own docstring)."""
+    events = storage.get_all_events(sport, status=status)
+
+    if status == "completed":
+        events = _previous_week_events(events)
+    elif status == "scheduled":
+        events = _next_week_events(events)
+
+    def _entry(e: dict) -> dict:
+        entry = {
+            "event_id": e["event_id"],
+            "event_date": e.get("event_date"),
+            "kickoff_time": e.get("kickoff_time"),
+            "status": e.get("status"),
+            "season": e.get("season"),
+            "season_type": e.get("season_type"),
+            "week": e.get("week"),
+            "round": _round_label(e),
+            "participants": e.get("participants"),
+            "venue_name": e.get("venue_name"),
+        }
+        if status == "completed":
+            entry["prediction_comparison"] = _prediction_comparison(predictions_table, e)
+            entry["leaders_comparison"] = _leaders_comparison(storage, predictions_table, sport, e)
+        return entry
+
+    return {"sport": sport, "events": [_entry(e) for e in events]}
+
+
+def _load_model_summary(s3, sport: str, model_name: str) -> dict | None:
+    """One model's card summary, or None if it's never had a version
+    promoted. Same 3-round-trip, run-every-model-concurrently shape as
+    nfl_reads._load_model_summary."""
+    pointer_key = current_version_key(sport, model_name)
+    if not s3.object_exists(pointer_key):
+        return None
+    version = s3.get_json(pointer_key)["version"]
+    card = s3.get_json(model_artifact_key(sport, model_name, version, "model_card.json"))
+    top_features = [
+        {"feature": name, "importance": value}
+        for name, value in list(card.get("feature_importances", {}).items())[:5]
+    ]
+    return {
+        "model_name": card["model_name"],
+        "algorithm": card["algorithm"],
+        "version": card["version"],
+        "trained_at": card["trained_at"],
+        **{k: v for k, v in card.items() if k in (
+            "accuracy", "log_loss", "naive_baseline_accuracy", "rmse", "mae", "naive_baseline_rmse", "naive_baseline_mae",
+        )},
+        "top_features": top_features,
+        "candidates": card.get("candidates"),
+        "candidates_ranked_by": card.get("candidates_ranked_by"),
+    }
+
+
+def list_models(s3, sport: str) -> dict:
+    """GET /ncaafb/models -- lists every currently-promoted model
+    (win-probability, the three score models, the seven player-prop
+    models -- national-ranking too, once its own serving phase lands),
+    with its latest model card summary. A model that's never had a
+    version promoted simply doesn't appear in this list."""
+    prefix = f"{sport}/"
+    model_names = sorted({key[len(prefix):].split("/")[0] for key in s3.list_keys(prefix)})
+
+    if not model_names:
+        return {"sport": sport, "models": []}
+
+    with ThreadPoolExecutor(max_workers=min(len(model_names), 10)) as executor:
+        results = executor.map(lambda name: _load_model_summary(s3, sport, name), model_names)
+
+    return {"sport": sport, "models": [card for card in results if card is not None]}

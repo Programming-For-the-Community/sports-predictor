@@ -62,3 +62,20 @@ class TestUpsertPlayerEntity:
         assert not_exists_clause.get_expression()["operator"] == "attribute_not_exists"
         assert lte_clause.get_expression()["operator"] == "<="
         assert lte_clause.get_expression()["values"][1] == "2025-11-09"
+
+
+class TestGetEntity:
+    def test_reads_by_entity_key(self, storage_env):
+        storage, mock_entities = _make_storage(storage_env)
+        mock_entities.get_item.return_value = {"entity_id": "61", "name": "Georgia"}
+
+        result = storage.get_entity("ncaafb", "61")
+
+        mock_entities.get_item.assert_called_once_with({"entity_key": "SPORT#NCAAFB#ENTITY#61"})
+        assert result == {"entity_id": "61", "name": "Georgia"}
+
+    def test_returns_none_when_missing(self, storage_env):
+        storage, mock_entities = _make_storage(storage_env)
+        mock_entities.get_item.return_value = None
+
+        assert storage.get_entity("ncaafb", "999") is None

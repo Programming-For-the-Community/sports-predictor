@@ -4,19 +4,14 @@
 # can't be set from this file) before doing anything. Mirrors
 # nfl_deploy.yml's shape and reasoning exactly.
 #
-# Deliberately trimmed vs. nfl_deploy.yml today: backfill, ai_training,
-# and the ingest/normalize/schedule-sync data pipeline exist as real CI
-# workflows so far (see project plan's build order -- inference/live-
-# scores land in later phases). Add jobs here the same way NFL has them,
-# in this order, as each phase's own workflow file gets built:
-#   - ai_hosting (needs: approval; feeds into `infra`'s needs/if, same
-#     shape as `ai_training` below)
-#   - deploy_predict_lambda, predict_read_deploy, live_scores_deploy
-#     (needs: [infra, ai_hosting] or [approval, infra] -- see
-#     nfl_deploy.yml's own versions of these jobs for the exact shape)
+# Deliberately still trimmed vs. nfl_deploy.yml: backfill, ai_training,
+# the ingest/normalize/schedule-sync data pipeline, ai_hosting, and the
+# predict/predict-read deploy jobs are now real CI workflows -- only
+# live_scores_deploy remains for a later phase (needs: [approval, infra],
+# same shape as predict_read_deploy below -- see nfl_deploy.yml's own
+# version of that job for the exact shape once it lands).
 # tf_install.yml already exposes every ncaafb_*_function_name output
-# these future jobs will need (added alongside this file), so none of
-# that wiring should be missing when those phases land.
+# these jobs need (added alongside this file).
 #
 # Both this job's `approval` step AND tf_install.yml's own terraform job
 # gate on the `development`/`production` environment, so a run through
@@ -81,13 +76,23 @@ jobs:
     uses: ./.github/workflows/ncaafb_ai_training.yml
     secrets: inherit
 
+  ai_hosting:
+    name: AI hosting (build)
+    needs: approval
+    if: |
+      always() &&
+      (needs.approval.result == 'success' || needs.approval.result == 'skipped')
+    uses: ./.github/workflows/ncaafb_ai_hosting.yml
+    secrets: inherit
+
   infra:
     name: Apply shared infrastructure
-    needs: [backfill, ai_training]
+    needs: [backfill, ai_training, ai_hosting]
     if: |
       always() &&
       (needs.backfill.result == 'success' || needs.backfill.result == 'skipped') &&
-      (needs.ai_training.result == 'success' || needs.ai_training.result == 'skipped')
+      (needs.ai_training.result == 'success' || needs.ai_training.result == 'skipped') &&
+      (needs.ai_hosting.result == 'success' || needs.ai_hosting.result == 'skipped')
     uses: ./.github/workflows/tf_install.yml
     secrets: inherit
 
@@ -108,3 +113,28 @@ jobs:
     secrets: inherit
     with:
       season_gate_function_name: ${{ needs.infra.outputs.season_gate_function_name }}
+
+  deploy_predict_lambda:
+    name: AI hosting (deploy)
+    needs: [infra, ai_hosting]
+    uses: ./.github/workflows/ncaafb_predict_deploy.yml
+    secrets: inherit
+    with:
+      function_name: ${{ needs.infra.outputs.ncaafb_predict_function_name }}
+      image_uri: ${{ needs.ai_hosting.outputs.predict_image_uri }}
+
+  # ncaafb-predict-read -- the light GET /ncaafb/events + GET /ncaafb/models
+  # Lambda split out of ncaafb-predict for cold start (see
+  # Terraform/lambda-ncaafb-predict-read.tf). A reusable workflow, not
+  # inline jobs here -- same reasoning as nfl_deploy.yml's own
+  # predict_read_deploy job.
+  predict_read_deploy:
+    name: NCAAFB predict-read (test + deploy)
+    needs: [approval, infra]
+    if: |
+      always() &&
+      (needs.approval.result == 'success' || needs.approval.result == 'skipped')
+    uses: ./.github/workflows/ncaafb_predict_read_deploy.yml
+    secrets: inherit
+    with:
+      function_name: ${{ needs.infra.outputs.ncaafb_predict_read_function_name }}

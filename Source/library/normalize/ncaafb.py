@@ -291,6 +291,61 @@ def game_player_stats_to_player_game_stats(game_box_score: dict, sport: str) -> 
     return player_game_stats_items, player_entities
 
 
+def roster_to_player_entities(roster: list[dict], sport: str, as_of_date: str) -> list[dict]:
+    """Every player entity item from one CFBD /roster response (see
+    CFBDClient.get_roster) -- the NCAAFB equivalent of espn.py's
+    roster_to_player_entities, and the fix for
+    game_player_stats_to_player_game_stats' own documented gap
+    (metadata.position always None from a box score alone).
+
+    NOT YET CONFIRMED LIVE, unlike every other normalizer in this module --
+    CFBD's /roster wasn't in scope until now (see ingest/handler.py's own
+    prior docstring). Coded against CFBD's publicly documented v2 schema:
+    a flat list of {"id", "teamId", "team", "firstName", "lastName",
+    "position", "jersey", ...} objects, one per player, no grouping by
+    team the way ESPN's roster nests athletes under position groups. "id"
+    is assumed to be the SAME id space CFBD's own box scores assign
+    (library/normalize/ncaafb.py's game_player_stats_to_player_game_stats
+    reads athlete["id"] from /games/players) -- CFBD has one player
+    database backing both endpoints, so this should hold, but run one real
+    GET /roster call before this deploys and patch field names here if
+    reality differs.
+
+    as_of_date is the ingest fetch's own timestamp (there's no per-payload
+    "as of" field on this endpoint the way ESPN's roster has "timestamp"),
+    truncated to a date by the caller -- same team_id_as_of role
+    espn.py's roster_to_player_entities docstring describes, used by
+    PipelineStorage.upsert_player_entity's staleness guard.
+
+    A player missing "id" or "teamId" is skipped -- CFBD's roster is known
+    to include walk-ons and practice-squad-equivalent entries some seasons
+    that may lack one or the other; nothing useful can be upserted without
+    both."""
+    entities = []
+    for player in roster:
+        athlete_id = player.get("id")
+        team_id = player.get("teamId")
+        if athlete_id is None or team_id is None:
+            continue
+        athlete_id, team_id = str(athlete_id), str(team_id)
+        name = " ".join(part for part in (player.get("firstName"), player.get("lastName")) if part)
+        entities.append({
+            "entity_key": entity_key(sport, athlete_id),
+            "entity_id": athlete_id,
+            "sport": sport,
+            "entity_type": "player",
+            "name": name,
+            "team_key": entity_team_key(sport, team_id),
+            "metadata": {
+                "team_id": team_id,
+                "team_id_as_of": as_of_date,
+                "jersey": player.get("jersey"),
+                "position": player.get("position"),
+            },
+        })
+    return entities
+
+
 # CFBD's team box score packs some stats as one dash-separated string,
 # same pattern as ESPN's own team-stat compound values -- confirmed live
 # against real 2025 data. A separate map from _STAT_TYPE_NAMES above since

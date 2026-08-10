@@ -36,3 +36,50 @@ sys.path.insert(0, os.path.join(_src, "aws-lambdas", "ncaafb", "ingest"))
 _load_handler("ncaafb_ingest", "aws-lambdas/ncaafb/ingest/handler.py")
 _load_handler("ncaafb_normalize", "aws-lambdas/ncaafb/normalize/handler.py")
 _load_handler("ncaafb_schedule_sync", "aws-lambdas/ncaafb/schedule-sync/handler.py")
+
+# predict/'s own modules (live_features.py, model_loader.py,
+# event_prediction.py) have unique names, unlike handler.py -- a plain
+# sys.path entry is enough for them, no _load_handler renaming trick
+# needed. predict/handler.py itself still needs one, same reasoning as
+# ingest/normalize above -- see NFL's own aws-lambdas/nfl/conftest.py for
+# the identical pattern.
+sys.path.insert(0, os.path.join(_src, "aws-lambdas", "ncaafb", "predict"))
+_load_handler("ncaafb_predict", "aws-lambdas/ncaafb/predict/handler.py")
+
+# predict-read/'s handler.py only ever imports from library.* (no local
+# sibling modules the way predict/'s model_loader.py etc. are) -- no
+# sys.path insert needed, just the same unique-module-name registration.
+_load_handler("ncaafb_predict_read", "aws-lambdas/ncaafb/predict-read/handler.py")
+
+
+@pytest.fixture(autouse=True)
+def reset_ncaafb_predict_singletons():
+    """Clears ncaafb_predict's own module-level singletons before and
+    after every test in this directory -- same reasoning and shape as
+    NFL's own reset_nfl_predict_singletons fixture."""
+    ncaafb_predict = sys.modules.get("ncaafb_predict")
+    if ncaafb_predict is None:
+        yield
+        return
+    ncaafb_predict._storage = None
+    ncaafb_predict._model_bucket = None
+    ncaafb_predict._predictions_table = None
+    yield
+    ncaafb_predict._storage = None
+    ncaafb_predict._model_bucket = None
+    ncaafb_predict._predictions_table = None
+
+
+@pytest.fixture(autouse=True)
+def reset_ncaafb_predict_read_singletons():
+    ncaafb_predict_read = sys.modules.get("ncaafb_predict_read")
+    if ncaafb_predict_read is None:
+        yield
+        return
+    ncaafb_predict_read._storage = None
+    ncaafb_predict_read._model_bucket = None
+    ncaafb_predict_read._predictions_table = None
+    yield
+    ncaafb_predict_read._storage = None
+    ncaafb_predict_read._model_bucket = None
+    ncaafb_predict_read._predictions_table = None

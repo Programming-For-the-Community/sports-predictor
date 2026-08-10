@@ -53,8 +53,9 @@ class TestDispatch:
         mock_s3 = MagicMock()
         mock_s3.get_object.return_value = _s3_response(payload)
         mock_storage = MagicMock()
+        mock_storage.get_entity.return_value = None  # no prior roster-set entity to preserve
         stats = [{"pk": "stat1"}]
-        entities = [{"pk": "ncaafb#player#1"}]
+        entities = [{"entity_id": "1", "pk": "ncaafb#player#1", "metadata": {"position": None}}]
 
         with patch.object(ncaafb_normalize, "_s3", mock_s3), \
              patch("ncaafb_normalize.PipelineStorage", return_value=mock_storage), \
@@ -63,6 +64,21 @@ class TestDispatch:
 
         assert mock_storage.upsert_player_entity.call_count == 2  # once per game entry
         assert mock_storage.write_player_game_stats.call_count == 2
+
+    def test_routes_roster_key_to_roster_processor(self):
+        payload = {"fetched_at": "2026-01-15T00:00:00+00:00", "data": [{"id": "1", "teamId": "2", "position": "QB"}]}
+        mock_s3 = MagicMock()
+        mock_s3.get_object.return_value = _s3_response(payload)
+        mock_storage = MagicMock()
+        entities = [{"entity_id": "1", "metadata": {"position": "QB"}}]
+
+        with patch.object(ncaafb_normalize, "_s3", mock_s3), \
+             patch("ncaafb_normalize.PipelineStorage", return_value=mock_storage), \
+             patch.object(ncaafb_normalize, "roster_to_player_entities", return_value=entities) as mock_transform:
+            ncaafb_normalize._dispatch("test-bucket", "ncaafb/roster/2025.json")
+
+        mock_transform.assert_called_once_with(payload["data"], "ncaafb", "2026-01-15")
+        mock_storage.upsert_player_entity.assert_called_once_with(entities[0])
 
     def test_routes_teamstats_key_to_teamstats_processor(self):
         payload = [{"id": "1", "teams": []}]
@@ -112,6 +128,56 @@ class TestDispatch:
             ncaafb_normalize._dispatch("my-bucket", "ncaafb/games/2025/regular/4.json")
 
         mock_s3.get_object.assert_called_once_with(Bucket="my-bucket", Key="ncaafb/games/2025/regular/4.json")
+
+
+class TestPreserveRosterPosition:
+    def test_carries_forward_existing_position_when_box_score_entity_has_none(self):
+        mock_storage = MagicMock()
+        mock_storage.get_entity.return_value = {"metadata": {"position": "QB"}}
+        entity = {"entity_id": "1", "metadata": {"position": None}}
+
+        ncaafb_normalize._preserve_roster_position(mock_storage, entity)
+
+        assert entity["metadata"]["position"] == "QB"
+
+    def test_no_op_when_box_score_entity_already_has_a_position(self):
+        # Never actually happens for CFBD box scores today (position is
+        # always None), but this stays a no-op if that ever changes rather
+        # than overwriting a real value with a stale lookup.
+        mock_storage = MagicMock()
+        entity = {"entity_id": "1", "metadata": {"position": "RB"}}
+
+        ncaafb_normalize._preserve_roster_position(mock_storage, entity)
+
+        assert entity["metadata"]["position"] == "RB"
+        mock_storage.get_entity.assert_not_called()
+
+    def test_no_op_when_no_existing_entity_found(self):
+        mock_storage = MagicMock()
+        mock_storage.get_entity.return_value = None
+        entity = {"entity_id": "1", "metadata": {"position": None}}
+
+        ncaafb_normalize._preserve_roster_position(mock_storage, entity)
+
+        assert entity["metadata"]["position"] is None
+
+    def test_no_op_when_existing_entity_also_has_no_position(self):
+        mock_storage = MagicMock()
+        mock_storage.get_entity.return_value = {"metadata": {"position": None}}
+        entity = {"entity_id": "1", "metadata": {"position": None}}
+
+        ncaafb_normalize._preserve_roster_position(mock_storage, entity)
+
+        assert entity["metadata"]["position"] is None
+
+    def test_lookup_failure_is_swallowed(self):
+        mock_storage = MagicMock()
+        mock_storage.get_entity.side_effect = Exception("DynamoDB timeout")
+        entity = {"entity_id": "1", "metadata": {"position": None}}
+
+        ncaafb_normalize._preserve_roster_position(mock_storage, entity)  # does not raise
+
+        assert entity["metadata"]["position"] is None
 
 
 class TestNormalizeLambdaHandler:
