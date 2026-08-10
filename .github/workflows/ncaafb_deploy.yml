@@ -81,24 +81,6 @@ jobs:
     uses: ./.github/workflows/ncaafb_ai_training.yml
     secrets: inherit
 
-  # TEMPORARY -- wired in here only because workflow_dispatch workflows
-  # don't show up in GitHub's manual "Run workflow" UI until they exist on
-  # the default branch, and this one-off image (see
-  # Source/model-training/ncaafb/sagemaker_gpu_poc/README.md) isn't going
-  # into main. Piggybacking on this pipeline's push trigger builds/pushes
-  # it without that detour. `infra` doesn't need this job's output, so it
-  # isn't in `infra`'s `needs`. Remove this job (and
-  # ncaafb_sagemaker_gpu_poc_build.yml stays, still runnable standalone
-  # once it's ever merged to main) once the image has been pushed.
-  sagemaker_gpu_poc_build:
-    name: SageMaker GPU POC image (build, TEMPORARY)
-    needs: approval
-    if: |
-      always() &&
-      (needs.approval.result == 'success' || needs.approval.result == 'skipped')
-    uses: ./.github/workflows/ncaafb_sagemaker_gpu_poc_build.yml
-    secrets: inherit
-
   infra:
     name: Apply shared infrastructure
     needs: [backfill, ai_training]

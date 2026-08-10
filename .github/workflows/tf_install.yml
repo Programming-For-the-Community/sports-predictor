@@ -126,7 +126,6 @@ env:
   TF_VAR_fargate_spot_account_vcpu_limit: ${{ vars.FARGATE_SPOT_VCPU_LIMIT }}
   TF_VAR_training_vcpu_budget_fraction: ${{ vars.VCPU_BUDGET_FRACTION }}
   TF_VAR_training_task_vcpu: ${{ vars.TRAINING_TASK_VCPU_LIMIT }}
-  TF_VAR_training_min_concurrent_tasks: ${{ vars.TRAINING_MIN_CONCURRENT_TASKS }}
 
 jobs:
   terraform:

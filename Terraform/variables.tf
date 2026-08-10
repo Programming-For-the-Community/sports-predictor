@@ -156,7 +156,7 @@ variable "third_party_api_key_secret_arn" {
 # Drives local.training_max_concurrency (locals-training-compute.tf), which
 # sets TrainAllTargets' MaxConcurrency in sfn-training-orchestrator.tf and
 # the cpu/memory on every nfl-train-*-model ECS task definition. Changing
-# any one of these five values (e.g. a raised account quota, or a
+# any one of these four values (e.g. a raised account quota, or a
 # per-task vCPU size found to be more than a training run actually uses)
 # is the single code change that reflows through to both.
 
@@ -175,9 +175,9 @@ variable "fargate_spot_account_vcpu_limit" {
 }
 
 variable "training_vcpu_budget_fraction" {
-  description = "Max fraction of fargate_account_vcpu_limit the training orchestrator's concurrent ECS tasks may consume at once, leaving the rest of the quota free for feature-engineering, backfill, and ingest tasks that can run at the same time"
+  description = "Max fraction of fargate_account_vcpu_limit the training orchestrator's concurrent ECS tasks may consume at once, leaving the rest of the quota free for feature-engineering, backfill, and ingest tasks that can run at the same time (CI supplies the real value via VCPU_BUDGET_FRACTION, tf_install.yml)"
   type        = number
-  default     = 0.6 # 3/5
+  default     = 0.75 # 3/4
   nullable    = false
 
   validation {
@@ -205,13 +205,6 @@ variable "training_task_memory_per_vcpu_mib" {
   nullable    = false
 }
 
-variable "training_min_concurrent_tasks" {
-  description = "Target concurrency to aim for when the vCPU-budget math alone would serialize training down to just one or two tasks at a time -- a target, not an unconditional floor: locals-training-compute.tf clamps the actual result so this can never push concurrency past what training_vcpu_budget actually allows"
-  type        = number
-  default     = 5
-  nullable    = false
-}
-
 # ── Feature-engineering compute ──────────────────────────────────────────────
 # Per-sport cpu/memory for each sport's standalone feature-engineering
 # Fargate task (ecs-task-<sport>-feature-engineering.tf). Unlike training
@@ -228,7 +221,7 @@ variable "feature_engineering_task_cpu" {
   type        = map(number)
   default = {
     nfl    = 1024
-    ncaafb = 1024
+    ncaafb = 8192
   }
   nullable = false
 
@@ -238,12 +231,12 @@ variable "feature_engineering_task_cpu" {
   }
 }
 
-variable "feature_engineering_task_memory" {
-  description = "Fargate memory (MiB) for each sport's feature-engineering task, keyed by sport -- ncaafb's real 10-season FBS backfill was OOM-killed at 2048 (Reason: OutOfMemoryError), so it's raised to 8192, the max memory Fargate allows at cpu=1024 without also raising cpu; nfl is left unchanged since it has never shown a memory problem"
+variable "feature_engineering_task_memory_per_vcpu_mib" {
+  description = "Fargate memory (MiB) provisioned per feature_engineering_task_cpu vCPU, keyed by sport -- local.feature_engineering_task_memory (locals-feature-engineering-compute.tf) multiplies this by each sport's own vCPU count, same derive-from-vCPU pattern training_task_memory_per_vcpu_mib uses. ncaafb's real 10-season FBS backfill was OOM-killed at 2048 total (Reason: OutOfMemoryError), so it's raised to 8192 -- the max memory Fargate allows at 1 vCPU -- rather than raising cpu, since nothing pointed at CPU being the problem (see feature_engineering_task_cpu's own description). nfl is left unchanged since it has never shown a memory problem"
   type        = map(number)
   default = {
-    nfl    = 2048
-    ncaafb = 8192
+    nfl    = 4096
+    ncaafb = 4096
   }
   nullable = false
 }

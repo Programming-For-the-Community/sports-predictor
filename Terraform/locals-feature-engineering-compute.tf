@@ -25,4 +25,18 @@ locals {
   feature_engineering_max_task_vcpu = max([for cpu in values(var.feature_engineering_task_cpu) : cpu]...) / 1024
 
   feature_engineering_max_concurrency = max(1, floor(local.feature_engineering_vcpu_budget / local.feature_engineering_max_task_vcpu))
+
+  # Each sport's own task memory (MiB), derived from ITS OWN vCPU count --
+  # feature_engineering_task_cpu[sport] / 1024 vCPU times
+  # feature_engineering_task_memory_per_vcpu_mib[sport] -- same
+  # derive-from-vCPU pattern locals-training-compute.tf's
+  # training_task_memory uses, kept per-sport (rather than one shared
+  # ratio) since how much memory a sport's full history needs per vCPU
+  # varies by sport (see feature_engineering_task_memory_per_vcpu_mib's
+  # own description). ecs-task-<sport>-feature-engineering.tf reads this,
+  # not the raw per-vCPU variable directly.
+  feature_engineering_task_memory = {
+    for sport, cpu in var.feature_engineering_task_cpu :
+    sport => (cpu / 1024) * var.feature_engineering_task_memory_per_vcpu_mib[sport]
+  }
 }
