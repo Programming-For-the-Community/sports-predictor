@@ -29,20 +29,32 @@ isn't XGBoost, not that GPU acceleration itself failed.
 
 ## How it works
 
-- `benchmark_entry_point.py` -- the SageMaker entry point. Installs a
-  pinned pandas/pyarrow/scikit-learn/scikit-learn-intelex/xgboost stack
-  matching `model-training/ncaafb/requirements.txt` (xgboost>=2.0 is
-  required for the `device=` API `library/ml/model_types.py`'s GPU path
-  uses -- not guaranteed to be what SageMaker's built-in XGBoost
-  container bundles by default), then imports and runs the real,
-  unmodified `train_player_prop_model.main()`.
-- `invoke.py` -- launches the actual SageMaker Training Job. Sets
-  `XGBOOST_DEVICE=cuda` in the job's environment, which
-  `model_types.py`'s `_xgb_estimator_kwargs()`/`_xgb_search_n_jobs()`
-  read: XGBoost trains with `tree_method="hist", device="cuda"`, and the
-  outer `RandomizedSearchCV`'s `n_jobs` drops from -1 to 1 (a single GPU
-  can't be fanned out across parallel search workers the way CPU cores
-  can -- see that file's own comment).
+This ships as its own Docker image (own `Dockerfile` in this directory)
+rather than the SageMaker XGBoost framework container + script-mode
+combo `invoke.py`/`benchmark_entry_point.py` originally used. Reason:
+that route required installing the `sagemaker` Python SDK to launch the
+job, and recent SDK releases pull in `torch`/`onnxruntime`/`mlflow`/a
+stack of `nvidia-cuda-*` wheels (local-mode training support, several GB)
+that have nothing to do with actually submitting a training job --
+enough to blow past AWS CloudShell's persistent storage limit. Building
+and pushing an image sidesteps needing the SDK (or any local Python
+environment) at all: build happens on a GitHub Actions runner, and the
+job itself is launched by pointing the SageMaker console at the pushed
+image directly.
+
+- `Dockerfile` -- same build shape as `model-training/ncaafb/Dockerfile`
+  (library/ + requirements.txt into a deps layer), with `ENTRYPOINT`
+  running `train_player_prop_model.py` directly and `XGBOOST_DEVICE=cuda`
+  baked in as a default env var. See the Dockerfile's own comment for why
+  it's shaped around SageMaker's `docker run image train` contract.
+- `.github/workflows/ncaafb_sagemaker_gpu_poc_build.yml` -- manual
+  (`workflow_dispatch` only, never called from `ncaafb_deploy.yml`)
+  build+push of that image to the shared ECR repo, tag
+  `ncaafb-sagemaker-gpu-poc-latest`.
+- `invoke.py`/`benchmark_entry_point.py` -- the original script-mode
+  path, kept as a fallback. Still valid if you'd rather drive this from a
+  local/CloudShell Python environment than the console, but needs
+  `pip install sagemaker boto3` first (see the disk-space caveat above).
 
 Nothing about `train_player_prop_model.py` or the S3 read/write paths
 changes -- it reads `ncaafb/training-data/player_features.parquet` and
@@ -52,22 +64,36 @@ directory's Terraform (`Terraform/iam-sagemaker-gpu-poc.tf`) creates.
 
 ## Running it
 
-```bash
-cd Source/model-training/ncaafb/sagemaker_gpu_poc
-pip install sagemaker boto3
-
-python invoke.py \
-    --role-arn "$(terraform -chdir=../../../../Terraform output -raw sagemaker_gpu_poc_role_arn)" \
-    --bucket "$(terraform -chdir=../../../../Terraform output -raw model_artifacts_bucket)"
-```
-
-`invoke.py --help` for the rest of the flags (`--target-stat`,
-`--instance-type`, `--region`). It blocks and streams logs until the job
-finishes, then prints the billable training time.
+1. **Build and push the image** -- GitHub repo -> Actions ->
+   "NCAAFB SageMaker GPU POC Build" -> Run workflow (on this branch).
+   Pushes `<ECR_URI>:ncaafb-sagemaker-gpu-poc-latest`.
+2. **Launch the training job from the SageMaker console** -- Training ->
+   Training jobs -> Create training job:
+   - Algorithm source: "Your own algorithm container in ECR" -- paste
+     the image URI from step 1.
+   - IAM role: the role from `terraform output -raw
+     sagemaker_gpu_poc_role_arn` (or find it in IAM -- name contains
+     `sagemaker-gpu-poc`).
+   - Instance type: `ml.g4dn.4xlarge`, 1 instance (see "Read this before
+     you run it" above for why not the cheaper `ml.g4dn.xlarge`).
+   - Input data channels: none -- the script reads its training data
+     straight from S3 itself, not through a SageMaker channel.
+   - Output data location: any throwaway S3 prefix (e.g.
+     `s3://<bucket-from-terraform-output-model_artifacts_bucket>/sagemaker-poc-output/`)
+     -- required by the console but unused, since the script writes model
+     artifacts directly to its own S3 key.
+   - Environment variables: `MODEL_ARTIFACTS_BUCKET_NAME` (bucket name,
+     not ARN -- `terraform output -raw model_artifacts_bucket`),
+     `TARGET_STAT=receiving_touchdowns`, `AWS_REGION=us-east-2`.
+     (`XGBOOST_DEVICE=cuda` is already baked into the image -- no need to
+     set it again here.)
+   - Stopping condition: max runtime an hour or so is plenty of headroom.
+   - Create training job. The console's job detail page streams
+     CloudWatch logs and shows billable training time when it finishes.
 
 **This has not been run against real AWS** -- built and reasoned through,
 but not dry-run-verified end to end (no AWS access in the environment
-this was written in). Expect to possibly debug a SageMaker SDK/container
+this was written in). Expect to possibly debug a container/SageMaker
 detail on the first real invocation.
 
 ## Cost
