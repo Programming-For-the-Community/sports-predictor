@@ -153,3 +153,139 @@ class TestPromoteIfBetter:
         training_common.promote_if_better(mock_s3, "nba", "win-probability", 1, {"log_loss": 0.65}, "log_loss")
 
         mock_s3.put_json.assert_called_once_with("nba/win-probability/current.json", {"version": 1})
+
+
+class TestWouldBeatCurrent:
+    """Read-only counterpart to promote_if_better -- used by
+    library.ml.backtest.run_backtest to decide whether a candidate is
+    worth persisting at all BEFORE writing anything to S3."""
+
+    def test_true_when_nothing_is_currently_promoted(self):
+        mock_s3 = MagicMock()
+        mock_s3.object_exists.return_value = False
+
+        assert training_common.would_beat_current(mock_s3, "nfl", "win-probability", {"log_loss": 0.65}, "log_loss") is True
+        mock_s3.put_json.assert_not_called()
+
+    def test_true_when_strictly_better_than_current(self):
+        mock_s3 = MagicMock()
+        mock_s3.object_exists.return_value = True
+        mock_s3.get_json.return_value = {"version": 5, "log_loss": 0.65}
+
+        assert training_common.would_beat_current(mock_s3, "nfl", "win-probability", {"log_loss": 0.60}, "log_loss") is True
+
+    def test_false_for_a_meaningful_regression(self):
+        mock_s3 = MagicMock()
+        mock_s3.object_exists.return_value = True
+        mock_s3.get_json.return_value = {"version": 5, "log_loss": 0.60}
+
+        assert training_common.would_beat_current(mock_s3, "nfl", "win-probability", {"log_loss": 0.70}, "log_loss") is False
+
+    def test_never_writes_anything(self):
+        """The whole point -- run_backtest calls this before deciding
+        whether to persist a candidate at all, so it must never itself
+        write to S3, win or lose."""
+        mock_s3 = MagicMock()
+        mock_s3.object_exists.return_value = True
+        mock_s3.get_json.return_value = {"version": 5, "log_loss": 0.60}
+
+        training_common.would_beat_current(mock_s3, "nfl", "win-probability", {"log_loss": 0.55}, "log_loss")
+        training_common.would_beat_current(mock_s3, "nfl", "win-probability", {"log_loss": 0.90}, "log_loss")
+
+        mock_s3.put_json.assert_not_called()
+
+
+class TestForcePromote:
+    """Unconditional pointer flip -- used by run_backtest for the first
+    candidate in a tournament run only, so a run interrupted after one
+    candidate still leaves that version live."""
+
+    def test_writes_the_pointer_with_no_comparison(self):
+        mock_s3 = MagicMock()
+
+        training_common.force_promote(mock_s3, "nfl", "win-probability", 6)
+
+        mock_s3.put_json.assert_called_once_with("nfl/win-probability/current.json", {"version": 6})
+        # Unlike promote_if_better, force_promote never reads anything to
+        # compare against first.
+        mock_s3.get_json.assert_not_called()
+
+    def test_scopes_the_pointer_key_to_the_given_sport(self):
+        mock_s3 = MagicMock()
+
+        training_common.force_promote(mock_s3, "nba", "win-probability", 1)
+
+        mock_s3.put_json.assert_called_once_with("nba/win-probability/current.json", {"version": 1})
+
+
+class TestResolveRunId:
+    """Threaded through to library.ml.backtest.run_backtest as its
+    resumable-progress breadcrumb key -- see load_run_progress/
+    save_run_progress/clear_run_progress below."""
+
+    def test_uses_training_run_id_env_var_when_set(self, monkeypatch):
+        monkeypatch.setenv("TRAINING_RUN_ID", "sfn-execution-abc123")
+
+        assert training_common.resolve_run_id() == "sfn-execution-abc123"
+
+    def test_falls_back_to_a_fresh_uuid_when_unset(self, monkeypatch):
+        monkeypatch.delenv("TRAINING_RUN_ID", raising=False)
+
+        first = training_common.resolve_run_id()
+        second = training_common.resolve_run_id()
+
+        # Distinct on every call with no env var -- a manual/local run has
+        # no prior attempt to resume, so there's nothing to keep stable.
+        assert first != second
+        assert first  # non-empty
+
+
+class TestRunProgress:
+    """load_run_progress/save_run_progress/clear_run_progress -- the
+    resumable-progress breadcrumb library.ml.backtest.run_backtest reads
+    and writes around every candidate, so a task interrupted mid-
+    tournament and relaunched with the same run_id skips whatever an
+    earlier attempt already settled instead of redoing it."""
+
+    def test_load_returns_none_when_no_breadcrumb_exists(self):
+        mock_s3 = MagicMock()
+        mock_s3.object_exists.return_value = False
+
+        assert training_common.load_run_progress(mock_s3, "nfl", "win-probability", "run-1") is None
+        mock_s3.get_json.assert_not_called()
+
+    def test_load_returns_the_stored_breadcrumb(self):
+        mock_s3 = MagicMock()
+        mock_s3.object_exists.return_value = True
+        mock_s3.get_json.return_value = {"evaluated": [{"algorithm": "xgboost"}], "promotions": [], "force_promoted": True}
+
+        progress = training_common.load_run_progress(mock_s3, "nfl", "win-probability", "run-1")
+
+        assert progress["force_promoted"] is True
+        mock_s3.get_json.assert_called_once_with("training-runs/nfl/win-probability/run-1/progress.json")
+
+    def test_save_writes_evaluated_promotions_and_force_promoted_flag(self):
+        mock_s3 = MagicMock()
+        evaluated = [{"algorithm": "xgboost", "score": 0.9, "rank_score": 0.05}]
+        promotions = [{"algorithm": "xgboost", "version": 5}]
+
+        training_common.save_run_progress(mock_s3, "nfl", "win-probability", "run-1", evaluated, promotions, True)
+
+        mock_s3.put_json.assert_called_once_with(
+            "training-runs/nfl/win-probability/run-1/progress.json",
+            {"evaluated": evaluated, "promotions": promotions, "force_promoted": True},
+        )
+
+    def test_clear_deletes_the_breadcrumb(self):
+        mock_s3 = MagicMock()
+
+        training_common.clear_run_progress(mock_s3, "nfl", "win-probability", "run-1")
+
+        mock_s3.delete_object.assert_called_once_with("training-runs/nfl/win-probability/run-1/progress.json")
+
+    def test_progress_key_is_scoped_by_sport_model_and_run_id_independently(self):
+        mock_s3 = MagicMock()
+
+        training_common.clear_run_progress(mock_s3, "ncaafb", "score-margin", "run-2")
+
+        mock_s3.delete_object.assert_called_once_with("training-runs/ncaafb/score-margin/run-2/progress.json")

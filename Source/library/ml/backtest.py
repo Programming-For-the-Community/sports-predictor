@@ -1,18 +1,19 @@
 """
 Runs several candidate algorithms (library.ml.model_types.ModelAdapter
 instances) against the same train/holdout split for one prediction
-target, and promotes whichever one wins -- the shared backtesting harness
-design/PROJECT_PLAN.md's Phase 4 calls for, generalized to run for any
-sport/target/task rather than being written once per model script.
+target, promoting incrementally as each one finishes rather than only at
+the end -- the shared backtesting harness design/PROJECT_PLAN.md's
+Phase 4 calls for, generalized to run for any sport/target/task rather
+than being written once per model script.
 
 Every target-specific concern (which columns are features, how the label
 is derived, what a trivial/naive baseline looks like for this target) is
 the caller's job -- a train_*.py script builds X_train/y_train/X_test/
 y_test and its own naive_baseline_metrics, then hands them here with a
 list of candidates to try. This module only knows how to run a fair
-tournament among whatever candidates it's given and hand the result to
-training_common.promote_if_better -- it has no sport- or target-specific
-knowledge at all.
+tournament among whatever candidates it's given and hand each one to
+training_common's promotion helpers as it finishes -- it has no sport- or
+target-specific knowledge at all.
 """
 import logging
 
@@ -34,6 +35,7 @@ def run_backtest(
     extra_metadata: dict,
     summary_metrics: list[str],
     promotion_metric: str,
+    run_id: str,
 ) -> dict:
     """task: "classification" or "regression" -- decides whether holdout
     metrics come from evaluate_holdout (accuracy/log_loss) or
@@ -44,32 +46,96 @@ def run_backtest(
     "naive" means is entirely target-specific (always predict home wins;
     predict this player's own rolling average; ...), then merged onto
     every candidate's model card identically so they're all compared
-    against the same baseline.
+    against the same baseline. run_id: see training_common.resolve_run_id
+    -- identifies this run's own resumable-progress breadcrumb, so a task
+    that gets interrupted mid-tournament and relaunched with the SAME
+    run_id picks up where it left off instead of redoing already-decided
+    candidates.
 
-    Every candidate gets tuned, fit, and evaluated on the identical
-    holdout split, but only the WINNER (best promotion_metric) gets a
-    versioned artifact actually written to S3 -- losing candidates are
-    scored and compared in memory only, never persisted. Deliberately not
-    "keep every candidate around for review": with 4-5 candidates per
-    target and 11 targets retraining weekly, versioning every candidate
-    would mean 40+ new S3 objects a week that are never read again (only
-    the promoted -- or, on a held-back run, the single new best-scoring --
-    version ever gets loaded by anything). The winning card still carries
-    a `candidates` summary of every algorithm tried this run, ranked
-    best-first by promotion_metric (the correct scoring rule for deciding
-    a winner) but DISPLAYING each one's accuracy (classification) or mae
-    (regression) instead -- human-readable, unlike log_loss/rmse -- so the
-    one artifact that does get saved still shows what it competed against.
-    Then promotes it via the existing, algorithm-agnostic
-    training_common.promote_if_better, same as if only one algorithm had
-    ever been tried.
+    Every candidate gets tuned and fit on the identical holdout split, but
+    candidates are no longer compared only against EACH OTHER at the end
+    -- each one is compared against whatever's live the moment it
+    finishes, one at a time, in candidate list order:
 
-    Returns {"winner": winner_card, "promoted": bool, "candidates": [summary, ...]}
-    -- "candidates" here is the lightweight score summary (see above), not
-    full model cards, since no other candidate has one.
+      - The FIRST candidate to finish IN THIS RUN always becomes the new
+        production version, unconditionally (training_common.
+        force_promote) -- whatever was live before this run doesn't get a
+        say. This is deliberate: it guarantees a run interrupted after
+        just one candidate (a Fargate Spot reclaim, most likely, on a
+        training task that can run 30-45+ minutes) still leaves a
+        freshly-trained version live rather than losing the whole run's
+        progress. A weak first candidate can only stay live if nothing
+        after it beats it. "first candidate in this run" is tracked via
+        the run's own progress breadcrumb (force_promoted), not simply
+        candidate-list index 0 -- if this is a resumed attempt and an
+        earlier attempt already force-promoted a candidate, the first
+        NEW candidate this attempt evaluates does NOT get force-promoted
+        again; it's compared against whatever's now live like any other
+        later candidate.
+      - Every candidate AFTER the run's own first is compared against
+        whatever's CURRENTLY HOSTED right now (training_common.
+        would_beat_current/promote_if_better both read the live
+        current.json pointer fresh, never a cached value from earlier in
+        this run) -- not guaranteed to be the same version this run's
+        first candidate produced, since a later candidate may have
+        already replaced it earlier in this same run. Only replaces what's
+        live if it actually beats it, same PROMOTION_TOLERANCE rule as
+        before -- so later candidates still can't regress production.
+
+    A candidate that doesn't win is never persisted to S3 at all -- same
+    storage-economy reasoning as before: with 4-5 candidates per target
+    and 11+ targets, versioning every losing candidate would mean dozens
+    of S3 objects nothing ever reads again. Every promoted card carries a
+    `candidates` summary of every algorithm evaluated SO FAR this run
+    (including ones evaluated in an earlier, interrupted attempt of the
+    same run_id -- not the full tournament, since candidates after it
+    haven't run yet), ranked best-first by promotion_metric (the correct
+    scoring rule) but DISPLAYING accuracy (classification) or mae
+    (regression) instead -- human-readable, unlike log_loss/rmse.
+
+    Progress (which candidates have been evaluated, their scores, and
+    whether this run has force-promoted its first candidate yet) is
+    written to S3 after every single candidate -- win, lose, or the run's
+    own force-promotion -- via training_common.save_run_progress, so a
+    task interrupted between any two candidates resumes without redoing
+    either the tuning/fitting or the promotion decision for candidates
+    already settled. The breadcrumb is deleted (training_common.
+    clear_run_progress) once every candidate in the list has been
+    evaluated -- nothing left to resume.
+
+    Returns {"promotions": [model_card, ...], "candidates": [summary, ...]}
+    -- promotions lists, in the order they happened across the WHOLE run
+    (including any earlier, interrupted attempt of the same run_id, not
+    just this attempt), every card that actually went live (usually 0 or
+    1; occasionally more, if a later candidate beats an earlier one that
+    itself just won); top-level candidates is the full score summary of
+    every algorithm tried this run (across every attempt), win or lose.
     """
-    evaluated = []
-    for adapter in candidates:
+    display_metric = "accuracy" if task == "classification" else "mae"
+
+    progress = training_common.load_run_progress(s3, sport, model_name, run_id)
+    if progress is None:
+        evaluated = []
+        promotions = []
+        force_promoted = False
+    else:
+        evaluated = progress["evaluated"]
+        promotions = progress["promotions"]
+        force_promoted = progress["force_promoted"]
+        logger.info(
+            "Resuming %s/%s run %s -- %d candidate(s) already settled by an earlier attempt.",
+            sport, model_name, run_id, len(evaluated),
+        )
+    already_evaluated = {entry["algorithm"] for entry in evaluated}
+
+    for index, adapter in enumerate(candidates):
+        if adapter.algorithm in already_evaluated:
+            logger.info(
+                "Skipping %s/%s candidate %s -- already settled by an earlier attempt of run %s.",
+                sport, model_name, adapter.algorithm, run_id,
+            )
+            continue
+
         logger.info("Tuning and fitting %s/%s candidate: %s", sport, model_name, adapter.algorithm)
         estimator, best_params = adapter.tune_and_fit(X_train, y_train)
         predictions = adapter.predict(estimator, X_test)
@@ -80,80 +146,67 @@ def run_backtest(
         else:
             raise ValueError(f"Unknown task: {task!r} (expected 'classification' or 'regression')")
 
-        evaluated.append({
-            "adapter": adapter,
-            "estimator": estimator,
-            "hyperparameters": best_params,
-            "metrics": metrics,
-            "feature_importances": adapter.feature_importances(estimator, list(X_train.columns)),
-        })
         logger.info(
             "%s/%s candidate %s: %s", sport, model_name, adapter.algorithm,
             " ".join(f"{k}={v:.4f}" for k, v in metrics.items()),
         )
+        # "score" is the display metric, NOT promotion_metric -- see the
+        # docstring above for why. rank_score carries promotion_metric's
+        # own value alongside it so a candidate with the best "score" not
+        # winning doesn't look like a bug (candidates_ranked_by, alongside
+        # the list, names which metric rank_score is).
+        evaluated.append({
+            "algorithm": adapter.algorithm,
+            "score": metrics[display_metric],
+            "rank_score": metrics[promotion_metric],
+        })
+        ranked_so_far = sorted(evaluated, key=lambda e: e["rank_score"])
 
-    # "score" is accuracy (classification) or mae (regression), NOT
-    # promotion_metric (log_loss/rmse) -- log_loss/rmse are the right rule
-    # for DECIDING a winner (see the ranking below), but neither means
-    # anything to someone reading the model card without an ML background,
-    # the same reasoning model_card_view.dart's primary metrics already
-    # apply. accuracy displays as a percentage; mae displays as a +/- error
-    # range in the target's own units -- both easily digestible without
-    # knowing what "log loss 0.65" or "RMSE 9.8" means. Ranked by the
-    # actual gate metric (promotion_metric), not by the display metric, so
-    # order is always best-first regardless of whether "best" means
-    # highest (accuracy) or lowest (mae) -- the frontend just renders this
-    # list in order, with no need to know or encode which direction is
-    # better.
-    #
-    # rank_score carries promotion_metric's own value alongside "score" --
-    # without it, a candidate with the highest displayed "score" not
-    # winning looks like a bug, since the ranking is driven by
-    # promotion_metric (e.g. log_loss), not the display metric.
-    # candidates_ranked_by, alongside the list rather than repeated
-    # per-entry, names which metric rank_score is.
-    display_metric = "accuracy" if task == "classification" else "mae"
-    ranked = sorted(evaluated, key=lambda e: e["metrics"][promotion_metric])
-    candidate_summary = [
-        {
-            "algorithm": e["adapter"].algorithm,
-            "score": e["metrics"][display_metric],
-            "rank_score": e["metrics"][promotion_metric],
+        metadata = {
+            **extra_metadata,
+            **metrics,
+            **naive_baseline_metrics,
+            # The exact column order/selection model_loader.predict()
+            # (serving side) needs to build a live feature_row into what
+            # the estimator was actually trained on. X_train is identical
+            # across every candidate, so this covers every target
+            # regardless of which candidate ends up promoted.
+            "feature_columns": list(X_train.columns),
+            "feature_importances": adapter.feature_importances(estimator, list(X_train.columns)),
+            "hyperparameters": best_params,
+            "candidates": ranked_so_far,
+            "candidates_ranked_by": promotion_metric,
         }
-        for e in ranked
-    ]
 
-    # ranked[0] is the winner -- sorted by promotion_metric above, and
-    # that sort never changes regardless of how many candidates there
-    # are, so no separate "find the best one" step is needed here.
-    winner = ranked[0]
-    adapter = winner["adapter"]
-    metadata = {
-        **extra_metadata,
-        **winner["metrics"],
-        **naive_baseline_metrics,
-        # The exact column order/selection model_loader.predict() (serving
-        # side) needs to build a live feature_row into what the estimator
-        # was actually trained on. Captured once here, off the winner's
-        # own training data -- X_train is identical across every
-        # candidate, so this covers every target regardless of which
-        # candidate won.
-        "feature_columns": list(X_train.columns),
-        "feature_importances": winner["feature_importances"],
-        "hyperparameters": winner["hyperparameters"],
-        "candidates": candidate_summary,
-        "candidates_ranked_by": promotion_metric,
-    }
-    winner_card = training_common.save_model_artifact(
-        s3, sport, model_name, adapter.algorithm,
-        adapter.serialize(winner["estimator"]), adapter.artifact_filename,
-        metadata, summary_metrics,
-    )
-    logger.info(
-        "%s/%s: %s wins this run's %d-candidate tournament (%s=%.4f) -- only this candidate's artifact is saved (v%d)",
-        sport, model_name, adapter.algorithm, len(evaluated), promotion_metric, winner["metrics"][promotion_metric],
-        winner_card["version"],
-    )
-    promoted = training_common.promote_if_better(s3, sport, model_name, winner_card["version"], winner_card, promotion_metric)
+        # Gated on the run's own persisted force_promoted flag, NOT this
+        # loop's index -- see the docstring above on why index alone
+        # breaks resumability (a resumed attempt's first NEW candidate is
+        # not necessarily the run's first candidate overall).
+        is_first_of_run = not force_promoted
+        if not is_first_of_run and not training_common.would_beat_current(s3, sport, model_name, metadata, promotion_metric):
+            logger.info(
+                "%s/%s candidate %s did not beat current production -- not persisted, moving to next candidate.",
+                sport, model_name, adapter.algorithm,
+            )
+            training_common.save_run_progress(s3, sport, model_name, run_id, evaluated, promotions, force_promoted)
+            continue
 
-    return {"winner": winner_card, "promoted": promoted, "candidates": candidate_summary}
+        card = training_common.save_model_artifact(
+            s3, sport, model_name, adapter.algorithm,
+            adapter.serialize(estimator), adapter.artifact_filename,
+            metadata, summary_metrics,
+        )
+        if is_first_of_run:
+            training_common.force_promote(s3, sport, model_name, card["version"])
+            force_promoted = True
+        else:
+            training_common.promote_if_better(s3, sport, model_name, card["version"], metadata, promotion_metric)
+        promotions.append(card)
+        training_common.save_run_progress(s3, sport, model_name, run_id, evaluated, promotions, force_promoted)
+        logger.info(
+            "%s/%s: %s (v%d) is now live, immediately -- before the remaining %d candidate(s) run.",
+            sport, model_name, adapter.algorithm, card["version"], len(candidates) - index - 1,
+        )
+
+    training_common.clear_run_progress(s3, sport, model_name, run_id)
+    return {"promotions": promotions, "candidates": sorted(evaluated, key=lambda e: e["rank_score"])}

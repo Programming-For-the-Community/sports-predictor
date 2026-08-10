@@ -18,7 +18,9 @@ particular algorithm turns a feature matrix into a prediction.
 """
 import io
 import logging
+import os
 import time
+import uuid
 from datetime import datetime, timezone
 
 import numpy as np
@@ -31,6 +33,7 @@ from library.storage.model_artifacts import (
     model_artifact_key,
     model_artifact_prefix,
     next_model_version,
+    run_progress_key,
 )
 
 logger = logging.getLogger("model-training")
@@ -188,6 +191,85 @@ def save_model_artifact(
         sport, model_name, version, algorithm, metric_summary, metadata["train_rows"], metadata["test_rows"],
     )
     return model_card
+
+
+def would_beat_current(s3: S3Manager, sport: str, model_name: str, metadata: dict, metric: str) -> bool:
+    """Read-only counterpart to promote_if_better's own comparison --
+    answers "would this candidate get promoted" without writing anything,
+    so library.ml.backtest.run_backtest can decide whether a candidate is
+    even worth persisting to S3 BEFORE calling save_model_artifact (a
+    losing candidate should never get a version at all -- see
+    save_model_artifact's own docstring on why). Same rule as
+    promote_if_better: True if there's no current production version yet,
+    or metadata[metric] is within PROMOTION_TOLERANCE of (or better than)
+    the current production version's own metric value."""
+    current_version = get_current_version(s3, sport, model_name)
+    if current_version is None:
+        return True
+    current_card = s3.get_json(model_artifact_key(sport, model_name, current_version, MODEL_CARD_FILENAME))
+    return metadata[metric] <= current_card[metric] * (1 + PROMOTION_TOLERANCE)
+
+
+def force_promote(s3: S3Manager, sport: str, model_name: str, version: int) -> None:
+    """Unconditionally points model_name's "current" pointer at `version`,
+    skipping promote_if_better's own comparison against whatever's already
+    live. Used by library.ml.backtest.run_backtest for the very first
+    candidate in a tournament run only -- that candidate always becomes
+    the new production version the moment it finishes, so a run
+    interrupted after just one candidate (e.g. a Fargate Spot reclaim)
+    still leaves SOME fresh version live rather than none. Every candidate
+    after the first still goes through the normal would_beat_current/
+    promote_if_better comparison against whatever's now current."""
+    s3.put_json(current_version_key(sport, model_name), {"version": version})
+    logger.info("Promoting %s/%s v%d unconditionally -- first candidate to finish this run.", sport, model_name, version)
+
+
+def resolve_run_id() -> str:
+    """Every train_*.py script's own run identity, threaded through to
+    library.ml.backtest.run_backtest as its resumable-progress breadcrumb
+    key (see run_progress_key/load_run_progress/save_run_progress below).
+    TRAINING_RUN_ID is set by Terraform/sfn-training-orchestrator.tf from
+    the Step Functions execution's own $$.Execution.Name -- stable across
+    a RunTrainingTask Retry attempt and the Catch-driven
+    RunTrainingTaskOnDemand fallback (same execution, same name), so a
+    task that gets interrupted and relaunched resumes the SAME run
+    instead of starting a fresh one with no memory of what already ran.
+    Falls back to a fresh uuid4 for a manual/local run outside the
+    orchestrator, where there's no prior attempt to resume anyway."""
+    return os.environ.get("TRAINING_RUN_ID") or str(uuid.uuid4())
+
+
+def load_run_progress(s3: S3Manager, sport: str, model_name: str, run_id: str) -> dict | None:
+    """None means this run_id has no breadcrumb yet for this model --
+    either this is the first attempt, or a previous attempt already
+    finished every candidate and cleared it (see clear_run_progress)."""
+    key = run_progress_key(sport, model_name, run_id)
+    if not s3.object_exists(key):
+        return None
+    return s3.get_json(key)
+
+
+def save_run_progress(
+    s3: S3Manager, sport: str, model_name: str, run_id: str,
+    evaluated: list[dict], promotions: list[dict], force_promoted: bool,
+) -> None:
+    """Overwrites the whole breadcrumb after every candidate (whether it
+    won, lost, or was the run's own force-promoted first candidate) --
+    small enough (a handful of candidates' metrics/cards) that a full
+    overwrite each time is simpler than an append-only log, and
+    idempotent if the same candidate's write happens to run twice."""
+    s3.put_json(run_progress_key(sport, model_name, run_id), {
+        "evaluated": evaluated,
+        "promotions": promotions,
+        "force_promoted": force_promoted,
+    })
+
+
+def clear_run_progress(s3: S3Manager, sport: str, model_name: str, run_id: str) -> None:
+    """Deletes the breadcrumb once library.ml.backtest.run_backtest
+    finishes every candidate normally -- nothing left to resume, and
+    leaving it around would just be a stale S3 object from here on."""
+    s3.delete_object(run_progress_key(sport, model_name, run_id))
 
 
 def get_current_version(s3: S3Manager, sport: str, model_name: str) -> int | None:

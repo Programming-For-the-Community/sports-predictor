@@ -1,13 +1,30 @@
 # Derives the training orchestrator's per-task Fargate sizing and its
 # TrainAllTargets Map's MaxConcurrency (sfn-training-orchestrator.tf) from
-# the four variables in variables.tf's "Training compute budget" section --
+# the five variables in variables.tf's "Training compute budget" section --
 # nothing below should ever need to change on its own; only those
 # variables should.
 locals {
   # Total vCPU the training Step Function's concurrent ECS tasks may
-  # consume at once. floor(), not round() -- rounding up could let actual
-  # usage exceed fargate_account_vcpu_limit's own fraction.
-  training_vcpu_budget = floor(var.fargate_account_vcpu_limit * var.training_vcpu_budget_fraction)
+  # consume at once -- the smaller of two independently-derived caps:
+  #
+  #   - The FULL Spot quota, no fraction reserved. RunTrainingTask
+  #     (sfn-training-orchestrator.tf) launches on FARGATE_SPOT, and
+  #     nothing else in this project (feature-engineering, backfill,
+  #     ingest) ever launches on Spot, so there's no other Spot consumer
+  #     to leave headroom for.
+  #   - training_vcpu_budget_fraction of the ON-DEMAND quota, same as
+  #     before Spot existed. This is the rare-case safety net: if every
+  #     in-flight training task's Catch falls through to
+  #     RunTrainingTaskOnDemand at once, that fallback launches on the
+  #     SAME on-demand quota feature-engineering/backfill/ingest use --
+  #     the fraction still protects their headroom in that worst case.
+  #
+  # floor(), not round(), on both terms -- rounding up could let actual
+  # usage exceed either cap.
+  training_vcpu_budget = min(
+    floor(var.fargate_spot_account_vcpu_limit),
+    floor(var.fargate_account_vcpu_limit * var.training_vcpu_budget_fraction),
+  )
 
   # How many training tasks, each sized at training_task_vcpu, fit in that
   # budget. training_min_concurrent_tasks is a TARGET floor, not an
@@ -16,9 +33,10 @@ locals {
   # otherwise silently request more vCPU than the account (or the
   # headroom this fraction deliberately reserves for feature-engineering/
   # ingest/backfill tasks) actually has, and fail ECS RunTask calls once
-  # real concurrency hit that ceiling. That's not hypothetical: at
-  # training_task_vcpu=16 and a real 64-vCPU account quota, the raw
-  # budget-derived value is only 2 -- training_min_concurrent_tasks'
+  # real concurrency hit that ceiling. That's not hypothetical: at this
+  # project's real current quotas (64 Spot / 250 on-demand vCPU,
+  # training_task_vcpu=16, training_vcpu_budget_fraction=0.75), the raw
+  # budget-derived value is only 4 -- training_min_concurrent_tasks'
   # default of 5 would have demanded 80 vCPU before this clamp existed.
   # max(1, ...) still guarantees training never fully serializes to zero
   # concurrency if the budget math rounds down that far.

@@ -121,7 +121,7 @@ def _feature_columns(df: pd.DataFrame, target_stat: str) -> list[str]:
 
 def train(s3: S3Manager, df: pd.DataFrame, target_stat: str) -> dict:
     """Runs the full candidate tournament and returns run_backtest's
-    result ({"winner": card, "promoted": bool, "candidates": [card, ...]})."""
+    result ({"promotions": [card, ...], "candidates": [summary, ...]})."""
     df = _filter_to_target_stat(df, target_stat)
     feature_columns = _feature_columns(df, target_stat)
     train_df, test_df = training_common.chronological_split(df, training_common.TEST_FRACTION)
@@ -157,6 +157,7 @@ def train(s3: S3Manager, df: pd.DataFrame, target_stat: str) -> dict:
         },
         summary_metrics=SUMMARY_METRICS,
         promotion_metric=PROMOTION_METRIC,
+        run_id=training_common.resolve_run_id(),
     )
 
 

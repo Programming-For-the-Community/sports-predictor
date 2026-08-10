@@ -71,7 +71,7 @@ def _feature_columns(df):
 
 def train(s3: S3Manager, df) -> dict:
     """Runs the full candidate tournament and returns run_backtest's
-    result ({"winner": card, "promoted": bool, "candidates": [card, ...]})."""
+    result ({"promotions": [card, ...], "candidates": [summary, ...]})."""
     feature_columns = _feature_columns(df)
     train_df, test_df = training_common.chronological_split(df, training_common.TEST_FRACTION)
     train_date_range = [str(train_df["event_date"].min()), str(train_df["event_date"].max())]
@@ -101,6 +101,7 @@ def train(s3: S3Manager, df) -> dict:
         },
         summary_metrics=SUMMARY_METRICS,
         promotion_metric=PROMOTION_METRIC,
+        run_id=training_common.resolve_run_id(),
     )
 
 

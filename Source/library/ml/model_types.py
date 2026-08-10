@@ -367,11 +367,25 @@ class ElasticNetAdapter(_JoblibSerializedAdapter):
 # just without XGBoost's lucky "raw output already IS the right value
 # either way" property, since a plain sklearn classifier/regressor
 # genuinely has different methods for the two.
+#
+# max_samples caps how much of the training slice each tree's bootstrap
+# draw actually sees -- added after a real CloudWatch log showed a single
+# CV fold (n_estimators=500, max_depth=10) taking 10.4 minutes on its own.
+# TimeSeriesSplit's folds grow with each split (fold 8 trains on nearly
+# the whole dataset, fold 1 on a small initial slice), so the LATE folds
+# -- not the average case -- set the worst-case fit time; max_samples
+# bounds every tree's per-fit cost to a fraction of whatever that fold's
+# training set happens to be, independent of how large it's grown to.
+# Tuned like every other axis here rather than fixed at one value --
+# bagging already trades some per-tree signal for variance reduction by
+# design, so it's plausible a smaller draw sometimes wins outright rather
+# than just being a speed/quality compromise.
 _RF_PARAM_DISTRIBUTIONS = {
     "model__n_estimators": [100, 200, 300, 400, 500, 600],
     "model__max_depth": [4, 6, 8, 10, 15, 20, None],
     "model__min_samples_leaf": [1, 2, 4, 8],
     "model__max_features": ["sqrt", "log2", None],
+    "model__max_samples": [0.4, 0.5, 0.6, 0.7, 0.85, 1.0],
 }
 # Fewer than XGBoost's 400 -- an individual Random Forest fit is usually
 # cheap, but full grid coverage matters less for a bagging method whose

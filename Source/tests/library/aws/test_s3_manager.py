@@ -49,3 +49,18 @@ class TestListKeys:
         manager.list_keys("nfl/win-probability/")
 
         mock_paginator.paginate.assert_called_once_with(Bucket="test-bucket", Prefix="nfl/win-probability/")
+
+
+class TestDeleteObject:
+    """Supports clearing a resumable-progress breadcrumb once a
+    library.ml.backtest.run_backtest run finishes (see
+    library.ml.training_common.clear_run_progress)."""
+
+    def test_passes_bucket_and_key_to_delete_object(self):
+        manager, mock_client, _ = _make_manager([{}])
+
+        manager.delete_object("training-runs/nfl/win-probability/run-1/progress.json")
+
+        mock_client.delete_object.assert_called_once_with(
+            Bucket="test-bucket", Key="training-runs/nfl/win-probability/run-1/progress.json",
+        )
