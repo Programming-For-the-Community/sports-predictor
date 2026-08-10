@@ -350,13 +350,22 @@ class ElasticNetAdapter(_JoblibSerializedAdapter):
 # Tuned like every other axis here rather than fixed at one value --
 # bagging already trades some per-tree signal for variance reduction by
 # design, so it's plausible a smaller draw sometimes wins outright rather
-# than just being a speed/quality compromise.
+# than just being a speed/quality compromise. Ceiling capped at 0.85, not
+# 1.0 -- on a large-population target (e.g. defensive_sacks, whose
+# filtered training population dwarfs every other player-prop stat's,
+# see train_player_prop_model.py), an uncapped draw combined with
+# max_depth's own upper end took over 6 minutes for a single fold.
+#
+# max_features has no None option -- unlike max_samples, an uncapped draw
+# here (every split considering every feature, not just a random
+# subspace) is pure cost with no offsetting variance-reduction rationale
+# the way max_samples=1.0 at least had one for.
 _RF_PARAM_DISTRIBUTIONS = {
     "model__n_estimators": [100, 200, 300, 400, 500, 600],
     "model__max_depth": [4, 6, 8, 10, 15, 20, None],
     "model__min_samples_leaf": [1, 2, 4, 8],
-    "model__max_features": ["sqrt", "log2", None],
-    "model__max_samples": [0.4, 0.5, 0.6, 0.7, 0.85, 1.0],
+    "model__max_features": ["sqrt", "log2"],
+    "model__max_samples": [0.4, 0.5, 0.6, 0.7, 0.85],
 }
 # Fewer than XGBoost's 400 -- an individual Random Forest fit is usually
 # cheap, but full grid coverage matters less for a bagging method whose
