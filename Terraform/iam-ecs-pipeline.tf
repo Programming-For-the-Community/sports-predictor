@@ -64,6 +64,13 @@ data "aws_iam_policy_document" "ecs_pipeline_permissions" {
   # independently -- see Terraform/s3-model-artifacts.tf. This role is
   # shared across every sport's feature-engineering/training tasks, so its
   # prefix list grows by one entry per sport onboarded, not a new role.
+  #
+  # training-runs/* is also listed here even though nothing ever calls
+  # ListBucket against it directly: S3 returns 403 (not 404) on a
+  # HeadObject/GetObject for a nonexistent key when the caller also lacks
+  # ListBucket on that key's prefix, and load_run_progress's HeadObject
+  # (training_common.py) targets a progress-marker key that legitimately
+  # doesn't exist yet on every run's first attempt.
   statement {
     sid       = "ListModelArtifactsSportPrefixes"
     actions   = ["s3:ListBucket"]
@@ -72,7 +79,7 @@ data "aws_iam_policy_document" "ecs_pipeline_permissions" {
     condition {
       test     = "StringLike"
       variable = "s3:prefix"
-      values   = ["nfl/*", "ncaafb/*"]
+      values   = ["nfl/*", "ncaafb/*", "training-runs/*"]
     }
   }
 }
