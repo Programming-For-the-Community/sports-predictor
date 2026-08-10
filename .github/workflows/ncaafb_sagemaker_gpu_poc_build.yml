@@ -1,15 +1,15 @@
 # Builds and pushes the one-off SageMaker GPU training benchmark image
-# (see Source/model-training/ncaafb/sagemaker_gpu_poc/README.md).
-# workflow_dispatch only -- unlike ncaafb_ai_training.yml this is never
-# workflow_call'd from ncaafb_deploy.yml or any other pipeline, since this
-# image isn't part of the regular pipeline at all. Run it manually once,
-# then launch a training job against the pushed image from the SageMaker
-# console.
+# (see Source/model-training/ncaafb/sagemaker_gpu_poc/README.md). Not
+# part of the regular pipeline -- workflow_call is only here because
+# ncaafb_deploy.yml temporarily pulls this job in (see that file's own
+# TEMPORARY comment) to get it built without merging to main; drop
+# workflow_call again once that temporary wiring is removed.
 
 name: NCAAFB SageMaker GPU POC Build
 
 on:
   workflow_dispatch:
+  workflow_call:
 
 permissions:
   id-token: write
