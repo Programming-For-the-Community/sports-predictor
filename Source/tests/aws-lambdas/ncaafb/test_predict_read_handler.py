@@ -44,12 +44,20 @@ class TestRouting:
         response = ncaafb_predict_read.lambda_handler(_api_event("/ncaafb/unknown"), None)
         assert response["statusCode"] == 404
 
-    def test_season_is_not_served_here(self):
-        # No National Ranking serving story yet -- see handler.py's own
-        # docstring. Should never be routed here, but if it somehow is,
-        # it must 404, not silently resurrect an unbuilt route.
-        response = ncaafb_predict_read.lambda_handler(_api_event("/ncaafb/season"), None)
-        assert response["statusCode"] == 404
+    def test_season_route(self):
+        with patch.object(ncaafb_predict_read, "_get_model_bucket"), \
+             patch.object(ncaafb_predict_read, "get_season_projection", return_value={"sport": "ncaafb", "standings": []}):
+            response = ncaafb_predict_read.lambda_handler(_api_event("/ncaafb/season"), None)
+
+        assert response["statusCode"] == 200
+        assert json.loads(response["body"]) == {"sport": "ncaafb", "standings": []}
+
+    def test_season_route_returns_503_when_not_yet_cached(self):
+        with patch.object(ncaafb_predict_read, "_get_model_bucket"), \
+             patch.object(ncaafb_predict_read, "get_season_projection", return_value=None):
+            response = ncaafb_predict_read.lambda_handler(_api_event("/ncaafb/season"), None)
+
+        assert response["statusCode"] == 503
 
     def test_unhandled_exception_returns_500(self):
         with patch.object(ncaafb_predict_read, "_get_storage"), \

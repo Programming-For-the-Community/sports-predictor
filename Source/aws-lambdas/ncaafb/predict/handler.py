@@ -3,24 +3,29 @@ NCAAFB inference Lambda. Triggered by API Gateway (REST API, Lambda proxy
 integration) behind the Cognito authorizer already wired in
 Terraform/api-gateway.tf -- every request reaching this function has
 already had its JWT validated by API Gateway itself; this code never
-checks auth. Mirrors Source/aws-lambdas/nfl/predict/handler.py exactly
-(see Terraform/lambda-ncaafb-predict.tf's own comment) -- NOT a port of
-it, since there's no season-wide scheduled-compute route here yet (the
-National Ranking model's own serving story is a later phase, unlike NFL's
-weekly season-projection precompute -- see live_features.py's own
-docstring for the other differences).
+checks auth. Mirrors Source/aws-lambdas/nfl/predict/handler.py's overall
+shape (see Terraform/lambda-ncaafb-predict.tf's own comment) -- NOT a
+port of it; see live_features.py's own docstring for the leaders-block
+differences and season_simulation.py's own docstring for how the
+ScheduledSeasonProjection branch below differs from NFL's (no static
+division table, CFP field selection needs the real trained
+national-ranking model).
 
 Routing and response-shaping only -- the actual prediction logic lives in
-event_prediction.py.
+event_prediction.py and season_projection.py.
 
 GET /ncaafb/events and GET /ncaafb/models are deliberately NOT served
 here -- see Source/aws-lambdas/ncaafb/predict-read/handler.py. Same cold-
 start-isolation reasoning as NFL's own predict/predict-read split (see
 that Lambda's own docstring): neither route ever loads or deserializes an
 ML model artifact, so they're served by a separate, much lighter Lambda.
+GET /ncaafb/season is served from predict-read too, off the cache this
+Lambda's own ScheduledSeasonProjection branch below writes to S3 -- see
+season_projection.py's own docstring for why that route can't compute
+this live per-request.
 
 Routes (see Terraform/lambda-ncaafb-predict.tf for the API Gateway
-wiring, once api-gateway-ncaafb-predict.tf exists):
+wiring):
     GET /ncaafb/predictions/events/{event_id}
         -> win probability, margin, home score, and away score for one
            upcoming/completed matchup, plus a `leaders` block: one
@@ -38,11 +43,11 @@ wiring, once api-gateway-ncaafb-predict.tf exists):
 not the internal SPORT#NCAAFB#EVENT#... key -- translated via
 library.schema.keys the same way every other NCAAFB adapter does.
 
-Both routes above compute live on every request (no caching) and log to
-the predictions table for the audit trail -- see design/DATA_SCHEMA.md's
-Predictions table. The predictions table's IAM grant is PutItem-only (see
-Terraform/iam-ncaafb-predict.tf, once it exists); this function never
-reads a past prediction back.
+Both API-Gateway-triggered routes above compute live on every request (no
+caching) and log to the predictions table for the audit trail -- see
+design/DATA_SCHEMA.md's Predictions table. The predictions table's IAM
+grant is PutItem-only (see Terraform/iam-lambda-inference.tf); this
+function never reads a past prediction back.
 """
 import json
 import logging
@@ -54,6 +59,7 @@ from library.storage.feature_storage import FeatureStorage
 import event_prediction
 import live_features
 import model_loader
+import season_projection
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger("ncaafb-predict")
@@ -100,6 +106,9 @@ def _response(status_code: int, body: dict) -> dict:
 
 
 def lambda_handler(event, context):
+    if event.get("detail-type") == "ScheduledSeasonProjection":
+        return season_projection.run_scheduled(_get_storage(), _get_model_bucket())
+
     path_params = event.get("pathParameters") or {}
     query_params = event.get("queryStringParameters") or {}
     resource = event.get("resource", "")

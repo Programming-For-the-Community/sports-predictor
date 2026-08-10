@@ -183,3 +183,21 @@ class TestListModels:
         result = ncaafb_reads.list_models(s3, "ncaafb")
 
         assert result["models"] == []
+
+
+class TestGetSeasonProjection:
+    def test_returns_none_when_not_yet_cached(self):
+        s3 = MagicMock()
+        s3.object_exists.return_value = False
+
+        assert ncaafb_reads.get_season_projection(s3, "ncaafb") is None
+
+    def test_reads_the_cached_object_under_the_expected_key(self):
+        s3 = MagicMock()
+        s3.object_exists.return_value = True
+        s3.get_json.return_value = {"sport": "ncaafb", "standings": []}
+
+        result = ncaafb_reads.get_season_projection(s3, "ncaafb")
+
+        assert result == {"sport": "ncaafb", "standings": []}
+        s3.object_exists.assert_called_once_with("season-projections/ncaafb/latest.json")

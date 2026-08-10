@@ -11,13 +11,14 @@
 #
 #   GET /ncaafb/events                                              -> ncaafb_predict_read (lambda-ncaafb-predict-read.tf)
 #   GET /ncaafb/models                                              -> ncaafb_predict_read (lambda-ncaafb-predict-read.tf)
+#   GET /ncaafb/season                                              -> ncaafb_predict_read (lambda-ncaafb-predict-read.tf)
 #   GET /ncaafb/predictions/events/{event_id}                       -> ncaafb_predict (lambda-ncaafb-predict.tf)
 #   GET /ncaafb/predictions/events/{event_id}/players/{entity_id}   -> ncaafb_predict (lambda-ncaafb-predict.tf)
 #
-# No /ncaafb/season route yet -- the National Ranking model's own serving
-# story (a scheduled whole-league batch compute + S3 cache, mirroring
-# NFL's own season-projection precompute) is a separate, later phase --
-# see Source/aws-lambdas/ncaafb/predict/handler.py's own docstring.
+# /ncaafb/season reads a cache written by ncaafb_predict's own
+# ScheduledSeasonProjection branch (see Terraform/scheduler-ncaafb-
+# season-projection.tf), not computed live -- same reasoning as NFL's own
+# /nfl/season route.
 
 resource "aws_api_gateway_resource" "ncaafb" {
   rest_api_id = aws_api_gateway_rest_api.main.id
@@ -66,6 +67,29 @@ resource "aws_api_gateway_integration" "ncaafb_models" {
   rest_api_id             = aws_api_gateway_rest_api.main.id
   resource_id             = aws_api_gateway_resource.ncaafb_models.id
   http_method             = aws_api_gateway_method.ncaafb_models.http_method
+  type                    = "AWS_PROXY"
+  integration_http_method = "POST"
+  uri                     = aws_lambda_function.ncaafb_predict_read.invoke_arn
+}
+
+resource "aws_api_gateway_resource" "ncaafb_season" {
+  rest_api_id = aws_api_gateway_rest_api.main.id
+  parent_id   = aws_api_gateway_resource.ncaafb.id
+  path_part   = "season"
+}
+
+resource "aws_api_gateway_method" "ncaafb_season" {
+  rest_api_id   = aws_api_gateway_rest_api.main.id
+  resource_id   = aws_api_gateway_resource.ncaafb_season.id
+  http_method   = "GET"
+  authorization = "COGNITO_USER_POOLS"
+  authorizer_id = aws_api_gateway_authorizer.cognito.id
+}
+
+resource "aws_api_gateway_integration" "ncaafb_season" {
+  rest_api_id             = aws_api_gateway_rest_api.main.id
+  resource_id             = aws_api_gateway_resource.ncaafb_season.id
+  http_method             = aws_api_gateway_method.ncaafb_season.http_method
   type                    = "AWS_PROXY"
   integration_http_method = "POST"
   uri                     = aws_lambda_function.ncaafb_predict_read.invoke_arn
@@ -160,6 +184,7 @@ locals {
   ncaafb_cors_resources = {
     events         = aws_api_gateway_resource.ncaafb_events.id
     models         = aws_api_gateway_resource.ncaafb_models.id
+    season         = aws_api_gateway_resource.ncaafb_season.id
     predict_event  = aws_api_gateway_resource.ncaafb_predictions_event.id
     predict_player = aws_api_gateway_resource.ncaafb_predictions_event_player.id
   }

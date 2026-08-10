@@ -36,6 +36,8 @@ jobs:
         Source/tests/aws-lambdas/ncaafb/test_live_features.py
         Source/tests/aws-lambdas/ncaafb/test_event_prediction.py
         Source/tests/aws-lambdas/ncaafb/test_predict_handler.py
+        Source/tests/aws-lambdas/ncaafb/test_season_simulation.py
+        Source/tests/aws-lambdas/ncaafb/test_season_projection.py
       # Both requirements files -- requirements-nodeps.txt (xgboost, only
       # ever installed --no-deps in the real Dockerfile build to dodge its
       # nvidia-nccl-cu12 GPU dependency) still needs to be installed HERE

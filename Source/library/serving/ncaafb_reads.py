@@ -1,14 +1,11 @@
 """
-Read-only NCAAFB serving logic -- GET /ncaafb/events and GET
-/ncaafb/models -- shared between the heavy inference Lambda
+Read-only NCAAFB serving logic -- GET /ncaafb/events, GET /ncaafb/models,
+and GET /ncaafb/season -- shared between the heavy inference Lambda
 (Source/aws-lambdas/ncaafb/predict) and the light read-only Lambda
 (Source/aws-lambdas/ncaafb/predict-read). Same split, and same reasoning,
 as library.serving.nfl_reads (see its own docstring) -- NOT a port of it,
 duplicated deliberately so this Lambda never has to import that
-NFL-named module. GET /ncaafb/season has no equivalent here yet -- the
-National Ranking model's own serving story (a scheduled whole-league
-batch compute + S3 cache, not a per-request route) is a separate, later
-phase; see design/PROJECT_PLAN.md.
+NFL-named module.
 
 Callers own their own storage/s3/predictions_table objects and Lambda-
 lifecycle concerns, same boundary nfl_reads.py draws.
@@ -20,6 +17,7 @@ from boto3.dynamodb.conditions import Key
 
 from library.features.ncaafb import is_bowl_game, is_playoff_game
 from library.storage.model_artifacts import current_version_key, model_artifact_key
+from library.storage.season_projections import season_projection_key
 
 WIN_PROBABILITY_MODEL = "win-probability"
 SCORE_MODELS = {"margin": "score-margin", "home_score": "home-score", "away_score": "away-score"}
@@ -268,9 +266,9 @@ def _load_model_summary(s3, sport: str, model_name: str) -> dict | None:
 def list_models(s3, sport: str) -> dict:
     """GET /ncaafb/models -- lists every currently-promoted model
     (win-probability, the three score models, the seven player-prop
-    models -- national-ranking too, once its own serving phase lands),
-    with its latest model card summary. A model that's never had a
-    version promoted simply doesn't appear in this list."""
+    models, national-ranking), with its latest model card summary. A
+    model that's never had a version promoted simply doesn't appear in
+    this list."""
     prefix = f"{sport}/"
     model_names = sorted({key[len(prefix):].split("/")[0] for key in s3.list_keys(prefix)})
 
@@ -281,3 +279,19 @@ def list_models(s3, sport: str) -> dict:
         results = executor.map(lambda name: _load_model_summary(s3, sport, name), model_names)
 
     return {"sport": sport, "models": [card for card in results if card is not None]}
+
+
+def get_season_projection(s3, sport: str) -> dict | None:
+    """GET /ncaafb/season -- reads the standings + bowl/playoff/
+    championship-probability + leaderboard projection written weekly by
+    the scheduled compute path (predict/handler.py's
+    ScheduledSeasonProjection branch, predict/season_projection.py),
+    never computed live here. None if the schedule hasn't fired yet
+    (e.g. right after a fresh deploy) -- the caller is expected to
+    surface that as "not yet available" rather than treat it like a real
+    500. Identical to nfl_reads.get_season_projection -- duplicated, not
+    imported, same reasoning this module's own docstring gives."""
+    key = season_projection_key(sport)
+    if not s3.object_exists(key):
+        return None
+    return s3.get_json(key)
