@@ -1,14 +1,16 @@
 # Single public entry point for the whole app -- the frontend (default
-# behavior, S3 origin) and the NFL API (path-routed to API Gateway's own
-# execute-api endpoint), both under local.domain. See acm.tf/route53.tf
-# for the matching cert/DNS records.
+# behavior, S3 origin) and every sport's API (path-routed to API Gateway's
+# own execute-api endpoint, one shared REST API for all sports), both
+# under local.domain. See acm.tf/route53.tf for the matching cert/DNS
+# records.
 #
-# One list entry per active sport's API prefix -- adding a second sport's
-# API later is one more entry here, not a hand-written cache behavior.
-# File-scoped locals block, same convention as
-# scheduler-nfl-train-player-prop-model.tf's own nfl_player_prop_stats.
+# One list entry per active sport's API prefix -- a path not in this list
+# falls through to the default behavior (the frontend's S3 origin)
+# instead of reaching API Gateway at all. File-scoped locals block, same
+# convention as scheduler-nfl-train-player-prop-model.tf's own
+# nfl_player_prop_stats.
 locals {
-  api_path_prefixes = ["nfl"]
+  api_path_prefixes = ["nfl", "ncaafb"]
 }
 
 resource "aws_cloudfront_origin_access_control" "frontend" {
@@ -30,11 +32,12 @@ resource "aws_cloudfront_distribution" "main" {
   }
 
   origin {
-    origin_id   = "nfl-api"
+    origin_id   = "api"
     domain_name = "${aws_api_gateway_rest_api.main.id}.execute-api.${var.region}.amazonaws.com"
     # Prefixes every forwarded request with the deployed stage, so a
-    # public request to /nfl/... reaches the API at /<stage>/nfl/...,
-    # exactly what the default execute-api endpoint expects.
+    # public request to /nfl/... or /ncaafb/... reaches the API at
+    # /<stage>/nfl/... etc., exactly what the default execute-api
+    # endpoint expects.
     origin_path = "/${aws_api_gateway_stage.main.stage_name}"
 
     custom_origin_config {
@@ -58,7 +61,7 @@ resource "aws_cloudfront_distribution" "main" {
     for_each = local.api_path_prefixes
     content {
       path_pattern           = "/${ordered_cache_behavior.value}/*"
-      target_origin_id       = "nfl-api"
+      target_origin_id       = "api"
       viewer_protocol_policy = "redirect-to-https"
       allowed_methods        = ["GET", "HEAD", "OPTIONS"]
       cached_methods         = ["GET", "HEAD"]

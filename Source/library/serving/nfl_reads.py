@@ -18,6 +18,7 @@ around training orchestration vs. algorithm specifics.
 """
 import re
 from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime, timedelta, timezone
 
 from boto3.dynamodb.conditions import Key
 
@@ -95,17 +96,27 @@ def _previous_week_events(completed: list[dict]) -> list[dict]:
     return [e for e in completed if _week_key(e) == target]
 
 
+_STALE_SCHEDULED_GRACE_DAYS = 3  # tolerates ingest lag flipping a played game's status to completed
+
+
 def _next_week_events(scheduled: list[dict]) -> list[dict]:
     """Only the soonest upcoming week's games. Empty if nothing's been
     ingested yet for the next week (e.g. between seasons, before the
     Tuesday/Wednesday ingest schedule has run for it) -- the frontend
     shows a "coming soon" state for that case instead of an empty list
-    that looks like a data problem."""
-    if not scheduled:
+    that looks like a data problem.
+
+    Ignores any "scheduled" event dated more than _STALE_SCHEDULED_GRACE_DAYS
+    in the past -- a canceled/postponed game that never got its status
+    updated (no dedicated status value exists for that yet) would otherwise
+    win min() permanently and mask every real upcoming week behind it."""
+    cutoff = (datetime.now(timezone.utc).date() - timedelta(days=_STALE_SCHEDULED_GRACE_DAYS)).isoformat()
+    plausible = [e for e in scheduled if e.get("event_date", "") >= cutoff]
+    if not plausible:
         return []
-    earliest = min(scheduled, key=lambda e: e.get("event_date", ""))
+    earliest = min(plausible, key=lambda e: e.get("event_date", ""))
     target = _week_key(earliest)
-    return [e for e in scheduled if _week_key(e) == target]
+    return [e for e in plausible if _week_key(e) == target]
 
 
 def _actual_result(event: dict) -> dict | None:

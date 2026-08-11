@@ -17,11 +17,10 @@
 # strict subset of what that role already grants the main predict Lambda,
 # so a second role would add IAM surface without tightening anything real.
 #
-# VPC-attached, same subnets/security group as the main predict Lambda --
-# DynamoDB/S3 are only reachable via the VPC Gateway Endpoints
-# (vpc-endpoints.tf) regardless of which Lambda is asking, so this doesn't
-# save anything on that front. The win here is entirely about what gets
-# imported at module load time, not about network path.
+# Not VPC-attached -- S3/DynamoDB are reachable over their public regional
+# endpoints without a VPC, and this Lambda also calls lambda:InvokeFunction
+# to trigger the predict Lambda on a cache miss, which isn't reachable at
+# all from inside the VPC (no NAT Gateway, no Lambda Interface Endpoint).
 
 resource "aws_cloudwatch_log_group" "nfl_predict_read" {
   name              = "/aws/lambda/${var.project}-nfl-predict-read"
@@ -71,11 +70,6 @@ resource "aws_lambda_function" "nfl_predict_read" {
       TEAM_GAME_STATS_TABLE_NAME   = aws_dynamodb_table.team_game_stats.name
       PREDICT_FUNCTION_NAME        = aws_lambda_function.nfl_predict.function_name # LambdaInvoker's async-invoke target
     }
-  }
-
-  vpc_config {
-    subnet_ids         = [aws_subnet.private_a.id, aws_subnet.private_b.id, aws_subnet.private_c.id]
-    security_group_ids = [aws_security_group.lambda_inference.id]
   }
 
   logging_config {

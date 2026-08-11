@@ -225,14 +225,14 @@ class TestBuildLivePlayerFeatures:
         assert row["is_home"] is True
 
 
-class TestBuildLiveEventLeaders:
+class TestBuildLiveEventLeaderCandidates:
     def test_raises_when_event_not_found(self):
         storage = MagicMock()
         storage.get_event.return_value = None
         with pytest.raises(live_features.EventNotFoundError):
-            live_features.build_live_event_leaders(storage, "ncaafb", "SPORT#NCAAFB#EVENT#1")
+            live_features.build_live_event_leader_candidates(storage, "ncaafb", "SPORT#NCAAFB#EVENT#1")
 
-    def test_shape_has_no_sacks_key(self):
+    def test_shape_has_sacks_key_and_empty_lists_when_no_candidates(self):
         storage = MagicMock()
         event = _event("SPORT#NCAAFB#EVENT#1", "2025-10-11", "61", "52")
         storage.get_event.return_value = event
@@ -240,13 +240,13 @@ class TestBuildLiveEventLeaders:
         storage.get_all_events.return_value = []
         storage.get_entity.return_value = None
 
-        result = live_features.build_live_event_leaders(storage, "ncaafb", event["event_key"])
+        result = live_features.build_live_event_leader_candidates(storage, "ncaafb", event["event_key"])
 
         assert set(result.keys()) == {"home", "away"}
-        assert set(result["home"].keys()) == {"passing", "receiving", "rushing"}
-        assert result["home"] == {"passing": None, "receiving": None, "rushing": None}
+        assert set(result["home"].keys()) == {"passing", "rushing", "receiving", "sacks"}
+        assert result["home"] == {"passing": [], "rushing": [], "receiving": [], "sacks": []}
 
-    def test_populates_a_found_leader(self):
+    def test_populates_a_found_passing_candidate(self):
         storage = MagicMock()
         event = _event("SPORT#NCAAFB#EVENT#1", "2025-10-11", "61", "52")
         past_game = _event("SPORT#NCAAFB#EVENT#900", "2025-10-04", "61", "70")
@@ -261,9 +261,38 @@ class TestBuildLiveEventLeaders:
             _player_game("101", "61", past_game["event_key"], "2025-10-04", {"passing_attempts": 30}),
         ]
         storage.get_entity.return_value = _entity("61")
-        storage.get_player_game_stats.return_value = [{"entity_id": "101"}]
+        storage.get_player_game_stats.return_value = [{"entity_id": "101", "stat_line": {"passing_attempts": 30}}]
 
-        result = live_features.build_live_event_leaders(storage, "ncaafb", event["event_key"])
+        result = live_features.build_live_event_leader_candidates(storage, "ncaafb", event["event_key"])
 
-        assert result["home"]["passing"]["entity_id"] == "101"
-        assert result["away"]["passing"] is None
+        assert [row["entity_id"] for row in result["home"]["passing"]] == ["101"]
+        assert result["away"]["passing"] == []
+
+    def test_ranks_multiple_rushing_candidates_by_recent_volume(self):
+        storage = MagicMock()
+        event = _event("SPORT#NCAAFB#EVENT#1", "2025-10-11", "61", "52")
+        past_game = _event("SPORT#NCAAFB#EVENT#900", "2025-10-04", "61", "70")
+        storage.get_event.return_value = event
+        storage.get_all_events.return_value = []
+
+        def _team_events(sport, team_id, before_date=None, limit=None, events=None):
+            return [past_game] if team_id == "61" else []
+
+        storage.get_team_events.side_effect = _team_events
+        storage.get_player_game_stats_for_event.return_value = [
+            _player_game("101", "61", past_game["event_key"], "2025-10-04", {"rushing_attempts": 5}),
+            _player_game("102", "61", past_game["event_key"], "2025-10-04", {"rushing_attempts": 20}),
+            _player_game("103", "61", past_game["event_key"], "2025-10-04", {"rushing_attempts": 12}),
+        ]
+        storage.get_entity.return_value = _entity("61")
+
+        def _player_history(entity_id, before_date=None, limit=None):
+            volumes = {"101": 5, "102": 20, "103": 12}
+            return [{"entity_id": entity_id, "stat_line": {"rushing_attempts": volumes[entity_id]}}]
+
+        storage.get_player_game_stats.side_effect = _player_history
+
+        result = live_features.build_live_event_leader_candidates(storage, "ncaafb", event["event_key"])
+
+        # LEADER_CANDIDATE_LIMITS caps rushing at 2 -- the top 2 by volume (102, 103), not 101.
+        assert [row["entity_id"] for row in result["home"]["rushing"]] == ["102", "103"]
