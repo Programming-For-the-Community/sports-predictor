@@ -1,12 +1,9 @@
-# NCAAFB read-only serving Lambda -- GET /ncaafb/events, GET
-# /ncaafb/models, GET /ncaafb/season, and (as of the prediction cache)
-# the two prediction routes too. Mirrors lambda-nfl-predict-read.tf
-# exactly: zip-packaged (no ML dependency footprint), reuses
+# NCAAFB read-only serving Lambda -- GET /ncaafb/events, /ncaafb/models,
+# /ncaafb/season, and the two prediction routes (cache read-through, see
+# Source/aws-lambdas/ncaafb/predict-read/handler.py). Mirrors
+# lambda-nfl-predict-read.tf: zip-packaged, reuses
 # aws_iam_role.lambda_inference, same VPC attachment as the main predict
-# Lambda. The prediction routes now only ever read/write a cache
-# (library.storage.prediction_cache) and, on a miss, fire an async
-# invoke of the predict Lambda, which is what actually computes -- see
-# predict-read/handler.py's own docstring.
+# Lambda.
 #
 # Code is deployed by the ncaafb_deploy workflow -- NOT by Terraform. Same
 # placeholder-ZIP + lifecycle.ignore_changes pattern as
@@ -54,10 +51,7 @@ resource "aws_lambda_function" "ncaafb_predict_read" {
       EVENTS_TABLE_NAME            = aws_dynamodb_table.events.name
       PLAYER_GAME_STATS_TABLE_NAME = aws_dynamodb_table.player_game_stats.name
       TEAM_GAME_STATS_TABLE_NAME   = aws_dynamodb_table.team_game_stats.name
-      # library.aws.lambda_invoker.LambdaInvoker's own target -- fired
-      # async (fire-and-forget) on a prediction-cache miss/stale-refresh,
-      # see handler.py's own docstring.
-      PREDICT_FUNCTION_NAME = aws_lambda_function.ncaafb_predict.function_name
+      PREDICT_FUNCTION_NAME        = aws_lambda_function.ncaafb_predict.function_name # LambdaInvoker's async-invoke target
     }
   }
 

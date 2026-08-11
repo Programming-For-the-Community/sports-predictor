@@ -1,11 +1,7 @@
-# NFL inference Lambda. Never triggered by API Gateway directly -- see
-# api-gateway-nfl-predict.tf, which points every GET route (including
-# the two prediction routes) at nfl_predict_read instead; this Lambda
-# only ever runs in the background (an EventBridge Scheduler invoke for
-# the season projection, or a fire-and-forget async invoke from
-# nfl_predict_read on a prediction-cache miss). Reads live feature
-# context from DynamoDB and the current promoted model from the model
-# artifacts bucket, computes a prediction, and audits it to the
+# NFL inference Lambda. Never triggered by API Gateway directly -- runs
+# only in the background (EventBridge Scheduler or an async invoke from
+# nfl_predict_read). Reads live feature context from DynamoDB and the
+# current promoted model, computes a prediction, and audits it to the
 # predictions table. See Source/aws-lambdas/nfl/predict/handler.py.
 #
 # Container image, not the zip packaging ingest/normalize use -- xgboost
@@ -33,7 +29,7 @@ resource "aws_cloudwatch_log_group" "nfl_predict" {
 
 resource "aws_lambda_function" "nfl_predict" {
   function_name = "${var.project}-nfl-predict"
-  description   = "Computes NFL event-outcome and player-prop predictions in the background -- never triggered by API Gateway directly (see api-gateway-nfl-predict.tf, which points every GET route at nfl_predict_read instead). Invoked by an EventBridge Scheduler (season projection) or a fire-and-forget async invoke from nfl_predict_read on a prediction-cache miss (see predict/handler.py's own docstring)."
+  description   = "Computes NFL event-outcome and player-prop predictions in the background. Never called by API Gateway -- invoked by EventBridge Scheduler (season projection) or an async invoke from nfl_predict_read on a cache miss. See predict/handler.py."
   role          = aws_iam_role.lambda_inference.arn
   package_type  = "Image"
   image_uri     = "${var.ecr_repo_url}:nfl-predict-latest"
@@ -45,13 +41,7 @@ resource "aws_lambda_function" "nfl_predict" {
   # setting and the pushed image's own platform fails at invoke time, not
   # at `terraform apply`.
   architectures = ["arm64"]
-  # No API Gateway ceiling to respect anymore -- this Lambda is never on
-  # that request path (see the description above), so its own timeout is
-  # the only limit that matters. 5 minutes covers a slow season
-  # projection (season_projection.py's _leaderboards, already known to
-  # run 26-29s, plus real headroom) or a slow prediction-cache compute
-  # with room to spare.
-  timeout = 300
+  timeout       = 300 # not on the API Gateway request path; covers a slow season projection
   # Lambda CPU scales with memory (roughly linear up to ~1,769MB = 1
   # vCPU) -- sized for import/init CPU (xgboost/scikit-learn/pandas), not
   # runtime memory need, which stays well under 512MB even on the

@@ -90,28 +90,15 @@ data "aws_iam_policy_document" "lambda_inference_permissions" {
     resources = ["arn:aws:dynamodb:${var.region}:${var.account_id}:table/${local.predictions_table}"]
   }
 
-  # library.storage.prediction_cache's own on-demand prediction cache --
-  # both predict-read (reads a cache entry, writes/deletes its own
-  # in-progress claim marker) and predict (writes the real result once
-  # computed, clears the claim) share this same role, so one statement
-  # covers both sides. GetObject is already covered by ReadModelArtifacts'
-  # whole-bucket grant above; this adds the write/delete half, scoped to
-  # the predictions-cache/ prefix only -- same reasoning
-  # WriteSeasonProjection's own scoping comment gives for not opening up
-  # the rest of the bucket (versioned model artifacts stay write-
-  # protected, written only by the training Fargate task).
+  # library.storage.prediction_cache's cache entries and in-progress
+  # markers. GetObject is already covered by ReadModelArtifacts above.
   statement {
     sid       = "ReadWritePredictionCache"
     actions   = ["s3:PutObject", "s3:DeleteObject"]
     resources = ["arn:aws:s3:::${local.model_artifacts_bucket}/predictions-cache/*"]
   }
 
-  # predict-read's own trigger for a prediction-cache miss/stale-refresh
-  # (library.aws.lambda_invoker.LambdaInvoker) -- an async, fire-and-
-  # forget invoke of the heavy predict Lambda, for either sport. Self-
-  # invoke (predict invoking itself) is unused but harmless -- both
-  # Lambdas share this one role, so there's no way to grant the cross-
-  # invoke half without the self half coming along with it.
+  # predict-read's async invoke of predict on a prediction-cache miss (library.aws.lambda_invoker).
   statement {
     sid       = "InvokePredictLambda"
     actions   = ["lambda:InvokeFunction"]

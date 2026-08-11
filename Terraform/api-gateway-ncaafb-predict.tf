@@ -1,24 +1,14 @@
 # Routes for the two NCAAFB serving Lambdas. All resources sit under
-# aws_api_gateway_rest_api.main (api-gateway.tf), mirroring
-# api-gateway-nfl-predict.tf's own route shape -- NOT a copy of that
-# file's shared aws_api_gateway_deployment/stage/usage-plan resources,
-# which stay owned there (one REST API, one deployment, shared across
-# every sport -- see that file's own comment). This file's own resources
-# are folded into THAT deployment's own trigger list (a small, additive
-# edit at the bottom of api-gateway-nfl-predict.tf's
-# aws_api_gateway_deployment.main) so a change here actually gets
-# deployed to the stage.
+# aws_api_gateway_rest_api.main (api-gateway.tf); the shared
+# aws_api_gateway_deployment/stage/usage-plan stay owned in
+# api-gateway-nfl-predict.tf, whose deployment trigger list includes
+# this file's resources too.
 #
-#   GET /ncaafb/events                                              -> ncaafb_predict_read (lambda-ncaafb-predict-read.tf)
-#   GET /ncaafb/models                                              -> ncaafb_predict_read (lambda-ncaafb-predict-read.tf)
-#   GET /ncaafb/season                                              -> ncaafb_predict_read (lambda-ncaafb-predict-read.tf)
-#   GET /ncaafb/predictions/events/{event_id}                       -> ncaafb_predict (lambda-ncaafb-predict.tf)
-#   GET /ncaafb/predictions/events/{event_id}/players/{entity_id}   -> ncaafb_predict (lambda-ncaafb-predict.tf)
-#
-# /ncaafb/season reads a cache written by ncaafb_predict's own
-# ScheduledSeasonProjection branch (see Terraform/scheduler-ncaafb-
-# season-projection.tf), not computed live -- same reasoning as NFL's own
-# /nfl/season route.
+#   GET /ncaafb/events                                              -> ncaafb_predict_read
+#   GET /ncaafb/models                                              -> ncaafb_predict_read
+#   GET /ncaafb/season                                              -> ncaafb_predict_read
+#   GET /ncaafb/predictions/events/{event_id}                       -> ncaafb_predict_read (cache), async-computed by ncaafb_predict
+#   GET /ncaafb/predictions/events/{event_id}/players/{entity_id}   -> ncaafb_predict_read (cache), async-computed by ncaafb_predict
 
 resource "aws_api_gateway_resource" "ncaafb" {
   rest_api_id = aws_api_gateway_rest_api.main.id
@@ -145,12 +135,7 @@ resource "aws_api_gateway_integration" "ncaafb_predict_event" {
   http_method             = aws_api_gateway_method.ncaafb_predict_event.http_method
   type                    = "AWS_PROXY"
   integration_http_method = "POST"
-  # ncaafb_predict_read, NOT ncaafb_predict -- this route is now a read-
-  # through prediction cache (library.storage.prediction_cache), with the
-  # actual computation happening asynchronously in ncaafb_predict, fired
-  # by predict-read/handler.py itself rather than through API Gateway at
-  # all. See that Lambda's own docstring.
-  uri = aws_lambda_function.ncaafb_predict_read.invoke_arn
+  uri                     = aws_lambda_function.ncaafb_predict_read.invoke_arn # cache read-through; see handler.py
 }
 
 # --- GET /ncaafb/predictions/events/{event_id}/players/{entity_id} -------------
@@ -175,9 +160,7 @@ resource "aws_api_gateway_integration" "ncaafb_predict_player" {
   http_method             = aws_api_gateway_method.ncaafb_predict_player.http_method
   type                    = "AWS_PROXY"
   integration_http_method = "POST"
-  # ncaafb_predict_read, NOT ncaafb_predict -- see ncaafb_predict_event's
-  # own comment above.
-  uri = aws_lambda_function.ncaafb_predict_read.invoke_arn
+  uri                     = aws_lambda_function.ncaafb_predict_read.invoke_arn
 }
 
 # --- CORS preflight (OPTIONS) -------------------------------------------

@@ -1,19 +1,11 @@
 # Routes for the two NFL serving Lambdas. All resources sit under
 # aws_api_gateway_rest_api.main (api-gateway.tf).
 #
-#   GET /nfl/events                                              -> nfl_predict_read (lambda-nfl-predict-read.tf)
-#   GET /nfl/models                                               -> nfl_predict_read (lambda-nfl-predict-read.tf)
-#   GET /nfl/season                                               -> nfl_predict_read (lambda-nfl-predict-read.tf)
-#   GET /nfl/predictions/events/{event_id}                        -> nfl_predict (lambda-nfl-predict.tf)
-#   GET /nfl/predictions/events/{event_id}/players/{entity_id}    -> nfl_predict (lambda-nfl-predict.tf)
-#
-# events/models/season point at the read-only Lambda: events/models for
-# cold start (see lambda-nfl-predict-read.tf), season because nfl_predict
-# writes it to S3 once a week and nfl_predict_read just serves that cached
-# object (scheduler-nfl-season-projection.tf). Everything else stays on
-# the main predict Lambda, which needs the full ML dependency chain. See
-# Source/aws-lambdas/nfl/predict/handler.py's and predict-read/handler.py's
-# docstrings for each route's request/response contract.
+#   GET /nfl/events                                              -> nfl_predict_read
+#   GET /nfl/models                                              -> nfl_predict_read
+#   GET /nfl/season                                              -> nfl_predict_read
+#   GET /nfl/predictions/events/{event_id}                       -> nfl_predict_read (cache), async-computed by nfl_predict
+#   GET /nfl/predictions/events/{event_id}/players/{entity_id}   -> nfl_predict_read (cache), async-computed by nfl_predict
 #
 # Deployment/stage/usage plan resources also live here -- api-gateway.tf
 # defers them since AWS requires at least one method to exist first.
@@ -143,12 +135,7 @@ resource "aws_api_gateway_integration" "nfl_predict_event" {
   http_method             = aws_api_gateway_method.nfl_predict_event.http_method
   type                    = "AWS_PROXY"
   integration_http_method = "POST"
-  # nfl_predict_read, NOT nfl_predict -- this route is now a read-through
-  # prediction cache (library.storage.prediction_cache), with the actual
-  # computation happening asynchronously in nfl_predict, fired by
-  # predict-read/handler.py itself rather than through API Gateway at
-  # all. See that Lambda's own docstring.
-  uri = aws_lambda_function.nfl_predict_read.invoke_arn
+  uri                     = aws_lambda_function.nfl_predict_read.invoke_arn # cache read-through; see handler.py
 }
 
 # --- GET /nfl/predictions/events/{event_id}/players/{entity_id} -------------
@@ -173,9 +160,7 @@ resource "aws_api_gateway_integration" "nfl_predict_player" {
   http_method             = aws_api_gateway_method.nfl_predict_player.http_method
   type                    = "AWS_PROXY"
   integration_http_method = "POST"
-  # nfl_predict_read, NOT nfl_predict -- see nfl_predict_event's own
-  # comment above.
-  uri = aws_lambda_function.nfl_predict_read.invoke_arn
+  uri                     = aws_lambda_function.nfl_predict_read.invoke_arn
 }
 
 # --- CORS preflight (OPTIONS) -------------------------------------------
@@ -262,12 +247,7 @@ resource "aws_api_gateway_deployment" "main" {
       aws_api_gateway_resource.nfl_predictions_event_player.id,
       aws_api_gateway_method.nfl_predict_event.id,
       aws_api_gateway_integration.nfl_predict_event.id,
-      # .uri explicitly -- same reason as nfl_events/nfl_models/
-      # nfl_season's own identical comments below: .id is a stable
-      # composite key that doesn't change when only .uri is updated in
-      # place, and this integration was just repointed from nfl_predict
-      # to nfl_predict_read.
-      aws_api_gateway_integration.nfl_predict_event.uri,
+      aws_api_gateway_integration.nfl_predict_event.uri, # repointed nfl_predict -> nfl_predict_read
       aws_api_gateway_method.nfl_predict_player.id,
       aws_api_gateway_integration.nfl_predict_player.id,
       aws_api_gateway_integration.nfl_predict_player.uri,
@@ -328,13 +308,7 @@ resource "aws_api_gateway_deployment" "main" {
       aws_api_gateway_resource.ncaafb_predictions_event_player.id,
       aws_api_gateway_method.ncaafb_predict_event.id,
       aws_api_gateway_integration.ncaafb_predict_event.id,
-      # .uri explicitly, not just .id -- same reason as nfl_events/
-      # nfl_models/nfl_season's own identical comments above: .id is a
-      # stable composite key that doesn't change when only .uri is
-      # updated in place, and this integration was just repointed from
-      # ncaafb_predict to ncaafb_predict_read (prediction-cache read-
-      # through, see api-gateway-ncaafb-predict.tf's own comment).
-      aws_api_gateway_integration.ncaafb_predict_event.uri,
+      aws_api_gateway_integration.ncaafb_predict_event.uri, # repointed ncaafb_predict -> ncaafb_predict_read
       aws_api_gateway_method.ncaafb_predict_player.id,
       aws_api_gateway_integration.ncaafb_predict_player.id,
       aws_api_gateway_integration.ncaafb_predict_player.uri,

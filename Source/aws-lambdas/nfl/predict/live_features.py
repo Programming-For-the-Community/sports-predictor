@@ -20,19 +20,10 @@ rating" snapshot -- NFL's ~2,700 completed games is the same cost
 build_dataset.py already treats as cheap-enough-to-scan, and this project
 has no request volume that would make that recomputation a real cost.
 
-PERFORMANCE: a single "predict one event" request calls build_live_event_
-features AND (for the leaders block) build_live_event_leader_candidates,
-and left un-threaded each one separately re-fetches the sport's ENTIRE
-event history via get_team_events/_live_elo_ratings/compute_elo_ratings
-(get_team_events' own docstring, library/storage/feature_storage.py,
-explains why each un-threaded call re-queries from scratch) -- 8 full-
-history queries total for one request (5 in build_live_event_features, 3
-in build_live_event_leader_candidates). Every function here takes an
-optional `events` (an already-fetched get_all_events(sport) result) and
-threads it through instead -- event_prediction.predict_event fetches it
-ONCE and passes the same list to both entry points, turning 8 queries
-into 1. Omitted (None), each function still falls back to fetching its
-own, so this is purely an opt-in perf path, not a behavior change.
+Every function here takes an optional `events` (an already-fetched
+get_all_events(sport) result) and threads it through downstream
+get_team_events/_live_elo_ratings calls instead of each one re-querying;
+omitted, each function fetches its own.
 """
 from datetime import date
 
@@ -84,16 +75,9 @@ def _live_elo_ratings(
     (elo_ratings.get(event['event_key'])), so a single-entry dict works
     identically to the full training-time one for this purpose.
 
-    current_ratings lets a caller that's already computed it (handler.py's
-    _leaderboards, which calls this once per candidate player per prop
-    stat) pass it straight through instead of paying this module's usual
-    per-call full-history recompute -- see this module's docstring for why
-    that recompute is normally cheap enough not to matter, and why a
-    hundreds-of-candidates loop is exactly the condition that stops being
-    true. `events` is the same already-fetched-history pass-through
-    build_live_event_features/build_live_event_leader_candidates take --
-    used only when current_ratings itself isn't already given, to avoid
-    yet another full get_all_events call on top of it."""
+    current_ratings/events are optional already-computed pass-throughs
+    for a caller that's already paid for them (e.g. handler.py's
+    _leaderboards, looping over many candidates)."""
     if current_ratings is None:
         completed_events = events if events is not None else storage.get_all_events(sport)
         _, current_ratings = compute_elo_ratings(completed_events, as_of_season=event.get("season"))
@@ -360,9 +344,8 @@ def build_live_event_features(
     will be None/absent for an unplayed game -- callers only read the
     feature columns off the result, never the labels).
 
-    `events` is this module's own already-fetched-history pass-through --
-    see this module's own docstring. team_game_stats gets the identical
-    one-fetch-per-request treatment locally, for its own 2 calls."""
+    `events`/team_game_stats are fetched once here and reused across this function's own
+    downstream calls."""
     event = storage.get_event(event_key)
     if event is None:
         raise EventNotFoundError(f"No event found for {event_key}")
@@ -440,9 +423,7 @@ def _build_player_feature_row(
     worth of "last completed game date" once from the same completed-events
     fetch _season_standings_inputs already does) -- when given, this skips
     its own storage.get_team_events call, the other per-candidate query
-    this function would otherwise repeat once per player per stat.
-    `events` is this module's own already-fetched-history pass-through --
-    see this module's own docstring."""
+    this function would otherwise repeat once per player per stat."""
     if team_last_event_dates is not None:
         own_previous_event_date = team_last_event_dates.get(team_id)
     else:
@@ -480,11 +461,8 @@ def build_live_player_features(
     their own last game log, since a just-traded player's most recent
     game log would still show their old team.
 
-    current_ratings/team_last_event_dates/events: see _build_player_
-    feature_row -- optional pass-throughs for a caller (handler.py's
-    season leaderboards) that's calling this in a loop over many players
-    and has already paid for the full-history data these would otherwise
-    each re-fetch."""
+    current_ratings/team_last_event_dates/events are optional already-computed
+    pass-throughs for a caller looping over many players (handler.py's season leaderboards)."""
     event = storage.get_event(event_key)
     if event is None:
         raise EventNotFoundError(f"No event found for {event_key}")
@@ -516,17 +494,8 @@ def build_live_event_leader_candidates(
     per category is the caller's job (handler.py), same separation
     build_live_player_features/model_loader.py already have.
 
-    Computes current_ratings ONCE here and threads it through every
-    candidate (up to ~15 per event: QB + 3 receivers + 2 rushers + 3
-    pass-rushers, per team) -- without this, each candidate's own
-    _build_player_feature_row call would separately pay _live_elo_ratings'
-    full-history recompute (see that function's docstring for why a loop
-    like this is exactly the condition that stops being cheap). `events`
-    is this module's own already-fetched-history pass-through --
-    event_prediction.predict_event fetches it once and passes the same
-    list here and to build_live_event_features, so a single "predict one
-    event" request pays for exactly one get_all_events call between the
-    two of them, not one each."""
+    Computes current_ratings once here and threads it through every candidate (up to ~15
+    per event) instead of each one recomputing it."""
     event = storage.get_event(event_key)
     if event is None:
         raise EventNotFoundError(f"No event found for {event_key}")

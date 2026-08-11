@@ -282,15 +282,8 @@ def list_models(s3, sport: str) -> dict:
 
 
 def get_season_projection(s3, sport: str) -> dict | None:
-    """GET /ncaafb/season -- reads the standings + bowl/playoff/
-    championship-probability + leaderboard projection written weekly by
-    the scheduled compute path (predict/handler.py's
-    ScheduledSeasonProjection branch, predict/season_projection.py),
-    never computed live here. None if the schedule hasn't fired yet
-    (e.g. right after a fresh deploy) -- the caller is expected to
-    surface that as "not yet available" rather than treat it like a real
-    500. Identical to nfl_reads.get_season_projection -- duplicated, not
-    imported, same reasoning this module's own docstring gives."""
+    """Reads the cached season projection written weekly by the scheduled compute path.
+    None if it hasn't run yet."""
     key = season_projection_key(sport)
     if not s3.object_exists(key):
         return None

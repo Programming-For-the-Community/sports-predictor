@@ -2,51 +2,27 @@
 Regular-season Monte Carlo simulation (win totals, bowl eligibility,
 conference championship, CFP field, and national championship
 probabilities) and player-prop leaderboard projection for the NCAAFB
-Season tab. Pure functions -- no AWS/storage access, same testability
-philosophy as Source/aws-lambdas/nfl/predict/season_simulation.py's own
-docstring -- but NOT a port of it, since FBS has no static division
-table (conference membership changes ~yearly -- see
-library/features/ncaafb.py's own docstring) and no fixed playoff bracket
-seeded by division winners the way the NFL's 7-seed-per-conference
-format is.
+Season tab. Pure functions -- no AWS/storage access.
 
 Game outcomes use Elo win probability (library.features.common.
-expected_score), the same "recomputing the full trained model for
-thousands of Monte Carlo paths is intractable" reasoning
-nfl/predict/season_simulation.py's own docstring gives.
+expected_score). CFP field selection needs a rank-like score per team,
+which Elo alone can't provide -- callers pass a `score_teams` callable
+backed by the real trained national-ranking model.
 
-CFP field selection is different: it genuinely NEEDS something rank-like
-to pick 5 conference-champion auto-bids + 7 at-large teams the way the
-real committee would, and Elo alone is a poor stand-in for that (it has
-no notion of quality wins, strength of schedule, or an AP-style
-consensus). This module stays pure and takes a `score_teams` callable
-instead of computing that itself -- Source/aws-lambdas/ncaafb/predict/
-season_projection.py's own caller supplies one backed by the actual
-trained national-ranking model, scored once per iteration in a single
-batched call across every team (not once per team -- see that module's
-own docstring for why that's what makes it tractable at all).
+Conference champion: best (wins, point_differential) record among a
+conference's tracked members. No real championship-game simulation, no
+head-to-head/common-opponent tiebreakers. point_differential is today's
+real value, not simulated forward.
 
-Conference champion: the team with the best (wins, point_differential)
-record among its own conference's tracked members -- SIMPLIFIED the same
-way nfl/predict/season_simulation.py's own division-winner selection is
-(no real conference-championship-game simulation, no head-to-head/
-common-opponent tiebreakers). point_differential is today's REAL value,
-not simulated forward, same simplification NFL's own module documents.
+CFP bracket: 12 teams. The 4 highest-ranked conference champions get a
+bye and seeds 1-4; the 5th-ranked champion joins the 7 at-large teams for
+seeds 5-12. Round of 12 is campus-site (home_advantage applies, higher
+seed hosts); quarterfinals on are neutral-site, fixed (non-reseeded)
+bracket: 1 vs (8/9 winner), 2 vs (5/12 winner), 3 vs (6/11 winner), 4 vs
+(7/10 winner).
 
-CFP bracket: 12 teams -- the 4 highest-ranked conference champions get a
-bye and the top 4 seeds; the 5th-highest-ranked champion joins the 7
-at-large teams to fill seeds 5-12. Round of 12 is real campus-site games
-(home_advantage applies, higher seed hosts); quarterfinals onward are
-neutral-site bowl games (no home_advantage), in the 12-team format's own
-fixed (non-reseeded) bracket: 1 vs (8/9 winner), 2 vs (5/12 winner), 3 vs
-(6/11 winner), 4 vs (7/10 winner). A best-effort model of the format
-introduced for the 2024 season, not adjusted for its exact committee-set
-bowl-site assignments (which don't affect who wins) -- worth confirming
-against the real bracket rules if this drifts from reality.
-
-Bowl eligibility: 6+ wins, the standard bar -- doesn't implement the FCS-
-win-counts-once-per-two-years nuance or waiver exceptions for a team that
-can't reach 6 (e.g. a killed game).
+Bowl eligibility: 6+ wins. Doesn't implement the FCS-win or waiver
+nuances.
 """
 import random
 from typing import Callable
@@ -76,10 +52,8 @@ def _conference_champion(members: list[str], wins: dict[str, int], point_differe
 
 
 def _select_cfp_field(model_scores: dict[str, float], champions: dict[str, str]) -> list[str]:
-    """Returns 12 seeds in order (seed 1 first) -- see this module's own
-    docstring for the auto-bid/at-large/bye rules. Lower model_scores is
-    better (the ranking model predicts AP-style rank, where 1 is best);
-    a team missing from model_scores entirely sorts last."""
+    """12 seeds in order (seed 1 first). Lower model_scores is better; a team missing from
+    model_scores sorts last."""
     ranked_champs = sorted(set(champions.values()), key=lambda t: model_scores.get(t, float("inf")))
     auto_bids = ranked_champs[: min(CFP_AUTO_BIDS, len(ranked_champs))]
 
@@ -101,8 +75,7 @@ def _play(team_a: str, team_b: str, ratings: dict[str, float], home_advantage: f
 
 
 def _simulate_cfp_bracket(seeds: list[str], ratings: dict[str, float], home_advantage: float, rng: random.Random) -> str:
-    """Returns the national champion for one simulated 12-team CFP --
-    see this module's own docstring for the bracket shape."""
+    """Returns the national champion for one simulated 12-team CFP."""
     one, two, three, four, five, six, seven, eight, nine, ten, eleven, twelve = seeds
 
     r1_5v12 = _play(five, twelve, ratings, home_advantage, rng)
@@ -134,29 +107,16 @@ def simulate_season(
     k_factor: float = DEFAULT_K_FACTOR,
     rng: random.Random | None = None,
 ) -> dict[str, dict]:
-    """Runs `simulations` full Monte Carlo season paths from today's
-    actual record forward -- see this module's own docstring for what
-    each of the five projected probabilities means and why `score_teams`
-    is a caller-supplied callable rather than something this module
-    computes itself.
+    """Runs `simulations` Monte Carlo season paths from today's actual record forward.
 
-    team_conference is this season's real {team_id: conference} map (see
-    Source/aws-lambdas/ncaafb/predict/season_projection.py's own
-    _season_standings_inputs) -- the full set of tracked teams is derived
-    from its keys, unlike NFL's own simulate_season which pulls the full
-    32-team league from a static TEAM_DIVISIONS constant. remaining_games
-    should already be filtered to real FBS-vs-FBS matchups only (both
-    sides present in team_conference) -- an FCS opponent has no
-    meaningful Elo rating or conference to simulate against.
+    team_conference is {team_id: conference}; the tracked team set is
+    derived from its keys. remaining_games must already be filtered to
+    FBS-vs-FBS matchups (both sides present in team_conference).
 
     score_teams is called once per simulated season with that
     iteration's final (wins, losses, ratings) and must return a
-    {team_id: score} dict (lower is better) for every team_id in
-    team_conference -- used only to pick the CFP field, not the
-    bracket's own game outcomes (those stay Elo-based like every other
-    game here). No `projected_losses` derivation assumption about season
-    length -- tracked directly in the loop, same reasoning NFL's own
-    module gives.
+    {team_id: score} dict (lower is better) for every tracked team --
+    used only to pick the CFP field, not game outcomes.
     """
     rng = rng or random.Random()
     teams = set(team_conference)
@@ -176,7 +136,7 @@ def simulate_season(
 
         for home_id, away_id in remaining_games:
             if home_id not in teams or away_id not in teams:
-                continue  # not a real FBS-vs-FBS matchup -- see this function's own docstring
+                continue
             home_rating = ratings.get(home_id, DEFAULT_STARTING_RATING)
             away_rating = ratings.get(away_id, DEFAULT_STARTING_RATING)
             home_win_probability = expected_score(home_rating, away_rating, home_advantage)
@@ -229,10 +189,6 @@ def project_leaderboard(
     games_remaining: dict[str, int],
     top_n: int = 10,
 ) -> list[dict]:
-    """Identical to nfl/predict/season_simulation.py's own function of
-    the same name -- see its own docstring. Duplicated, not imported,
-    same per-Lambda-deployment-package convention as every other shared
-    shape in this file."""
     projected = []
     for entity_id, current_total in current_totals.items():
         per_game = per_game_projections.get(entity_id, 0.0)
