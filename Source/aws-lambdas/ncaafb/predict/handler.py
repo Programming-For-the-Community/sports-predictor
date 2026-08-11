@@ -1,35 +1,14 @@
 """
-NCAAFB inference Lambda -- a pure background compute worker, never
-invoked by API Gateway directly (see Terraform/api-gateway-ncaafb-
-predict.tf: every GET route, including the two prediction routes, is
-served by predict-read/handler.py instead). Two invocation shapes, both
-async (EventBridge Scheduler or a fire-and-forget Lambda invoke), neither
-bound by API Gateway's 29s integration ceiling -- only this Lambda's own
-300s timeout applies:
+NCAAFB inference Lambda -- a background compute worker, never invoked by
+API Gateway. Two invocation shapes:
 
     {"detail-type": "ScheduledSeasonProjection"}
-        -> Terraform/scheduler-ncaafb-season-projection.tf's weekly
-           direct invoke. Computes the season projection and writes it
-           to S3 -- see season_projection.py's own docstring.
+        -> weekly EventBridge Scheduler invoke; computes the season
+           projection and writes it to S3.
     {"detail-type": "ComputeAndCachePrediction", "route": "event"|"player_prop", ...}
-        -> predict-read/handler.py's own fire-and-forget invoke on a
-           prediction-cache miss/stale-refresh (library.storage.
-           prediction_cache) -- computes one event or player-prop
-           prediction and writes it to the same S3 cache predict-read
-           reads from. See event_prediction.compute_and_cache_event/
-           compute_and_cache_player_prop's own docstrings, including how
-           a recognized-but-possibly-transient failure (event not
-           ingested yet, no model promoted yet) becomes a short-lived
-           negative cache entry instead of leaving a request stuck at
-           "computing" forever.
-
-This split (predict-read owns every HTTP response, predict only ever
-computes in the background) is why GET /ncaafb/predictions/events/
-{event_id}'s own real latency -- up to ~50s once NCAAFB's much larger
-backfilled history made live_features.py's per-request DynamoDB fetching
-expensive (since fixed, see that module's own docstring) -- stopped being
-a 504 risk: nothing here is ever on API Gateway's own request path
-anymore.
+        -> fire-and-forget invoke from predict-read on a prediction-cache
+           miss/stale-refresh; computes one prediction and writes it to
+           the same S3 cache predict-read reads from.
 """
 import logging
 import os
@@ -43,8 +22,7 @@ from library.storage.feature_storage import FeatureStorage
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger("ncaafb-predict")
 
-# Initialized once per container lifetime, reused across warm invocations
-# -- same lazy-singleton pattern as normalize/handler.py's _get_storage().
+# Lazy singletons, reused across warm invocations.
 _storage: FeatureStorage | None = None
 _model_bucket: S3Manager | None = None
 _predictions_table: DynamoDBTable | None = None

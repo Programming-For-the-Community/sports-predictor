@@ -304,16 +304,9 @@ def _season_record(team_events: list[dict], team_id: str) -> tuple[int, int]:
 def average_opponent_elo(
     team_events: list[dict], team_id: str, elo_ratings: dict[str, dict[str, float]]
 ) -> float | None:
-    """Strength of schedule -- the average pre-game Elo each opponent
-    carried into their game against team_id, over team_id's own
-    season-to-date games. None if no game has a resolvable opponent
-    rating yet (e.g. this is team_id's own first game of the season).
-
-    Public (not module-private) -- also reused by
-    Source/aws-lambdas/ncaafb/predict/season_projection.py to build a
-    live strength-of-schedule input for the National Ranking model's
-    Monte Carlo scoring, the same function training's own
-    build_team_week_features calls below."""
+    """Strength of schedule -- average pre-game Elo each opponent carried into their game
+    against team_id, over team_id's season-to-date games. None if no opponent rating is
+    resolvable yet."""
     values = []
     for event in team_events:
         participants = event.get("participants", [])

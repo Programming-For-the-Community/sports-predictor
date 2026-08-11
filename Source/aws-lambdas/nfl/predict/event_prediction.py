@@ -161,14 +161,8 @@ def _record_leader_predictions(
 
 
 def predict_event_leaders(storage, s3, predictions_table, event_key_value: str, events: list[dict] | None = None) -> dict | None:
-    """The `leaders` block -- passing/receiving/rushing/sacks leaders per
-    team. Best-effort: any failure here is logged and swallowed rather
-    than propagated, since the core win/margin/score predictions in
-    predict_event already succeeded by the time this runs and shouldn't
-    be thrown away over a problem in this purely additive field. `events`
-    is predict_event's own already-fetched get_all_events result, passed
-    through so this doesn't pay for a second one -- see live_features.
-    build_live_event_leader_candidates' own docstring."""
+    """The `leaders` block -- passing/receiving/rushing/sacks leaders per team. Best-effort:
+    a failure here is logged and returns None rather than failing predict_event."""
     try:
         candidates = live_features.build_live_event_leader_candidates(storage, SPORT, event_key_value, events=events)
     except Exception:
@@ -210,11 +204,6 @@ def predict_event_leaders(storage, s3, predictions_table, event_key_value: str, 
 
 def predict_event(storage, s3, predictions_table, event_id: str) -> dict:
     event_key_value = build_event_key(SPORT, event_id)
-    # Fetched ONCE and threaded through both build_live_event_features and
-    # predict_event_leaders below -- see live_features.py's own docstring
-    # for why a naive per-call fetch (the pre-existing behavior omitted
-    # `events` still falls back to) makes this route pay for 8 full-
-    # history queries instead of 1.
     events = storage.get_all_events(SPORT)
     feature_row = live_features.build_live_event_features(storage, SPORT, event_key_value, events=events)
 
@@ -273,24 +262,10 @@ def predict_player_prop(storage, s3, predictions_table, event_id: str, entity_id
 
 
 def compute_and_cache_event(storage, s3, predictions_table, event_id: str) -> None:
-    """Background worker for a cache miss/stale-refresh on GET /nfl/
-    predictions/events/{event_id} -- triggered asynchronously by predict-
-    read/handler.py (never by API Gateway directly, so this isn't bound
-    by its 29s ceiling; only this Lambda's own 300s timeout applies).
-    Computes predict_event's own result (same function, same audit-trail
-    writes) and additionally writes it to the S3 prediction cache
-    (library.storage.prediction_cache) so the next request can be served
-    instantly instead of triggering another compute.
-
-    A failure with one of prediction_cache.ERROR_STATUS_CODES' recognized,
-    possibly-transient errors (event_id not ingested yet, no model
-    promoted yet) gets a short-lived negative cache entry instead of
-    leaving the request stuck at "computing" forever -- see
-    prediction_cache.put_error_cached's own docstring. Any OTHER
-    exception is deliberately not caught here -- it propagates after the
-    in-progress claim is still cleared (see the finally below), shows up
-    as a real Lambda error, same "let it show up, don't silently reshape
-    it" reasoning season_projection.run_scheduled's own docstring gives."""
+    """Background worker triggered by predict-read on a cache miss/stale-refresh. Computes
+    predict_event and writes the result to the S3 prediction cache. A recognized,
+    possibly-transient error (event not ingested, no model promoted) gets a short-lived
+    negative cache entry; any other exception propagates after the in-progress claim clears."""
     event_key_value = build_event_key(SPORT, event_id)
     cache_key = prediction_cache.event_prediction_cache_key(SPORT, event_key_value)
     try:
@@ -307,10 +282,7 @@ def compute_and_cache_event(storage, s3, predictions_table, event_id: str) -> No
 
 
 def compute_and_cache_player_prop(storage, s3, predictions_table, event_id: str, entity_id: str, target_stat: str) -> None:
-    """Background worker for a cache miss/stale-refresh on GET /nfl/
-    predictions/events/{event_id}/players/{entity_id}?stat=... -- same
-    role, and same recognized-error-vs-real-bug handling, as
-    compute_and_cache_event."""
+    """Same role as compute_and_cache_event, for one player-prop stat."""
     event_key_value = build_event_key(SPORT, event_id)
     cache_key = prediction_cache.player_prop_cache_key(SPORT, event_key_value, entity_id, target_stat)
     try:
