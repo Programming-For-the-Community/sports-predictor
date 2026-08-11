@@ -53,7 +53,7 @@ import enrichment
 from library.http.cfbd import CFBDClient
 from library.storage.ncaafb_team_cache import get_cached_teams, teams_by_school
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
+logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s", force=True)  # AWS Lambda pre-attaches a root handler, so basicConfig() is otherwise a silent no-op
 logger = logging.getLogger("ncaafb-ingest")
 
 RAW_BUCKET = os.environ["RAW_BUCKET_NAME"]

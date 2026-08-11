@@ -73,6 +73,22 @@ class TestUpsertPlayerEntity:
         assert lte_clause.get_expression()["values"][1] == "2025-11-09"
 
 
+class TestUpsertPlayerEntityReturnValue:
+    def test_returns_true_when_put_item_writes(self, storage_env):
+        storage, mock_entities = _make_storage(storage_env)
+        mock_entities.put_item.return_value = True
+        entity = {"entity_id": "walker3", "metadata": {"team_id": "26", "team_id_as_of": "2025-11-09"}}
+
+        assert storage.upsert_player_entity(entity) is True
+
+    def test_returns_false_when_put_item_rejects_the_condition(self, storage_env):
+        storage, mock_entities = _make_storage(storage_env)
+        mock_entities.put_item.return_value = False
+        entity = {"entity_id": "walker3", "metadata": {"team_id": "26", "team_id_as_of": "2025-11-09"}}
+
+        assert storage.upsert_player_entity(entity) is False
+
+
 class TestGetEventsByStatus:
     def test_queries_the_status_index(self, storage_env):
         storage, mock_events = _make_storage_with_events(storage_env)

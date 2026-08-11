@@ -48,15 +48,19 @@ class PipelineStorage:
     def upsert_entity(self, item: dict) -> None:
         self._entities_table.put_item(item)
 
-    def upsert_player_entity(self, item: dict) -> None:
+    def upsert_player_entity(self, item: dict) -> bool:
         """Same as upsert_entity, but only overwrites metadata.team_id if
         item's own metadata.team_id_as_of (see boxscore_to_player_game_stats)
-        is the same age or newer than what's already stored. Silently
-        skips the write otherwise -- no retry, nothing else for the
-        caller to do."""
+        is the same age or newer than what's already stored. Skips the
+        write otherwise -- no retry, nothing else for the caller to do.
+        Returns whether the write actually happened (see DynamoDBTable.
+        put_item), so a caller that wants to know how many of its writes
+        were rejected by the staleness guard (rather than just fire-and-
+        forget) can count them -- see aws-lambdas/ncaafb/normalize/
+        handler.py's _process_roster."""
         as_of = item["metadata"]["team_id_as_of"]
         condition = Attr("metadata.team_id_as_of").not_exists() | Attr("metadata.team_id_as_of").lte(as_of)
-        self._entities_table.put_item(item, condition_expression=condition)
+        return self._entities_table.put_item(item, condition_expression=condition)
 
     def upsert_event(self, item: dict) -> None:
         self._events_table.put_item(item)

@@ -38,7 +38,7 @@ import boto3
 from library.http.cfbd import CFBDClient
 from library.storage.ncaafb_team_cache import attach_venue_indoor
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
+logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s", force=True)  # AWS Lambda pre-attaches a root handler, so basicConfig() is otherwise a silent no-op
 logger = logging.getLogger("ncaafb-schedule-sync")
 
 RAW_BUCKET = os.environ["RAW_BUCKET_NAME"]
