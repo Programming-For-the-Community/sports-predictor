@@ -9,6 +9,7 @@ handler is resilient to individual record failures.
 The ncaafb_normalize module is registered in sys.modules by conftest.py.
 """
 import json
+from datetime import date, timedelta
 
 import pytest
 from unittest.mock import MagicMock, patch
@@ -180,6 +181,40 @@ class TestPreserveRosterPosition:
         assert entity["metadata"]["position"] is None
 
 
+class TestCancelStaleScheduledEvents:
+    def test_cancels_an_event_over_a_year_past_its_own_date(self):
+        storage = MagicMock()
+        old_date = (date.today() - timedelta(days=400)).isoformat()
+        stale_event = {"event_key": "k1", "sport": "ncaafb", "status": "scheduled", "event_date": old_date}
+        storage.get_events_by_status.return_value = [stale_event]
+
+        count = ncaafb_normalize._cancel_stale_scheduled_events(storage)
+
+        assert count == 1
+        assert stale_event["status"] == "canceled"
+        storage.upsert_event.assert_called_once_with(stale_event)
+
+    def test_leaves_a_recent_scheduled_event_alone(self):
+        storage = MagicMock()
+        recent_date = (date.today() - timedelta(days=10)).isoformat()
+        storage.get_events_by_status.return_value = [
+            {"event_key": "k1", "status": "scheduled", "event_date": recent_date},
+        ]
+
+        count = ncaafb_normalize._cancel_stale_scheduled_events(storage)
+
+        assert count == 0
+        storage.upsert_event.assert_not_called()
+
+    def test_queries_the_scheduled_status(self):
+        storage = MagicMock()
+        storage.get_events_by_status.return_value = []
+
+        ncaafb_normalize._cancel_stale_scheduled_events(storage)
+
+        storage.get_events_by_status.assert_called_once_with("ncaafb", "scheduled")
+
+
 class TestNormalizeLambdaHandler:
     def test_processes_multiple_records(self):
         payload = [{"id": "1"}]
@@ -229,6 +264,26 @@ class TestNormalizeLambdaHandler:
     def test_returns_empty_result_for_no_records(self):
         with patch.object(ncaafb_normalize, "_s3", MagicMock()), \
              patch("ncaafb_normalize.PipelineStorage"):
+            result = ncaafb_normalize.lambda_handler({"Records": []}, None)
+
+        assert result == {"processed": 0, "failed": 0}
+
+    def test_runs_stale_event_cleanup_once_regardless_of_record_count(self):
+        mock_storage = MagicMock()
+        mock_storage.get_events_by_status.return_value = []
+
+        with patch.object(ncaafb_normalize, "_s3", MagicMock()), \
+             patch("ncaafb_normalize.PipelineStorage", return_value=mock_storage):
+            ncaafb_normalize.lambda_handler({"Records": []}, None)
+
+        mock_storage.get_events_by_status.assert_called_once_with("ncaafb", "scheduled")
+
+    def test_a_stale_event_cleanup_failure_does_not_crash_the_run(self):
+        mock_storage = MagicMock()
+        mock_storage.get_events_by_status.side_effect = Exception("DynamoDB timeout")
+
+        with patch.object(ncaafb_normalize, "_s3", MagicMock()), \
+             patch("ncaafb_normalize.PipelineStorage", return_value=mock_storage):
             result = ncaafb_normalize.lambda_handler({"Records": []}, None)
 
         assert result == {"processed": 0, "failed": 0}

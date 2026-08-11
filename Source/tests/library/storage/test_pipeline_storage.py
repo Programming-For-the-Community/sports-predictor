@@ -9,7 +9,7 @@ behavior (see tests/library/aws/test_dynamodb_table.py for that).
 from unittest.mock import MagicMock, patch
 
 import pytest
-from boto3.dynamodb.conditions import Or
+from boto3.dynamodb.conditions import Key, Or
 
 from library.storage.pipeline_storage import PipelineStorage
 
@@ -31,6 +31,15 @@ def _make_storage(storage_env):
         mock_table_cls.side_effect = [mock_entities, MagicMock(), MagicMock(), MagicMock()]
         storage = PipelineStorage()
     return storage, mock_entities
+
+
+def _make_storage_with_events(storage_env):
+    mock_events = MagicMock()
+    with patch("library.storage.pipeline_storage.S3Manager"), \
+         patch("library.storage.pipeline_storage.DynamoDBTable") as mock_table_cls:
+        mock_table_cls.side_effect = [MagicMock(), mock_events, MagicMock(), MagicMock()]
+        storage = PipelineStorage()
+    return storage, mock_events
 
 
 class TestUpsertPlayerEntity:
@@ -62,6 +71,29 @@ class TestUpsertPlayerEntity:
         assert not_exists_clause.get_expression()["operator"] == "attribute_not_exists"
         assert lte_clause.get_expression()["operator"] == "<="
         assert lte_clause.get_expression()["values"][1] == "2025-11-09"
+
+
+class TestGetEventsByStatus:
+    def test_queries_the_status_index(self, storage_env):
+        storage, mock_events = _make_storage_with_events(storage_env)
+        mock_events.query.return_value = []
+
+        storage.get_events_by_status("ncaafb", "scheduled")
+
+        call = mock_events.query.call_args
+        assert call.args[0] == Key("status").eq("scheduled")
+        assert call.kwargs["index_name"] == "status-index"
+
+    def test_filters_to_the_requested_sport(self, storage_env):
+        storage, mock_events = _make_storage_with_events(storage_env)
+        mock_events.query.return_value = [
+            {"event_id": "1", "sport": "ncaafb"},
+            {"event_id": "2", "sport": "nfl"},
+        ]
+
+        result = storage.get_events_by_status("ncaafb", "scheduled")
+
+        assert [e["event_id"] for e in result] == ["1"]
 
 
 class TestGetEntity:

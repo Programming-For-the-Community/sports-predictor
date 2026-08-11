@@ -115,6 +115,16 @@ def build_event_features(
     is the one addition, {entity_id: (latitude, longitude)} built from
     team entities' own metadata (see library/normalize/ncaafb.py's
     team_to_entity) rather than a hardcoded module constant.
+
+    No raw season_type column -- unlike build_team_week_features (the
+    ranking model's own row, which deliberately excludes it from training
+    via NON_FEATURE_COLUMNS instead), a raw "regular"/"postseason" string
+    passed straight into training_common.numeric_frame's pd.to_numeric
+    coercion becomes NaN on every row, silently contributing nothing.
+    is_bowl_game/is_playoff_game below already give the model the same
+    postseason signal as real, usable numeric features (regular season is
+    simply both False), so there's nothing left for a raw season_type
+    column to add.
     """
     participants = event["participants"]
     home = next(p for p in participants if p.get("role") == "home")
@@ -154,7 +164,6 @@ def build_event_features(
         "home_entity_id": home_id,
         "away_entity_id": away_id,
         "week": event.get("week"),
-        "season_type": event.get("season_type"),
         "kickoff_hour_utc": kickoff_hour_utc(event.get("kickoff_time")),
         "venue_indoor": event.get("venue_indoor"),
         "home_elo": home_elo,
@@ -235,7 +244,9 @@ def build_player_features(
     """One training row for a player-prop target -- same shape as
     library.features.nfl.build_player_features (see its own docstring),
     plus team_coordinates for the same reason build_event_features takes
-    it."""
+    it. No raw season_type column, same reasoning as build_event_features'
+    own docstring -- is_bowl_game/is_playoff_game below already carry the
+    signal as usable numeric features."""
     participants = event["participants"]
     home = next(p for p in participants if p.get("role") == "home")
     away = next(p for p in participants if p.get("role") == "away")
@@ -264,7 +275,6 @@ def build_player_features(
         **averages,
         "is_home": is_home,
         "week": event.get("week"),
-        "season_type": event.get("season_type"),
         "kickoff_hour_utc": kickoff_hour_utc(event.get("kickoff_time")),
         "venue_indoor": event.get("venue_indoor"),
         "rest_days": rest_days(player_game["event_date"], own_previous_event_date),

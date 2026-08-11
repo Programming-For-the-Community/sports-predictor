@@ -279,19 +279,36 @@ class TestRosterNeedsRefresh:
             assert ncaafb_ingest._roster_needs_refresh(2025) is True
 
 
+class TestAnnotateRoster:
+    def test_injects_team_id_resolved_by_school_name(self):
+        roster = [{"id": "101", "team": "Georgia", "position": "QB"}]
+
+        ncaafb_ingest._annotate_roster(roster, [{"id": 61, "school": "Georgia"}])
+
+        assert roster[0]["teamId"] == 61
+
+    def test_leaves_team_id_unset_when_school_not_found_in_teams_cache(self):
+        roster = [{"id": "101", "team": "Unknown State", "position": "QB"}]
+
+        ncaafb_ingest._annotate_roster(roster, [{"id": 61, "school": "Georgia"}])
+
+        assert "teamId" not in roster[0]
+
+
 class TestFetchRosterIfStale:
-    def test_cache_miss_fetches_and_writes_both_roster_and_marker(self):
+    def test_cache_miss_fetches_writes_both_roster_and_marker_with_team_id_resolved(self):
         mock_s3, store = _make_s3()
         client = MagicMock()
-        client.get_roster.return_value = [{"id": "1", "teamId": "2", "position": "QB"}]
+        client.get_roster.return_value = [{"id": "1", "team": "Georgia", "position": "QB"}]
+        teams = [{"id": 61, "school": "Georgia"}]
 
         with patch.object(ncaafb_ingest, "_s3", mock_s3):
-            result = ncaafb_ingest._fetch_roster_if_stale(client, 2025)
+            result = ncaafb_ingest._fetch_roster_if_stale(client, 2025, teams)
 
         assert result is True
         client.get_roster.assert_called_once_with(2025)
         roster_payload = json.loads(store["ncaafb/roster/2025.json"])
-        assert roster_payload["data"] == [{"id": "1", "teamId": "2", "position": "QB"}]
+        assert roster_payload["data"] == [{"id": "1", "team": "Georgia", "position": "QB", "teamId": 61}]
         assert "fetched_at" in roster_payload
         assert ncaafb_ingest._roster_marker_key(2025) in store
 
@@ -302,7 +319,7 @@ class TestFetchRosterIfStale:
         client = MagicMock()
 
         with patch.object(ncaafb_ingest, "_s3", mock_s3):
-            result = ncaafb_ingest._fetch_roster_if_stale(client, 2025)
+            result = ncaafb_ingest._fetch_roster_if_stale(client, 2025, [])
 
         assert result is False
         client.get_roster.assert_not_called()

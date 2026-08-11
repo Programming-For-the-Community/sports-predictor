@@ -27,8 +27,27 @@ def team_to_entity(team: dict, sport: str) -> dict:
     }
 
 
+# ESPN status.type.name values for a game that will never be played (or
+# resume) under this event_id -- status.type.completed is False for all
+# of these, same as a genuinely upcoming game, so without this a canceled/
+# postponed game defaults to "scheduled" and sits there permanently (see
+# [[project-nfl-data-quality-edge-cases]] for the 3 known real records
+# this was confirmed against: a canceled Pro Bowl, the Damar Hamlin
+# permanently-suspended game, and a hurricane-postponed game replayed
+# under a different event_id). STATUS_SUSPENDED/STATUS_FORFEIT are
+# included on the same reasoning even though no known record has hit
+# them yet -- ESPN's public API is unofficial, so any status wholly
+# distinct from "will be/was played normally" gets the same treatment.
+_NON_PLAYED_STATUS_NAMES = {"STATUS_CANCELED", "STATUS_POSTPONED", "STATUS_SUSPENDED", "STATUS_FORFEIT"}
+
+
 def _event_status(status: dict) -> str:
-    return "completed" if status.get("type", {}).get("completed") else "scheduled"
+    status_type = status.get("type", {})
+    if status_type.get("completed"):
+        return "completed"
+    if status_type.get("name") in _NON_PLAYED_STATUS_NAMES:
+        return "canceled"
+    return "scheduled"
 
 
 def scoreboard_event_to_event_item(event: dict, sport: str) -> dict:

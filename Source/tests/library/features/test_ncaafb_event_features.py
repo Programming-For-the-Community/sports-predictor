@@ -22,7 +22,7 @@ class TestBuildEventFeaturesCore:
 
         assert row["event_key"] == "E1"
         assert row["week"] == 3
-        assert row["season_type"] == "regular"
+        assert "season_type" not in row
         assert row["home_elo"] == 1600.0
         assert row["away_elo"] == 1550.0
         assert row["elo_diff"] == 50.0

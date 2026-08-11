@@ -55,6 +55,10 @@ def teams_by_id(teams: list[dict]) -> dict[str, dict]:
     return {str(t["id"]): t for t in teams if t.get("id") is not None}
 
 
+def teams_by_school(teams: list[dict]) -> dict[str, dict]:
+    return {t["school"]: t for t in teams if t.get("school")}
+
+
 def attach_venue_indoor(games: list[dict], season: int, client, s3, bucket: str) -> None:
     """Attaches venue_indoor to each game dict in place, from the home
     team's own venue -- CFBD has no per-game indoor flag (see

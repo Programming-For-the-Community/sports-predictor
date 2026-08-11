@@ -56,6 +56,38 @@ class TestScoreboardEventToEventItem:
         assert item["venue_state"] is None
 
 
+class TestEventStatus:
+    def test_completed_when_status_type_completed_is_true(self):
+        raw = _scoreboard_event(status={"type": {"completed": True, "name": "STATUS_FINAL"}})
+        assert scoreboard_event_to_event_item(raw, "nfl")["status"] == "completed"
+
+    def test_scheduled_for_an_upcoming_game(self):
+        item = scoreboard_event_to_event_item(_scoreboard_event(), "nfl")
+        assert item["status"] == "scheduled"
+
+    def test_canceled_for_a_real_canceled_game(self):
+        # Regression case: 401223873, the canceled 2020 Pro Bowl -- see
+        # project-nfl-data-quality-edge-cases. completed is False here,
+        # same as a genuinely upcoming game, so without name-checking this
+        # used to default to "scheduled" forever.
+        raw = _scoreboard_event(status={"type": {"completed": False, "name": "STATUS_CANCELED"}})
+        assert scoreboard_event_to_event_item(raw, "nfl")["status"] == "canceled"
+
+    def test_canceled_for_a_postponed_game(self):
+        # Regression case: 400951581, hurricane-postponed and replayed
+        # under a different event_id -- see project-nfl-data-quality-
+        # edge-cases. This event_id itself never gets played.
+        raw = _scoreboard_event(status={"type": {"completed": False, "name": "STATUS_POSTPONED"}})
+        assert scoreboard_event_to_event_item(raw, "nfl")["status"] == "canceled"
+
+    def test_canceled_for_a_suspended_game(self):
+        # Regression case: 401437947, the Damar Hamlin game -- suspended
+        # mid-game, later ruled permanently over. See project-nfl-data-
+        # quality-edge-cases.
+        raw = _scoreboard_event(status={"type": {"completed": False, "name": "STATUS_SUSPENDED"}})
+        assert scoreboard_event_to_event_item(raw, "nfl")["status"] == "canceled"
+
+
 class TestScoreboardEventToEventItemCoachInjuryDepthChart:
     """Coach/injuries/depth-chart are attached by ingest's _enrich_events
     (aws-lambdas/nfl/ingest/handler.py) before this function ever sees
