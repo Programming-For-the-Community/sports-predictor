@@ -29,7 +29,7 @@ import live_scores
 from library.http.nfl import NFLClient
 from library.storage.feature_storage import FeatureStorage
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
+logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s", force=True)  # AWS Lambda pre-attaches a root handler, so basicConfig() is otherwise a silent no-op
 logger = logging.getLogger("nfl-live-scores")
 
 SPORT = "nfl"

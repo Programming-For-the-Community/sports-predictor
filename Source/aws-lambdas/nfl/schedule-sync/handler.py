@@ -40,7 +40,7 @@ import boto3
 from library.http.nfl import NFLClient
 from library.storage.depth_chart_cache import attach_depth_charts
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
+logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s", force=True)  # AWS Lambda pre-attaches a root handler, so basicConfig() is otherwise a silent no-op
 logger = logging.getLogger("nfl-schedule-sync")
 
 RAW_BUCKET = os.environ["RAW_BUCKET_NAME"]

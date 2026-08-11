@@ -36,7 +36,7 @@ from library.serving.ncaafb_reads import get_season_projection, list_events, lis
 from library.storage import prediction_cache
 from library.storage.feature_storage import FeatureStorage
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
+logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s", force=True)  # AWS Lambda pre-attaches a root handler, so basicConfig() is otherwise a silent no-op
 logger = logging.getLogger("ncaafb-predict-read")
 
 SPORT = "ncaafb"

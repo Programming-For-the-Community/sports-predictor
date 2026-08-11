@@ -44,7 +44,7 @@ from library.normalize.ncaafb import (
 )
 from library.storage.pipeline_storage import PipelineStorage
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
+logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s", force=True)  # AWS Lambda pre-attaches a root handler, so basicConfig() is otherwise a silent no-op
 logger = logging.getLogger("ncaafb-normalize")
 
 SPORT = "ncaafb"
@@ -130,12 +130,23 @@ def _process_boxscore(payload: list, key: str) -> None:
 
 
 def _process_roster(payload: dict, key: str) -> None:
+    # Split written vs. rejected -- roster's own team_id_as_of is always
+    # today's fetch date, so a rejection here means something ELSE
+    # already wrote a same-day-or-newer team_id_as_of for that same
+    # entity_id first (see upsert_player_entity's own docstring for the
+    # staleness guard this is watching). A candidate count of 0 written
+    # entities means roster_to_player_entities itself found nothing to
+    # write (e.g. every entry missing "id"/"teamId") -- a different
+    # failure mode than a nonzero rejected count.
     storage = _get_storage()
     as_of_date = payload["fetched_at"][:10]
     entities = roster_to_player_entities(payload.get("data", []), SPORT, as_of_date)
-    for entity in entities:
-        storage.upsert_player_entity(entity)
-    logger.info("Wrote %d player entities from %s", len(entities), key)
+    written = sum(1 for entity in entities if storage.upsert_player_entity(entity))
+    rejected = len(entities) - written
+    logger.info(
+        "Wrote %d player entities (%d rejected by the staleness guard) from %s -- %d candidates from %d raw roster rows",
+        written, rejected, key, len(entities), len(payload.get("data", [])),
+    )
 
 
 def _process_teamstats(payload: list, key: str) -> None:

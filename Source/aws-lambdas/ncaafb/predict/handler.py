@@ -19,7 +19,7 @@ from library.aws.dynamodb_table import DynamoDBTable
 from library.aws.s3_manager import S3Manager
 from library.storage.feature_storage import FeatureStorage
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
+logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s", force=True)  # AWS Lambda pre-attaches a root handler, so basicConfig() is otherwise a silent no-op
 logger = logging.getLogger("ncaafb-predict")
 
 # Lazy singletons, reused across warm invocations.

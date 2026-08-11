@@ -81,6 +81,28 @@ class TestDispatch:
         mock_transform.assert_called_once_with(payload["data"], "ncaafb", "2026-01-15")
         mock_storage.upsert_player_entity.assert_called_once_with(entities[0])
 
+    def test_logs_a_write_rejected_by_the_staleness_guard_separately_from_a_real_write(self, caplog):
+        # A rejection here means some other write already landed a same-
+        # day-or-newer team_id_as_of for that entity_id first (see
+        # PipelineStorage.upsert_player_entity's own docstring) -- the
+        # aggregate "wrote N" count alone can't tell a real, silent
+        # rejection apart from roster_to_player_entities finding nothing
+        # to write in the first place, so the log line needs both numbers.
+        payload = {"fetched_at": "2026-01-15T00:00:00+00:00", "data": [{"id": "1"}, {"id": "2"}]}
+        mock_s3 = MagicMock()
+        mock_s3.get_object.return_value = _s3_response(payload)
+        mock_storage = MagicMock()
+        mock_storage.upsert_player_entity.side_effect = [True, False]
+        entities = [{"entity_id": "1", "metadata": {}}, {"entity_id": "2", "metadata": {}}]
+
+        with patch.object(ncaafb_normalize, "_s3", mock_s3), \
+             patch("ncaafb_normalize.PipelineStorage", return_value=mock_storage), \
+             patch.object(ncaafb_normalize, "roster_to_player_entities", return_value=entities), \
+             caplog.at_level("INFO"):
+            ncaafb_normalize._dispatch("test-bucket", "ncaafb/roster/2025.json")
+
+        assert "Wrote 1 player entities (1 rejected by the staleness guard)" in caplog.text
+
     def test_routes_teamstats_key_to_teamstats_processor(self):
         payload = [{"id": "1", "teams": []}]
         mock_s3 = MagicMock()

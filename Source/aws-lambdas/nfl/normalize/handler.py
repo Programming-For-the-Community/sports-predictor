@@ -32,7 +32,7 @@ from library.normalize.espn import (
 )
 from library.storage.pipeline_storage import PipelineStorage
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
+logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s", force=True)  # AWS Lambda pre-attaches a root handler, so basicConfig() is otherwise a silent no-op
 logger = logging.getLogger("nfl-normalize")
 
 SPORT = "nfl"
