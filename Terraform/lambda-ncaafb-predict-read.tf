@@ -1,9 +1,12 @@
 # NCAAFB read-only serving Lambda -- GET /ncaafb/events, /ncaafb/models,
 # /ncaafb/season, and the two prediction routes (cache read-through, see
 # Source/aws-lambdas/ncaafb/predict-read/handler.py). Mirrors
-# lambda-nfl-predict-read.tf: zip-packaged, reuses
-# aws_iam_role.lambda_inference, same VPC attachment as the main predict
-# Lambda.
+# lambda-nfl-predict-read.tf: zip-packaged, reuses aws_iam_role.lambda_inference.
+#
+# Not VPC-attached -- S3/DynamoDB are reachable over their public regional
+# endpoints without a VPC, and this Lambda also calls lambda:InvokeFunction
+# to trigger the predict Lambda on a cache miss, which isn't reachable at
+# all from inside the VPC (no NAT Gateway, no Lambda Interface Endpoint).
 #
 # Code is deployed by the ncaafb_deploy workflow -- NOT by Terraform. Same
 # placeholder-ZIP + lifecycle.ignore_changes pattern as
@@ -53,11 +56,6 @@ resource "aws_lambda_function" "ncaafb_predict_read" {
       TEAM_GAME_STATS_TABLE_NAME   = aws_dynamodb_table.team_game_stats.name
       PREDICT_FUNCTION_NAME        = aws_lambda_function.ncaafb_predict.function_name # LambdaInvoker's async-invoke target
     }
-  }
-
-  vpc_config {
-    subnet_ids         = [aws_subnet.private_a.id, aws_subnet.private_b.id, aws_subnet.private_c.id]
-    security_group_ids = [aws_security_group.lambda_inference.id]
   }
 
   logging_config {

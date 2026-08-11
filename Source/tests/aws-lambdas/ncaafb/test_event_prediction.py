@@ -67,7 +67,7 @@ class TestPredictEvent:
         with patch.object(event_prediction.live_features, "build_live_event_features", return_value={"f": 1}), \
              patch.object(event_prediction.model_loader, "load_current_model", return_value=(MagicMock(), {"version": 1})), \
              patch.object(event_prediction.model_loader, "predict", return_value=1.0), \
-             patch.object(event_prediction.live_features, "build_live_event_leaders", side_effect=Exception("boom")):
+             patch.object(event_prediction.live_features, "build_live_event_leader_candidates", side_effect=Exception("boom")):
             result = event_prediction.predict_event(storage, s3, predictions_table, "401520281")
 
         assert result["leaders"] is None
@@ -96,34 +96,37 @@ class TestPredictPlayerProp:
         assert written["model_key"] == "MODEL#player-prop-passing-yards#v5#PLAYER#101"
 
 
+_EMPTY_TEAM_CANDIDATES = {"passing": [], "rushing": [], "receiving": [], "sacks": []}
+
+
 class TestPredictEventLeaders:
     def test_returns_none_on_candidate_build_failure(self):
         storage, s3, predictions_table = MagicMock(), MagicMock(), MagicMock()
-        with patch.object(event_prediction.live_features, "build_live_event_leaders", side_effect=Exception("boom")):
+        with patch.object(event_prediction.live_features, "build_live_event_leader_candidates", side_effect=Exception("boom")):
             result = event_prediction.predict_event_leaders(storage, s3, predictions_table, "SPORT#NCAAFB#EVENT#1")
         assert result is None
 
-    def test_null_category_stays_null_without_scoring(self):
+    def test_empty_category_stays_empty_without_scoring(self):
         storage, s3, predictions_table = MagicMock(), MagicMock(), MagicMock()
-        candidates = {
-            "home": {"passing": None, "receiving": None, "rushing": None},
-            "away": {"passing": None, "receiving": None, "rushing": None},
-        }
-        with patch.object(event_prediction.live_features, "build_live_event_leaders", return_value=candidates):
+        candidates = {"home": _EMPTY_TEAM_CANDIDATES, "away": _EMPTY_TEAM_CANDIDATES}
+        with patch.object(event_prediction.live_features, "build_live_event_leader_candidates", return_value=candidates):
             result = event_prediction.predict_event_leaders(storage, s3, predictions_table, "SPORT#NCAAFB#EVENT#1")
 
-        assert result == candidates
+        assert result == {
+            "home": {"passing": None, "rushing": [], "receiving": [], "sacks": []},
+            "away": {"passing": None, "rushing": [], "receiving": [], "sacks": []},
+        }
         predictions_table.put_item.assert_not_called()
 
-    def test_scores_a_found_candidate_for_both_stats_in_its_category(self):
+    def test_scores_a_found_passing_candidate_for_both_stats_in_its_category(self):
         storage, s3, predictions_table = MagicMock(), MagicMock(), MagicMock()
         candidates = {
-            "home": {"passing": {"entity_id": "101"}, "receiving": None, "rushing": None},
-            "away": {"passing": None, "receiving": None, "rushing": None},
+            "home": {**_EMPTY_TEAM_CANDIDATES, "passing": [{"entity_id": "101"}]},
+            "away": _EMPTY_TEAM_CANDIDATES,
         }
         storage.get_entity.return_value = {"name": "Carson Beck"}
 
-        with patch.object(event_prediction.live_features, "build_live_event_leaders", return_value=candidates), \
+        with patch.object(event_prediction.live_features, "build_live_event_leader_candidates", return_value=candidates), \
              patch.object(event_prediction.model_loader, "load_current_model", return_value=(MagicMock(), {"version": 1})), \
              patch.object(event_prediction.model_loader, "predict", return_value=275.0):
             result = event_prediction.predict_event_leaders(storage, s3, predictions_table, "SPORT#NCAAFB#EVENT#1")
@@ -135,15 +138,31 @@ class TestPredictEventLeaders:
         assert home_passing["passing_touchdowns"] == 275.0  # same mocked predict() for both stats
         assert predictions_table.put_item.call_count == 2
 
-    def test_skips_a_stat_whose_model_has_no_promoted_version(self):
+    def test_scores_every_candidate_in_a_list_category(self):
         storage, s3, predictions_table = MagicMock(), MagicMock(), MagicMock()
         candidates = {
-            "home": {"passing": {"entity_id": "101"}, "receiving": None, "rushing": None},
-            "away": {"passing": None, "receiving": None, "rushing": None},
+            "home": {**_EMPTY_TEAM_CANDIDATES, "rushing": [{"entity_id": "101"}, {"entity_id": "102"}]},
+            "away": _EMPTY_TEAM_CANDIDATES,
         }
         storage.get_entity.return_value = None
 
-        with patch.object(event_prediction.live_features, "build_live_event_leaders", return_value=candidates), \
+        with patch.object(event_prediction.live_features, "build_live_event_leader_candidates", return_value=candidates), \
+             patch.object(event_prediction.model_loader, "load_current_model", return_value=(MagicMock(), {"version": 1})), \
+             patch.object(event_prediction.model_loader, "predict", return_value=80.0):
+            result = event_prediction.predict_event_leaders(storage, s3, predictions_table, "SPORT#NCAAFB#EVENT#1")
+
+        assert [row["entity_id"] for row in result["home"]["rushing"]] == ["101", "102"]
+        assert predictions_table.put_item.call_count == 4  # 2 candidates x 2 stats
+
+    def test_skips_a_stat_whose_model_has_no_promoted_version(self):
+        storage, s3, predictions_table = MagicMock(), MagicMock(), MagicMock()
+        candidates = {
+            "home": {**_EMPTY_TEAM_CANDIDATES, "passing": [{"entity_id": "101"}]},
+            "away": _EMPTY_TEAM_CANDIDATES,
+        }
+        storage.get_entity.return_value = None
+
+        with patch.object(event_prediction.live_features, "build_live_event_leader_candidates", return_value=candidates), \
              patch.object(event_prediction.model_loader, "load_current_model", side_effect=model_loader.NoPromotedModelError("none")):
             result = event_prediction.predict_event_leaders(storage, s3, predictions_table, "SPORT#NCAAFB#EVENT#1")
 

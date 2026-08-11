@@ -5,9 +5,17 @@ test_nfl_reads_*.py's file split -- consolidated here since ncaafb_reads'
 own leaders_comparison shape is simpler (no ranking/limit step, see that
 function's own docstring). storage/predictions_table/s3 are MagicMocks.
 """
+from datetime import date, timedelta
 from unittest.mock import MagicMock
 
 from library.serving import ncaafb_reads
+
+# "scheduled" event_dates are relative to today, not hardcoded -- list_events'
+# soonest-upcoming-week scoping ignores anything more than a few days in the
+# past (see ncaafb_reads._STALE_SCHEDULED_GRACE_DAYS), so a fixed past date
+# would silently drop out of the result as real time moves forward.
+def _future(days: int) -> str:
+    return (date.today() + timedelta(days=days)).isoformat()
 
 
 def _event(event_key, event_date, home_id, away_id, status="scheduled", season=2025, season_type="regular", week=5,
@@ -43,9 +51,23 @@ class TestListEvents:
         storage = MagicMock()
         predictions_table = MagicMock()
         storage.get_all_events.return_value = [
-            _event("e1", "2025-10-18", "61", "52", week=6),
-            _event("e2", "2025-10-11", "61", "70", week=5),
-            _event("e3", "2025-10-11", "80", "90", week=5),
+            _event("e1", _future(11), "61", "52", week=6),
+            _event("e2", _future(4), "61", "70", week=5),
+            _event("e3", _future(4), "80", "90", week=5),
+        ]
+
+        result = ncaafb_reads.list_events(storage, predictions_table, "ncaafb", "scheduled")
+
+        assert {e["event_id"] for e in result["events"]} == {"e2", "e3"}
+
+    def test_a_stale_never_played_scheduled_event_does_not_mask_a_real_upcoming_week(self):
+        storage = MagicMock()
+        predictions_table = MagicMock()
+        stale_date = (date.today() - timedelta(days=400)).isoformat()
+        storage.get_all_events.return_value = [
+            _event("stale", stale_date, "61", "52", week=1, season=2024),
+            _event("e2", _future(4), "61", "70", week=5),
+            _event("e3", _future(4), "80", "90", week=5),
         ]
 
         result = ncaafb_reads.list_events(storage, predictions_table, "ncaafb", "scheduled")
@@ -74,7 +96,7 @@ class TestListEvents:
 
     def test_scheduled_events_have_no_comparison_fields(self):
         storage = MagicMock()
-        storage.get_all_events.return_value = [_event("e1", "2025-10-11", "61", "52")]
+        storage.get_all_events.return_value = [_event("e1", _future(4), "61", "52")]
         result = ncaafb_reads.list_events(storage, MagicMock(), "ncaafb", "scheduled")
         assert "prediction_comparison" not in result["events"][0]
 

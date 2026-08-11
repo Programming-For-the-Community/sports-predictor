@@ -10,6 +10,7 @@ The nfl_predict_read module is registered in sys.modules by conftest.py.
 """
 import json
 import time
+from datetime import date, timedelta
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -78,10 +79,14 @@ class TestEventsRoute:
         nfl_predict_read._storage.get_all_events.assert_called_once_with("nfl", status="completed")
 
     def test_response_body_matches_list_events_shape(self):
+        # event_date is relative to today -- list_events' soonest-upcoming-week
+        # scoping ignores anything more than a few days in the past (see
+        # nfl_reads._STALE_SCHEDULED_GRACE_DAYS).
+        event_date = (date.today() + timedelta(days=4)).isoformat()
         nfl_predict_read._storage = MagicMock()
         nfl_predict_read._storage.get_all_events.return_value = [
             {
-                "event_id": "401547417", "event_date": "2025-09-28", "status": "scheduled",
+                "event_id": "401547417", "event_date": event_date, "status": "scheduled",
                 "season": 2025, "season_type": 2, "week": 4,
                 "participants": [{"entity_id": "12", "role": "home"}, {"entity_id": "24", "role": "away"}],
             },

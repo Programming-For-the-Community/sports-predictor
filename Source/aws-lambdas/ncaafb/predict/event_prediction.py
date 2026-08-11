@@ -22,6 +22,7 @@ LEADER_CATEGORY_STATS = {
     "passing": ["passing_yards", "passing_touchdowns"],
     "rushing": ["rushing_yards", "rushing_touchdowns"],
     "receiving": ["receiving_yards", "receiving_touchdowns"],
+    "sacks": ["defensive_sacks"],
 }
 
 
@@ -88,23 +89,27 @@ def _score_and_record_leader(storage, s3, predictions_table, model_cache: dict, 
 
 
 def predict_event_leaders(storage, s3, predictions_table, event_key_value: str, events: list[dict] | None = None) -> dict | None:
-    """The `leaders` block -- one presumptive passing/receiving/rushing leader per team.
-    Best-effort: a failure here is logged and returns None rather than failing predict_event."""
+    """The `leaders` block -- passing/rushing/receiving/sacks leaders per team (passing
+    singular, the rest lists -- see live_features.LEADER_CANDIDATE_LIMITS). Best-effort:
+    a failure here is logged and returns None rather than failing predict_event."""
     try:
-        candidates = live_features.build_live_event_leaders(storage, SPORT, event_key_value, events=events)
+        candidates = live_features.build_live_event_leader_candidates(storage, SPORT, event_key_value, events=events)
     except Exception:
         logger.exception("Failed to build leader candidates for %s", event_key_value)
         return None
 
     model_cache: dict = {}
 
+    def score(feature_row: dict, stats: list[str]) -> dict:
+        return _score_and_record_leader(storage, s3, predictions_table, model_cache, event_key_value, feature_row, stats)
+
     def team_leaders(team_candidates: dict) -> dict:
+        passing_rows = team_candidates["passing"]
         return {
-            category: (
-                _score_and_record_leader(storage, s3, predictions_table, model_cache, event_key_value, feature_row, stats)
-                if (feature_row := team_candidates.get(category)) is not None else None
-            )
-            for category, stats in LEADER_CATEGORY_STATS.items()
+            "passing": score(passing_rows[0], LEADER_CATEGORY_STATS["passing"]) if passing_rows else None,
+            "rushing": [score(row, LEADER_CATEGORY_STATS["rushing"]) for row in team_candidates["rushing"]],
+            "receiving": [score(row, LEADER_CATEGORY_STATS["receiving"]) for row in team_candidates["receiving"]],
+            "sacks": [score(row, LEADER_CATEGORY_STATS["sacks"]) for row in team_candidates["sacks"]],
         }
 
     return {"home": team_leaders(candidates["home"]), "away": team_leaders(candidates["away"])}
