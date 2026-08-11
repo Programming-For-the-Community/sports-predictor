@@ -1,9 +1,8 @@
 """
 Unit tests for library.serving.ncaafb_reads -- list_events, list_models,
 and their supporting comparison/round-label helpers. NOT a port of
-test_nfl_reads_*.py's file split -- consolidated here since ncaafb_reads'
-own leaders_comparison shape is simpler (no ranking/limit step, see that
-function's own docstring). storage/predictions_table/s3 are MagicMocks.
+test_nfl_reads_*.py's file split -- consolidated here since ncaafb_reads
+is a smaller module. storage/predictions_table/s3 are MagicMocks.
 """
 from datetime import date, timedelta
 from unittest.mock import MagicMock
@@ -74,6 +73,23 @@ class TestListEvents:
 
         assert {e["event_id"] for e in result["events"]} == {"e2", "e3"}
 
+    def test_a_past_dated_scheduled_event_is_excluded_even_within_the_target_week(self):
+        # e1 is within _STALE_SCHEDULED_GRACE_DAYS so it still counts
+        # toward picking week 5 as the target -- but "upcoming" must never
+        # include a past-dated event, played or not, so it's excluded from
+        # the final result while e2 (same week, future-dated) stays.
+        storage = MagicMock()
+        predictions_table = MagicMock()
+        yesterday = (date.today() - timedelta(days=1)).isoformat()
+        storage.get_all_events.return_value = [
+            _event("e1", yesterday, "61", "52", week=5),
+            _event("e2", _future(2), "61", "70", week=5),
+        ]
+
+        result = ncaafb_reads.list_events(storage, predictions_table, "ncaafb", "scheduled")
+
+        assert {e["event_id"] for e in result["events"]} == {"e2"}
+
     def test_completed_returns_only_the_most_recent_week(self):
         storage = MagicMock()
         predictions_table = MagicMock()
@@ -137,7 +153,7 @@ class TestLeadersComparison:
         event = _event("e1", "2025-10-11", "61", "52")
         assert ncaafb_reads._leaders_comparison(MagicMock(), predictions_table, "ncaafb", event) is None
 
-    def test_single_entry_per_category_no_ranking(self):
+    def test_single_passing_entry_per_team(self):
         storage = MagicMock()
         predictions_table = MagicMock()
         predictions_table.query.return_value = [
@@ -154,8 +170,48 @@ class TestLeadersComparison:
         assert result["home"]["passing"]["entity_id"] == "101"
         assert result["home"]["passing"]["predicted"] == {"passing_yards": 275.0}
         assert result["home"]["passing"]["actual"] == {"passing_yards": 260}
-        assert result["home"]["receiving"] is None
+        assert result["home"]["receiving"] == []
         assert result["away"]["passing"] is None
+
+    def test_rushing_leaders_are_grouped_as_a_list(self):
+        storage = MagicMock()
+        storage.get_entity.side_effect = lambda sport, entity_id: {
+            "rb1": {"metadata": {"team_id": "61"}, "name": "RB One"},
+            "rb2": {"metadata": {"team_id": "61"}, "name": "RB Two"},
+        }[entity_id]
+        storage.get_player_game_stats_for_event.return_value = []
+        predictions_table = MagicMock()
+        predictions_table.query.return_value = [
+            {"model_key": "MODEL#player-prop-rushing-yards#v1#PLAYER#rb1", "predicted_value": {"value": 90.0}},
+            {"model_key": "MODEL#player-prop-rushing-yards#v1#PLAYER#rb2", "predicted_value": {"value": 40.0}},
+        ]
+        event = _event("e1", "2025-10-11", "61", "52")
+
+        result = ncaafb_reads._leaders_comparison(storage, predictions_table, "ncaafb", event)
+
+        assert [r["entity_id"] for r in result["home"]["rushing"]] == ["rb1", "rb2"]  # ranked by predicted yards
+        assert result["away"]["rushing"] == []
+
+    def test_rushing_is_capped_at_top_2_by_predicted_yards(self):
+        # Guards against an event whose audit trail holds more than 2 recorded
+        # rushing predictions -- the comparison should still only ever show
+        # the top 2, same as the pre-game leaders block did.
+        storage = MagicMock()
+        storage.get_entity.side_effect = lambda sport, entity_id: {
+            "metadata": {"team_id": "61"}, "name": entity_id,
+        }
+        storage.get_player_game_stats_for_event.return_value = []
+        predictions_table = MagicMock()
+        predictions_table.query.return_value = [
+            {"model_key": f"MODEL#player-prop-rushing-yards#v1#PLAYER#rb{i}", "predicted_value": {"value": float(i)}}
+            for i in range(1, 5)
+        ]
+        event = _event("e1", "2025-10-11", "61", "52")
+
+        result = ncaafb_reads._leaders_comparison(storage, predictions_table, "ncaafb", event)
+
+        assert len(result["home"]["rushing"]) == 2
+        assert [r["entity_id"] for r in result["home"]["rushing"]] == ["rb4", "rb3"]
 
     def test_skips_a_player_who_has_since_left_both_teams(self):
         storage = MagicMock()

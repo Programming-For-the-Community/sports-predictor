@@ -9,7 +9,7 @@ deployment, not the code.
 """
 import os
 
-from boto3.dynamodb.conditions import Attr
+from boto3.dynamodb.conditions import Attr, Key
 
 from library.aws.dynamodb_table import DynamoDBTable
 from library.aws.s3_manager import S3Manager
@@ -60,6 +60,16 @@ class PipelineStorage:
 
     def upsert_event(self, item: dict) -> None:
         self._events_table.put_item(item)
+
+    def get_events_by_status(self, sport: str, status: str) -> list[dict]:
+        """Every event for a sport currently at `status` -- same status-
+        index GSI pattern as FeatureStorage.get_all_events (Terraform/
+        dynamodb-events.tf). Needed on the write side too (not just
+        FeatureStorage's read-only copy) for normalize's own stale-event
+        cleanup -- see aws-lambdas/ncaafb/normalize/handler.py's
+        _cancel_stale_scheduled_events."""
+        items = self._events_table.query(Key("status").eq(status), index_name="status-index")
+        return [item for item in items if item.get("sport") == sport]
 
     def get_entity(self, sport: str, entity_id: str) -> dict | None:
         """One entity (team or player) by id -- a direct GetItem. Read-side

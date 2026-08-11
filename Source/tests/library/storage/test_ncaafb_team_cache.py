@@ -12,7 +12,7 @@ from unittest.mock import MagicMock
 
 from botocore.exceptions import ClientError
 
-from library.storage.ncaafb_team_cache import attach_venue_indoor, get_cached_teams, teams_by_id
+from library.storage.ncaafb_team_cache import attach_venue_indoor, get_cached_teams, teams_by_id, teams_by_school
 
 BUCKET = "test-bucket"
 
@@ -86,6 +86,16 @@ class TestTeamsById:
 
     def test_skips_entries_missing_id(self):
         result = teams_by_id([{"school": "No Id Team"}])
+        assert result == {}
+
+
+class TestTeamsBySchool:
+    def test_keys_by_school_name(self):
+        result = teams_by_school([_team("2", "Georgia"), _team(52, "Alabama")])
+        assert set(result.keys()) == {"Georgia", "Alabama"}
+
+    def test_skips_entries_missing_school(self):
+        result = teams_by_school([{"id": "2"}])
         assert result == {}
 
 

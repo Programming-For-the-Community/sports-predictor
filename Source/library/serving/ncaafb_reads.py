@@ -34,11 +34,21 @@ _STAT_CATEGORY = {
     "passing_yards": "passing", "passing_touchdowns": "passing",
     "receiving_yards": "receiving", "receiving_touchdowns": "receiving",
     "rushing_yards": "rushing", "rushing_touchdowns": "rushing",
+    "defensive_sacks": "sacks",
 }
 
 # Matches predict/event_prediction.py's record_prediction model_key shape
 # for a player-prop prediction (MODEL#player-prop-passing-yards#v3#PLAYER#qb1).
 _PLAYER_PROP_MODEL_KEY_RE = re.compile(r"^MODEL#player-prop-([a-z-]+)#v\d+#PLAYER#(.+)$")
+
+# Mirrors predict/event_prediction.py's own LEADER_CATEGORY_STATS primary
+# stat per category -- duplicated for the same reason _STAT_CATEGORY above
+# is. The audit trail can hold more rows per category than this many
+# (e.g. an event predicted before live_features.py's candidate-count cap
+# changed), so this re-sorts and re-slices rather than trusting it already
+# matches the leaders block shown pre-game.
+_LEADER_CATEGORY_LIMITS = {"rushing": 2, "receiving": 3, "sacks": 3}
+_CATEGORY_PRIMARY_STAT = {"rushing": "rushing_yards", "receiving": "receiving_yards", "sacks": "defensive_sacks"}
 
 
 def _home_and_away(event: dict) -> tuple[str, str] | None:
@@ -70,14 +80,26 @@ _STALE_SCHEDULED_GRACE_DAYS = 3  # see nfl_reads.py's own docstring for the iden
 def _next_week_events(scheduled: list[dict]) -> list[dict]:
     """Only the soonest upcoming week's games -- see nfl_reads.py's own
     docstring for the identical reasoning, including why events older
-    than _STALE_SCHEDULED_GRACE_DAYS are excluded from the min()."""
+    than _STALE_SCHEDULED_GRACE_DAYS are excluded from the min(). The
+    grace period only decides which week counts as "soonest" (so an
+    already-played Thursday game doesn't hide the rest of its own week's
+    Saturday games) -- the returned list is separately filtered to
+    today-or-later, since "upcoming" must never include a past-dated
+    event, played or not. A "scheduled" event that's actually over a year
+    stale gets corrected to "canceled" at write time (see
+    aws-lambdas/ncaafb/normalize/handler.py's _cancel_stale_scheduled_
+    events) and so drops out of `scheduled` entirely before ever reaching
+    here, but this filter still holds for anything more recent than that
+    (e.g. a game played yesterday whose status hasn't caught up to
+    "completed" yet)."""
+    today = datetime.now(timezone.utc).date().isoformat()
     cutoff = (datetime.now(timezone.utc).date() - timedelta(days=_STALE_SCHEDULED_GRACE_DAYS)).isoformat()
     plausible = [e for e in scheduled if e.get("event_date", "") >= cutoff]
     if not plausible:
         return []
     earliest = min(plausible, key=lambda e: e.get("event_date", ""))
     target = _week_key(earliest)
-    return [e for e in plausible if _week_key(e) == target]
+    return [e for e in plausible if _week_key(e) == target and e.get("event_date", "") >= today]
 
 
 def _actual_result(event: dict) -> dict | None:
@@ -136,12 +158,10 @@ def _prediction_comparison(predictions_table, event: dict) -> dict | None:
 
 def _leaders_comparison(storage, predictions_table, sport: str, event: dict) -> dict | None:
     """Player-prop predicted-vs-actual for a completed event. Shape
-    mirrors the (predicted-only) `leaders` block
-    predict/event_prediction.py's predict_event_leaders returns: exactly
-    ONE entry-or-null per category per team (passing/receiving/rushing,
-    no sacks -- see predict/live_features.py's own docstring), unlike
-    NFL's ranked lists -- there's never more than one candidate to
-    compare here, so no sort/limit step is needed."""
+    mirrors the (predicted-only) `leaders` block predict/event_prediction.py's
+    predict_event_leaders returns: `passing` is a single entry or null per
+    team (only one passing candidate is ever scored), `rushing`/`receiving`/
+    `sacks` are lists."""
     home_away = _home_and_away(event)
     if home_away is None:
         return None
@@ -165,8 +185,8 @@ def _leaders_comparison(storage, predictions_table, sport: str, event: dict) -> 
         for row in storage.get_player_game_stats_for_event(event["event_key"])
     }
 
-    home: dict[str, dict | None] = {"passing": None, "receiving": None, "rushing": None}
-    away: dict[str, dict | None] = {"passing": None, "receiving": None, "rushing": None}
+    home: dict[str, list[dict] | dict | None] = {"passing": None, "rushing": [], "receiving": [], "sacks": []}
+    away: dict[str, list[dict] | dict | None] = {"passing": None, "rushing": [], "receiving": [], "sacks": []}
 
     for entity_id, predicted_stats in predicted_by_entity.items():
         category = next((_STAT_CATEGORY[stat] for stat in predicted_stats if stat in _STAT_CATEGORY), None)
@@ -192,7 +212,17 @@ def _leaders_comparison(storage, predictions_table, sport: str, event: dict) -> 
         }
         if entity and entity.get("name"):
             entry["name"] = entity["name"]
-        bucket[category] = entry
+
+        if category == "passing":
+            bucket["passing"] = entry
+        else:
+            bucket[category].append(entry)
+
+    for bucket in (home, away):
+        for category, limit in _LEADER_CATEGORY_LIMITS.items():
+            primary_stat = _CATEGORY_PRIMARY_STAT[category]
+            bucket[category].sort(key=lambda entry: entry["predicted"].get(primary_stat, -1), reverse=True)
+            bucket[category] = bucket[category][:limit]
 
     return {"home": home, "away": away}
 

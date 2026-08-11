@@ -68,16 +68,37 @@ jobs:
     uses: ./.github/workflows/nfl_ai_hosting.yml
     secrets: inherit
 
+  ncaafb_backfill_build:
+    name: NCAAFB backfill (build)
+    uses: ./.github/workflows/ncaafb_backfill.yml
+    secrets: inherit
+
+  ncaafb_ai_training_build:
+    name: NCAAFB AI training (build)
+    uses: ./.github/workflows/ncaafb_ai_training.yml
+    secrets: inherit
+
+  ncaafb_ai_hosting_build:
+    name: NCAAFB AI hosting (build)
+    uses: ./.github/workflows/ncaafb_ai_hosting.yml
+    secrets: inherit
+
   # --- Infra: applies once, gated on every "before" job tolerating
   # success-or-skip (mirrors nfl_deploy.yml's own tolerant-if pattern) ---
   infra:
     name: Apply shared infrastructure
-    needs: [nfl_backfill_build, nfl_ai_training_build, nfl_ai_hosting_build]
+    needs: [
+      nfl_backfill_build, nfl_ai_training_build, nfl_ai_hosting_build,
+      ncaafb_backfill_build, ncaafb_ai_training_build, ncaafb_ai_hosting_build,
+    ]
     if: |
       always() &&
       (needs.nfl_backfill_build.result == 'success' || needs.nfl_backfill_build.result == 'skipped') &&
       (needs.nfl_ai_training_build.result == 'success' || needs.nfl_ai_training_build.result == 'skipped') &&
-      (needs.nfl_ai_hosting_build.result == 'success' || needs.nfl_ai_hosting_build.result == 'skipped')
+      (needs.nfl_ai_hosting_build.result == 'success' || needs.nfl_ai_hosting_build.result == 'skipped') &&
+      (needs.ncaafb_backfill_build.result == 'success' || needs.ncaafb_backfill_build.result == 'skipped') &&
+      (needs.ncaafb_ai_training_build.result == 'success' || needs.ncaafb_ai_training_build.result == 'skipped') &&
+      (needs.ncaafb_ai_hosting_build.result == 'success' || needs.ncaafb_ai_hosting_build.result == 'skipped')
     uses: ./.github/workflows/tf_install.yml
     secrets: inherit
 
@@ -125,6 +146,36 @@ jobs:
     with:
       function_name: ${{ needs.infra.outputs.nfl_live_scores_function_name }}
 
+  ncaafb_predict_deploy:
+    name: NCAAFB AI hosting (deploy)
+    needs: [infra, ncaafb_ai_hosting_build]
+    uses: ./.github/workflows/ncaafb_predict_deploy.yml
+    secrets: inherit
+    with:
+      function_name: ${{ needs.infra.outputs.ncaafb_predict_function_name }}
+      image_uri: ${{ needs.ncaafb_ai_hosting_build.outputs.predict_image_uri }}
+
+  ncaafb_data_pipeline:
+    name: NCAAFB data pipeline (deploy)
+    needs: infra
+    uses: ./.github/workflows/ncaafb_data_pipeline.yml
+    secrets: inherit
+    with:
+      ingest_function_name: ${{ needs.infra.outputs.ncaafb_ingest_function_name }}
+      normalize_function_name: ${{ needs.infra.outputs.ncaafb_normalize_function_name }}
+      schedule_sync_function_name: ${{ needs.infra.outputs.ncaafb_schedule_sync_function_name }}
+
+  ncaafb_predict_read_deploy:
+    name: NCAAFB predict-read (deploy)
+    needs: infra
+    uses: ./.github/workflows/ncaafb_predict_read_deploy.yml
+    secrets: inherit
+    with:
+      function_name: ${{ needs.infra.outputs.ncaafb_predict_read_function_name }}
+
+  # No live-scores job for NCAAFB yet -- see ncaafb_deploy.yml's own
+  # comment (no live-scores feature/workflow exists for this sport yet).
+
   # No config `with:` block for either -- both read directly from
   # Terraform state instead of relaying it through needs.infra.outputs.*,
   # which proved unreliable in practice (see frontend_hosting.yml's
@@ -142,7 +193,3 @@ jobs:
     secrets: inherit
     with:
       source_run_id: ${{ github.run_id }}
-
-  # A future sport's deploy (e.g. NCAA FB) adds its own build job(s)
-  # before `infra`, its own needs entry in `infra`'s tolerant-if, and its
-  # own deploy job(s) after -- same shape as the NFL jobs above.

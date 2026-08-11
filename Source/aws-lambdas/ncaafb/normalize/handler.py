@@ -23,10 +23,16 @@ are bulk-per-week rather than per-game:
                                                             unlike the three above (see
                                                             ingest/handler.py's
                                                             _fetch_roster_if_stale)
+
+Also runs _cancel_stale_scheduled_events unconditionally on every
+invocation, regardless of which key(s) triggered it -- see that
+function's own docstring for why this lives here rather than in
+ingest/handler.py (which never touches DynamoDB directly).
 """
 import json
 import logging
 import urllib.parse
+from datetime import datetime, timedelta, timezone
 
 import boto3
 
@@ -53,6 +59,30 @@ def _get_storage() -> PipelineStorage:
     if _storage is None:
         _storage = PipelineStorage()
     return _storage
+
+
+STALE_UNPLAYED_MAX_AGE_DAYS = 365
+
+
+def _cancel_stale_scheduled_events(storage: PipelineStorage) -> int:
+    """Corrects any event still "scheduled" more than a year past its own
+    event_date to "canceled". CFBD's bulk /games endpoint has no
+    structured cancellation signal of its own (unlike ESPN's
+    status.type.name -- see library/normalize/espn.py's _event_status),
+    so a genuinely canceled/postponed NCAAFB game just sits at
+    "scheduled" forever without this; a year is long enough that no real
+    delayed/rescheduled game could still be legitimately upcoming. Run
+    once per invocation (not per S3 record) -- idempotent and cheap (one
+    status-index Query, see PipelineStorage.get_events_by_status), same
+    "safe to run unconditionally and often" reasoning ingest's own teams/
+    coaches cache refresh already relies on. Returns how many rows were
+    corrected, purely for logging."""
+    cutoff = (datetime.now(timezone.utc).date() - timedelta(days=STALE_UNPLAYED_MAX_AGE_DAYS)).isoformat()
+    stale = [e for e in storage.get_events_by_status(SPORT, "scheduled") if e.get("event_date", "") < cutoff]
+    for event in stale:
+        event["status"] = "canceled"
+        storage.upsert_event(event)
+    return len(stale)
 
 
 def _process_games(payload: list, key: str) -> None:
@@ -137,6 +167,13 @@ def _dispatch(bucket: str, key: str) -> None:
 def lambda_handler(event: dict, context) -> dict:
     records = event.get("Records", [])
     processed = failed = 0
+
+    try:
+        canceled = _cancel_stale_scheduled_events(_get_storage())
+        if canceled:
+            logger.info("Canceled %d stale scheduled event(s)", canceled)
+    except Exception:
+        logger.exception("Failed cancelling stale scheduled events")
 
     for record in records:
         bucket = record["s3"]["bucket"]["name"]

@@ -298,18 +298,20 @@ def roster_to_player_entities(roster: list[dict], sport: str, as_of_date: str) -
     game_player_stats_to_player_game_stats' own documented gap
     (metadata.position always None from a box score alone).
 
-    NOT YET CONFIRMED LIVE, unlike every other normalizer in this module --
-    CFBD's /roster wasn't in scope until now (see ingest/handler.py's own
-    prior docstring). Coded against CFBD's publicly documented v2 schema:
-    a flat list of {"id", "teamId", "team", "firstName", "lastName",
-    "position", "jersey", ...} objects, one per player, no grouping by
-    team the way ESPN's roster nests athletes under position groups. "id"
+    Confirmed live against CFBD's real /roster schema: a flat list of
+    {"id", "team", "firstName", "lastName", "position", "jersey", ...}
+    objects, one per player, no grouping by team the way ESPN's roster
+    nests athletes under position groups. Note there's no "teamId" here --
+    only "team", a school name string -- so "teamId" is expected to
+    already be injected by ingest/handler.py's own _annotate_roster
+    before this ever runs; a roster payload that skipped that step will
+    have every player dropped (see the "id"/"teamId" guard below), same
+    as one whose school wasn't found in that season's teams cache. "id"
     is assumed to be the SAME id space CFBD's own box scores assign
     (library/normalize/ncaafb.py's game_player_stats_to_player_game_stats
     reads athlete["id"] from /games/players) -- CFBD has one player
-    database backing both endpoints, so this should hold, but run one real
-    GET /roster call before this deploys and patch field names here if
-    reality differs.
+    database backing both endpoints, so this should hold, but this half
+    is still unconfirmed against real data.
 
     as_of_date is the ingest fetch's own timestamp (there's no per-payload
     "as of" field on this endpoint the way ESPN's roster has "timestamp"),
