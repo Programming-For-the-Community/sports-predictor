@@ -79,7 +79,9 @@ def reset_ncaafb_predict_read_singletons():
     ncaafb_predict_read._storage = None
     ncaafb_predict_read._model_bucket = None
     ncaafb_predict_read._predictions_table = None
+    ncaafb_predict_read._predict_invoker = None
     yield
     ncaafb_predict_read._storage = None
     ncaafb_predict_read._model_bucket = None
     ncaafb_predict_read._predictions_table = None
+    ncaafb_predict_read._predict_invoker = None

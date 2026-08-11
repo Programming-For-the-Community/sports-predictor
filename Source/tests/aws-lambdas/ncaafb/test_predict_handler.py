@@ -1,110 +1,51 @@
 """
-Unit tests for ncaafb/predict/handler.py -- routing and error-to-status-code
-mapping only; event_prediction's actual prediction logic is exercised in
-test_event_prediction.py. The ncaafb_predict module is registered in
+Unit tests for ncaafb/predict/handler.py -- a pure background compute
+worker (see that module's own docstring), dispatching on `detail-type`
+only. No API-Gateway-shaped routing lives here anymore -- GET
+/ncaafb/predictions/events/{event_id} and .../players/{entity_id} moved
+to predict-read/handler.py (see test_predict_read_handler.py's own
+TestPredictionRoutes); ScheduledSeasonProjection is covered separately in
+test_season_projection.py. The ncaafb_predict module is registered in
 sys.modules by conftest.py, which also resets its singletons around every
 test in this directory.
 """
-import json
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import ncaafb_predict
-import live_features
-import model_loader
+import event_prediction
 
 
-def _api_event(resource, path_params=None, query_params=None):
-    return {"resource": resource, "pathParameters": path_params, "queryStringParameters": query_params}
-
-
-class TestRouting:
-    def test_predict_event_route(self):
+class TestComputeAndCacheDispatch:
+    def test_event_route_calls_compute_and_cache_event(self):
         with patch.object(ncaafb_predict, "_get_storage"), \
              patch.object(ncaafb_predict, "_get_model_bucket"), \
              patch.object(ncaafb_predict, "_get_predictions_table"), \
-             patch.object(ncaafb_predict.event_prediction, "predict_event", return_value={"ok": True}) as mock_predict:
+             patch.object(event_prediction, "compute_and_cache_event") as mock_compute:
             response = ncaafb_predict.lambda_handler(
-                _api_event("/ncaafb/predictions/events/{event_id}", {"event_id": "401520281"}), None,
+                {"detail-type": "ComputeAndCachePrediction", "route": "event", "event_id": "401520281"}, None,
             )
 
-        assert response["statusCode"] == 200
-        assert json.loads(response["body"]) == {"ok": True}
-        mock_predict.assert_called_once()
-        assert mock_predict.call_args.args[-1] == "401520281"
+        assert response == {"status": "ok"}
+        mock_compute.assert_called_once()
+        assert mock_compute.call_args.args[-1] == "401520281"
 
-    def test_predict_player_prop_route(self):
+    def test_player_prop_route_calls_compute_and_cache_player_prop(self):
         with patch.object(ncaafb_predict, "_get_storage"), \
              patch.object(ncaafb_predict, "_get_model_bucket"), \
              patch.object(ncaafb_predict, "_get_predictions_table"), \
-             patch.object(ncaafb_predict.event_prediction, "predict_player_prop", return_value={"ok": True}) as mock_predict:
+             patch.object(event_prediction, "compute_and_cache_player_prop") as mock_compute:
             response = ncaafb_predict.lambda_handler(
-                _api_event(
-                    "/ncaafb/predictions/events/{event_id}/players/{entity_id}",
-                    {"event_id": "401520281", "entity_id": "101"}, {"stat": "passing_yards"},
-                ), None,
+                {
+                    "detail-type": "ComputeAndCachePrediction", "route": "player_prop",
+                    "event_id": "401520281", "entity_id": "101", "stat": "passing_yards",
+                }, None,
             )
 
-        assert response["statusCode"] == 200
-        mock_predict.assert_called_once()
-        assert mock_predict.call_args.args[-1] == "passing_yards"
+        assert response == {"status": "ok"}
+        mock_compute.assert_called_once()
+        assert mock_compute.call_args.args[-3:] == ("401520281", "101", "passing_yards")
 
-    def test_player_prop_route_missing_stat_query_param(self):
-        response = ncaafb_predict.lambda_handler(
-            _api_event(
-                "/ncaafb/predictions/events/{event_id}/players/{entity_id}",
-                {"event_id": "401520281", "entity_id": "101"}, {},
-            ), None,
-        )
-        assert response["statusCode"] == 400
+    def test_unrecognized_invocation_shape_does_not_raise(self):
+        response = ncaafb_predict.lambda_handler({"resource": "/ncaafb/unknown"}, None)
 
-    def test_unknown_route_returns_404(self):
-        response = ncaafb_predict.lambda_handler(_api_event("/ncaafb/unknown"), None)
-        assert response["statusCode"] == 404
-
-
-class TestErrorMapping:
-    def test_event_not_found_returns_404(self):
-        with patch.object(ncaafb_predict, "_get_storage"), \
-             patch.object(ncaafb_predict, "_get_model_bucket"), \
-             patch.object(ncaafb_predict, "_get_predictions_table"), \
-             patch.object(ncaafb_predict.event_prediction, "predict_event", side_effect=live_features.EventNotFoundError("nope")):
-            response = ncaafb_predict.lambda_handler(
-                _api_event("/ncaafb/predictions/events/{event_id}", {"event_id": "1"}), None,
-            )
-        assert response["statusCode"] == 404
-
-    def test_malformed_event_returns_422(self):
-        with patch.object(ncaafb_predict, "_get_storage"), \
-             patch.object(ncaafb_predict, "_get_model_bucket"), \
-             patch.object(ncaafb_predict, "_get_predictions_table"), \
-             patch.object(ncaafb_predict.event_prediction, "predict_event", side_effect=live_features.MalformedEventError("bad")):
-            response = ncaafb_predict.lambda_handler(
-                _api_event("/ncaafb/predictions/events/{event_id}", {"event_id": "1"}), None,
-            )
-        assert response["statusCode"] == 422
-
-    def test_no_promoted_model_returns_503(self):
-        with patch.object(ncaafb_predict, "_get_storage"), \
-             patch.object(ncaafb_predict, "_get_model_bucket"), \
-             patch.object(ncaafb_predict, "_get_predictions_table"), \
-             patch.object(ncaafb_predict.event_prediction, "predict_event", side_effect=model_loader.NoPromotedModelError("none")):
-            response = ncaafb_predict.lambda_handler(
-                _api_event("/ncaafb/predictions/events/{event_id}", {"event_id": "1"}), None,
-            )
-        assert response["statusCode"] == 503
-
-    def test_unhandled_exception_returns_500(self):
-        with patch.object(ncaafb_predict, "_get_storage"), \
-             patch.object(ncaafb_predict, "_get_model_bucket"), \
-             patch.object(ncaafb_predict, "_get_predictions_table"), \
-             patch.object(ncaafb_predict.event_prediction, "predict_event", side_effect=Exception("boom")):
-            response = ncaafb_predict.lambda_handler(
-                _api_event("/ncaafb/predictions/events/{event_id}", {"event_id": "1"}), None,
-            )
-        assert response["statusCode"] == 500
-
-
-class TestCorsHeaders:
-    def test_response_includes_cors_headers(self):
-        response = ncaafb_predict.lambda_handler(_api_event("/ncaafb/unknown"), None)
-        assert response["headers"]["Access-Control-Allow-Origin"] == "*"
+        assert response["status"] == "error"

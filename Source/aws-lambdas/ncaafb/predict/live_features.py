@@ -37,6 +37,21 @@ for defensive_sacks (CFBD's box score has no "who started at pass rusher"
 signal the way passing/rushing/receiving attempts identify a starter), so
 build_live_event_leaders' result only ever has passing/receiving/rushing
 keys, unlike NFL's four-category leaders block.
+
+PERFORMANCE: one event request calls storage.get_team_events up to 10
+times (2 for the event-level rolling windows, 6 for the 3-category x
+2-team presumptive-leader search below, plus build_live_event_leaders'
+own separate walk) -- and FeatureStorage.get_team_events' own docstring
+explains why each of those, left un-threaded, re-fetches the sport's
+ENTIRE event history from DynamoDB from scratch every time. build_live_
+event_features/build_live_event_leaders both take an optional `events`
+(an already-fetched get_all_events(sport) result) and thread it through
+every downstream get_team_events/_live_elo_ratings call instead -- turning
+those 10 full-history queries into 1 when a caller (event_prediction.
+predict_event) fetches it once and passes it to both. Omitted, this
+still works, just slower (the original per-call behavior) -- this is what
+was actually making the live NCAAFB predict route slow enough to risk a
+504 against API Gateway's 29s ceiling.
 """
 from library.features.common import DEFAULT_STARTING_RATING, compute_elo_ratings
 from library.features.ncaafb import (
@@ -85,13 +100,17 @@ def _home_away_ids(event: dict) -> tuple[str, str]:
 
 def _live_elo_ratings(
     storage, sport: str, event: dict, home_id: str, away_id: str, current_ratings: dict | None = None,
+    events: list[dict] | None = None,
 ) -> dict:
     """A minimal elo_ratings dict containing just this one (not-yet-played)
     event's key, mapped to each team's CURRENT rating -- see
     Source/aws-lambdas/nfl/predict/live_features.py's own docstring for
-    the full reasoning, identical here."""
+    the full reasoning, identical here. `events` is this module's own
+    already-fetched-history pass-through (see this module's own
+    docstring) -- used only when current_ratings itself isn't already
+    given, to avoid yet another full get_all_events call on top of it."""
     if current_ratings is None:
-        completed_events = storage.get_all_events(sport)
+        completed_events = events if events is not None else storage.get_all_events(sport)
         _, current_ratings = compute_elo_ratings(completed_events, as_of_season=event.get("season"))
     return {
         event["event_key"]: {
@@ -121,8 +140,8 @@ def _team_coordinates_for(storage, sport: str, *team_ids: str) -> dict[str, tupl
     return coordinates
 
 
-def _team_previous_event_date(storage, sport: str, team_id: str, before_date: str) -> str | None:
-    previous = storage.get_team_events(sport, team_id, before_date=before_date, limit=1)
+def _team_previous_event_date(storage, sport: str, team_id: str, before_date: str, events: list[dict] | None = None) -> str | None:
+    previous = storage.get_team_events(sport, team_id, before_date=before_date, limit=1, events=events)
     return previous[0]["event_date"] if previous else None
 
 
@@ -137,14 +156,16 @@ def _still_on_team(storage, sport: str, entity_id: str, team_id: str) -> bool:
 
 def _presumptive_leader(
     storage, sport: str, team_id: str, before_date: str, current_season: int | None, category: str, window: int,
+    events: list[dict] | None = None,
 ) -> tuple[str, list[dict]] | None:
     """(entity_id, their own recent game history) for team_id's
     presumptive category leader (category in LEADER_IDENTIFIERS), or None
     if no still-rostered leader is found within the lookback bound -- see
     this module's own docstring for the full search/verification
-    algorithm."""
+    algorithm. `events` is this module's own already-fetched-history
+    pass-through -- see this module's own docstring."""
     identify_fn = LEADER_IDENTIFIERS[category]
-    team_events = storage.get_team_events(sport, team_id, before_date=before_date)
+    team_events = storage.get_team_events(sport, team_id, before_date=before_date, events=events)
     for event in team_events:
         season = event.get("season")
         if season is not None and current_season is not None and season < current_season - SEASON_LOOKBACK:
@@ -161,6 +182,7 @@ def _presumptive_leader(
 def _build_player_feature_row(
     storage, sport: str, event: dict, home_id: str, away_id: str, entity_id: str, team_id: str,
     prior_games: list[dict], team_coordinates: dict, window: int, current_ratings: dict | None = None,
+    events: list[dict] | None = None,
 ) -> dict:
     player_game = {
         "event_key": event["event_key"],
@@ -172,36 +194,48 @@ def _build_player_feature_row(
     }
     return build_player_features(
         player_game, prior_games, event,
-        _live_elo_ratings(storage, sport, event, home_id, away_id, current_ratings),
-        _team_previous_event_date(storage, sport, team_id, event["event_date"]),
+        _live_elo_ratings(storage, sport, event, home_id, away_id, current_ratings, events),
+        _team_previous_event_date(storage, sport, team_id, event["event_date"], events),
         team_coordinates, window,
     )
 
 
-def build_live_event_features(storage, sport: str, event_key: str, window: int = DEFAULT_ROLLING_WINDOW) -> dict:
+def build_live_event_features(
+    storage, sport: str, event_key: str, window: int = DEFAULT_ROLLING_WINDOW,
+    events: list[dict] | None = None,
+) -> dict:
     """One event-level feature row for event_key, in the exact shape
     train_win_probability_model.py/train_score_model.py were trained on
     (label_* fields will be None/absent for an unplayed game -- callers
-    only read the feature columns off the result, never the labels)."""
+    only read the feature columns off the result, never the labels).
+
+    `events` is this module's own already-fetched-history pass-through
+    (see this module's own docstring) -- fetched once here if not given,
+    and threaded through every one of this function's own 8 downstream
+    get_team_events calls (2 rolling windows + 6 presumptive-leader
+    searches) instead of each one separately re-querying. team_game_stats
+    gets the identical one-fetch treatment locally, for its own 2 calls."""
     event = storage.get_event(event_key)
     if event is None:
         raise EventNotFoundError(f"No event found for {event_key}")
     home_id, away_id = _home_away_ids(event)
     before_date = event["event_date"]
     current_season = event.get("season")
+    events = events if events is not None else storage.get_all_events(sport)
+    team_game_stats = storage.get_all_team_game_stats(sport)
 
-    home_events = storage.get_team_events(sport, home_id, before_date=before_date, limit=window)
-    away_events = storage.get_team_events(sport, away_id, before_date=before_date, limit=window)
-    home_box = storage.get_team_game_stats_for_team(sport, home_id, before_date=before_date, limit=window)
-    away_box = storage.get_team_game_stats_for_team(sport, away_id, before_date=before_date, limit=window)
+    home_events = storage.get_team_events(sport, home_id, before_date=before_date, limit=window, events=events)
+    away_events = storage.get_team_events(sport, away_id, before_date=before_date, limit=window, events=events)
+    home_box = storage.get_team_game_stats_for_team(sport, home_id, before_date=before_date, limit=window, team_game_stats=team_game_stats)
+    away_box = storage.get_team_game_stats_for_team(sport, away_id, before_date=before_date, limit=window, team_game_stats=team_game_stats)
     team_coordinates = _team_coordinates_for(storage, sport, home_id, away_id)
 
     def leader_games(team_id: str, category: str) -> list[dict] | None:
-        found = _presumptive_leader(storage, sport, team_id, before_date, current_season, category, window)
+        found = _presumptive_leader(storage, sport, team_id, before_date, current_season, category, window, events)
         return found[1] if found else None
 
     return build_event_features(
-        event, _live_elo_ratings(storage, sport, event, home_id, away_id),
+        event, _live_elo_ratings(storage, sport, event, home_id, away_id, events=events),
         home_events, away_events, team_coordinates, window,
         home_qb_games=leader_games(home_id, "passing"),
         away_qb_games=leader_games(away_id, "passing"),
@@ -215,14 +249,16 @@ def build_live_event_features(storage, sport: str, event_key: str, window: int =
 
 def build_live_player_features(
     storage, sport: str, event_key: str, entity_id: str, window: int = DEFAULT_ROLLING_WINDOW,
-    current_ratings: dict | None = None,
+    current_ratings: dict | None = None, events: list[dict] | None = None,
 ) -> dict:
     """One player-prop feature row for entity_id's performance in
     event_key, in the exact shape train_player_prop_model.py was trained
     on. team_id comes from the player's own entity record
     (metadata.team_id, kept current by roster sync and box-score upserts),
     not from their own last game log, since a just-traded/transferred
-    player's most recent game log would still show their old team."""
+    player's most recent game log would still show their old team.
+    `events`/`current_ratings` are this module's own optional already-
+    fetched pass-throughs -- see this module's own docstring."""
     event = storage.get_event(event_key)
     if event is None:
         raise EventNotFoundError(f"No event found for {event_key}")
@@ -237,11 +273,14 @@ def build_live_player_features(
     prior_games = storage.get_player_game_stats(entity_id, before_date=event["event_date"], limit=window)
     return _build_player_feature_row(
         storage, sport, event, home_id, away_id, entity_id, team_id,
-        prior_games, team_coordinates, window, current_ratings,
+        prior_games, team_coordinates, window, current_ratings, events,
     )
 
 
-def build_live_event_leaders(storage, sport: str, event_key: str, window: int = DEFAULT_ROLLING_WINDOW) -> dict:
+def build_live_event_leaders(
+    storage, sport: str, event_key: str, window: int = DEFAULT_ROLLING_WINDOW,
+    events: list[dict] | None = None,
+) -> dict:
     """{"home": {"passing": row|None, "receiving": row|None, "rushing":
     row|None}, "away": {...}} -- ONE candidate per category per team
     (matching identify_starting_qb/identify_lead_rusher/identify_lead_
@@ -249,7 +288,13 @@ def build_live_event_leaders(storage, sport: str, event_key: str, window: int = 
     pools), each already a full build_live_player_features-shaped row.
     None for a category with no still-rostered leader found within the
     lookback bound. See this module's own docstring for why there's no
-    sacks key."""
+    sacks key.
+
+    `events` is this module's own already-fetched-history pass-through --
+    event_prediction.predict_event fetches it once and passes the SAME
+    list here and to build_live_event_features, so a single "predict one
+    event" request pays for exactly one get_all_events call between the
+    two of them, not one each."""
     event = storage.get_event(event_key)
     if event is None:
         raise EventNotFoundError(f"No event found for {event_key}")
@@ -257,19 +302,20 @@ def build_live_event_leaders(storage, sport: str, event_key: str, window: int = 
     before_date = event["event_date"]
     current_season = event.get("season")
     team_coordinates = _team_coordinates_for(storage, sport, home_id, away_id)
-    _, current_ratings = compute_elo_ratings(storage.get_all_events(sport), as_of_season=current_season)
+    events = events if events is not None else storage.get_all_events(sport)
+    _, current_ratings = compute_elo_ratings(events, as_of_season=current_season)
 
     def team_leaders(team_id: str) -> dict:
         result = {}
         for category in LEADER_IDENTIFIERS:
-            found = _presumptive_leader(storage, sport, team_id, before_date, current_season, category, window)
+            found = _presumptive_leader(storage, sport, team_id, before_date, current_season, category, window, events)
             if found is None:
                 result[category] = None
                 continue
             entity_id, prior_games = found
             result[category] = _build_player_feature_row(
                 storage, sport, event, home_id, away_id, entity_id, team_id,
-                prior_games, team_coordinates, window, current_ratings,
+                prior_games, team_coordinates, window, current_ratings, events,
             )
         return result
 

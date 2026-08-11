@@ -33,6 +33,7 @@ FROM public.ecr.aws/lambda/python:3.12 AS runtime
 COPY --from=builder /install ${LAMBDA_TASK_ROOT}
 COPY aws-lambdas/ncaafb/predict/handler.py aws-lambdas/ncaafb/predict/live_features.py \
      aws-lambdas/ncaafb/predict/model_loader.py aws-lambdas/ncaafb/predict/event_prediction.py \
+     aws-lambdas/ncaafb/predict/season_projection.py aws-lambdas/ncaafb/predict/season_simulation.py \
      ${LAMBDA_TASK_ROOT}/
 
 CMD ["handler.lambda_handler"]

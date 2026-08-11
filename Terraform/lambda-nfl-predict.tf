@@ -1,9 +1,12 @@
-# NFL inference Lambda. Triggered by API Gateway -- see
-# api-gateway-nfl-predict.tf for the routes, methods, and Cognito
-# authorizer wiring. Reads live feature context from DynamoDB and the
-# current promoted model from the model artifacts bucket, computes a
-# prediction on every request, and audits it to the predictions table.
-# See Source/aws-lambdas/nfl/predict/handler.py.
+# NFL inference Lambda. Never triggered by API Gateway directly -- see
+# api-gateway-nfl-predict.tf, which points every GET route (including
+# the two prediction routes) at nfl_predict_read instead; this Lambda
+# only ever runs in the background (an EventBridge Scheduler invoke for
+# the season projection, or a fire-and-forget async invoke from
+# nfl_predict_read on a prediction-cache miss). Reads live feature
+# context from DynamoDB and the current promoted model from the model
+# artifacts bucket, computes a prediction, and audits it to the
+# predictions table. See Source/aws-lambdas/nfl/predict/handler.py.
 #
 # Container image, not the zip packaging ingest/normalize use -- xgboost
 # pulls in numpy and scipy, which alone leave almost no headroom under
@@ -30,7 +33,7 @@ resource "aws_cloudwatch_log_group" "nfl_predict" {
 
 resource "aws_lambda_function" "nfl_predict" {
   function_name = "${var.project}-nfl-predict"
-  description   = "Computes live NFL event-outcome and player-prop predictions on request. Triggered by API Gateway -- see api-gateway-nfl-predict.tf."
+  description   = "Computes NFL event-outcome and player-prop predictions in the background -- never triggered by API Gateway directly (see api-gateway-nfl-predict.tf, which points every GET route at nfl_predict_read instead). Invoked by an EventBridge Scheduler (season projection) or a fire-and-forget async invoke from nfl_predict_read on a prediction-cache miss (see predict/handler.py's own docstring)."
   role          = aws_iam_role.lambda_inference.arn
   package_type  = "Image"
   image_uri     = "${var.ecr_repo_url}:nfl-predict-latest"
@@ -42,13 +45,13 @@ resource "aws_lambda_function" "nfl_predict" {
   # setting and the pushed image's own platform fails at invoke time, not
   # at `terraform apply`.
   architectures = ["arm64"]
-  # API Gateway's own REST API integration timeout is a hard,
-  # non-configurable 29s ceiling for the API-Gateway-triggered routes, so
-  # this can't help or hurt those. Set to 120s for the
-  # ScheduledSeasonProjection path (scheduler-nfl-season-projection.tf),
-  # which is invoked directly by EventBridge Scheduler, bypasses API
-  # Gateway entirely, and needs more than 29s to compute.
-  timeout = 120
+  # No API Gateway ceiling to respect anymore -- this Lambda is never on
+  # that request path (see the description above), so its own timeout is
+  # the only limit that matters. 5 minutes covers a slow season
+  # projection (season_projection.py's _leaderboards, already known to
+  # run 26-29s, plus real headroom) or a slow prediction-cache compute
+  # with room to spare.
+  timeout = 300
   # Lambda CPU scales with memory (roughly linear up to ~1,769MB = 1
   # vCPU) -- sized for import/init CPU (xgboost/scikit-learn/pandas), not
   # runtime memory need, which stays well under 512MB even on the
