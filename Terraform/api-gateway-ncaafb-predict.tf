@@ -145,7 +145,12 @@ resource "aws_api_gateway_integration" "ncaafb_predict_event" {
   http_method             = aws_api_gateway_method.ncaafb_predict_event.http_method
   type                    = "AWS_PROXY"
   integration_http_method = "POST"
-  uri                     = aws_lambda_function.ncaafb_predict.invoke_arn
+  # ncaafb_predict_read, NOT ncaafb_predict -- this route is now a read-
+  # through prediction cache (library.storage.prediction_cache), with the
+  # actual computation happening asynchronously in ncaafb_predict, fired
+  # by predict-read/handler.py itself rather than through API Gateway at
+  # all. See that Lambda's own docstring.
+  uri = aws_lambda_function.ncaafb_predict_read.invoke_arn
 }
 
 # --- GET /ncaafb/predictions/events/{event_id}/players/{entity_id} -------------
@@ -170,7 +175,9 @@ resource "aws_api_gateway_integration" "ncaafb_predict_player" {
   http_method             = aws_api_gateway_method.ncaafb_predict_player.http_method
   type                    = "AWS_PROXY"
   integration_http_method = "POST"
-  uri                     = aws_lambda_function.ncaafb_predict.invoke_arn
+  # ncaafb_predict_read, NOT ncaafb_predict -- see ncaafb_predict_event's
+  # own comment above.
+  uri = aws_lambda_function.ncaafb_predict_read.invoke_arn
 }
 
 # --- CORS preflight (OPTIONS) -------------------------------------------

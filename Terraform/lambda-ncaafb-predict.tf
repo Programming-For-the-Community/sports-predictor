@@ -1,8 +1,9 @@
 # NCAAFB inference Lambda -- mirrors lambda-nfl-predict.tf exactly. No
 # CFBD calls of its own: reads feature context already ingested into
 # DynamoDB and the current promoted model from the model artifacts bucket,
-# same as NFL. See Source/aws-lambdas/ncaafb/predict/handler.py, which also
-# adds the ranking-prediction route NFL has no equivalent of.
+# same as NFL. See Source/aws-lambdas/ncaafb/predict/handler.py, which
+# also runs the season-long national-ranking simulation NFL has no
+# equivalent of (season_projection.py/season_simulation.py).
 #
 # Container image (xgboost dependency footprint, same rationale as
 # lambda-nfl-predict.tf). Built/pushed by the ncaafb_ai_hosting workflow.
@@ -20,15 +21,18 @@ resource "aws_cloudwatch_log_group" "ncaafb_predict" {
 
 resource "aws_lambda_function" "ncaafb_predict" {
   function_name = "${var.project}-ncaafb-predict"
-  description   = "Computes live NCAAFB event-outcome, player-prop, and national-ranking predictions on request. Triggered by API Gateway -- see api-gateway-ncaafb-predict.tf."
+  description   = "Computes NCAAFB event-outcome, player-prop, and national-ranking predictions in the background -- never triggered by API Gateway directly (see api-gateway-ncaafb-predict.tf, which points every GET route at ncaafb_predict_read instead). Invoked by an EventBridge Scheduler (season projection) or a fire-and-forget async invoke from ncaafb_predict_read on a prediction-cache miss (see predict/handler.py's own docstring)."
   role          = aws_iam_role.lambda_inference.arn
   package_type  = "Image"
   image_uri     = "${var.ecr_repo_url}:ncaafb-predict-latest"
   architectures = ["arm64"]
-  # Same 120s ceiling as lambda-nfl-predict.tf's ScheduledSeasonProjection
-  # path -- API Gateway's own 29s integration ceiling still applies to the
-  # API-Gateway-triggered routes regardless of this setting.
-  timeout     = 120
+  # No API Gateway ceiling to respect anymore -- this Lambda is never on
+  # that request path (see the description above), so its own timeout is
+  # the only limit that matters. 5 minutes covers a slow season
+  # simulation (season_projection.py's Monte Carlo loop, scored against
+  # the real national-ranking model every iteration -- see
+  # season_simulation.py's own docstring) with real headroom.
+  timeout     = 300
   memory_size = 3008
 
   environment {

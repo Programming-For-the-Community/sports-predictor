@@ -253,7 +253,7 @@ class TestBuildLiveEventLeaders:
         storage.get_event.return_value = event
         storage.get_all_events.return_value = []
 
-        def _team_events(sport, team_id, before_date=None, limit=None):
+        def _team_events(sport, team_id, before_date=None, limit=None, events=None):
             return [past_game] if team_id == "61" else []
 
         storage.get_team_events.side_effect = _team_events

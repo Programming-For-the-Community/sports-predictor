@@ -18,6 +18,7 @@ import model_loader
 from library.schema.keys import entity_key as build_entity_key
 from library.schema.keys import event_key as build_event_key
 from library.serving.nfl_reads import SCORE_MODELS, WIN_PROBABILITY_MODEL
+from library.storage import prediction_cache
 
 logger = logging.getLogger("nfl-predict")
 
@@ -159,14 +160,17 @@ def _record_leader_predictions(
     return result
 
 
-def predict_event_leaders(storage, s3, predictions_table, event_key_value: str) -> dict | None:
+def predict_event_leaders(storage, s3, predictions_table, event_key_value: str, events: list[dict] | None = None) -> dict | None:
     """The `leaders` block -- passing/receiving/rushing/sacks leaders per
     team. Best-effort: any failure here is logged and swallowed rather
     than propagated, since the core win/margin/score predictions in
     predict_event already succeeded by the time this runs and shouldn't
-    be thrown away over a problem in this purely additive field."""
+    be thrown away over a problem in this purely additive field. `events`
+    is predict_event's own already-fetched get_all_events result, passed
+    through so this doesn't pay for a second one -- see live_features.
+    build_live_event_leader_candidates' own docstring."""
     try:
-        candidates = live_features.build_live_event_leader_candidates(storage, SPORT, event_key_value)
+        candidates = live_features.build_live_event_leader_candidates(storage, SPORT, event_key_value, events=events)
     except Exception:
         logger.exception("Failed to build leader candidates for %s", event_key_value)
         return None
@@ -206,7 +210,13 @@ def predict_event_leaders(storage, s3, predictions_table, event_key_value: str) 
 
 def predict_event(storage, s3, predictions_table, event_id: str) -> dict:
     event_key_value = build_event_key(SPORT, event_id)
-    feature_row = live_features.build_live_event_features(storage, SPORT, event_key_value)
+    # Fetched ONCE and threaded through both build_live_event_features and
+    # predict_event_leaders below -- see live_features.py's own docstring
+    # for why a naive per-call fetch (the pre-existing behavior omitted
+    # `events` still falls back to) makes this route pay for 8 full-
+    # history queries instead of 1.
+    events = storage.get_all_events(SPORT)
+    feature_row = live_features.build_live_event_features(storage, SPORT, event_key_value, events=events)
 
     booster, model_card = model_loader.load_current_model(s3, SPORT, WIN_PROBABILITY_MODEL)
     home_win_probability = model_loader.predict(booster, model_card, feature_row)
@@ -234,7 +244,7 @@ def predict_event(storage, s3, predictions_table, event_id: str) -> dict:
     return {
         "event_key": event_key_value,
         "predictions": predictions,
-        "leaders": predict_event_leaders(storage, s3, predictions_table, event_key_value),
+        "leaders": predict_event_leaders(storage, s3, predictions_table, event_key_value, events=events),
         "generated_at": datetime.now(timezone.utc).isoformat(),
     }
 
@@ -260,3 +270,57 @@ def predict_player_prop(storage, s3, predictions_table, event_id: str, entity_id
         "prediction": {"value": value, "model_version": model_card["version"]},
         "generated_at": datetime.now(timezone.utc).isoformat(),
     }
+
+
+def compute_and_cache_event(storage, s3, predictions_table, event_id: str) -> None:
+    """Background worker for a cache miss/stale-refresh on GET /nfl/
+    predictions/events/{event_id} -- triggered asynchronously by predict-
+    read/handler.py (never by API Gateway directly, so this isn't bound
+    by its 29s ceiling; only this Lambda's own 300s timeout applies).
+    Computes predict_event's own result (same function, same audit-trail
+    writes) and additionally writes it to the S3 prediction cache
+    (library.storage.prediction_cache) so the next request can be served
+    instantly instead of triggering another compute.
+
+    A failure with one of prediction_cache.ERROR_STATUS_CODES' recognized,
+    possibly-transient errors (event_id not ingested yet, no model
+    promoted yet) gets a short-lived negative cache entry instead of
+    leaving the request stuck at "computing" forever -- see
+    prediction_cache.put_error_cached's own docstring. Any OTHER
+    exception is deliberately not caught here -- it propagates after the
+    in-progress claim is still cleared (see the finally below), shows up
+    as a real Lambda error, same "let it show up, don't silently reshape
+    it" reasoning season_projection.run_scheduled's own docstring gives."""
+    event_key_value = build_event_key(SPORT, event_id)
+    cache_key = prediction_cache.event_prediction_cache_key(SPORT, event_key_value)
+    try:
+        try:
+            result = predict_event(storage, s3, predictions_table, event_id)
+        except (live_features.EventNotFoundError, live_features.MalformedEventError, model_loader.NoPromotedModelError) as exc:
+            prediction_cache.put_error_cached(s3, cache_key, type(exc).__name__, str(exc))
+            return
+        event = storage.get_event(event_key_value)
+        model_versions = {key: result["predictions"][key]["model_version"] for key in prediction_cache.CORE_EVENT_MODELS}
+        prediction_cache.put_cached(s3, cache_key, result, model_versions, (event or {}).get("status"))
+    finally:
+        prediction_cache.clear_in_progress(s3, cache_key)
+
+
+def compute_and_cache_player_prop(storage, s3, predictions_table, event_id: str, entity_id: str, target_stat: str) -> None:
+    """Background worker for a cache miss/stale-refresh on GET /nfl/
+    predictions/events/{event_id}/players/{entity_id}?stat=... -- same
+    role, and same recognized-error-vs-real-bug handling, as
+    compute_and_cache_event."""
+    event_key_value = build_event_key(SPORT, event_id)
+    cache_key = prediction_cache.player_prop_cache_key(SPORT, event_key_value, entity_id, target_stat)
+    try:
+        try:
+            result = predict_player_prop(storage, s3, predictions_table, event_id, entity_id, target_stat)
+        except (live_features.EventNotFoundError, live_features.MalformedEventError, model_loader.NoPromotedModelError) as exc:
+            prediction_cache.put_error_cached(s3, cache_key, type(exc).__name__, str(exc))
+            return
+        event = storage.get_event(event_key_value)
+        model_version = result["prediction"]["model_version"]
+        prediction_cache.put_cached(s3, cache_key, result, model_version, (event or {}).get("status"))
+    finally:
+        prediction_cache.clear_in_progress(s3, cache_key)

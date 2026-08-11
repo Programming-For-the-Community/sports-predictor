@@ -19,6 +19,20 @@ completed-events history on every call rather than caching a "current
 rating" snapshot -- NFL's ~2,700 completed games is the same cost
 build_dataset.py already treats as cheap-enough-to-scan, and this project
 has no request volume that would make that recomputation a real cost.
+
+PERFORMANCE: a single "predict one event" request calls build_live_event_
+features AND (for the leaders block) build_live_event_leader_candidates,
+and left un-threaded each one separately re-fetches the sport's ENTIRE
+event history via get_team_events/_live_elo_ratings/compute_elo_ratings
+(get_team_events' own docstring, library/storage/feature_storage.py,
+explains why each un-threaded call re-queries from scratch) -- 8 full-
+history queries total for one request (5 in build_live_event_features, 3
+in build_live_event_leader_candidates). Every function here takes an
+optional `events` (an already-fetched get_all_events(sport) result) and
+threads it through instead -- event_prediction.predict_event fetches it
+ONCE and passes the same list to both entry points, turning 8 queries
+into 1. Omitted (None), each function still falls back to fetching its
+own, so this is purely an opt-in perf path, not a behavior change.
 """
 from datetime import date
 
@@ -59,6 +73,7 @@ def _home_away_ids(event: dict) -> tuple[str, str]:
 
 def _live_elo_ratings(
     storage, sport: str, event: dict, home_id: str, away_id: str, current_ratings: dict | None = None,
+    events: list[dict] | None = None,
 ) -> dict:
     """A minimal elo_ratings dict containing just this one (not-yet-played)
     event's key, mapped to each team's CURRENT rating -- the second
@@ -75,9 +90,12 @@ def _live_elo_ratings(
     per-call full-history recompute -- see this module's docstring for why
     that recompute is normally cheap enough not to matter, and why a
     hundreds-of-candidates loop is exactly the condition that stops being
-    true."""
+    true. `events` is the same already-fetched-history pass-through
+    build_live_event_features/build_live_event_leader_candidates take --
+    used only when current_ratings itself isn't already given, to avoid
+    yet another full get_all_events call on top of it."""
     if current_ratings is None:
-        completed_events = storage.get_all_events(sport)
+        completed_events = events if events is not None else storage.get_all_events(sport)
         _, current_ratings = compute_elo_ratings(completed_events, as_of_season=event.get("season"))
     return {
         event["event_key"]: {
@@ -333,20 +351,29 @@ def _presumptive_leader_and_history(
     return _leader_history(storage, eligible_ids, _LEADER_VOLUME_STAT[position_abbreviation], before_date, window)
 
 
-def build_live_event_features(storage, sport: str, event_key: str, window: int = DEFAULT_ROLLING_WINDOW) -> dict:
+def build_live_event_features(
+    storage, sport: str, event_key: str, window: int = DEFAULT_ROLLING_WINDOW,
+    events: list[dict] | None = None,
+) -> dict:
     """One event-level feature row for event_key, in the exact shape
     train_win_probability_model.py/train_score_model.py were trained on (label_* fields
     will be None/absent for an unplayed game -- callers only read the
-    feature columns off the result, never the labels)."""
+    feature columns off the result, never the labels).
+
+    `events` is this module's own already-fetched-history pass-through --
+    see this module's own docstring. team_game_stats gets the identical
+    one-fetch-per-request treatment locally, for its own 2 calls."""
     event = storage.get_event(event_key)
     if event is None:
         raise EventNotFoundError(f"No event found for {event_key}")
     home_id, away_id = _home_away_ids(event)
+    events = events if events is not None else storage.get_all_events(sport)
+    team_game_stats = storage.get_all_team_game_stats(sport)
 
-    home_events = storage.get_team_events(sport, home_id, before_date=event["event_date"], limit=window)
-    away_events = storage.get_team_events(sport, away_id, before_date=event["event_date"], limit=window)
-    home_box = storage.get_team_game_stats_for_team(sport, home_id, before_date=event["event_date"], limit=window)
-    away_box = storage.get_team_game_stats_for_team(sport, away_id, before_date=event["event_date"], limit=window)
+    home_events = storage.get_team_events(sport, home_id, before_date=event["event_date"], limit=window, events=events)
+    away_events = storage.get_team_events(sport, away_id, before_date=event["event_date"], limit=window, events=events)
+    home_box = storage.get_team_game_stats_for_team(sport, home_id, before_date=event["event_date"], limit=window, team_game_stats=team_game_stats)
+    away_box = storage.get_team_game_stats_for_team(sport, away_id, before_date=event["event_date"], limit=window, team_game_stats=team_game_stats)
 
     # Depth chart/injuries are the event's own ingest-time snapshot (see
     # library/normalize/espn.py) -- absent for any event ingested before
@@ -368,7 +395,7 @@ def build_live_event_features(storage, sport: str, event_key: str, window: int =
 
     return build_event_features(
         event,
-        _live_elo_ratings(storage, sport, event, home_id, away_id),
+        _live_elo_ratings(storage, sport, event, home_id, away_id, events=events),
         home_events,
         away_events,
         window,
@@ -399,6 +426,7 @@ def _build_player_feature_row(
     storage, sport: str, event: dict, home_id: str, away_id: str, entity_id: str, team_id: str,
     prior_games: list[dict], window: int,
     current_ratings: dict | None = None, team_last_event_dates: dict[str, str] | None = None,
+    events: list[dict] | None = None,
 ) -> dict:
     """Shared by build_live_player_features (one specific requested
     player) and build_live_event_leader_candidates (every candidate
@@ -412,11 +440,13 @@ def _build_player_feature_row(
     worth of "last completed game date" once from the same completed-events
     fetch _season_standings_inputs already does) -- when given, this skips
     its own storage.get_team_events call, the other per-candidate query
-    this function would otherwise repeat once per player per stat."""
+    this function would otherwise repeat once per player per stat.
+    `events` is this module's own already-fetched-history pass-through --
+    see this module's own docstring."""
     if team_last_event_dates is not None:
         own_previous_event_date = team_last_event_dates.get(team_id)
     else:
-        own_previous_events = storage.get_team_events(sport, team_id, before_date=event["event_date"], limit=1)
+        own_previous_events = storage.get_team_events(sport, team_id, before_date=event["event_date"], limit=1, events=events)
         own_previous_event_date = own_previous_events[0]["event_date"] if own_previous_events else None
 
     player_game = {
@@ -432,7 +462,7 @@ def _build_player_feature_row(
         player_game,
         prior_games,
         event,
-        _live_elo_ratings(storage, sport, event, home_id, away_id, current_ratings),
+        _live_elo_ratings(storage, sport, event, home_id, away_id, current_ratings, events),
         own_previous_event_date,
         window,
     )
@@ -441,6 +471,7 @@ def _build_player_feature_row(
 def build_live_player_features(
     storage, sport: str, event_key: str, entity_id: str, window: int = DEFAULT_ROLLING_WINDOW,
     current_ratings: dict | None = None, team_last_event_dates: dict[str, str] | None = None,
+    events: list[dict] | None = None,
 ) -> dict:
     """One player-prop feature row for entity_id's performance in
     event_key, in the exact shape train_player_prop_model.py was trained
@@ -449,10 +480,11 @@ def build_live_player_features(
     their own last game log, since a just-traded player's most recent
     game log would still show their old team.
 
-    current_ratings/team_last_event_dates: see _build_player_feature_row --
-    optional pass-throughs for a caller (handler.py's season leaderboards)
-    that's calling this in a loop over many players and has already paid
-    for the full-history data these would otherwise each re-fetch."""
+    current_ratings/team_last_event_dates/events: see _build_player_
+    feature_row -- optional pass-throughs for a caller (handler.py's
+    season leaderboards) that's calling this in a loop over many players
+    and has already paid for the full-history data these would otherwise
+    each re-fetch."""
     event = storage.get_event(event_key)
     if event is None:
         raise EventNotFoundError(f"No event found for {event_key}")
@@ -466,12 +498,13 @@ def build_live_player_features(
     prior_games = storage.get_player_game_stats(entity_id, before_date=event["event_date"], limit=window)
     return _build_player_feature_row(
         storage, sport, event, home_id, away_id, entity_id, team_id, prior_games, window,
-        current_ratings, team_last_event_dates,
+        current_ratings, team_last_event_dates, events,
     )
 
 
 def build_live_event_leader_candidates(
     storage, sport: str, event_key: str, window: int = DEFAULT_ROLLING_WINDOW,
+    events: list[dict] | None = None,
 ) -> dict:
     """One feature row per candidate likely to lead each team in
     passing/receiving/rushing/sacks for event_key, grouped
@@ -488,22 +521,28 @@ def build_live_event_leader_candidates(
     pass-rushers, per team) -- without this, each candidate's own
     _build_player_feature_row call would separately pay _live_elo_ratings'
     full-history recompute (see that function's docstring for why a loop
-    like this is exactly the condition that stops being cheap)."""
+    like this is exactly the condition that stops being cheap). `events`
+    is this module's own already-fetched-history pass-through --
+    event_prediction.predict_event fetches it once and passes the same
+    list here and to build_live_event_features, so a single "predict one
+    event" request pays for exactly one get_all_events call between the
+    two of them, not one each."""
     event = storage.get_event(event_key)
     if event is None:
         raise EventNotFoundError(f"No event found for {event_key}")
     home_id, away_id = _home_away_ids(event)
 
-    _, current_ratings = compute_elo_ratings(storage.get_all_events(sport), as_of_season=event.get("season"))
+    events = events if events is not None else storage.get_all_events(sport)
+    _, current_ratings = compute_elo_ratings(events, as_of_season=event.get("season"))
 
     return {
         "home": _team_leader_candidates(
             storage, sport, event, home_id, away_id, home_id, window, current_ratings,
-            event.get("home_depth_chart"), event.get("home_injuries"),
+            event.get("home_depth_chart"), event.get("home_injuries"), events=events,
         ),
         "away": _team_leader_candidates(
             storage, sport, event, home_id, away_id, away_id, window, current_ratings,
-            event.get("away_depth_chart"), event.get("away_injuries"),
+            event.get("away_depth_chart"), event.get("away_injuries"), events=events,
         ),
     }
 
@@ -527,9 +566,10 @@ def _top_n_by_recent_volume(
 def _team_leader_candidates(
     storage, sport: str, event: dict, home_id: str, away_id: str, team_id: str, window: int,
     current_ratings: dict | None = None, depth_chart: dict | None = None, injuries: list[dict] | None = None,
+    events: list[dict] | None = None,
 ) -> dict:
     before_date = event["event_date"]
-    last_events = storage.get_team_events(sport, team_id, before_date=before_date, limit=1)
+    last_events = storage.get_team_events(sport, team_id, before_date=before_date, limit=1, events=events)
     # This team's own previous-game date, when known -- reusing it here
     # (instead of letting each candidate's own _build_player_feature_row
     # call separately re-derive it via its own storage.get_team_events
@@ -545,7 +585,7 @@ def _team_leader_candidates(
         return [
             _build_player_feature_row(
                 storage, sport, event, home_id, away_id, entity_id, team_id, prior_games, window,
-                current_ratings, team_last_event_dates,
+                current_ratings, team_last_event_dates, events,
             )
             for entity_id, prior_games in histories.items()
         ]

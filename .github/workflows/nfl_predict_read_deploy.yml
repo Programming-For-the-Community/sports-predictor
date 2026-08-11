@@ -41,7 +41,7 @@ jobs:
     name: Run nfl-predict-read tests
     uses: ./.github/workflows/run_python_tests.yml
     with:
-      test_path: 'Source/tests/aws-lambdas/nfl/test_predict_read.py Source/tests/library/serving/'
+      test_path: 'Source/tests/aws-lambdas/nfl/test_predict_read.py Source/tests/library/serving/ Source/tests/library/storage/test_prediction_cache.py Source/tests/library/storage/test_model_artifacts.py Source/tests/library/aws/test_lambda_invoker.py'
       requirements_files: 'Source/aws-lambdas/nfl/predict-read/requirements.txt'
 
   deploy:

@@ -27,7 +27,7 @@ jobs:
     name: Run ncaafb-predict-read tests
     uses: ./.github/workflows/run_python_tests.yml
     with:
-      test_path: 'Source/tests/aws-lambdas/ncaafb/test_predict_read_handler.py Source/tests/library/serving/test_ncaafb_reads.py'
+      test_path: 'Source/tests/aws-lambdas/ncaafb/test_predict_read_handler.py Source/tests/library/serving/test_ncaafb_reads.py Source/tests/library/storage/test_prediction_cache.py Source/tests/library/storage/test_model_artifacts.py Source/tests/library/aws/test_lambda_invoker.py'
       requirements_files: 'Source/aws-lambdas/ncaafb/predict-read/requirements.txt'
 
   deploy:

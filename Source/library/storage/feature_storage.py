@@ -66,23 +66,38 @@ class FeatureStorage:
         )
 
     def get_team_events(
-        self, sport: str, entity_id: str, before_date: str | None = None, limit: int | None = None
+        self, sport: str, entity_id: str, before_date: str | None = None, limit: int | None = None,
+        events: list[dict] | None = None,
     ) -> list[dict]:
         """A team's completed games, most recent first. No GSI on `events`
         for entity_id yet -- design/DATA_SCHEMA.md defers that until it's
         actually painful, and NFL's ~2,720 total games is cheap enough to
         scan and filter in Python instead.
 
-        Intended for one-team-at-a-time lookups (e.g. a future inference
-        Lambda building a live feature vector for one upcoming matchup).
-        Batch feature engineering over the whole history should call
-        get_all_events() once instead -- calling this per team would scan
-        the table once per team rather than once total.
+        Intended for one-team-at-a-time lookups (e.g. a live inference
+        Lambda building a feature vector for one upcoming matchup). A
+        SINGLE such request can easily call this many times over (once per
+        team per rolling window, once per presumptive-leader candidate
+        search, ...) -- pass an already-fetched get_all_events(sport)
+        result as `events` to filter it in memory instead of re-querying
+        the whole sport's history again on every call. This is exactly
+        the redundant-requery pattern that made NCAAFB's live predict
+        route slow (10 full-history queries in one request, see
+        Source/aws-lambdas/ncaafb/predict/live_features.py's own
+        docstring) -- omitted (None), this still re-fetches every time,
+        so a caller that doesn't thread `events` through just gets the
+        old (correct, just slower) behavior.
+
+        Batch feature engineering over the whole history should still
+        call get_all_events() once and iterate in Python directly,
+        rather than calling this per team at all -- see this docstring's
+        own history for why (each call, even with `events` given, still
+        does an O(n) scan of the full list).
         """
-        events = self.get_all_events(sport)
+        all_events = events if events is not None else self.get_all_events(sport)
         team_events = [
             event
-            for event in events
+            for event in all_events
             if any(p.get("entity_id") == entity_id for p in event.get("participants", []))
             and (before_date is None or event.get("event_date", "") < before_date)
         ]
@@ -130,14 +145,18 @@ class FeatureStorage:
         return self._team_game_stats_table.query(Key("sport").eq(sport), index_name="sport-index")
 
     def get_team_game_stats_for_team(
-        self, sport: str, entity_id: str, before_date: str | None = None, limit: int | None = None
+        self, sport: str, entity_id: str, before_date: str | None = None, limit: int | None = None,
+        team_game_stats: list[dict] | None = None,
     ) -> list[dict]:
         """A team's own completed team_game_stats rows, most recent first.
         Same one-team-at-a-time lookup shape as get_team_events -- no
         dedicated per-team GSI, so this filters get_all_team_game_stats'
         sport-scoped result down to one team in Python, same as
-        get_team_events does against get_all_events."""
-        rows = self.get_all_team_game_stats(sport)
+        get_team_events does against get_all_events. `team_game_stats`
+        is the same optional already-fetched-result pass-through
+        get_team_events' own `events` parameter is, for the same reason
+        -- see that parameter's own docstring."""
+        rows = team_game_stats if team_game_stats is not None else self.get_all_team_game_stats(sport)
         team_rows = [
             row
             for row in rows

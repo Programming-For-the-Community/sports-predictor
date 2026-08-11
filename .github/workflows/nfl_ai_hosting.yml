@@ -60,6 +60,7 @@ jobs:
         Source/tests/aws-lambdas/nfl/test_predict_event_outcome.py
         Source/tests/aws-lambdas/nfl/test_predict_player_props.py
         Source/tests/aws-lambdas/nfl/test_predict_routing.py
+        Source/tests/aws-lambdas/nfl/test_predict_compute_and_cache.py
         Source/tests/aws-lambdas/nfl/test_predict_leaders.py
         Source/tests/aws-lambdas/nfl/test_predict_receiving_props.py
         Source/tests/aws-lambdas/nfl/test_predict_rushing_props.py
