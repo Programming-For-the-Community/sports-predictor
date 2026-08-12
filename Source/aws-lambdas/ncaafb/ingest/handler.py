@@ -192,6 +192,12 @@ def _fetch_roster_if_stale(client: CFBDClient, season: int, teams: list[dict]) -
 
 
 def lambda_handler(event: dict, context) -> dict:
+    # TEMPORARY -- build-verification markers, remove once the roster
+    # write investigation is resolved. Confirms this exact deployed
+    # package is actually the one executing (a console Code-tab view can
+    # otherwise look current while stale code still runs).
+    logger.info("DEBUG-MARKER-BUILD-CHECK-2026-08-12 lambda_handler entered")
+
     season = event.get("season")
     week = event.get("week")
     season_type = event.get("season_type")
@@ -218,11 +224,13 @@ def lambda_handler(event: dict, context) -> dict:
         logger.exception("Failed fetching season coaches for %s", resolved_season)
         coaches_cached = False
 
+    logger.info("DEBUG-MARKER-BUILD-CHECK-2026-08-12 about to call _fetch_roster_if_stale for season %s", resolved_season)
     try:
         roster_fetched = _fetch_roster_if_stale(client, resolved_season, season_teams)
     except Exception:
         logger.exception("Failed fetching roster for %s", resolved_season)
         roster_fetched = False
+    logger.info("DEBUG-MARKER-BUILD-CHECK-2026-08-12 _fetch_roster_if_stale returned %s", roster_fetched)
 
     if season is None or week is None or season_type is None:
         resolved = _resolve_current_week(client, resolved_season)
