@@ -92,8 +92,8 @@ def lambda_handler(event: dict, context) -> dict:
                 # One week's transient CFBD failure doesn't block the
                 # rest of the season's weeks from syncing -- next week's
                 # scheduled run retries it anyway.
-                logger.exception("Failed syncing season %d type %s week %d", season, season_type, week)
+                logger.exception("Failed syncing season %s type %s week %d", season, season_type, week)
                 failed += 1
 
-    logger.info("Schedule sync for season %d complete: %d synced, %d failed", season, synced, failed)
+    logger.info("Schedule sync for season %s complete: %d synced, %d failed", season, synced, failed)
     return {"season": season, "synced": synced, "failed": failed}

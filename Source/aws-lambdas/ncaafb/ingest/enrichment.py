@@ -41,24 +41,24 @@ def enrich_games(games: list[dict], season: int, week: int, client: CFBDClient, 
     try:
         attach_venue_indoor(games, season, client, s3, bucket)
     except Exception:
-        logger.exception("Failed fetching season teams for %d -- venue_indoor will be omitted", season)
+        logger.exception("Failed fetching season teams for %s -- venue_indoor will be omitted", season)
 
     try:
         by_id = teams_by_id(get_cached_teams(s3, bucket, client, season))
     except Exception:
-        logger.exception("Failed fetching season teams for %d -- coach/rank fields will be omitted", season)
+        logger.exception("Failed fetching season teams for %s -- coach/rank fields will be omitted", season)
         by_id = {}
 
     try:
         coach_by_school = coach_lookup_by_school(get_cached_coaches(s3, bucket, client, season), season)
     except Exception:
-        logger.exception("Failed fetching season coaches for %d -- coach fields will be omitted", season)
+        logger.exception("Failed fetching season coaches for %s -- coach fields will be omitted", season)
         coach_by_school = {}
 
     try:
         rank_by_school = rank_lookup_by_school(client.get_rankings(season, week=week))
     except Exception:
-        logger.exception("Failed fetching rankings for season %d week %d -- rank fields will be omitted", season, week)
+        logger.exception("Failed fetching rankings for season %s week %s -- rank fields will be omitted", season, week)
         rank_by_school = {}
 
     for game in games:

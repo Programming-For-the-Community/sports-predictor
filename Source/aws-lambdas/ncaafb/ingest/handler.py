@@ -177,12 +177,17 @@ def _fetch_roster_if_stale(client: CFBDClient, season: int, teams: list[dict]) -
     caller (already fetched unconditionally each run) rather than
     re-fetched here -- see _annotate_roster."""
     if not _roster_needs_refresh(season):
+        logger.info(
+            "Roster for season %s was already fetched within the last %d days -- skipping (delete %s to force a refresh)",
+            season, ROSTER_CACHE_TTL_DAYS, _roster_marker_key(season),
+        )
         return False
     roster = client.get_roster(season)
     _annotate_roster(roster, teams)
     now = datetime.now(timezone.utc).isoformat()
     _put_json(f"ncaafb/roster/{season}.json", {"fetched_at": now, "data": roster})
     _put_json(_roster_marker_key(season), {"fetched_at": now})
+    logger.info("Fetched %d roster rows for season %s -> ncaafb/roster/%s.json", len(roster), season, season)
     return True
 
 
@@ -203,36 +208,36 @@ def lambda_handler(event: dict, context) -> dict:
         season_teams = get_cached_teams(_s3, RAW_BUCKET, client, resolved_season)
         teams_cached = True
     except Exception:
-        logger.exception("Failed fetching season teams for %d", resolved_season)
+        logger.exception("Failed fetching season teams for %s", resolved_season)
         season_teams, teams_cached = [], False
 
     try:
         enrichment.get_cached_coaches(_s3, RAW_BUCKET, client, resolved_season)
         coaches_cached = True
     except Exception:
-        logger.exception("Failed fetching season coaches for %d", resolved_season)
+        logger.exception("Failed fetching season coaches for %s", resolved_season)
         coaches_cached = False
 
     try:
         roster_fetched = _fetch_roster_if_stale(client, resolved_season, season_teams)
     except Exception:
-        logger.exception("Failed fetching roster for %d", resolved_season)
+        logger.exception("Failed fetching roster for %s", resolved_season)
         roster_fetched = False
 
     if season is None or week is None or season_type is None:
         resolved = _resolve_current_week(client, resolved_season)
         if resolved is None:
-            logger.info("No week has started yet for season %d -- nothing to ingest", resolved_season)
+            logger.info("No week has started yet for season %s -- nothing to ingest", resolved_season)
             return {
                 "processed": 0, "failed": 0,
                 "teams_cached": teams_cached, "coaches_cached": coaches_cached, "roster_fetched": roster_fetched,
             }
         season_type, week = resolved
         season = resolved_season
-        logger.info("Auto-detected season %d type %s week %d", season, season_type, week)
+        logger.info("Auto-detected season %s type %s week %s", season, season_type, week)
 
     games = client.get_games(season, week=week, season_type=season_type)
-    logger.info("Found %d games in season %d type %s week %d", len(games), season, season_type, week)
+    logger.info("Found %d games in season %s type %s week %s", len(games), season, season_type, week)
 
     enrichment.enrich_games(games, season, week, client, _s3, RAW_BUCKET)
     _put_json(f"ncaafb/games/{season}/{season_type}/{week}.json", games)
@@ -242,7 +247,7 @@ def lambda_handler(event: dict, context) -> dict:
     processed = failed = 0
     completed_games = [g for g in games if g.get("completed")]
     if not completed_games:
-        logger.info("No completed games yet in season %d type %s week %d -- box scores not fetched", season, season_type, week)
+        logger.info("No completed games yet in season %s type %s week %s -- box scores not fetched", season, season_type, week)
     else:
         # Bulk per-week calls, always re-fetched (no per-game idempotency
         # skip like NFL's own ingest) -- CFBD's box score endpoints cost
@@ -257,7 +262,7 @@ def lambda_handler(event: dict, context) -> dict:
             _put_json(f"ncaafb/boxscore/{season}/{season_type}/{week}.json", player_box_scores)
             processed += 1
         except Exception:
-            logger.exception("Failed fetching player box scores for season %d type %s week %d", season, season_type, week)
+            logger.exception("Failed fetching player box scores for season %s type %s week %s", season, season_type, week)
             failed += 1
 
         try:
@@ -266,7 +271,7 @@ def lambda_handler(event: dict, context) -> dict:
             _put_json(f"ncaafb/teamstats/{season}/{season_type}/{week}.json", team_box_scores)
             processed += 1
         except Exception:
-            logger.exception("Failed fetching team box scores for season %d type %s week %d", season, season_type, week)
+            logger.exception("Failed fetching team box scores for season %s type %s week %s", season, season_type, week)
             failed += 1
 
     logger.info("Done: %d processed, %d failed", processed, failed)
