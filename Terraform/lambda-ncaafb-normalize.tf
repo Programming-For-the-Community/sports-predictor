@@ -35,8 +35,14 @@ resource "aws_lambda_function" "ncaafb_normalize" {
   role          = aws_iam_role.lambda_pipeline.arn
   runtime       = "python3.12"
   handler       = "handler.lambda_handler"
-  timeout       = 60
-  memory_size   = 256
+  # 60s was too short for CFBD's full-season roster write (~16k rows) even
+  # after parallelizing the entity writes (see ncaafb/normalize/handler.py's
+  # WRITE_WORKERS) -- confirmed via CloudWatch: that invocation hit the
+  # full 60s timeout twice in a row (S3's async-invoke retry) with zero
+  # application log output either time. 1024MB bumped alongside it for more
+  # network throughput under WRITE_WORKERS' concurrent connections.
+  timeout     = 300
+  memory_size = 1024
 
   filename         = data.archive_file.ncaafb_normalize_placeholder.output_path
   source_code_hash = data.archive_file.ncaafb_normalize_placeholder.output_base64sha256
