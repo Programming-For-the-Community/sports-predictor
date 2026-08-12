@@ -177,6 +177,9 @@ locals {
     season         = aws_api_gateway_resource.ncaafb_season.id
     predict_event  = aws_api_gateway_resource.ncaafb_predictions_event.id
     predict_player = aws_api_gateway_resource.ncaafb_predictions_event_player.id
+    # live-scores -- resource declared in api-gateway-ncaafb-live-scores.tf,
+    # a third Lambda target.
+    live_scores = aws_api_gateway_resource.ncaafb_live_scores.id
   }
 }
 

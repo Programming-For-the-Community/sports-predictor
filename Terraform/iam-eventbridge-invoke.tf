@@ -40,6 +40,8 @@ data "aws_iam_policy_document" "eventbridge_invoke_permissions" {
   # nfl_schedule_sync (walks all 23 weeks of a season internally),
   # scheduler-nfl-live-scores.tf invokes nfl_live_scores every 60s.
   # ncaafb_predict: scheduler-ncaafb-season-projection.tf's own target.
+  # ncaafb_live_scores: scheduler-ncaafb-live-scores.tf's own target,
+  # same every-60s reasoning as nfl_live_scores.
   statement {
     sid     = "InvokeDirectLambdaJobs"
     actions = ["lambda:InvokeFunction"]
@@ -48,6 +50,7 @@ data "aws_iam_policy_document" "eventbridge_invoke_permissions" {
       aws_lambda_function.nfl_schedule_sync.arn,
       aws_lambda_function.nfl_live_scores.arn,
       aws_lambda_function.ncaafb_predict.arn,
+      aws_lambda_function.ncaafb_live_scores.arn,
     ]
   }
 }

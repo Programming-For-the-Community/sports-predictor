@@ -173,8 +173,13 @@ jobs:
     with:
       function_name: ${{ needs.infra.outputs.ncaafb_predict_read_function_name }}
 
-  # No live-scores job for NCAAFB yet -- see ncaafb_deploy.yml's own
-  # comment (no live-scores feature/workflow exists for this sport yet).
+  ncaafb_live_scores_deploy:
+    name: NCAAFB live-scores (deploy)
+    needs: infra
+    uses: ./.github/workflows/ncaafb_live_scores_deploy.yml
+    secrets: inherit
+    with:
+      function_name: ${{ needs.infra.outputs.ncaafb_live_scores_function_name }}
 
   # No config `with:` block for either -- both read directly from
   # Terraform state instead of relaying it through needs.infra.outputs.*,

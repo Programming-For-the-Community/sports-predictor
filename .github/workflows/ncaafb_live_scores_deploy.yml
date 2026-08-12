@@ -1,0 +1,44 @@
+# Tests and deploys the NCAAFB live-scores Lambda -- GET /ncaafb/live-scores
+# plus the EventBridge-triggered cache refresh. Mirrors
+# nfl_live_scores_deploy.yml exactly -- see that file's own docstring for
+# why this is a separate reusable workflow rather than jobs inlined into
+# ncaafb_deploy.yml/app_deploy.yml directly.
+#
+# Function name is supplied by the caller from a Terraform output, with a
+# default so workflow_dispatch (manual, standalone run) still works
+# without needing that wiring -- same pattern as nfl_live_scores_deploy.yml.
+
+name: NCAAFB Live Scores Deploy
+
+on:
+  workflow_dispatch:
+  workflow_call:
+    inputs:
+      function_name:
+        description: 'NCAAFB live-scores Lambda function name (from Terraform output ncaafb_live_scores_function_name)'
+        required: false
+        type: string
+        default: 'sports-predictor-ncaafb-live-scores'
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  test:
+    name: Run ncaafb-live-scores tests
+    uses: ./.github/workflows/run_python_tests.yml
+    with:
+      test_path: 'Source/tests/aws-lambdas/ncaafb/test_live_scores.py Source/tests/aws-lambdas/ncaafb/test_live_scores_handler.py'
+      requirements_files: 'Source/aws-lambdas/ncaafb/live-scores/requirements.txt'
+
+  deploy:
+    name: Deploy ncaafb-live-scores Lambda
+    needs: test
+    uses: ./.github/workflows/python_lambda_build.yml
+    secrets: inherit
+    with:
+      function_name: ${{ inputs.function_name || 'sports-predictor-ncaafb-live-scores' }}
+      handler_dir: 'Source/aws-lambdas/ncaafb/live-scores'
+      library_path: 'Source/library'
+      extra_source_files: 'Source/aws-lambdas/ncaafb/live-scores/live_scores.py'

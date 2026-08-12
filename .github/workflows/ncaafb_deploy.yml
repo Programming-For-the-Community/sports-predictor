@@ -4,14 +4,11 @@
 # can't be set from this file) before doing anything. Mirrors
 # nfl_deploy.yml's shape and reasoning exactly.
 #
-# Deliberately still trimmed vs. nfl_deploy.yml: backfill, ai_training,
-# the ingest/normalize/schedule-sync data pipeline, ai_hosting, and the
-# predict/predict-read deploy jobs are now real CI workflows -- only
-# live_scores_deploy remains for a later phase (needs: [approval, infra],
-# same shape as predict_read_deploy below -- see nfl_deploy.yml's own
-# version of that job for the exact shape once it lands).
-# tf_install.yml already exposes every ncaafb_*_function_name output
-# these jobs need (added alongside this file).
+# Mirrors nfl_deploy.yml's shape and reasoning exactly: backfill,
+# ai_training, the ingest/normalize/schedule-sync data pipeline,
+# ai_hosting, predict/predict-read, and live-scores are all real CI
+# workflows here. tf_install.yml already exposes every ncaafb_*_function_name
+# output these jobs need (added alongside this file).
 #
 # Both this job's `approval` step AND tf_install.yml's own terraform job
 # gate on the `development`/`production` environment, so a run through
@@ -138,3 +135,17 @@ jobs:
     secrets: inherit
     with:
       function_name: ${{ needs.infra.outputs.ncaafb_predict_read_function_name }}
+
+  # ncaafb-live-scores -- GET /ncaafb/live-scores plus the EventBridge-
+  # triggered cache refresh (Terraform/lambda-ncaafb-live-scores.tf). Same
+  # reusable-workflow reasoning as predict_read_deploy above.
+  live_scores_deploy:
+    name: NCAAFB live-scores (test + deploy)
+    needs: [approval, infra]
+    if: |
+      always() &&
+      (needs.approval.result == 'success' || needs.approval.result == 'skipped')
+    uses: ./.github/workflows/ncaafb_live_scores_deploy.yml
+    secrets: inherit
+    with:
+      function_name: ${{ needs.infra.outputs.ncaafb_live_scores_function_name }}

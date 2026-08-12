@@ -51,6 +51,12 @@ _load_handler("ncaafb_predict", "aws-lambdas/ncaafb/predict/handler.py")
 # sys.path insert needed, just the same unique-module-name registration.
 _load_handler("ncaafb_predict_read", "aws-lambdas/ncaafb/predict-read/handler.py")
 
+# live-scores/'s own live_scores.py has a unique name, unlike handler.py --
+# same pattern as ingest/'s enrichment.py above. See NFL's own
+# aws-lambdas/nfl/conftest.py for the identical pattern.
+sys.path.insert(0, os.path.join(_src, "aws-lambdas", "ncaafb", "live-scores"))
+_load_handler("ncaafb_live_scores", "aws-lambdas/ncaafb/live-scores/handler.py")
+
 
 @pytest.fixture(autouse=True)
 def reset_ncaafb_predict_singletons():
