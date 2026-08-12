@@ -9,9 +9,17 @@ import logging
 from decimal import Decimal
 
 import boto3
+from botocore.config import Config
 from botocore.exceptions import ClientError
 
 logger = logging.getLogger(__name__)
+
+# botocore's own default (10) is sized for serial callers. ncaafb-normalize's
+# _process_boxscore/_process_roster fan out up to WRITE_WORKERS (20)
+# concurrent put_item calls against the entities table -- without this,
+# calls beyond the default pool size would just queue for a free
+# connection, silently giving back most of that parallelism.
+_CONFIG = Config(max_pool_connections=25)
 
 
 def _to_dynamodb_safe(value):
@@ -60,7 +68,7 @@ def _from_dynamodb_safe(value):
 class DynamoDBTable:
     def __init__(self, table_name: str, region: str | None = None):
         self.table_name = table_name
-        self._table = boto3.resource("dynamodb", region_name=region).Table(table_name)
+        self._table = boto3.resource("dynamodb", region_name=region, config=_CONFIG).Table(table_name)
 
     def put_item(self, item: dict, condition_expression=None) -> bool:
         """Writes item, returning True if it was written. condition_expression

@@ -29,6 +29,7 @@ invocation, regardless of which key(s) triggered it -- see that
 function's own docstring for why this lives here rather than in
 ingest/handler.py (which never touches DynamoDB directly).
 """
+import concurrent.futures
 import json
 import logging
 import urllib.parse
@@ -115,18 +116,37 @@ def _preserve_roster_position(storage: PipelineStorage, entity: dict) -> None:
         entity["metadata"]["position"] = existing["metadata"]["position"]
 
 
+# Both player-entity write paths below fan writes out across threads rather
+# than looping serially like every other processor in this file. Each write
+# is one (sometimes two, see _write_boxscore_entity) synchronous DynamoDB
+# round-trip, and at CFBD's real scale that serial cost blows Lambda's own
+# timeout: a single week's box score (1122 entities) measured at 47.97s of
+# the 60s timeout, and the full-season roster (~16k rows) measured at a
+# full 60s timeout TWICE (S3's async-invoke retry) with zero application
+# log output either time, since the "Wrote N..." line only fires after the
+# whole loop finishes. I/O-bound work, so GIL contention isn't a concern.
+WRITE_WORKERS = 20
+
+
+def _write_boxscore_entity(storage: PipelineStorage, entity: dict) -> bool:
+    _preserve_roster_position(storage, entity)
+    return storage.upsert_player_entity(entity)
+
+
 def _process_boxscore(payload: list, key: str) -> None:
     storage = _get_storage()
-    total_stats = total_entities = 0
+    total_stats = 0
+    all_entities: list[dict] = []
     for game_box_score in payload:
         stats_items, player_entities = game_player_stats_to_player_game_stats(game_box_score, SPORT)
-        for entity in player_entities:
-            _preserve_roster_position(storage, entity)
-            storage.upsert_player_entity(entity)
         storage.write_player_game_stats(stats_items)
         total_stats += len(stats_items)
-        total_entities += len(player_entities)
-    logger.info("Wrote %d player stat lines and %d player entities from %s", total_stats, total_entities, key)
+        all_entities.extend(player_entities)
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=WRITE_WORKERS) as pool:
+        list(pool.map(lambda entity: _write_boxscore_entity(storage, entity), all_entities))
+
+    logger.info("Wrote %d player stat lines and %d player entities from %s", total_stats, len(all_entities), key)
 
 
 def _process_roster(payload: dict, key: str) -> None:
@@ -141,7 +161,8 @@ def _process_roster(payload: dict, key: str) -> None:
     storage = _get_storage()
     as_of_date = payload["fetched_at"][:10]
     entities = roster_to_player_entities(payload.get("data", []), SPORT, as_of_date)
-    written = sum(1 for entity in entities if storage.upsert_player_entity(entity))
+    with concurrent.futures.ThreadPoolExecutor(max_workers=WRITE_WORKERS) as pool:
+        written = sum(pool.map(storage.upsert_player_entity, entities))
     rejected = len(entities) - written
     logger.info(
         "Wrote %d player entities (%d rejected by the staleness guard) from %s -- %d candidates from %d raw roster rows",
