@@ -127,10 +127,10 @@ class TestPredictionRoutes:
             )
 
         assert response["statusCode"] == 200
-        assert json.loads(response["body"]) == {"ok": True}
+        assert json.loads(response["body"]) == {"ok": True, "stale": False}
         get_invoker.assert_not_called()
 
-    def test_stale_cache_hit_still_returns_the_cached_result_but_triggers_a_refresh(self):
+    def test_stale_cache_hit_returns_203_with_the_cached_result_and_triggers_a_refresh(self):
         versions = {"win_probability": 1, "margin": 1, "home_score": 1, "away_score": 1}
         state = _model_version_state("ncaafb", versions)
         state[self.CACHE_KEY] = {
@@ -146,8 +146,9 @@ class TestPredictionRoutes:
                 _predict_event(self.EVENT_RESOURCE, {"event_id": self.EVENT_ID}), None,
             )
 
-        assert response["statusCode"] == 200
-        assert json.loads(response["body"]) == {"ok": "stale"}
+        assert response["statusCode"] == 203
+        body = json.loads(response["body"])
+        assert body == {"ok": "stale", "stale": True, "retry_after_seconds": ncaafb_predict_read.RETRY_AFTER_SECONDS}
         invoker.invoke_async.assert_called_once_with(
             {"detail-type": "ComputeAndCachePrediction", "route": "event", "event_id": self.EVENT_ID},
         )
@@ -169,7 +170,7 @@ class TestPredictionRoutes:
                 _predict_event(self.EVENT_RESOURCE, {"event_id": self.EVENT_ID}), None,
             )
 
-        assert response["statusCode"] == 200  # still serves the old value immediately
+        assert response["statusCode"] == 203  # still serves the old value immediately, flagged stale
         invoker.invoke_async.assert_called_once()  # but kicks off a refresh
 
     def test_cache_miss_triggers_a_compute_and_returns_202(self):
@@ -260,5 +261,5 @@ class TestPredictionRoutes:
             )
 
         assert response["statusCode"] == 200
-        assert json.loads(response["body"]) == {"stat": stat}
+        assert json.loads(response["body"]) == {"stat": stat, "stale": False}
         get_invoker.assert_not_called()

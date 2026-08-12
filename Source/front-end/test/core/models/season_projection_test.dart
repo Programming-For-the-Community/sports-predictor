@@ -52,6 +52,31 @@ void main() {
     expect(standing.projectedLosses, 0.0);
   });
 
+  test('a standing with no simulation fields yet defaults instead of throwing', () {
+    // Real scenario for NCAAFB specifically -- build_season_projection
+    // skips simulation entirely (fewer than CFP_FIELD_SIZE teams tracked,
+    // or no promoted ranking model yet) but still writes wins/losses/
+    // conference for every team. See TeamStanding.fromJson's own doc
+    // comment.
+    final standing = TeamStanding.fromJson({'team_id': '333', 'conference': 'SEC', 'wins': 3, 'losses': 1});
+
+    expect(standing.division, 'SEC');
+    expect(standing.projectedWins, 3.0);
+    expect(standing.projectedLosses, 0.0);
+    expect(standing.divisionWinnerProbability, 0.0);
+    expect(standing.playoffProbability, 0.0);
+    expect(standing.championshipProbability, 0.0);
+  });
+
+  test('conference_champion_probability (NCAAFB) is read the same as division_winner_probability (NFL)', () {
+    final standing = TeamStanding.fromJson({
+      'team_id': '333', 'conference': 'SEC', 'wins': 8, 'losses': 1,
+      'projected_wins': 10.2, 'conference_champion_probability': 0.35,
+    });
+
+    expect(standing.divisionWinnerProbability, 0.35);
+  });
+
   test('leaderboards is null when the backend could not compute it', () {
     final season = SeasonProjection.fromJson({
       'sport': 'nfl',

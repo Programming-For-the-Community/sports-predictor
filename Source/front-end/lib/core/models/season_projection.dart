@@ -12,13 +12,22 @@ class TeamStanding {
     required this.divisionWinnerProbability,
     required this.playoffProbability,
     required this.championshipProbability,
+    this.abbreviation,
   });
 
   final String teamId;
-  // "AFC East"/"NFC West"/etc, for grouping standings by division (see
-  // season_page.dart) -- null only for a non-franchise participant that
-  // slipped past is_real_franchise_matchup somehow, not expected in
-  // practice.
+  // Off the team entity (see library.serving.common.enrich_team_standings)
+  // -- same source and null-for-an-unseeded-entity caveat as Participant.
+  // abbreviation. season_page.dart's _StandingsRow uses this via
+  // teamDisplayFor, the same fallback rule teamDisplay applies to events.
+  final String? abbreviation;
+  // "AFC East"/"NFC West"/etc for NFL, or the team's conference ("SEC"/
+  // "Big Ten"/etc, NCAAFB has no division concept) for every other sport
+  // -- see fromJson below for which backend key each maps from. Used to
+  // group standings (see season_page.dart's _groupByDivision) -- null
+  // only for a non-franchise participant that slipped past
+  // is_real_franchise_matchup (NFL) or an unresolved team_conference
+  // entry (NCAAFB), not expected in practice.
   final String? division;
   // Actual, this-season-so-far record.
   final int wins;
@@ -33,25 +42,38 @@ class TeamStanding {
   final double playoffProbability;
   final double championshipProbability;
 
-  // ties/projected_losses default rather than require -- the season
-  // projection this parses is a weekly-precomputed S3 payload
-  // (scheduler-nfl-season-projection.tf), not computed fresh per
-  // request, so a frontend deploy can land before that job has next run
-  // with the fields that produce these two keys. Defaulting means a
-  // brief "0" ties / "0" projected-losses window after a frontend
-  // deploy instead of a hard parse failure -- self-heals the next time
-  // the weekly job runs, no coordinated deploy required.
+  // Every simulation-derived field defaults rather than requires -- both
+  // sports' build_season_projection merge `**simulation.get(team_id, {})`
+  // into each row, and simulation itself is skipped entirely (see
+  // aws-lambdas/ncaafb/predict/season_projection.py's own
+  // build_season_projection) when fewer than CFP_FIELD_SIZE teams are
+  // tracked yet or no ranking model has been promoted -- both routine
+  // early-season states, not error states, so a standings row with none
+  // of these fields is expected, not a parse failure. Same self-healing
+  // reasoning already applied to ties/projected_losses now extends to
+  // the rest: defaults now, real values once that week's job/model
+  // catches up, no coordinated deploy required.
+  //
+  // division_winner_probability (NFL) and conference_champion_probability
+  // (NCAAFB -- no division concept, see TeamStanding.division's own doc
+  // comment) are the same "won their group" concept at each sport's own
+  // granularity, so divisionWinnerProbability reads whichever key its
+  // own sport's backend actually sends.
   factory TeamStanding.fromJson(Map<String, dynamic> json) => TeamStanding(
         teamId: json['team_id'] as String,
-        division: json['division'] as String?,
+        division: json['division'] as String? ?? json['conference'] as String?,
         wins: json['wins'] as int,
         losses: json['losses'] as int,
         ties: json['ties'] as int? ?? 0,
-        projectedWins: (json['projected_wins'] as num).toDouble(),
+        projectedWins: (json['projected_wins'] as num?)?.toDouble() ?? (json['wins'] as int).toDouble(),
         projectedLosses: (json['projected_losses'] as num?)?.toDouble() ?? 0.0,
-        divisionWinnerProbability: (json['division_winner_probability'] as num).toDouble(),
-        playoffProbability: (json['playoff_probability'] as num).toDouble(),
-        championshipProbability: (json['championship_probability'] as num).toDouble(),
+        divisionWinnerProbability:
+            (json['division_winner_probability'] as num? ?? json['conference_champion_probability'] as num?)
+                    ?.toDouble() ??
+                0.0,
+        playoffProbability: (json['playoff_probability'] as num?)?.toDouble() ?? 0.0,
+        championshipProbability: (json['championship_probability'] as num?)?.toDouble() ?? 0.0,
+        abbreviation: json['abbreviation'] as String?,
       );
 }
 

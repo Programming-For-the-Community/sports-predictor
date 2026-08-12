@@ -1,29 +1,29 @@
 """
 Builds the season projection (standings, bowl/CFP/championship
-probabilities, player-prop leaderboards) that Terraform/scheduler-
-ncaafb-season-projection.tf's weekly EventBridge Scheduler invoke writes
-to S3 for GET /ncaafb/season.
+probabilities) that Terraform/scheduler-ncaafb-season-projection.tf's
+weekly EventBridge Scheduler invoke writes to S3 for GET /ncaafb/season.
+Team outcomes only -- no player-prop leaderboard here, unlike NFL's own
+season_projection.py (NCAAFB's season simulation was deliberately scoped
+to team outcomes, see design/PROJECT_PLAN.md's NCAAFB section).
 
 Pulls this season's data once via FeatureStorage, derives Elo ratings and
 each team's conference/record/scoring/strength-of-schedule snapshot
-(_season_standings_inputs), runs season_simulation's Monte Carlo logic
-with a ranking-model-backed score_teams callable (_batch_score_teams),
-and scores each tracked player-prop leaderboard (_leaderboards).
+(_season_standings_inputs), and runs season_simulation's Monte Carlo
+logic with a ranking-model-backed score_teams callable
+(_batch_score_teams).
 """
 import logging
 from collections import Counter
-from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 
 import pandas as pd
 
-import event_prediction
-import live_features
 import model_loader
 import season_simulation
 from library.features.common import compute_elo_ratings, current_streak, rolling_team_scoring_averages
 from library.features.ncaafb import average_opponent_elo
 from library.ml.model_types import ADAPTERS
+from library.serving.common import enrich_team_standings
 from library.serving.ncaafb_reads import _home_and_away
 from library.storage.feature_storage import FeatureStorage
 from library.storage.season_projections import season_projection_key
@@ -32,12 +32,6 @@ logger = logging.getLogger("ncaafb-predict")
 
 SPORT = "ncaafb"
 RANKING_MODEL_NAME = "national-ranking"
-
-# Source of truth is Terraform/dynamodb-sport-registry.tf's ncaafb_player_prop_stats map.
-PLAYER_PROP_STATS = [
-    "passing_yards", "passing_touchdowns", "rushing_yards", "rushing_touchdowns",
-    "receiving_yards", "receiving_touchdowns", "defensive_sacks",
-]
 
 
 def _season_standings_inputs(storage: FeatureStorage) -> dict:
@@ -179,85 +173,6 @@ def _batch_score_teams(estimator, model_card: dict, teams: list[str], season_inp
     return dict(zip(teams, (float(value) for value in predictions)))
 
 
-def _leaderboards(storage: FeatureStorage, s3, model_cache: dict, season_inputs: dict) -> dict:
-    """Top-10 season-long leaderboard per tracked player-prop stat, projected as current
-    season-to-date total + (next-game model prediction * games remaining). Candidates are
-    every player with at least one recorded value for that stat this season."""
-    season_player_stats = [
-        row for row in storage.get_all_player_game_stats(SPORT)
-        if row.get("event_key") in season_inputs["completed_event_keys"]
-    ]
-
-    player_team: dict[str, str] = {}
-    for row in season_player_stats:
-        player_team.setdefault(row["entity_id"], row.get("team_id"))
-
-    current_totals_by_stat: dict[str, dict[str, float]] = {stat: {} for stat in PLAYER_PROP_STATS}
-    for row in season_player_stats:
-        entity_id = row["entity_id"]
-        stat_line = row.get("stat_line", {})
-        for stat in PLAYER_PROP_STATS:
-            value = stat_line.get(stat)
-            if value is not None:
-                totals = current_totals_by_stat[stat]
-                totals[entity_id] = totals.get(entity_id, 0) + value
-
-    all_candidates = {entity_id for totals in current_totals_by_stat.values() for entity_id in totals}
-
-    def _build_row(entity_id: str) -> tuple[str, dict | None]:
-        next_event_key = season_inputs["team_next_event"].get(player_team.get(entity_id))
-        if next_event_key is None:
-            return entity_id, None
-        try:
-            feature_row = live_features.build_live_player_features(
-                storage, SPORT, next_event_key, entity_id, current_ratings=season_inputs["current_ratings"],
-            )
-            return entity_id, feature_row
-        except live_features.EventNotFoundError:
-            return entity_id, None
-        except Exception:
-            logger.exception("Failed to build live features for %s", entity_id)
-            return entity_id, None
-
-    feature_row_cache: dict[str, dict] = {}
-    with ThreadPoolExecutor(max_workers=max(1, min(len(all_candidates), 10))) as executor:
-        for entity_id, feature_row in executor.map(_build_row, all_candidates):
-            if feature_row is not None:
-                feature_row_cache[entity_id] = feature_row
-
-    leaderboards: dict[str, list[dict]] = {}
-    for stat in PLAYER_PROP_STATS:
-        candidates = set(current_totals_by_stat[stat])
-        current_totals = current_totals_by_stat[stat]
-        model_name = event_prediction.model_name_to_prop(stat)
-        try:
-            booster, model_card = event_prediction.get_cached_model(model_cache, s3, model_name)
-        except model_loader.NoPromotedModelError:
-            booster = None
-
-        per_game_projections: dict[str, float] = {}
-        if booster is not None:
-            for entity_id in candidates:
-                feature_row = feature_row_cache.get(entity_id)
-                if feature_row is not None:
-                    prediction = model_loader.predict(booster, model_card, feature_row)
-                    per_game_projections[entity_id] = event_prediction.non_negative(prediction)
-
-        games_remaining = {
-            entity_id: season_inputs["games_remaining"].get(player_team.get(entity_id), 0)
-            for entity_id in candidates
-        }
-
-        top = season_simulation.project_leaderboard(current_totals, per_game_projections, games_remaining, top_n=10)
-        for row in top:
-            entity = storage.get_entity(SPORT, row["entity_id"])
-            if entity and entity.get("name"):
-                row["name"] = entity["name"]
-        leaderboards[stat] = top
-
-    return leaderboards
-
-
 def build_season_projection(storage: FeatureStorage, s3) -> dict:
     season_inputs = _season_standings_inputs(storage)
     teams = list(season_inputs["team_conference"])
@@ -293,18 +208,12 @@ def build_season_projection(storage: FeatureStorage, s3) -> dict:
         key=lambda row: row.get("projected_wins", row["wins"]),
         reverse=True,
     )
-
-    try:
-        leaderboards = _leaderboards(storage, s3, {}, season_inputs)
-    except Exception:
-        logger.exception("Failed to build season leaderboards")
-        leaderboards = None
+    standings = enrich_team_standings(storage, SPORT, standings)
 
     return {
         "sport": SPORT,
         "season": season_inputs["current_season"],
         "standings": standings,
-        "leaderboards": leaderboards,
         "generated_at": datetime.now(timezone.utc).isoformat(),
     }
 

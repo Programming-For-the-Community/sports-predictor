@@ -220,33 +220,3 @@ class TestSimulateSeason:
         )
 
         assert result[self.STRONG_TEAM]["projected_wins"] == pytest.approx(5.0)
-
-
-class TestProjectLeaderboard:
-    def test_projects_current_plus_per_game_times_remaining(self):
-        result = season_simulation.project_leaderboard(
-            current_totals={"p1": 800.0},
-            per_game_projections={"p1": 250.0},
-            games_remaining={"p1": 4},
-            top_n=10,
-        )
-
-        assert result[0]["projected_total"] == pytest.approx(800.0 + 250.0 * 4)
-
-    def test_sorted_descending_and_capped_at_top_n(self):
-        current_totals = {"p1": 100.0, "p2": 900.0, "p3": 500.0}
-        per_game_projections = {"p1": 0.0, "p2": 0.0, "p3": 0.0}
-        games_remaining = {"p1": 0, "p2": 0, "p3": 0}
-
-        result = season_simulation.project_leaderboard(
-            current_totals, per_game_projections, games_remaining, top_n=2,
-        )
-
-        assert [row["entity_id"] for row in result] == ["p2", "p3"]
-
-    def test_missing_projection_or_games_remaining_defaults_to_no_growth(self):
-        result = season_simulation.project_leaderboard(
-            current_totals={"p1": 100.0}, per_game_projections={}, games_remaining={}, top_n=10,
-        )
-
-        assert result[0]["projected_total"] == 100.0

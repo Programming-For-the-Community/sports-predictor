@@ -46,6 +46,39 @@ List<(String, List<SportEvent>)> _groupByDate(List<SportEvent> events) {
   return groups;
 }
 
+// Home's conference stands in for the whole matchup -- the away side can
+// differ (a non-conference game), but grouping needs exactly one key per
+// event and this reads naturally as "which conference's slate is this
+// game part of". Null for NFL (its team entities carry no conference
+// field at all -- see event.dart's Participant.conference) and for any
+// NCAAFB game whose home participant hasn't been enriched.
+String? _primaryConference(SportEvent event) => event.home.conference ?? event.away.conference;
+
+/// Buckets an already-date-sorted event list into (conference, dateGroups)
+/// sections, conferences alphabetical with anything unclassified ("Other")
+/// last -- makes a large NCAAFB slate (100+ FBS games/week) easy to scan
+/// for one conference's games instead of one long chronological list.
+/// Skips the outer grouping entirely (one null-keyed section) when nothing
+/// in the list has a conference at all, so NFL's list renders exactly as
+/// it did before this grouping existed.
+List<(String?, List<(String, List<SportEvent>)>)> _groupByConferenceThenDate(List<SportEvent> events) {
+  if (!events.any((e) => _primaryConference(e) != null)) {
+    return [(null, _groupByDate(events))];
+  }
+
+  final byConference = <String, List<SportEvent>>{};
+  for (final event in events) {
+    byConference.putIfAbsent(_primaryConference(event) ?? 'Other', () => []).add(event);
+  }
+  final conferences = byConference.keys.toList()
+    ..sort((a, b) {
+      if (a == 'Other') return b == 'Other' ? 0 : 1;
+      if (b == 'Other') return -1;
+      return a.compareTo(b);
+    });
+  return [for (final conference in conferences) (conference, _groupByDate(byConference[conference]!))];
+}
+
 class EventListPage extends ConsumerStatefulWidget {
   const EventListPage({super.key, required this.sportId});
 
@@ -149,16 +182,25 @@ class _EventListPageState extends ConsumerState<EventListPage> {
               return Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  for (final (heading, dayEvents) in _groupByDate(sorted)) ...[
-                    Padding(
-                      padding: const EdgeInsets.only(bottom: 8),
-                      child: Text(heading.toUpperCase(), style: AppTextStyles.microLabel(color: AppColors.inkSub)),
-                    ),
-                    for (final event in dayEvents) ...[
-                      GameRow(sport: widget.sportId, event: event, liveState: liveScores[event.eventId]),
-                      const SizedBox(height: 12),
+                  for (final (conference, dateGroups) in _groupByConferenceThenDate(sorted)) ...[
+                    if (conference != null) ...[
+                      Padding(
+                        padding: const EdgeInsets.only(bottom: 8),
+                        child: Text(conference.toUpperCase(), style: AppTextStyles.sectionTitle(color: AppColors.cyan)),
+                      ),
                     ],
-                    const SizedBox(height: 8),
+                    for (final (heading, dayEvents) in dateGroups) ...[
+                      Padding(
+                        padding: const EdgeInsets.only(bottom: 8),
+                        child: Text(heading.toUpperCase(), style: AppTextStyles.microLabel(color: AppColors.inkSub)),
+                      ),
+                      for (final event in dayEvents) ...[
+                        GameRow(sport: widget.sportId, event: event, liveState: liveScores[event.eventId]),
+                        const SizedBox(height: 12),
+                      ],
+                      const SizedBox(height: 8),
+                    ],
+                    if (conference != null) const SizedBox(height: 12),
                   ],
                 ],
               );

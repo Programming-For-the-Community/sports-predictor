@@ -1,9 +1,7 @@
 import 'event_leaders.dart';
 
 /// Mirrors GET /{sport}/events' response shape (see
-/// Source/aws-lambdas/nfl/predict/handler.py's _list_events) -- deliberately
-/// no team display names/colors here, that's static/nfl_team_colors.dart's
-/// job, matching how the backend route itself has none either.
+/// Source/library/serving/{nfl,ncaafb}_reads.py's own list_events).
 class ParticipantResult {
   const ParticipantResult({required this.score, required this.won});
 
@@ -17,16 +15,31 @@ class ParticipantResult {
 }
 
 class Participant {
-  const Participant({required this.entityId, required this.role, required this.result});
+  const Participant({
+    required this.entityId, required this.role, required this.result,
+    this.abbreviation, this.conference,
+  });
 
   final String entityId;
   final String role; // 'home' or 'away'
   final ParticipantResult? result; // null until the event is completed
+  // Off the participant's own team entity (see enrich_participants) --
+  // null on an entity that's never been seeded. NFL prefers its own
+  // static/nfl_team_colors.dart table over this (real brand colors,
+  // longer-established); every other sport has no such table, so this is
+  // its only source. See teamDisplay's own doc comment.
+  final String? abbreviation;
+  // Also off the team entity -- null for NFL (no conference field on its
+  // team entities at all, see espn.py's team_to_entity). Used to group
+  // event_list_page.dart's list when present -- see its own grouping doc.
+  final String? conference;
 
   factory Participant.fromJson(Map<String, dynamic> json) => Participant(
         entityId: json['entity_id'] as String,
         role: json['role'] as String,
         result: json['result'] != null ? ParticipantResult.fromJson(json['result'] as Map<String, dynamic>) : null,
+        abbreviation: json['abbreviation'] as String?,
+        conference: json['conference'] as String?,
       );
 }
 

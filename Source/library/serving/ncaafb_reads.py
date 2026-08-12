@@ -17,6 +17,7 @@ from datetime import datetime, timedelta, timezone
 from boto3.dynamodb.conditions import Key
 
 from library.features.ncaafb import is_bowl_game, is_playoff_game
+from library.serving.common import enrich_participants
 from library.storage.model_artifacts import current_version_key, model_artifact_key
 from library.storage.season_projections import season_projection_key
 
@@ -246,7 +247,10 @@ def list_events(storage, predictions_table, sport: str, status: str) -> dict:
     nfl_reads.list_events (see its own docstring). No exhibition-game
     filter -- unlike NFL's is_real_franchise_matchup, NCAAFB has no
     equivalent contamination to exclude (see
-    Source/feature-engineering/ncaafb/build_dataset.py's own docstring)."""
+    Source/feature-engineering/ncaafb/build_dataset.py's own docstring).
+    Each participant also carries `name`/`abbreviation` off its own team
+    entity -- see enrich_participants; this is NCAAFB's only source of
+    team display text, unlike NFL's hand-maintained static table."""
     events = storage.get_all_events(sport, status=status)
 
     if status == "completed":
@@ -264,7 +268,7 @@ def list_events(storage, predictions_table, sport: str, status: str) -> dict:
             "season_type": e.get("season_type"),
             "week": e.get("week"),
             "round": _round_label(e),
-            "participants": e.get("participants"),
+            "participants": enrich_participants(storage, sport, e.get("participants")),
             "venue_name": e.get("venue_name"),
         }
         if status == "completed":

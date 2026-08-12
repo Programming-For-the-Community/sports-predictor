@@ -9,6 +9,8 @@ import '../../core/models/event.dart';
 import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_text_styles.dart';
 import '../../core/widgets/matchup_hero.dart';
+import '../../core/widgets/prediction_computing_retry.dart';
+import '../../core/widgets/prediction_freshness_badge.dart';
 import '../../core/widgets/team_leaders_panel.dart';
 import '../../static/nfl_team_colors.dart';
 
@@ -140,8 +142,8 @@ class _EventDetailPageState extends ConsumerState<EventDetailPage> {
             if (leadersComparison != null) ...[
               const SizedBox(height: 20),
               TeamLeadersComparisonPanel(
-                homeAbbr: nflTeam(event.home.entityId).abbreviation,
-                awayAbbr: nflTeam(event.away.entityId).abbreviation,
+                homeAbbr: teamDisplay(event.home).abbreviation,
+                awayAbbr: teamDisplay(event.away).abbreviation,
                 comparison: leadersComparison,
               ),
             ],
@@ -160,11 +162,20 @@ class _EventDetailPageState extends ConsumerState<EventDetailPage> {
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
                   MatchupHero(event: event, prediction: prediction, liveState: liveScores[widget.eventId]),
+                  if (prediction.stale) ...[
+                    const SizedBox(height: 12),
+                    Center(
+                      child: PredictionFreshnessBadge(
+                        sport: widget.sportId, eventId: widget.eventId,
+                        stale: prediction.stale, retryAfterSeconds: prediction.staleRetryAfterSeconds,
+                      ),
+                    ),
+                  ],
                   if (leaders != null) ...[
                     const SizedBox(height: 20),
                     TeamLeadersPanel(
-                      homeAbbr: nflTeam(event.home.entityId).abbreviation,
-                      awayAbbr: nflTeam(event.away.entityId).abbreviation,
+                      homeAbbr: teamDisplay(event.home).abbreviation,
+                      awayAbbr: teamDisplay(event.away).abbreviation,
                       leaders: leaders,
                     ),
                   ],
@@ -172,7 +183,11 @@ class _EventDetailPageState extends ConsumerState<EventDetailPage> {
               );
             },
             loading: () => const Center(child: CircularProgressIndicator()),
-            error: (error, _) => Text('Couldn\'t load prediction: $error', style: AppTextStyles.body(color: AppColors.neg)),
+            error: (error, _) => error is PredictionComputingException
+                ? PredictionComputingRetry(
+                    sport: widget.sportId, eventId: widget.eventId, retryAfterSeconds: error.retryAfterSeconds,
+                  )
+                : Text('Couldn\'t load prediction: $error', style: AppTextStyles.body(color: AppColors.neg)),
           ),
     );
   }

@@ -117,4 +117,35 @@ void main() {
 
     expect(predictionCalls, greaterThan(initialCalls));
   });
+
+  testWidgets('a cold-cache-miss keeps retrying past a single retryAfterSeconds until the compute resolves', (tester) async {
+    var predictionCalls = 0;
+
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          eventsListProvider.overrideWith((ref, query) async => query.status == 'scheduled' ? [_scheduledEvent('2026-09-14T17:00:00Z')] : []),
+          eventPredictionProvider.overrideWith((ref, query) async {
+            predictionCalls++;
+            // Resolves on the 3rd attempt -- past what a single retry
+            // (see PredictionComputingRetry's own doc comment on why it
+            // must reschedule itself, not just retry once) would cover.
+            // pumpAndSettle below fast-forwards through pending timers on
+            // its own, so this only asserts the end state: with the old
+            // single-shot-timer bug, the 2nd attempt's failure would never
+            // schedule a 3rd, and this would settle stuck on "Computing
+            // prediction..." at predictionCalls == 2 instead.
+            if (predictionCalls < 3) throw const PredictionComputingException(1);
+            return _prediction;
+          }),
+          liveScoresProvider.overrideWith((ref, sport) async => const <String, LiveEventState>{}),
+        ],
+        child: const MaterialApp(home: Scaffold(body: EventDetailPage(sportId: 'nfl', eventId: '401547417'))),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(predictionCalls, 3);
+    expect(find.text('Computing prediction...'), findsNothing);
+  });
 }

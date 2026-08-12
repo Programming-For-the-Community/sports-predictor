@@ -1,9 +1,13 @@
 import 'package:flutter/material.dart';
 
-/// Frontend-only -- the backend has no team display/color data (see
+import '../core/models/event.dart';
+
+/// Frontend-only -- the backend has no team COLOR data for any sport (see
 /// Source/library/features/nfl_teams.py, which only carries
 /// division/conference/coordinates). Keyed by ESPN's numeric team_id, the
-/// same id used as entity_id throughout the backend.
+/// same id used as entity_id throughout the backend. NFL-only: hand-typed
+/// real brand colors for its 32 teams. No other sport has an equivalent
+/// table -- see teamDisplay below for how everyone else is handled.
 class NflTeam {
   const NflTeam(this.abbreviation, this.primary);
   final String abbreviation;
@@ -45,4 +49,25 @@ const Map<String, NflTeam> kNflTeams = {
   '34': NflTeam('HOU', Color(0xFF03202F)),
 };
 
-NflTeam nflTeam(String entityId) => kNflTeams[entityId] ?? NflTeam(entityId, const Color(0xFF586577));
+/// The one function every team-display widget should call -- prefers the
+/// NFL static table above (real brand colors) when entityId is in it,
+/// otherwise falls back to the backend-provided abbreviation with a color
+/// derived from entityId so different teams still render distinguishably
+/// instead of all sharing one flat gray. Takes the two raw fields rather
+/// than a Participant so both event-shaped callers (teamDisplay below) and
+/// standings rows (TeamStanding.abbreviation, no Participant/role/result
+/// on that shape at all -- see GET /{sport}/season's own row shape) share
+/// one fallback rule.
+NflTeam teamDisplayFor(String entityId, String? abbreviation) {
+  final known = kNflTeams[entityId];
+  if (known != null) return known;
+  return NflTeam(abbreviation ?? entityId, _fallbackColor(entityId));
+}
+
+/// See Participant.abbreviation for where the fallback value comes from.
+NflTeam teamDisplay(Participant participant) => teamDisplayFor(participant.entityId, participant.abbreviation);
+
+Color _fallbackColor(String entityId) {
+  final hue = (entityId.hashCode % 360).abs().toDouble();
+  return HSLColor.fromAHSL(1.0, hue, 0.55, 0.45).toColor();
+}

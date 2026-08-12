@@ -26,8 +26,8 @@ class MatchupHero extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final home = nflTeam(event.home.entityId);
-    final away = nflTeam(event.away.entityId);
+    final home = teamDisplay(event.home);
+    final away = teamDisplay(event.away);
     final homeFavored = prediction.homeWinProbability >= 0.5;
     final isLive = liveState?.live ?? false;
 
@@ -175,8 +175,8 @@ class MatchupResultHero extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final home = nflTeam(event.home.entityId);
-    final away = nflTeam(event.away.entityId);
+    final home = teamDisplay(event.home);
+    final away = teamDisplay(event.away);
     final homeWon = event.home.result?.won ?? false;
 
     return Container(

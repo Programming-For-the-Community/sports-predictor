@@ -38,11 +38,14 @@ const kSports = [
     active: true,
   ),
   SportConfig(
-    id: 'ncaa_fb',
+    // Matches the backend's own route prefix (/ncaafb/...) exactly --
+    // this id is passed straight through as the API path segment (see
+    // app_router.dart's :sport param), so it can't diverge from it.
+    id: 'ncaafb',
     displayName: 'NCAA Football',
     eventShape: EventShape.headToHead,
     accentColor: AppColors.cyan,
-    active: false,
+    active: true,
   ),
   SportConfig(
     id: 'nba',

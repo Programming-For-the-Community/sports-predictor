@@ -11,6 +11,8 @@ import '../theme/app_text_styles.dart';
 import '../../static/nfl_team_colors.dart';
 import 'confidence_pill.dart';
 import 'live_status_pill.dart';
+import 'prediction_computing_retry.dart';
+import 'prediction_freshness_badge.dart';
 import 'team_color_dot.dart';
 import 'win_probability_bar.dart';
 
@@ -105,8 +107,8 @@ class GameRow extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final home = nflTeam(event.home.entityId);
-    final away = nflTeam(event.away.entityId);
+    final home = teamDisplay(event.home);
+    final away = teamDisplay(event.away);
     final isCompleted = event.status == 'completed';
     final isLive = liveState?.live ?? false;
     // Only fetched for a not-yet-started, not-live event -- watched here
@@ -173,6 +175,7 @@ class GameRow extends ConsumerWidget {
               )
             : _LivePredictionSummary(
                 prediction: prediction!, homeAbbr: home.abbreviation, awayAbbr: away.abbreviation,
+                sport: sport, eventId: event.eventId,
               );
 
     return InkWell(
@@ -230,10 +233,17 @@ class GameRow extends ConsumerWidget {
 /// shown next to each team's own actual score), instead of two
 /// independent fetches of the same prediction.
 class _LivePredictionSummary extends StatelessWidget {
-  const _LivePredictionSummary({required this.prediction, required this.homeAbbr, required this.awayAbbr});
+  const _LivePredictionSummary({
+    required this.prediction, required this.homeAbbr, required this.awayAbbr,
+    required this.sport, required this.eventId,
+  });
   final AsyncValue<EventPrediction> prediction;
   final String homeAbbr;
   final String awayAbbr;
+  // Only needed to retry on a cold-cache-miss (see the error branch below)
+  // -- prediction itself is already resolved by the caller.
+  final String sport;
+  final String eventId;
 
   @override
   Widget build(BuildContext context) {
@@ -274,6 +284,10 @@ class _LivePredictionSummary extends StatelessWidget {
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                   ),
+                  PredictionFreshnessBadge(
+                    sport: sport, eventId: eventId,
+                    stale: p.stale, retryAfterSeconds: p.staleRetryAfterSeconds, compact: true,
+                  ),
                 ],
               ),
             ),
@@ -283,7 +297,9 @@ class _LivePredictionSummary extends StatelessWidget {
         );
       },
       loading: () => const WinProbabilityBar(homeWinProbability: 0.5),
-      error: (_, __) => Text('--', style: AppTextStyles.body(color: AppColors.inkMute)),
+      error: (error, _) => error is PredictionComputingException
+          ? PredictionComputingRetry(sport: sport, eventId: eventId, retryAfterSeconds: error.retryAfterSeconds, compact: true)
+          : Text('--', style: AppTextStyles.body(color: AppColors.inkMute)),
     );
   }
 }

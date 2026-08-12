@@ -14,8 +14,12 @@ prediction routes are a read-through cache (library.storage.
 prediction_cache) in front of the predict Lambda, which does the actual
 computation asynchronously:
 
-    - Fresh cache hit: 200, served from S3.
-    - Stale cache hit: 200, served from S3, background refresh triggered.
+    - Fresh cache hit: 200, served from S3, body carries "stale": false.
+    - Stale cache hit: 203, served from S3, body carries "stale": true and
+      "retry_after_seconds" alongside the (possibly outdated) prediction
+      fields, background refresh triggered. A repeat request while that
+      refresh is still in flight returns 203 again without triggering a
+      second one.
     - Cache miss: 202 {"status": "computing", "retry_after_seconds": N},
       async compute triggered. A repeat request for the same key returns
       202 again without triggering a second compute.
@@ -102,8 +106,13 @@ def _serve_or_trigger(s3, cache_key: str, current_model_versions, async_payload:
             # expired -- fall through, retry as a miss
         else:
             if not prediction_cache.is_fresh(entry, current_model_versions):
+                # 203, not 200 -- lets the frontend show a "refreshing"
+                # indicator and silently re-poll instead of treating this
+                # the same as a genuinely current result (see
+                # EventPrediction.stale on the frontend).
                 _trigger_refresh(s3, cache_key, async_payload)
-            return _response(200, entry["result"])
+                return _response(203, {**entry["result"], "stale": True, "retry_after_seconds": RETRY_AFTER_SECONDS})
+            return _response(200, {**entry["result"], "stale": False})
 
     _trigger_refresh(s3, cache_key, async_payload)
     return _response(202, {"status": "computing", "retry_after_seconds": RETRY_AFTER_SECONDS})

@@ -20,6 +20,7 @@ import model_loader
 import season_simulation
 from library.features.common import compute_elo_ratings
 from library.features.nfl_teams import TEAM_DIVISIONS, is_real_franchise_matchup
+from library.serving.common import enrich_team_standings
 from library.serving.nfl_reads import _home_and_away
 from library.storage.feature_storage import FeatureStorage
 from library.storage.season_projections import season_projection_key
@@ -276,6 +277,7 @@ def build_season_projection(storage: FeatureStorage, s3) -> dict:
         key=lambda row: row["projected_wins"],
         reverse=True,
     )
+    standings = enrich_team_standings(storage, SPORT, standings)
 
     try:
         leaderboards = _leaderboards(storage, s3, model_cache, season_inputs)

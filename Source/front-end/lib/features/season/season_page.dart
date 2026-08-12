@@ -81,34 +81,43 @@ class _SeasonPageState extends ConsumerState<SeasonPage> {
               style: AppTextStyles.pageH1(),
             ),
             const SizedBox(height: 20),
-            // Standings and player props each stand alone (a toggle, not
-            // both stacked on one page) -- both are already tall multi-
-            // column sections on their own, and stacking them turns this
-            // into a very long scroll for no reason once a viewer only
-            // wants one or the other.
-            // Horizontal-scroll, not a bare Row -- these two labels
-            // together don't fit a phone-width screen (see
-            // sport_shell_page.dart's _TabToggle for the same pattern).
-            SingleChildScrollView(
-              scrollDirection: Axis.horizontal,
-              child: Row(
-                children: [
-                  _StatusToggle(
-                    label: 'Standings & Playoff Odds',
-                    selected: _tab == 'standings',
-                    onTap: () => setState(() => _tab = 'standings'),
-                  ),
-                  const SizedBox(width: 8),
-                  _StatusToggle(
-                    label: 'Player Prop Leaders',
-                    selected: _tab == 'props',
-                    onTap: () => setState(() => _tab = 'props'),
-                  ),
-                ],
+            // Player Prop Leaders only exists as a toggle option when the
+            // backend actually sent a leaderboards block -- NCAAFB's own
+            // season simulation is team-outcomes-only, no player-level
+            // simulation (see aws-lambdas/ncaafb/predict/season_projection.
+            // py's own docstring), so `season.leaderboards` is always null
+            // there and this whole toggle collapses to just the standings
+            // section, unchanged from before this toggle existed.
+            if (season.leaderboards != null) ...[
+              // Standings and player props each stand alone (a toggle, not
+              // both stacked on one page) -- both are already tall multi-
+              // column sections on their own, and stacking them turns this
+              // into a very long scroll for no reason once a viewer only
+              // wants one or the other.
+              // Horizontal-scroll, not a bare Row -- these two labels
+              // together don't fit a phone-width screen (see
+              // sport_shell_page.dart's _TabToggle for the same pattern).
+              SingleChildScrollView(
+                scrollDirection: Axis.horizontal,
+                child: Row(
+                  children: [
+                    _StatusToggle(
+                      label: 'Standings & Playoff Odds',
+                      selected: _tab == 'standings',
+                      onTap: () => setState(() => _tab = 'standings'),
+                    ),
+                    const SizedBox(width: 8),
+                    _StatusToggle(
+                      label: 'Player Prop Leaders',
+                      selected: _tab == 'props',
+                      onTap: () => setState(() => _tab = 'props'),
+                    ),
+                  ],
+                ),
               ),
-            ),
-            const SizedBox(height: 20),
-            if (_tab == 'standings')
+              const SizedBox(height: 20),
+            ],
+            if (_tab == 'standings' || season.leaderboards == null)
               // Fixed-width (capped by the viewport -- see
               // core/widgets/responsive.dart) division cards in a Wrap --
               // multiple divisions per row on a wide screen, same pattern
@@ -251,7 +260,7 @@ class _StandingsRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final info = nflTeam(team.teamId);
+    final info = teamDisplayFor(team.teamId, team.abbreviation);
     return Row(
       children: [
         Expanded(

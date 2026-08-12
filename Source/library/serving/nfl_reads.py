@@ -23,6 +23,7 @@ from datetime import datetime, timedelta, timezone
 from boto3.dynamodb.conditions import Key
 
 from library.features.nfl_teams import is_real_franchise_matchup
+from library.serving.common import enrich_participants
 from library.storage.model_artifacts import current_version_key, model_artifact_key
 from library.storage.season_projections import season_projection_key
 
@@ -289,7 +290,9 @@ def list_events(storage, predictions_table, sport: str, status: str) -> dict:
     the travel-distance feature -- see normalize/espn.py), `null` on any
     of the three the venue lacked or the event was ingested before this
     field existed. Excludes the Pro Bowl and any other exhibition game
-    entirely (see is_real_franchise_matchup)."""
+    entirely (see is_real_franchise_matchup). Each participant also
+    carries `name`/`abbreviation` off its own team entity -- see
+    enrich_participants."""
     events = [e for e in storage.get_all_events(sport, status=status) if is_real_franchise_matchup(e)]
 
     if status == "completed":
@@ -307,7 +310,7 @@ def list_events(storage, predictions_table, sport: str, status: str) -> dict:
             "season_type": e.get("season_type"),
             "week": e.get("week"),
             "round": _round_label(e),
-            "participants": e.get("participants"),
+            "participants": enrich_participants(storage, sport, e.get("participants")),
             "venue_name": e.get("venue_name"),
             "venue_city": e.get("venue_city"),
             "venue_state": e.get("venue_state"),

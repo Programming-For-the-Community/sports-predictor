@@ -46,6 +46,20 @@ class TestListEvents:
         assert result["events"][0]["kickoff_time"] == f"{event_date}T20:25Z"
         storage.get_all_events.assert_called_once_with("nfl", status="scheduled")
 
+    def test_participants_carry_name_and_abbreviation_from_their_entity(self):
+        storage = MagicMock()
+        storage.get_all_events.return_value = [_scheduled_event("EVT#1", 2025, _future(4), "12", "24")]
+        storage.get_entity.side_effect = lambda sport, entity_id: {
+            "12": {"name": "Kansas City Chiefs", "metadata": {"abbreviation": "KC"}},
+            "24": {"name": "Los Angeles Chargers", "metadata": {"abbreviation": "LAC"}},
+        }[entity_id]
+
+        result = nfl_reads.list_events(storage, MagicMock(), "nfl", "scheduled")
+
+        home, away = result["events"][0]["participants"]
+        assert home["abbreviation"] == "KC"
+        assert away["abbreviation"] == "LAC"
+
     def test_venue_fields_pass_through_when_present(self):
         storage = MagicMock()
         storage.get_all_events.return_value = [

@@ -20,9 +20,6 @@ every test here.
 """
 from unittest.mock import MagicMock, patch
 
-import pytest
-
-import live_features
 import model_loader
 import ncaafb_predict
 import season_projection
@@ -172,7 +169,6 @@ class TestScheduledSeasonProjection:
             "completed": [_completed_event("E1", 2025, "12", "24", 27, 20)],
             "scheduled": [],
         }[status]
-        ncaafb_predict._storage.get_all_player_game_stats.return_value = []
 
         with patch.object(season_simulation, "simulate_season", return_value={}):
             response = ncaafb_predict.lambda_handler({"detail-type": "ScheduledSeasonProjection"}, None)
@@ -184,6 +180,10 @@ class TestScheduledSeasonProjection:
         assert body["season"] == 2025
         assert body["standings"][0]["wins"] == 1
         assert body["standings"][0]["conference"] == "Big Ten"
+        # Team outcomes only -- see this module's own docstring for why
+        # NCAAFB's season projection has no player-prop leaderboard,
+        # unlike NFL's.
+        assert "leaderboards" not in body
 
     def test_fewer_than_twelve_tracked_teams_skips_simulation_but_still_writes_standings(self):
         ncaafb_predict._storage = MagicMock()
@@ -192,14 +192,7 @@ class TestScheduledSeasonProjection:
             "completed": [_completed_event("E1", 2025, "12", "24", 27, 20)],
             "scheduled": [],
         }[status]
-        ncaafb_predict._storage.get_all_player_game_stats.return_value = []
 
-        # load_current_model is ALSO called once per player-prop stat by
-        # _leaderboards regardless of team count (unrelated to the
-        # 12-team CFP gate this test is actually about) -- given a real
-        # return value so that path stays a no-op instead of crashing on
-        # an unconfigured MagicMock, and the assertion below only checks
-        # that the RANKING model specifically was never requested.
         with patch.object(model_loader, "load_current_model", return_value=(MagicMock(), _model_card(1))) as load_current_model, \
              patch.object(season_simulation, "simulate_season") as simulate_season:
             ncaafb_predict.lambda_handler({"detail-type": "ScheduledSeasonProjection"}, None)
@@ -218,7 +211,6 @@ class TestScheduledSeasonProjection:
             "completed": self.TWELVE_TEAM_EVENTS,
             "scheduled": [],
         }[status]
-        ncaafb_predict._storage.get_all_player_game_stats.return_value = []
 
         with patch.object(model_loader, "load_current_model", side_effect=model_loader.NoPromotedModelError("nope")):
             response = ncaafb_predict.lambda_handler({"detail-type": "ScheduledSeasonProjection"}, None)
@@ -234,7 +226,6 @@ class TestScheduledSeasonProjection:
             "completed": self.TWELVE_TEAM_EVENTS,
             "scheduled": [],
         }[status]
-        ncaafb_predict._storage.get_all_player_game_stats.return_value = []
 
         simulated = {f"t{i}": {"projected_wins": 8.0, "conference_champion_probability": 0.1, "bowl_probability": 0.6, "playoff_probability": 0.2, "championship_probability": 0.01} for i in range(12)}
 
@@ -245,41 +236,3 @@ class TestScheduledSeasonProjection:
         simulate_season.assert_called_once()
         body = ncaafb_predict._model_bucket.put_json.call_args[0][1]
         assert body["standings"][0]["projected_wins"] == 8.0
-
-    def test_leaderboards_is_none_when_building_them_fails_but_standings_still_write(self):
-        ncaafb_predict._storage = MagicMock()
-        ncaafb_predict._model_bucket = MagicMock()
-        ncaafb_predict._storage.get_all_events.side_effect = lambda sport, status: {
-            "completed": [_completed_event("E1", 2025, "12", "24", 27, 20)],
-            "scheduled": [],
-        }[status]
-        ncaafb_predict._storage.get_all_player_game_stats.side_effect = RuntimeError("boom")
-
-        ncaafb_predict.lambda_handler({"detail-type": "ScheduledSeasonProjection"}, None)
-
-        body = ncaafb_predict._model_bucket.put_json.call_args[0][1]
-        assert body["leaderboards"] is None
-
-    def test_leaderboards_include_player_names_and_are_capped_at_ten(self):
-        ncaafb_predict._storage = MagicMock()
-        ncaafb_predict._model_bucket = MagicMock()
-        ncaafb_predict._storage.get_all_events.side_effect = lambda sport, status: {
-            "completed": [_completed_event("E1", 2025, "12", "24", 27, 20)],
-            "scheduled": [_scheduled_event("E2", 2025, "2025-09-21", "12", "7")],
-        }[status]
-        ncaafb_predict._storage.get_all_player_game_stats.return_value = [
-            {"entity_id": "qb1", "team_id": "12", "event_key": "E1", "stat_line": {"passing_yards": 300}},
-        ]
-        ncaafb_predict._storage.get_entity.return_value = {"entity_id": "qb1", "name": "Shedeur Sanders"}
-
-        with patch.object(live_features, "build_live_player_features", return_value={"entity_id": "qb1"}), \
-             patch.object(model_loader, "load_current_model", return_value=(MagicMock(), _model_card(1))), \
-             patch.object(model_loader, "predict", return_value=280.0):
-            ncaafb_predict.lambda_handler({"detail-type": "ScheduledSeasonProjection"}, None)
-
-        body = ncaafb_predict._model_bucket.put_json.call_args[0][1]
-        passing_leaders = body["leaderboards"]["passing_yards"]
-        assert len(passing_leaders) <= 10
-        assert passing_leaders[0]["name"] == "Shedeur Sanders"
-        # current 300 + one remaining game projected at 280/game
-        assert passing_leaders[0]["projected_total"] == pytest.approx(580.0)

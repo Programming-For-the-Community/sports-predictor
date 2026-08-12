@@ -1,8 +1,9 @@
 """
 Regular-season Monte Carlo simulation (win totals, bowl eligibility,
 conference championship, CFP field, and national championship
-probabilities) and player-prop leaderboard projection for the NCAAFB
-Season tab. Pure functions -- no AWS/storage access.
+probabilities) for the NCAAFB Season tab -- team outcomes only, no
+player-prop leaderboard (unlike NFL's own season_simulation.py). Pure
+functions -- no AWS/storage access.
 
 Game outcomes use Elo win probability (library.features.common.
 expected_score). CFP field selection needs a rank-like score per team,
@@ -181,22 +182,3 @@ def simulate_season(
         }
         for team_id in teams
     }
-
-
-def project_leaderboard(
-    current_totals: dict[str, float],
-    per_game_projections: dict[str, float],
-    games_remaining: dict[str, int],
-    top_n: int = 10,
-) -> list[dict]:
-    projected = []
-    for entity_id, current_total in current_totals.items():
-        per_game = per_game_projections.get(entity_id, 0.0)
-        remaining = games_remaining.get(entity_id, 0)
-        projected.append({
-            "entity_id": entity_id,
-            "current_total": current_total,
-            "projected_total": current_total + per_game * remaining,
-        })
-    projected.sort(key=lambda row: row["projected_total"], reverse=True)
-    return projected[:top_n]
