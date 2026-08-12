@@ -47,18 +47,25 @@ jobs:
   # that doesn't use it. train-win-probability-model's own job below DOES
   # already have every one of those (pandas/pyarrow/scikit-learn/xgboost),
   # so it needs no such exclusion.
+  #
+  # Both test_paths below scope to their own nfl/ subdirectory, not the
+  # shared parent (Source/tests/feature-engineering/, Source/tests/
+  # model-training/) -- ncaafb_ai_training.yml's own test jobs cover the
+  # identically-named sibling files under .../ncaafb/, and pytest can't
+  # collect two same-basename test modules in one run without package
+  # __init__.py files, which this repo's test tree doesn't have.
   test-feature-engineering:
     name: Run feature engineering tests
     uses: ./.github/workflows/run_python_tests.yml
     with:
-      test_path: 'Source/tests/library/ Source/tests/feature-engineering/ --ignore=Source/tests/library/ml'
+      test_path: 'Source/tests/library/ Source/tests/feature-engineering/nfl/ --ignore=Source/tests/library/ml'
       requirements_files: 'Source/feature-engineering/nfl/requirements.txt'
 
   test-train-win-probability-model:
     name: Run train win-probability model tests
     uses: ./.github/workflows/run_python_tests.yml
     with:
-      test_path: 'Source/tests/library/ Source/tests/model-training/'
+      test_path: 'Source/tests/library/ Source/tests/model-training/nfl/'
       requirements_files: 'Source/model-training/nfl/requirements.txt'
 
   set-versions:
