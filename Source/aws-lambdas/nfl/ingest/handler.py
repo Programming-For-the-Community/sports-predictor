@@ -296,7 +296,7 @@ def lambda_handler(event: dict, context) -> dict:
         week = scoreboard.get("week", {}).get("number", 1)
 
         if season_type == PRESEASON_TYPE:
-            logger.info("Auto-detected preseason (season %d) -- skipping, not ingested by design", season)
+            logger.info("Auto-detected preseason (season %s) -- skipping, not ingested by design", season)
             return {
                 "processed": 0, "skipped": 0, "failed": 0,
                 "rosters_fetched": rosters_fetched, "rosters_failed": rosters_failed,
@@ -304,12 +304,12 @@ def lambda_handler(event: dict, context) -> dict:
                 "coaches_fetched": coaches_fetched,
             }
 
-        logger.info("Auto-detected season %d type %d week %d", season, season_type, week)
+        logger.info("Auto-detected season %s type %s week %s", season, season_type, week)
     else:
         scoreboard = client.get_scoreboard(season, season_type, week)
 
     events = scoreboard.get("events", [])
-    logger.info("Found %d events in season %d type %d week %d", len(events), season, season_type, week)
+    logger.info("Found %d events in season %s type %s week %s", len(events), season, season_type, week)
 
     # Mutates each event dict in place -- scoreboard["events"] holds the
     # same list/dict objects, so this enrichment is already reflected in

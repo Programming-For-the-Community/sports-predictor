@@ -118,7 +118,7 @@ def enrich_events(
     try:
         coaches = get_cached_coaches(s3, bucket, core_client, season)
     except Exception:
-        logger.exception("Failed fetching season coaches for %d -- coach fields will be omitted", season)
+        logger.exception("Failed fetching season coaches for %s -- coach fields will be omitted", season)
         coaches = {}
 
     injuries_by_team: dict[str, list[dict]] = {}

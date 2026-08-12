@@ -46,6 +46,12 @@ data "aws_iam_policy_document" "lambda_pipeline_permissions" {
       "arn:aws:dynamodb:${var.region}:${var.account_id}:table/${local.events_table}",
       "arn:aws:dynamodb:${var.region}:${var.account_id}:table/${local.player_game_stats_table}",
       "arn:aws:dynamodb:${var.region}:${var.account_id}:table/${local.team_game_stats_table}",
+      # A table's GSI is a distinct IAM resource from the table itself --
+      # needed for PipelineStorage.get_events_by_status's status-index
+      # Query (aws-lambdas/ncaafb/normalize/handler.py's stale-scheduled-
+      # event cleanup), same convention as ecs-pipeline/lambda-inference's
+      # own /index/* entries.
+      "arn:aws:dynamodb:${var.region}:${var.account_id}:table/${local.events_table}/index/*",
     ]
   }
 
