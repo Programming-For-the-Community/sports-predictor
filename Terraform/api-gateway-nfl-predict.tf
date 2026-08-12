@@ -312,6 +312,12 @@ resource "aws_api_gateway_deployment" "main" {
       aws_api_gateway_method.ncaafb_predict_player.id,
       aws_api_gateway_integration.ncaafb_predict_player.id,
       aws_api_gateway_integration.ncaafb_predict_player.uri,
+      # live-scores -- resource/method/integration declared in
+      # api-gateway-ncaafb-live-scores.tf, a third NCAAFB Lambda target.
+      aws_api_gateway_resource.ncaafb_live_scores.id,
+      aws_api_gateway_method.ncaafb_live_scores.id,
+      aws_api_gateway_integration.ncaafb_live_scores.id,
+      aws_api_gateway_integration.ncaafb_live_scores.uri,
       sha1(jsonencode(values(aws_api_gateway_method.ncaafb_cors)[*].id)),
       sha1(jsonencode(values(aws_api_gateway_integration.ncaafb_cors)[*].id)),
       sha1(jsonencode(values(aws_api_gateway_integration_response.ncaafb_cors)[*].id)),
