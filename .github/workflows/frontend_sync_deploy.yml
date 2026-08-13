@@ -105,10 +105,23 @@ jobs:
           echo "bucket_name=$BUCKET_NAME" >> "$GITHUB_OUTPUT"
           echo "distribution_id=$DISTRIBUTION_ID" >> "$GITHUB_OUTPUT"
 
+      # `flutter build web` doesn't content-hash any filename (unlike e.g.
+      # a CRA/webpack build) -- main.dart.js, index.html, and every other
+      # output file keep the exact same URL from one deploy to the next,
+      # only the bytes behind it change. `aws s3 sync` with no
+      # --cache-control sends no Cache-Control header at all, so browsers
+      # (mobile Safari/Chrome especially) fell back to long heuristic
+      # freshness and kept serving a build from days ago -- the
+      # CloudFront invalidation below clears the *edge* cache, but never
+      # reaches a browser that never asks CloudFront again. no-cache
+      # (distinct from no-store) still lets the browser/CloudFront cache
+      # the bytes, it just forces a conditional GET/ETag revalidation on
+      # every load, so a real new deploy is always seen without a manual
+      # hard refresh.
       - name: Sync to S3
         env:
           BUCKET_NAME: ${{ steps.resolve.outputs.bucket_name }}
-        run: aws s3 sync build/web/ "s3://$BUCKET_NAME" --delete
+        run: aws s3 sync build/web/ "s3://$BUCKET_NAME" --delete --cache-control "no-cache"
 
       - name: Invalidate CloudFront
         env:
