@@ -38,8 +38,8 @@ resource "aws_lambda_function" "ncaafb_live_scores" {
   # worst case (per-event boxscore fetch for every currently-live event,
   # parallelized), just more headroom here since a busy NCAAFB Saturday
   # can have noticeably more games live at once than an NFL Sunday.
-  timeout       = 45
-  memory_size   = 256
+  timeout     = 45
+  memory_size = 256
 
   filename         = data.archive_file.ncaafb_live_scores_placeholder.output_path
   source_code_hash = data.archive_file.ncaafb_live_scores_placeholder.output_base64sha256
