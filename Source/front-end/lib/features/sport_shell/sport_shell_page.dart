@@ -46,7 +46,7 @@ class SportShellPage extends StatelessWidget {
             child: Column(
               children: [
                 Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
+                  padding: const EdgeInsets.fromLTRB(24, 16, 24, 0),
                   child: Row(
                     children: [
                       IconButton(
@@ -54,10 +54,6 @@ class SportShellPage extends StatelessWidget {
                         icon: const Icon(Icons.arrow_back, color: AppColors.inkSub),
                       ),
                       const SizedBox(width: 8),
-                      // Expanded, not a bare Text -- on a narrow (mobile)
-                      // viewport the title needs to give ground and
-                      // ellipsize rather than push the Events/Season/
-                      // Models toggle past the edge of the screen.
                       Expanded(
                         child: Text(
                           sport.displayName,
@@ -65,21 +61,17 @@ class SportShellPage extends StatelessWidget {
                           overflow: TextOverflow.ellipsis,
                         ),
                       ),
-                      // Flexible+horizontal-scroll, not a bare widget --
-                      // even with the title above fully ellipsized down,
-                      // three tap-target-sized pills don't fit next to
-                      // the back button on a phone-width screen. Scrolls
-                      // invisibly (no visible scrollbar needed) on any
-                      // viewport wide enough to show it in full, same as
-                      // it always has.
-                      Flexible(
-                        child: SingleChildScrollView(
-                          scrollDirection: Axis.horizontal,
-                          child: _TabToggle(sportId: sportId, activeTab: activeTab),
-                        ),
-                      ),
                     ],
                   ),
+                ),
+                // Own full-width row below the title -- on a phone-width
+                // screen there's no longer a back button/title sharing
+                // space with it, so the three tabs can stretch to fill
+                // the row (see _TabToggle) instead of needing a
+                // horizontal scroll to reach the third one.
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(24, 12, 24, 4),
+                  child: _TabToggle(sportId: sportId, activeTab: activeTab),
                 ),
                 Expanded(child: child),
               ],
@@ -102,22 +94,27 @@ class _TabToggle extends StatelessWidget {
       padding: const EdgeInsets.all(4),
       decoration: BoxDecoration(color: AppColors.surface, borderRadius: BorderRadius.circular(999)),
       child: Row(
-        mainAxisSize: MainAxisSize.min,
         children: [
-          _TabButton(
-            label: 'Events',
-            active: activeTab == _SportTab.events,
-            onTap: () => context.go('/$sportId/events'),
+          Expanded(
+            child: _TabButton(
+              label: 'Events',
+              active: activeTab == _SportTab.events,
+              onTap: () => context.go('/$sportId/events'),
+            ),
           ),
-          _TabButton(
-            label: 'Season',
-            active: activeTab == _SportTab.season,
-            onTap: () => context.go('/$sportId/season'),
+          Expanded(
+            child: _TabButton(
+              label: 'Season',
+              active: activeTab == _SportTab.season,
+              onTap: () => context.go('/$sportId/season'),
+            ),
           ),
-          _TabButton(
-            label: 'Models',
-            active: activeTab == _SportTab.models,
-            onTap: () => context.go('/$sportId/models'),
+          Expanded(
+            child: _TabButton(
+              label: 'Models',
+              active: activeTab == _SportTab.models,
+              onTap: () => context.go('/$sportId/models'),
+            ),
           ),
         ],
       ),
@@ -142,8 +139,10 @@ class _TabButton extends StatelessWidget {
           color: active ? AppColors.cyan : null,
           borderRadius: BorderRadius.circular(999),
         ),
+        alignment: Alignment.center,
         child: Text(
           label,
+          textAlign: TextAlign.center,
           style: AppTextStyles.body(color: active ? AppColors.bg : AppColors.inkSub).copyWith(fontWeight: FontWeight.w600),
         ),
       ),

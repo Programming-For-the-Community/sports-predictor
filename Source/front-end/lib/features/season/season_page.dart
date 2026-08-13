@@ -224,12 +224,18 @@ List<_StandingsColumn> _standingsColumns(String sport) {
     // NCAAFB only -- NFL has no equivalent model/concept (see
     // TeamStanding.currentRank's own doc comment).
     if (isNcaafb)
-      _StandingsColumn('RANK', 1, (context, sport, team) {
+      _StandingsColumn('RANK', 2, (context, sport, team) {
         final rank = team.currentRank;
         return Text(
           rank != null ? '#$rank' : '--',
           style: AppTextStyles.metricValue(color: AppColors.inkMute),
           textAlign: TextAlign.center,
+          // A 3-digit rank (#100+) was wrapping onto a second line in
+          // this narrow flex:1 column -- same hard backstop the header
+          // row above already uses.
+          maxLines: 1,
+          softWrap: false,
+          overflow: TextOverflow.ellipsis,
         );
       }),
     _StandingsColumn('TEAM', 3, (context, sport, team) {
