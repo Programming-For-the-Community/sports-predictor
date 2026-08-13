@@ -41,11 +41,14 @@ resource "aws_lambda_function" "nfl_live_scores" {
   role          = aws_iam_role.lambda_live_scores.arn
   runtime       = "python3.12"
   handler       = "handler.lambda_handler"
-  # A single ESPN scoreboard call plus a DynamoDB Query on the rare tick
-  # that finds a candidate -- generous headroom over the common case
-  # (zero ESPN calls, near-instant) without approaching API Gateway's own
-  # 29s integration ceiling on the read path.
-  timeout     = 20
+  # Covers the LiveScoreRefresh trigger's worst case: one scoreboard call
+  # plus a per-event boxscore fetch for every event ESPN currently reports
+  # as live (parallelized, see live_scores.py's BOXSCORE_MAX_WORKERS) on a
+  # Sunday with several games live at once. GET /nfl/live-scores (the other
+  # trigger this same function serves) never approaches this -- it's just
+  # an S3 read, so this headroom doesn't risk API Gateway's own 29s
+  # integration ceiling on that path.
+  timeout     = 45
   memory_size = 256
 
   filename         = data.archive_file.nfl_live_scores_placeholder.output_path

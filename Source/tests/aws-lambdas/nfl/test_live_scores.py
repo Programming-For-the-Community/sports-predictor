@@ -64,6 +64,25 @@ def _espn_event(event_id: str, *, state: str, completed: bool, detail: str, home
     }
 
 
+def _espn_summary(event_id: str) -> dict:
+    return {
+        "header": {"id": event_id, "competitions": [{"date": "2026-09-14T17:00Z"}]},
+        "boxscore": {
+            "players": [{
+                "team": {"id": "10"},
+                "statistics": [{
+                    "name": "passing",
+                    "keys": ["completions/passingAttempts", "passingYards"],
+                    "athletes": [{
+                        "athlete": {"id": "100", "displayName": "QB One", "jersey": "9", "position": {"abbreviation": "QB"}},
+                        "stats": ["20/30", "250"],
+                    }],
+                }],
+            }],
+        },
+    }
+
+
 class TestCandidateEvents:
     def test_excludes_an_event_more_than_15_minutes_before_kickoff(self):
         now = datetime(2026, 9, 14, 17, 0, tzinfo=timezone.utc)
@@ -189,6 +208,72 @@ class TestRefresh:
 
         assert result == {"polled": 0}
         client.get_scoreboard_for_date.assert_not_called()
+
+
+class TestLivePlayerStats:
+    def test_a_live_candidates_boxscore_is_fetched_and_cached(self):
+        storage = MagicMock()
+        storage.get_all_events.return_value = [_event("1", datetime.now(timezone.utc).isoformat())]
+        client = MagicMock()
+        client.get_scoreboard_for_date.return_value = {
+            "events": [_espn_event("1", state="in", completed=False, detail="Q3", home_score="10", away_score="7")],
+        }
+        client.get_summary.return_value = _espn_summary("1")
+        s3 = _make_s3()
+
+        live_scores.refresh(storage, s3, BUCKET, client, SPORT)
+
+        client.get_summary.assert_called_once_with("1")
+        cached = json.loads(s3._store[live_scores.LIVE_SCORES_CACHE_KEY])
+        assert cached["events"]["1"]["player_stats"]["100"] == {
+            "completions": 20, "passing_attempts": 30, "passing_yards": 250,
+        }
+
+    def test_a_not_yet_live_candidate_never_fetches_a_boxscore(self):
+        storage = MagicMock()
+        storage.get_all_events.return_value = [_event("1", datetime.now(timezone.utc).isoformat())]
+        client = MagicMock()
+        client.get_scoreboard_for_date.return_value = {
+            "events": [_espn_event("1", state="pre", completed=False, detail="7:00 PM", home_score="0", away_score="0")],
+        }
+        s3 = _make_s3()
+
+        live_scores.refresh(storage, s3, BUCKET, client, SPORT)
+
+        client.get_summary.assert_not_called()
+
+    def test_a_boxscore_fetch_failure_omits_player_stats_but_does_not_fail_the_whole_refresh(self):
+        storage = MagicMock()
+        storage.get_all_events.return_value = [_event("1", datetime.now(timezone.utc).isoformat())]
+        client = MagicMock()
+        client.get_scoreboard_for_date.return_value = {
+            "events": [_espn_event("1", state="in", completed=False, detail="Q3", home_score="10", away_score="7")],
+        }
+        client.get_summary.side_effect = RuntimeError("ESPN hiccup")
+        s3 = _make_s3()
+
+        result = live_scores.refresh(storage, s3, BUCKET, client, SPORT)
+
+        assert result == {"polled": 1}
+        cached = json.loads(s3._store[live_scores.LIVE_SCORES_CACHE_KEY])
+        assert cached["events"]["1"]["live"] is True
+        assert cached["events"]["1"]["player_stats"] == {}
+
+    def test_live_player_stats_parses_the_boxscore_into_stat_lines_keyed_by_entity_id(self):
+        client = MagicMock()
+        client.get_summary.return_value = _espn_summary("1")
+
+        stats = live_scores._live_player_stats(client, SPORT, "1")
+
+        assert stats == {"100": {"completions": 20, "passing_attempts": 30, "passing_yards": 250}}
+
+    def test_live_player_stats_returns_empty_on_a_malformed_response_instead_of_raising(self):
+        client = MagicMock()
+        client.get_summary.return_value = {"unexpected": "shape"}
+
+        stats = live_scores._live_player_stats(client, SPORT, "1")
+
+        assert stats == {}
 
 
 class TestGetLiveScores:

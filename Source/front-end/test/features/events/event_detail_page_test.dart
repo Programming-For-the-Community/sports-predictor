@@ -5,6 +5,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:front_end/core/data/events_repository.dart';
 import 'package:front_end/core/data/live_scores_repository.dart';
 import 'package:front_end/core/models/event.dart';
+import 'package:front_end/core/models/event_leaders.dart';
 import 'package:front_end/core/models/live_score.dart';
 import 'package:front_end/core/models/prediction.dart';
 import 'package:front_end/features/events/event_detail_page.dart';
@@ -16,6 +17,23 @@ const _prediction = EventPrediction(
   homeScore: 27.3,
   awayScore: 22.8,
   leaders: null,
+);
+
+const _predictionWithLeaders = EventPrediction(
+  homeWinProbability: 0.62,
+  homeWinProbabilityModelVersion: 9,
+  margin: 4.5,
+  homeScore: 27.3,
+  awayScore: 22.8,
+  leaders: EventLeaders(
+    home: TeamLeaders(
+      passing: PlayerStatLine(entityId: '100', name: 'QB One', stats: {'passing_yards': 250}),
+      receiving: [],
+      rushing: [],
+      sacks: [],
+    ),
+    away: TeamLeaders(passing: null, receiving: [], rushing: [], sacks: []),
+  ),
 );
 
 SportEvent _scheduledEvent(String kickoff) => SportEvent(
@@ -116,6 +134,55 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(predictionCalls, greaterThan(initialCalls));
+  });
+
+  testWidgets('a live event shows predicted-vs-live-so-far leaders, not the predicted-only panel', (tester) async {
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          eventsListProvider.overrideWith((ref, query) async => query.status == 'scheduled' ? [_scheduledEvent('2026-09-14T17:00:00Z')] : []),
+          eventPredictionProvider.overrideWith((ref, query) async => _predictionWithLeaders),
+          liveScoresProvider.overrideWith((ref, sport) async => const {
+                '401547417': LiveEventState(
+                  live: true,
+                  detail: 'Q2 04:12',
+                  homeScore: 10,
+                  awayScore: 7,
+                  playerStats: {
+                    '100': {'passing_yards': 140},
+                  },
+                ),
+              }),
+        ],
+        child: const MaterialApp(home: Scaffold(body: EventDetailPage(sportId: 'nfl', eventId: '401547417'))),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('PLAYER LEADERS -- LIVE'), findsOneWidget);
+    expect(find.text('PLAYER LEADERS'), findsNothing);
+    // Predicted 250 still shown alongside the live-so-far 140 -- same
+    // "actual X (pred Y)" row TeamLeadersComparisonPanel already renders
+    // for a completed event, unmodified.
+    expect(find.textContaining('140'), findsOneWidget);
+    expect(find.textContaining('pred 250'), findsOneWidget);
+  });
+
+  testWidgets('a scheduled (not yet live) event with predicted leaders still shows the predicted-only panel', (tester) async {
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          eventsListProvider.overrideWith((ref, query) async => query.status == 'scheduled' ? [_scheduledEvent('2026-09-14T17:00:00Z')] : []),
+          eventPredictionProvider.overrideWith((ref, query) async => _predictionWithLeaders),
+          liveScoresProvider.overrideWith((ref, sport) async => const <String, LiveEventState>{}),
+        ],
+        child: const MaterialApp(home: Scaffold(body: EventDetailPage(sportId: 'nfl', eventId: '401547417'))),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('PLAYER LEADERS'), findsOneWidget);
+    expect(find.text('PLAYER LEADERS -- LIVE'), findsNothing);
   });
 
   testWidgets('a cold-cache-miss keeps retrying past a single retryAfterSeconds until the compute resolves', (tester) async {

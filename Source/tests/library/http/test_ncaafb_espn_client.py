@@ -24,3 +24,12 @@ class TestNcaafbEspnClient:
 
         client._get.assert_called_once_with("scoreboard", params={"dates": "20260906"})
         assert result == {"events": []}
+
+    def test_get_summary_passes_event_param(self):
+        client = NcaafbEspnClient.__new__(NcaafbEspnClient)
+        client._get = MagicMock(return_value={"header": {}})
+
+        result = client.get_summary("401520281")
+
+        client._get.assert_called_once_with("summary", params={"event": "401520281"})
+        assert result == {"header": {}}

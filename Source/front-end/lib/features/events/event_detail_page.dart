@@ -6,6 +6,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/data/events_repository.dart';
 import '../../core/data/live_scores_repository.dart';
 import '../../core/models/event.dart';
+import '../../core/models/event_leaders.dart';
 import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_text_styles.dart';
 import '../../core/widgets/matchup_hero.dart';
@@ -37,6 +38,10 @@ bool _withinPredictionPollWindow(SportEvent event) {
 /// `EventPrediction.leaders` stays nullable since it's a best-effort field
 /// server-side (see handler.py's _predict_event_leaders): the panel simply
 /// doesn't render if the backend couldn't compute it for a given event.
+/// Once the event is actually live, the same predicted leaders are instead
+/// shown against their own live-so-far stat line (see
+/// EventLeadersLiveComparison.toLiveComparison, sourced from the same
+/// live-scores poll below) rather than the plain predicted-only panel.
 ///
 /// A completed event does NOT call the live prediction endpoint -- same
 /// rule game_row.dart's own docstring documents for the list view: a
@@ -158,12 +163,20 @@ class _EventDetailPageState extends ConsumerState<EventDetailPage> {
             data: (prediction) {
               final leaders = prediction.leaders;
               final liveScores = ref.watch(liveScoresProvider(widget.sportId)).value ?? const {};
+              final liveState = liveScores[widget.eventId];
+              // Once the game is actually live, "predicted leaders" alone
+              // is stale framing -- swap to the same predicted-vs-actual
+              // panel a completed event uses, just fed this event's live
+              // (so-far, not final) stat lines instead of the box score
+              // ingest eventually writes. Falls back to the predicted-only
+              // panel before kickoff or if the live poll hasn't produced
+              // any player stats yet.
+              final liveComparison =
+                  leaders != null && liveState != null && liveState.live ? leaders.toLiveComparison(liveState.playerStats) : null;
               return Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  MatchupHero(
-                    sport: widget.sportId, event: event, prediction: prediction, liveState: liveScores[widget.eventId],
-                  ),
+                  MatchupHero(sport: widget.sportId, event: event, prediction: prediction, liveState: liveState),
                   if (prediction.stale) ...[
                     const SizedBox(height: 12),
                     Center(
@@ -173,7 +186,15 @@ class _EventDetailPageState extends ConsumerState<EventDetailPage> {
                       ),
                     ),
                   ],
-                  if (leaders != null) ...[
+                  if (liveComparison != null) ...[
+                    const SizedBox(height: 20),
+                    TeamLeadersComparisonPanel(
+                      homeAbbr: teamDisplay(widget.sportId, event.home).abbreviation,
+                      awayAbbr: teamDisplay(widget.sportId, event.away).abbreviation,
+                      comparison: liveComparison,
+                      title: 'PLAYER LEADERS -- LIVE',
+                    ),
+                  ] else if (leaders != null) ...[
                     const SizedBox(height: 20),
                     TeamLeadersPanel(
                       homeAbbr: teamDisplay(widget.sportId, event.home).abbreviation,

@@ -193,14 +193,24 @@ class _PlayerRow extends StatelessWidget {
 /// stat instead of a predicted-only value. Renders nothing (caller's job
 /// to skip it, same "don't render if null" rule TeamLeadersPanel's own
 /// caller already follows) when there's no comparison to show.
+///
+/// Also reused, unmodified, for a currently-live event's predicted-vs-
+/// so-far comparison (see EventLeadersLiveComparison.toLiveComparison in
+/// event_leaders.dart) -- `title` lets that caller swap in wording that
+/// doesn't claim a final result.
 class TeamLeadersComparisonPanel extends StatelessWidget {
   const TeamLeadersComparisonPanel({
-    super.key, required this.homeAbbr, required this.awayAbbr, required this.comparison,
+    super.key,
+    required this.homeAbbr,
+    required this.awayAbbr,
+    required this.comparison,
+    this.title = 'PLAYER PROPS -- PREDICTED VS ACTUAL',
   });
 
   final String homeAbbr;
   final String awayAbbr;
   final EventLeadersComparison comparison;
+  final String title;
 
   @override
   Widget build(BuildContext context) {
@@ -214,7 +224,7 @@ class TeamLeadersComparisonPanel extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text('PLAYER PROPS -- PREDICTED VS ACTUAL', style: AppTextStyles.microLabel()),
+          Text(title, style: AppTextStyles.microLabel()),
           const SizedBox(height: 16),
           _ResponsiveTeamColumns(
             away: _TeamLeadersComparisonColumn(label: awayAbbr, team: comparison.away),

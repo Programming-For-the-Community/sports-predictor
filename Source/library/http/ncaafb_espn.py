@@ -22,3 +22,15 @@ class NcaafbEspnClient(EspnBaseClient):
         specific candidates from our own event history, so extra
         non-FBS games in the response are simply never matched against."""
         return self._get("scoreboard", params={"dates": date})
+
+    def get_summary(self, event_id: str) -> dict:
+        """Live/current boxscore for one event -- same shape and endpoint
+        NFLClient.get_summary uses (library/http/nfl.py). This project's
+        own NCAAFB pipeline otherwise sources box scores from CFBD, not
+        ESPN (CFBD is not a live data source -- confirmed no in-progress
+        stats), but CFBD's own ids are already known to match ESPN's
+        exactly (see live-scores/live_scores.py's own docstring), so this
+        can be parsed through the same shared ESPN normalizer
+        (library.normalize.espn.boxscore_to_player_game_stats) with no id
+        crosswalk needed."""
+        return self._get("summary", params={"event": event_id})

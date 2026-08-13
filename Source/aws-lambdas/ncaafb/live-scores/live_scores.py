@@ -13,15 +13,35 @@ the same direct-lookup shape NFL's own module uses, no crosswalk needed.
 """
 import json
 import logging
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 
 from botocore.exceptions import ClientError
 
+from library.normalize.espn import boxscore_to_player_game_stats
 from library.parsing import parse_number
 
 logger = logging.getLogger("ncaafb-live-scores")
 
 LIVE_SCORES_CACHE_KEY = "ncaafb/cache/live-scores/latest.json"
+
+# Same values as NFL's own module (aws-lambdas/nfl/live-scores/live_scores.py)
+# -- ESPN's site API uses this same compound-stat-key shape across every
+# football sport it serves, not just NFL, and this project's own NCAAFB box
+# scores normally come from CFBD instead (see NcaafbEspnClient.get_summary's
+# own docstring for why this endpoint is used here anyway). Must stay in
+# sync with both NFL's copy here and normalize/handler.py's own.
+_COMPOUND_KEY_SPLITS: dict[str, tuple[str, str]] = {
+    "completions/passingAttempts": ("completions", "passing_attempts"),
+    "sacks-sackYardsLost": ("sacks_taken", "sack_yards_lost"),
+    "fieldGoalsMade/fieldGoalAttempts": ("field_goals_made", "field_goal_attempts"),
+    "extraPointsMade/extraPointAttempts": ("extra_points_made", "extra_point_attempts"),
+}
+
+# Same reasoning as NFL's own module -- a Saturday with several games live
+# at once shouldn't pay each event's own boxscore-fetch latency serially
+# against this Lambda's own timeout.
+BOXSCORE_MAX_WORKERS = 10
 
 # Same values as NFL's own module -- see that file's own comments for the
 # reasoning (15 minutes catches an early kickoff without waiting on the
@@ -82,6 +102,21 @@ def _extract_live_state(espn_event: dict) -> dict:
     }
 
 
+def _live_player_stats(client, sport: str, event_id: str) -> dict[str, dict]:
+    """Same reasoning as NFL's own module -- best-effort entity_id ->
+    stat_line for one currently-live event, from ESPN's own boxscore/
+    summary endpoint. Empty on any fetch/parse failure rather than
+    raising -- one bad event shouldn't cost every other live event its
+    own score/stat refresh this tick."""
+    try:
+        summary = client.get_summary(event_id)
+        stats_items, _ = boxscore_to_player_game_stats(summary, sport, _COMPOUND_KEY_SPLITS)
+        return {item["entity_id"]: item["stat_line"] for item in stats_items}
+    except Exception:
+        logger.exception("Failed fetching live box score for event %s -- omitting player_stats this tick", event_id)
+        return {}
+
+
 def refresh(storage, s3, bucket: str, client, sport: str) -> dict:
     """Called on every LiveScoreRefresh tick -- see scheduler-ncaafb-live-
     scores.tf. Cheap on every tick where nothing is in its live window,
@@ -104,12 +139,28 @@ def refresh(storage, s3, bucket: str, client, sport: str) -> dict:
     espn_events_by_id = {e["id"]: e for e in scoreboard.get("events", [])}
 
     events_out = {}
+    live_event_ids = []
     for event in candidates:
         espn_event = espn_events_by_id.get(event["event_id"])
         if espn_event is None:
             logger.warning("Candidate event %s not found in today's ESPN scoreboard -- skipping", event["event_id"])
             continue
-        events_out[event["event_id"]] = _extract_live_state(espn_event)
+        state = _extract_live_state(espn_event)
+        events_out[event["event_id"]] = state
+        if state["live"]:
+            live_event_ids.append(event["event_id"])
+
+    # Boxscore fetch is its own ESPN call per event, unlike the score/status
+    # above -- only worth paying for an event ESPN itself confirms is
+    # actually being played right now, not merely in the poll window.
+    if live_event_ids:
+        with ThreadPoolExecutor(max_workers=min(len(live_event_ids), BOXSCORE_MAX_WORKERS)) as executor:
+            player_stats_by_event = dict(zip(
+                live_event_ids,
+                executor.map(lambda event_id: _live_player_stats(client, sport, event_id), live_event_ids),
+            ))
+        for event_id, player_stats in player_stats_by_event.items():
+            events_out[event_id]["player_stats"] = player_stats
 
     _put_cache(s3, bucket, {"fetched_at": now.isoformat(), "events": events_out})
     logger.info("Refreshed live state for %d event(s)", len(events_out))

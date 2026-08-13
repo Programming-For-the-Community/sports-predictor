@@ -9,6 +9,7 @@ class LiveEventState {
     required this.detail,
     required this.homeScore,
     required this.awayScore,
+    this.playerStats = const {},
   });
 
   // False for an event in its poll window but that hasn't actually
@@ -20,11 +21,22 @@ class LiveEventState {
   final String? detail;
   final double? homeScore;
   final double? awayScore;
+  // entity_id -> stat_line, from ESPN's own live boxscore -- only ever
+  // populated while `live` is true (see live_scores.py's own refresh()),
+  // absent entirely otherwise, same "not fetched this tick" meaning an
+  // absent key already carries elsewhere in this model.
+  final Map<String, Map<String, double>> playerStats;
 
   factory LiveEventState.fromJson(Map<String, dynamic> json) => LiveEventState(
         live: json['live'] as bool,
         detail: json['detail'] as String?,
         homeScore: (json['home_score'] as num?)?.toDouble(),
         awayScore: (json['away_score'] as num?)?.toDouble(),
+        playerStats: (json['player_stats'] as Map<String, dynamic>? ?? {}).map(
+          (entityId, statLine) => MapEntry(
+            entityId,
+            (statLine as Map<String, dynamic>).map((key, value) => MapEntry(key, (value as num).toDouble())),
+          ),
+        ),
       );
 }

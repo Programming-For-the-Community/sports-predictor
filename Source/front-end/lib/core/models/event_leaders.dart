@@ -59,6 +59,41 @@ class EventLeaders {
       );
 }
 
+/// Builds an EventLeadersComparison entirely client-side, from the
+/// predicted `leaders` block plus GET /{sport}/live-scores' own
+/// `player_stats` (LiveEventState.playerStats) -- no separate backend
+/// endpoint for this: the predicted side never changes mid-game, and the
+/// "actual" side is just whatever the same live-scores poll this page
+/// already runs every 30s (event_detail_page.dart) most recently fetched.
+/// Reuses PlayerStatLineComparison/TeamLeadersComparison/
+/// EventLeadersComparison verbatim -- an in-progress player's live totals
+/// are exactly as much an "actual" value as a completed game's final ones,
+/// just not yet final.
+extension EventLeadersLiveComparison on EventLeaders {
+  EventLeadersComparison toLiveComparison(Map<String, Map<String, double>> playerStats) => EventLeadersComparison(
+        home: home.toLiveComparison(playerStats),
+        away: away.toLiveComparison(playerStats),
+      );
+}
+
+extension TeamLeadersLiveComparison on TeamLeaders {
+  TeamLeadersComparison toLiveComparison(Map<String, Map<String, double>> playerStats) => TeamLeadersComparison(
+        passing: passing?.toLiveComparison(playerStats),
+        receiving: receiving.map((player) => player.toLiveComparison(playerStats)).toList(),
+        rushing: rushing.map((player) => player.toLiveComparison(playerStats)).toList(),
+        sacks: sacks.map((player) => player.toLiveComparison(playerStats)).toList(),
+      );
+}
+
+extension PlayerStatLineLiveComparison on PlayerStatLine {
+  PlayerStatLineComparison toLiveComparison(Map<String, Map<String, double>> playerStats) => PlayerStatLineComparison(
+        entityId: entityId,
+        name: name,
+        predicted: stats,
+        actual: playerStats[entityId] ?? const {},
+      );
+}
+
 /// Mirrors the `leaders_comparison` block on a completed event from
 /// GET /{sport}/events?status=completed (see
 /// Source/library/serving/nfl_reads.py's _leaders_comparison) --
