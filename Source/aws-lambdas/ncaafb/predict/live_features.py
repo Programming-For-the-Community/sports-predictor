@@ -26,6 +26,8 @@ optional pass-through accepted by every public function here and threaded
 into get_team_events/_live_elo_ratings calls, so one event-prediction
 request can share a single fetch instead of each function re-querying.
 """
+from concurrent.futures import ThreadPoolExecutor
+
 from library.features.common import DEFAULT_STARTING_RATING, compute_elo_ratings
 from library.features.ncaafb import (
     build_event_features,
@@ -226,10 +228,20 @@ def _box_score_candidate_ids(
 ) -> list[str]:
     """Every still-rostered entity_id credited with stat_key at least once in team_id's box
     score history, walking most-recent-first, bounded the same as _presumptive_leader
-    (current season plus SEASON_LOOKBACK prior)."""
+    (current season plus SEASON_LOOKBACK prior).
+
+    Two phases: first collect every distinct candidate id from box scores
+    (cheap, no I/O beyond the already-fetched events/box-score rows),
+    then check roster membership (_still_on_team, one GetItem each)
+    concurrently -- a real, reported source of live-request latency when
+    sequential, since a team's SEASON_LOOKBACK-bounded box-score history
+    can hold dozens of distinct candidates for a single category. Unlike
+    _presumptive_leader below, there's no early exit to lose here -- this
+    function always needs every candidate's roster status, not just the
+    first match, so concurrency is a clean win with no wasted work."""
     team_events = storage.get_team_events(sport, team_id, before_date=before_date, events=events)
     seen: set[str] = set()
-    candidate_ids: list[str] = []
+    ordered_ids: list[str] = []
     for event in team_events:
         season = event.get("season")
         if season is not None and current_season is not None and season < current_season - SEASON_LOOKBACK:
@@ -239,9 +251,16 @@ def _box_score_candidate_ids(
             if entity_id is None or entity_id in seen or stat_key not in row.get("stat_line", {}):
                 continue
             seen.add(entity_id)
-            if _still_on_team(storage, sport, entity_id, team_id):
-                candidate_ids.append(entity_id)
-    return candidate_ids
+            ordered_ids.append(entity_id)
+
+    if not ordered_ids:
+        return []
+    with ThreadPoolExecutor(max_workers=min(len(ordered_ids), 16)) as executor:
+        still_rostered = dict(zip(
+            ordered_ids,
+            executor.map(lambda entity_id: _still_on_team(storage, sport, entity_id, team_id), ordered_ids),
+        ))
+    return [entity_id for entity_id in ordered_ids if still_rostered[entity_id]]
 
 
 def _recent_volume(storage, entity_id: str, stat: str, before_date: str, window: int) -> tuple[float, list[dict]]:

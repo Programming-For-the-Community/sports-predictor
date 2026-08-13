@@ -35,5 +35,14 @@ void main() {
       final border = _decorationOf(tester).border! as Border;
       expect(border.top.color.a, closeTo(0.85, 0.001));
     });
+
+    testWidgets('renders nothing at all for a team with no official color', (tester) async {
+      // A team with no real brand color on record (any non-NFL team --
+      // see static/nfl_team_colors.dart's own doc comment) omits the dot
+      // entirely rather than a guessed/hashed placeholder.
+      await tester.pumpWidget(const MaterialApp(home: Scaffold(body: TeamColorDot(color: null))));
+
+      expect(find.byType(Container), findsNothing);
+    });
   });
 }

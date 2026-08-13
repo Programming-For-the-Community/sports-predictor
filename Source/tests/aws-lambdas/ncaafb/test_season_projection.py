@@ -146,6 +146,19 @@ class TestSeasonStandingsInputs:
         assert inputs["games_remaining"]["12"] == 2
 
 
+class TestCurrentRankings:
+    def test_ranks_teams_by_ascending_score_lower_is_better(self):
+        season_inputs = {
+            "wins": {"a": 5, "b": 5, "c": 5}, "losses": {"a": 0, "b": 0, "c": 0},
+            "current_ratings": {"a": 1500.0, "b": 1500.0, "c": 1500.0},
+            "avg_points_scored": {}, "avg_points_allowed": {}, "win_streak": {}, "strength_of_schedule": {},
+        }
+        with patch.object(season_projection, "_batch_score_teams", return_value={"a": 2.0, "b": 0.5, "c": 1.0}):
+            rankings = season_projection._current_rankings(MagicMock(), _model_card(1), ["a", "b", "c"], season_inputs)
+
+        assert rankings == {"b": 1, "c": 2, "a": 3}
+
+
 class TestScheduledSeasonProjection:
     """GET /ncaafb/season is served from predict-read/handler.py, not
     here -- this Lambda instead computes the projection on Terraform/
@@ -228,11 +241,45 @@ class TestScheduledSeasonProjection:
         }[status]
 
         simulated = {f"t{i}": {"projected_wins": 8.0, "conference_champion_probability": 0.1, "bowl_probability": 0.6, "playoff_probability": 0.2, "championship_probability": 0.01} for i in range(12)}
+        # _batch_score_teams is also what powers _current_rankings' own
+        # extra (non-simulated) scoring pass -- mocked directly rather
+        # than routed through a real adapter/estimator, same reasoning
+        # simulate_season itself is mocked here.
+        scores = {f"t{i}": float(i) for i in range(12)}
 
         with patch.object(model_loader, "load_current_model", return_value=(MagicMock(), _model_card(1))), \
-             patch.object(season_simulation, "simulate_season", return_value=simulated) as simulate_season:
+             patch.object(season_simulation, "simulate_season", return_value=simulated) as simulate_season, \
+             patch.object(season_projection, "_batch_score_teams", return_value=scores):
             ncaafb_predict.lambda_handler({"detail-type": "ScheduledSeasonProjection"}, None)
 
         simulate_season.assert_called_once()
         body = ncaafb_predict._model_bucket.put_json.call_args[0][1]
         assert body["standings"][0]["projected_wins"] == 8.0
+        # t0 has the lowest (best) score -- rank 1.
+        by_team = {row["team_id"]: row for row in body["standings"]}
+        assert by_team["t0"]["current_rank"] == 1
+        assert by_team["t11"]["current_rank"] == 12
+
+    def test_a_current_rankings_failure_does_not_lose_the_rest_of_the_run(self):
+        # Regression: current_rank is computed in its own try/except,
+        # separate from simulate_season above it -- a bug here shouldn't
+        # cost the run its already-working simulation output, and
+        # standings should still get written (just without current_rank)
+        # rather than the whole invocation failing.
+        ncaafb_predict._storage = MagicMock()
+        ncaafb_predict._model_bucket = MagicMock()
+        ncaafb_predict._storage.get_all_events.side_effect = lambda sport, status: {
+            "completed": self.TWELVE_TEAM_EVENTS,
+            "scheduled": [],
+        }[status]
+        simulated = {f"t{i}": {"projected_wins": 8.0, "conference_champion_probability": 0.1, "bowl_probability": 0.6, "playoff_probability": 0.2, "championship_probability": 0.01} for i in range(12)}
+
+        with patch.object(model_loader, "load_current_model", return_value=(MagicMock(), _model_card(1))), \
+             patch.object(season_simulation, "simulate_season", return_value=simulated), \
+             patch.object(season_projection, "_current_rankings", side_effect=KeyError("boom")):
+            response = ncaafb_predict.lambda_handler({"detail-type": "ScheduledSeasonProjection"}, None)
+
+        assert response == {"status": "ok"}
+        body = ncaafb_predict._model_bucket.put_json.call_args[0][1]
+        assert body["standings"][0]["projected_wins"] == 8.0
+        assert body["standings"][0]["current_rank"] is None

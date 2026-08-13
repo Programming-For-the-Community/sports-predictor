@@ -5,12 +5,22 @@ import 'event_leaders.dart';
 class ParticipantResult {
   const ParticipantResult({required this.score, required this.won});
 
-  final double score;
-  final bool won;
+  // Both nullable -- NFL's own normalize (espn.py) fills a not-yet-played
+  // game's score with ESPN's literal "0"/false rather than omitting it,
+  // so `result` itself being non-null was previously treated as "the
+  // game finished" everywhere this gets read. NCAAFB's normalize
+  // (ncaafb.py's game_to_event_item) instead leaves score/won genuinely
+  // None pre-game -- deliberately, CFBD really has no score to report --
+  // so `result` is non-null there even for a scheduled event, with these
+  // two fields null inside it. Every caller already reads these via `?.`
+  // (result itself was already nullable), so widening just these two to
+  // match costs nothing at the call sites.
+  final double? score;
+  final bool? won;
 
   factory ParticipantResult.fromJson(Map<String, dynamic> json) => ParticipantResult(
-        score: (json['score'] as num).toDouble(),
-        won: json['won'] as bool,
+        score: (json['score'] as num?)?.toDouble(),
+        won: json['won'] as bool?,
       );
 }
 

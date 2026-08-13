@@ -13,6 +13,7 @@ class TeamStanding {
     required this.playoffProbability,
     required this.championshipProbability,
     this.abbreviation,
+    this.currentRank,
   });
 
   final String teamId;
@@ -21,6 +22,13 @@ class TeamStanding {
   // abbreviation. season_page.dart's _StandingsRow uses this via
   // teamDisplayFor, the same fallback rule teamDisplay applies to events.
   final String? abbreviation;
+  // NCAAFB only -- today's actual (not simulated) National Ranking
+  // position, 1-based (see aws-lambdas/ncaafb/predict/season_projection.
+  // py's _current_rankings). Null for NFL (no such model/concept) and for
+  // NCAAFB whenever the ranking model isn't promoted yet or fewer than
+  // CFP_FIELD_SIZE teams are tracked -- same routine-not-error absence as
+  // every other simulation-derived field on this class.
+  final int? currentRank;
   // "AFC East"/"NFC West"/etc for NFL, or the team's conference ("SEC"/
   // "Big Ten"/etc, NCAAFB has no division concept) for every other sport
   // -- see fromJson below for which backend key each maps from. Used to
@@ -74,6 +82,7 @@ class TeamStanding {
         playoffProbability: (json['playoff_probability'] as num?)?.toDouble() ?? 0.0,
         championshipProbability: (json['championship_probability'] as num?)?.toDouble() ?? 0.0,
         abbreviation: json['abbreviation'] as String?,
+        currentRank: json['current_rank'] as int?,
       );
 }
 

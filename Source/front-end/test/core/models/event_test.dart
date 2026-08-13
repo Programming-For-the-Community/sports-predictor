@@ -25,6 +25,29 @@ void main() {
     expect(event.round, isNull);
   });
 
+  test('a non-null result with a null score/won (NCAAFB scheduled event) parses instead of throwing', () {
+    // NCAAFB's own normalize (game_to_event_item) always attaches a
+    // `result` object, even pre-game -- score/won are left null rather
+    // than omitted (CFBD genuinely has no score to report yet), unlike
+    // NFL's ESPN-sourced "0"/false placeholder. This exact shape once
+    // threw a cast error (`(json['score'] as num)` rejects null) --
+    // regression coverage for that.
+    final event = SportEvent.fromJson({
+      'event_id': '401872926',
+      'event_date': '2026-08-30',
+      'status': 'scheduled',
+      'week': 1,
+      'participants': [
+        {'entity_id': '333', 'role': 'home', 'result': {'score': null, 'won': null}},
+        {'entity_id': '61', 'role': 'away', 'result': {'score': null, 'won': null}},
+      ],
+    });
+
+    expect(event.home.result, isNotNull);
+    expect(event.home.result!.score, isNull);
+    expect(event.home.result!.won, isNull);
+  });
+
   test('kickoffTime is null when absent (an event ingested before it existed)', () {
     final event = SportEvent.fromJson({
       'event_id': '401547417',

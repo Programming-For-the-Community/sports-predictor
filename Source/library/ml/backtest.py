@@ -24,6 +24,25 @@ from library.ml.model_types import ModelAdapter
 logger = logging.getLogger("model-training")
 
 
+def _is_worse_than_baseline(metadata: dict, naive_baseline_metrics: dict, promotion_metric: str) -> bool | None:
+    """None if there's no baseline value comparable to promotion_metric at
+    all -- win-probability's own naive_baseline_metrics only ever computes
+    naive_baseline_accuracy, never a baseline log_loss (see
+    train_win_probability_model.py's own SUMMARY_METRICS) -- True/False
+    otherwise. A lower-is-better metric (rmse/log_loss) compares directly
+    against its own naive_baseline_<metric> counterpart when one exists;
+    log_loss falls back to accuracy vs. naive_baseline_accuracy (the only
+    baseline signal a classification target actually has) when its own
+    baseline isn't available. Warn-only, never blocks promotion -- see
+    run_backtest's own docstring for why."""
+    baseline_key = f"naive_baseline_{promotion_metric}"
+    if baseline_key in naive_baseline_metrics:
+        return metadata[promotion_metric] > naive_baseline_metrics[baseline_key]
+    if promotion_metric == "log_loss" and "naive_baseline_accuracy" in naive_baseline_metrics and "accuracy" in metadata:
+        return metadata["accuracy"] < naive_baseline_metrics["naive_baseline_accuracy"]
+    return None
+
+
 def run_backtest(
     s3: S3Manager,
     sport: str,
@@ -52,56 +71,51 @@ def run_backtest(
     run_id picks up where it left off instead of redoing already-decided
     candidates.
 
-    Every candidate gets tuned and fit on the identical holdout split, but
-    candidates are no longer compared only against EACH OTHER at the end
-    -- each one is compared against whatever's live the moment it
-    finishes, one at a time, in candidate list order:
+    Every candidate gets tuned and fit on the identical holdout split, and
+    every candidate -- including the first -- is compared against
+    whatever's CURRENTLY HOSTED right now (training_common.
+    would_beat_current/promote_if_better both read the live current.json
+    pointer fresh, never a cached value from earlier in this run) the
+    moment it finishes, in candidate list order. Only replaces what's
+    live if it's genuinely at least as good (no percentage tolerance --
+    see promote_if_better's own docstring for why an earlier version of
+    this rule that allowed a slightly worse candidate through effectively
+    let whichever algorithm ran LAST in CANDIDATES list order win by
+    default). An earlier candidate's own win in THIS SAME run is a real
+    comparison target for a later one, same as a previous month's
+    production version would be.
 
-      - The FIRST candidate to finish IN THIS RUN always becomes the new
-        production version, unconditionally (training_common.
-        force_promote) -- whatever was live before this run doesn't get a
-        say. This is deliberate: it guarantees a run interrupted after
-        just one candidate (a Fargate Spot reclaim, most likely, on a
-        training task that can run 30-45+ minutes) still leaves a
-        freshly-trained version live rather than losing the whole run's
-        progress. A weak first candidate can only stay live if nothing
-        after it beats it. "first candidate in this run" is tracked via
-        the run's own progress breadcrumb (force_promoted), not simply
-        candidate-list index 0 -- if this is a resumed attempt and an
-        earlier attempt already force-promoted a candidate, the first
-        NEW candidate this attempt evaluates does NOT get force-promoted
-        again; it's compared against whatever's now live like any other
-        later candidate.
-      - Every candidate AFTER the run's own first is compared against
-        whatever's CURRENTLY HOSTED right now (training_common.
-        would_beat_current/promote_if_better both read the live
-        current.json pointer fresh, never a cached value from earlier in
-        this run) -- not guaranteed to be the same version this run's
-        first candidate produced, since a later candidate may have
-        already replaced it earlier in this same run. Only replaces what's
-        live if it actually beats it, same PROMOTION_TOLERANCE rule as
-        before -- so later candidates still can't regress production.
+    No candidate is ever force-promoted unconditionally, including the
+    run's first -- a Fargate Spot reclaim right after the first candidate
+    finishes just means that candidate is versioned (if it won) or
+    skipped (if it lost) like any other; resumability itself comes from
+    the run-progress breadcrumb below, not from guaranteeing something
+    new goes live regardless of quality.
 
-    A candidate that doesn't win is never persisted to S3 at all -- same
-    storage-economy reasoning as before: with 4-5 candidates per target
-    and 11+ targets, versioning every losing candidate would mean dozens
-    of S3 objects nothing ever reads again. Every promoted card carries a
-    `candidates` summary of every algorithm evaluated SO FAR this run
-    (including ones evaluated in an earlier, interrupted attempt of the
-    same run_id -- not the full tournament, since candidates after it
-    haven't run yet), ranked best-first by promotion_metric (the correct
-    scoring rule) but DISPLAYING accuracy (classification) or mae
-    (regression) instead -- human-readable, unlike log_loss/rmse.
+    A candidate that doesn't win is never persisted to S3 at all -- with
+    4-5 candidates per target and 11+ targets, versioning every losing
+    candidate would mean dozens of S3 objects nothing ever reads again.
+    Every promoted card carries a `candidates` summary of every algorithm
+    evaluated SO FAR this run (including ones evaluated in an earlier,
+    interrupted attempt of the same run_id -- not the full tournament,
+    since candidates after it haven't run yet), ranked best-first by
+    promotion_metric (the correct scoring rule) but DISPLAYING accuracy
+    (classification) or mae (regression) instead -- human-readable,
+    unlike log_loss/rmse. A winning candidate whose promotion_metric is
+    worse than the naive baseline gets a loud warning logged (see
+    _is_worse_than_baseline) -- not blocked, since a genuinely hard-to-
+    beat target (e.g. a very sparse player-prop stat) can leave every
+    real candidate worse than a trivial baseline, and refusing to
+    promote anything at all would be a worse outcome than a visibly-
+    flagged weak model.
 
-    Progress (which candidates have been evaluated, their scores, and
-    whether this run has force-promoted its first candidate yet) is
-    written to S3 after every single candidate -- win, lose, or the run's
-    own force-promotion -- via training_common.save_run_progress, so a
-    task interrupted between any two candidates resumes without redoing
-    either the tuning/fitting or the promotion decision for candidates
-    already settled. The breadcrumb is deleted (training_common.
-    clear_run_progress) once every candidate in the list has been
-    evaluated -- nothing left to resume.
+    Progress (which candidates have been evaluated and their scores) is
+    written to S3 after every single candidate -- win or lose -- via
+    training_common.save_run_progress, so a task interrupted between any
+    two candidates resumes without redoing either the tuning/fitting or
+    the promotion decision for candidates already settled. The breadcrumb
+    is deleted (training_common.clear_run_progress) once every candidate
+    in the list has been evaluated -- nothing left to resume.
 
     Returns {"promotions": [model_card, ...], "candidates": [summary, ...]}
     -- promotions lists, in the order they happened across the WHOLE run
@@ -117,18 +131,16 @@ def run_backtest(
     if progress is None:
         evaluated = []
         promotions = []
-        force_promoted = False
     else:
         evaluated = progress["evaluated"]
         promotions = progress["promotions"]
-        force_promoted = progress["force_promoted"]
         logger.info(
             "Resuming %s/%s run %s -- %d candidate(s) already settled by an earlier attempt.",
             sport, model_name, run_id, len(evaluated),
         )
     already_evaluated = {entry["algorithm"] for entry in evaluated}
 
-    for index, adapter in enumerate(candidates):
+    for adapter in candidates:
         if adapter.algorithm in already_evaluated:
             logger.info(
                 "Skipping %s/%s candidate %s -- already settled by an earlier attempt of run %s.",
@@ -178,35 +190,32 @@ def run_backtest(
             "candidates_ranked_by": promotion_metric,
         }
 
-        # Gated on the run's own persisted force_promoted flag, NOT this
-        # loop's index -- see the docstring above on why index alone
-        # breaks resumability (a resumed attempt's first NEW candidate is
-        # not necessarily the run's first candidate overall).
-        is_first_of_run = not force_promoted
-        if not is_first_of_run and not training_common.would_beat_current(s3, sport, model_name, metadata, promotion_metric):
+        if not training_common.would_beat_current(s3, sport, model_name, metadata, promotion_metric):
             logger.info(
                 "%s/%s candidate %s did not beat current production -- not persisted, moving to next candidate.",
                 sport, model_name, adapter.algorithm,
             )
-            training_common.save_run_progress(s3, sport, model_name, run_id, evaluated, promotions, force_promoted)
+            training_common.save_run_progress(s3, sport, model_name, run_id, evaluated, promotions)
             continue
+
+        worse_than_baseline = _is_worse_than_baseline(metadata, naive_baseline_metrics, promotion_metric)
+        if worse_than_baseline:
+            logger.warning(
+                "%s/%s candidate %s is about to be promoted despite scoring WORSE than the naive baseline "
+                "on %s -- likely means this target isn't learnable with current features/data, not "
+                "necessarily a training bug. Promoting anyway (still beats/ties current production).",
+                sport, model_name, adapter.algorithm, promotion_metric,
+            )
 
         card = training_common.save_model_artifact(
             s3, sport, model_name, adapter.algorithm,
             adapter.serialize(estimator), adapter.artifact_filename,
             metadata, summary_metrics,
         )
-        if is_first_of_run:
-            training_common.force_promote(s3, sport, model_name, card["version"])
-            force_promoted = True
-        else:
-            training_common.promote_if_better(s3, sport, model_name, card["version"], metadata, promotion_metric)
+        training_common.promote_if_better(s3, sport, model_name, card["version"], metadata, promotion_metric)
         promotions.append(card)
-        training_common.save_run_progress(s3, sport, model_name, run_id, evaluated, promotions, force_promoted)
-        logger.info(
-            "%s/%s: %s (v%d) is now live, immediately -- before the remaining %d candidate(s) run.",
-            sport, model_name, adapter.algorithm, card["version"], len(candidates) - index - 1,
-        )
+        training_common.save_run_progress(s3, sport, model_name, run_id, evaluated, promotions)
+        logger.info("%s/%s: %s (v%d) is now live.", sport, model_name, adapter.algorithm, card["version"])
 
     training_common.clear_run_progress(s3, sport, model_name, run_id)
     return {"promotions": promotions, "candidates": sorted(evaluated, key=lambda e: e["rank_score"])}

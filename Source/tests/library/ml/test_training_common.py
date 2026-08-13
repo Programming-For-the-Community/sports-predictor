@@ -92,12 +92,27 @@ class TestPromoteIfBetter:
         assert promoted is True
         mock_s3.put_json.assert_called_once_with("nfl/win-probability/current.json", {"version": 6})
 
-    def test_promotes_when_within_tolerance_but_slightly_worse(self):
+    def test_holds_back_even_a_slight_regression(self):
+        # No percentage tolerance -- a candidate must be genuinely at
+        # least as good, not just "not too much worse." An earlier
+        # version of this function allowed up to 2% worse through, which
+        # meant nearly every candidate passed regardless of true quality
+        # (see promote_if_better's own docstring for the full story).
         mock_s3 = MagicMock()
         mock_s3.object_exists.return_value = True
         mock_s3.get_json.return_value = {"version": 5, "log_loss": 0.620}
 
         promoted = training_common.promote_if_better(mock_s3, "nfl", "win-probability", 6, {"log_loss": 0.626}, "log_loss")
+
+        assert promoted is False
+        mock_s3.put_json.assert_not_called()
+
+    def test_promotes_on_an_exact_tie(self):
+        mock_s3 = MagicMock()
+        mock_s3.object_exists.return_value = True
+        mock_s3.get_json.return_value = {"version": 5, "log_loss": 0.620}
+
+        promoted = training_common.promote_if_better(mock_s3, "nfl", "win-probability", 6, {"log_loss": 0.620}, "log_loss")
 
         assert promoted is True
 
@@ -195,29 +210,6 @@ class TestWouldBeatCurrent:
         mock_s3.put_json.assert_not_called()
 
 
-class TestForcePromote:
-    """Unconditional pointer flip -- used by run_backtest for the first
-    candidate in a tournament run only, so a run interrupted after one
-    candidate still leaves that version live."""
-
-    def test_writes_the_pointer_with_no_comparison(self):
-        mock_s3 = MagicMock()
-
-        training_common.force_promote(mock_s3, "nfl", "win-probability", 6)
-
-        mock_s3.put_json.assert_called_once_with("nfl/win-probability/current.json", {"version": 6})
-        # Unlike promote_if_better, force_promote never reads anything to
-        # compare against first.
-        mock_s3.get_json.assert_not_called()
-
-    def test_scopes_the_pointer_key_to_the_given_sport(self):
-        mock_s3 = MagicMock()
-
-        training_common.force_promote(mock_s3, "nba", "win-probability", 1)
-
-        mock_s3.put_json.assert_called_once_with("nba/win-probability/current.json", {"version": 1})
-
-
 class TestResolveRunId:
     """Threaded through to library.ml.backtest.run_backtest as its
     resumable-progress breadcrumb key -- see load_run_progress/
@@ -257,23 +249,23 @@ class TestRunProgress:
     def test_load_returns_the_stored_breadcrumb(self):
         mock_s3 = MagicMock()
         mock_s3.object_exists.return_value = True
-        mock_s3.get_json.return_value = {"evaluated": [{"algorithm": "xgboost"}], "promotions": [], "force_promoted": True}
+        mock_s3.get_json.return_value = {"evaluated": [{"algorithm": "xgboost"}], "promotions": []}
 
         progress = training_common.load_run_progress(mock_s3, "nfl", "win-probability", "run-1")
 
-        assert progress["force_promoted"] is True
+        assert progress["evaluated"] == [{"algorithm": "xgboost"}]
         mock_s3.get_json.assert_called_once_with("training-runs/nfl/win-probability/run-1/progress.json")
 
-    def test_save_writes_evaluated_promotions_and_force_promoted_flag(self):
+    def test_save_writes_evaluated_and_promotions(self):
         mock_s3 = MagicMock()
         evaluated = [{"algorithm": "xgboost", "score": 0.9, "rank_score": 0.05}]
         promotions = [{"algorithm": "xgboost", "version": 5}]
 
-        training_common.save_run_progress(mock_s3, "nfl", "win-probability", "run-1", evaluated, promotions, True)
+        training_common.save_run_progress(mock_s3, "nfl", "win-probability", "run-1", evaluated, promotions)
 
         mock_s3.put_json.assert_called_once_with(
             "training-runs/nfl/win-probability/run-1/progress.json",
-            {"evaluated": evaluated, "promotions": promotions, "force_promoted": True},
+            {"evaluated": evaluated, "promotions": promotions},
         )
 
     def test_clear_deletes_the_breadcrumb(self):

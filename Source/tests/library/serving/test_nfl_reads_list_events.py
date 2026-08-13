@@ -156,6 +156,23 @@ class TestListEvents:
         assert comparison["actual_home_score"] == 24
         assert comparison["actual_away_score"] == 17
 
+    def test_completed_event_queries_the_predictions_table_exactly_once(self):
+        # prediction_comparison and leaders_comparison used to each
+        # independently re-query the same event_key partition -- one
+        # request per event, not two, and (with several completed events)
+        # concurrently, not a long fully-serialized chain. See
+        # nfl_reads.list_events' own comment for why.
+        storage = MagicMock()
+        predictions_table = MagicMock()
+        predictions_table.query.return_value = [
+            _prediction_row("MODEL#win-probability#v1", {"home_win_probability": 0.6, "model_version": 1}),
+        ]
+        storage.get_all_events.return_value = [_completed_event("EVT#1", 2025, "12", "13", 24, 17)]
+
+        nfl_reads.list_events(storage, predictions_table, "nfl", "completed")
+
+        predictions_table.query.assert_called_once()
+
     def test_excludes_the_pro_bowl_from_the_list(self):
         storage = MagicMock()
         storage.get_all_events.return_value = [

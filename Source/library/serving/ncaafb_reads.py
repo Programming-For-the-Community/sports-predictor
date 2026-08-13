@@ -62,6 +62,20 @@ def _home_and_away(event: dict) -> tuple[str, str] | None:
 
 
 def _week_key(event: dict) -> tuple:
+    """Groups events into what the frontend shows as one "week" --
+    postseason games key by their own event_date, not `week`: confirmed
+    live that CFBD's postseason week numbering is flat (every bowl/CFP
+    round across an entire season comes back as week=1, spanning Dec-Jan),
+    so keying postseason by `week` the same way regular season does was
+    silently grouping the ENTIRE bracket -- 11+ games spanning a full
+    month -- as one "most recently completed week" (confirmed live: a
+    real CFP semifinal from 11 days earlier was showing up alongside the
+    actual championship game, both generically labeled "CFP" with no way
+    to tell them apart). event_date isolates each round correctly instead,
+    since a postseason round's own games all share a date, and rounds
+    virtually never overlap. Regular season keeps `week`, unaffected."""
+    if event.get("season_type") == "postseason":
+        return (event.get("season"), event.get("season_type"), event.get("event_date"))
     return (event.get("season"), event.get("season_type"), event.get("week"))
 
 
@@ -118,16 +132,19 @@ def _actual_result(event: dict) -> dict | None:
     return {"home_score": home_score, "away_score": away_score, "home_won": home_score > away_score}
 
 
-def _prediction_comparison(predictions_table, event: dict) -> dict | None:
+def _prediction_comparison(rows: list[dict], event: dict) -> dict | None:
     """Compares this event's logged prediction against the actual result
     -- reads the audit trail predict/event_prediction.py's record_prediction
     already wrote, never recomputes one now (see nfl_reads.py's own
-    identical docstring for why)."""
+    identical docstring for why).
+
+    rows: this event's own predictions-table rows, already fetched by the
+    caller (list_events' _entry) -- _leaders_comparison needs the exact
+    same query, so it's fetched once and passed to both instead of each
+    re-querying it independently."""
     actual = _actual_result(event)
     if actual is None:
         return None
-
-    rows = predictions_table.query(Key("event_key").eq(event["event_key"]))
 
     def _row_for(model_prefix: str) -> dict | None:
         return next((r for r in rows if r["model_key"].startswith(f"MODEL#{model_prefix}#")), None)
@@ -157,18 +174,21 @@ def _prediction_comparison(predictions_table, event: dict) -> dict | None:
     }
 
 
-def _leaders_comparison(storage, predictions_table, sport: str, event: dict) -> dict | None:
+def _leaders_comparison(storage, rows: list[dict], sport: str, event: dict) -> dict | None:
     """Player-prop predicted-vs-actual for a completed event. Shape
     mirrors the (predicted-only) `leaders` block predict/event_prediction.py's
     predict_event_leaders returns: `passing` is a single entry or null per
     team (only one passing candidate is ever scored), `rushing`/`receiving`/
-    `sacks` are lists."""
+    `sacks` are lists.
+
+    rows: same already-fetched predictions-table rows _prediction_
+    comparison takes -- see its own docstring for why this isn't queried
+    here too."""
     home_away = _home_and_away(event)
     if home_away is None:
         return None
     home_id, away_id = home_away
 
-    rows = predictions_table.query(Key("event_key").eq(event["event_key"]))
     predicted_by_entity: dict[str, dict[str, float]] = {}
     for row in rows:
         match = _PLAYER_PROP_MODEL_KEY_RE.match(row["model_key"])
@@ -272,11 +292,29 @@ def list_events(storage, predictions_table, sport: str, status: str) -> dict:
             "venue_name": e.get("venue_name"),
         }
         if status == "completed":
-            entry["prediction_comparison"] = _prediction_comparison(predictions_table, e)
-            entry["leaders_comparison"] = _leaders_comparison(storage, predictions_table, sport, e)
+            # One query, not two -- _prediction_comparison and
+            # _leaders_comparison used to each independently re-query the
+            # exact same event_key partition.
+            rows = predictions_table.query(Key("event_key").eq(e["event_key"]))
+            entry["prediction_comparison"] = _prediction_comparison(rows, e)
+            entry["leaders_comparison"] = _leaders_comparison(storage, rows, sport, e)
         return entry
 
-    return {"sport": sport, "events": [_entry(e) for e in events]}
+    if not events:
+        return {"sport": sport, "events": []}
+
+    # Concurrent, not sequential -- a completed week's own entries each
+    # make several DynamoDB round trips (the predictions query above plus
+    # a get_entity per matched leader candidate), and events is capped at
+    # one week but still turned a real request into a long fully-
+    # serialized chain as the predictions table grew (NCAAFB's own
+    # completed week can run 60+ FBS games, several times NFL's ~16).
+    # Same per-item-independent concurrency shape list_models already
+    # uses.
+    with ThreadPoolExecutor(max_workers=min(len(events), 16)) as executor:
+        entries = list(executor.map(_entry, events))
+
+    return {"sport": sport, "events": entries}
 
 
 def _load_model_summary(s3, sport: str, model_name: str) -> dict | None:

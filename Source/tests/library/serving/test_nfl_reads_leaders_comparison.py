@@ -23,7 +23,7 @@ class TestLeadersComparison:
         predictions_table.query.return_value = []
         event = _completed_event("EVT#1", 2025, "12", "13", 24, 17)
 
-        assert nfl_reads._leaders_comparison(storage, predictions_table, "nfl", event) is None
+        assert nfl_reads._leaders_comparison(storage, predictions_table.query.return_value, "nfl", event) is None
         # No predicted rows at all -- shouldn't even bother looking up
         # actual stats.
         storage.get_player_game_stats_for_event.assert_not_called()
@@ -33,7 +33,7 @@ class TestLeadersComparison:
         predictions_table = MagicMock()
         event = {"event_key": "EVT#1", "participants": [{"entity_id": "12", "role": "unknown"}]}
 
-        assert nfl_reads._leaders_comparison(storage, predictions_table, "nfl", event) is None
+        assert nfl_reads._leaders_comparison(storage, predictions_table.query.return_value, "nfl", event) is None
 
     def test_ignores_non_player_prop_model_keys_in_the_same_query_results(self):
         storage = MagicMock()
@@ -45,7 +45,7 @@ class TestLeadersComparison:
         ]
         event = _completed_event("EVT#1", 2025, "12", "13", 24, 17)
 
-        assert nfl_reads._leaders_comparison(storage, predictions_table, "nfl", event) is None
+        assert nfl_reads._leaders_comparison(storage, predictions_table.query.return_value, "nfl", event) is None
 
     def test_receiving_leaders_are_grouped_as_a_list(self):
         storage = MagicMock()
@@ -61,7 +61,7 @@ class TestLeadersComparison:
         ]
         event = _completed_event("EVT#1", 2025, "12", "13", 24, 17)
 
-        result = nfl_reads._leaders_comparison(storage, predictions_table, "nfl", event)
+        result = nfl_reads._leaders_comparison(storage, predictions_table.query.return_value, "nfl", event)
 
         assert {r["entity_id"] for r in result["home"]["receiving"]} == {"wr1", "wr2"}
         assert result["away"]["receiving"] == []
@@ -87,7 +87,7 @@ class TestLeadersComparison:
         ]
         event = _completed_event("EVT#1", 2025, "12", "13", 24, 17)
 
-        result = nfl_reads._leaders_comparison(storage, predictions_table, "nfl", event)
+        result = nfl_reads._leaders_comparison(storage, predictions_table.query.return_value, "nfl", event)
 
         assert [r["entity_id"] for r in result["home"]["receiving"]] == ["wr2", "wr5", "wr3"]
 
@@ -103,7 +103,7 @@ class TestLeadersComparison:
         ]
         event = _completed_event("EVT#1", 2025, "12", "13", 24, 17)
 
-        result = nfl_reads._leaders_comparison(storage, predictions_table, "nfl", event)
+        result = nfl_reads._leaders_comparison(storage, predictions_table.query.return_value, "nfl", event)
 
         assert result["home"]["passing"]["predicted"] == {"passing_yards": 267.0}
         assert result["home"]["passing"]["actual"] == {}
@@ -122,7 +122,7 @@ class TestLeadersComparison:
         ]
         event = _completed_event("EVT#1", 2025, "12", "13", 24, 17)
 
-        result = nfl_reads._leaders_comparison(storage, predictions_table, "nfl", event)
+        result = nfl_reads._leaders_comparison(storage, predictions_table.query.return_value, "nfl", event)
 
         assert result["home"]["passing"] is None
         assert result["away"]["passing"] is None
@@ -137,7 +137,7 @@ class TestLeadersComparison:
         ]
         event = _completed_event("EVT#1", 2025, "12", "13", 24, 17)
 
-        result = nfl_reads._leaders_comparison(storage, predictions_table, "nfl", event)
+        result = nfl_reads._leaders_comparison(storage, predictions_table.query.return_value, "nfl", event)
 
         assert result["home"]["rushing"] == []
         assert [r["entity_id"] for r in result["away"]["rushing"]] == ["rb1"]

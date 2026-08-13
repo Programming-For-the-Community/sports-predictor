@@ -9,7 +9,9 @@ import '../../core/models/event.dart';
 import '../../core/models/live_score.dart';
 import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_text_styles.dart';
+import '../../core/widgets/conference_filter_field.dart';
 import '../../core/widgets/game_row.dart';
+import '../../static/conference_order.dart';
 
 const _weekdayNames = [
   'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday',
@@ -55,13 +57,16 @@ List<(String, List<SportEvent>)> _groupByDate(List<SportEvent> events) {
 String? _primaryConference(SportEvent event) => event.home.conference ?? event.away.conference;
 
 /// Buckets an already-date-sorted event list into (conference, dateGroups)
-/// sections, conferences alphabetical with anything unclassified ("Other")
-/// last -- makes a large NCAAFB slate (100+ FBS games/week) easy to scan
-/// for one conference's games instead of one long chronological list.
-/// Skips the outer grouping entirely (one null-keyed section) when nothing
-/// in the list has a conference at all, so NFL's list renders exactly as
-/// it did before this grouping existed.
-List<(String?, List<(String, List<SportEvent>)>)> _groupByConferenceThenDate(List<SportEvent> events) {
+/// sections, Power 5 first then Group of 5 (see static/conference_order.
+/// dart -- the same priority order season_page.dart's standings use) with
+/// anything unclassified ("Other") last -- makes a large NCAAFB slate
+/// (100+ FBS games/week) easy to scan for one conference's games instead
+/// of one long chronological list. Skips the outer grouping entirely (one
+/// null-keyed section) when nothing in the list has a conference at all,
+/// so NFL's list renders exactly as it did before this grouping existed.
+/// filter, when non-empty, keeps only conferences whose own name contains
+/// it (case-insensitive) -- see _ConferenceFilterField.
+List<(String?, List<(String, List<SportEvent>)>)> _groupByConferenceThenDate(List<SportEvent> events, String filter) {
   if (!events.any((e) => _primaryConference(e) != null)) {
     return [(null, _groupByDate(events))];
   }
@@ -70,11 +75,12 @@ List<(String?, List<(String, List<SportEvent>)>)> _groupByConferenceThenDate(Lis
   for (final event in events) {
     byConference.putIfAbsent(_primaryConference(event) ?? 'Other', () => []).add(event);
   }
-  final conferences = byConference.keys.toList()
+  final needle = filter.trim().toLowerCase();
+  final conferences = byConference.keys.where((c) => needle.isEmpty || c.toLowerCase().contains(needle)).toList()
     ..sort((a, b) {
       if (a == 'Other') return b == 'Other' ? 0 : 1;
       if (b == 'Other') return -1;
-      return a.compareTo(b);
+      return compareConferenceOrder(a, b);
     });
   return [for (final conference in conferences) (conference, _groupByDate(byConference[conference]!))];
 }
@@ -90,6 +96,7 @@ class EventListPage extends ConsumerStatefulWidget {
 
 class _EventListPageState extends ConsumerState<EventListPage> {
   String _status = 'scheduled';
+  String _conferenceFilter = '';
   Timer? _liveScoresTimer;
 
   @override
@@ -179,10 +186,24 @@ class _EventListPageState extends ConsumerState<EventListPage> {
                       ? _sortKey(a).compareTo(_sortKey(b))
                       : _sortKey(b).compareTo(_sortKey(a)),
                 );
+              final grouped = _groupByConferenceThenDate(sorted, _conferenceFilter);
               return Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  for (final (conference, dateGroups) in _groupByConferenceThenDate(sorted)) ...[
+                  // Same >1-conference gate as season_page.dart's own
+                  // filter field -- NFL's date-only list (no conference
+                  // field at all) and a single-conference slate both have
+                  // nothing this would narrow down.
+                  if (_groupByConferenceThenDate(sorted, '').length > 1) ...[
+                    ConferenceFilterField(
+                      value: _conferenceFilter,
+                      onChanged: (value) => setState(() => _conferenceFilter = value),
+                    ),
+                    const SizedBox(height: 16),
+                  ],
+                  if (grouped.isEmpty)
+                    Text('No conferences match "$_conferenceFilter".', style: AppTextStyles.body(color: AppColors.inkSub)),
+                  for (final (conference, dateGroups) in grouped) ...[
                     if (conference != null) ...[
                       Padding(
                         padding: const EdgeInsets.only(bottom: 8),

@@ -173,11 +173,28 @@ def _batch_score_teams(estimator, model_card: dict, teams: list[str], season_inp
     return dict(zip(teams, (float(value) for value in predictions)))
 
 
+def _current_rankings(estimator, model_card: dict, teams: list[str], season_inputs: dict) -> dict[str, int]:
+    """Today's actual (not simulated) National Ranking per team -- the same
+    model/feature row simulate_season's own score_teams callable uses to
+    pick each simulated season's CFP field, scored once against the real
+    current wins/losses/ratings instead of a simulated future. Lower score
+    is better (see _batch_score_teams), so rank is just each team's 1-based
+    position once sorted -- not limited to the top 25, standings itself
+    displays whatever's meaningful per row."""
+    scores = _batch_score_teams(
+        estimator, model_card, teams, season_inputs,
+        season_inputs["wins"], season_inputs["losses"], season_inputs["current_ratings"],
+    )
+    ranked = sorted(teams, key=lambda team_id: scores[team_id])
+    return {team_id: rank for rank, team_id in enumerate(ranked, start=1)}
+
+
 def build_season_projection(storage: FeatureStorage, s3) -> dict:
     season_inputs = _season_standings_inputs(storage)
     teams = list(season_inputs["team_conference"])
 
     simulation: dict[str, dict] = {}
+    current_rankings: dict[str, int] = {}
     if len(teams) >= season_simulation.CFP_FIELD_SIZE:
         try:
             estimator, model_card = model_loader.load_current_model(s3, SPORT, RANKING_MODEL_NAME)
@@ -191,7 +208,17 @@ def build_season_projection(storage: FeatureStorage, s3) -> dict:
                 season_inputs["team_conference"], score_teams,
             )
         except model_loader.NoPromotedModelError:
-            logger.warning("No promoted %s model -- season simulation skipped this run", RANKING_MODEL_NAME)
+            logger.warning("No promoted %s model -- season simulation and ranking skipped this run", RANKING_MODEL_NAME)
+        else:
+            # Separate try/except from simulate_season above -- a bug here
+            # shouldn't cost the whole run its (already-computed, working)
+            # simulation. logger.exception captures the full traceback,
+            # unlike the NoPromotedModelError branch above which is an
+            # expected, routine condition, not a bug to diagnose.
+            try:
+                current_rankings = _current_rankings(estimator, model_card, teams, season_inputs)
+            except Exception:
+                logger.exception("Failed to compute current_rank for %s -- standings will omit it this run", SPORT)
 
     standings = sorted(
         (
@@ -201,6 +228,7 @@ def build_season_projection(storage: FeatureStorage, s3) -> dict:
                 "wins": season_inputs["wins"].get(team_id, 0),
                 "losses": season_inputs["losses"].get(team_id, 0),
                 "ties": season_inputs["ties"].get(team_id, 0),
+                "current_rank": current_rankings.get(team_id),
                 **simulation.get(team_id, {}),
             }
             for team_id in teams

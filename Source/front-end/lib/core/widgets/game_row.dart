@@ -107,8 +107,8 @@ class GameRow extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final home = teamDisplay(event.home);
-    final away = teamDisplay(event.away);
+    final home = teamDisplay(sport, event.home);
+    final away = teamDisplay(sport, event.away);
     final isCompleted = event.status == 'completed';
     final isLive = liveState?.live ?? false;
     // Only fetched for a not-yet-started, not-live event -- watched here
@@ -388,11 +388,11 @@ class _MatchupLine extends StatelessWidget {
     required this.awayColor, required this.awayAbbr, this.awayScore, this.awayPredictedScore,
     required this.homeColor, required this.homeAbbr, this.homeScore, this.homePredictedScore,
   });
-  final Color awayColor;
+  final Color? awayColor;
   final String awayAbbr;
   final double? awayScore;
   final double? awayPredictedScore;
-  final Color homeColor;
+  final Color? homeColor;
   final String homeAbbr;
   final double? homeScore;
   final double? homePredictedScore;
@@ -413,7 +413,7 @@ class _MatchupLine extends StatelessWidget {
 
 class _TeamLine extends StatelessWidget {
   const _TeamLine({required this.color, required this.abbr, this.score, this.predictedScore});
-  final Color color;
+  final Color? color;
   final String abbr;
   final double? score;
   // The prediction logged for this team (live pre-game, or the one

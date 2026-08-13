@@ -43,15 +43,6 @@ LOAD_FEATURES_BACKOFF_SECONDS = 2.0
 
 MODEL_CARD_FILENAME = "model_card.json"
 
-# How much worse (as a fraction of the current production version's gate
-# metric -- log_loss for a classifier, rmse for a regressor, always a
-# lower-is-better metric) a newly trained version is allowed to be and
-# still get promoted automatically. Set to catch a genuine regression (a
-# bug, or a hyperparameter search landing somewhere pathological, e.g.
-# unfloored max_depth landing on a depth-1 decision stump), not to
-# adjudicate between two versions within normal run-to-run noise.
-PROMOTION_TOLERANCE = 0.02
-
 # Fraction of events (most recent, by date) held out for evaluation.
 # Chronological, not random -- a random split would leak future games
 # into training in a way that doesn't match how this model actually gets
@@ -201,27 +192,14 @@ def would_beat_current(s3: S3Manager, sport: str, model_name: str, metadata: dic
     losing candidate should never get a version at all -- see
     save_model_artifact's own docstring on why). Same rule as
     promote_if_better: True if there's no current production version yet,
-    or metadata[metric] is within PROMOTION_TOLERANCE of (or better than)
-    the current production version's own metric value."""
+    or metadata[metric] is genuinely at least as good as the current
+    production version's own metric value -- see that function's own
+    docstring for why there's no percentage tolerance here."""
     current_version = get_current_version(s3, sport, model_name)
     if current_version is None:
         return True
     current_card = s3.get_json(model_artifact_key(sport, model_name, current_version, MODEL_CARD_FILENAME))
-    return metadata[metric] <= current_card[metric] * (1 + PROMOTION_TOLERANCE)
-
-
-def force_promote(s3: S3Manager, sport: str, model_name: str, version: int) -> None:
-    """Unconditionally points model_name's "current" pointer at `version`,
-    skipping promote_if_better's own comparison against whatever's already
-    live. Used by library.ml.backtest.run_backtest for the very first
-    candidate in a tournament run only -- that candidate always becomes
-    the new production version the moment it finishes, so a run
-    interrupted after just one candidate (e.g. a Fargate Spot reclaim)
-    still leaves SOME fresh version live rather than none. Every candidate
-    after the first still goes through the normal would_beat_current/
-    promote_if_better comparison against whatever's now current."""
-    s3.put_json(current_version_key(sport, model_name), {"version": version})
-    logger.info("Promoting %s/%s v%d unconditionally -- first candidate to finish this run.", sport, model_name, version)
+    return metadata[metric] <= current_card[metric]
 
 
 def resolve_run_id() -> str:
@@ -251,17 +229,15 @@ def load_run_progress(s3: S3Manager, sport: str, model_name: str, run_id: str) -
 
 def save_run_progress(
     s3: S3Manager, sport: str, model_name: str, run_id: str,
-    evaluated: list[dict], promotions: list[dict], force_promoted: bool,
+    evaluated: list[dict], promotions: list[dict],
 ) -> None:
-    """Overwrites the whole breadcrumb after every candidate (whether it
-    won, lost, or was the run's own force-promoted first candidate) --
-    small enough (a handful of candidates' metrics/cards) that a full
-    overwrite each time is simpler than an append-only log, and
+    """Overwrites the whole breadcrumb after every candidate (win or
+    lose) -- small enough (a handful of candidates' metrics/cards) that a
+    full overwrite each time is simpler than an append-only log, and
     idempotent if the same candidate's write happens to run twice."""
     s3.put_json(run_progress_key(sport, model_name, run_id), {
         "evaluated": evaluated,
         "promotions": promotions,
-        "force_promoted": force_promoted,
     })
 
 
@@ -284,12 +260,22 @@ def get_current_version(s3: S3Manager, sport: str, model_name: str) -> int | Non
 
 def promote_if_better(s3: S3Manager, sport: str, model_name: str, version: int, metadata: dict, metric: str) -> bool:
     """Points model_name's "current" pointer (current_version_key) at
-    `version` unless an existing production version already scores
-    meaningfully better on `metric` -- guards against a retrain with bad
-    luck (an unlucky hyperparameter search, or a bug) silently becoming
-    production just because it's the newest. A held-back version is
-    still fully trained and versioned, never deleted -- only not
-    promoted -- so it stays available for manual review or promotion.
+    `version` unless an existing production version already scores better
+    on `metric` -- guards against a retrain with bad luck (an unlucky
+    hyperparameter search, or a bug) silently becoming production just
+    because it's the newest. A held-back version is still fully trained
+    and versioned, never deleted -- only not promoted -- so it stays
+    available for manual review or promotion.
+
+    Requires genuine improvement (new_score <= current_score, no
+    percentage slack) -- an earlier version of this function allowed a
+    candidate up to 2% WORSE than the incumbent to still take over, which
+    inverted the whole point of a promotion gate: with every candidate in
+    a CANDIDATES list effectively guaranteed to pass unless it regressed
+    badly, whichever algorithm happened to run last in list order (always
+    MLPRegressorAdapter, for every regression/player-prop target) won by
+    default regardless of whether it was actually the best of the
+    cohort, not just the ones evaluated before it.
 
     `metric` must name a lower-is-better value present on both model
     cards (log_loss for a classifier, rmse for a regressor) -- accuracy
@@ -304,10 +290,11 @@ def promote_if_better(s3: S3Manager, sport: str, model_name: str, version: int, 
 
     Not a controlled A/B: the current production version's score was
     measured on an older, now-stale holdout window, while `version`'s was
-    measured on a newer one that includes since-completed games. Good
-    enough to catch a genuine regression, not precise enough to
-    adjudicate between two versions within normal noise of each other --
-    see PROMOTION_TOLERANCE.
+    measured on a newer one that includes since-completed games -- so a
+    "win" here is against a moving target, not a perfectly fair rematch.
+    Good enough to catch a genuine regression; run_backtest's own
+    baseline-comparison warning (see its docstring) is the other half of
+    this system's actual quality bar.
     """
     current_version = get_current_version(s3, sport, model_name)
     if current_version is None:
@@ -318,9 +305,8 @@ def promote_if_better(s3: S3Manager, sport: str, model_name: str, version: int, 
     current_card = s3.get_json(model_artifact_key(sport, model_name, current_version, MODEL_CARD_FILENAME))
     current_score = current_card[metric]
     new_score = metadata[metric]
-    threshold = current_score * (1 + PROMOTION_TOLERANCE)
 
-    if new_score <= threshold:
+    if new_score <= current_score:
         logger.info(
             "Promoting %s/%s v%d (%s=%.4f) over current production v%d (%s=%.4f).",
             sport, model_name, version, metric, new_score, current_version, metric, current_score,
@@ -328,9 +314,9 @@ def promote_if_better(s3: S3Manager, sport: str, model_name: str, version: int, 
         s3.put_json(current_version_key(sport, model_name), {"version": version})
         return True
 
-    logger.warning(
-        "Holding back %s/%s v%d (%s=%.4f) -- more than %.0f%% worse than current production v%d "
-        "(%s=%.4f). Still versioned and available, just not promoted automatically.",
-        sport, model_name, version, metric, new_score, PROMOTION_TOLERANCE * 100, current_version, metric, current_score,
+    logger.info(
+        "Holding back %s/%s v%d (%s=%.4f) -- current production v%d (%s=%.4f) is still better. "
+        "Still versioned and available, just not promoted automatically.",
+        sport, model_name, version, metric, new_score, current_version, metric, current_score,
     )
     return False

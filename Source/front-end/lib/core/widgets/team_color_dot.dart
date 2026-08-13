@@ -12,7 +12,10 @@ import 'package:flutter/material.dart';
 class TeamColorDot extends StatelessWidget {
   const TeamColorDot({super.key, required this.color, this.size = 8});
 
-  final Color color;
+  // Null for a team with no official color on record (see
+  // static/nfl_team_colors.dart's NflTeam.primary) -- omits the dot
+  // entirely rather than a guessed/hashed placeholder.
+  final Color? color;
   final double size;
 
   // Below this, a color reads as "a hole in the background" rather than
@@ -21,19 +24,21 @@ class TeamColorDot extends StatelessWidget {
   // Ravens/Falcons/Panthers black), not a general-purpose contrast ratio.
   static const double _minFillLightness = 0.32;
 
-  Color get _visibleFill {
+  Color _visibleFill(Color color) {
     final hsl = HSLColor.fromColor(color);
     return hsl.lightness >= _minFillLightness ? color : hsl.withLightness(_minFillLightness).toColor();
   }
 
   @override
   Widget build(BuildContext context) {
+    final fill = color;
+    if (fill == null) return const SizedBox.shrink();
     return Container(
       width: size,
       height: size,
       decoration: BoxDecoration(
         shape: BoxShape.circle,
-        color: _visibleFill,
+        color: _visibleFill(fill),
         border: Border.all(color: Colors.white.withValues(alpha: 0.85), width: 1.2),
       ),
     );

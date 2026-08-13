@@ -60,6 +60,68 @@ class TestStillOnTeam:
         assert live_features._still_on_team(storage, "ncaafb", "101", "61") is False
 
 
+class TestBoxScoreCandidateIds:
+    """Roster-membership checks (_still_on_team) now run concurrently --
+    see the function's own docstring for why. These tests only lock in
+    output correctness (right candidates, still-rostered filter, season-
+    lookback bound), not the concurrency itself, which a synchronous
+    unit test can't meaningfully observe."""
+
+    def test_returns_still_rostered_candidates_credited_with_the_stat(self):
+        storage = MagicMock()
+        storage.get_team_events.return_value = [_event("e1", "2025-10-11", "61", "52")]
+        storage.get_player_game_stats_for_event.return_value = [
+            _player_game("101", "61", "e1", "2025-10-11", {"rushing_yards": 90}),
+            _player_game("102", "61", "e1", "2025-10-11", {"rushing_yards": 40}),
+        ]
+        storage.get_entity.side_effect = lambda sport, entity_id: {
+            "101": _entity("61"), "102": _entity("99"),  # 102 has since transferred
+        }[entity_id]
+
+        ids = live_features._box_score_candidate_ids(storage, "ncaafb", "61", "2025-10-18", 2025, "rushing_yards")
+
+        assert ids == ["101"]
+
+    def test_skips_a_row_missing_the_stat_key(self):
+        storage = MagicMock()
+        storage.get_team_events.return_value = [_event("e1", "2025-10-11", "61", "52")]
+        storage.get_player_game_stats_for_event.return_value = [
+            _player_game("101", "61", "e1", "2025-10-11", {"passing_yards": 200}),
+        ]
+        storage.get_entity.return_value = _entity("61")
+
+        ids = live_features._box_score_candidate_ids(storage, "ncaafb", "61", "2025-10-18", 2025, "rushing_yards")
+
+        assert ids == []
+        storage.get_entity.assert_not_called()
+
+    def test_empty_team_events_short_circuits_without_any_roster_check(self):
+        storage = MagicMock()
+        storage.get_team_events.return_value = []
+
+        ids = live_features._box_score_candidate_ids(storage, "ncaafb", "61", "2025-10-18", 2025, "rushing_yards")
+
+        assert ids == []
+        storage.get_entity.assert_not_called()
+
+    def test_a_candidate_appearing_in_multiple_games_is_only_checked_once(self):
+        storage = MagicMock()
+        storage.get_team_events.return_value = [
+            _event("e1", "2025-10-11", "61", "52"),
+            _event("e2", "2025-10-04", "61", "70"),
+        ]
+        storage.get_player_game_stats_for_event.side_effect = lambda event_key: {
+            "e1": [_player_game("101", "61", "e1", "2025-10-11", {"rushing_yards": 90})],
+            "e2": [_player_game("101", "61", "e2", "2025-10-04", {"rushing_yards": 60})],
+        }[event_key]
+        storage.get_entity.return_value = _entity("61")
+
+        ids = live_features._box_score_candidate_ids(storage, "ncaafb", "61", "2025-10-18", 2025, "rushing_yards")
+
+        assert ids == ["101"]
+        storage.get_entity.assert_called_once()
+
+
 class TestPresumptiveLeader:
     def test_finds_leader_from_most_recent_game(self):
         storage = MagicMock()

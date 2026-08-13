@@ -249,12 +249,14 @@ class TestEndToEndWithRealBacktest:
                 for p in patches:
                     p.stop()
 
-        # xgboost, first in CANDIDATES, is force-promoted unconditionally
-        # the moment it finishes. Every candidate after it (logistic, RF,
-        # MLP) is directionally correct but progressively less confident
-        # than xgboost's near-perfect prediction -- none of their log_loss
-        # values beat xgboost's within PROMOTION_TOLERANCE, so none of
-        # them ever get an artifact written at all.
+        # xgboost, first in CANDIDATES, wins outright -- no existing
+        # production version yet, so it's promoted directly. Every
+        # candidate after it (logistic, RF, MLP) is directionally correct
+        # but progressively less confident than xgboost's near-perfect
+        # prediction, so none of their log_loss values ever beat what's
+        # now live, and none of them get an artifact written at all (a
+        # losing candidate is never persisted -- see run_backtest's own
+        # docstring).
         written_models = dict(mock_s3.put_bytes_calls)
         assert written_models == {"nfl/win-probability/v1/model.xgb": b"xgb-bytes"}
 

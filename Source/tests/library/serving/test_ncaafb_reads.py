@@ -120,6 +120,27 @@ class TestListEvents:
 
         assert {e["event_id"] for e in result["events"]} == {"e2"}
 
+    def test_postseason_completed_events_group_by_date_not_the_flat_week_number(self):
+        # Regression: CFBD's postseason `week` is flat (every bowl/CFP
+        # round in a season comes back as week=1) -- confirmed live an
+        # earlier CFP round was showing up alongside the actual
+        # championship game because both shared week=1, 11 days apart.
+        # event_date isolates each round correctly instead.
+        storage = MagicMock()
+        predictions_table = MagicMock()
+        predictions_table.query.return_value = []
+        storage.get_all_events.return_value = [
+            _event("semifinal", "2026-01-09", "145", "2390", status="completed", season_type="postseason",
+                   week=1, is_playoff_game=True, home_score=27, away_score=31),
+            _event("championship", "2026-01-20", "84", "2390", status="completed", season_type="postseason",
+                   week=1, is_playoff_game=True, home_score=27, away_score=21),
+        ]
+        storage.get_player_game_stats_for_event.return_value = []
+
+        result = ncaafb_reads.list_events(storage, predictions_table, "ncaafb", "completed")
+
+        assert {e["event_id"] for e in result["events"]} == {"championship"}
+
     def test_empty_when_nothing_ingested_for_that_status(self):
         storage = MagicMock()
         storage.get_all_events.return_value = []
@@ -132,6 +153,26 @@ class TestListEvents:
         result = ncaafb_reads.list_events(storage, MagicMock(), "ncaafb", "scheduled")
         assert "prediction_comparison" not in result["events"][0]
 
+    def test_completed_event_queries_the_predictions_table_exactly_once(self):
+        # prediction_comparison and leaders_comparison used to each
+        # independently re-query the same event_key partition -- one
+        # request per event, not two, and (with several completed events,
+        # up to 60+ FBS games in an NCAAFB week) concurrently, not a long
+        # fully-serialized chain. See list_events' own comment for why.
+        storage = MagicMock()
+        predictions_table = MagicMock()
+        predictions_table.query.return_value = [
+            {"model_key": "MODEL#win-probability#v1", "predicted_value": {"home_win_probability": 0.6}},
+        ]
+        storage.get_all_events.return_value = [
+            _event("e1", "2025-10-11", "61", "52", status="completed", home_score=24, away_score=17),
+        ]
+        storage.get_player_game_stats_for_event.return_value = []
+
+        ncaafb_reads.list_events(storage, predictions_table, "ncaafb", "completed")
+
+        predictions_table.query.assert_called_once()
+
 
 class TestPredictionComparison:
     def test_none_when_game_has_no_final_score(self):
@@ -142,7 +183,7 @@ class TestPredictionComparison:
         predictions_table = MagicMock()
         predictions_table.query.return_value = []
         event = _event("e1", "2025-10-11", "61", "52", status="completed", home_score=24, away_score=17)
-        assert ncaafb_reads._prediction_comparison(predictions_table, event) is None
+        assert ncaafb_reads._prediction_comparison(predictions_table.query.return_value, event) is None
 
     def test_compares_predicted_vs_actual(self):
         predictions_table = MagicMock()
@@ -154,7 +195,7 @@ class TestPredictionComparison:
         ]
         event = _event("e1", "2025-10-11", "61", "52", status="completed", home_score=24, away_score=17)
 
-        result = ncaafb_reads._prediction_comparison(predictions_table, event)
+        result = ncaafb_reads._prediction_comparison(predictions_table.query.return_value, event)
 
         assert result["predicted_home_won"] is True
         assert result["actual_home_won"] is True
@@ -167,7 +208,7 @@ class TestLeadersComparison:
         predictions_table = MagicMock()
         predictions_table.query.return_value = []
         event = _event("e1", "2025-10-11", "61", "52")
-        assert ncaafb_reads._leaders_comparison(MagicMock(), predictions_table, "ncaafb", event) is None
+        assert ncaafb_reads._leaders_comparison(MagicMock(), predictions_table.query.return_value, "ncaafb", event) is None
 
     def test_single_passing_entry_per_team(self):
         storage = MagicMock()
@@ -181,7 +222,7 @@ class TestLeadersComparison:
         ]
         event = _event("e1", "2025-10-11", "61", "52")
 
-        result = ncaafb_reads._leaders_comparison(storage, predictions_table, "ncaafb", event)
+        result = ncaafb_reads._leaders_comparison(storage, predictions_table.query.return_value, "ncaafb", event)
 
         assert result["home"]["passing"]["entity_id"] == "101"
         assert result["home"]["passing"]["predicted"] == {"passing_yards": 275.0}
@@ -203,7 +244,7 @@ class TestLeadersComparison:
         ]
         event = _event("e1", "2025-10-11", "61", "52")
 
-        result = ncaafb_reads._leaders_comparison(storage, predictions_table, "ncaafb", event)
+        result = ncaafb_reads._leaders_comparison(storage, predictions_table.query.return_value, "ncaafb", event)
 
         assert [r["entity_id"] for r in result["home"]["rushing"]] == ["rb1", "rb2"]  # ranked by predicted yards
         assert result["away"]["rushing"] == []
@@ -224,7 +265,7 @@ class TestLeadersComparison:
         ]
         event = _event("e1", "2025-10-11", "61", "52")
 
-        result = ncaafb_reads._leaders_comparison(storage, predictions_table, "ncaafb", event)
+        result = ncaafb_reads._leaders_comparison(storage, predictions_table.query.return_value, "ncaafb", event)
 
         assert len(result["home"]["rushing"]) == 2
         assert [r["entity_id"] for r in result["home"]["rushing"]] == ["rb4", "rb3"]
@@ -239,7 +280,7 @@ class TestLeadersComparison:
         storage.get_player_game_stats_for_event.return_value = []
         event = _event("e1", "2025-10-11", "61", "52")
 
-        result = ncaafb_reads._leaders_comparison(storage, predictions_table, "ncaafb", event)
+        result = ncaafb_reads._leaders_comparison(storage, predictions_table.query.return_value, "ncaafb", event)
 
         assert result["home"]["passing"] is None
         assert result["away"]["passing"] is None

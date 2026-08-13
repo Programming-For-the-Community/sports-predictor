@@ -135,7 +135,7 @@ def _actual_result(event: dict) -> dict | None:
     return {"home_score": home_score, "away_score": away_score, "home_won": home_score > away_score}
 
 
-def _prediction_comparison(predictions_table, event: dict) -> dict | None:
+def _prediction_comparison(rows: list[dict], event: dict) -> dict | None:
     """Compares this event's logged prediction against the actual result --
     reads the audit trail predict/handler.py's _record_prediction already
     wrote (whatever was predicted BEFORE the game), never recomputes one
@@ -144,12 +144,15 @@ def _prediction_comparison(predictions_table, event: dict) -> dict | None:
     now-normalized stats, leaking the outcome into its own "prediction".
     Returns None if no prediction was ever logged for this event (nobody
     requested one before it was played) or the event has no final score
-    yet."""
+    yet.
+
+    rows: this event's own predictions-table rows, already fetched by the
+    caller (list_events' _entry) -- _leaders_comparison needs the exact
+    same query, so it's fetched once and passed to both instead of each
+    re-querying it independently."""
     actual = _actual_result(event)
     if actual is None:
         return None
-
-    rows = predictions_table.query(Key("event_key").eq(event["event_key"]))
 
     def _row_for(model_prefix: str) -> dict | None:
         return next((r for r in rows if r["model_key"].startswith(f"MODEL#{model_prefix}#")), None)
@@ -179,7 +182,7 @@ def _prediction_comparison(predictions_table, event: dict) -> dict | None:
     }
 
 
-def _leaders_comparison(storage, predictions_table, sport: str, event: dict) -> dict | None:
+def _leaders_comparison(storage, rows: list[dict], sport: str, event: dict) -> dict | None:
     """Player-prop predicted-vs-actual for a completed event -- the
     player-level counterpart to _prediction_comparison, same "read the
     audit trail, never recompute" reasoning: recomputing live features for
@@ -191,6 +194,10 @@ def _leaders_comparison(storage, predictions_table, sport: str, event: dict) -> 
     _prediction_comparison already has for the team-level comparison, not
     a bug.
 
+    rows: same already-fetched predictions-table rows _prediction_
+    comparison takes -- see its own docstring for why this isn't queried
+    here too.
+
     Shape mirrors the (predicted-only) `leaders` block
     predict/handler.py's _predict_event_leaders returns: `passing` is a
     single entry or null per team (only one passing candidate is ever
@@ -200,7 +207,6 @@ def _leaders_comparison(storage, predictions_table, sport: str, event: dict) -> 
         return None
     home_id, away_id = home_away
 
-    rows = predictions_table.query(Key("event_key").eq(event["event_key"]))
     predicted_by_entity: dict[str, dict[str, float]] = {}
     for row in rows:
         match = _PLAYER_PROP_MODEL_KEY_RE.match(row["model_key"])
@@ -316,11 +322,27 @@ def list_events(storage, predictions_table, sport: str, status: str) -> dict:
             "venue_state": e.get("venue_state"),
         }
         if status == "completed":
-            entry["prediction_comparison"] = _prediction_comparison(predictions_table, e)
-            entry["leaders_comparison"] = _leaders_comparison(storage, predictions_table, sport, e)
+            # One query, not two -- _prediction_comparison and
+            # _leaders_comparison used to each independently re-query the
+            # exact same event_key partition.
+            rows = predictions_table.query(Key("event_key").eq(e["event_key"]))
+            entry["prediction_comparison"] = _prediction_comparison(rows, e)
+            entry["leaders_comparison"] = _leaders_comparison(storage, rows, sport, e)
         return entry
 
-    return {"sport": sport, "events": [_entry(e) for e in events]}
+    if not events:
+        return {"sport": sport, "events": []}
+
+    # Concurrent, not sequential -- a completed week's own entries each
+    # make several DynamoDB round trips (the predictions query above plus
+    # a get_entity per matched leader candidate), and events is capped at
+    # one week (~16 games) but still turned a real request into a long
+    # fully-serialized chain as the predictions table grew. Same
+    # per-item-independent concurrency shape list_models already uses.
+    with ThreadPoolExecutor(max_workers=min(len(events), 16)) as executor:
+        entries = list(executor.map(_entry, events))
+
+    return {"sport": sport, "events": entries}
 
 
 def _load_model_summary(s3, sport: str, model_name: str) -> dict | None:

@@ -138,12 +138,12 @@ class _EventDetailPageState extends ConsumerState<EventDetailPage> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            MatchupResultHero(event: event, comparison: event.predictionComparison),
+            MatchupResultHero(sport: widget.sportId, event: event, comparison: event.predictionComparison),
             if (leadersComparison != null) ...[
               const SizedBox(height: 20),
               TeamLeadersComparisonPanel(
-                homeAbbr: teamDisplay(event.home).abbreviation,
-                awayAbbr: teamDisplay(event.away).abbreviation,
+                homeAbbr: teamDisplay(widget.sportId, event.home).abbreviation,
+                awayAbbr: teamDisplay(widget.sportId, event.away).abbreviation,
                 comparison: leadersComparison,
               ),
             ],
@@ -161,7 +161,9 @@ class _EventDetailPageState extends ConsumerState<EventDetailPage> {
               return Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  MatchupHero(event: event, prediction: prediction, liveState: liveScores[widget.eventId]),
+                  MatchupHero(
+                    sport: widget.sportId, event: event, prediction: prediction, liveState: liveScores[widget.eventId],
+                  ),
                   if (prediction.stale) ...[
                     const SizedBox(height: 12),
                     Center(
@@ -174,8 +176,8 @@ class _EventDetailPageState extends ConsumerState<EventDetailPage> {
                   if (leaders != null) ...[
                     const SizedBox(height: 20),
                     TeamLeadersPanel(
-                      homeAbbr: teamDisplay(event.home).abbreviation,
-                      awayAbbr: teamDisplay(event.away).abbreviation,
+                      homeAbbr: teamDisplay(widget.sportId, event.home).abbreviation,
+                      awayAbbr: teamDisplay(widget.sportId, event.away).abbreviation,
                       leaders: leaders,
                     ),
                   ],

@@ -18,16 +18,17 @@ import 'win_probability_bar.dart';
 /// liveScoresProvider) overrides the per-team scores with live ones and
 /// swaps the confidence pill for a LIVE status line when set and live.
 class MatchupHero extends StatelessWidget {
-  const MatchupHero({super.key, required this.event, required this.prediction, this.liveState});
+  const MatchupHero({super.key, required this.sport, required this.event, required this.prediction, this.liveState});
 
+  final String sport;
   final SportEvent event;
   final EventPrediction prediction;
   final LiveEventState? liveState;
 
   @override
   Widget build(BuildContext context) {
-    final home = teamDisplay(event.home);
-    final away = teamDisplay(event.away);
+    final home = teamDisplay(sport, event.home);
+    final away = teamDisplay(sport, event.away);
     final homeFavored = prediction.homeWinProbability >= 0.5;
     final isLive = liveState?.live ?? false;
 
@@ -128,7 +129,7 @@ class _TeamColumn extends StatelessWidget {
     required this.color, required this.abbr, required this.probability, required this.favored,
     required this.predictedScore,
   });
-  final Color color;
+  final Color? color;
   final String abbr;
   final double probability;
   final bool favored;
@@ -168,15 +169,16 @@ class _TeamColumn extends StatelessWidget {
 /// null when no prediction was ever logged for this event before it was
 /// played (see PredictionComparison's own docs), not a loading state.
 class MatchupResultHero extends StatelessWidget {
-  const MatchupResultHero({super.key, required this.event, required this.comparison});
+  const MatchupResultHero({super.key, required this.sport, required this.event, required this.comparison});
 
+  final String sport;
   final SportEvent event;
   final PredictionComparison? comparison;
 
   @override
   Widget build(BuildContext context) {
-    final home = teamDisplay(event.home);
-    final away = teamDisplay(event.away);
+    final home = teamDisplay(sport, event.home);
+    final away = teamDisplay(sport, event.away);
     final homeWon = event.home.result?.won ?? false;
 
     return Container(
@@ -231,7 +233,7 @@ class MatchupResultHero extends StatelessWidget {
 
 class _ResultTeamColumn extends StatelessWidget {
   const _ResultTeamColumn({required this.color, required this.abbr, required this.score, required this.won});
-  final Color color;
+  final Color? color;
   final String abbr;
   final double? score;
   final bool won;
