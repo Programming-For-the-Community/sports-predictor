@@ -1,0 +1,103 @@
+# Builds and deploys the NBA recurring data pipeline Lambdas: nba-ingest
+# (EventBridge-triggered, writes raw JSON to S3), nba-normalize
+# (S3-triggered, writes to DynamoDB), and nba-schedule-sync (EventBridge-
+# triggered, writes raw JSON to S3 for the next 14 days -- see
+# Terraform/lambda-nba-schedule-sync.tf for why 14 days, not a full
+# season). All three are deployed in parallel since they are independent
+# -- a failure in one does not block the others. Mirrors
+# nfl_data_pipeline.yml exactly.
+#
+# Lambda function names are supplied by the caller (nba_deploy.yml) from
+# Terraform outputs so this workflow never hard-codes names that Terraform
+# owns. Defaults are provided so workflow_dispatch (manual, standalone run)
+# still works without needing the Terraform output values.
+#
+# Terraform (tf_install.yml) creates each Lambda function with a placeholder
+# ZIP and lifecycle { ignore_changes } so it never overwrites what this
+# workflow deploys. This workflow owns all subsequent code updates.
+
+name: NBA Data Pipeline
+
+on:
+  workflow_dispatch:
+  workflow_call:
+    inputs:
+      ingest_function_name:
+        description: 'NBA ingest Lambda function name (from Terraform output nba_ingest_function_name)'
+        required: false
+        type: string
+        default: 'sports-predictor-nba-ingest'
+      normalize_function_name:
+        description: 'NBA normalize Lambda function name (from Terraform output nba_normalize_function_name)'
+        required: false
+        type: string
+        default: 'sports-predictor-nba-normalize'
+      schedule_sync_function_name:
+        description: 'NBA schedule-sync Lambda function name (from Terraform output nba_schedule_sync_function_name)'
+        required: false
+        type: string
+        default: 'sports-predictor-nba-schedule-sync'
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  # Each Lambda gets its own upstream test job, pointed at its own
+  # specific test file -- not the whole Source/tests/aws-lambdas/nba/
+  # directory. Same reasoning as nfl_data_pipeline.yml's own comment: a
+  # failing normalize test shouldn't fail the ingest deploy, or vice
+  # versa, purely because both deploys pointed at the same shared
+  # directory. NBA's own test suite isn't split into concern-scoped files
+  # per Lambda the way NFL's ingest test suite is -- one file per Lambda
+  # is enough at NBA's current size.
+  test-ingest:
+    name: Run nba-ingest tests
+    uses: ./.github/workflows/run_python_tests.yml
+    with:
+      test_path: 'Source/tests/aws-lambdas/nba/test_ingest.py'
+      requirements_files: 'Source/aws-lambdas/nba/ingest/requirements.txt'
+
+  test-normalize:
+    name: Run nba-normalize tests
+    uses: ./.github/workflows/run_python_tests.yml
+    with:
+      test_path: 'Source/tests/aws-lambdas/nba/test_normalize.py'
+      requirements_files: 'Source/aws-lambdas/nba/normalize/requirements.txt'
+
+  deploy-ingest:
+    name: Deploy nba-ingest Lambda
+    needs: test-ingest
+    uses: ./.github/workflows/python_lambda_build.yml
+    secrets: inherit
+    with:
+      function_name: ${{ inputs.ingest_function_name || 'sports-predictor-nba-ingest' }}
+      handler_dir: 'Source/aws-lambdas/nba/ingest'
+      library_path: 'Source/library'
+
+  deploy-normalize:
+    name: Deploy nba-normalize Lambda
+    needs: test-normalize
+    uses: ./.github/workflows/python_lambda_build.yml
+    secrets: inherit
+    with:
+      function_name: ${{ inputs.normalize_function_name || 'sports-predictor-nba-normalize' }}
+      handler_dir: 'Source/aws-lambdas/nba/normalize'
+      library_path: 'Source/library'
+
+  test-schedule-sync:
+    name: Run nba-schedule-sync tests
+    uses: ./.github/workflows/run_python_tests.yml
+    with:
+      test_path: 'Source/tests/aws-lambdas/nba/test_schedule_sync.py'
+      requirements_files: 'Source/aws-lambdas/nba/schedule-sync/requirements.txt'
+
+  deploy-schedule-sync:
+    name: Deploy nba-schedule-sync Lambda
+    needs: test-schedule-sync
+    uses: ./.github/workflows/python_lambda_build.yml
+    secrets: inherit
+    with:
+      function_name: ${{ inputs.schedule_sync_function_name || 'sports-predictor-nba-schedule-sync' }}
+      handler_dir: 'Source/aws-lambdas/nba/schedule-sync'
+      library_path: 'Source/library'

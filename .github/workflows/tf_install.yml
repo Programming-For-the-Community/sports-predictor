@@ -80,6 +80,15 @@ on:
       ncaafb_live_scores_function_name:
         description: 'NCAAFB live-scores Lambda function name'
         value: ${{ jobs.terraform.outputs.ncaafb_live_scores_function_name }}
+      nba_ingest_function_name:
+        description: 'NBA ingest Lambda function name'
+        value: ${{ jobs.terraform.outputs.nba_ingest_function_name }}
+      nba_normalize_function_name:
+        description: 'NBA normalize Lambda function name'
+        value: ${{ jobs.terraform.outputs.nba_normalize_function_name }}
+      nba_schedule_sync_function_name:
+        description: 'NBA schedule-sync Lambda function name'
+        value: ${{ jobs.terraform.outputs.nba_schedule_sync_function_name }}
       cognito_user_pool_id:
         description: 'Cognito User Pool ID'
         value: ${{ jobs.terraform.outputs.cognito_user_pool_id }}
@@ -145,6 +154,9 @@ jobs:
       ncaafb_predict_function_name: ${{ steps.tf_outputs.outputs.ncaafb_predict_function_name }}
       ncaafb_predict_read_function_name: ${{ steps.tf_outputs.outputs.ncaafb_predict_read_function_name }}
       ncaafb_live_scores_function_name: ${{ steps.tf_outputs.outputs.ncaafb_live_scores_function_name }}
+      nba_ingest_function_name: ${{ steps.tf_outputs.outputs.nba_ingest_function_name }}
+      nba_normalize_function_name: ${{ steps.tf_outputs.outputs.nba_normalize_function_name }}
+      nba_schedule_sync_function_name: ${{ steps.tf_outputs.outputs.nba_schedule_sync_function_name }}
       cognito_user_pool_id: ${{ steps.tf_outputs.outputs.cognito_user_pool_id }}
       cognito_client_id: ${{ steps.tf_outputs.outputs.cognito_client_id }}
       api_endpoint: ${{ steps.tf_outputs.outputs.api_endpoint }}
@@ -283,6 +295,9 @@ jobs:
         capture_output ncaafb_predict_function_name
         capture_output ncaafb_predict_read_function_name
         capture_output ncaafb_live_scores_function_name
+        capture_output nba_ingest_function_name
+        capture_output nba_normalize_function_name
+        capture_output nba_schedule_sync_function_name
         capture_output cognito_user_pool_id
         capture_output cognito_client_id
         capture_output api_endpoint
