@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:math';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -29,22 +30,41 @@ class ApiClient {
 
   final Ref _ref;
   final http.Client _httpClient;
+  final Random _random = Random();
+
+  // API Gateway's stage-wide throttle (see api-gateway-nfl-predict.tf) is
+  // one shared budget across every route and every sport -- a single event
+  // list page load fans out one request per visible event, so a burst of
+  // 429s is an expected, recoverable condition here, not just an abuse
+  // signal. Retried with exponential backoff + full jitter (not a fixed
+  // delay) specifically so that when many rows 429 in the same tick, their
+  // retries land spread out instead of re-forming the exact same burst --
+  // the bug that motivated this (see prediction_computing_retry.dart's own
+  // jitter for the matching fix on the "computing" 202/203 path).
+  static const _maxRetries429 = 4;
+  static const _baseBackoff = Duration(milliseconds: 250);
 
   Future<dynamic> get(String path, {Map<String, String>? queryParameters}) async {
     final uri = Uri.parse('${AppConfig.apiBaseUrl}$path').replace(queryParameters: queryParameters);
     final stopwatch = Stopwatch()..start();
     debugPrint('[ApiClient] GET $uri -- requesting id token');
-    final response = await _send(uri, await _authHeader());
+    var response = await _send(uri, await _authHeader());
 
     if (response.statusCode == 401) {
       // One reactive retry, covering clock skew between our proactive
       // refresh and the server's actual expiry check.
       debugPrint('[ApiClient] GET $uri -- got 401, retrying with a forced token refresh');
-      final retried = await _send(uri, await _authHeader(forceRefresh: true));
-      final decoded = _decode(retried);
-      debugPrint('[ApiClient] GET $uri -- done (after retry) in ${stopwatch.elapsedMilliseconds}ms');
-      return decoded;
+      response = await _send(uri, await _authHeader(forceRefresh: true));
     }
+
+    for (var attempt = 0; response.statusCode == 429 && attempt < _maxRetries429; attempt++) {
+      final backoff = _baseBackoff * pow(2, attempt).toInt();
+      final jittered = Duration(milliseconds: _random.nextInt(backoff.inMilliseconds + 1));
+      debugPrint('[ApiClient] GET $uri -- got 429, retrying in ${jittered.inMilliseconds}ms (attempt ${attempt + 1}/$_maxRetries429)');
+      await Future.delayed(jittered);
+      response = await _send(uri, await _authHeader());
+    }
+
     final decoded = _decode(response);
     debugPrint('[ApiClient] GET $uri -- done in ${stopwatch.elapsedMilliseconds}ms');
     return decoded;

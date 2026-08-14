@@ -1,0 +1,56 @@
+# 30-day retention, same rationale as ecs-task-nfl-backfill.tf.
+resource "aws_cloudwatch_log_group" "nba_train_player_prop_model" {
+  name              = "/ecs/${var.project}-nba-train-player-prop-model"
+  retention_in_days = 30
+
+  tags = merge(local.common_tags, {
+    Sport     = "nba"
+    Component = "training"
+  })
+}
+
+# Standalone Fargate task, one definition shared by every NBA player-prop
+# stat -- same shape as ecs-task-ncaafb-train-player-prop-model.tf. The
+# training orchestrator's registry item (dynamodb-sport-registry.tf's
+# nba_registry) schedules it once per stat via a per-invocation
+# TARGET_STAT container override; not set here, same reasoning as the NFL
+# file. Reuses the win-probability task's own image, overriding the
+# container command to run train_player_prop_model.py.
+resource "aws_ecs_task_definition" "nba_train_player_prop_model" {
+  family                   = "${var.project}-nba-train-player-prop-model"
+  requires_compatibilities = ["FARGATE"]
+  network_mode             = "awsvpc"
+  cpu                      = local.training_task_cpu
+  memory                   = local.training_task_memory
+  execution_role_arn       = aws_iam_role.ecs_pipeline.arn
+  task_role_arn            = aws_iam_role.ecs_pipeline.arn
+
+  container_definitions = jsonencode([
+    {
+      name      = "nba-train-player-prop-model"
+      image     = "${var.ecr_repo_url}:nba-train-win-probability-model-latest"
+      command   = ["train_player_prop_model.py"]
+      essential = true
+      environment = [
+        { name = "MODEL_ARTIFACTS_BUCKET_NAME", value = aws_s3_bucket.model_artifacts.bucket },
+        { name = "AWS_REGION", value = var.region },
+        { name = "OMP_NUM_THREADS", value = "1" },
+        { name = "OPENBLAS_NUM_THREADS", value = "1" },
+        { name = "MKL_NUM_THREADS", value = "1" },
+      ]
+      logConfiguration = {
+        logDriver = "awslogs"
+        options = {
+          "awslogs-group"         = aws_cloudwatch_log_group.nba_train_player_prop_model.name
+          "awslogs-region"        = var.region
+          "awslogs-stream-prefix" = "train-player-prop-model"
+        }
+      }
+    }
+  ])
+
+  tags = merge(local.common_tags, {
+    Sport     = "nba"
+    Component = "training"
+  })
+}

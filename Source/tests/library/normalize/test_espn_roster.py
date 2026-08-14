@@ -75,3 +75,19 @@ class TestRosterToPlayerEntities:
 
     def test_empty_roster_returns_no_entities(self):
         assert roster_to_player_entities(_roster(groups=[]), "nfl") == []
+
+
+class TestRosterToPlayerEntitiesFlatShape:
+    """NBA's roster response has no NFL-style position-group wrapper --
+    `athletes` is a flat list of athlete dicts directly (confirmed live,
+    2026-08-14). Same function, same output shape -- only the input's
+    grouping differs, detected structurally (see _flatten_roster_athletes'
+    own docstring), not branched on sport."""
+
+    def test_returns_one_entity_per_athlete_with_no_grouping_wrapper(self):
+        roster = _roster(groups=[_athlete("1", position="F"), _athlete("2", position="G")])
+
+        entities = roster_to_player_entities(roster, "nba")
+
+        assert {e["entity_id"] for e in entities} == {"1", "2"}
+        assert {e["metadata"]["position"] for e in entities} == {"F", "G"}

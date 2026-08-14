@@ -141,3 +141,19 @@ class TestBoxscoreToPlayerGameStatsFieldNames:
         line = _stat_line(statistics)
 
         assert line == {"defensive_total_tackles": 7}
+
+    def test_category_with_no_name_field_gets_no_prefix_at_all(self):
+        # NBA's single player-stat block has no "name" field at all (only
+        # a display-label "names" array) -- confirmed live, 2026-08-14.
+        # Falling back to a fabricated "misc" prefix would silently rename
+        # "points" to "misc_points", breaking TARGET_STAT's exact
+        # stat_line key match. A category missing "name" entirely (not a
+        # category whose name happens to be "misc") gets no prefix.
+        statistics = [{
+            "keys": ["points", "rebounds"],
+            "athletes": [{"athlete": {"id": "p1", "displayName": "Player One"}, "stats": ["17", "4"]}],
+        }]
+
+        line = _stat_line(statistics)
+
+        assert line == {"points": 17, "rebounds": 4}

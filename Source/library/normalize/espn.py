@@ -130,12 +130,30 @@ def scoreboard_event_to_event_item(event: dict, sport: str) -> dict:
     return item
 
 
+def _flatten_roster_athletes(raw_athletes: list) -> list[dict]:
+    """NFL's roster groups athletes by position group (offense/defense/
+    specialTeam/injuredReserveOrOut/suspended/practiceSquad --
+    `[{"items": [athlete, ...]}, ...]`); NBA's is a flat list of athlete
+    dicts with no grouping wrapper at all -- confirmed live, 2026-08-14
+    (see project-nba-onboarding memory). Detected per-entry rather than
+    branched on sport, since that's the actual structural signal and keeps
+    this function sport-agnostic, matching this module's own docstring."""
+    flat = []
+    for entry in raw_athletes:
+        if "items" in entry:
+            flat.extend(entry["items"])
+        else:
+            flat.append(entry)
+    return flat
+
+
 def roster_to_player_entities(roster: dict, sport: str) -> list[dict]:
     """Every player entity item for one team's current roster (see
-    NFLClient.get_roster) -- same item shape boxscore_to_player_game_stats
-    already produces for its own player_entities return value, written
-    through the same guarded PipelineStorage.upsert_player_entity, so this
-    is a second SOURCE for that one write path, not a second write path.
+    NFLClient.get_roster/NBAClient.get_roster) -- same item shape
+    boxscore_to_player_game_stats already produces for its own
+    player_entities return value, written through the same guarded
+    PipelineStorage.upsert_player_entity, so this is a second SOURCE for
+    that one write path, not a second write path.
 
     Unlike a box score, a roster fetch has no game of its own to derive a
     date from -- team_id_as_of comes from the roster payload's own
@@ -144,42 +162,41 @@ def roster_to_player_entities(roster: dict, sport: str) -> list[dict]:
     stays correct even if normalize processes this S3 object some time
     after ingest actually fetched it.
 
-    Includes every position group ESPN returns (offense/defense/
-    specialTeam/injuredReserveOrOut/suspended/practiceSquad) -- a player
-    on IR or the practice squad is still on this team, not some other
-    one, which is exactly the fact this function exists to keep current.
+    Includes every player ESPN's roster response returns for the team,
+    including IR/practice-squad-equivalent statuses where the sport has
+    them (NFL's own position groups) -- a player on IR is still on this
+    team, not some other one, which is exactly the fact this function
+    exists to keep current.
 
     metadata.position is the athlete's own specific position abbreviation
-    ("QB"/"WR"/"CB"/etc, confirmed present on every roster athlete via
-    curl) -- distinct from `group`, ESPN's coarse offense/defense/
-    specialTeam bucket above. live_features.py's roster-driven candidate
-    selection (predict/live_features.py) uses this to know which roster
-    players are even eligible for a given slot, since a player with no
-    recorded stats yet (a rookie) has no other signal to identify their
-    position from.
+    ("QB"/"WR"/"CB" for NFL, "F"/"G"/"C" for NBA -- same
+    position.abbreviation shape confirmed on both, live). live_features.py's
+    roster-driven candidate selection (predict/live_features.py) uses this
+    to know which roster players are even eligible for a given slot, since
+    a player with no recorded stats yet (a rookie) has no other signal to
+    identify their position from.
     """
     team_id = str(roster["team"]["id"])
     as_of_date = roster["timestamp"][:10]
     entities = []
-    for group in roster.get("athletes", []):
-        for athlete in group.get("items", []):
-            entities.append({
-                "entity_key": entity_key(sport, athlete["id"]),
-                "entity_id": athlete["id"],
-                "sport": sport,
-                "entity_type": "player",
-                "name": athlete.get("displayName", ""),
-                # Top-level (not nested in metadata) -- a GSI hash key
-                # must be a top-level attribute. See dynamodb-entities.tf's
-                # team-index.
-                "team_key": entity_team_key(sport, team_id),
-                "metadata": {
-                    "team_id": team_id,
-                    "team_id_as_of": as_of_date,
-                    "jersey": athlete.get("jersey"),
-                    "position": (athlete.get("position") or {}).get("abbreviation"),
-                },
-            })
+    for athlete in _flatten_roster_athletes(roster.get("athletes", [])):
+        entities.append({
+            "entity_key": entity_key(sport, athlete["id"]),
+            "entity_id": athlete["id"],
+            "sport": sport,
+            "entity_type": "player",
+            "name": athlete.get("displayName", ""),
+            # Top-level (not nested in metadata) -- a GSI hash key
+            # must be a top-level attribute. See dynamodb-entities.tf's
+            # team-index.
+            "team_key": entity_team_key(sport, team_id),
+            "metadata": {
+                "team_id": team_id,
+                "team_id_as_of": as_of_date,
+                "jersey": athlete.get("jersey"),
+                "position": (athlete.get("position") or {}).get("abbreviation"),
+            },
+        })
     return entities
 
 
@@ -218,7 +235,18 @@ def boxscore_to_player_game_stats(
     for team_block in summary.get("boxscore", {}).get("players", []):
         team_id = str(team_block["team"]["id"])
         for category in team_block.get("statistics", []):
-            category_name = snake_case(category.get("name", "misc"))
+            # NFL's categories are always named ("passing"/"rushing"/etc,
+            # prefixed below); NBA's single stat block has no "name" field
+            # at all (only a display-label "names" array) -- confirmed
+            # live, 2026-08-14. Falling back to a fabricated "misc" prefix
+            # there would silently rename "points" to "misc_points",
+            # breaking TARGET_STAT's exact stat_line key match (see
+            # model-training/nba/train_player_prop_model.py). Distinguish
+            # "genuinely unnamed" (category.get("name") is None -- no
+            # prefix at all) from "named" (prefix as before) rather than
+            # defaulting a name in.
+            raw_category_name = category.get("name")
+            category_name = snake_case(raw_category_name) if raw_category_name is not None else None
             keys = category.get("keys", [])
             for athlete_entry in category.get("athletes", []):
                 athlete = athlete_entry["athlete"]
@@ -250,7 +278,7 @@ def boxscore_to_player_game_stats(
                     # "passing"'s "interceptions" key, defensive picks vs
                     # thrown picks) still gets disambiguated.
                     snake_key = snake_case(key)
-                    if snake_key == category_name or snake_key.startswith(f"{category_name}_"):
+                    if category_name is None or snake_key == category_name or snake_key.startswith(f"{category_name}_"):
                         field_name = snake_key
                     else:
                         field_name = f"{category_name}_{snake_key}"
