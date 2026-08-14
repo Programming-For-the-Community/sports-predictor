@@ -1,0 +1,3 @@
+# All runtime dependencies come from either the Lambda Python runtime (boto3)
+# or the shared library bundled by the build workflow. No additional packages
+# are needed for normalization.

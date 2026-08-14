@@ -144,3 +144,27 @@ output "ncaafb_live_scores_function_name" {
   description = "NCAAFB live-scores Lambda function name -- passed to ncaafb_deploy workflow for `aws lambda update-function-code`"
   value       = aws_lambda_function.ncaafb_live_scores.function_name
 }
+
+# NBA (Sub-phase 3A). Only ingest/normalize/schedule-sync + backfill are
+# wired here (step 4) -- predict/predict-read/live-scores outputs get
+# added once those Lambdas' real code exists (step 6/7), same as
+# tf_install.yml's own workflow_call outputs block.
+output "nba_backfill_task_definition_arn" {
+  description = "ARN of the NBA backfill ECS task definition -- pass to `aws ecs run-task --task-definition`"
+  value       = aws_ecs_task_definition.nba_backfill.arn
+}
+
+output "nba_ingest_function_name" {
+  description = "NBA ingest Lambda function name -- passed to nba_data_pipeline workflow for `aws lambda update-function-code`"
+  value       = aws_lambda_function.nba_ingest.function_name
+}
+
+output "nba_normalize_function_name" {
+  description = "NBA normalize Lambda function name -- passed to nba_data_pipeline workflow for `aws lambda update-function-code`"
+  value       = aws_lambda_function.nba_normalize.function_name
+}
+
+output "nba_schedule_sync_function_name" {
+  description = "NBA schedule-sync Lambda function name -- passed to nba_data_pipeline workflow for `aws lambda update-function-code`"
+  value       = aws_lambda_function.nba_schedule_sync.function_name
+}

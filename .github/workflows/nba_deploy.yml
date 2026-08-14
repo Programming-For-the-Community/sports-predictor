@@ -1,0 +1,97 @@
+# Top-level NBA deploy pipeline. Runs on every push to an nba* branch, but
+# pauses for manual approval (via the environment's required reviewers --
+# configure this in Settings > Environments, it can't be set from this
+# file) before doing anything. Mirrors nfl_deploy.yml's own structure and
+# comments, with the caveats below.
+#
+# STUB, BY DESIGN -- only wires backfill + infra + data_pipeline, unlike
+# nfl_deploy.yml's/ncaafb_deploy.yml's full 6-job shape. NBA's Sub-phase
+# 3A build order (see project-nba-onboarding memory) hasn't reached
+# predict/predict-read/live-scores or training yet (steps 5-7), so there
+# is no ai_training/ai_hosting/predict_deploy/predict_read_deploy/
+# live_scores_deploy workflow file for this to call -- adding those job
+# blocks now would reference `uses:` targets that don't exist and fail on
+# first run. The missing jobs get added here, not in a new file, once
+# each step's own workflow file exists:
+#   - ai_training     -> after step 5 (Sub-phase 3A: feature engineering + training)
+#   - ai_hosting, deploy_predict_lambda, predict_read_deploy -> after step 6 (inference)
+#   - live_scores_deploy -> after step 7 (live-scores)
+# infra's `needs`/`if` list and tf_install.yml's own outputs will need
+# ai_training/ai_hosting added to the `needs: [backfill, ai_training,
+# ai_hosting]` list at that point too, same as nfl_deploy.yml's shape --
+# don't forget that when filling this back in.
+#
+# Once approved, backfill (build) runs BEFORE infra -- it doesn't read
+# anything Terraform manages, only needing the ECR repo URL and AWS push
+# credentials (plain GitHub variables/secrets). tf_install then applies
+# infra (including the NBA ECS task definition's env vars -- see
+# Terraform/ecs-task-nba-backfill.tf). Only after infra does data_pipeline
+# run, since it deploys Lambda code into functions Terraform just created.
+#
+# Both this job's `approval` step AND tf_install.yml's own terraform job
+# gate on the `development`/`production` environment, so a run through
+# this pipeline prompts for approval twice -- same accepted tradeoff as
+# nfl_deploy.yml's own comment explains.
+
+name: NBA Deploy
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - 'nba*'
+      - 'nba/*'
+  workflow_call:
+
+# See app_deploy.yml's own comment -- shared group across every workflow
+# that can reach tf_install.yml's terraform apply, since
+# Terraform/main.tf's S3 backend has no state locking configured.
+concurrency:
+  group: terraform-deploy-pipeline
+  cancel-in-progress: false
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  approval:
+    name: Await deployment approval
+    if: github.event_name != 'workflow_call'
+    runs-on: ubuntu-latest
+    environment: development
+    steps:
+      - name: Approved
+        run: echo "Deployment approved -- proceeding."
+
+  # approval is intentionally skipped (not failed) when called via
+  # workflow_call -- without this, a skipped `needs` job would cause
+  # everything downstream to be skipped too. Each build job below repeats
+  # this same tolerant check against `approval` directly.
+  backfill:
+    name: Historical backfill (build)
+    needs: approval
+    if: |
+      always() &&
+      (needs.approval.result == 'success' || needs.approval.result == 'skipped')
+    uses: ./.github/workflows/nba_backfill.yml
+    secrets: inherit
+
+  infra:
+    name: Apply shared infrastructure
+    needs: backfill
+    if: |
+      always() &&
+      (needs.backfill.result == 'success' || needs.backfill.result == 'skipped')
+    uses: ./.github/workflows/tf_install.yml
+    secrets: inherit
+
+  data_pipeline:
+    name: Data pipeline
+    needs: infra
+    uses: ./.github/workflows/nba_data_pipeline.yml
+    secrets: inherit
+    with:
+      ingest_function_name: ${{ needs.infra.outputs.nba_ingest_function_name }}
+      normalize_function_name: ${{ needs.infra.outputs.nba_normalize_function_name }}
+      schedule_sync_function_name: ${{ needs.infra.outputs.nba_schedule_sync_function_name }}
