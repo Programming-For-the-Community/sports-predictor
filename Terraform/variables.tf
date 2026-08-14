@@ -222,6 +222,14 @@ variable "feature_engineering_task_cpu" {
   default = {
     nfl    = 1024
     ncaafb = 8192
+    # Started at NCAAFB's own post-OOM size rather than NFL's default --
+    # NBA's 10-year player-game row count (~1,230 games/season x ~26
+    # players x 10 seasons) is larger than NCAAFB's own FBS volume that
+    # actually triggered the OOM this variable's description documents, so
+    # defaulting to NFL's low setting and waiting to get OOM-killed too
+    # would be ignoring evidence already in hand, not "verify before
+    # presizing" the way the training-task vCPU override is meant to be.
+    nba = 8192
   }
   nullable = false
 
@@ -237,6 +245,7 @@ variable "feature_engineering_task_memory_per_vcpu_mib" {
   default = {
     nfl    = 4096
     ncaafb = 4096
+    nba    = 4096
   }
   nullable = false
 }

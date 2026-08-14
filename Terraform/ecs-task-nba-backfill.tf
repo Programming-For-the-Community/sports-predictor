@@ -1,0 +1,67 @@
+# 30-day retention, same rationale as ecs-task-nfl-backfill.tf.
+resource "aws_cloudwatch_log_group" "nba_backfill" {
+  name              = "/ecs/${var.project}-nba-backfill"
+  retention_in_days = 30
+
+  tags = merge(local.common_tags, {
+    Sport     = "nba"
+    Component = "ingestion"
+  })
+}
+
+# Standalone Fargate task (launched via `aws ecs run-task`, not a Service --
+# this runs to completion and stops, no always-on cost). Pass
+# --propagate-tags TASK_DEFINITION on that command (or the equivalent
+# console option) or the running task won't carry this file's tags for
+# cost allocation -- RunTask doesn't propagate them by default. Runs in a
+# public subnet with a public IP to reach ESPN's public API, same
+# NAT-Gateway-cost reasoning as ecs-task-nfl-backfill.tf.
+#
+# START_SEASON/END_SEASON/BATCH_SIZE/REQUEST_DELAY_SECONDS default to a
+# full historical run here; override them per-run via ECS "Run Task" ->
+# Container overrides -> Environment variables. See
+# Source/data-backfills/nba/backfill.py's docstring.
+resource "aws_ecs_task_definition" "nba_backfill" {
+  family                   = "${var.project}-nba-backfill"
+  requires_compatibilities = ["FARGATE"]
+  network_mode             = "awsvpc"
+  cpu                      = "1024"
+  memory                   = "2048"
+  execution_role_arn       = aws_iam_role.nba_backfill.arn
+  task_role_arn            = aws_iam_role.nba_backfill.arn
+
+  container_definitions = jsonencode([
+    {
+      name      = "nba-backfill"
+      image     = "${var.ecr_repo_url}:nba-backfill-latest"
+      essential = true
+      environment = [
+        { name = "RAW_BUCKET_NAME", value = aws_s3_bucket.raw_data_lake.bucket },
+        { name = "ENTITIES_TABLE_NAME", value = aws_dynamodb_table.entities.name },
+        { name = "EVENTS_TABLE_NAME", value = aws_dynamodb_table.events.name },
+        { name = "PLAYER_GAME_STATS_TABLE_NAME", value = aws_dynamodb_table.player_game_stats.name },
+        { name = "TEAM_GAME_STATS_TABLE_NAME", value = aws_dynamodb_table.team_game_stats.name },
+        { name = "AWS_REGION", value = var.region },
+        { name = "ESPN_API_ROOT_URL", value = var.espn_api_root_url },
+        { name = "ESPN_USER_AGENT", value = var.espn_user_agent },
+        { name = "START_SEASON", value = "2016" },
+        { name = "END_SEASON", value = "2025" },
+        { name = "BATCH_SIZE", value = "2" },
+        { name = "REQUEST_DELAY_SECONDS", value = "0.3" },
+      ]
+      logConfiguration = {
+        logDriver = "awslogs"
+        options = {
+          "awslogs-group"         = aws_cloudwatch_log_group.nba_backfill.name
+          "awslogs-region"        = var.region
+          "awslogs-stream-prefix" = "backfill"
+        }
+      }
+    }
+  ])
+
+  tags = merge(local.common_tags, {
+    Sport     = "nba"
+    Component = "ingestion"
+  })
+}

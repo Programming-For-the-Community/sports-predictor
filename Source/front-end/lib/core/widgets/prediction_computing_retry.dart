@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -43,6 +44,7 @@ class PredictionComputingRetry extends ConsumerStatefulWidget {
 
 class _PredictionComputingRetryState extends ConsumerState<PredictionComputingRetry> {
   Timer? _retryTimer;
+  final Random _random = Random();
 
   @override
   void initState() {
@@ -56,9 +58,18 @@ class _PredictionComputingRetryState extends ConsumerState<PredictionComputingRe
     _scheduleRetry();
   }
 
+  // +0-40% jitter on top of the server's own retryAfterSeconds -- every
+  // card on a page whose caches went stale/missing at the same moment
+  // (e.g. a model promotion) otherwise gets the exact same delay and
+  // re-requests in the same tick, over and over, every cycle. That
+  // synchronized fan-out is what actually produced a real batch of
+  // API Gateway 429s (see api-gateway-nfl-predict.tf's own note) --
+  // jitter spreads retries out instead of recreating the burst.
   void _scheduleRetry() {
     _retryTimer?.cancel();
-    _retryTimer = Timer(Duration(seconds: widget.retryAfterSeconds), () {
+    final baseMs = widget.retryAfterSeconds * 1000;
+    final jitteredMs = baseMs + _random.nextInt((baseMs * 0.4).round() + 1);
+    _retryTimer = Timer(Duration(milliseconds: jitteredMs), () {
       if (!mounted) return;
       ref.invalidate(eventPredictionProvider((sport: widget.sport, eventId: widget.eventId)));
     });

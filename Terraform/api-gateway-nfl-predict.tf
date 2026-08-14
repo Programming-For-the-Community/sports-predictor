@@ -321,6 +321,41 @@ resource "aws_api_gateway_deployment" "main" {
       sha1(jsonencode(values(aws_api_gateway_method.ncaafb_cors)[*].id)),
       sha1(jsonencode(values(aws_api_gateway_integration.ncaafb_cors)[*].id)),
       sha1(jsonencode(values(aws_api_gateway_integration_response.ncaafb_cors)[*].id)),
+      # NBA -- every resource/method/integration declared in
+      # api-gateway-nba-predict.tf, this REST API's third sport. Same
+      # single shared aws_api_gateway_deployment as every route above (one
+      # REST API, one deployment -- see that file's own comment for why
+      # its resources couldn't just define their own).
+      aws_api_gateway_resource.nba.id,
+      aws_api_gateway_resource.nba_events.id,
+      aws_api_gateway_method.nba_events.id,
+      aws_api_gateway_integration.nba_events.id,
+      aws_api_gateway_resource.nba_models.id,
+      aws_api_gateway_method.nba_models.id,
+      aws_api_gateway_integration.nba_models.id,
+      aws_api_gateway_resource.nba_season.id,
+      aws_api_gateway_method.nba_season.id,
+      aws_api_gateway_integration.nba_season.id,
+      aws_api_gateway_resource.nba_predictions.id,
+      aws_api_gateway_resource.nba_predictions_events.id,
+      aws_api_gateway_resource.nba_predictions_event.id,
+      aws_api_gateway_resource.nba_predictions_event_players.id,
+      aws_api_gateway_resource.nba_predictions_event_player.id,
+      aws_api_gateway_method.nba_predict_event.id,
+      aws_api_gateway_integration.nba_predict_event.id,
+      aws_api_gateway_integration.nba_predict_event.uri, # repointed nba_predict -> nba_predict_read
+      aws_api_gateway_method.nba_predict_player.id,
+      aws_api_gateway_integration.nba_predict_player.id,
+      aws_api_gateway_integration.nba_predict_player.uri,
+      # live-scores -- resource/method/integration declared in
+      # api-gateway-nba-live-scores.tf, a third NBA Lambda target.
+      aws_api_gateway_resource.nba_live_scores.id,
+      aws_api_gateway_method.nba_live_scores.id,
+      aws_api_gateway_integration.nba_live_scores.id,
+      aws_api_gateway_integration.nba_live_scores.uri,
+      sha1(jsonencode(values(aws_api_gateway_method.nba_cors)[*].id)),
+      sha1(jsonencode(values(aws_api_gateway_integration.nba_cors)[*].id)),
+      sha1(jsonencode(values(aws_api_gateway_integration_response.nba_cors)[*].id)),
     ]))
   }
 
@@ -343,14 +378,27 @@ resource "aws_api_gateway_stage" "main" {
 # Throttling only -- no API key required yet (Cognito already authenticates
 # every caller). A usage plan is still the right place for throttling even
 # without keys: it's the mechanism API Gateway exposes for it.
+#
+# Raised from 20 burst / 10 rps (2026-08-14) -- that was too low for this
+# API's real traffic shape: event_list_page.dart renders every upcoming
+# event eagerly (not a lazy/viewport-limited list), and each GameRow
+# fetches its own prediction independently, so a single page load of a
+# full NCAAFB week (~130 events) fans out ~130 near-simultaneous
+# GET .../predictions/events/{id} calls -- confirmed as the cause of a
+# real batch of 429s when every cached prediction went stale/missing at
+# once and every row's request landed in the same tick. 100 burst / 60 rps
+# clears a slate that size in ~2s instead of throttling it outright, while
+# still bounding cost/abuse for what's currently a single-user, Cognito-
+# authenticated app. Raise again if a larger sport's slate (NCAA MBB,
+# Phase 3B) needs more headroom -- don't assume this number is final.
 resource "aws_api_gateway_method_settings" "main" {
   rest_api_id = aws_api_gateway_rest_api.main.id
   stage_name  = aws_api_gateway_stage.main.stage_name
   method_path = "*/*"
 
   settings {
-    throttling_burst_limit = 20
-    throttling_rate_limit  = 10
+    throttling_burst_limit = 100
+    throttling_rate_limit  = 60
   }
 }
 
@@ -363,8 +411,8 @@ resource "aws_api_gateway_usage_plan" "main" {
   }
 
   throttle_settings {
-    burst_limit = 20
-    rate_limit  = 10
+    burst_limit = 100
+    rate_limit  = 60
   }
 
   tags = merge(local.common_tags, {

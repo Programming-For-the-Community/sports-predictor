@@ -202,3 +202,85 @@ resource "aws_dynamodb_table_item" "ncaafb_registry" {
     }
   })
 }
+
+# 3 score targets, same shape as NFL/NCAAFB. 6 player-prop stats -- per the
+# approved Phase 3 plan, turnovers and free_throws_made are deliberately
+# excluded here (kept as feature inputs only, not trained targets) and
+# personal_fouls_drawn isn't a field ESPN's NBA box score exposes at all
+# (confirmed via live verification 2026-08-13 -- see project memory).
+locals {
+  nba_score_targets = {
+    "margin"     = true
+    "home_score" = true
+    "away_score" = true
+  }
+  nba_player_prop_stats = {
+    "points"              = true
+    "rebounds"            = true
+    "assists"             = true
+    "steals"              = true
+    "blocks"              = true
+    "three_pointers_made" = true
+  }
+}
+
+# NBA's registry row -- same shape as nfl_registry above, minus a
+# national-ranking target (NBA has no in-season poll the way NCAAFB/NCAA
+# MBB do -- same asymmetry those sports already have relative to NFL).
+#
+# season_start/season_end are a first-pass estimate (preseason through
+# just past the NBA Finals) pending live verification of the actual
+# season/play-in/playoff calendar -- open item 5 in the approved plan,
+# not yet checked. Revisit before relying on season-gating being exactly
+# right at the boundaries.
+resource "aws_dynamodb_table_item" "nba_registry" {
+  table_name = aws_dynamodb_table.sport_registry.name
+  hash_key   = aws_dynamodb_table.sport_registry.hash_key
+
+  item = jsonencode({
+    sport_key       = { S = "SPORT#NBA" }
+    sport           = { S = "nba" }
+    event_type      = { S = "head_to_head" }
+    polling_cadence = { S = "daily" }
+    season_start    = { S = "09-01" } # preseason/training camp -- unverified, see comment above
+    season_end      = { S = "07-01" } # past the NBA Finals -- unverified, see comment above
+
+    training_targets = {
+      L = concat(
+        [
+          {
+            M = {
+              model_name             = { S = "win-probability" }
+              task_definition_suffix = { S = "train-win-probability-model" }
+              container_name         = { S = "nba-train-win-probability-model" }
+              env_name               = { S = "AWS_REGION" }
+              env_value              = { S = var.region }
+            }
+          },
+        ],
+        [
+          for target, _ in local.nba_score_targets : {
+            M = {
+              model_name             = { S = "score-${replace(target, "_", "-")}" }
+              task_definition_suffix = { S = "train-score-model" }
+              container_name         = { S = "nba-train-score-model" }
+              env_name               = { S = "SCORE_TARGET" }
+              env_value              = { S = target }
+            }
+          }
+        ],
+        [
+          for stat, _ in local.nba_player_prop_stats : {
+            M = {
+              model_name             = { S = "player-prop-${replace(stat, "_", "-")}" }
+              task_definition_suffix = { S = "train-player-prop-model" }
+              container_name         = { S = "nba-train-player-prop-model" }
+              env_name               = { S = "TARGET_STAT" }
+              env_value              = { S = stat }
+            }
+          }
+        ],
+      )
+    }
+  })
+}

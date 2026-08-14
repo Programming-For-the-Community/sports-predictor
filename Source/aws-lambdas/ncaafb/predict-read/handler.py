@@ -37,6 +37,7 @@ from library.aws.lambda_invoker import LambdaInvoker
 from library.aws.s3_manager import S3Manager
 from library.schema.keys import event_key as build_event_key
 from library.serving.ncaafb_reads import get_season_projection, list_events, list_models
+from library.serving.viewer_analytics import log_viewer_analytics
 from library.storage import prediction_cache
 from library.storage.feature_storage import FeatureStorage
 
@@ -122,6 +123,7 @@ def lambda_handler(event, context):
     path_params = event.get("pathParameters") or {}
     query_params = event.get("queryStringParameters") or {}
     resource = event.get("resource", "")
+    log_viewer_analytics(logger, SPORT, resource, event.get("httpMethod"), event.get("headers"))
 
     try:
         if resource == "/ncaafb/events":

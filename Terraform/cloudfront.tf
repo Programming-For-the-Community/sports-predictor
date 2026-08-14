@@ -20,6 +20,49 @@ resource "aws_cloudfront_origin_access_control" "frontend" {
   signing_protocol                  = "sigv4"
 }
 
+# Baseline security headers on every response -- HSTS, MIME-sniffing
+# protection, clickjacking protection, and a conservative Referrer-Policy.
+# Free (a native CloudFront feature, no Lambda@Edge/CloudFront Function
+# needed) -- added 2026-08-14 as part of a security review, since the
+# distribution previously set none of these.
+#
+# No Content-Security-Policy here -- the Flutter Web build's own script/
+# style loading pattern hasn't been audited against a CSP yet, and a wrong
+# CSP silently breaks the app in a way that's hard to notice from the
+# Terraform side. Worth adding once that audit happens, not guessed here.
+resource "aws_cloudfront_response_headers_policy" "security_headers" {
+  name = "${var.project}-security-headers"
+
+  security_headers_config {
+    content_type_options {
+      override = true
+    }
+
+    frame_options {
+      frame_option = "DENY"
+      override     = true
+    }
+
+    referrer_policy {
+      referrer_policy = "strict-origin-when-cross-origin"
+      override        = true
+    }
+
+    strict_transport_security {
+      access_control_max_age_sec = 63072000 # 2 years, the value HSTS preload lists expect
+      include_subdomains         = true
+      preload                    = true
+      override                   = true
+    }
+
+    xss_protection {
+      protection = true
+      mode_block = true
+      override   = true
+    }
+  }
+}
+
 resource "aws_cloudfront_distribution" "main" {
   enabled             = true
   default_root_object = "index.html"
@@ -54,7 +97,8 @@ resource "aws_cloudfront_distribution" "main" {
     allowed_methods        = ["GET", "HEAD"]
     cached_methods         = ["GET", "HEAD"]
     # Managed-CachingOptimized -- static assets, safe to cache aggressively.
-    cache_policy_id = "658327ea-f89d-4fab-a63d-7e88639e58f6"
+    cache_policy_id            = "658327ea-f89d-4fab-a63d-7e88639e58f6"
+    response_headers_policy_id = aws_cloudfront_response_headers_policy.security_headers.id
   }
 
   dynamic "ordered_cache_behavior" {
@@ -66,14 +110,19 @@ resource "aws_cloudfront_distribution" "main" {
       allowed_methods        = ["GET", "HEAD", "OPTIONS"]
       cached_methods         = ["GET", "HEAD"]
       # Managed-CachingDisabled -- predictions are always dynamic.
-      cache_policy_id = "4135ea2d-6df8-44a3-9df3-4b5a84be39ad"
+      cache_policy_id            = "4135ea2d-6df8-44a3-9df3-4b5a84be39ad"
+      response_headers_policy_id = aws_cloudfront_response_headers_policy.security_headers.id
       # Managed-AllViewerExceptHostHeader -- forwards Authorization + all
       # query strings (needed for the Cognito authorizer and player-prop
       # `?stat=` params), same as Managed-AllViewer, but substitutes the
       # origin's own domain as the Host header instead of forwarding the
       # viewer's. API Gateway's regional execute-api endpoint rejects a
       # Host header that doesn't match its own domain, so plain AllViewer
-      # 403s every request to this origin.
+      # 403s every request to this origin. This same managed policy also
+      # forwards CloudFront's device-type/viewer-location headers (per
+      # AWS's own docs for it) -- library/serving/viewer_analytics.py reads
+      # those from inside predict-read, no separate plumbing needed for
+      # that data to arrive.
       origin_request_policy_id = "b689b0a8-53d0-40ab-baf2-68738e2966ac"
     }
   }
@@ -93,9 +142,15 @@ resource "aws_cloudfront_distribution" "main" {
     response_page_path = "/index.html"
   }
 
+  # US-only -- this is a single-user project with no expected traffic from
+  # outside the US; every request from elsewhere is a scan/bot/probe by
+  # construction, not a legitimate user this app needs to reach. Free,
+  # native CloudFront feature (no WAF needed for this specific control).
+  # Added 2026-08-14 as part of a security review.
   restrictions {
     geo_restriction {
-      restriction_type = "none"
+      restriction_type = "whitelist"
+      locations        = ["US"]
     }
   }
 
