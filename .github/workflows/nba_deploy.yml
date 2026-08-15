@@ -4,29 +4,48 @@
 # file) before doing anything. Mirrors nfl_deploy.yml's own structure and
 # comments, with the caveats below.
 #
-# STUB, BY DESIGN -- only wires backfill + infra + data_pipeline, unlike
-# nfl_deploy.yml's/ncaafb_deploy.yml's full 6-job shape. NBA's Sub-phase
-# 3A build order (see project-nba-onboarding memory) hasn't reached
-# predict/predict-read/live-scores or training yet (steps 5-7), so there
-# is no ai_training/ai_hosting/predict_deploy/predict_read_deploy/
+# STUB, BY DESIGN -- only wires backfill + ai_hosting + infra +
+# data_pipeline, unlike nfl_deploy.yml's/ncaafb_deploy.yml's full 6-job
+# shape. NBA's Sub-phase 3A build order (see project-nba-onboarding
+# memory) hasn't reached predict-read/live-scores or training yet (steps
+# 5, 7), so there is no ai_training/predict_read_deploy/
 # live_scores_deploy workflow file for this to call -- adding those job
 # blocks now would reference `uses:` targets that don't exist and fail on
-# first run. The missing jobs get added here, not in a new file, once
-# each step's own workflow file exists:
-#   - ai_training     -> after step 5 (Sub-phase 3A: feature engineering + training)
-#   - ai_hosting, deploy_predict_lambda, predict_read_deploy -> after step 6 (inference)
-#   - live_scores_deploy -> after step 7 (live-scores)
-# infra's `needs`/`if` list and tf_install.yml's own outputs will need
-# ai_training/ai_hosting added to the `needs: [backfill, ai_training,
-# ai_hosting]` list at that point too, same as nfl_deploy.yml's shape --
-# don't forget that when filling this back in.
+# first run. ai_hosting/deploy_predict_lambda ARE wired below, ahead of
+# schedule, but only against nba_ai_hosting.yml's placeholder image (see
+# that file's own header) -- NOT real inference code yet.
 #
-# Once approved, backfill (build) runs BEFORE infra -- it doesn't read
-# anything Terraform manages, only needing the ECR repo URL and AWS push
-# credentials (plain GitHub variables/secrets). tf_install then applies
-# infra (including the NBA ECS task definition's env vars -- see
-# Terraform/ecs-task-nba-backfill.tf). Only after infra does data_pipeline
-# run, since it deploys Lambda code into functions Terraform just created.
+# Why ai_hosting couldn't wait for step 6 like the others: unlike the
+# zip-based Lambdas, aws_lambda_function.nba_predict
+# (Terraform/lambda-nba-predict.tf) is a container-image Lambda --
+# CreateFunction validates its image tag already exists in ECR, and
+# Terraform can't fabricate a placeholder image the way it does a
+# placeholder ZIP. infra ran without this dependency once (2026-08-14)
+# and failed at CreateFunction for exactly this reason -- see
+# project-nba-onboarding memory. nfl_deploy.yml's own `infra` job
+# depending on `ai_hosting` is what prevents this for NFL/NCAAFB; this
+# file now mirrors that same invariant instead of a manual one-off image
+# push.
+#
+# The still-missing jobs get added here, not in a new file, once each
+# step's own workflow file exists:
+#   - ai_training -> after step 5 (Sub-phase 3A: feature engineering + training)
+#   - predict_read_deploy -> after step 6 (inference), alongside replacing
+#     ai_hosting's placeholder Dockerfile/handler with real code
+#   - live_scores_deploy -> after step 7 (live-scores)
+# infra's `needs`/`if` list will need ai_training added at that point too,
+# same as nfl_deploy.yml's `needs: [backfill, ai_training, ai_hosting]`
+# shape -- don't forget that when filling this back in.
+#
+# Once approved, backfill and ai_hosting (build) run BEFORE infra -- both
+# only need the ECR repo URL and AWS push credentials (plain GitHub
+# variables/secrets), not anything Terraform manages. tf_install then
+# applies infra (including the NBA ECS task definition's env vars -- see
+# Terraform/ecs-task-nba-backfill.tf -- and, for nba-predict specifically,
+# its CreateFunction call, which now finds ai_hosting's just-pushed image).
+# Only after infra do deploy_predict_lambda and data_pipeline run, since
+# they deploy code into functions/point Lambdas at images Terraform just
+# created.
 #
 # Both this job's `approval` step AND tf_install.yml's own terraform job
 # gate on the `development`/`production` environment, so a run through
@@ -77,14 +96,40 @@ jobs:
     uses: ./.github/workflows/nba_backfill.yml
     secrets: inherit
 
-  infra:
-    name: Apply shared infrastructure
-    needs: backfill
+  # STUB image only -- see nba_ai_hosting.yml's own header. Exists so
+  # infra never runs without nba-predict-latest already in ECR.
+  ai_hosting:
+    name: AI hosting (build)
+    needs: approval
     if: |
       always() &&
-      (needs.backfill.result == 'success' || needs.backfill.result == 'skipped')
+      (needs.approval.result == 'success' || needs.approval.result == 'skipped')
+    uses: ./.github/workflows/nba_ai_hosting.yml
+    secrets: inherit
+
+  infra:
+    name: Apply shared infrastructure
+    needs: [backfill, ai_hosting]
+    if: |
+      always() &&
+      (needs.backfill.result == 'success' || needs.backfill.result == 'skipped') &&
+      (needs.ai_hosting.result == 'success' || needs.ai_hosting.result == 'skipped')
     uses: ./.github/workflows/tf_install.yml
     secrets: inherit
+
+  # Points nba-predict at whatever ai_hosting just pushed (today: the
+  # placeholder image). Real per-sport nba_predict_deploy.yml (mirroring
+  # nfl_predict_deploy.yml) still belongs to step 6 -- inlined here for
+  # now since there's only one Lambda involved and no test suite to run
+  # against real code yet.
+  deploy_predict_lambda:
+    name: AI hosting (deploy)
+    needs: [infra, ai_hosting]
+    uses: ./.github/workflows/nba_predict_deploy.yml
+    secrets: inherit
+    with:
+      function_name: ${{ needs.infra.outputs.nba_predict_function_name }}
+      image_uri: ${{ needs.ai_hosting.outputs.predict_image_uri }}
 
   data_pipeline:
     name: Data pipeline
