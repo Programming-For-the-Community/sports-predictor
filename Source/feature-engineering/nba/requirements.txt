@@ -1,0 +1,6 @@
+# Same dependency set as feature-engineering/nfl -- see that
+# requirements.txt's own comment. boto3 comes from the library package's
+# own dependencies; pandas + pyarrow write the training datasets as
+# Parquet.
+pandas>=2.2
+pyarrow>=16.0

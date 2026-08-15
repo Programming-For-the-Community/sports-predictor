@@ -16,6 +16,7 @@ training_common's promotion helpers as it finishes -- it has no sport- or
 target-specific knowledge at all.
 """
 import logging
+import time
 
 from library.aws.s3_manager import S3Manager
 from library.ml import training_common
@@ -117,6 +118,10 @@ def run_backtest(
     is deleted (training_common.clear_run_progress) once every candidate
     in the list has been evaluated -- nothing left to resume.
 
+    Every evaluated entry (and every promoted card's metadata) carries a
+    training_seconds field -- wall-clock tune_and_fit time for that
+    candidate alone, see the field's own comment below for why.
+
     Returns {"promotions": [model_card, ...], "candidates": [summary, ...]}
     -- promotions lists, in the order they happened across the WHOLE run
     (including any earlier, interrupted attempt of the same run_id, not
@@ -149,7 +154,9 @@ def run_backtest(
             continue
 
         logger.info("Tuning and fitting %s/%s candidate: %s", sport, model_name, adapter.algorithm)
+        tune_and_fit_started = time.perf_counter()
         estimator, best_params = adapter.tune_and_fit(X_train, y_train)
+        training_seconds = time.perf_counter() - tune_and_fit_started
         predictions = adapter.predict(estimator, X_test)
         if task == "classification":
             metrics = training_common.evaluate_holdout(predictions, y_test)
@@ -159,24 +166,34 @@ def run_backtest(
             raise ValueError(f"Unknown task: {task!r} (expected 'classification' or 'regression')")
 
         logger.info(
-            "%s/%s candidate %s: %s", sport, model_name, adapter.algorithm,
-            " ".join(f"{k}={v:.4f}" for k, v in metrics.items()),
+            "%s/%s candidate %s: %s (training_seconds=%.1f)", sport, model_name, adapter.algorithm,
+            " ".join(f"{k}={v:.4f}" for k, v in metrics.items()), training_seconds,
         )
         # "score" is the display metric, NOT promotion_metric -- see the
         # docstring above for why. rank_score carries promotion_metric's
         # own value alongside it so a candidate with the best "score" not
         # winning doesn't look like a bug (candidates_ranked_by, alongside
-        # the list, names which metric rank_score is).
+        # the list, names which metric rank_score is). training_seconds is
+        # wall-clock time for tune_and_fit alone (the search+refit cost
+        # that scales with row count/candidate space) -- not predict/
+        # evaluate, which are comparatively instant for every candidate
+        # here. Exists so a real per-candidate cost/accuracy tradeoff can
+        # be read off past runs' model cards instead of guessed -- see
+        # design/PROJECT_PLAN.md Phase 3's model-selection section (this
+        # is the basis for trimming a target's CANDIDATES list once real
+        # numbers exist, not a decision made from this field alone).
         evaluated.append({
             "algorithm": adapter.algorithm,
             "score": metrics[display_metric],
             "rank_score": metrics[promotion_metric],
+            "training_seconds": training_seconds,
         })
         ranked_so_far = sorted(evaluated, key=lambda e: e["rank_score"])
 
         metadata = {
             **extra_metadata,
             **metrics,
+            "training_seconds": training_seconds,
             **naive_baseline_metrics,
             # The exact column order/selection model_loader.predict()
             # (serving side) needs to build a live feature_row into what
