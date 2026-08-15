@@ -1,0 +1,94 @@
+# Builds, packages, and deploys the NBA AI training code. Runs standalone
+# (workflow_dispatch) or called from nba_deploy.yml (workflow_call) --
+# either way the work is identical: build and push image(s). Mirrors
+# nfl_ai_training.yml exactly -- same two-image split, same reasoning.
+#
+# This stage builds two images: Feature Engineering and Train
+# Win-Probability Model (the latter also serves the score and player-prop
+# Fargate tasks -- ecs-task-nba-train-score-model.tf and
+# ecs-task-nba-train-player-prop-model.tf both point at this same image
+# tag and override `command` to run train_score_model.py /
+# train_player_prop_model.py instead, same pattern
+# ecs-task-nfl-train-score-model.tf uses).
+#
+# Each image gets its OWN version constant below, bumped independently --
+# feature engineering and train win-probability model are unrelated
+# Fargate tasks with unrelated code, so a change to one has no reason to
+# force a version bump (and a new image tag/deploy) of the other. Bump
+# only the constant for whichever image actually changed, never both just
+# to keep them in sync.
+
+name: NBA AI Training
+
+on:
+  workflow_dispatch:
+  workflow_call:
+
+env:
+  FEATURE_ENGINEERING_IMAGE_VERSION: '1.0.0'
+  TRAIN_WIN_PROBABILITY_MODEL_IMAGE_VERSION: '1.0.0'
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  # Two independent test jobs, not one shared one -- same reasoning as
+  # nfl_ai_training.yml: a failing model-training test shouldn't fail
+  # feature engineering's deployment too, even though both re-run
+  # Source/tests/library/ redundantly (no clean partition exists, since
+  # e.g. library.aws.dynamodb_table is used by both).
+  #
+  # feature-engineering's own requirements.txt has no reason to carry
+  # xgboost/scikit-learn/pandas/lightgbm's ML-training extras (it only
+  # writes Parquet) -- library/tests/ml/ needs those and is excluded here.
+  # train-win-probability-model's own job below already has all of them
+  # (including lightgbm, unlike NFL's/NCAAFB's own requirements.txt), so
+  # it needs no such exclusion.
+  test-feature-engineering:
+    name: Run feature engineering tests
+    uses: ./.github/workflows/run_python_tests.yml
+    with:
+      test_path: 'Source/tests/library/ Source/tests/feature-engineering/nba/ --ignore=Source/tests/library/ml'
+      requirements_files: 'Source/feature-engineering/nba/requirements.txt'
+
+  test-train-win-probability-model:
+    name: Run train win-probability model tests
+    uses: ./.github/workflows/run_python_tests.yml
+    with:
+      test_path: 'Source/tests/library/ Source/tests/model-training/nba/'
+      requirements_files: 'Source/model-training/nba/requirements.txt'
+
+  set-versions:
+    name: Resolve image versions
+    runs-on: ubuntu-latest
+    outputs:
+      feature_engineering_version: ${{ steps.out.outputs.feature_engineering_version }}
+      train_win_probability_model_version: ${{ steps.out.outputs.train_win_probability_model_version }}
+    steps:
+      - id: out
+        run: |
+          echo "feature_engineering_version=${{ env.FEATURE_ENGINEERING_IMAGE_VERSION }}" >> "$GITHUB_OUTPUT"
+          echo "train_win_probability_model_version=${{ env.TRAIN_WIN_PROBABILITY_MODEL_IMAGE_VERSION }}" >> "$GITHUB_OUTPUT"
+
+  build-feature-engineering-image:
+    name: Build and push feature engineering image
+    needs: [set-versions, test-feature-engineering]
+    uses: ./.github/workflows/docker_build_push.yml
+    secrets: inherit
+    with:
+      dockerfile_path: 'Source/feature-engineering/nba/Dockerfile'
+      docker_context: 'Source'
+      image_name: 'nba-feature-engineering'
+      image_version: ${{ needs.set-versions.outputs.feature_engineering_version }}
+
+  build-train-win-probability-model-image:
+    name: Build and push train win-probability model image
+    needs: [set-versions, test-train-win-probability-model]
+    uses: ./.github/workflows/docker_build_push.yml
+    secrets: inherit
+    with:
+      dockerfile_path: 'Source/model-training/nba/Dockerfile'
+      docker_context: 'Source'
+      image_name: 'nba-train-win-probability-model'
+      image_version: ${{ needs.set-versions.outputs.train_win_probability_model_version }}

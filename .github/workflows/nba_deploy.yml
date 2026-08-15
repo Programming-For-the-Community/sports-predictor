@@ -4,16 +4,16 @@
 # file) before doing anything. Mirrors nfl_deploy.yml's own structure and
 # comments, with the caveats below.
 #
-# STUB, BY DESIGN -- only wires backfill + ai_hosting + infra +
-# data_pipeline, unlike nfl_deploy.yml's/ncaafb_deploy.yml's full 6-job
-# shape. NBA's Sub-phase 3A build order (see project-nba-onboarding
-# memory) hasn't reached predict-read/live-scores or training yet (steps
-# 5, 7), so there is no ai_training/predict_read_deploy/
-# live_scores_deploy workflow file for this to call -- adding those job
-# blocks now would reference `uses:` targets that don't exist and fail on
-# first run. ai_hosting/deploy_predict_lambda ARE wired below, ahead of
-# schedule, but only against nba_ai_hosting.yml's placeholder image (see
-# that file's own header) -- NOT real inference code yet.
+# STUB, BY DESIGN -- only wires backfill + ai_training + ai_hosting +
+# infra + data_pipeline, unlike nfl_deploy.yml's/ncaafb_deploy.yml's full
+# 6-job shape. NBA's Sub-phase 3A build order (see project-nba-onboarding
+# memory) hasn't reached predict-read/live-scores yet (steps 6, 7), so
+# there is no predict_read_deploy/live_scores_deploy workflow file for
+# this to call -- adding those job blocks now would reference `uses:`
+# targets that don't exist and fail on first run. ai_hosting/
+# deploy_predict_lambda ARE wired below, ahead of schedule, but only
+# against nba_ai_hosting.yml's placeholder image (see that file's own
+# header) -- NOT real inference code yet.
 #
 # Why ai_hosting couldn't wait for step 6 like the others: unlike the
 # zip-based Lambdas, aws_lambda_function.nba_predict
@@ -29,17 +29,22 @@
 #
 # The still-missing jobs get added here, not in a new file, once each
 # step's own workflow file exists:
-#   - ai_training -> after step 5 (Sub-phase 3A: feature engineering + training)
 #   - predict_read_deploy -> after step 6 (inference), alongside replacing
 #     ai_hosting's placeholder Dockerfile/handler with real code
 #   - live_scores_deploy -> after step 7 (live-scores)
-# infra's `needs`/`if` list will need ai_training added at that point too,
-# same as nfl_deploy.yml's `needs: [backfill, ai_training, ai_hosting]`
-# shape -- don't forget that when filling this back in.
 #
-# Once approved, backfill and ai_hosting (build) run BEFORE infra -- both
-# only need the ECR repo URL and AWS push credentials (plain GitHub
-# variables/secrets), not anything Terraform manages. tf_install then
+# Once approved, backfill, ai_training, and ai_hosting (build) run BEFORE
+# infra -- all three only need the ECR repo URL and AWS push credentials
+# (plain GitHub variables/secrets), not anything Terraform manages, and
+# infra's own `needs` list below depends on all three for exactly that
+# reason -- the feature-engineering/train-win-probability-model images
+# ai_training pushes must exist in ECR before the training ECS task
+# definitions infra applies could ever actually run (RunTask pulls the
+# image by tag; a missing tag fails at runtime, not at `terraform apply`,
+# so this dependency is what catches it instead of a silent later
+# failure -- see project-nba-onboarding memory for the exact same trap
+# already hit and fixed for ai_hosting/nba-predict on 2026-08-14).
+# tf_install then
 # applies infra (including the NBA ECS task definition's env vars -- see
 # Terraform/ecs-task-nba-backfill.tf -- and, for nba-predict specifically,
 # its CreateFunction call, which now finds ai_hosting's just-pushed image).
@@ -107,12 +112,26 @@ jobs:
     uses: ./.github/workflows/nba_ai_hosting.yml
     secrets: inherit
 
+  # Real code (Sub-phase 3A step 5), not a stub -- pushes
+  # nba-feature-engineering-latest and nba-train-win-probability-model-
+  # latest. infra never runs without both already in ECR, same invariant
+  # ai_hosting enforces for nba-predict-latest.
+  ai_training:
+    name: AI training (build)
+    needs: approval
+    if: |
+      always() &&
+      (needs.approval.result == 'success' || needs.approval.result == 'skipped')
+    uses: ./.github/workflows/nba_ai_training.yml
+    secrets: inherit
+
   infra:
     name: Apply shared infrastructure
-    needs: [backfill, ai_hosting]
+    needs: [backfill, ai_training, ai_hosting]
     if: |
       always() &&
       (needs.backfill.result == 'success' || needs.backfill.result == 'skipped') &&
+      (needs.ai_training.result == 'success' || needs.ai_training.result == 'skipped') &&
       (needs.ai_hosting.result == 'success' || needs.ai_hosting.result == 'skipped')
     uses: ./.github/workflows/tf_install.yml
     secrets: inherit
