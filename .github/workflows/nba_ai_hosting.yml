@@ -1,0 +1,59 @@
+# STUB, BY DESIGN. Builds and pushes ONLY the placeholder image at
+# Source/aws-lambdas/nba/predict/ (see that directory's own Dockerfile
+# comment) -- there is no real predict Lambda code yet (Sub-phase 3A step
+# 6). This file exists now, ahead of step 6, purely so nba_deploy.yml's
+# `infra` job can depend on it the same way nfl_deploy.yml's/
+# ncaafb_deploy.yml's own `infra` job depends on their real ai_hosting --
+# aws_lambda_function.nba_predict (Terraform/lambda-nba-predict.tf) is a
+# container-image Lambda, and CreateFunction validates the referenced
+# image tag already exists in ECR before Terraform can create it. Without
+# this job running first, every `infra` run fails at CreateFunction --
+# hit for real 2026-08-14, see project-nba-onboarding memory.
+#
+# No test job (unlike nfl_ai_hosting.yml's test-predict) -- there's
+# nothing real to test yet. At step 6, replace the placeholder
+# Dockerfile/handler with the real ones and add the test-predict job back
+# in, mirroring nfl_ai_hosting.yml exactly -- this file's shape (outputs,
+# set-versions, build-predict-image via docker_build_push.yml) doesn't
+# need to change otherwise.
+
+name: NBA AI Hosting
+
+on:
+  workflow_dispatch:
+  workflow_call:
+    outputs:
+      predict_image_uri:
+        description: 'Versioned tag of the pushed nba-predict image, for nba_predict_deploy.yml (step 6) to point the Lambda at'
+        value: ${{ jobs.build-predict-image.outputs.versioned_tag }}
+
+env:
+  PREDICT_IMAGE_VERSION: '0.0.1-stub'
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  set-versions:
+    name: Resolve image versions
+    runs-on: ubuntu-latest
+    outputs:
+      predict_version: ${{ steps.out.outputs.predict_version }}
+    steps:
+      - id: out
+        run: echo "predict_version=${{ env.PREDICT_IMAGE_VERSION }}" >> "$GITHUB_OUTPUT"
+
+  build-predict-image:
+    name: Build and push predict image
+    needs: set-versions
+    uses: ./.github/workflows/docker_build_push.yml
+    secrets: inherit
+    with:
+      dockerfile_path: 'Source/aws-lambdas/nba/predict/Dockerfile'
+      docker_context: 'Source/aws-lambdas/nba/predict'
+      image_name: 'nba-predict'
+      image_version: ${{ needs.set-versions.outputs.predict_version }}
+      # arm64 -- matches aws_lambda_function.nba_predict's
+      # architectures = ["arm64"] (Terraform/lambda-nba-predict.tf).
+      platform: 'linux/arm64'
