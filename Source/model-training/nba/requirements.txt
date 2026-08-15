@@ -1,0 +1,13 @@
+# Same dependency set as model-training/nfl -- see that requirements.txt's
+# own comment -- plus lightgbm, which NFL's/NCAAFB's own training images
+# don't need (their CANDIDATES lists don't include the LightGBM adapters
+# -- see library/ml/model_types.py's own docstring on why the import
+# stays lazy/adapter-scoped rather than a library-wide dependency).
+# lightgbm ships prebuilt manylinux wheels for standard Fargate
+# architectures, same as xgboost.
+pandas>=2.2
+pyarrow>=16.0
+scikit-learn>=1.4
+scikit-learn-intelex>=2024.0
+xgboost>=2.0
+lightgbm>=4.3

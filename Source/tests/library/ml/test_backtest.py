@@ -171,6 +171,25 @@ class TestRunBacktest:
 
         assert result["promotions"][0]["feature_columns"] == ["a"]
 
+    def test_candidate_summary_and_promoted_card_both_carry_training_seconds(self):
+        """training_seconds is wall-clock time for tune_and_fit alone --
+        see this field's own comment in run_backtest. A _FakeAdapter's
+        tune_and_fit returns instantly, so this just proves the field is
+        present and non-negative on both the evaluated-candidates summary
+        AND the promoted card's own metadata, not that timing is accurate
+        to any real precision (that's not this module's concern -- it
+        just reads time.perf_counter() around whatever tune_and_fit
+        actually does)."""
+        adapter = _FakeAdapter("xgboost", np.array([0.9, 0.1, 0.9, 0.1]))
+
+        with patch.object(backtest.training_common, "save_model_artifact", side_effect=_fake_save), \
+             patch.object(backtest.training_common, "would_beat_current", return_value=True), \
+             patch.object(backtest.training_common, "promote_if_better"):
+            result = _run([adapter])
+
+        assert result["candidates"][0]["training_seconds"] >= 0
+        assert result["promotions"][0]["training_seconds"] >= 0
+
     def test_candidates_expose_the_metric_that_actually_decided_ranking(self):
         """Regression test for a real, reported confusion: a run where the
         candidate with the HIGHER displayed accuracy wasn't promoted,

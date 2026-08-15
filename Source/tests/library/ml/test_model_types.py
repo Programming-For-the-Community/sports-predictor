@@ -345,12 +345,113 @@ class TestMLPAdapters:
         assert [name for name, _ in pipeline.steps] == ["impute", "scale", "model"]
 
 
+class TestLightGBMAdapters:
+    """lightgbm isn't installed in every environment that imports this
+    module (see model_types.py's own docstring on the lazy-import
+    contract) -- these tests never import the real package, instead
+    patching model_types._lgbm_estimator_classes directly with fake
+    classifier/regressor classes, same "always mock the estimator class
+    and the search" boundary every other adapter's tests here draw, just
+    at the one extra indirection level the lazy import adds."""
+
+    def test_instantiating_the_registry_entries_needs_no_lightgbm_installed(self):
+        # Proves the module docstring's central claim: importing
+        # model_types and instantiating ADAPTERS never touches lightgbm --
+        # only tune_and_fit does (see the tests below). If this test can
+        # run at all (module-level import already succeeded to collect
+        # this file), the claim already holds; asserting the instances
+        # exist and are the right type makes that explicit rather than
+        # implicit in "the file imported".
+        assert isinstance(model_types.ADAPTERS["lightgbm_classifier"], model_types.LightGBMClassifierAdapter)
+        assert isinstance(model_types.ADAPTERS["lightgbm_regressor"], model_types.LightGBMRegressorAdapter)
+
+    def test_classifier_tune_and_fit_searches_with_binary_objective_and_log_loss_scoring(self):
+        adapter = model_types.LightGBMClassifierAdapter()
+        mock_search = MagicMock()
+        mock_search.best_params_ = {"num_leaves": 31}
+        mock_fitted = MagicMock()
+        mock_classifier_cls = MagicMock(return_value=mock_fitted)
+        mock_regressor_cls = MagicMock()
+
+        with patch.object(model_types, "RandomizedSearchCV", return_value=mock_search) as mock_search_cls, \
+             patch.object(model_types, "_lgbm_estimator_classes", return_value=(mock_classifier_cls, mock_regressor_cls)):
+            estimator, params = adapter.tune_and_fit(_df(), pd.Series([0, 1, 0, 1]))
+
+        assert mock_search_cls.call_args.kwargs["scoring"] == "neg_log_loss"
+        mock_classifier_cls.assert_called_with(
+            objective="binary", verbosity=-1, random_state=model_types._LGBM_RANDOM_STATE, num_leaves=31,
+        )
+        assert estimator is mock_fitted
+        assert params == {"num_leaves": 31}
+
+    def test_regressor_tune_and_fit_searches_with_regression_objective_and_rmse_scoring(self):
+        adapter = model_types.LightGBMRegressorAdapter()
+        mock_search = MagicMock()
+        mock_search.best_params_ = {"num_leaves": 63}
+        mock_fitted = MagicMock()
+        mock_classifier_cls = MagicMock()
+        mock_regressor_cls = MagicMock(return_value=mock_fitted)
+
+        with patch.object(model_types, "RandomizedSearchCV", return_value=mock_search) as mock_search_cls, \
+             patch.object(model_types, "_lgbm_estimator_classes", return_value=(mock_classifier_cls, mock_regressor_cls)):
+            estimator, params = adapter.tune_and_fit(_df(), pd.Series([1.0, 2.0, 3.0, 4.0]))
+
+        assert mock_search_cls.call_args.kwargs["scoring"] == "neg_root_mean_squared_error"
+        mock_regressor_cls.assert_called_with(
+            objective="regression", verbosity=-1, random_state=model_types._LGBM_RANDOM_STATE, num_leaves=63,
+        )
+        assert estimator is mock_fitted
+        assert params == {"num_leaves": 63}
+
+    def test_classifier_predict_returns_positive_class_probability(self):
+        adapter = model_types.LightGBMClassifierAdapter()
+        mock_estimator = MagicMock()
+        mock_estimator.predict_proba.return_value = np.array([[0.3, 0.7], [0.9, 0.1]])
+
+        result = adapter.predict(mock_estimator, _df(2))
+
+        assert list(result) == [0.7, 0.1]
+
+    def test_regressor_predict_returns_the_continuous_value_directly(self):
+        adapter = model_types.LightGBMRegressorAdapter()
+        mock_estimator = MagicMock()
+        mock_estimator.predict.return_value = np.array([12.5, 8.0])
+
+        result = adapter.predict(mock_estimator, _df(2))
+
+        assert list(result) == [12.5, 8.0]
+
+    def test_feature_importances_are_unsigned_and_sorted_descending(self):
+        adapter = model_types.LightGBMRegressorAdapter()
+        mock_estimator = MagicMock()
+        mock_estimator.feature_importances_ = np.array([1.0, 5.0])
+
+        importances = adapter.feature_importances(mock_estimator, ["a", "b"])
+
+        assert list(importances.items()) == [("b", 5.0), ("a", 1.0)]
+
+    def test_serialize_and_deserialize_round_trip_via_joblib(self):
+        # _JoblibSerializedAdapter's shared behavior, same as
+        # TestLogisticRegressionAdapter's own round-trip test -- proves
+        # LightGBM's adapters get it for free the same way, no lightgbm
+        # import needed since joblib just pickles whatever object it's
+        # handed.
+        adapter = model_types.LightGBMClassifierAdapter()
+        fake_model = {"not": "really a model, just picklable"}
+
+        raw = adapter.serialize(fake_model)
+        result = adapter.deserialize(raw)
+
+        assert result == fake_model
+
+
 class TestAdaptersRegistry:
     def test_registry_is_keyed_by_model_card_algorithm_name(self):
         assert set(model_types.ADAPTERS) == {
             "xgboost", "logistic_regression", "elastic_net",
             "random_forest_classifier", "random_forest_regressor",
             "mlp_classifier", "mlp_regressor",
+            "lightgbm_classifier", "lightgbm_regressor",
         }
 
     def test_xgboost_entry_needs_no_task_to_serve(self):

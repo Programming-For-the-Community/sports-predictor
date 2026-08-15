@@ -3,11 +3,31 @@ One adapter per trainable algorithm, used by both training
 (library.ml.backtest.run_backtest) and serving
 (Source/aws-lambdas/nfl/predict/model_loader.py) so neither side hardcodes
 which algorithm a given model_name's promoted version happens to be.
-Adding a genuinely new algorithm (this module already has five: XGBoost,
-logistic regression, ElasticNet, Random Forest, and a small MLP neural
-net) means writing one adapter class and adding it to a target's
+Adding a genuinely new algorithm (this module already has six: XGBoost,
+logistic regression, ElasticNet, Random Forest, a small MLP neural net,
+and LightGBM) means writing one adapter class and adding it to a target's
 candidate list -- no new training script, no new ECS task, no new
 scheduler entry, and nothing to change in model_loader.py.
+
+LightGBMClassifierAdapter/LightGBMRegressorAdapter import the `lightgbm`
+package LAZILY, inside their own methods, not at this module's top level
+-- unlike every other import here, which every sport's predict Lambda
+already needs regardless of what's currently promoted for it (see
+Source/aws-lambdas/nfl/predict/requirements.txt's own comment on why
+scikit-learn/pandas/joblib are unconditional there). A module-level
+`import lightgbm` would force EVERY sport's predict Lambda to carry that
+dependency just to import this module at cold start, even though (as of
+Phase 3's NBA onboarding) only NBA's train_*.py scripts actually add
+these two adapters to a CANDIDATES list -- NFL's and NCAAFB's model cards
+can structurally never have algorithm="lightgbm_classifier"/
+"lightgbm_regressor", so their predict Lambdas never need lightgbm
+installed at all. Same reasoning as training_common.load_features'
+own local `import pyarrow`. Once a LightGBM candidate actually wins a
+target for some sport, THAT sport's own predict Lambda requirements.txt
+needs lightgbm added (joblib.load of a promoted LightGBM model card
+needs the class importable to unpickle it) -- see
+Source/model-training/nba/requirements.txt for where it's already added
+on the training side.
 
 predict() always means the same thing regardless of algorithm or which
 side of the train/serve boundary is calling it: positive-class probability
@@ -518,6 +538,101 @@ class MLPRegressorAdapter(_MLPAdapterBase):
         return estimator.predict(X)
 
 
+# Histogram-based gradient boosting -- added for Phase 3 (basketball's
+# data volume, see design/PROJECT_PLAN.md's model-selection section),
+# typically materially faster to train than XGBoost's default tree method
+# at large row counts with comparable tabular-data accuracy. Same search
+# shape as XGBoostAdapter (native missing-value handling, no imputer
+# needed, joblib-serializable sklearn wrapper unlike XGBoost's raw
+# Booster) -- fewer search iterations than XGBoost's 400 since LightGBM's
+# histogram binning already makes an individual fit cheap, similar
+# reasoning to Random Forest's own smaller iteration count.
+#
+# See this module's own docstring for why `lightgbm` is imported lazily
+# inside _lgbm_estimator_classes rather than at module level.
+def _lgbm_estimator_classes():
+    import lightgbm as lgb
+    return lgb.LGBMClassifier, lgb.LGBMRegressor
+
+
+_LGBM_PARAM_DISTRIBUTIONS = {
+    "max_depth": [-1, 3, 4, 5, 6, 7, 8, 9],
+    "num_leaves": [15, 31, 63, 127],
+    "n_estimators": [50, 100, 200, 300, 400, 500],
+    "learning_rate": [0.005, 0.01, 0.02, 0.05, 0.1, 0.2],
+    "min_child_samples": [5, 10, 20, 30, 50],
+    "subsample": [0.5, 0.6, 0.7, 0.8, 0.9, 1.0],
+    "colsample_bytree": [0.5, 0.6, 0.7, 0.8, 0.9, 1.0],
+}
+_LGBM_SEARCH_ITERATIONS = 200
+_LGBM_CV_SPLITS = 8
+_LGBM_RANDOM_STATE = 42
+
+
+class LightGBMClassifierAdapter(_JoblibSerializedAdapter):
+    algorithm = "lightgbm_classifier"
+    artifact_filename = "model.joblib"
+
+    def tune_and_fit(self, X_train: pd.DataFrame, y_train: pd.Series) -> tuple[Any, dict]:
+        LGBMClassifier, _ = _lgbm_estimator_classes()
+        search = RandomizedSearchCV(
+            LGBMClassifier(objective="binary", n_jobs=1, verbosity=-1, random_state=_LGBM_RANDOM_STATE),
+            param_distributions=_LGBM_PARAM_DISTRIBUTIONS,
+            n_iter=_LGBM_SEARCH_ITERATIONS,
+            scoring="neg_log_loss",
+            cv=TimeSeriesSplit(n_splits=_LGBM_CV_SPLITS),
+            random_state=_LGBM_RANDOM_STATE,
+            verbose=10,
+            n_jobs=-1,
+        )
+        search.fit(X_train, y_train)
+        model = LGBMClassifier(objective="binary", verbosity=-1, random_state=_LGBM_RANDOM_STATE, **search.best_params_)
+        model.fit(X_train, y_train)
+        return model, search.best_params_
+
+    def predict(self, estimator, X: pd.DataFrame) -> np.ndarray:
+        return estimator.predict_proba(X)[:, 1]
+
+    def feature_importances(self, estimator, feature_columns: list[str]) -> dict[str, float]:
+        importances = estimator.feature_importances_
+        return dict(sorted(
+            zip(feature_columns, (float(v) for v in importances)),
+            key=lambda kv: kv[1], reverse=True,
+        ))
+
+
+class LightGBMRegressorAdapter(_JoblibSerializedAdapter):
+    algorithm = "lightgbm_regressor"
+    artifact_filename = "model.joblib"
+
+    def tune_and_fit(self, X_train: pd.DataFrame, y_train: pd.Series) -> tuple[Any, dict]:
+        _, LGBMRegressor = _lgbm_estimator_classes()
+        search = RandomizedSearchCV(
+            LGBMRegressor(objective="regression", n_jobs=1, verbosity=-1, random_state=_LGBM_RANDOM_STATE),
+            param_distributions=_LGBM_PARAM_DISTRIBUTIONS,
+            n_iter=_LGBM_SEARCH_ITERATIONS,
+            scoring="neg_root_mean_squared_error",
+            cv=TimeSeriesSplit(n_splits=_LGBM_CV_SPLITS),
+            random_state=_LGBM_RANDOM_STATE,
+            verbose=10,
+            n_jobs=-1,
+        )
+        search.fit(X_train, y_train)
+        model = LGBMRegressor(objective="regression", verbosity=-1, random_state=_LGBM_RANDOM_STATE, **search.best_params_)
+        model.fit(X_train, y_train)
+        return model, search.best_params_
+
+    def predict(self, estimator, X: pd.DataFrame) -> np.ndarray:
+        return estimator.predict(X)
+
+    def feature_importances(self, estimator, feature_columns: list[str]) -> dict[str, float]:
+        importances = estimator.feature_importances_
+        return dict(sorted(
+            zip(feature_columns, (float(v) for v in importances)),
+            key=lambda kv: kv[1], reverse=True,
+        ))
+
+
 # Keyed by model_card["algorithm"] -- serving (model_loader.py) dispatches
 # a promoted model card's own "algorithm" field through this registry to
 # deserialize/predict it, without needing to know in advance which
@@ -535,12 +650,16 @@ class MLPRegressorAdapter(_MLPAdapterBase):
 # predict methods (predict_proba only exists on the classifier), unlike
 # XGBoost's raw Booster output.
 #
-# 5 algorithm families (xgboost, logistic regression, elastic net, random
-# forest, mlp), 7 registry entries -- see model-training/nfl/
+# 6 algorithm families (xgboost, logistic regression, elastic net, random
+# forest, mlp, lightgbm), 9 registry entries -- see model-training/nfl/
 # train_win_probability_model.py's CANDIDATES and train_score_model.py/
-# train_player_prop_model.py's own candidate lists for which ones actually
-# compete for which target; not every entry here is necessarily in every
-# target's candidate list.
+# train_player_prop_model.py's own candidate lists (and
+# model-training/nba's own, the only CANDIDATES lists that currently
+# include the lightgbm entries) for which ones actually compete for which
+# target; not every entry here is necessarily in every target's candidate
+# list. Instantiating LightGBMClassifierAdapter/LightGBMRegressorAdapter
+# here is safe without `lightgbm` installed -- see this module's own
+# docstring, the import only happens inside tune_and_fit.
 ADAPTERS: dict[str, ModelAdapter] = {
     "xgboost": XGBoostAdapter(),
     "logistic_regression": LogisticRegressionAdapter(),
@@ -549,4 +668,6 @@ ADAPTERS: dict[str, ModelAdapter] = {
     "random_forest_regressor": RandomForestRegressorAdapter(),
     "mlp_classifier": MLPClassifierAdapter(),
     "mlp_regressor": MLPRegressorAdapter(),
+    "lightgbm_classifier": LightGBMClassifierAdapter(),
+    "lightgbm_regressor": LightGBMRegressorAdapter(),
 }
