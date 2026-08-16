@@ -170,6 +170,48 @@ class TestPromoteIfBetter:
         mock_s3.put_json.assert_called_once_with("nba/win-probability/current.json", {"version": 1})
 
 
+class TestUpdatePromotedCandidates:
+    """Backfills an already-saved model card's own candidates/
+    candidates_ranked_by fields -- see library.ml.backtest.run_backtest's
+    own docstring for why the card written at promotion time can be
+    incomplete."""
+
+    def test_overwrites_candidates_and_ranked_by_on_the_existing_card(self):
+        mock_s3 = MagicMock()
+        mock_s3.get_json.return_value = {
+            "sport": "nfl", "model_name": "win-probability", "algorithm": "xgboost",
+            "version": 7, "log_loss": 0.60, "candidates": [{"algorithm": "xgboost", "rank_score": 0.60}],
+        }
+        full_candidates = [
+            {"algorithm": "xgboost", "rank_score": 0.60},
+            {"algorithm": "logistic_regression", "rank_score": 0.65},
+        ]
+
+        training_common.update_promoted_candidates(mock_s3, "nfl", "win-probability", 7, full_candidates, "log_loss")
+
+        mock_s3.get_json.assert_called_once_with("nfl/win-probability/v7/model_card.json")
+        written_key, written_card = mock_s3.put_json.call_args.args
+        assert written_key == "nfl/win-probability/v7/model_card.json"
+        assert written_card["candidates"] == full_candidates
+        assert written_card["candidates_ranked_by"] == "log_loss"
+
+    def test_leaves_every_other_field_on_the_card_untouched(self):
+        mock_s3 = MagicMock()
+        mock_s3.get_json.return_value = {
+            "algorithm": "xgboost", "version": 7, "log_loss": 0.60,
+            "feature_columns": ["a", "b"], "trained_at": "2026-08-15T00:00:00Z",
+            "candidates": [{"algorithm": "xgboost", "rank_score": 0.60}],
+        }
+
+        training_common.update_promoted_candidates(mock_s3, "nfl", "win-probability", 7, [], "log_loss")
+
+        written_card = mock_s3.put_json.call_args.args[1]
+        assert written_card["algorithm"] == "xgboost"
+        assert written_card["log_loss"] == 0.60
+        assert written_card["feature_columns"] == ["a", "b"]
+        assert written_card["trained_at"] == "2026-08-15T00:00:00Z"
+
+
 class TestWouldBeatCurrent:
     """Read-only counterpart to promote_if_better -- used by
     library.ml.backtest.run_backtest to decide whether a candidate is
