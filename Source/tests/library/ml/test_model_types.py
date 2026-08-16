@@ -76,6 +76,34 @@ class TestXGBoostAdapterFeatureImportances:
         assert list(importances.keys()) == ["a", "b", "c"]
 
 
+class TestLogSearchConvergence:
+    def _search(self, scores):
+        search = MagicMock()
+        search.cv_results_ = {"mean_test_score": scores}
+        return search
+
+    def test_logs_running_best_at_checkpoints(self, caplog):
+        # 10 trials, worsening after the 5th -- running best should stay
+        # flat at trial 5's score from there on.
+        scores = [-1.0, -0.8, -0.6, -0.5, -0.4, -0.9, -0.7, -0.6, -0.9, -0.95]
+        with caplog.at_level("INFO"):
+            model_types._log_search_convergence("some_algorithm", self._search(scores))
+
+        [record] = [r for r in caplog.records if "some_algorithm" in r.message]
+        assert "1/10=-1.00000" in record.message
+        assert "5/10=-0.40000" in record.message  # best reached at trial 5
+        assert "10/10=-0.40000" in record.message  # never improves after
+
+    def test_malformed_cv_results_does_not_raise(self, caplog):
+        search = MagicMock()
+        search.cv_results_ = {}  # missing "mean_test_score" entirely
+
+        with caplog.at_level("INFO"):
+            model_types._log_search_convergence("some_algorithm", search)  # must not raise
+
+        assert not any("some_algorithm" in r.message and r.levelname == "INFO" for r in caplog.records)
+
+
 class TestXGBoostClassifierAdapter:
     def test_tune_and_fit_searches_with_binary_logistic_objective_and_log_loss_scoring(self):
         adapter = model_types.XGBoostClassifierAdapter()

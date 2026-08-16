@@ -53,6 +53,7 @@ XGBoostClassifierAdapter/XGBoostRegressorAdapter subclasses to know which
 objective/scoring to tune with.
 """
 import io
+import logging
 from typing import Any, Protocol
 
 import joblib
@@ -63,6 +64,43 @@ from sklearn.ensemble import RandomForestClassifier, RandomForestRegressor
 from sklearn.impute import SimpleImputer
 from sklearn.linear_model import ElasticNet, LogisticRegression
 from sklearn.model_selection import GridSearchCV, RandomizedSearchCV, TimeSeriesSplit
+
+logger = logging.getLogger("model-training")
+
+
+def _log_search_convergence(label: str, search: RandomizedSearchCV) -> None:
+    """Logs the best score RandomizedSearchCV had found so far at several
+    checkpoints through its own trial order -- answers "how much is
+    n_iter actually buying us" from real data instead of a guess, at zero
+    extra cost: search.fit() already computes every trial's score
+    (search.cv_results_['mean_test_score']) internally, this just makes
+    that visible instead of letting it be discarded once fit() returns
+    (which is what every adapter below did before this existed).
+
+    Every caller here scores with a "neg_*" metric (neg_log_loss/
+    neg_root_mean_squared_error), so higher (less negative) is always
+    better -- a single running max works regardless of which candidate is
+    calling this. Checkpoint-based rather than a single "iterations to
+    convergence" number -- reading score@10% vs score@100% straight off
+    the log is enough to judge whether a target's n_iter is oversized,
+    without this module guessing at a tolerance threshold on the
+    caller's behalf. See design/PROJECT_PLAN.md's model-selection section
+    -- real numbers from this are the basis for trimming n_iter, not a
+    decision made without them.
+
+    Best-effort, never raises -- this is a diagnostic-only side effect of
+    an already-successful search.fit(), and a malformed/mocked
+    cv_results_ (real risk in a unit test that mocks RandomizedSearchCV
+    wholesale) must never be able to take down the actual tune_and_fit
+    call it's logging about."""
+    try:
+        scores = np.maximum.accumulate(search.cv_results_["mean_test_score"])
+        n = len(scores)
+        checkpoints = sorted({max(1, round(n * frac)) for frac in (0.1, 0.25, 0.5, 0.75, 1.0)})
+        summary = ", ".join(f"{c}/{n}={scores[c - 1]:.5f}" for c in checkpoints)
+        logger.info("%s search convergence (best score so far, at iteration/total): %s", label, summary)
+    except Exception:
+        logger.debug("Couldn't summarize search convergence for %s", label, exc_info=True)
 from sklearn.neural_network import MLPClassifier, MLPRegressor
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
@@ -149,11 +187,18 @@ _XGB_PARAM_DISTRIBUTIONS = {
     "subsample": [0.4, 0.45, 0.5, 0.55, 0.6, 0.65, 0.7, 0.8, 0.9, 1.0],
     "colsample_bytree": [0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0],
 }
-# Raised alongside colsample_bytree -- adding a 6th search axis grows the
-# combination space roughly 7x, and holding n_iter fixed would have let
-# RandomizedSearchCV's sample density (iterations / combinations) drop by
-# the same factor.
-_XGB_SEARCH_ITERATIONS = 400
+# Trimmed from 400 to 250, 2026-08-15 -- random-search theory (Bergstra &
+# Bengio 2012: P(at least one of n draws lands in the top q-quantile) =
+# 1-(1-q)^n) puts 400 iterations at ~98% confidence of landing in this
+# space's top 1%, with the last ~250 of those spent chasing the tail past
+# the top-2% mark (~150 iterations, ~99.97%) into diminishing territory a
+# gradient-boosted tree's typically-flat near-optimum response surface
+# likely can't even distinguish in held-out score. 250 splits the
+# difference pending real evidence -- _log_search_convergence's
+# checkpoint logging (added same day) will show actual score@150 vs.
+# score@250 vs. score@400 on the NEXT real run; trim further (or revert)
+# from that, not from this comment's own theory alone.
+_XGB_SEARCH_ITERATIONS = 250
 _XGB_CV_SPLITS = 8
 _XGB_RANDOM_STATE = 42
 
@@ -173,6 +218,7 @@ class XGBoostClassifierAdapter(XGBoostAdapter):
             n_jobs=-1,
         )
         search.fit(X_train, y_train)
+        _log_search_convergence("xgboost_classifier", search)
         model = xgb.XGBClassifier(objective="binary:logistic", eval_metric="logloss", **search.best_params_)
         model.fit(X_train, y_train)
         return model.get_booster(), search.best_params_
@@ -194,6 +240,7 @@ class XGBoostRegressorAdapter(XGBoostAdapter):
             n_jobs=-1,
         )
         search.fit(X_train, y_train)
+        _log_search_convergence("xgboost_regressor", search)
         model = xgb.XGBRegressor(objective="reg:squarederror", **search.best_params_)
         model.fit(X_train, y_train)
         return model.get_booster(), search.best_params_
@@ -427,6 +474,7 @@ class _RandomForestAdapterBase(_JoblibSerializedAdapter):
             n_jobs=-1,
         )
         search.fit(X_train, y_train)
+        _log_search_convergence(self.algorithm, search)
         best_params = {key.removeprefix("model__"): value for key, value in search.best_params_.items()}
         model = self._build_pipeline().set_params(**{f"model__{k}": v for k, v in best_params.items()})
         model.fit(X_train, y_train)
@@ -504,6 +552,7 @@ class _MLPAdapterBase(_JoblibSerializedAdapter):
             n_jobs=-1,
         )
         search.fit(X_train, y_train)
+        _log_search_convergence(self.algorithm, search)
         best_params = {key.removeprefix("model__"): value for key, value in search.best_params_.items()}
         model = self._build_pipeline().set_params(**{f"model__{k}": v for k, v in best_params.items()})
         model.fit(X_train, y_train)
@@ -586,6 +635,7 @@ class LightGBMClassifierAdapter(_JoblibSerializedAdapter):
             n_jobs=-1,
         )
         search.fit(X_train, y_train)
+        _log_search_convergence("lightgbm_classifier", search)
         model = LGBMClassifier(objective="binary", verbosity=-1, random_state=_LGBM_RANDOM_STATE, **search.best_params_)
         model.fit(X_train, y_train)
         return model, search.best_params_
@@ -618,6 +668,7 @@ class LightGBMRegressorAdapter(_JoblibSerializedAdapter):
             n_jobs=-1,
         )
         search.fit(X_train, y_train)
+        _log_search_convergence("lightgbm_regressor", search)
         model = LGBMRegressor(objective="regression", verbosity=-1, random_state=_LGBM_RANDOM_STATE, **search.best_params_)
         model.fit(X_train, y_train)
         return model, search.best_params_
