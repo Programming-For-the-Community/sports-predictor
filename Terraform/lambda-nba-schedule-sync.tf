@@ -42,7 +42,7 @@ data "archive_file" "nba_schedule_sync_placeholder" {
 
 resource "aws_lambda_function" "nba_schedule_sync" {
   function_name = "${var.project}-nba-schedule-sync"
-  description   = "Seeds the rest of the NBA season's scoreboards from ESPN (idempotent, skip-if-already-synced) so the frontend's upcoming list and season_projection.py's remaining_games input always have data ahead of daily ingest. Triggered by EventBridge Scheduler -- see scheduler-nba-schedule-sync.tf."
+  description   = "Seeds the rest of the NBA season's scoreboards from ESPN (idempotent, skip-if-already-synced) so remaining_games always has data ahead of daily ingest. Triggered by EventBridge Scheduler."
   role          = aws_iam_role.lambda_pipeline.arn
   runtime       = "python3.12"
   handler       = "handler.lambda_handler"
