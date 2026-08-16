@@ -1,12 +1,14 @@
 """
 Unit tests for the NBA ingest Lambda handler: date resolution (explicit
 override vs. yesterday auto-detection), the preseason skip, the
-teams/roster refresh, and box-score idempotency/failure isolation. All
-AWS and ESPN calls are mocked.
+teams/roster refresh, box-score idempotency/failure isolation, and
+injury attachment onto scoreboard events. All AWS and ESPN calls are
+mocked.
 
 The nba_ingest module is registered in sys.modules by conftest.py, which
 also sets RAW_BUCKET_NAME before the module is imported.
 """
+import json
 from datetime import date
 from unittest.mock import MagicMock, patch
 
@@ -19,11 +21,24 @@ def _teams_response(team_ids=("1", "2")):
     return {"sports": [{"leagues": [{"teams": [{"team": {"id": tid}} for tid in team_ids]}]}]}
 
 
-def _event(event_id="401700001", completed=False, season_type=2):
-    return {
+def _event(event_id="401700001", completed=False, season_type=2, home_id=None, away_id=None):
+    evt = {
         "id": event_id,
         "season": {"year": 2026, "type": season_type},
         "status": {"type": {"completed": completed}},
+    }
+    if home_id is not None or away_id is not None:
+        evt["competitions"] = [{"competitors": [
+            {"team": {"id": home_id}, "homeAway": "home"},
+            {"team": {"id": away_id}, "homeAway": "away"},
+        ]}]
+    return evt
+
+
+def _roster_with_injury(team_id, athlete_id, status):
+    return {
+        "team": {"id": team_id}, "timestamp": "2026-01-01T00:00Z",
+        "athletes": [{"id": athlete_id, "displayName": "Player", "injuries": [{"status": status}]}],
     }
 
 
@@ -138,6 +153,50 @@ class TestLambdaHandlerTeamsAndRosters:
 
         assert result["rosters_fetched"] == 1
         assert result["rosters_failed"] == 1
+
+
+class TestLambdaHandlerInjuries:
+    def test_attaches_home_and_away_injuries_from_same_run_roster_fetch(self):
+        mock_client = MagicMock()
+        mock_client.get_teams.return_value = _teams_response(team_ids=("1", "2"))
+        mock_client.get_roster.side_effect = [
+            _roster_with_injury("1", "10", "Out"),
+            _roster_with_injury("2", "20", "Questionable"),
+        ]
+        mock_client.get_scoreboard_for_date.return_value = _scoreboard(
+            [_event(event_id="E1", completed=False, home_id="1", away_id="2")]
+        )
+        mock_s3 = MagicMock()
+
+        with patch.object(nba_ingest, "NBAClient", return_value=mock_client), \
+             patch.object(nba_ingest, "_s3", mock_s3):
+            nba_ingest.lambda_handler({"date": "20260114"}, None)
+
+        scoreboard_calls = [c for c in mock_s3.put_object.call_args_list if c.kwargs["Key"] == "nba/scoreboard/20260114.json"]
+        written = json.loads(scoreboard_calls[0].kwargs["Body"])
+        evt = written["events"][0]
+        assert evt["home_injuries"] == [{"entity_id": "10", "status": "Out"}]
+        assert evt["away_injuries"] == [{"entity_id": "20", "status": "Questionable"}]
+
+    def test_a_failed_team_roster_fetch_leaves_that_side_unset_not_empty(self):
+        mock_client = MagicMock()
+        mock_client.get_teams.return_value = _teams_response(team_ids=("1", "2"))
+        mock_client.get_roster.side_effect = [
+            Exception("ESPN timeout"), _roster_with_injury("2", "20", "Doubtful"),
+        ]
+        mock_client.get_scoreboard_for_date.return_value = _scoreboard(
+            [_event(event_id="E1", completed=False, home_id="1", away_id="2")]
+        )
+        mock_s3 = MagicMock()
+
+        with patch.object(nba_ingest, "NBAClient", return_value=mock_client), \
+             patch.object(nba_ingest, "_s3", mock_s3):
+            nba_ingest.lambda_handler({"date": "20260114"}, None)
+
+        scoreboard_calls = [c for c in mock_s3.put_object.call_args_list if c.kwargs["Key"] == "nba/scoreboard/20260114.json"]
+        evt = json.loads(scoreboard_calls[0].kwargs["Body"])["events"][0]
+        assert "home_injuries" not in evt
+        assert evt["away_injuries"] == [{"entity_id": "20", "status": "Doubtful"}]
 
 
 class TestLambdaHandlerBoxScores:

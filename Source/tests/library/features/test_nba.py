@@ -87,6 +87,31 @@ class TestBuildEventFeaturesCore:
         assert row["away_travel_km"] > 3000
 
 
+class TestBuildEventFeaturesInjuries:
+    def test_team_injury_counts_from_home_and_away_injuries(self):
+        event = _event("E1", "2025-12-01", "2", "13")
+        event["home_injuries"] = [{"entity_id": "1", "status": "Out"}, {"entity_id": "2", "status": "Questionable"}]
+        event["away_injuries"] = [{"entity_id": "3", "status": "Doubtful"}]
+
+        row = build_event_features(event, {}, [], [])
+
+        # Questionable isn't counted -- same threshold _team_injury_count
+        # (library.features.common) already applies for every sport.
+        assert row["home_team_injury_count"] == 1
+        assert row["away_team_injury_count"] == 1
+
+    def test_no_injuries_data_on_event_yields_none_not_zero(self):
+        # Forward-only -- an event an ingest run never enriched (e.g. a
+        # historical backfilled row) has no injuries key at all, a real
+        # missing value, not "confirmed healthy".
+        event = _event("E1", "2025-12-01", "2", "13")
+
+        row = build_event_features(event, {}, [], [])
+
+        assert row["home_team_injury_count"] is None
+        assert row["away_team_injury_count"] is None
+
+
 class TestBuildEventFeaturesRollingBoxStats:
     def test_team_box_stats_computed_from_history(self):
         event = _event("E2", "2025-12-08", "2", "13")

@@ -7,7 +7,7 @@ players by position ("offense"/"defense"/"specialTeam"/
 flat "items" list. Split out of what used to be one large test_espn.py --
 see test_espn_player_game_stats.py's own history note.
 """
-from library.normalize.espn import roster_to_player_entities
+from library.normalize.espn import roster_to_player_entities, roster_to_team_injuries
 
 
 def _roster(*, team_id="23", timestamp="2026-08-08T05:05:15Z", groups):
@@ -91,3 +91,53 @@ class TestRosterToPlayerEntitiesFlatShape:
 
         assert {e["entity_id"] for e in entities} == {"1", "2"}
         assert {e["metadata"]["position"] for e in entities} == {"F", "G"}
+
+
+def _athlete_with_injury(athlete_id, status):
+    athlete = _athlete(athlete_id)
+    athlete["injuries"] = [{"status": status}]
+    return athlete
+
+
+class TestRosterToTeamInjuries:
+    def test_returns_entity_id_and_status_for_a_current_injury(self):
+        roster = _roster(groups=[_athlete_with_injury("1", "Out")])
+
+        injuries = roster_to_team_injuries(roster)
+
+        assert injuries == [{"entity_id": "1", "status": "Out"}]
+
+    def test_healthy_athlete_with_no_injuries_key_is_omitted(self):
+        roster = _roster(groups=[_athlete("1")])
+
+        assert roster_to_team_injuries(roster) == []
+
+    def test_athlete_with_empty_injuries_list_is_omitted(self):
+        athlete = _athlete("1")
+        athlete["injuries"] = []
+        roster = _roster(groups=[athlete])
+
+        assert roster_to_team_injuries(roster) == []
+
+    def test_non_current_status_is_filtered_out(self):
+        # A recovered player's status-change log entry shouldn't still
+        # count as a current injury (same reasoning
+        # EspnCoreApiClient.get_team_injuries' own filter documents).
+        roster = _roster(groups=[_athlete_with_injury("1", "Active")])
+
+        assert roster_to_team_injuries(roster) == []
+
+    def test_falls_back_to_nested_type_description_when_status_key_absent(self):
+        athlete = _athlete("1")
+        athlete["injuries"] = [{"type": {"description": "Doubtful"}}]
+        roster = _roster(groups=[athlete])
+
+        assert roster_to_team_injuries(roster) == [{"entity_id": "1", "status": "Doubtful"}]
+
+    def test_works_with_nfl_style_grouped_roster_too(self):
+        roster = {
+            "team": {"id": "1"}, "timestamp": "2026-01-01T00:00Z",
+            "athletes": [{"position": "offense", "items": [_athlete_with_injury("1", "Questionable")]}],
+        }
+
+        assert roster_to_team_injuries(roster) == [{"entity_id": "1", "status": "Questionable"}]

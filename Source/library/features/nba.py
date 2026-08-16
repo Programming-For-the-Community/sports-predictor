@@ -17,15 +17,20 @@ Genuinely different from NFL/NCAAFB, not just renamed:
   below) carry that signal instead. Individual players ARE modeled, just
   as their own dedicated player-prop rows (build_player_features), same
   as every other sport.
-- No injury data wired in at all (not "dropped as NCAAFB does", genuinely
-  absent) -- NBA's roster fetch does carry each athlete's own `injuries`
-  in ESPN's raw response (confirmed live, see library/normalize/espn.py's
-  roster_to_player_entities), but nothing persists it anywhere yet (no
-  ingest-time enrichment attaches it to an event the way NFL's
-  _enrich_events does for its own injury endpoint). Revisit once that
-  pipeline exists -- faking a permanently-null injury column here would
-  be worse than omitting it, same discipline NCAAFB's own docstring
-  documents for its missing injury data.
+- home_team_injury_count/away_team_injury_count only -- no
+  home_qb_injury_status equivalent, since there's no starting-QB-style
+  single player whose own status matters more than the team's overall
+  count (see this docstring's own note above on why no leader-tracking
+  sub-features exist here at all). Sourced from Source/aws-lambdas/nba/
+  ingest/handler.py's _attach_injuries, which attaches each event's
+  home_injuries/away_injuries from that SAME run's roster fetch (NBA's
+  roster response embeds injuries directly -- confirmed live -- so unlike
+  NFL this needs no separate injury-report API call). Forward-only, same
+  as NFL's own coach/injury fields: only populated for events an ingest
+  run has actually enriched, null on anything backfilled before this
+  shipped. The exact raw per-athlete injury status field name is
+  UNVERIFIED against a real payload -- see library/normalize/espn.py's
+  roster_to_team_injuries docstring.
 - No coach-tenure features -- explicitly deferred, out of Sub-phase 3A's
   scope (see project-nba-onboarding memory); NBA has no coach data source
   wired in the way NFL's separate "core" API client provides one.
@@ -57,6 +62,7 @@ from library.features import nba_teams
 from library.features.common import (
     DEFAULT_ROLLING_WINDOW,
     _rate,
+    _team_injury_count,
     current_streak,
     kickoff_hour_utc,
     rest_days,
@@ -236,6 +242,8 @@ def build_event_features(
         "away_travel_km": away_travel_km,
         "home_win_streak": home_win_streak,
         "away_win_streak": away_win_streak,
+        "home_team_injury_count": _team_injury_count(event.get("home_injuries")),
+        "away_team_injury_count": _team_injury_count(event.get("away_injuries")),
         "label_home_won": home.get("result", {}).get("won"),
         "label_home_score": home.get("result", {}).get("score"),
         "label_away_score": away.get("result", {}).get("score"),

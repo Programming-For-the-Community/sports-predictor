@@ -200,6 +200,54 @@ def roster_to_player_entities(roster: dict, sport: str) -> list[dict]:
     return entities
 
 
+# Same status vocabulary EspnCoreApiClient.get_team_injuries filters to
+# (NFL's separate core-API injury-report endpoint) -- ESPN uses this same
+# three-status set project-wide wherever it reports a current injury
+# report, so it's a reasonable default here too. Duplicated locally
+# rather than imported from library.http.espn_core: that module is a
+# different concern (an HTTP client for a different ESPN host), and
+# library.features.common already holds the canonical status-severity
+# vocabulary (_INJURY_STATUS_ORDINAL/_TEAM_INJURY_COUNT_STATUSES) that
+# this module deliberately doesn't import either, to keep normalize free
+# of feature-layer knowledge.
+_CURRENT_INJURY_STATUSES = {"Questionable", "Doubtful", "Out"}
+
+
+def roster_to_team_injuries(roster: dict) -> list[dict]:
+    """Extracts each currently-injured athlete's status from a roster
+    response. NBA's site-API roster embeds `injuries` directly on each
+    athlete (confirmed live, 2026-08-14 -- see NBAClient.get_roster's own
+    docstring) -- unlike NFL, which needs a separate core-API injury-report
+    call (EspnCoreApiClient.get_team_injuries), so no extra fetch is
+    needed for what's already collected here. Returns the same
+    [{"entity_id", "status"}, ...] contract that function returns (raw
+    ESPN status string unmapped -- severity thresholding is a
+    feature-layer concern, library.features.common), so downstream code
+    doesn't need to know which of the two sources an event's injuries
+    field came from.
+
+    UNVERIFIED: only the existence of athlete["injuries"] was confirmed
+    live, not the exact key holding each entry's status string -- this
+    assumes a top-level "status" string per entry (matching
+    EspnCoreApiClient.get_team_injuries' own confirmed shape from the
+    same ESPN status vocabulary), with a fallback to a nested
+    type.description shape in case the site API differs from the core
+    API here. Treat as needing a real payload check before trusting it in
+    production (see project-nba-onboarding memory).
+    """
+    result = []
+    for athlete in _flatten_roster_athletes(roster.get("athletes", [])):
+        athlete_id = athlete.get("id")
+        if athlete_id is None:
+            continue
+        for injury in athlete.get("injuries") or []:
+            status = injury.get("status") or (injury.get("type") or {}).get("description")
+            if status not in _CURRENT_INJURY_STATUSES:
+                continue
+            result.append({"entity_id": athlete_id, "status": status})
+    return result
+
+
 def boxscore_to_player_game_stats(
     summary: dict,
     sport: str,

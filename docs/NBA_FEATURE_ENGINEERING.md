@@ -68,9 +68,10 @@ One row per completed event, home/away perspective.
 | `is_international_game` | Whether the game was played at one of `nba_teams.INTERNATIONAL_VENUES` (Mexico City, Paris) rather than either team's home arena. |
 | `home_travel_km`, `away_travel_km` | Distance each team travels to the game -- see "Travel distance" below. |
 | `home_win_streak`, `away_win_streak` | Current streak entering this game. |
+| `home_team_injury_count`, `away_team_injury_count` | Count of that team's players currently listed Doubtful or Out (Questionable isn't counted) -- see "Injuries" below. |
 | `label_home_won`, `label_home_score`, `label_away_score` | Training labels (win-probability + all three score targets share this one dataset). |
 
-**No QB/RB/WR-style leader-tracking sub-features** -- see "No position-leader tracking" below. **No coach, injury, weather, or `venue_indoor` columns** -- see "What's deliberately absent" below.
+**No QB/RB/WR-style leader-tracking sub-features** -- see "No position-leader tracking" below. **No coach, weather, or `venue_indoor` columns** -- see "What's deliberately absent" below.
 
 ## `player_features.parquet` fields
 
@@ -104,6 +105,16 @@ possessions ≈ field_goal_attempts − offensive_rebounds + turnovers + 0.44 ×
 
 `build_event_features` computes each side's own rolling possessions estimate from its rolling `avg_field_goal_attempts`/`avg_offensive_rebounds`/`avg_turnovers`/`avg_free_throw_attempts`, then derives `home_offensive_efficiency`/`home_defensive_efficiency` (+ away) as `avg_points_scored`/`avg_points_allowed` per 100 of that estimate. `None` (not 0) when any rolling input is missing -- same "missing, not fabricated" discipline as every other None-propagating helper in this project, rather than silently producing a misleadingly precise efficiency number from an undefined possessions estimate.
 
+## Injuries
+
+Unlike NFL, which needs a separate core-API injury-report call (`EspnCoreApiClient.get_team_injuries`), NBA's roster response embeds each athlete's current `injuries` directly (confirmed live) -- so `Source/aws-lambdas/nba/ingest/handler.py`'s `_fetch_rosters` extracts it from the SAME daily roster fetch, no extra API call. `_attach_injuries` then attaches `home_injuries`/`away_injuries` onto each scoreboard event dict before it's written to S3, and `library/normalize/espn.py`'s `scoreboard_event_to_event_item` (shared across every sport) picks it up from there with no NBA-specific change needed.
+
+`build_event_features` reduces this to `home_team_injury_count`/`away_team_injury_count` via `library/features/common.py`'s `_team_injury_count` -- the same function NFL uses, so both sports share one severity threshold (Doubtful/Out counted, Questionable not). No `home_qb_injury_status`-equivalent field -- there's no starting-QB-style single player whose own status matters more than the team's overall count (see "No position-leader tracking" below).
+
+**Forward-only**, same as NFL's own coach/injury fields: only events an ingest run has actually enriched carry this data; `null` (not `0`) on anything backfilled before this shipped, or on any date whose own roster fetch failed for that team.
+
+**UNVERIFIED:** only the existence of `athlete["injuries"]` on a live NBA roster payload was confirmed (2026-08-14), not the exact key holding each entry's status string. `library/normalize/espn.py`'s `roster_to_team_injuries` assumes a top-level `"status"` string (matching `EspnCoreApiClient.get_team_injuries`'s own confirmed shape and ESPN's established status vocabulary), with a fallback to a nested `type.description` shape -- needs a real captured payload to confirm before fully trusting these two columns in production.
+
 ## Travel distance and divisions
 
 NBA is a fixed 30 franchises with a division alignment stable since 2004 -- low realignment risk, closer to NFL's hardcoded-table pattern (`nfl_teams.py`) than NCAAFB's CFBD-sourced dynamic per-season lookup. `library/features/nba_teams.py` hardcodes `TEAM_DIVISIONS` (6 divisions, 5 teams each) and `TEAM_COORDINATES` (arena/downtown-market coordinates, not exact stadium geolocation) -- every one of the 30 ESPN team ids was individually live-verified against `site.web.api.espn.com/apis/site/v2/sports/basketball/nba/teams/{id}` before being hardcoded, not assumed from a remembered id mapping.
@@ -118,7 +129,6 @@ Unlike `build_event_features`/`build_player_features` for NCAAFB (which take a `
 
 Where no real data source exists (or nothing persists/enriches one yet), NBA simply doesn't feature-engineer that thing -- no permanently-null placeholder columns kept around just to match NFL's/NCAAFB's schema shape:
 
-- **No injury fields.** NBA's roster fetch (`Source/aws-lambdas/nba/ingest/`) does carry each athlete's own `injuries` in ESPN's raw payload (confirmed live), but nothing persists or attaches it to an event the way NFL's `_enrich_events` does for its own separate injury endpoint -- this is a genuine gap, not a "no data exists" case like NCAAFB's, and worth revisiting once an enrichment pipeline exists.
 - **No coach-tenure features.** Explicitly deferred, out of Sub-phase 3A's approved scope -- NFL's coach data comes from a different "core" ESPN API client NBA doesn't have wired up yet.
 - **No weather, and no `venue_indoor` either.** Every NBA game is indoor, so there's no weather signal to feature-engineer in the first place (unlike NFL where `weather_temperature` is a real, if sparse, feature) -- and, unlike NFL/NCAAFB, `venue_indoor` itself isn't carried as a feature either, since it would be a constant `true` on every row and contribute nothing a model could split on.
 - **No `week`/`season_type` on player-level rows.** ESPN's NBA schedule has no week numbering -- see the `player_features.parquet` field table above.
