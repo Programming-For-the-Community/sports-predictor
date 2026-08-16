@@ -6,9 +6,10 @@ import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_text_styles.dart';
 import '../../core/widgets/page_glow.dart';
 
-/// Per-sport tab shell: the "Events | Models" segmented toggle from
-/// design/FRONTEND_STYLE.md's top-bar spec. Reads SportConfig from the
-/// :sport path param for title/accent only -- no sport-specific logic
+/// Per-sport tab shell: the "Events | Season | Models" segmented toggle
+/// from design/FRONTEND_STYLE.md's top-bar spec. Reads SportConfig from the
+/// :sport path param for title/accent and to gate the Season tab
+/// (SportConfig.hasSeasonProjection) -- no other sport-specific logic
 /// lives here.
 enum _SportTab { events, season, models }
 
@@ -71,7 +72,7 @@ class SportShellPage extends StatelessWidget {
                 // horizontal scroll to reach the third one.
                 Padding(
                   padding: const EdgeInsets.fromLTRB(24, 12, 24, 4),
-                  child: _TabToggle(sportId: sportId, activeTab: activeTab),
+                  child: _TabToggle(sportId: sportId, activeTab: activeTab, showSeasonTab: sport.hasSeasonProjection),
                 ),
                 Expanded(child: child),
               ],
@@ -84,9 +85,10 @@ class SportShellPage extends StatelessWidget {
 }
 
 class _TabToggle extends StatelessWidget {
-  const _TabToggle({required this.sportId, required this.activeTab});
+  const _TabToggle({required this.sportId, required this.activeTab, required this.showSeasonTab});
   final String sportId;
   final _SportTab activeTab;
+  final bool showSeasonTab;
 
   @override
   Widget build(BuildContext context) {
@@ -102,13 +104,14 @@ class _TabToggle extends StatelessWidget {
               onTap: () => context.go('/$sportId/events'),
             ),
           ),
-          Expanded(
-            child: _TabButton(
-              label: 'Season',
-              active: activeTab == _SportTab.season,
-              onTap: () => context.go('/$sportId/season'),
+          if (showSeasonTab)
+            Expanded(
+              child: _TabButton(
+                label: 'Season',
+                active: activeTab == _SportTab.season,
+                onTap: () => context.go('/$sportId/season'),
+              ),
             ),
-          ),
           Expanded(
             child: _TabButton(
               label: 'Models',

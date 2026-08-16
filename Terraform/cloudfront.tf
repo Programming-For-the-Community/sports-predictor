@@ -10,7 +10,7 @@
 # convention as scheduler-nfl-train-player-prop-model.tf's own
 # nfl_player_prop_stats.
 locals {
-  api_path_prefixes = ["nfl", "ncaafb"]
+  api_path_prefixes = ["nfl", "ncaafb", "nba"]
 }
 
 resource "aws_cloudfront_origin_access_control" "frontend" {

@@ -6,9 +6,13 @@ split, and same reasoning, as library.serving.ncaafb_reads (see its own
 docstring) -- NOT a port of it, duplicated deliberately so this Lambda
 never has to import that NCAAFB-named module.
 
-No get_season_projection/season-projection support yet -- that's Sub-phase
-3A step 8 (season simulation), not part of step 6. `/nba/season` isn't
-wired into predict-read's routing table until then.
+get_season_projection (Sub-phase 3A step 8) just reads the standings +
+NBA Cup + player-prop leaderboard projection written weekly by the
+scheduled compute path (aws-lambdas/nba/predict/season_projection.py's
+run_scheduled) -- never computed live here, same read-only-cache role
+nfl_reads.py's/ncaafb_reads.py's own get_season_projection play. No round
+label -- NBA has no postseason-round concept the way NCAAFB's national
+ranking does.
 
 No round/week grouping -- NBA has no CFBD-style week numbering (ESPN's
 schedule is date-based, ~10-15 games/night most nights of the season), so
@@ -26,6 +30,7 @@ from boto3.dynamodb.conditions import Key
 
 from library.serving.common import enrich_participants
 from library.storage.model_artifacts import current_version_key, model_artifact_key
+from library.storage.season_projections import season_projection_key
 
 _PLAYER_PROP_MODEL_KEY_RE = re.compile(r"^MODEL#player-prop-([a-z-]+)#v\d+#PLAYER#(.+)$")
 
@@ -288,3 +293,18 @@ def list_models(s3, sport: str) -> dict:
         results = executor.map(lambda name: _load_model_summary(s3, sport, name), model_names)
 
     return {"sport": sport, "models": [card for card in results if card is not None]}
+
+
+def get_season_projection(s3, sport: str) -> dict | None:
+    """GET /nba/season -- reads the standings + NBA Cup + leaderboard
+    projection written weekly by the scheduled compute path (predict/
+    handler.py's ScheduledSeasonProjection branch), never computed live
+    here. None if the schedule hasn't fired yet (e.g. right after a fresh
+    deploy) -- the caller is expected to surface that as "not yet
+    available" rather than treat it like a real 500. Identical to
+    nfl_reads.py's/ncaafb_reads.py's own get_season_projection -- the S3
+    read-through shape has no sport-specific logic in it at all."""
+    key = season_projection_key(sport)
+    if not s3.object_exists(key):
+        return None
+    return s3.get_json(key)

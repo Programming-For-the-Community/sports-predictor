@@ -59,14 +59,48 @@ const _statShortLabels = {
   'rushing_touchdowns': 'TD',
   'receiving_touchdowns': 'TD',
   'defensive_sacks': 'SACKS',
+  'points': 'PTS',
+  'rebounds': 'REB',
+  'assists': 'AST',
 };
 
-/// Renders the `leaders` block once GET /{sport}/predictions/events/{id}
-/// starts returning it (see event_leaders.dart) -- QB passing leader, top
-/// 3 receivers, top 2 rushers, top 3 in sacks, per team.
-class TeamLeadersPanel extends StatelessWidget {
-  const TeamLeadersPanel({super.key, required this.homeAbbr, required this.awayAbbr, required this.leaders});
+class _CategoryConfig {
+  const _CategoryConfig(this.key, this.title, this.statKeys);
+  final String key;
+  final String title;
+  final List<String> statKeys;
+}
 
+// Mirrors predict/event_prediction.py's own LEADER_CATEGORY_STATS per
+// sport -- same "sport picks its own category set" convention
+// season_page.dart's _standingsColumns uses. `passing`'s single starting-
+// QB candidate is already normalized to a 0-or-1-element list by
+// TeamLeaders.fromJson, so it needs no special-casing here, just its own
+// stat keys like every other category.
+const _footballCategories = [
+  _CategoryConfig('passing', 'Passing', ['passing_yards', 'passing_touchdowns']),
+  _CategoryConfig('rushing', 'Rushing', ['rushing_yards', 'rushing_touchdowns']),
+  _CategoryConfig('receiving', 'Receiving', ['receiving_yards', 'receiving_touchdowns']),
+  _CategoryConfig('sacks', 'Sacks', ['defensive_sacks']),
+];
+
+const _basketballCategories = [
+  _CategoryConfig('scoring', 'Scoring', ['points']),
+  _CategoryConfig('rebounding', 'Rebounding', ['rebounds']),
+  _CategoryConfig('assists', 'Assists', ['assists']),
+];
+
+List<_CategoryConfig> _categoriesFor(String sport) =>
+    sport == 'nba' || sport == 'ncaambb' ? _basketballCategories : _footballCategories;
+
+/// Renders the `leaders` block once GET /{sport}/predictions/events/{id}
+/// starts returning it (see event_leaders.dart) -- category set and limits
+/// are sport-specific (see _categoriesFor above); each category shows
+/// whatever candidates the backend actually sent.
+class TeamLeadersPanel extends StatelessWidget {
+  const TeamLeadersPanel({super.key, required this.sport, required this.homeAbbr, required this.awayAbbr, required this.leaders});
+
+  final String sport;
   final String homeAbbr;
   final String awayAbbr;
   final EventLeaders leaders;
@@ -89,8 +123,8 @@ class TeamLeadersPanel extends StatelessWidget {
           // game_row.dart's _MatchupLine -- side by side or stacked, see
           // _ResponsiveTeamColumns.
           _ResponsiveTeamColumns(
-            away: _TeamLeadersColumn(label: awayAbbr, team: leaders.away),
-            home: _TeamLeadersColumn(label: homeAbbr, team: leaders.home),
+            away: _TeamLeadersColumn(sport: sport, label: awayAbbr, team: leaders.away),
+            home: _TeamLeadersColumn(sport: sport, label: homeAbbr, team: leaders.home),
           ),
         ],
       ),
@@ -99,8 +133,9 @@ class TeamLeadersPanel extends StatelessWidget {
 }
 
 class _TeamLeadersColumn extends StatelessWidget {
-  const _TeamLeadersColumn({required this.label, required this.team});
+  const _TeamLeadersColumn({required this.sport, required this.label, required this.team});
 
+  final String sport;
   final String label;
   final TeamLeaders team;
 
@@ -111,15 +146,9 @@ class _TeamLeadersColumn extends StatelessWidget {
       children: [
         Text(label, style: AppTextStyles.cardTitle()),
         const SizedBox(height: 12),
-        if (team.passing != null)
-          _CategorySection(title: 'Passing', players: [team.passing!], statKeys: const ['passing_yards', 'passing_touchdowns']),
-        if (team.rushing.isNotEmpty)
-          _CategorySection(title: 'Rushing', players: team.rushing, statKeys: const ['rushing_yards', 'rushing_touchdowns']),
-        if (team.receiving.isNotEmpty)
-          _CategorySection(
-              title: 'Receiving', players: team.receiving, statKeys: const ['receiving_yards', 'receiving_touchdowns']),
-        if (team.sacks.isNotEmpty)
-          _CategorySection(title: 'Sacks', players: team.sacks, statKeys: const ['defensive_sacks']),
+        for (final category in _categoriesFor(sport))
+          if (team[category.key].isNotEmpty)
+            _CategorySection(title: category.title, players: team[category.key], statKeys: category.statKeys),
       ],
     );
   }
@@ -201,12 +230,14 @@ class _PlayerRow extends StatelessWidget {
 class TeamLeadersComparisonPanel extends StatelessWidget {
   const TeamLeadersComparisonPanel({
     super.key,
+    required this.sport,
     required this.homeAbbr,
     required this.awayAbbr,
     required this.comparison,
     this.title = 'PLAYER PROPS -- PREDICTED VS ACTUAL',
   });
 
+  final String sport;
   final String homeAbbr;
   final String awayAbbr;
   final EventLeadersComparison comparison;
@@ -227,8 +258,8 @@ class TeamLeadersComparisonPanel extends StatelessWidget {
           Text(title, style: AppTextStyles.microLabel()),
           const SizedBox(height: 16),
           _ResponsiveTeamColumns(
-            away: _TeamLeadersComparisonColumn(label: awayAbbr, team: comparison.away),
-            home: _TeamLeadersComparisonColumn(label: homeAbbr, team: comparison.home),
+            away: _TeamLeadersComparisonColumn(sport: sport, label: awayAbbr, team: comparison.away),
+            home: _TeamLeadersComparisonColumn(sport: sport, label: homeAbbr, team: comparison.home),
           ),
         ],
       ),
@@ -237,8 +268,9 @@ class TeamLeadersComparisonPanel extends StatelessWidget {
 }
 
 class _TeamLeadersComparisonColumn extends StatelessWidget {
-  const _TeamLeadersComparisonColumn({required this.label, required this.team});
+  const _TeamLeadersComparisonColumn({required this.sport, required this.label, required this.team});
 
+  final String sport;
   final String label;
   final TeamLeadersComparison team;
 
@@ -249,10 +281,8 @@ class _TeamLeadersComparisonColumn extends StatelessWidget {
       children: [
         Text(label, style: AppTextStyles.cardTitle()),
         const SizedBox(height: 12),
-        if (team.passing != null) _ComparisonCategorySection(title: 'Passing', players: [team.passing!]),
-        if (team.rushing.isNotEmpty) _ComparisonCategorySection(title: 'Rushing', players: team.rushing),
-        if (team.receiving.isNotEmpty) _ComparisonCategorySection(title: 'Receiving', players: team.receiving),
-        if (team.sacks.isNotEmpty) _ComparisonCategorySection(title: 'Sacks', players: team.sacks),
+        for (final category in _categoriesFor(sport))
+          if (team[category.key].isNotEmpty) _ComparisonCategorySection(title: category.title, players: team[category.key]),
       ],
     );
   }

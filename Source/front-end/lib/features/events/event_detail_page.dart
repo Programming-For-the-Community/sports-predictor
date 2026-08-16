@@ -147,6 +147,7 @@ class _EventDetailPageState extends ConsumerState<EventDetailPage> {
             if (leadersComparison != null) ...[
               const SizedBox(height: 20),
               TeamLeadersComparisonPanel(
+                sport: widget.sportId,
                 homeAbbr: teamDisplay(widget.sportId, event.home).abbreviation,
                 awayAbbr: teamDisplay(widget.sportId, event.away).abbreviation,
                 comparison: leadersComparison,
@@ -189,6 +190,7 @@ class _EventDetailPageState extends ConsumerState<EventDetailPage> {
                   if (liveComparison != null) ...[
                     const SizedBox(height: 20),
                     TeamLeadersComparisonPanel(
+                      sport: widget.sportId,
                       homeAbbr: teamDisplay(widget.sportId, event.home).abbreviation,
                       awayAbbr: teamDisplay(widget.sportId, event.away).abbreviation,
                       comparison: liveComparison,
@@ -197,6 +199,7 @@ class _EventDetailPageState extends ConsumerState<EventDetailPage> {
                   ] else if (leaders != null) ...[
                     const SizedBox(height: 20),
                     TeamLeadersPanel(
+                      sport: widget.sportId,
                       homeAbbr: teamDisplay(widget.sportId, event.home).abbreviation,
                       awayAbbr: teamDisplay(widget.sportId, event.away).abbreviation,
                       leaders: leaders,

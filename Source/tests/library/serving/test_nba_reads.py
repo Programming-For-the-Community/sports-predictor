@@ -3,9 +3,8 @@ Unit tests for library.serving.nba_reads -- list_events, list_models, and
 their supporting comparison helpers. storage/predictions_table/s3 are
 MagicMocks.
 
-No TestGetSeasonProjection/TestRoundLabel here, unlike test_ncaafb_reads.py
--- nba_reads has neither yet (see its own docstring: no /nba/season route
-until Sub-phase 3A step 8, no postseason-round concept at all).
+No TestRoundLabel here, unlike test_ncaafb_reads.py -- NBA has no
+postseason-round concept at all (see nba_reads.py's own docstring).
 """
 from datetime import date, timedelta
 from unittest.mock import MagicMock
@@ -260,3 +259,21 @@ class TestListModels:
         result = nba_reads.list_models(s3, "nba")
 
         assert result["models"] == []
+
+
+class TestGetSeasonProjection:
+    def test_returns_the_cached_projection_from_its_own_key(self):
+        s3 = MagicMock()
+        s3.object_exists.return_value = True
+        s3.get_json.return_value = {"sport": "nba", "season": 2026, "standings": []}
+
+        result = nba_reads.get_season_projection(s3, "nba")
+
+        assert result == {"sport": "nba", "season": 2026, "standings": []}
+        s3.get_json.assert_called_once_with("season-projections/nba/latest.json")
+
+    def test_returns_none_when_the_scheduled_job_hasnt_written_one_yet(self):
+        s3 = MagicMock()
+        s3.object_exists.return_value = False
+
+        assert nba_reads.get_season_projection(s3, "nba") is None

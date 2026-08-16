@@ -168,11 +168,11 @@ void main() {
       },
     });
 
-    final passing = event.leadersComparison!.home.passing!;
+    final passing = event.leadersComparison!.home['passing'].single;
     expect(passing.displayName, 'Patrick Mahomes');
     expect(passing.predicted['passing_yards'], 267.0);
     expect(passing.actual['passing_yards'], 289.0);
-    expect(event.leadersComparison!.away.passing, isNull);
+    expect(event.leadersComparison!.away['passing'], isEmpty);
   });
 
   test('venueLabel combines name and city/state', () {

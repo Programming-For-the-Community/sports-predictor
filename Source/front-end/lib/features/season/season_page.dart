@@ -12,9 +12,12 @@ import '../../static/conference_order.dart';
 import '../../static/nfl_team_colors.dart';
 
 // Source of truth is Terraform/scheduler-nfl-train-player-prop-model.tf's
-// nfl_player_prop_stats map -- same duplication handler.py's own
+// nfl_player_prop_stats map / scheduler-nba-train-player-prop-model.tf's
+// nba_player_prop_stats map -- same duplication handler.py's own
 // PLAYER_PROP_STATS accepts, since there's no model registry to read
-// display labels from at runtime either.
+// display labels from at runtime either. One shared map -- NFL's and
+// NBA's stat keys never collide (different sports, different leaderboards
+// maps), so there's nothing sport-conditional needed here.
 const _statLabels = {
   'passing_yards': 'Passing Yards',
   'passing_touchdowns': 'Passing TDs',
@@ -23,6 +26,12 @@ const _statLabels = {
   'receiving_yards': 'Receiving Yards',
   'receiving_touchdowns': 'Receiving TDs',
   'defensive_sacks': 'Sacks',
+  'points': 'Points',
+  'rebounds': 'Rebounds',
+  'assists': 'Assists',
+  'steals': 'Steals',
+  'blocks': 'Blocks',
+  'three_pointers_made': '3-Pointers Made',
 };
 
 /// Buckets standings by division, preserving each team's relative order --
@@ -72,20 +81,25 @@ class _SeasonPageState extends ConsumerState<SeasonPage> {
               style: AppTextStyles.pageH1(),
             ),
             const SizedBox(height: 20),
-            // Player Prop Leaders only exists as a toggle option when the
-            // backend actually sent a leaderboards block -- NCAAFB's own
+            // Player Prop Leaders/NBA Cup only exist as toggle options
+            // when the backend actually sent that block -- NCAAFB's own
             // season simulation is team-outcomes-only, no player-level
-            // simulation (see aws-lambdas/ncaafb/predict/season_projection.
-            // py's own docstring), so `season.leaderboards` is always null
+            // simulation and no in-season tournament (see aws-lambdas/
+            // ncaafb/predict/season_projection.py's own docstring), so
+            // both `season.leaderboards` and `season.cup` are always null
             // there and this whole toggle collapses to just the standings
-            // section, unchanged from before this toggle existed.
-            if (season.leaderboards != null) ...[
-              // Standings and player props each stand alone (a toggle, not
-              // both stacked on one page) -- both are already tall multi-
-              // column sections on their own, and stacking them turns this
-              // into a very long scroll for no reason once a viewer only
-              // wants one or the other.
-              // Horizontal-scroll, not a bare Row -- these two labels
+            // section, unchanged from before this toggle existed. NBA's
+            // own `season.cup` is null too whenever the current season's
+            // Cup groups haven't been added to CUP_GROUPS yet (see
+            // CupProjection's own doc comment) -- same best-effort
+            // treatment as leaderboards.
+            if (season.leaderboards != null || season.cup != null) ...[
+              // Standings/player props/NBA Cup each stand alone (a
+              // toggle, not all stacked on one page) -- each is already a
+              // tall multi-column section on its own, and stacking them
+              // turns this into a very long scroll for no reason once a
+              // viewer only wants one.
+              // Horizontal-scroll, not a bare Row -- these labels
               // together don't fit a phone-width screen (see
               // sport_shell_page.dart's _TabToggle for the same pattern).
               SingleChildScrollView(
@@ -97,18 +111,32 @@ class _SeasonPageState extends ConsumerState<SeasonPage> {
                       selected: _tab == 'standings',
                       onTap: () => setState(() => _tab = 'standings'),
                     ),
-                    const SizedBox(width: 8),
-                    _StatusToggle(
-                      label: 'Player Prop Leaders',
-                      selected: _tab == 'props',
-                      onTap: () => setState(() => _tab = 'props'),
-                    ),
+                    if (season.leaderboards != null) ...[
+                      const SizedBox(width: 8),
+                      _StatusToggle(
+                        label: 'Player Prop Leaders',
+                        selected: _tab == 'props',
+                        onTap: () => setState(() => _tab = 'props'),
+                      ),
+                    ],
+                    if (season.cup != null) ...[
+                      const SizedBox(width: 8),
+                      _StatusToggle(
+                        label: 'NBA Cup',
+                        selected: _tab == 'cup',
+                        onTap: () => setState(() => _tab = 'cup'),
+                      ),
+                    ],
                   ],
                 ),
               ),
               const SizedBox(height: 20),
             ],
-            if (_tab == 'standings' || season.leaderboards == null) ...[
+            if (_tab == 'props' && season.leaderboards != null)
+              _Leaderboards(leaderboards: season.leaderboards)
+            else if (_tab == 'cup' && season.cup != null)
+              _CupSection(sport: season.sport, cup: season.cup!)
+            else ...[
               // Only shown once there's more than one conference/division
               // to filter -- a single-conference standings list (or NFL's
               // fixed 8 divisions, small enough to just scroll) has
@@ -158,8 +186,7 @@ class _SeasonPageState extends ConsumerState<SeasonPage> {
                   );
                 },
               ),
-            ] else
-              _Leaderboards(leaderboards: season.leaderboards),
+            ],
           ],
         ),
         loading: () => const Center(child: Padding(padding: EdgeInsets.all(40), child: CircularProgressIndicator())),
@@ -220,6 +247,7 @@ class _StandingsColumn {
 
 List<_StandingsColumn> _standingsColumns(String sport) {
   final isNcaafb = sport == 'ncaafb';
+  final isNba = sport == 'nba';
   return [
     // NCAAFB only -- NFL has no equivalent model/concept (see
     // TeamStanding.currentRank's own doc comment).
@@ -261,20 +289,34 @@ List<_StandingsColumn> _standingsColumns(String sport) {
     _StandingsColumn('REC', 2, (context, sport, team) => Text(
           // Ties only appended when this team actually has one -- most
           // teams most seasons don't, and a universal "-0" reads as
-          // noise on every other row.
+          // noise on every other row. NBA never has one (team.ties is
+          // always 0 there -- see TeamStanding's own doc comment), so
+          // this already renders correctly for NBA with no branch needed.
           team.ties > 0 ? '${team.wins}-${team.losses}-${team.ties}' : '${team.wins}-${team.losses}',
           style: AppTextStyles.metricValue(),
           textAlign: TextAlign.center,
         )),
-    // "Division"/"Super Bowl" are NFL-specific words -- NCAAFB has no
-    // division concept (conference championship stands in, see
-    // TeamStanding.division's own doc comment) and plays for a national
-    // championship, not a Super Bowl.
+    // NBA swaps DIV% for PLAY-IN% -- the NBA hasn't tied any playoff-
+    // seeding benefit to division titles since 2015-16 (see
+    // season_simulation.py's own simulate_season docstring), so a DIV%
+    // column would be misleading there; the play-in round is the real
+    // extra tier NBA's own bracket has that NFL's/NCAAFB's don't.
+    if (isNba)
+      _StandingsColumn('PLAY-IN%', 2, (context, sport, team) => _PercentText(team.playInProbability ?? 0.0))
+    else
+      // "Division"/"Super Bowl" are NFL-specific words -- NCAAFB has no
+      // division concept (conference championship stands in, see
+      // TeamStanding.division's own doc comment) and plays for a national
+      // championship, not a Super Bowl.
+      _StandingsColumn(
+        isNcaafb ? 'CONF%' : 'DIV%', 2, (context, sport, team) => _PercentText(team.divisionWinnerProbability),
+      ),
     _StandingsColumn(
-      isNcaafb ? 'CONF%' : 'DIV%', 2, (context, sport, team) => _PercentText(team.divisionWinnerProbability),
+      isNba ? 'PLAYOFFS%' : (isNcaafb ? 'CFP%' : 'PO%'), 2, (context, sport, team) => _PercentText(team.playoffProbability),
     ),
-    _StandingsColumn(isNcaafb ? 'CFP%' : 'PO%', 2, (context, sport, team) => _PercentText(team.playoffProbability)),
-    _StandingsColumn(isNcaafb ? 'NC%' : 'SB%', 2, (context, sport, team) => _PercentText(team.championshipProbability)),
+    _StandingsColumn(
+      isNba ? 'CHAMP%' : (isNcaafb ? 'NC%' : 'SB%'), 2, (context, sport, team) => _PercentText(team.championshipProbability),
+    ),
   ];
 }
 
@@ -466,6 +508,115 @@ class _LeaderboardCard extends StatelessWidget {
             ),
         ],
       ),
+    );
+  }
+}
+
+/// NBA Cup (in-season tournament) groups -- one card per group, sorted
+/// alphabetically ("Eastern A" before "Eastern B" before "Western A",
+/// etc). Same fixed-width-cards-in-a-Wrap layout as _Leaderboards above.
+class _CupSection extends StatelessWidget {
+  const _CupSection({required this.sport, required this.cup});
+
+  final String sport;
+  final CupProjection cup;
+
+  @override
+  Widget build(BuildContext context) {
+    final groupNames = cup.groups.keys.toList()..sort();
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final width = cardWidth(340, constraints.maxWidth);
+        return Wrap(
+          spacing: 20,
+          runSpacing: 20,
+          children: [
+            for (final groupName in groupNames)
+              SizedBox(
+                width: width,
+                child: _CupGroupCard(sport: sport, groupName: groupName, teams: cup.groups[groupName]!),
+              ),
+          ],
+        );
+      },
+    );
+  }
+}
+
+class _CupGroupCard extends StatelessWidget {
+  const _CupGroupCard({required this.sport, required this.groupName, required this.teams});
+
+  final String sport;
+  final String groupName;
+  final List<CupTeamStanding> teams;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(16),
+        gradient: LinearGradient(begin: Alignment.topLeft, end: Alignment.bottomRight, colors: AppColors.surfaceGrad),
+        border: Border.all(color: AppColors.borderRaised),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(groupName.toUpperCase(), style: AppTextStyles.microLabel(color: AppColors.cyan)),
+          const SizedBox(height: 14),
+          Row(
+            children: [
+              const Expanded(flex: 3, child: SizedBox()),
+              Expanded(flex: 2, child: Text('REC', style: AppTextStyles.microLabel(), textAlign: TextAlign.center)),
+              Expanded(flex: 2, child: Text('ADV%', style: AppTextStyles.microLabel(), textAlign: TextAlign.center)),
+              Expanded(flex: 2, child: Text('CHAMP%', style: AppTextStyles.microLabel(), textAlign: TextAlign.center)),
+            ],
+          ),
+          const Divider(height: 16, color: AppColors.border),
+          for (final team in teams) ...[
+            _CupTeamRow(sport: sport, team: team),
+            const SizedBox(height: 8),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+class _CupTeamRow extends StatelessWidget {
+  const _CupTeamRow({required this.sport, required this.team});
+
+  final String sport;
+  final CupTeamStanding team;
+
+  @override
+  Widget build(BuildContext context) {
+    final info = teamDisplayFor(sport, team.teamId, team.abbreviation);
+    return Row(
+      children: [
+        Expanded(
+          flex: 3,
+          child: Row(
+            children: [
+              TeamColorDot(color: info.primary),
+              if (info.primary != null) const SizedBox(width: 8),
+              Flexible(
+                child: Text(info.abbreviation, style: AppTextStyles.body(color: AppColors.ink), overflow: TextOverflow.ellipsis),
+              ),
+            ],
+          ),
+        ),
+        Expanded(
+          flex: 2,
+          child: Text(
+            '${team.groupWins}-${team.groupLosses}',
+            style: AppTextStyles.metricValue(),
+            textAlign: TextAlign.center,
+          ),
+        ),
+        Expanded(flex: 2, child: _PercentText(team.knockoutProbability)),
+        Expanded(flex: 2, child: _PercentText(team.championProbability)),
+      ],
     );
   }
 }

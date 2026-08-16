@@ -122,7 +122,7 @@ resource "aws_cloudwatch_dashboard" "viewer_analytics" {
         height = 6
         properties = {
           region = var.region
-          title  = "OS (iOS / Android) -- CloudFront's device headers don't expose Windows/macOS/Linux specifically"
+          title  = "OS (iOS / Android)"
           view   = "bar"
           query  = <<-QUERY
             ${local.viewer_analytics_log_sources}
@@ -141,7 +141,7 @@ resource "aws_cloudwatch_dashboard" "viewer_analytics" {
         height = 6
         properties = {
           region = var.region
-          title  = "Top raw User-Agent strings (browser proxy -- not pre-bucketed into named browsers)"
+          title  = "Top raw User-Agent strings"
           view   = "table"
           query  = <<-QUERY
             ${local.viewer_analytics_log_sources}
@@ -161,7 +161,7 @@ resource "aws_cloudwatch_dashboard" "viewer_analytics" {
         height = 6
         properties = {
           region = var.region
-          title  = "Top API endpoints (method + resource)"
+          title  = "Top API endpoints"
           view   = "table"
           query  = <<-QUERY
             ${local.viewer_analytics_log_sources}

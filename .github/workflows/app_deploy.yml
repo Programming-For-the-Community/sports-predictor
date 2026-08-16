@@ -227,8 +227,13 @@ jobs:
     with:
       function_name: ${{ needs.infra.outputs.nba_predict_read_function_name }}
 
-  # No NBA live-scores deploy job yet -- that's Sub-phase 3A step 7, not
-  # part of step 6 (see nba_deploy.yml's own header for the same gap).
+  nba_live_scores_deploy:
+    name: NBA live-scores (deploy)
+    needs: infra
+    uses: ./.github/workflows/nba_live_scores_deploy.yml
+    secrets: inherit
+    with:
+      function_name: ${{ needs.infra.outputs.nba_live_scores_function_name }}
 
   # No config `with:` block for either -- both read directly from
   # Terraform state instead of relaying it through needs.infra.outputs.*,

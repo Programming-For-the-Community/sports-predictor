@@ -1,22 +1,21 @@
 """
-NBA inference Lambda -- a background compute worker, never invoked by API
-Gateway directly. One invocation shape so far:
+NBA inference Lambda -- a background compute worker, never invoked by
+API Gateway directly. Two invocation shapes:
 
+    {"detail-type": "ScheduledSeasonProjection"}
+        -> weekly EventBridge Scheduler invoke; computes the season
+           projection (standings + play-in/playoff odds + NBA Cup +
+           player-prop leaderboards) and writes it to S3.
     {"detail-type": "ComputeAndCachePrediction", "route": "event"|"player_prop", ...}
         -> fire-and-forget invoke from predict-read on a prediction-cache
            miss/stale-refresh; computes one prediction and writes it to
            the same S3 cache predict-read reads from.
-
-No "ScheduledSeasonProjection" shape yet -- that's Sub-phase 3A step 8
-(season simulation), not part of step 6. See
-Source/aws-lambdas/ncaafb/predict/handler.py for what this Lambda grows
-into once that step lands (season_projection.run_scheduled, a weekly/
-nightly EventBridge Scheduler invoke).
 """
 import logging
 import os
 
 import event_prediction
+import season_projection
 from library.aws.dynamodb_table import DynamoDBTable
 from library.aws.s3_manager import S3Manager
 from library.storage.feature_storage import FeatureStorage
@@ -52,6 +51,9 @@ def _get_predictions_table() -> DynamoDBTable:
 
 
 def lambda_handler(event, context):
+    if event.get("detail-type") == "ScheduledSeasonProjection":
+        return season_projection.run_scheduled(_get_storage(), _get_model_bucket())
+
     if event.get("detail-type") == "ComputeAndCachePrediction":
         if event["route"] == "event":
             event_prediction.compute_and_cache_event(

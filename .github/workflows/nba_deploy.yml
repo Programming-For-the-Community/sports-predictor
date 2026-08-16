@@ -1,18 +1,8 @@
 # Top-level NBA deploy pipeline. Runs on every push to an nba* branch, but
 # pauses for manual approval (via the environment's required reviewers --
 # configure this in Settings > Environments, it can't be set from this
-# file) before doing anything. Mirrors nfl_deploy.yml's own structure and
-# comments, with the caveats below.
-#
-# STUB, BY DESIGN -- still missing live_scores_deploy, unlike
-# nfl_deploy.yml's/ncaafb_deploy.yml's full 6-job shape. NBA's Sub-phase
-# 3A build order (see project-nba-onboarding memory) hasn't reached
-# live-scores yet (step 7), so there is no nba_live_scores_deploy.yml for
-# this to call -- adding that job block now would reference a `uses:`
-# target that doesn't exist and fail on first run. ai_hosting/
-# deploy_predict_lambda/predict_read_deploy are all real as of step 6
-# (inference) -- ai_hosting's own placeholder-image header from step 5 is
-# now stale, see that file for the update.
+# file) before doing anything. Mirrors nfl_deploy.yml's/ncaafb_deploy.yml's
+# own full 6-job shape, with the caveats below.
 #
 # Why ai_hosting couldn't wait for step 6 like predict_read_deploy could:
 # unlike the zip-based Lambdas, aws_lambda_function.nba_predict
@@ -45,9 +35,9 @@
 # applies infra (including the NBA ECS task definition's env vars -- see
 # Terraform/ecs-task-nba-backfill.tf -- and, for nba-predict specifically,
 # its CreateFunction call, which now finds ai_hosting's just-pushed image).
-# Only after infra do deploy_predict_lambda and data_pipeline run, since
-# they deploy code into functions/point Lambdas at images Terraform just
-# created.
+# Only after infra do deploy_predict_lambda, predict_read_deploy,
+# data_pipeline, and live_scores_deploy run, since they deploy code into
+# functions/point Lambdas at images Terraform just created.
 #
 # Both this job's `approval` step AND tf_install.yml's own terraform job
 # gate on the `development`/`production` environment, so a run through
@@ -168,3 +158,18 @@ jobs:
       ingest_function_name: ${{ needs.infra.outputs.nba_ingest_function_name }}
       normalize_function_name: ${{ needs.infra.outputs.nba_normalize_function_name }}
       schedule_sync_function_name: ${{ needs.infra.outputs.nba_schedule_sync_function_name }}
+
+  # nba-live-scores -- GET /nba/live-scores + the EventBridge-triggered
+  # cache refresh (see Terraform/lambda-nba-live-scores.tf). A reusable
+  # workflow, not inline jobs here -- same reasoning as predict_read_deploy
+  # above (app_deploy.yml needs this exact same test+deploy pair too).
+  live_scores_deploy:
+    name: NBA live-scores (test + deploy)
+    needs: [approval, infra]
+    if: |
+      always() &&
+      (needs.approval.result == 'success' || needs.approval.result == 'skipped')
+    uses: ./.github/workflows/nba_live_scores_deploy.yml
+    secrets: inherit
+    with:
+      function_name: ${{ needs.infra.outputs.nba_live_scores_function_name }}

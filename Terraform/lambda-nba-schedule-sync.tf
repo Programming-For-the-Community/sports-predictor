@@ -1,12 +1,18 @@
 # NBA schedule-sync Lambda. Triggered directly by EventBridge Scheduler --
-# see scheduler-nba-schedule-sync.tf. Walks the next 14 calendar days via
+# see scheduler-nba-schedule-sync.tf. Walks up to
+# handler.py's own SCHEDULE_SYNC_MAX_LOOKAHEAD_DAYS calendar days via
 # ESPN's scoreboard-by-date endpoint and writes each date's results to S3
 # -- normalize's existing S3 trigger (s3-raw-data-lake-notifications.tf)
 # picks these up the same way daily ingest's output does. Exists for the
 # same reason NFL's own schedule-sync does (daily ingest alone never seeds
-# future dates ahead of time), but a fixed lookahead window rather than a
-# full-season walk -- see the aws_lambda_function resource's own comment
-# below for why, and for the known gap that leaves for season simulation.
+# future dates ahead of time).
+#
+# Full-season walk with an idempotent skip-if-already-synced check per
+# date (2026-08-16, Sub-phase 3A step 8) -- season_projection.py's
+# remaining_games input needs the whole rest of the season seeded, not
+# just two weeks. See handler.py's own docstring for the full reasoning
+# (previously a fixed 14-day window; that was a real, documented gap left
+# open specifically until this step needed fixing it).
 #
 # Code is deployed by the nba_data_pipeline workflow (via `aws lambda
 # update-function-code`) -- NOT by Terraform. Same placeholder-ZIP +
@@ -36,24 +42,18 @@ data "archive_file" "nba_schedule_sync_placeholder" {
 
 resource "aws_lambda_function" "nba_schedule_sync" {
   function_name = "${var.project}-nba-schedule-sync"
-  description   = "Seeds the next 14 days of NBA scoreboards from ESPN so the frontend's upcoming list always has data ahead of daily ingest. Triggered by EventBridge Scheduler -- see scheduler-nba-schedule-sync.tf."
+  description   = "Seeds the rest of the NBA season's scoreboards from ESPN (idempotent, skip-if-already-synced) so the frontend's upcoming list and season_projection.py's remaining_games input always have data ahead of daily ingest. Triggered by EventBridge Scheduler -- see scheduler-nba-schedule-sync.tf."
   role          = aws_iam_role.lambda_pipeline.arn
   runtime       = "python3.12"
   handler       = "handler.lambda_handler"
-  # Only a 14-day lookahead (handler.py's own SCHEDULE_SYNC_LOOKAHEAD_DAYS),
-  # NOT a full-season walk like NFL's/NCAAFB's own schedule-sync (600s
-  # there reflects a real ~170-330-day-equivalent season walk) -- a
-  # per-day walk across NBA's whole ~170-day regular season would be
-  # 170+ ESPN calls every single scheduled run, in tension with this
-  # phase's own API-call-minimization principle. 14 calls needs nowhere
-  # near that ceiling. This is a real, known scope gap, not an oversight:
-  # season simulation (Sub-phase 3A step 8) will very likely need the
-  # full season's remaining games seeded the way NFL's own schedule-sync
-  # provides for _season_standings_inputs' remaining_games, and 14 days
-  # won't cover that -- revisit this Lambda (probably a full-season walk
-  # with a skip-if-already-synced idempotency check per date, so it
-  # doesn't re-pay 170+ calls every run) when step 8 is built, not before.
-  timeout     = 120
+  # 270-day ceiling (handler.py's own SCHEDULE_SYNC_MAX_LOOKAHEAD_DAYS) x
+  # the shared RateLimiter's 0.3s floor is ~81s worst case on the first
+  # run after this shipped (before the idempotent skip has anything to
+  # skip); real per-call latency on top of that floor easily pushes past
+  # 120s. 300s gives real headroom for that one-time cost -- every run
+  # after it is far cheaper (only new dates + still-unwritten preseason
+  # dates get an ESPN call at all, see handler.py's own docstring).
+  timeout     = 300
   memory_size = 256
 
   filename         = data.archive_file.nba_schedule_sync_placeholder.output_path

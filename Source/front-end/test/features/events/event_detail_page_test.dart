@@ -26,13 +26,13 @@ const _predictionWithLeaders = EventPrediction(
   homeScore: 27.3,
   awayScore: 22.8,
   leaders: EventLeaders(
-    home: TeamLeaders(
-      passing: PlayerStatLine(entityId: '100', name: 'QB One', stats: {'passing_yards': 250}),
-      receiving: [],
-      rushing: [],
-      sacks: [],
-    ),
-    away: TeamLeaders(passing: null, receiving: [], rushing: [], sacks: []),
+    home: TeamLeaders({
+      'passing': [PlayerStatLine(entityId: '100', name: 'QB One', stats: {'passing_yards': 250})],
+      'receiving': [],
+      'rushing': [],
+      'sacks': [],
+    }),
+    away: TeamLeaders({'passing': [], 'receiving': [], 'rushing': [], 'sacks': []}),
   ),
 );
 

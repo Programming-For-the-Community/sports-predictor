@@ -9,9 +9,6 @@ rather than mocking them out, to catch a real wiring bug (wrong key,
 wrong argument order) that a fully-mocked test wouldn't. The
 nba_predict_read module is registered in sys.modules by conftest.py.
 
-No GET /nba/season route tested here -- that route doesn't exist yet
-(Sub-phase 3A step 8, season simulation), see library.serving.nba_reads'
-own docstring.
 """
 import json
 import time
@@ -78,6 +75,26 @@ class TestRouting:
     def test_unknown_route_returns_404(self):
         response = nba_predict_read.lambda_handler(_api_event("/nba/unknown"), None)
         assert response["statusCode"] == 404
+
+    def test_season_route_returns_the_cached_projection(self):
+        nba_predict_read._model_bucket = MagicMock()
+        nba_predict_read._model_bucket.object_exists.return_value = True
+        nba_predict_read._model_bucket.get_json.return_value = {"sport": "nba", "season": 2026, "standings": []}
+
+        response = nba_predict_read.lambda_handler(_api_event("/nba/season"), None)
+
+        assert response["statusCode"] == 200
+        body = json.loads(response["body"])
+        assert body["season"] == 2026
+        nba_predict_read._model_bucket.get_json.assert_called_once_with("season-projections/nba/latest.json")
+
+    def test_season_route_returns_503_when_the_scheduled_job_hasnt_written_one_yet(self):
+        nba_predict_read._model_bucket = MagicMock()
+        nba_predict_read._model_bucket.object_exists.return_value = False
+
+        response = nba_predict_read.lambda_handler(_api_event("/nba/season"), None)
+
+        assert response["statusCode"] == 503
 
     def test_unhandled_exception_returns_500(self):
         with patch.object(nba_predict_read, "_get_storage"), \

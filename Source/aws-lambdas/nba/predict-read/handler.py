@@ -5,13 +5,11 @@ authorizer.
 Routes:
     GET /nba/events?status=scheduled|completed
     GET /nba/models
+    GET /nba/season
     GET /nba/predictions/events/{event_id}
     GET /nba/predictions/events/{event_id}/players/{entity_id}?stat=points
 
-No GET /nba/season yet -- that's Sub-phase 3A step 8 (season simulation),
-not part of step 6. See library.serving.nba_reads' own docstring.
-
-See library.serving.nba_reads for events/models. The two prediction
+See library.serving.nba_reads for events/models/season. The two prediction
 routes are a read-through cache (library.storage.prediction_cache) in
 front of the predict Lambda, which does the actual computation
 asynchronously:
@@ -38,7 +36,7 @@ from library.aws.dynamodb_table import DynamoDBTable
 from library.aws.lambda_invoker import LambdaInvoker
 from library.aws.s3_manager import S3Manager
 from library.schema.keys import event_key as build_event_key
-from library.serving.nba_reads import list_events, list_models
+from library.serving.nba_reads import get_season_projection, list_events, list_models
 from library.serving.viewer_analytics import log_viewer_analytics
 from library.storage import prediction_cache
 from library.storage.feature_storage import FeatureStorage
@@ -135,6 +133,12 @@ def lambda_handler(event, context):
 
         if resource == "/nba/models":
             body = list_models(_get_model_bucket(), SPORT)
+            return _response(200, body)
+
+        if resource == "/nba/season":
+            body = get_season_projection(_get_model_bucket(), SPORT)
+            if body is None:
+                return _response(503, {"error": "Season projection not yet available -- check back after the next scheduled update"})
             return _response(200, body)
 
         if resource == "/nba/predictions/events/{event_id}":

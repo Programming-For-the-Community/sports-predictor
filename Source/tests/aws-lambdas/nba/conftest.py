@@ -48,6 +48,11 @@ _load_handler("nba_predict", "aws-lambdas/nba/predict/handler.py")
 # sys.path insert needed, just the same unique-module-name registration.
 _load_handler("nba_predict_read", "aws-lambdas/nba/predict-read/handler.py")
 
+# live-scores/'s own live_scores.py has a unique name, unlike handler.py --
+# same split as predict/'s modules above.
+sys.path.insert(0, os.path.join(_src, "aws-lambdas", "nba", "live-scores"))
+_load_handler("nba_live_scores", "aws-lambdas/nba/live-scores/handler.py")
+
 
 @pytest.fixture(autouse=True)
 def reset_nba_predict_singletons():

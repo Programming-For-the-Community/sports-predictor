@@ -36,8 +36,8 @@ void main() {
     final prediction = EventPrediction.fromJson(json);
 
     expect(prediction.leaders, isNotNull);
-    expect(prediction.leaders!.home.passing!.displayName, 'Patrick Mahomes');
-    expect(prediction.leaders!.home.receiving.single.displayName, '4258');
-    expect(prediction.leaders!.home.receiving.single.stats['receiving_yards'], 78);
+    expect(prediction.leaders!.home['passing'].single.displayName, 'Patrick Mahomes');
+    expect(prediction.leaders!.home['receiving'].single.displayName, '4258');
+    expect(prediction.leaders!.home['receiving'].single.stats['receiving_yards'], 78);
   });
 }

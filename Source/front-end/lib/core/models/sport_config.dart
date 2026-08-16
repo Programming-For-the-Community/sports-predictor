@@ -20,6 +20,7 @@ class SportConfig {
     required this.eventShape,
     required this.accentColor,
     required this.active,
+    this.hasSeasonProjection = true,
   });
 
   final String id;
@@ -27,6 +28,13 @@ class SportConfig {
   final EventShape eventShape;
   final Color accentColor;
   final bool active;
+
+  // False hides sport_shell_page.dart's Season tab entirely -- for a sport
+  // whose backend has no /{sport}/season route yet, GET-ing it would just
+  // surface a raw "couldn't load" error on every tap. Defaults true so
+  // every existing entry below needs no change; only a sport activated
+  // before its own season simulation ships (see the nba entry) sets this.
+  final bool hasSeasonProjection;
 }
 
 const kSports = [
@@ -52,7 +60,7 @@ const kSports = [
     displayName: 'NBA',
     eventShape: EventShape.headToHead,
     accentColor: AppColors.cyan,
-    active: false,
+    active: true,
   ),
   SportConfig(
     id: 'ncaa_mbb',
@@ -60,6 +68,10 @@ const kSports = [
     eventShape: EventShape.headToHead,
     accentColor: AppColors.cyan,
     active: false,
+    // No /{sport}/season route exists for this sport yet (Sub-phase 3B,
+    // not started) -- see hasSeasonProjection's own doc comment. Costs
+    // nothing to set correctly now even while inactive/unreachable.
+    hasSeasonProjection: false,
   ),
   SportConfig(
     id: 'pga',

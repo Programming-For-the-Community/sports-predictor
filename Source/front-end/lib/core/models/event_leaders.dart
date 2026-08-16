@@ -1,10 +1,11 @@
 /// Mirrors the `leaders` block on GET /{sport}/predictions/events/{event_id}
-/// (see Source/aws-lambdas/nfl/predict/handler.py's _predict_event_leaders)
-/// -- optional/nullable throughout since it's a best-effort field that can
-/// come back null if the backend couldn't compute it for a given event.
-/// `name` is likewise optional -- a raw ESPN id is meaningless in the UI,
-/// so this model prefers `name` when the backend includes it and falls
-/// back to the id otherwise.
+/// (see Source/aws-lambdas/nfl/predict/event_prediction.py's
+/// predict_event_leaders/LEADER_CATEGORY_STATS) -- optional/nullable
+/// throughout since it's a best-effort field that can come back null if the
+/// backend couldn't compute it for a given event. `name` is likewise
+/// optional -- a raw ESPN id is meaningless in the UI, so this model
+/// prefers `name` when the backend includes it and falls back to the id
+/// otherwise.
 class PlayerStatLine {
   const PlayerStatLine({required this.entityId, required this.name, required this.stats});
 
@@ -28,23 +29,34 @@ class PlayerStatLine {
   }
 }
 
+/// Category keys are sport-specific (NFL/NCAAFB: passing/receiving/rushing/
+/// sacks; NBA/NCAA MBB: scoring/rebounding/assists -- see
+/// team_leaders_panel.dart's own per-sport category config, the only place
+/// that needs to know what a given sport's categories actually are). This
+/// model itself stays category-agnostic, just a map of category key ->
+/// candidates.
+///
+/// Every category normalizes to a list here even though NFL's/NCAAFB's own
+/// `passing` category is sent as a single object-or-null, not a list (see
+/// event_prediction.py's own `team_leaders`) -- a team only ever has one
+/// starting-QB candidate, so a 0-or-1-element list is lossless and lets
+/// every category render through the same list-based widget code, no
+/// singular-vs-list special case needed above this parsing step.
 class TeamLeaders {
-  const TeamLeaders({required this.passing, required this.receiving, required this.rushing, required this.sacks});
+  const TeamLeaders(this.categories);
 
-  final PlayerStatLine? passing;
-  final List<PlayerStatLine> receiving;
-  final List<PlayerStatLine> rushing;
-  final List<PlayerStatLine> sacks;
+  final Map<String, List<PlayerStatLine>> categories;
 
-  factory TeamLeaders.fromJson(Map<String, dynamic> json) => TeamLeaders(
-        passing: json['passing'] != null ? PlayerStatLine.fromJson(json['passing'] as Map<String, dynamic>) : null,
-        receiving: _list(json['receiving']),
-        rushing: _list(json['rushing']),
-        sacks: _list(json['sacks']),
-      );
+  List<PlayerStatLine> operator [](String category) => categories[category] ?? const [];
 
-  static List<PlayerStatLine> _list(dynamic value) =>
-      (value as List<dynamic>? ?? []).map((e) => PlayerStatLine.fromJson(e as Map<String, dynamic>)).toList();
+  factory TeamLeaders.fromJson(Map<String, dynamic> json) =>
+      TeamLeaders(json.map((key, value) => MapEntry(key, _normalize(value))));
+
+  static List<PlayerStatLine> _normalize(dynamic value) {
+    if (value == null) return const [];
+    if (value is List) return value.map((e) => PlayerStatLine.fromJson(e as Map<String, dynamic>)).toList();
+    return [PlayerStatLine.fromJson(value as Map<String, dynamic>)];
+  }
 }
 
 class EventLeaders {
@@ -78,10 +90,10 @@ extension EventLeadersLiveComparison on EventLeaders {
 
 extension TeamLeadersLiveComparison on TeamLeaders {
   TeamLeadersComparison toLiveComparison(Map<String, Map<String, double>> playerStats) => TeamLeadersComparison(
-        passing: passing?.toLiveComparison(playerStats),
-        receiving: receiving.map((player) => player.toLiveComparison(playerStats)).toList(),
-        rushing: rushing.map((player) => player.toLiveComparison(playerStats)).toList(),
-        sacks: sacks.map((player) => player.toLiveComparison(playerStats)).toList(),
+        categories.map((category, players) => MapEntry(
+              category,
+              players.map((player) => player.toLiveComparison(playerStats)).toList(),
+            )),
       );
 }
 
@@ -99,8 +111,8 @@ extension PlayerStatLineLiveComparison on PlayerStatLine {
 /// Source/library/serving/nfl_reads.py's _leaders_comparison) --
 /// predicted-vs-actual player-prop stats for whichever leader candidates
 /// had a prediction recorded before the game. Same shape as
-/// TeamLeaders/EventLeaders above (passing singular, others lists), just
-/// with `predicted`/`actual` sub-maps per player instead of flat stat
+/// TeamLeaders/EventLeaders above (category map, all-list once parsed),
+/// just with `predicted`/`actual` sub-maps per player instead of flat stat
 /// values -- null throughout under the same "nobody recorded one before
 /// the game" condition PredictionComparison already documents at the
 /// team level (see event.dart).
@@ -128,27 +140,22 @@ class PlayerStatLineComparison {
 }
 
 class TeamLeadersComparison {
-  const TeamLeadersComparison({
-    required this.passing, required this.receiving, required this.rushing, required this.sacks,
-  });
+  const TeamLeadersComparison(this.categories);
 
-  final PlayerStatLineComparison? passing;
-  final List<PlayerStatLineComparison> receiving;
-  final List<PlayerStatLineComparison> rushing;
-  final List<PlayerStatLineComparison> sacks;
+  final Map<String, List<PlayerStatLineComparison>> categories;
 
-  factory TeamLeadersComparison.fromJson(Map<String, dynamic> json) => TeamLeadersComparison(
-        passing: json['passing'] != null
-            ? PlayerStatLineComparison.fromJson(json['passing'] as Map<String, dynamic>)
-            : null,
-        receiving: _list(json['receiving']),
-        rushing: _list(json['rushing']),
-        sacks: _list(json['sacks']),
-      );
+  List<PlayerStatLineComparison> operator [](String category) => categories[category] ?? const [];
 
-  static List<PlayerStatLineComparison> _list(dynamic value) => (value as List<dynamic>? ?? [])
-      .map((e) => PlayerStatLineComparison.fromJson(e as Map<String, dynamic>))
-      .toList();
+  factory TeamLeadersComparison.fromJson(Map<String, dynamic> json) =>
+      TeamLeadersComparison(json.map((key, value) => MapEntry(key, _normalize(value))));
+
+  static List<PlayerStatLineComparison> _normalize(dynamic value) {
+    if (value == null) return const [];
+    if (value is List) {
+      return value.map((e) => PlayerStatLineComparison.fromJson(e as Map<String, dynamic>)).toList();
+    }
+    return [PlayerStatLineComparison.fromJson(value as Map<String, dynamic>)];
+  }
 }
 
 class EventLeadersComparison {

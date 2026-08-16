@@ -47,21 +47,21 @@ const _predictionWithLeaders = EventPrediction(
   homeScore: 27.3,
   awayScore: 22.8,
   leaders: EventLeaders(
-    home: TeamLeaders(
-      passing: PlayerStatLine(entityId: '1', name: 'Christian McCaffrey Jr.', stats: {'passing_yards': 312, 'passing_touchdowns': 3}),
-      receiving: [
+    home: TeamLeaders({
+      'passing': [PlayerStatLine(entityId: '1', name: 'Christian McCaffrey Jr.', stats: {'passing_yards': 312, 'passing_touchdowns': 3})],
+      'receiving': [
         PlayerStatLine(entityId: '2', name: 'DeAndre Hopkins-Wilson', stats: {'receiving_yards': 118, 'receiving_touchdowns': 1}),
         PlayerStatLine(entityId: '3', name: 'Christopher Godwin', stats: {'receiving_yards': 74, 'receiving_touchdowns': 0}),
       ],
-      rushing: [PlayerStatLine(entityId: '4', name: 'Jonathan Taylor', stats: {'rushing_yards': 96, 'rushing_touchdowns': 1})],
-      sacks: [PlayerStatLine(entityId: '5', name: 'Myles Garrett', stats: {'defensive_sacks': 2.5})],
-    ),
-    away: TeamLeaders(
-      passing: PlayerStatLine(entityId: '6', name: 'Justin Herbert', stats: {'passing_yards': 289, 'passing_touchdowns': 2}),
-      receiving: [PlayerStatLine(entityId: '7', name: 'Amon-Ra St. Brown', stats: {'receiving_yards': 101, 'receiving_touchdowns': 1})],
-      rushing: [PlayerStatLine(entityId: '8', name: 'Derrick Henry', stats: {'rushing_yards': 88, 'rushing_touchdowns': 1})],
-      sacks: [PlayerStatLine(entityId: '9', name: 'Nick Bosa', stats: {'defensive_sacks': 1.5})],
-    ),
+      'rushing': [PlayerStatLine(entityId: '4', name: 'Jonathan Taylor', stats: {'rushing_yards': 96, 'rushing_touchdowns': 1})],
+      'sacks': [PlayerStatLine(entityId: '5', name: 'Myles Garrett', stats: {'defensive_sacks': 2.5})],
+    }),
+    away: TeamLeaders({
+      'passing': [PlayerStatLine(entityId: '6', name: 'Justin Herbert', stats: {'passing_yards': 289, 'passing_touchdowns': 2})],
+      'receiving': [PlayerStatLine(entityId: '7', name: 'Amon-Ra St. Brown', stats: {'receiving_yards': 101, 'receiving_touchdowns': 1})],
+      'rushing': [PlayerStatLine(entityId: '8', name: 'Derrick Henry', stats: {'rushing_yards': 88, 'rushing_touchdowns': 1})],
+      'sacks': [PlayerStatLine(entityId: '9', name: 'Nick Bosa', stats: {'defensive_sacks': 1.5})],
+    }),
   ),
 );
 
@@ -89,36 +89,40 @@ final _completedEvent = SportEvent(
     actualAwayScore: 23,
   ),
   leadersComparison: const EventLeadersComparison(
-    home: TeamLeadersComparison(
-      passing: PlayerStatLineComparison(
-        entityId: '1', name: 'Christian McCaffrey Jr.',
-        predicted: {'passing_yards': 312}, actual: {'passing_yards': 298},
-      ),
-      receiving: [
+    home: TeamLeadersComparison({
+      'passing': [
+        PlayerStatLineComparison(
+          entityId: '1', name: 'Christian McCaffrey Jr.',
+          predicted: {'passing_yards': 312}, actual: {'passing_yards': 298},
+        ),
+      ],
+      'receiving': [
         PlayerStatLineComparison(
           entityId: '2', name: 'DeAndre Hopkins-Wilson',
           predicted: {'receiving_yards': 118}, actual: {'receiving_yards': 132},
         ),
       ],
-      rushing: [
+      'rushing': [
         PlayerStatLineComparison(
           entityId: '4', name: 'Jonathan Taylor',
           predicted: {'rushing_yards': 96}, actual: {'rushing_yards': 71},
         ),
       ],
-      sacks: [],
-    ),
-    away: TeamLeadersComparison(
-      passing: PlayerStatLineComparison(
-        entityId: '6', name: 'Justin Herbert',
-        predicted: {'passing_yards': 289}, actual: {'passing_yards': 301},
-      ),
-      receiving: [],
-      rushing: [],
-      sacks: [
+      'sacks': [],
+    }),
+    away: TeamLeadersComparison({
+      'passing': [
+        PlayerStatLineComparison(
+          entityId: '6', name: 'Justin Herbert',
+          predicted: {'passing_yards': 289}, actual: {'passing_yards': 301},
+        ),
+      ],
+      'receiving': [],
+      'rushing': [],
+      'sacks': [
         PlayerStatLineComparison(entityId: '9', name: 'Nick Bosa', predicted: {'defensive_sacks': 1.5}, actual: {'defensive_sacks': 2}),
       ],
-    ),
+    }),
   ),
 );
 

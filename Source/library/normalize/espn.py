@@ -92,6 +92,22 @@ def scoreboard_event_to_event_item(event: dict, sport: str) -> dict:
         "weather_temperature": weather.get("temperature"),
     }
 
+    # Sport-agnostic passthrough of ESPN's own event-level "notes" --
+    # confirmed live, 2026-08-16, that NBA in-season-tournament (NBA Cup)
+    # group-play games carry event["notes"] == [{"type": "event",
+    # "headline": "NBA Cup - Group Play"}], a sibling of "competitions",
+    # not nested inside it. Stored as the raw headline string rather than
+    # a parsed boolean so interpretation stays with whichever sport's own
+    # feature/serving code cares about it (only NBA's season_projection.py
+    # does today) -- this function itself doesn't know what "NBA Cup"
+    # means, same "generic extraction, sport-specific interpretation"
+    # split every other optional field on this item already follows. Omit
+    # rather than write None when absent, same convention as the
+    # coach/injuries fields below.
+    notes = event.get("notes") or []
+    if tournament_headline := next((n.get("headline") for n in notes if n.get("headline")), None):
+        item["tournament_note"] = tournament_headline
+
     # Coach/injuries/depth-chart are absent on any event not enriched by
     # ingest's _enrich_events (aws-lambdas/nfl/ingest/handler.py), or where
     # that fetch failed. Omitted rather than written as None/empty, same

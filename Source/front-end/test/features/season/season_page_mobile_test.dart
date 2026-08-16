@@ -45,6 +45,48 @@ final _season = SeasonProjection(
   },
 );
 
+// Realistic group size (5 teams, real-length abbreviations aren't long
+// enough to stress anything on their own, but a full group plus every
+// probability column together is a genuinely wide row) -- same "don't
+// just use short placeholder strings" philosophy as _season above.
+final _nbaCupSeason = SeasonProjection(
+  sport: 'nba',
+  season: 2026,
+  standings: [
+    const TeamStanding(
+      teamId: '2', division: 'Eastern Atlantic', wins: 18, losses: 6, ties: 0,
+      projectedWins: 58.0, projectedLosses: 24.0,
+      divisionWinnerProbability: 0.7, playoffProbability: 0.95, championshipProbability: 0.18,
+      playInProbability: 0.02,
+    ),
+  ],
+  leaderboards: null,
+  cup: const CupProjection(groups: {
+    'Eastern B': [
+      CupTeamStanding(
+        teamId: '2', name: 'Boston Celtics', abbreviation: 'BOS', groupWins: 4, groupLosses: 1,
+        groupWinnerProbability: 0.55, knockoutProbability: 0.7, cupFinalistProbability: 0.32, championProbability: 0.14,
+      ),
+      CupTeamStanding(
+        teamId: '19', name: 'Orlando Magic', abbreviation: 'ORL', groupWins: 3, groupLosses: 2,
+        groupWinnerProbability: 0.2, knockoutProbability: 0.35, cupFinalistProbability: 0.11, championProbability: 0.03,
+      ),
+      CupTeamStanding(
+        teamId: '8', name: 'Detroit Pistons', abbreviation: 'DET', groupWins: 2, groupLosses: 3,
+        groupWinnerProbability: 0.15, knockoutProbability: 0.22, cupFinalistProbability: 0.05, championProbability: 0.01,
+      ),
+      CupTeamStanding(
+        teamId: '20', name: 'Philadelphia 76ers', abbreviation: 'PHI', groupWins: 2, groupLosses: 3,
+        groupWinnerProbability: 0.08, knockoutProbability: 0.15, cupFinalistProbability: 0.03, championProbability: 0.01,
+      ),
+      CupTeamStanding(
+        teamId: '17', name: 'Brooklyn Nets', abbreviation: 'BKN', groupWins: 1, groupLosses: 4,
+        groupWinnerProbability: 0.02, knockoutProbability: 0.04, cupFinalistProbability: 0.01, championProbability: 0.0,
+      ),
+    ],
+  }),
+);
+
 void main() {
   for (final width in mobileViewportWidths) {
     testWidgets('standings tab renders with no overflow at ${width}px wide', (tester) async {
@@ -75,6 +117,23 @@ void main() {
       // same as a real user would have to.
       await tester.ensureVisible(find.text('Player Prop Leaders'));
       await tester.tap(find.text('Player Prop Leaders'));
+      await tester.pumpAndSettle();
+
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('NBA Cup tab renders a full 5-team group with no overflow at ${width}px wide', (tester) async {
+      await pumpAtWidth(
+        tester,
+        width,
+        ProviderScope(
+          overrides: [seasonProjectionProvider.overrideWith((ref, sport) async => _nbaCupSeason)],
+          child: const MaterialApp(home: Scaffold(body: SeasonPage(sportId: 'nba'))),
+        ),
+      );
+
+      await tester.ensureVisible(find.text('NBA Cup'));
+      await tester.tap(find.text('NBA Cup'));
       await tester.pumpAndSettle();
 
       expect(tester.takeException(), isNull);
