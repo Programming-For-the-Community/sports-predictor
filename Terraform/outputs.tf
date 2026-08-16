@@ -149,9 +149,10 @@ output "ncaafb_live_scores_function_name" {
 # step 4; nba_predict_function_name added early (2026-08-14, ahead of
 # step 6) so nba_deploy.yml's deploy_predict_lambda job can point
 # nba-predict at nba_ai_hosting.yml's pushed image -- see that workflow's
-# own header for why. predict-read/live-scores outputs still get added
-# once those Lambdas' real code exists (step 6/7), same as tf_install.yml's
-# own workflow_call outputs block.
+# own header for why. nba_predict_read_function_name added at step 6
+# (inference). live-scores output still gets added once that Lambda's real
+# code exists (step 7), same as tf_install.yml's own workflow_call outputs
+# block.
 output "nba_backfill_task_definition_arn" {
   description = "ARN of the NBA backfill ECS task definition -- pass to `aws ecs run-task --task-definition`"
   value       = aws_ecs_task_definition.nba_backfill.arn
@@ -175,4 +176,9 @@ output "nba_schedule_sync_function_name" {
 output "nba_predict_function_name" {
   description = "NBA predict Lambda function name -- passed to nba_deploy workflow's deploy_predict_lambda job for `aws lambda update-function-code`"
   value       = aws_lambda_function.nba_predict.function_name
+}
+
+output "nba_predict_read_function_name" {
+  description = "NBA predict-read Lambda function name -- passed to nba_deploy workflow's predict_read_deploy job for `aws lambda update-function-code`"
+  value       = aws_lambda_function.nba_predict_read.function_name
 }

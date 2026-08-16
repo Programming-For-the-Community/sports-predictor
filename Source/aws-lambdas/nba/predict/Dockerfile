@@ -1,18 +1,46 @@
-# STUB. Real predict Lambda code (handler.py, event_prediction.py, etc.,
-# mirroring Source/aws-lambdas/nfl/predict/) doesn't exist yet -- that's
-# Sub-phase 3A step 6. This Dockerfile exists only so nba_ai_hosting.yml
-# has something to build and push a valid `nba-predict-latest` image to
-# ECR *before* tf_install.yml's terraform apply creates
-# aws_lambda_function.nba_predict (a container-image Lambda -- CreateFunction
-# validates the referenced image tag already exists, unlike a zip-packaged
-# Lambda where Terraform can fabricate its own inline placeholder). Same
-# role predict-read's aws_lambda_function.nba_predict_read placeholder ZIP
-# plays for the zip-based Lambdas -- see lambda-nba-predict-read.tf.
+# Build context is Source/ (not this directory) -- same reasoning as
+# Source/aws-lambdas/nfl/predict/Dockerfile: this image needs both this
+# function's code and the sibling library/ package, and Docker can't COPY
+# anything from outside its build context. See
+# .github/workflows/nba_ai_hosting.yml for the `docker build -f
+# Source/aws-lambdas/nba/predict/Dockerfile Source` invocation.
 #
-# Replace this whole file with the real multi-stage build (copy
-# Source/aws-lambdas/nfl/predict/Dockerfile's shape) at step 6 -- nothing
-# else needs to change, nba_ai_hosting.yml already builds+pushes whatever
-# is at this path.
-FROM public.ecr.aws/lambda/python:3.12
-COPY handler.py ${LAMBDA_TASK_ROOT}
+# Container image, not the zip packaging every other Lambda in this repo
+# uses -- same xgboost/numpy/scipy size reasoning as NFL's/NCAAFB's own
+# predict Dockerfiles (see their own comments). requirements-nodeps.txt/
+# requirements.txt split for the identical reason too (dodging xgboost's
+# unconditional nvidia-nccl-cu12 GPU dependency on Linux).
+#
+# boto3 is intentionally excluded from requirements.txt -- the Lambda
+# Python base image ships it preinstalled, same as the managed (zip)
+# runtime does.
+
+FROM public.ecr.aws/lambda/python:3.12 AS builder
+
+WORKDIR /build
+
+COPY library/ ./library/
+COPY aws-lambdas/nba/predict/requirements.txt ./requirements.txt
+COPY aws-lambdas/nba/predict/requirements-nodeps.txt ./requirements-nodeps.txt
+
+RUN pip install --no-cache-dir --target=/install --no-deps ./library && \
+    pip install --no-cache-dir --target=/install --no-deps -r requirements-nodeps.txt && \
+    pip install --no-cache-dir --target=/install -r requirements.txt
+
+# --- Runtime: installed packages + application source, nothing else ---
+FROM public.ecr.aws/lambda/python:3.12 AS runtime
+
+# lightgbm's prebuilt wheel dynamically links libgomp.so.1 (OpenMP) at
+# import time -- python base images don't ship it. NBA's own CANDIDATES
+# lists include LightGBM (see library/ml/model_types.py), so whichever
+# target promoted it needs this at inference time too, not just training
+# (see Source/model-training/nba/Dockerfile's identical fix, confirmed
+# live 2026-08-15).
+RUN dnf install -y libgomp && dnf clean all
+
+COPY --from=builder /install ${LAMBDA_TASK_ROOT}
+COPY aws-lambdas/nba/predict/handler.py aws-lambdas/nba/predict/live_features.py \
+     aws-lambdas/nba/predict/model_loader.py aws-lambdas/nba/predict/event_prediction.py \
+     ${LAMBDA_TASK_ROOT}/
+
 CMD ["handler.lambda_handler"]

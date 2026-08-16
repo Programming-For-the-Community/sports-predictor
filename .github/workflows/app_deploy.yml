@@ -83,6 +83,21 @@ jobs:
     uses: ./.github/workflows/ncaafb_ai_hosting.yml
     secrets: inherit
 
+  nba_backfill_build:
+    name: NBA backfill (build)
+    uses: ./.github/workflows/nba_backfill.yml
+    secrets: inherit
+
+  nba_ai_training_build:
+    name: NBA AI training (build)
+    uses: ./.github/workflows/nba_ai_training.yml
+    secrets: inherit
+
+  nba_ai_hosting_build:
+    name: NBA AI hosting (build)
+    uses: ./.github/workflows/nba_ai_hosting.yml
+    secrets: inherit
+
   # --- Infra: applies once, gated on every "before" job tolerating
   # success-or-skip (mirrors nfl_deploy.yml's own tolerant-if pattern) ---
   infra:
@@ -90,6 +105,7 @@ jobs:
     needs: [
       nfl_backfill_build, nfl_ai_training_build, nfl_ai_hosting_build,
       ncaafb_backfill_build, ncaafb_ai_training_build, ncaafb_ai_hosting_build,
+      nba_backfill_build, nba_ai_training_build, nba_ai_hosting_build,
     ]
     if: |
       always() &&
@@ -98,7 +114,10 @@ jobs:
       (needs.nfl_ai_hosting_build.result == 'success' || needs.nfl_ai_hosting_build.result == 'skipped') &&
       (needs.ncaafb_backfill_build.result == 'success' || needs.ncaafb_backfill_build.result == 'skipped') &&
       (needs.ncaafb_ai_training_build.result == 'success' || needs.ncaafb_ai_training_build.result == 'skipped') &&
-      (needs.ncaafb_ai_hosting_build.result == 'success' || needs.ncaafb_ai_hosting_build.result == 'skipped')
+      (needs.ncaafb_ai_hosting_build.result == 'success' || needs.ncaafb_ai_hosting_build.result == 'skipped') &&
+      (needs.nba_backfill_build.result == 'success' || needs.nba_backfill_build.result == 'skipped') &&
+      (needs.nba_ai_training_build.result == 'success' || needs.nba_ai_training_build.result == 'skipped') &&
+      (needs.nba_ai_hosting_build.result == 'success' || needs.nba_ai_hosting_build.result == 'skipped')
     uses: ./.github/workflows/tf_install.yml
     secrets: inherit
 
@@ -180,6 +199,36 @@ jobs:
     secrets: inherit
     with:
       function_name: ${{ needs.infra.outputs.ncaafb_live_scores_function_name }}
+
+  nba_predict_deploy:
+    name: NBA AI hosting (deploy)
+    needs: [infra, nba_ai_hosting_build]
+    uses: ./.github/workflows/nba_predict_deploy.yml
+    secrets: inherit
+    with:
+      function_name: ${{ needs.infra.outputs.nba_predict_function_name }}
+      image_uri: ${{ needs.nba_ai_hosting_build.outputs.predict_image_uri }}
+
+  nba_data_pipeline:
+    name: NBA data pipeline (deploy)
+    needs: infra
+    uses: ./.github/workflows/nba_data_pipeline.yml
+    secrets: inherit
+    with:
+      ingest_function_name: ${{ needs.infra.outputs.nba_ingest_function_name }}
+      normalize_function_name: ${{ needs.infra.outputs.nba_normalize_function_name }}
+      schedule_sync_function_name: ${{ needs.infra.outputs.nba_schedule_sync_function_name }}
+
+  nba_predict_read_deploy:
+    name: NBA predict-read (deploy)
+    needs: infra
+    uses: ./.github/workflows/nba_predict_read_deploy.yml
+    secrets: inherit
+    with:
+      function_name: ${{ needs.infra.outputs.nba_predict_read_function_name }}
+
+  # No NBA live-scores deploy job yet -- that's Sub-phase 3A step 7, not
+  # part of step 6 (see nba_deploy.yml's own header for the same gap).
 
   # No config `with:` block for either -- both read directly from
   # Terraform state instead of relaying it through needs.infra.outputs.*,

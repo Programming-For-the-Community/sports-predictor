@@ -1,0 +1,42 @@
+# Tests and deploys the NBA predict-read Lambda -- GET /nba/events and GET
+# /nba/models, split out of nba-predict for cold start (see
+# Terraform/lambda-nba-predict-read.tf). Zip-packaged like
+# ingest/normalize, not a container image -- mirrors
+# nfl_predict_read_deploy.yml/ncaafb_predict_read_deploy.yml exactly (see
+# nfl_predict_read_deploy.yml's own comment for the full reasoning,
+# including why this lives in its own reusable workflow rather than
+# inlined jobs).
+
+name: NBA Predict Read Deploy
+
+on:
+  workflow_dispatch:
+  workflow_call:
+    inputs:
+      function_name:
+        description: 'NBA predict-read Lambda function name (from Terraform output nba_predict_read_function_name)'
+        required: false
+        type: string
+        default: 'sports-predictor-nba-predict-read'
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  test:
+    name: Run nba-predict-read tests
+    uses: ./.github/workflows/run_python_tests.yml
+    with:
+      test_path: 'Source/tests/aws-lambdas/nba/test_predict_read_handler.py Source/tests/library/serving/test_nba_reads.py Source/tests/library/storage/test_prediction_cache.py Source/tests/library/storage/test_model_artifacts.py Source/tests/library/aws/test_lambda_invoker.py'
+      requirements_files: 'Source/aws-lambdas/nba/predict-read/requirements.txt'
+
+  deploy:
+    name: Deploy nba-predict-read Lambda
+    needs: test
+    uses: ./.github/workflows/python_lambda_build.yml
+    secrets: inherit
+    with:
+      function_name: ${{ inputs.function_name || 'sports-predictor-nba-predict-read' }}
+      handler_dir: 'Source/aws-lambdas/nba/predict-read'
+      library_path: 'Source/library'

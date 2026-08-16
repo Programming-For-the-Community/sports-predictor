@@ -1,0 +1,7 @@
+# Installed with --no-deps (see Dockerfile) specifically to skip
+# xgboost's unconditional Linux/x86_64 nvidia-nccl-cu12 dependency
+# (~300MB, GPU-only distributed training support). Same rationale as
+# Source/aws-lambdas/ncaafb/predict/requirements-nodeps.txt -- its own
+# genuine runtime deps (numpy, scipy) are still satisfied by
+# requirements.txt.
+xgboost>=2.0,<3.0
