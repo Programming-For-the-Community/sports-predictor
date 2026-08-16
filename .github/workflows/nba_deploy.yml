@@ -4,19 +4,18 @@
 # file) before doing anything. Mirrors nfl_deploy.yml's own structure and
 # comments, with the caveats below.
 #
-# STUB, BY DESIGN -- only wires backfill + ai_training + ai_hosting +
-# infra + data_pipeline, unlike nfl_deploy.yml's/ncaafb_deploy.yml's full
-# 6-job shape. NBA's Sub-phase 3A build order (see project-nba-onboarding
-# memory) hasn't reached predict-read/live-scores yet (steps 6, 7), so
-# there is no predict_read_deploy/live_scores_deploy workflow file for
-# this to call -- adding those job blocks now would reference `uses:`
-# targets that don't exist and fail on first run. ai_hosting/
-# deploy_predict_lambda ARE wired below, ahead of schedule, but only
-# against nba_ai_hosting.yml's placeholder image (see that file's own
-# header) -- NOT real inference code yet.
+# STUB, BY DESIGN -- still missing live_scores_deploy, unlike
+# nfl_deploy.yml's/ncaafb_deploy.yml's full 6-job shape. NBA's Sub-phase
+# 3A build order (see project-nba-onboarding memory) hasn't reached
+# live-scores yet (step 7), so there is no nba_live_scores_deploy.yml for
+# this to call -- adding that job block now would reference a `uses:`
+# target that doesn't exist and fail on first run. ai_hosting/
+# deploy_predict_lambda/predict_read_deploy are all real as of step 6
+# (inference) -- ai_hosting's own placeholder-image header from step 5 is
+# now stale, see that file for the update.
 #
-# Why ai_hosting couldn't wait for step 6 like the others: unlike the
-# zip-based Lambdas, aws_lambda_function.nba_predict
+# Why ai_hosting couldn't wait for step 6 like predict_read_deploy could:
+# unlike the zip-based Lambdas, aws_lambda_function.nba_predict
 # (Terraform/lambda-nba-predict.tf) is a container-image Lambda --
 # CreateFunction validates its image tag already exists in ECR, and
 # Terraform can't fabricate a placeholder image the way it does a
@@ -27,10 +26,8 @@
 # file now mirrors that same invariant instead of a manual one-off image
 # push.
 #
-# The still-missing jobs get added here, not in a new file, once each
-# step's own workflow file exists:
-#   - predict_read_deploy -> after step 6 (inference), alongside replacing
-#     ai_hosting's placeholder Dockerfile/handler with real code
+# The still-missing job gets added here, not in a new file, once its own
+# workflow file exists:
 #   - live_scores_deploy -> after step 7 (live-scores)
 #
 # Once approved, backfill, ai_training, and ai_hosting (build) run BEFORE
@@ -101,8 +98,8 @@ jobs:
     uses: ./.github/workflows/nba_backfill.yml
     secrets: inherit
 
-  # STUB image only -- see nba_ai_hosting.yml's own header. Exists so
-  # infra never runs without nba-predict-latest already in ECR.
+  # Real code as of step 6 -- see nba_ai_hosting.yml's own header. Also
+  # ensures infra never runs without nba-predict-latest already in ECR.
   ai_hosting:
     name: AI hosting (build)
     needs: approval
@@ -136,11 +133,7 @@ jobs:
     uses: ./.github/workflows/tf_install.yml
     secrets: inherit
 
-  # Points nba-predict at whatever ai_hosting just pushed (today: the
-  # placeholder image). Real per-sport nba_predict_deploy.yml (mirroring
-  # nfl_predict_deploy.yml) still belongs to step 6 -- inlined here for
-  # now since there's only one Lambda involved and no test suite to run
-  # against real code yet.
+  # Points nba-predict at whatever ai_hosting just pushed.
   deploy_predict_lambda:
     name: AI hosting (deploy)
     needs: [infra, ai_hosting]
@@ -149,6 +142,22 @@ jobs:
     with:
       function_name: ${{ needs.infra.outputs.nba_predict_function_name }}
       image_uri: ${{ needs.ai_hosting.outputs.predict_image_uri }}
+
+  # nba-predict-read -- the light GET /nba/events + GET /nba/models Lambda
+  # split out of nba-predict for cold start (see
+  # Terraform/lambda-nba-predict-read.tf). A reusable workflow, not inline
+  # jobs here -- same reasoning as nfl_deploy.yml's own predict_read_deploy
+  # job (app_deploy.yml needs this exact same test+deploy pair too).
+  predict_read_deploy:
+    name: NBA predict-read (test + deploy)
+    needs: [approval, infra]
+    if: |
+      always() &&
+      (needs.approval.result == 'success' || needs.approval.result == 'skipped')
+    uses: ./.github/workflows/nba_predict_read_deploy.yml
+    secrets: inherit
+    with:
+      function_name: ${{ needs.infra.outputs.nba_predict_read_function_name }}
 
   data_pipeline:
     name: Data pipeline
