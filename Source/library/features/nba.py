@@ -90,6 +90,20 @@ def estimate_possessions(
     return field_goal_attempts - offensive_rebounds + turnovers + 0.44 * free_throw_attempts
 
 
+def _total_rebounds(box_stats: dict) -> float | None:
+    """Total rebounds isn't its own ESPN team-boxscore stat (confirmed
+    live via a real training run, 2026-08-15: 'avg_rebounds' came back
+    null for every row) -- only offensiveRebounds/defensiveRebounds exist
+    as raw stats. Derived as their sum instead of trusting a stat_line key
+    that was never actually live-verified, same "derived, not raw"
+    treatment as estimate_possessions."""
+    offensive = box_stats.get("avg_offensive_rebounds")
+    defensive = box_stats.get("avg_defensive_rebounds")
+    if offensive is None or defensive is None:
+        return None
+    return offensive + defensive
+
+
 def _efficiency_per_100(points: float | None, possessions: float | None) -> float | None:
     """Points per 100 possessions -- None if points or possessions is
     missing, or possessions is 0 (a team with no rolling history at all
@@ -188,7 +202,7 @@ def build_event_features(
         "away_avg_points_scored": away_scoring["avg_points_scored"],
         "away_avg_points_allowed": away_scoring["avg_points_allowed"],
         "away_games_played": away_scoring["games_played"],
-        "home_avg_rebounds": home_box_stats.get("avg_rebounds"),
+        "home_avg_rebounds": _total_rebounds(home_box_stats),
         "home_avg_offensive_rebounds": home_box_stats.get("avg_offensive_rebounds"),
         "home_avg_defensive_rebounds": home_box_stats.get("avg_defensive_rebounds"),
         "home_avg_assists": home_box_stats.get("avg_assists"),
@@ -202,7 +216,7 @@ def build_event_features(
         "home_offensive_efficiency": home_offensive_efficiency,
         "home_defensive_efficiency": home_defensive_efficiency,
         "home_box_games_played": home_box_stats["games_played"],
-        "away_avg_rebounds": away_box_stats.get("avg_rebounds"),
+        "away_avg_rebounds": _total_rebounds(away_box_stats),
         "away_avg_offensive_rebounds": away_box_stats.get("avg_offensive_rebounds"),
         "away_avg_defensive_rebounds": away_box_stats.get("avg_defensive_rebounds"),
         "away_avg_assists": away_box_stats.get("avg_assists"),

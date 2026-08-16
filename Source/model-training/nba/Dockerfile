@@ -26,6 +26,15 @@ RUN pip install --no-cache-dir --target=/install ./library && \
 # --- Runtime: installed packages + application source, nothing else ---
 FROM python:3.12-slim AS runtime
 
+# lightgbm's prebuilt wheel dynamically links libgomp.so.1 (OpenMP) at
+# import time -- python:3.12-slim doesn't ship it, so `import lightgbm`
+# fails with a LoadLibrary error otherwise (confirmed live, 2026-08-15).
+# xgboost/scikit-learn-intelex ship their own OpenMP runtime bundled in
+# the wheel, so this is a lightgbm-only requirement, not a general one.
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends libgomp1 && \
+    rm -rf /var/lib/apt/lists/*
+
 RUN useradd --no-create-home --uid 10001 train-model
 
 WORKDIR /app
