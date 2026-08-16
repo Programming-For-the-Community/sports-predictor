@@ -96,13 +96,19 @@ def run_backtest(
     A candidate that doesn't win is never persisted to S3 at all -- with
     4-5 candidates per target and 11+ targets, versioning every losing
     candidate would mean dozens of S3 objects nothing ever reads again.
-    Every promoted card carries a `candidates` summary of every algorithm
-    evaluated SO FAR this run (including ones evaluated in an earlier,
-    interrupted attempt of the same run_id -- not the full tournament,
-    since candidates after it haven't run yet), ranked best-first by
-    promotion_metric (the correct scoring rule) but DISPLAYING accuracy
-    (classification) or mae (regression) instead -- human-readable,
-    unlike log_loss/rmse. A winning candidate whose promotion_metric is
+    Every promoted card carries a `candidates` summary of the COMPLETE
+    tournament -- every algorithm this run evaluated, win or lose
+    (including ones evaluated in an earlier, interrupted attempt of the
+    same run_id), ranked best-first by promotion_metric (the correct
+    scoring rule) but DISPLAYING accuracy (classification) or mae
+    (regression) instead -- human-readable, unlike log_loss/rmse. The
+    card written at the MOMENT a candidate is promoted only has whatever
+    was evaluated so far (candidates later in the list haven't run yet);
+    training_common.update_promoted_candidates backfills whichever
+    version this run ultimately leaves live with the full list once every
+    candidate is done, right before this function returns -- see that
+    backfill's own comment below for why it's safe to only ever touch the
+    LAST promotion. A winning candidate whose promotion_metric is
     worse than the naive baseline gets a loud warning logged (see
     _is_worse_than_baseline) -- not blocked, since a genuinely hard-to-
     beat target (e.g. a very sparse player-prop stat) can leave every
@@ -234,5 +240,30 @@ def run_backtest(
         training_common.save_run_progress(s3, sport, model_name, run_id, evaluated, promotions)
         logger.info("%s/%s: %s (v%d) is now live.", sport, model_name, adapter.algorithm, card["version"])
 
+    # The winning candidate was promoted as soon as it beat current
+    # production -- possibly before every candidate in this run had even
+    # been tried (see this function's own docstring) -- so its model card
+    # was written with only a PARTIAL "candidates" summary at that point.
+    # Now that the whole run is done, backfill it with the complete list.
+    # promotions[-1] is guaranteed to be whichever version this run
+    # leaves live: promote_if_better only ever replaces the currently-live
+    # version with something strictly better, so nothing evaluated after
+    # the last promotion could have beaten it without becoming a new,
+    # later entry in promotions itself. Skipped entirely if this run
+    # promoted nothing -- current production then belongs to some earlier
+    # run, whose own card correctly still only summarizes ITS OWN
+    # tournament, not this one's failed candidates.
+    final_candidates = sorted(evaluated, key=lambda e: e["rank_score"])
+    if promotions:
+        final_card = promotions[-1]
+        training_common.update_promoted_candidates(
+            s3, sport, model_name, final_card["version"], final_candidates, promotion_metric,
+        )
+        # Keeps the in-memory return value consistent with what's now in
+        # S3, for any caller that reads promotions[-1] directly rather
+        # than re-fetching the card.
+        final_card["candidates"] = final_candidates
+        final_card["candidates_ranked_by"] = promotion_metric
+
     training_common.clear_run_progress(s3, sport, model_name, run_id)
-    return {"promotions": promotions, "candidates": sorted(evaluated, key=lambda e: e["rank_score"])}
+    return {"promotions": promotions, "candidates": final_candidates}

@@ -184,6 +184,35 @@ def save_model_artifact(
     return model_card
 
 
+def update_promoted_candidates(
+    s3: S3Manager, sport: str, model_name: str, version: int, candidates: list[dict], candidates_ranked_by: str,
+) -> None:
+    """Rewrites an already-saved model card's own `candidates`/
+    `candidates_ranked_by` fields in place. Called once, at the very end
+    of library.ml.backtest.run_backtest, on whichever version that run
+    ends up leaving live -- run_backtest promotes a winning candidate the
+    moment it beats current production, which can be before the rest of
+    that run's candidates have even been tried, so the card written at
+    promotion time only carries a partial "candidates" summary (see
+    run_backtest's own docstring). This fills it in with the COMPLETE
+    tournament (every candidate that run evaluated, win or lose) once the
+    whole run is known.
+
+    Every other field on the card (metrics, hyperparameters, feature
+    importances, trained_at) is left untouched -- only the summary list
+    was ever incomplete; nothing else about the promoted version itself
+    changes after the fact."""
+    key = model_artifact_key(sport, model_name, version, MODEL_CARD_FILENAME)
+    card = s3.get_json(key)
+    card["candidates"] = candidates
+    card["candidates_ranked_by"] = candidates_ranked_by
+    s3.put_json(key, card)
+    logger.info(
+        "Updated %s/%s v%d's model card with the full %d-candidate run summary.",
+        sport, model_name, version, len(candidates),
+    )
+
+
 def would_beat_current(s3: S3Manager, sport: str, model_name: str, metadata: dict, metric: str) -> bool:
     """Read-only counterpart to promote_if_better's own comparison --
     answers "would this candidate get promoted" without writing anything,
