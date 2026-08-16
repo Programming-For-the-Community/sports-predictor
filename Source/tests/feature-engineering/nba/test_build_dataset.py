@@ -111,10 +111,16 @@ class TestBuildEventDataset:
         e7 = next(row for row in rows if row["event_key"] == "E7")
         assert e7["home_games_played"] == 3
 
-    def _team_box_row(self, event_key, team_id, points_scored_stat=None, turnovers=13, rebounds=44):
+    def _team_box_row(self, event_key, team_id, points_scored_stat=None, turnovers=13, offensive_rebounds=32, defensive_rebounds=12):
+        # No raw "rebounds" stat -- ESPN's team boxscore only exposes
+        # offensive/defensive rebounds separately (see
+        # library.features.nba._total_rebounds).
         return {
             "event_key": event_key, "team_key": f"nba:team:{team_id}", "team_id": team_id,
-            "event_date": "2025-12-01", "stat_line": {"turnovers": turnovers, "rebounds": rebounds},
+            "event_date": "2025-12-01", "stat_line": {
+                "turnovers": turnovers,
+                "offensive_rebounds": offensive_rebounds, "defensive_rebounds": defensive_rebounds,
+            },
         }
 
     def test_team_box_stats_history_carries_forward_across_games(self):
@@ -123,10 +129,10 @@ class TestBuildEventDataset:
             _event("E2", "2025-12-08", "2", "18"),
         ]
         team_game_stats = [
-            self._team_box_row("E1", "2", turnovers=10, rebounds=45),
-            self._team_box_row("E1", "13", turnovers=14, rebounds=40),
-            self._team_box_row("E2", "2", turnovers=8, rebounds=50),
-            self._team_box_row("E2", "18", turnovers=12, rebounds=42),
+            self._team_box_row("E1", "2", turnovers=10, offensive_rebounds=35, defensive_rebounds=10),
+            self._team_box_row("E1", "13", turnovers=14, offensive_rebounds=30, defensive_rebounds=10),
+            self._team_box_row("E2", "2", turnovers=8, offensive_rebounds=38, defensive_rebounds=12),
+            self._team_box_row("E2", "18", turnovers=12, offensive_rebounds=30, defensive_rebounds=12),
         ]
         storage = self._storage(events, team_game_stats=team_game_stats)
 

@@ -95,13 +95,16 @@ class TestBuildEventFeaturesRollingBoxStats:
                 "field_goals_made": 42, "field_goal_attempts": 90,
                 "three_pointers_made": 14, "three_point_attempts": 38,
                 "free_throws_made": 18, "free_throw_attempts": 22,
-                "rebounds": 45, "offensive_rebounds": 10, "defensive_rebounds": 35,
+                "offensive_rebounds": 10, "defensive_rebounds": 35,
                 "assists": 26, "steals": 8, "blocks": 5, "turnovers": 13, "fouls": 19,
             }},
         ]
 
         row = build_event_features(event, {}, [], [], home_team_box_stats=home_box_history)
 
+        # No raw "rebounds" stat_line key -- ESPN's team boxscore only
+        # exposes offensive/defensive rebounds separately (see
+        # library.features.nba._total_rebounds); derived as their sum.
         assert row["home_avg_rebounds"] == 45
         assert row["home_avg_offensive_rebounds"] == 10
         assert row["home_avg_assists"] == 26

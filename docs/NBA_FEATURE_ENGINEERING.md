@@ -59,7 +59,8 @@ One row per completed event, home/away perspective.
 | `home_elo`, `away_elo`, `elo_diff` | Pre-game Elo ratings. |
 | `home_rest_days`, `away_rest_days` | Days since each team's own previous game -- more load-bearing for NBA than football, given back-to-backs are common in an 82-game season. |
 | `home_avg_points_scored/allowed`, `away_avg_points_scored/allowed`, `*_games_played` | Rolling team scoring, last `ROLLING_WINDOW` games. |
-| `home_avg_rebounds`, `home_avg_offensive_rebounds`, `home_avg_defensive_rebounds`, `home_avg_assists`, `home_avg_steals`, `home_avg_blocks`, `home_avg_turnovers`, `home_avg_fouls` (+ away) | Rolling team box-score averages -- direct numeric fields off `team_game_stats.stat_line` (see `library/normalize/espn.py`'s `boxscore_to_team_game_stats`). |
+| `home_avg_offensive_rebounds`, `home_avg_defensive_rebounds`, `home_avg_assists`, `home_avg_steals`, `home_avg_blocks`, `home_avg_turnovers`, `home_avg_fouls` (+ away) | Rolling team box-score averages -- direct numeric fields off `team_game_stats.stat_line` (see `library/normalize/espn.py`'s `boxscore_to_team_game_stats`). |
+| `home_avg_rebounds` (+ away) | **Derived, not a raw field** -- ESPN's team boxscore has no combined "rebounds" stat, only offensive/defensive separately; summed from the two averages above (`library/features/nba.py`'s `_total_rebounds`). |
 | `home_field_goal_pct`, `home_three_point_pct`, `home_free_throw_pct` (+ away) | Makes over attempts across the rolling window (not an average of per-game percentages) -- from the `_COMPOUND_KEY_SPLITS`-derived `*_made`/`*_attempts` pairs (`Source/aws-lambdas/nba/normalize/handler.py`). |
 | `home_offensive_efficiency`, `home_defensive_efficiency` (+ away) | Points scored/allowed per 100 possessions -- **derived, not raw fields**, see "Possessions and efficiency" below. |
 | `home_box_games_played` (+ away) | How much team box-score history backs the averages/percentages above. |
