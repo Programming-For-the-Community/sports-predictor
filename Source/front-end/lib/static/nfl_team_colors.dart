@@ -52,32 +52,46 @@ const Map<String, NflTeam> kNflTeams = {
   '34': NflTeam('HOU', Color(0xFF03202F)),
 };
 
+/// Parses a bare 6-digit hex string (ESPN's own format, e.g. "c8102e", no
+/// "#") into a Color -- null on anything else (missing, malformed, an
+/// already-"#"-prefixed string some other source might send) so a bad
+/// value degrades to "no dot" the same way a missing color already does,
+/// never a thrown FormatException.
+Color? _parseApiColor(String? hex) {
+  if (hex == null) return null;
+  final match = RegExp(r'^#?([0-9a-fA-F]{6})$').firstMatch(hex);
+  if (match == null) return null;
+  return Color(int.parse('FF${match.group(1)}', radix: 16));
+}
+
 /// The one function every team-display widget should call -- prefers the
-/// NFL static table above (real brand colors) ONLY when sport is 'nfl'.
-/// Gated on sport, not just "is entityId in the table": raw ESPN team ids
-/// are NOT unique across sports (see library/schema/keys.py's own
-/// entity_team_key docstring, and design/DATA_SCHEMA.md's `SPORT#<sport>#`
-/// prefix convention every backend key follows for the same reason) --
-/// kNflTeams only has ~34 entries (NFL's own low-numbered legacy ESPN
-/// ids), and a NCAAFB team whose id happens to fall in that same range
-/// would silently render as the wrong NFL team's abbreviation/color if
-/// this checked the table unconditionally. No other sport gets a hashed
-/// placeholder color either (a prior version of this function did) --
-/// showing SOME teams with a real brand color and others with an
-/// arbitrary made-up one was worse than showing none; every non-NFL team
-/// gets `primary: null` and TeamColorDot omits itself entirely. Takes the
-/// two raw fields rather than a Participant so both event-shaped callers
-/// (teamDisplay below) and standings rows (TeamStanding.abbreviation, no
-/// Participant/role/result on that shape at all -- see GET /{sport}/
-/// season's own row shape) share one rule.
-NflTeam teamDisplayFor(String sport, String entityId, String? abbreviation) {
+/// NFL static table above (real brand colors, hand-typed and longer-
+/// established) ONLY when sport is 'nfl'; every other sport falls back to
+/// `apiColor` (see Participant.color's own doc comment for where that
+/// comes from -- library.normalize.espn.team_to_entity, confirmed live to
+/// carry ESPN's own real per-team hex). Gated on sport, not just "is
+/// entityId in the table": raw ESPN team ids are NOT unique across sports
+/// (see library/schema/keys.py's own entity_team_key docstring, and
+/// design/DATA_SCHEMA.md's `SPORT#<sport>#` prefix convention every
+/// backend key follows for the same reason) -- kNflTeams only has ~34
+/// entries (NFL's own low-numbered legacy ESPN ids), and a NCAAFB team
+/// whose id happens to fall in that same range would silently render as
+/// the wrong NFL team's abbreviation/color if this checked the table
+/// unconditionally. No hashed placeholder color for a team with neither
+/// source (a prior version of this function did that) -- TeamColorDot
+/// omits itself entirely rather than show an arbitrary made-up color.
+/// Takes the raw fields rather than a Participant so both event-shaped
+/// callers (teamDisplay below) and standings/bracket/cup rows (no
+/// Participant/role/result on those shapes at all -- see GET /{sport}/
+/// season's own row shapes) share one rule.
+NflTeam teamDisplayFor(String sport, String entityId, String? abbreviation, {String? apiColor}) {
   if (sport == 'nfl') {
     final known = kNflTeams[entityId];
     if (known != null) return known;
   }
-  return NflTeam(abbreviation ?? entityId, null);
+  return NflTeam(abbreviation ?? entityId, _parseApiColor(apiColor));
 }
 
-/// See Participant.abbreviation for where the fallback value comes from.
+/// See Participant.abbreviation/.color for where the fallback values come from.
 NflTeam teamDisplay(String sport, Participant participant) =>
-    teamDisplayFor(sport, participant.entityId, participant.abbreviation);
+    teamDisplayFor(sport, participant.entityId, participant.abbreviation, apiColor: participant.color);

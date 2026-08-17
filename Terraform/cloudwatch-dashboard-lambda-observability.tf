@@ -25,6 +25,13 @@
 # upper bound (summed maxima don't necessarily co-occur at the exact same
 # instant), same simplification any SUM-of-SEARCH concurrency rollup makes;
 # fine for spotting real single-sport concurrency pressure, not exact.
+#
+# Each SEARCH's metric name is a bare term (e.g. `Invocations "prefix"`),
+# NOT `MetricName="Invocations" "prefix"` -- live-verified 2026-08-16 via
+# GetMetricData that mixing a MetricName= property clause with a plain
+# quoted term silently matches zero series, which is why this dashboard
+# originally showed no data at all despite the underlying Lambda metrics
+# being populated.
 locals {
   lambda_dashboard_sports = ["nfl", "ncaafb", "nba"]
 }
@@ -50,7 +57,7 @@ resource "aws_cloudwatch_dashboard" "lambda_observability" {
           metrics = [
             for sport in local.lambda_dashboard_sports : [
               {
-                expression = "SUM(SEARCH('{AWS/Lambda,FunctionName} MetricName=\"Invocations\" \"${var.project}-${sport}-\"', 'Sum', 300))"
+                expression = "SUM(SEARCH('{AWS/Lambda,FunctionName} Invocations \"${var.project}-${sport}-\"', 'Sum', 300))"
                 label      = upper(sport)
                 id         = "inv_${sport}"
               }
@@ -73,7 +80,7 @@ resource "aws_cloudwatch_dashboard" "lambda_observability" {
           metrics = [
             [
               {
-                expression = "SEARCH('{AWS/Lambda,FunctionName} MetricName=\"Invocations\" \"${var.project}-\"', 'Sum', 300)"
+                expression = "SEARCH('{AWS/Lambda,FunctionName} Invocations \"${var.project}-\"', 'Sum', 300)"
                 id         = "inv_all"
               }
             ]
@@ -97,7 +104,7 @@ resource "aws_cloudwatch_dashboard" "lambda_observability" {
           metrics = [
             for sport in local.lambda_dashboard_sports : [
               {
-                expression = "SUM(SEARCH('{AWS/Lambda,FunctionName} MetricName=\"Errors\" \"${var.project}-${sport}-\"', 'Sum', 300))"
+                expression = "SUM(SEARCH('{AWS/Lambda,FunctionName} Errors \"${var.project}-${sport}-\"', 'Sum', 300))"
                 label      = upper(sport)
                 id         = "err_${sport}"
               }
@@ -119,7 +126,7 @@ resource "aws_cloudwatch_dashboard" "lambda_observability" {
           metrics = [
             [
               {
-                expression = "SEARCH('{AWS/Lambda,FunctionName} MetricName=\"Errors\" \"${var.project}-\"', 'Sum', 300)"
+                expression = "SEARCH('{AWS/Lambda,FunctionName} Errors \"${var.project}-\"', 'Sum', 300)"
                 id         = "err_all"
               }
             ]
@@ -143,7 +150,7 @@ resource "aws_cloudwatch_dashboard" "lambda_observability" {
           metrics = [
             for sport in local.lambda_dashboard_sports : [
               {
-                expression = "AVG(SEARCH('{AWS/Lambda,FunctionName} MetricName=\"Duration\" \"${var.project}-${sport}-\"', 'Average', 300))"
+                expression = "AVG(SEARCH('{AWS/Lambda,FunctionName} Duration \"${var.project}-${sport}-\"', 'Average', 300))"
                 label      = upper(sport)
                 id         = "dur_${sport}"
               }
@@ -166,7 +173,7 @@ resource "aws_cloudwatch_dashboard" "lambda_observability" {
           metrics = [
             [
               {
-                expression = "SEARCH('{AWS/Lambda,FunctionName} MetricName=\"Duration\" \"${var.project}-\"', 'Average', 300)"
+                expression = "SEARCH('{AWS/Lambda,FunctionName} Duration \"${var.project}-\"', 'Average', 300)"
                 id         = "dur_all"
               }
             ]
@@ -190,7 +197,7 @@ resource "aws_cloudwatch_dashboard" "lambda_observability" {
           metrics = [
             for sport in local.lambda_dashboard_sports : [
               {
-                expression = "SUM(SEARCH('{AWS/Lambda,FunctionName} MetricName=\"ConcurrentExecutions\" \"${var.project}-${sport}-\"', 'Maximum', 300))"
+                expression = "SUM(SEARCH('{AWS/Lambda,FunctionName} ConcurrentExecutions \"${var.project}-${sport}-\"', 'Maximum', 300))"
                 label      = upper(sport)
                 id         = "conc_${sport}"
               }
@@ -213,7 +220,7 @@ resource "aws_cloudwatch_dashboard" "lambda_observability" {
           metrics = [
             [
               {
-                expression = "SEARCH('{AWS/Lambda,FunctionName} MetricName=\"ConcurrentExecutions\" \"${var.project}-\"', 'Maximum', 300)"
+                expression = "SEARCH('{AWS/Lambda,FunctionName} ConcurrentExecutions \"${var.project}-\"', 'Maximum', 300)"
                 id         = "conc_all"
               }
             ]
@@ -242,7 +249,7 @@ resource "aws_cloudwatch_dashboard" "lambda_observability" {
           metrics = [
             for sport in local.lambda_dashboard_sports : [
               {
-                expression = "SUM(SEARCH('{AWS/Lambda,FunctionName} MetricName=\"Throttles\" \"${var.project}-${sport}-\"', 'Sum', 300))"
+                expression = "SUM(SEARCH('{AWS/Lambda,FunctionName} Throttles \"${var.project}-${sport}-\"', 'Sum', 300))"
                 label      = upper(sport)
                 id         = "thr_${sport}"
               }
@@ -264,7 +271,7 @@ resource "aws_cloudwatch_dashboard" "lambda_observability" {
           metrics = [
             [
               {
-                expression = "SEARCH('{AWS/Lambda,FunctionName} MetricName=\"Throttles\" \"${var.project}-\"', 'Sum', 300)"
+                expression = "SEARCH('{AWS/Lambda,FunctionName} Throttles \"${var.project}-\"', 'Sum', 300)"
                 id         = "thr_all"
               }
             ]

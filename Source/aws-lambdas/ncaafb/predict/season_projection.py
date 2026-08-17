@@ -312,29 +312,36 @@ def _project_bracket_round(
 
 def _bracket_payload(
     storage: FeatureStorage, s3, predictions_table, season_inputs: dict,
-    estimator, model_card: dict, teams: list[str],
+    estimator, model_card: dict, teams: list[str], simulation: dict[str, dict],
 ) -> dict | None:
     """Builds the 12-team CFP bracket, reconciled against real results as
     they exist right now -- see _resolve_matchup's own docstring for the
-    3-state design. Unlike NFL's/NBA's own seeding (real wins once the
-    regular season is over, else projected_wins), NCAAFB's CFP field is
-    fundamentally driven by the ranking model's score, not raw win
-    totals -- and that score already reflects the team's full body of
-    work to date. Simulating a FUTURE ranking-model score forward is the
-    same intractable problem season_simulation.py's own docstring already
-    rules out for full-model game outcomes, so this always seeds from
-    TODAY's real model score (_current_model_scores) and today's real
-    conference-champion picks, the same "best current guess" every other
-    best-effort field on this page already is. None if fewer than
+    3-state design. Seeds from the season simulation's own projected
+    end-of-year wins once the regular season still has games left, else
+    real wins -- same real-vs-projected split NFL's/NBA's own
+    _bracket_payload use for seeding (2026-08-16 -- this module previously
+    always seeded off TODAY's real record regardless of how much season
+    remained, which put the bracket's field out of step with the
+    standings table's own end-of-season projection; changed to match).
+    point_differential/ratings stay at today's real value either way --
+    simulate_season doesn't project either forward, same simplification
+    NFL's/NBA's own seeding already accepts. None if fewer than
     CFP_FIELD_SIZE teams are tracked (mirrors build_season_projection's
     own simulate_season gate)."""
     if len(teams) < season_simulation.CFP_FIELD_SIZE:
         return None
 
-    model_scores = _current_model_scores(estimator, model_card, teams, season_inputs)
+    regular_season_over = not season_inputs["remaining_games"]
+    if regular_season_over:
+        wins, losses = season_inputs["wins"], season_inputs["losses"]
+    else:
+        wins = {team_id: projection["projected_wins"] for team_id, projection in simulation.items()}
+        losses = {team_id: projection["projected_losses"] for team_id, projection in simulation.items()}
+
+    model_scores = _batch_score_teams(estimator, model_card, teams, season_inputs, wins, losses, season_inputs["current_ratings"])
     conferences = season_simulation._group_by_conference(season_inputs["team_conference"])
     champions = {
-        conference: season_simulation._conference_champion(members, season_inputs["wins"], season_inputs["point_differential"])
+        conference: season_simulation._conference_champion(members, wins, season_inputs["point_differential"])
         for conference, members in conferences.items()
     }
     seeds = season_simulation._select_cfp_field(model_scores, champions)
@@ -422,7 +429,7 @@ def build_season_projection(storage: FeatureStorage, s3, predictions_table) -> d
                 logger.exception("Failed to compute current_rank for %s -- standings will omit it this run", SPORT)
 
             try:
-                bracket = _bracket_payload(storage, s3, predictions_table, season_inputs, estimator, model_card, teams)
+                bracket = _bracket_payload(storage, s3, predictions_table, season_inputs, estimator, model_card, teams, simulation)
             except Exception:
                 logger.exception("Failed to build season bracket")
 

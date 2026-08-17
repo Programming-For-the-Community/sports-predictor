@@ -60,14 +60,23 @@ def teams_by_school(teams: list[dict]) -> dict[str, dict]:
 
 
 def attach_venue_indoor(games: list[dict], season: int, client, s3, bucket: str) -> None:
-    """Attaches venue_indoor to each game dict in place, from the home
-    team's own venue -- CFBD has no per-game indoor flag (see
-    library/http/cfbd.py's get_games docstring). Cheap enough (one
-    TTL-cached bulk call) to run unconditionally from schedule-sync's
-    season-wide walk, unlike coach/ranking enrichment (ingest-only, see
-    aws-lambdas/ncaafb/ingest/enrichment.py)."""
+    """Attaches venue_indoor/venue_city/venue_state to each game dict in
+    place, from the home team's own venue -- CFBD's own /games response
+    carries only a bare venue name string, no city/state breakdown (a
+    separate /venues-by-id endpoint has that, but the home team's own
+    /teams `location` is already this same Venue object -- confirmed live
+    via CFBD's own OpenAPI schema -- so no second endpoint/cache is
+    needed). Same "home team's own listed venue" approximation
+    venue_indoor already made (not exact for a real neutral-site game),
+    same reasoning. Cheap enough (one TTL-cached bulk call) to run
+    unconditionally from schedule-sync's season-wide walk, unlike coach/
+    ranking enrichment (ingest-only, see aws-lambdas/ncaafb/ingest/
+    enrichment.py)."""
     by_id = teams_by_id(get_cached_teams(s3, bucket, client, season))
     for game in games:
         home_id = str(game["homeId"]) if game.get("homeId") is not None else None
         home_team = by_id.get(home_id) if home_id else None
-        game["venue_indoor"] = (home_team or {}).get("location", {}).get("dome")
+        location = (home_team or {}).get("location") or {}
+        game["venue_indoor"] = location.get("dome")
+        game["venue_city"] = location.get("city")
+        game["venue_state"] = location.get("state")

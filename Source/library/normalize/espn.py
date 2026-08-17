@@ -23,6 +23,13 @@ def team_to_entity(team: dict, sport: str) -> dict:
             "abbreviation": team.get("abbreviation"),
             "location": team.get("location"),
             "nickname": team.get("nickname") or team.get("name"),
+            # Bare 6-digit hex, no "#" (confirmed live, e.g. "c8102e") --
+            # frontend's own job to prefix it. NFL prefers its own
+            # hand-typed static/nfl_team_colors.dart table over this (real
+            # brand colors, longer-established) -- this exists for every
+            # other sport, which has no such table (see teamDisplayFor's
+            # own doc comment).
+            "color": team.get("color"),
         },
     }
 
@@ -314,7 +321,16 @@ def boxscore_to_player_game_stats(
             keys = category.get("keys", [])
             for athlete_entry in category.get("athletes", []):
                 athlete = athlete_entry["athlete"]
-                athlete_id = athlete["id"]
+                # Confirmed live, 2025-12-07 game 401810216 (2025-26 season):
+                # a deep-bench player held out for "COACH'S DECISION" can
+                # carry a stub athlete object with no "id" at all (just
+                # `links`/`shortName`) -- every other athlete entry in the
+                # same response has a normal numeric id. No stat line is
+                # recoverable without an id to key it by, and a scoreless
+                # DNP entry has nothing worth capturing anyway.
+                athlete_id = athlete.get("id")
+                if athlete_id is None:
+                    continue
                 values = athlete_entry.get("stats", [])
                 line = stat_lines.setdefault(athlete_id, {})
                 athlete_team[athlete_id] = team_id

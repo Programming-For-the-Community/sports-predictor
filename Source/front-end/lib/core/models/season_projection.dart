@@ -15,6 +15,7 @@ class TeamStanding {
     this.playInProbability,
     this.abbreviation,
     this.currentRank,
+    this.color,
   });
 
   final String teamId;
@@ -23,6 +24,8 @@ class TeamStanding {
   // abbreviation. season_page.dart's _StandingsRow uses this via
   // teamDisplayFor, the same fallback rule teamDisplay applies to events.
   final String? abbreviation;
+  // Also off the team entity -- see Participant.color's own doc comment.
+  final String? color;
   // NCAAFB only -- today's actual (not simulated) National Ranking
   // position, 1-based (see aws-lambdas/ncaafb/predict/season_projection.
   // py's _current_rankings). Null for NFL (no such model/concept) and for
@@ -92,6 +95,7 @@ class TeamStanding {
         playInProbability: (json['play_in_probability'] as num?)?.toDouble(),
         abbreviation: json['abbreviation'] as String?,
         currentRank: json['current_rank'] as int?,
+        color: json['color'] as String?,
       );
 }
 
@@ -134,11 +138,14 @@ class CupTeamStanding {
     required this.championProbability,
     this.name,
     this.abbreviation,
+    this.color,
   });
 
   final String teamId;
   final String? name;
   final String? abbreviation;
+  // Also off the team entity -- see Participant.color's own doc comment.
+  final String? color;
   // Actual, this-Cup-so-far group-play record (NOT the team's overall
   // season record -- see aws-lambdas/nba/predict/season_projection.py's
   // own CUP_GROUP_PLAY_NOTE filtering).
@@ -155,6 +162,7 @@ class CupTeamStanding {
         teamId: json['team_id'] as String,
         name: json['name'] as String?,
         abbreviation: json['abbreviation'] as String?,
+        color: json['color'] as String?,
         groupWins: json['group_wins'] as int? ?? 0,
         groupLosses: json['group_losses'] as int? ?? 0,
         groupWinnerProbability: (json['group_winner_probability'] as num?)?.toDouble() ?? 0.0,
@@ -275,13 +283,18 @@ class BracketRound {
 /// lookup map instead of carried on every row (a bracket team id appears
 /// in several matchups, not just one).
 class BracketTeamName {
-  const BracketTeamName({this.name, this.abbreviation});
+  const BracketTeamName({this.name, this.abbreviation, this.color});
 
   final String? name;
   final String? abbreviation;
+  // Also off the team entity -- see Participant.color's own doc comment.
+  final String? color;
 
-  factory BracketTeamName.fromJson(Map<String, dynamic> json) =>
-      BracketTeamName(name: json['name'] as String?, abbreviation: json['abbreviation'] as String?);
+  factory BracketTeamName.fromJson(Map<String, dynamic> json) => BracketTeamName(
+        name: json['name'] as String?,
+        abbreviation: json['abbreviation'] as String?,
+        color: json['color'] as String?,
+      );
 }
 
 class BracketProjection {

@@ -38,7 +38,7 @@ resource "aws_cloudwatch_dashboard" "viewer_analytics" {
         type   = "log"
         x      = 0
         y      = 0
-        width  = 8
+        width  = 12
         height = 6
         properties = {
           region = var.region
@@ -54,9 +54,9 @@ resource "aws_cloudwatch_dashboard" "viewer_analytics" {
       },
       {
         type   = "log"
-        x      = 8
+        x      = 12
         y      = 0
-        width  = 8
+        width  = 12
         height = 6
         properties = {
           region = var.region
@@ -68,28 +68,6 @@ resource "aws_cloudwatch_dashboard" "viewer_analytics" {
             | parse @message '"country_name": "*"' as country_name
             | stats count(*) as requests by country_name
             | sort requests desc
-          QUERY
-        }
-      },
-      {
-        type   = "log"
-        x      = 16
-        y      = 0
-        width  = 8
-        height = 6
-        properties = {
-          region = var.region
-          title  = "Top cities"
-          view   = "table"
-          query  = <<-QUERY
-            ${local.viewer_analytics_log_sources}
-            | filter @message like /viewer_analytics/
-            | parse @message '"city": "*"' as city
-            | parse @message '"region_name": "*"' as region_name
-            | parse @message '"country_name": "*"' as country_name
-            | stats count(*) as requests by city, region_name, country_name
-            | sort requests desc
-            | limit 20
           QUERY
         }
       },
@@ -169,6 +147,28 @@ resource "aws_cloudwatch_dashboard" "viewer_analytics" {
             | parse @message '"method": "*"' as method
             | parse @message '"resource": "*"' as resource
             | stats count(*) as requests by method, resource
+            | sort requests desc
+            | limit 20
+          QUERY
+        }
+      },
+      {
+        type   = "log"
+        x      = 0
+        y      = 18
+        width  = 24
+        height = 10
+        properties = {
+          region = var.region
+          title  = "Top cities"
+          view   = "table"
+          query  = <<-QUERY
+            ${local.viewer_analytics_log_sources}
+            | filter @message like /viewer_analytics/
+            | parse @message '"city": "*"' as city
+            | parse @message '"region_name": "*"' as region_name
+            | parse @message '"country_name": "*"' as country_name
+            | stats count(*) as requests by city, region_name, country_name
             | sort requests desc
             | limit 20
           QUERY

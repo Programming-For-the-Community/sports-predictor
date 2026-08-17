@@ -28,6 +28,7 @@ def enrich_participants(storage, sport: str, participants: list[dict] | None) ->
             "name": (entity or {}).get("name"),
             "abbreviation": metadata.get("abbreviation"),
             "conference": metadata.get("conference"),
+            "color": metadata.get("color"),
         })
     return enriched
 
@@ -44,7 +45,12 @@ def enrich_team_standings(storage, sport: str, standings: list[dict]) -> list[di
     for row in standings:
         entity = storage.get_entity(sport, row["team_id"])
         metadata = (entity or {}).get("metadata") or {}
-        enriched.append({**row, "name": (entity or {}).get("name"), "abbreviation": metadata.get("abbreviation")})
+        enriched.append({
+            **row,
+            "name": (entity or {}).get("name"),
+            "abbreviation": metadata.get("abbreviation"),
+            "color": metadata.get("color"),
+        })
     return enriched
 
 
@@ -82,6 +88,10 @@ def enrich_bracket_team_names(storage, sport: str, bracket: dict) -> dict:
     for team_id in team_ids:
         entity = storage.get_entity(sport, team_id)
         metadata = (entity or {}).get("metadata") or {}
-        team_names[team_id] = {"name": (entity or {}).get("name"), "abbreviation": metadata.get("abbreviation")}
+        team_names[team_id] = {
+            "name": (entity or {}).get("name"),
+            "abbreviation": metadata.get("abbreviation"),
+            "color": metadata.get("color"),
+        }
 
     return {**bracket, "team_names": team_names}

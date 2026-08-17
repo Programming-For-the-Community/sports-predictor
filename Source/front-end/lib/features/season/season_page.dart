@@ -286,7 +286,7 @@ List<_StandingsColumn> _standingsColumns(String sport) {
         );
       }),
     _StandingsColumn('TEAM', 3, (context, sport, team) {
-      final info = teamDisplayFor(sport, team.teamId, team.abbreviation);
+      final info = teamDisplayFor(sport, team.teamId, team.abbreviation, apiColor: team.color);
       return Row(
         children: [
           TeamColorDot(color: info.primary),
@@ -386,7 +386,8 @@ class _StandingsHeaderRow extends StatelessWidget {
   Widget build(BuildContext context) {
     return Row(
       children: [
-        for (var i = 0; i < columns.length; i++)
+        for (var i = 0; i < columns.length; i++) ...[
+          if (i > 0) const SizedBox(width: 6),
           Expanded(
             flex: columns[i].flex,
             child: Text(
@@ -402,6 +403,7 @@ class _StandingsHeaderRow extends StatelessWidget {
               overflow: TextOverflow.ellipsis,
             ),
           ),
+        ],
       ],
     );
   }
@@ -610,7 +612,7 @@ class _CupTeamRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final info = teamDisplayFor(sport, team.teamId, team.abbreviation);
+    final info = teamDisplayFor(sport, team.teamId, team.abbreviation, apiColor: team.color);
     return Row(
       children: [
         Expanded(
@@ -640,15 +642,13 @@ class _CupTeamRow extends StatelessWidget {
   }
 }
 
-/// Playoff/Cup-knockout bracket -- a simple sequential row of round
-/// columns per conference (horizontally scrollable), not a converging
-/// dual-bracket graphic. Same "don't over-engineer the visual" approach
-/// _CupSection's own plain group cards already take. Conference-split
-/// sports (NFL/NBA -- bracket.conferences non-empty) get one round-row
-/// per conference stacked vertically, then the cross-conference final as
-/// its own small card; a flat-bracket sport (NCAAFB -- bracket.rounds
-/// non-null) gets just one round-row, its own championship already the
-/// last column in it.
+/// Playoff/Cup-knockout bracket -- a converging tree (_BracketTree) per
+/// conference, connector lines drawn between a matchup and whichever
+/// next-round matchup its own winner feeds into. Conference-split sports
+/// (NFL/NBA -- bracket.conferences non-empty) get one tree per conference
+/// stacked vertically, then the cross-conference final as its own small
+/// card; a flat-bracket sport (NCAAFB -- bracket.rounds non-null) gets
+/// just one tree, its own championship already the last round in it.
 class _BracketSection extends StatelessWidget {
   const _BracketSection({required this.sport, required this.bracket});
 
@@ -659,7 +659,7 @@ class _BracketSection extends StatelessWidget {
   Widget build(BuildContext context) {
     final flatRounds = bracket.rounds;
     if (flatRounds != null) {
-      return _BracketRoundsRow(sport: sport, rounds: flatRounds, teamNames: bracket.teamNames);
+      return _BracketTree(sport: sport, rounds: flatRounds, teamNames: bracket.teamNames);
     }
 
     final conferenceNames = bracket.conferences.keys.toList()..sort();
@@ -672,7 +672,7 @@ class _BracketSection extends StatelessWidget {
             padding: const EdgeInsets.only(bottom: 8),
             child: Text(conference.toUpperCase(), style: AppTextStyles.microLabel(color: AppColors.cyan)),
           ),
-          _BracketRoundsRow(sport: sport, rounds: bracket.conferences[conference]!, teamNames: bracket.teamNames),
+          _BracketTree(sport: sport, rounds: bracket.conferences[conference]!, teamNames: bracket.teamNames),
           const SizedBox(height: 20),
         ],
         if (finalMatchup != null) ...[
@@ -688,51 +688,215 @@ class _BracketSection extends StatelessWidget {
   }
 }
 
-class _BracketRoundsRow extends StatelessWidget {
-  const _BracketRoundsRow({required this.sport, required this.rounds, required this.teamNames});
+/// One resolved bracket slot's position, in "slot units" (1 unit = one
+/// vertical card-row) -- round 0 gets simple sequential slots 0,1,2,...;
+/// every later round's own slot is the average of whichever earlier-round
+/// slot(s) its own winner traces back to. Matched generically by winner
+/// team id (predicted or actual, see BracketMatchup.isFinal) rather than
+/// assuming round sizes always halve, so a bye (a team with no
+/// prior-round game at all, e.g. NFL's #1 seed skipping Wild Card,
+/// NCAAFB's top-4 seeds skipping Round of 12) naturally gets zero found
+/// sources on that side and just keeps its own round's sequential slot,
+/// and a play-in-style round (NBA) that doesn't cleanly halve still
+/// resolves correctly the same way -- nothing here is sport-specific.
+class _BracketSlotLayout {
+  const _BracketSlotLayout(this.slots, this.connections);
+
+  /// slots[roundIndex][matchupIndex] -> vertical slot position.
+  final List<List<double>> slots;
+  final List<_BracketConnection> connections;
+}
+
+class _BracketConnection {
+  const _BracketConnection(this.fromRound, this.fromSlot, this.toRound, this.toSlot);
+  final int fromRound;
+  final double fromSlot;
+  final int toRound;
+  final double toSlot;
+}
+
+_BracketSlotLayout _computeBracketSlotLayout(List<BracketRound> rounds) {
+  final slots = <List<double>>[];
+  final connections = <_BracketConnection>[];
+
+  for (var r = 0; r < rounds.length; r++) {
+    final matchups = rounds[r].matchups;
+    if (r == 0) {
+      slots.add([for (var i = 0; i < matchups.length; i++) i.toDouble()]);
+      continue;
+    }
+
+    final previousMatchups = rounds[r - 1].matchups;
+    final previousSlots = slots[r - 1];
+    final roundSlots = <double>[];
+    for (var i = 0; i < matchups.length; i++) {
+      final matchup = matchups[i];
+      final foundSlots = <double>[];
+      for (var j = 0; j < previousMatchups.length; j++) {
+        final previous = previousMatchups[j];
+        final winner = previous.isFinal ? previous.actualWinner : previous.predictedWinner;
+        if (winner != null && (winner == matchup.teamA || winner == matchup.teamB)) {
+          foundSlots.add(previousSlots[j]);
+        }
+      }
+      final slot = foundSlots.isEmpty ? i.toDouble() : foundSlots.reduce((a, b) => a + b) / foundSlots.length;
+      roundSlots.add(slot);
+      for (final sourceSlot in foundSlots) {
+        connections.add(_BracketConnection(r - 1, sourceSlot, r, slot));
+      }
+    }
+    slots.add(roundSlots);
+  }
+
+  return _BracketSlotLayout(slots, connections);
+}
+
+/// Draws each round-to-round connector as a simple 3-segment elbow
+/// (horizontal out of the source card, vertical to the target's own row,
+/// horizontal into the target card) -- the standard bracket-diagram
+/// connector shape, positioned entirely from _computeBracketSlotLayout's
+/// own slot math, no widget measurement needed.
+class _BracketConnectorPainter extends CustomPainter {
+  const _BracketConnectorPainter({
+    required this.connections,
+    required this.color,
+    required this.cardWidth,
+    required this.cardHeight,
+    required this.roundGap,
+    required this.verticalUnit,
+  });
+
+  final List<_BracketConnection> connections;
+  final Color color;
+  final double cardWidth;
+  final double cardHeight;
+  final double roundGap;
+  final double verticalUnit;
+
+  double _x(int round) => round * (cardWidth + roundGap);
+  double _y(double slot) => slot * verticalUnit + cardHeight / 2;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final paint = Paint()
+      ..color = color
+      ..strokeWidth = 1.5
+      ..style = PaintingStyle.stroke;
+    for (final connection in connections) {
+      final x1 = _x(connection.fromRound) + cardWidth;
+      final y1 = _y(connection.fromSlot);
+      final x2 = _x(connection.toRound);
+      final y2 = _y(connection.toSlot);
+      final midX = x1 + roundGap / 2;
+      canvas.drawPath(
+        Path()
+          ..moveTo(x1, y1)
+          ..lineTo(midX, y1)
+          ..lineTo(midX, y2)
+          ..lineTo(x2, y2),
+        paint,
+      );
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant _BracketConnectorPainter oldDelegate) => oldDelegate.connections != connections;
+}
+
+/// Converging bracket tree -- rounds placed left to right, each matchup
+/// card positioned by its own computed slot (see _computeBracketSlotLayout),
+/// connector lines drawn underneath. Horizontally scrollable (the same
+/// pattern this page's other wide content uses); the outer page itself
+/// already scrolls vertically, so a fixed-height inner Stack here (driven
+/// by the widest round's own card count) is safe -- Stack doesn't throw on
+/// overflow the way a Row/Column would, so an unusually tall bracket just
+/// extends the page's own scroll, never a RenderFlex error.
+class _BracketTree extends StatelessWidget {
+  const _BracketTree({required this.sport, required this.rounds, required this.teamNames});
 
   final String sport;
   final List<BracketRound> rounds;
   final Map<String, BracketTeamName> teamNames;
 
+  static const double _cardWidth = 220;
+  static const double _cardHeight = 108;
+  static const double _roundGap = 40;
+  static const double _verticalUnit = 124;
+  static const double _headerHeight = 20;
+
   @override
   Widget build(BuildContext context) {
+    if (rounds.isEmpty) {
+      return Text('Bracket not available yet.', style: AppTextStyles.body(color: AppColors.inkSub));
+    }
+
+    final layout = _computeBracketSlotLayout(rounds);
+    var maxSlot = 0.0;
+    for (final roundSlots in layout.slots) {
+      for (final slot in roundSlots) {
+        if (slot > maxSlot) maxSlot = slot;
+      }
+    }
+    final totalWidth = rounds.length * _cardWidth + (rounds.length - 1) * _roundGap;
+    final totalHeight = maxSlot * _verticalUnit + _cardHeight;
+
     return SingleChildScrollView(
       scrollDirection: Axis.horizontal,
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          for (final round in rounds) ...[
-            _BracketRoundColumn(sport: sport, round: round, teamNames: teamNames),
-            const SizedBox(width: 16),
+      child: SizedBox(
+        width: totalWidth,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            SizedBox(
+              height: _headerHeight,
+              child: Stack(
+                children: [
+                  for (var r = 0; r < rounds.length; r++)
+                    Positioned(
+                      left: r * (_cardWidth + _roundGap),
+                      width: _cardWidth,
+                      child: Text(
+                        rounds[r].round.toUpperCase(),
+                        style: AppTextStyles.microLabel(),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 10),
+            SizedBox(
+              width: totalWidth,
+              height: totalHeight,
+              child: Stack(
+                children: [
+                  Positioned.fill(
+                    child: CustomPaint(
+                      painter: _BracketConnectorPainter(
+                        connections: layout.connections,
+                        color: AppColors.borderRaised,
+                        cardWidth: _cardWidth,
+                        cardHeight: _cardHeight,
+                        roundGap: _roundGap,
+                        verticalUnit: _verticalUnit,
+                      ),
+                    ),
+                  ),
+                  for (var r = 0; r < rounds.length; r++)
+                    for (var i = 0; i < rounds[r].matchups.length; i++)
+                      Positioned(
+                        left: r * (_cardWidth + _roundGap),
+                        top: layout.slots[r][i] * _verticalUnit,
+                        width: _cardWidth,
+                        height: _cardHeight,
+                        child: _BracketMatchupCard(sport: sport, matchup: rounds[r].matchups[i], teamNames: teamNames),
+                      ),
+                ],
+              ),
+            ),
           ],
-        ],
-      ),
-    );
-  }
-}
-
-class _BracketRoundColumn extends StatelessWidget {
-  const _BracketRoundColumn({required this.sport, required this.round, required this.teamNames});
-
-  final String sport;
-  final BracketRound round;
-  final Map<String, BracketTeamName> teamNames;
-
-  @override
-  Widget build(BuildContext context) {
-    return SizedBox(
-      width: 220,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(round.round.toUpperCase(), style: AppTextStyles.microLabel()),
-          const SizedBox(height: 8),
-          for (final matchup in round.matchups) ...[
-            _BracketMatchupCard(sport: sport, matchup: matchup, teamNames: teamNames),
-            const SizedBox(height: 12),
-          ],
-        ],
+        ),
       ),
     );
   }
@@ -837,7 +1001,7 @@ class _BracketTeamRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final info = teamDisplayFor(sport, teamId, teamNames[teamId]?.abbreviation);
+    final info = teamDisplayFor(sport, teamId, teamNames[teamId]?.abbreviation, apiColor: teamNames[teamId]?.color);
     return Row(
       children: [
         if (seed != null)

@@ -27,7 +27,7 @@ class ParticipantResult {
 class Participant {
   const Participant({
     required this.entityId, required this.role, required this.result,
-    this.abbreviation, this.conference,
+    this.abbreviation, this.conference, this.color,
   });
 
   final String entityId;
@@ -43,6 +43,11 @@ class Participant {
   // team entities at all, see espn.py's team_to_entity). Used to group
   // event_list_page.dart's list when present -- see its own grouping doc.
   final String? conference;
+  // Bare 6-digit hex, no "#" (ESPN's own format, see espn.py's own
+  // team_to_entity) -- teamDisplayFor/_parseApiColor (nfl_team_colors.dart)
+  // parse it. Null for NFL (that table's own doc comment) and for any
+  // entity never seeded.
+  final String? color;
 
   factory Participant.fromJson(Map<String, dynamic> json) => Participant(
         entityId: json['entity_id'] as String,
@@ -50,6 +55,7 @@ class Participant {
         result: json['result'] != null ? ParticipantResult.fromJson(json['result'] as Map<String, dynamic>) : null,
         abbreviation: json['abbreviation'] as String?,
         conference: json['conference'] as String?,
+        color: json['color'] as String?,
       );
 }
 

@@ -122,8 +122,8 @@ class TestEnrichBracketTeamNames:
 
         result = enrich_bracket_team_names(self._storage(), "nfl", bracket)
 
-        assert result["team_names"]["12"] == {"name": "Chiefs", "abbreviation": "KC"}
-        assert result["team_names"]["24"] == {"name": "Chargers", "abbreviation": "LAC"}
+        assert result["team_names"]["12"] == {"name": "Chiefs", "abbreviation": "KC", "color": None}
+        assert result["team_names"]["24"] == {"name": "Chargers", "abbreviation": "LAC", "color": None}
 
     def test_collects_team_ids_from_a_flat_rounds_list(self):
         bracket = {"rounds": [{"round": "Round of 12", "matchups": [{"team_a": "12", "team_b": "24"}]}]}
@@ -161,7 +161,7 @@ class TestEnrichBracketTeamNames:
 
         result = enrich_bracket_team_names(storage, "ncaafb", bracket)
 
-        assert result["team_names"]["1"] == {"name": None, "abbreviation": None}
+        assert result["team_names"]["1"] == {"name": None, "abbreviation": None, "color": None}
 
     def test_the_original_bracket_fields_are_preserved(self):
         bracket = {"conferences": {}, "champion": "12"}

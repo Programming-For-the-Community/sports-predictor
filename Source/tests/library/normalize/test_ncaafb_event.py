@@ -76,6 +76,16 @@ class TestGameToEventItem:
         item = game_to_event_item(_game(), "ncaafb")
         assert item["venue_indoor"] is None
 
+    def test_venue_city_and_state_passed_through_from_enrichment(self):
+        item = game_to_event_item(_game(venue_city="Athens", venue_state="GA"), "ncaafb")
+        assert item["venue_city"] == "Athens"
+        assert item["venue_state"] == "GA"
+
+    def test_venue_city_and_state_none_when_enrichment_never_ran(self):
+        item = game_to_event_item(_game(), "ncaafb")
+        assert item["venue_city"] is None
+        assert item["venue_state"] is None
+
     def test_is_playoff_game_true_for_a_real_cfp_game(self):
         item = game_to_event_item(_game(playoff={"competition": "cfp", "round": "first_round"}), "ncaafb")
         assert item["is_playoff_game"] is True

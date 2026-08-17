@@ -52,6 +52,25 @@ class TestBoxscoreToPlayerGameStats:
 
         assert player_entities[0]["team_key"] == "SPORT#NFL#TEAM#KC"
 
+    def test_an_athlete_entry_with_no_id_is_skipped_not_a_crash(self):
+        # Confirmed live, 2025-12-07 (NBA event 401810216, 2025-26 season):
+        # a bench player held out "COACH'S DECISION" carries a stub athlete
+        # object with no "id" at all (just links/shortName) -- every other
+        # entry in the same response is normal. Nothing recoverable from a
+        # scoreless DNP row with no id to key it by; the fix skips it
+        # instead of crashing the whole game's stat processing.
+        stats_items, player_entities = boxscore_to_player_game_stats(
+            _summary([{"name": "passing", "keys": ["passingYards"], "athletes": [
+                {"athlete": {"id": "1", "displayName": "QB One"}, "stats": ["250"]},
+                {"athlete": {"links": [], "shortName": "Olbrich"}, "stats": ["--"]},
+            ]}]),
+            "nfl", compound_key_splits={},
+        )
+
+        assert len(stats_items) == 1
+        assert len(player_entities) == 1
+        assert stats_items[0]["entity_id"] == "1"
+
     def test_player_entity_carries_position(self):
         # Same metadata.position field/shape roster_to_player_entities sets
         # -- upsert_player_entity replaces the whole entity item, not just

@@ -40,8 +40,14 @@ def _prime_cache(mock_s3, key: str, data, fetched_at: str = "2026-01-01T00:00:00
     mock_s3.put_object(Key=key, Body=json.dumps({"fetched_at": fetched_at, "data": data}))
 
 
-def _team(team_id: str, school: str, conference: str = "SEC", dome: bool | None = False) -> dict:
-    return {"id": team_id, "school": school, "conference": conference, "location": {"dome": dome}}
+def _team(
+    team_id: str, school: str, conference: str = "SEC", dome: bool | None = False,
+    city: str | None = None, state: str | None = None,
+) -> dict:
+    return {
+        "id": team_id, "school": school, "conference": conference,
+        "location": {"dome": dome, "city": city, "state": state},
+    }
 
 
 class TestGetCachedTeams:
@@ -129,6 +135,27 @@ class TestAttachVenueIndoor:
         attach_venue_indoor(games, 2025, client, mock_s3, BUCKET)
 
         assert games[0]["venue_indoor"] is None
+        assert games[0]["venue_city"] is None
+        assert games[0]["venue_state"] is None
+
+    def test_sets_venue_city_and_state_from_the_home_teams_own_venue(self):
+        # CFBD's own /games response has no city/state breakdown, only a
+        # bare venue name string -- the home team's own /teams `location`
+        # is the same underlying Venue object, confirmed live via CFBD's
+        # OpenAPI schema, so this is sourced from the same already-cached
+        # teams call venue_indoor itself already uses, not a second lookup.
+        mock_s3 = _make_s3()
+        client = MagicMock()
+        client.get_teams.return_value = [
+            _team("2", "Georgia", dome=False, city="Athens", state="GA"),
+            _team("52", "Alabama", dome=False, city="Tuscaloosa", state="AL"),
+        ]
+        games = [{"id": "1", "homeId": "2", "awayId": "52"}]
+
+        attach_venue_indoor(games, 2025, client, mock_s3, BUCKET)
+
+        assert games[0]["venue_city"] == "Athens"
+        assert games[0]["venue_state"] == "GA"
 
     def test_fetches_teams_at_most_once_across_many_games(self):
         mock_s3 = _make_s3()

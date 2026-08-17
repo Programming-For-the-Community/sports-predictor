@@ -154,11 +154,13 @@ def game_to_event_item(game: dict, sport: str) -> dict:
     season_type ("postseason" and NOT a playoff game).
 
     home_coach/away_coach/home_current_rank/away_current_rank/
-    venue_indoor are only present when aws-lambdas/ncaafb/ingest/
-    enrichment.py successfully attached them before this game was
-    written to S3 -- omitted here (not written as None) when absent,
-    same convention scoreboard_event_to_event_item already uses for
-    NFL's coach/injury/depth-chart fields.
+    venue_indoor/venue_city/venue_state are only present when
+    aws-lambdas/ncaafb/ingest/enrichment.py (or schedule-sync's own
+    attach_venue_indoor call, for the venue_* fields specifically)
+    successfully attached them before this game was written to S3 --
+    omitted here (not written as None) when absent, same convention
+    scoreboard_event_to_event_item already uses for NFL's coach/injury/
+    depth-chart fields.
     """
     event_id = str(game["id"])
     home_id, away_id = str(game["homeId"]), str(game["awayId"])
@@ -188,6 +190,8 @@ def game_to_event_item(game: dict, sport: str) -> dict:
         "week": game.get("week"),
         "venue_indoor": game.get("venue_indoor"),
         "venue_name": game.get("venue"),
+        "venue_city": game.get("venue_city"),
+        "venue_state": game.get("venue_state"),
         "home_conference": game.get("homeConference"),
         "away_conference": game.get("awayConference"),
         "conference_game": game.get("conferenceGame"),
