@@ -90,6 +90,101 @@ class TestSimulateBracket:
         assert championships / 500 > 0.5
 
 
+class TestProjectPlayIn:
+    def test_seed_ten_can_never_win_the_final_seven_or_eight_seed(self):
+        ratings = {team: 1500 for team in ("s7", "s8", "s9", "s10")}
+
+        result = season_simulation.project_play_in("s7", "s8", "s9", "s10", ratings, home_advantage=55)
+
+        assert result["final_7_seed"] != "s10"
+        assert result["final_8_seed"] != "s10"
+
+    def test_returns_three_games_and_no_rng_needed(self):
+        ratings = {team: 1500 for team in ("s7", "s8", "s9", "s10")}
+
+        first = season_simulation.project_play_in("s7", "s8", "s9", "s10", ratings, home_advantage=55)
+        second = season_simulation.project_play_in("s7", "s8", "s9", "s10", ratings, home_advantage=55)
+
+        assert len(first["games"]) == 3
+        assert first == second
+
+    def test_a_dominant_seven_seed_wins_the_final_seven_seed_outright(self):
+        ratings = {"s7": 2200, "s8": 1500, "s9": 1500, "s10": 1500}
+
+        result = season_simulation.project_play_in("s7", "s8", "s9", "s10", ratings, home_advantage=55)
+
+        assert result["final_7_seed"] == "s7"
+
+
+class TestProjectBracket:
+    SEEDS = [f"s{i}" for i in range(1, 9)]
+
+    def test_returns_three_rounds_with_the_right_matchup_counts(self):
+        ratings = {team: 1500 for team in self.SEEDS}
+
+        result = season_simulation.project_bracket(self.SEEDS, ratings, home_advantage=55)
+
+        rounds = {r["round"]: r["matchups"] for r in result["rounds"]}
+        assert len(rounds["First Round"]) == 4
+        assert len(rounds["Conference Semifinals"]) == 2
+        assert len(rounds["Conference Finals"]) == 1
+        assert result["champion"] in self.SEEDS
+
+    def test_no_reseeding_first_round_pairs_are_fixed(self):
+        ratings = {team: 1500 for team in self.SEEDS}
+
+        result = season_simulation.project_bracket(self.SEEDS, ratings, home_advantage=55)
+
+        first_round_pairs = {frozenset((m["team_a"], m["team_b"])) for m in result["rounds"][0]["matchups"]}
+        assert first_round_pairs == {
+            frozenset(("s1", "s8")), frozenset(("s4", "s5")), frozenset(("s3", "s6")), frozenset(("s2", "s7")),
+        }
+
+    def test_a_much_stronger_top_seed_is_favored_to_win_it_all(self):
+        ratings = {"s1": 2200}
+
+        result = season_simulation.project_bracket(self.SEEDS, ratings, home_advantage=55)
+
+        assert result["champion"] == "s1"
+
+
+class TestProjectConferenceBracket:
+    def test_combines_play_in_and_bracket_into_four_rounds(self):
+        direct_seeds = [f"s{i}" for i in range(1, 7)]
+        ratings = {f"s{i}": 1500 for i in range(1, 11)}
+
+        result = season_simulation.project_conference_bracket(
+            direct_seeds, "s7", "s8", "s9", "s10", ratings, home_advantage=55,
+        )
+
+        assert [r["round"] for r in result["rounds"]] == [
+            "Play-In", "First Round", "Conference Semifinals", "Conference Finals",
+        ]
+        all_teams = {f"s{i}" for i in range(1, 11)}
+        assert result["champion"] in all_teams
+
+
+class TestProjectFinals:
+    def test_home_court_goes_to_the_better_regular_season_record(self):
+        ratings = {"a": 1500, "b": 1500}
+
+        result = season_simulation.project_finals(
+            "a", "b", wins={"a": 60, "b": 50}, point_differential={}, ratings=ratings, home_advantage=55,
+        )
+
+        assert result["team_a"] == "a"
+
+    def test_point_differential_breaks_a_tied_record(self):
+        ratings = {"a": 1500, "b": 1500}
+
+        result = season_simulation.project_finals(
+            "a", "b", wins={"a": 55, "b": 55}, point_differential={"a": -10, "b": 200},
+            ratings=ratings, home_advantage=55,
+        )
+
+        assert result["team_a"] == "b"
+
+
 class TestSimulateSeason:
     # Real ESPN team_ids from library.features.nba_teams.TEAM_DIVISIONS --
     # _teams_by_conference/_teams_by_division read the real table, so a
@@ -237,6 +332,45 @@ class TestSimulateCup:
         )
 
         assert result is not None  # doesn't raise -- the bad pair is simply skipped
+
+
+class TestProjectCupKnockoutBracket:
+    def test_none_when_season_is_not_in_cup_groups(self):
+        result = season_simulation.project_cup_knockout_bracket(2099, {}, {}, {})
+        assert result is None
+
+    def test_none_when_season_is_none(self):
+        result = season_simulation.project_cup_knockout_bracket(None, {}, {}, {})
+        assert result is None
+
+    def test_returns_both_conferences_a_championship_and_a_champion(self):
+        result = season_simulation.project_cup_knockout_bracket(2026, {}, {}, {})
+
+        assert set(result["conferences"]) == {"Eastern", "Western"}
+        for rounds in result["conferences"].values():
+            assert [r["round"] for r in rounds] == ["Semifinals", "Conference Final"]
+            assert len(rounds[0]["matchups"]) == 2
+        assert result["champion"] == result["championship"]["predicted_winner"]
+
+    def test_no_rng_needed_and_deterministic_across_calls(self):
+        cup_wins = {"2": 4, "19": 3, "8": 2, "20": 1, "17": 0}
+
+        first = season_simulation.project_cup_knockout_bracket(2026, cup_wins, {}, {})
+        second = season_simulation.project_cup_knockout_bracket(2026, cup_wins, {}, {})
+
+        assert first == second
+
+    def test_a_dominant_group_winner_is_favored_to_win_its_conference(self):
+        # Boston ("2", real CUP_GROUPS Eastern-B membership) given a real
+        # group record so it's unambiguously its group's winner, then
+        # rated far above the rest of its own conference's knockout field.
+        cup_wins = {"2": 5}
+        ratings = {"2": 2400}
+
+        result = season_simulation.project_cup_knockout_bracket(2026, cup_wins, {}, ratings)
+
+        eastern_final = result["conferences"]["Eastern"][1]["matchups"][0]
+        assert eastern_final["predicted_winner"] == "2"
 
 
 class TestProjectLeaderboard:

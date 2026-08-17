@@ -32,8 +32,9 @@ simulate_cup for how that's handled.
 
 # {season: {conference: {group_letter: [team_id, ...]}}}. Team ids match
 # nba_teams.py's own ESPN numeric ids. 2025-26 season (ESPN season.year
-# 2026) confirmed live, 2026-08-16, against espn.com/nba/standings/_/
-# view/nba-cup -- 3 groups of 5 per conference, 30 teams total.
+# 2026) confirmed live and re-confirmed unchanged against espn.com/nba/
+# standings/_/view/nba-cup, both checks 2026-08-16 -- 3 groups of 5 per
+# conference, 30 teams total.
 CUP_GROUPS: dict[int, dict[str, dict[str, list[str]]]] = {
     2026: {
         "Eastern": {

@@ -107,6 +107,115 @@ void main() {
     expect(find.text('4-1'), findsOneWidget);
   });
 
+  testWidgets('Playoff Bracket toggle appears when bracket is present and switches to the bracket view', (tester) async {
+    final projection = SeasonProjection(
+      sport: 'nfl',
+      season: 2026,
+      standings: [_nbaStanding('2')], // reused fixture, sport-neutral shape
+      leaderboards: null,
+      bracket: const BracketProjection(
+        conferences: {
+          'AFC': [
+            BracketRound(round: 'Wild Card', matchups: [
+              BracketMatchup(
+                teamA: '12', teamB: '13', seedA: 2, seedB: 7, status: 'projected',
+                predictedWinner: '12', winProbability: 0.62,
+              ),
+            ]),
+          ],
+          'NFC': [
+            BracketRound(round: 'Wild Card', matchups: [
+              BracketMatchup(
+                teamA: '19', teamB: '24', seedA: 2, seedB: 7, status: 'projected',
+                predictedWinner: '19', winProbability: 0.55,
+              ),
+            ]),
+          ],
+        },
+        rounds: null,
+        teamNames: {},
+        finalMatchup: BracketMatchup(teamA: '12', teamB: '19', status: 'projected', predictedWinner: '12', winProbability: 0.51),
+        champion: '12',
+      ),
+    );
+
+    await pumpSeasonPage(tester, 'nfl', projection);
+
+    expect(find.text('Playoff Bracket'), findsOneWidget);
+    // Standings tab is the default -- bracket content isn't visible yet.
+    expect(find.text('AFC'), findsNothing);
+
+    await tester.tap(find.text('Playoff Bracket'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('AFC'), findsOneWidget);
+    expect(find.text('NFC'), findsOneWidget);
+    expect(find.text('CHAMPIONSHIP'), findsOneWidget);
+    expect(find.text('WILD CARD'), findsNWidgets(2));
+  });
+
+  testWidgets('a flat (NCAAFB-shaped) bracket renders its rounds with no conference headers', (tester) async {
+    final projection = SeasonProjection(
+      sport: 'ncaafb',
+      season: 2025,
+      standings: [],
+      leaderboards: null,
+      bracket: const BracketProjection(
+        conferences: {},
+        rounds: [
+          BracketRound(round: 'Round of 12', matchups: [
+            BracketMatchup(teamA: '5', teamB: '12', seedA: 5, seedB: 12, status: 'projected', predictedWinner: '5', winProbability: 0.7),
+          ]),
+          BracketRound(round: 'National Championship', matchups: [
+            BracketMatchup(teamA: '1', teamB: '2', seedA: 1, seedB: 2, status: 'projected', predictedWinner: '1', winProbability: 0.58),
+          ]),
+        ],
+        teamNames: {},
+        champion: '1',
+      ),
+    );
+
+    await pumpSeasonPage(tester, 'ncaafb', projection);
+    await tester.tap(find.text('Playoff Bracket'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('ROUND OF 12'), findsOneWidget);
+    expect(find.text('NATIONAL CHAMPIONSHIP'), findsOneWidget);
+    expect(find.text('CHAMPIONSHIP'), findsNothing); // that label is only the conference-split final's own header
+  });
+
+  testWidgets('a completed bracket matchup shows the real score, not a probability', (tester) async {
+    final projection = SeasonProjection(
+      sport: 'nfl',
+      season: 2026,
+      standings: [],
+      leaderboards: null,
+      bracket: const BracketProjection(
+        conferences: {
+          'AFC': [
+            BracketRound(round: 'Wild Card', matchups: [
+              BracketMatchup(
+                teamA: '12', teamB: '13', seedA: 2, seedB: 7, status: 'final',
+                predictedWinner: '12', winProbability: 0.62,
+                actualWinner: '12', actualHomeScore: 27, actualAwayScore: 13,
+              ),
+            ]),
+          ],
+        },
+        rounds: null,
+        teamNames: {},
+      ),
+    );
+
+    await pumpSeasonPage(tester, 'nfl', projection);
+    await tester.tap(find.text('Playoff Bracket'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('FINAL'), findsOneWidget);
+    expect(find.text('27'), findsOneWidget);
+    expect(find.text('13'), findsOneWidget);
+  });
+
   testWidgets('ncaafb has neither PLAY-IN% nor an NBA Cup toggle', (tester) async {
     final projection = SeasonProjection(
       sport: 'ncaafb',

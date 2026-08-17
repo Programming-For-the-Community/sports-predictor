@@ -107,6 +107,55 @@ class TestSimulateCfpBracket:
         assert championships / 300 > 0.35
 
 
+class TestProjectCfpBracket:
+    SEEDS = [f"s{n}" for n in range(1, 13)]
+
+    def test_returns_four_rounds_with_the_right_matchup_counts(self):
+        ratings = {team: 1500 for team in self.SEEDS}
+
+        result = season_simulation.project_cfp_bracket(self.SEEDS, ratings, home_advantage=55)
+
+        rounds = {r["round"]: r["matchups"] for r in result["rounds"]}
+        assert len(rounds["Round of 12"]) == 4
+        assert len(rounds["Quarterfinals"]) == 4
+        assert len(rounds["Semifinals"]) == 2
+        assert len(rounds["National Championship"]) == 1
+        assert result["champion"] in self.SEEDS
+
+    def test_no_rng_needed_and_deterministic_across_calls(self):
+        ratings = {f"s{n}": 1700 - n * 10 for n in range(1, 13)}
+
+        first = season_simulation.project_cfp_bracket(self.SEEDS, ratings, home_advantage=55)
+        second = season_simulation.project_cfp_bracket(self.SEEDS, ratings, home_advantage=55)
+
+        assert first == second
+
+    def test_a_much_stronger_top_seed_is_favored_to_win_it_all(self):
+        ratings = {"s1": 2200}  # everyone else defaults to DEFAULT_STARTING_RATING (1500)
+
+        result = season_simulation.project_cfp_bracket(self.SEEDS, ratings, home_advantage=55)
+
+        assert result["champion"] == "s1"
+
+    def test_round_of_12_pairs_five_with_twelve_six_with_eleven_seven_with_ten_eight_with_nine(self):
+        ratings = {team: 1500 for team in self.SEEDS}
+
+        result = season_simulation.project_cfp_bracket(self.SEEDS, ratings, home_advantage=55)
+
+        round_of_12_pairs = {frozenset((m["team_a"], m["team_b"])) for m in result["rounds"][0]["matchups"]}
+        assert round_of_12_pairs == {
+            frozenset(("s5", "s12")), frozenset(("s6", "s11")), frozenset(("s7", "s10")), frozenset(("s8", "s9")),
+        }
+
+    def test_seeds_one_through_four_have_a_bye_into_the_quarterfinals(self):
+        ratings = {team: 1500 for team in self.SEEDS}
+
+        result = season_simulation.project_cfp_bracket(self.SEEDS, ratings, home_advantage=55)
+
+        round_of_12_teams = {t for m in result["rounds"][0]["matchups"] for t in (m["team_a"], m["team_b"])}
+        assert round_of_12_teams.isdisjoint({"s1", "s2", "s3", "s4"})
+
+
 class TestSimulateSeason:
     TEAMS = [f"t{i}" for i in range(12)]
     TEAM_CONFERENCE = {team: f"C{i // 4}" for i, team in enumerate(TEAMS)}

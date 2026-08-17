@@ -17,14 +17,16 @@ from collections import Counter
 from datetime import datetime, timezone
 
 import pandas as pd
+from boto3.dynamodb.conditions import Key
 
+import event_prediction
 import model_loader
 import season_simulation
 from library.features.common import compute_elo_ratings, current_streak, rolling_team_scoring_averages
 from library.features.ncaafb import average_opponent_elo
 from library.ml.model_types import ADAPTERS
-from library.serving.common import enrich_team_standings
-from library.serving.ncaafb_reads import _home_and_away
+from library.serving.common import enrich_bracket_team_names, enrich_team_standings
+from library.serving.ncaafb_reads import WIN_PROBABILITY_MODEL, _actual_result, _home_and_away
 from library.storage.feature_storage import FeatureStorage
 from library.storage.season_projections import season_projection_key
 
@@ -173,28 +175,227 @@ def _batch_score_teams(estimator, model_card: dict, teams: list[str], season_inp
     return dict(zip(teams, (float(value) for value in predictions)))
 
 
-def _current_rankings(estimator, model_card: dict, teams: list[str], season_inputs: dict) -> dict[str, int]:
-    """Today's actual (not simulated) National Ranking per team -- the same
-    model/feature row simulate_season's own score_teams callable uses to
-    pick each simulated season's CFP field, scored once against the real
-    current wins/losses/ratings instead of a simulated future. Lower score
-    is better (see _batch_score_teams), so rank is just each team's 1-based
-    position once sorted -- not limited to the top 25, standings itself
-    displays whatever's meaningful per row."""
-    scores = _batch_score_teams(
+def _current_model_scores(estimator, model_card: dict, teams: list[str], season_inputs: dict) -> dict[str, float]:
+    """Today's actual (not simulated) ranking-model score per team --
+    the SAME model/feature row simulate_season's own score_teams callable
+    uses to pick each simulated season's CFP field, scored once against
+    real current wins/losses/ratings instead of a simulated future. Lower
+    is better (see _batch_score_teams). Used both by _current_rankings
+    (below, for the standings table's current_rank column) and by
+    _bracket_payload (for real bracket seeding -- see that function's own
+    docstring for why "today's real ranking" is used for seeding
+    regardless of how much season remains, rather than trying to project
+    a future ranking-model score forward)."""
+    return _batch_score_teams(
         estimator, model_card, teams, season_inputs,
         season_inputs["wins"], season_inputs["losses"], season_inputs["current_ratings"],
     )
+
+
+def _current_rankings(estimator, model_card: dict, teams: list[str], season_inputs: dict) -> dict[str, int]:
+    """Today's actual National Ranking per team -- rank is just each
+    team's 1-based position once sorted by _current_model_scores, not
+    limited to the top 25, standings itself displays whatever's
+    meaningful per row."""
+    scores = _current_model_scores(estimator, model_card, teams, season_inputs)
     ranked = sorted(teams, key=lambda team_id: scores[team_id])
     return {team_id: rank for rank, team_id in enumerate(ranked, start=1)}
 
 
-def build_season_projection(storage: FeatureStorage, s3) -> dict:
+def _real_postseason_matchups(storage: FeatureStorage, current_season: int | None) -> dict[frozenset, dict]:
+    """{frozenset({home_id, away_id}): event} for every real CFP game
+    (is_playoff_game -- CFBD's own `playoff` field, confirmed live to be
+    populated only for real 12-team CFP games, not every bowl -- see
+    library/normalize/ncaafb.py's own docstring) this season, scheduled
+    or completed."""
+    result: dict[frozenset, dict] = {}
+    for status in ("scheduled", "completed"):
+        for event in storage.get_all_events(SPORT, status=status):
+            if event.get("season") != current_season or not event.get("is_playoff_game"):
+                continue
+            home_away = _home_and_away(event)
+            if home_away is None:
+                continue
+            result[frozenset(home_away)] = event
+    return result
+
+
+def _logged_win_probability(predictions_table, event_key_value: str) -> dict | None:
+    """This event's own logged win-probability prediction, or None if
+    nobody's ever requested one -- same "read the audit trail, never
+    recompute" rule library/serving/ncaafb_reads.py's own
+    _prediction_comparison follows."""
+    rows = predictions_table.query(Key("event_key").eq(event_key_value))
+    row = next((r for r in rows if r["model_key"].startswith(f"MODEL#{WIN_PROBABILITY_MODEL}#")), None)
+    return row["predicted_value"] if row else None
+
+
+def _resolve_matchup(
+    team_a: str, team_b: str, seed_a: int | None, seed_b: int | None,
+    real_matchups: dict[frozenset, dict], storage: FeatureStorage, s3, predictions_table,
+    current_ratings: dict[str, float], home_advantage: float,
+) -> dict:
+    """Resolves one bracket slot -- the same 3-state design as NFL's own
+    season_projection.py: (1) no real CFP game exists yet -- the model's
+    own deterministic pick ("status": "projected"); (2) a real game
+    exists and is completed -- the actual result plus whatever was
+    originally predicted, if anyone ever requested one ("status":
+    "final"); (3) a real game exists, not yet played -- computed on the
+    spot right here if nobody's viewed it yet ("status": "scheduled")."""
+    real_event = real_matchups.get(frozenset((team_a, team_b)))
+    if real_event is None:
+        matchup = season_simulation.project_matchup(team_a, team_b, seed_a, seed_b, current_ratings, home_advantage)
+        matchup["status"] = "projected"
+        return matchup
+
+    event_key_value = real_event["event_key"]
+    home_id, away_id = _home_and_away(real_event)
+
+    if real_event.get("status") == "completed":
+        actual = _actual_result(real_event)
+        logged = _logged_win_probability(predictions_table, event_key_value)
+        predicted_winner = win_probability = None
+        if logged is not None:
+            probability = logged["home_win_probability"]
+            predicted_winner = home_id if probability >= 0.5 else away_id
+            win_probability = probability if predicted_winner == home_id else 1 - probability
+        return {
+            "status": "final",
+            "team_a": home_id, "team_b": away_id, "seed_a": seed_a, "seed_b": seed_b,
+            "predicted_winner": predicted_winner, "win_probability": win_probability,
+            "actual_winner": home_id if actual["home_won"] else away_id,
+            "actual_home_score": actual["home_score"], "actual_away_score": actual["away_score"],
+        }
+
+    logged = _logged_win_probability(predictions_table, event_key_value)
+    if logged is None:
+        try:
+            event_prediction.compute_and_cache_event(storage, s3, predictions_table, real_event["event_id"])
+            logged = _logged_win_probability(predictions_table, event_key_value)
+        except Exception:
+            logger.exception("Failed computing a live prediction for bracket game %s", event_key_value)
+
+    predicted_winner = win_probability = None
+    if logged is not None:
+        probability = logged["home_win_probability"]
+        predicted_winner = home_id if probability >= 0.5 else away_id
+        win_probability = probability if predicted_winner == home_id else 1 - probability
+
+    return {
+        "status": "scheduled",
+        "team_a": home_id, "team_b": away_id, "seed_a": seed_a, "seed_b": seed_b,
+        "predicted_winner": predicted_winner, "win_probability": win_probability,
+    }
+
+
+def _project_bracket_round(
+    round_name: str, pairs: list[tuple[str, str, int | None, int | None]],
+    real_matchups: dict[frozenset, dict], storage: FeatureStorage, s3, predictions_table,
+    current_ratings: dict[str, float], home_advantage: float,
+) -> tuple[dict, list[tuple[str, int | None]]]:
+    """Resolves one round's worth of (team_a, team_b, seed_a, seed_b)
+    slots, returning that round's display dict alongside
+    [(advancing_team, its_own_seed), ...] for the next round to consume."""
+    matchups = []
+    advancing = []
+    for team_a, team_b, seed_a, seed_b in pairs:
+        matchup = _resolve_matchup(
+            team_a, team_b, seed_a, seed_b, real_matchups, storage, s3, predictions_table,
+            current_ratings, home_advantage,
+        )
+        matchups.append(matchup)
+        winner = matchup["predicted_winner"] if matchup["status"] != "final" else matchup["actual_winner"]
+        winner_seed = seed_a if winner == team_a else seed_b
+        advancing.append((winner, winner_seed))
+    return {"round": round_name, "matchups": matchups}, advancing
+
+
+def _bracket_payload(
+    storage: FeatureStorage, s3, predictions_table, season_inputs: dict,
+    estimator, model_card: dict, teams: list[str],
+) -> dict | None:
+    """Builds the 12-team CFP bracket, reconciled against real results as
+    they exist right now -- see _resolve_matchup's own docstring for the
+    3-state design. Unlike NFL's/NBA's own seeding (real wins once the
+    regular season is over, else projected_wins), NCAAFB's CFP field is
+    fundamentally driven by the ranking model's score, not raw win
+    totals -- and that score already reflects the team's full body of
+    work to date. Simulating a FUTURE ranking-model score forward is the
+    same intractable problem season_simulation.py's own docstring already
+    rules out for full-model game outcomes, so this always seeds from
+    TODAY's real model score (_current_model_scores) and today's real
+    conference-champion picks, the same "best current guess" every other
+    best-effort field on this page already is. None if fewer than
+    CFP_FIELD_SIZE teams are tracked (mirrors build_season_projection's
+    own simulate_season gate)."""
+    if len(teams) < season_simulation.CFP_FIELD_SIZE:
+        return None
+
+    model_scores = _current_model_scores(estimator, model_card, teams, season_inputs)
+    conferences = season_simulation._group_by_conference(season_inputs["team_conference"])
+    champions = {
+        conference: season_simulation._conference_champion(members, season_inputs["wins"], season_inputs["point_differential"])
+        for conference, members in conferences.items()
+    }
+    seeds = season_simulation._select_cfp_field(model_scores, champions)
+    seed_number = {team_id: rank + 1 for rank, team_id in enumerate(seeds)}
+    one, two, three, four, five, six, seven, eight, nine, ten, eleven, twelve = seeds
+
+    current_season = season_inputs["current_season"]
+    real_matchups = _real_postseason_matchups(storage, current_season)
+    ratings = season_inputs["current_ratings"]
+    home_advantage = season_simulation.DEFAULT_HOME_ADVANTAGE
+
+    round_of_12, round_of_12_advancing = _project_bracket_round(
+        "Round of 12",
+        [
+            (five, twelve, seed_number[five], seed_number[twelve]),
+            (six, eleven, seed_number[six], seed_number[eleven]),
+            (seven, ten, seed_number[seven], seed_number[ten]),
+            (eight, nine, seed_number[eight], seed_number[nine]),
+        ],
+        real_matchups, storage, s3, predictions_table, ratings, home_advantage,
+    )
+    r1_5v12, r1_6v11, r1_7v10, r1_8v9 = round_of_12_advancing
+
+    quarterfinals, quarterfinal_advancing = _project_bracket_round(
+        "Quarterfinals",
+        [
+            (one, r1_8v9[0], seed_number[one], r1_8v9[1]),
+            (two, r1_5v12[0], seed_number[two], r1_5v12[1]),
+            (three, r1_6v11[0], seed_number[three], r1_6v11[1]),
+            (four, r1_7v10[0], seed_number[four], r1_7v10[1]),
+        ],
+        real_matchups, storage, s3, predictions_table, ratings, 0.0,
+    )
+    qf1, qf2, qf3, qf4 = quarterfinal_advancing
+
+    semifinals, semifinal_advancing = _project_bracket_round(
+        "Semifinals",
+        [(qf1[0], qf4[0], qf1[1], qf4[1]), (qf2[0], qf3[0], qf2[1], qf3[1])],
+        real_matchups, storage, s3, predictions_table, ratings, 0.0,
+    )
+    sf1, sf2 = semifinal_advancing
+
+    championship, championship_advancing = _project_bracket_round(
+        "National Championship", [(sf1[0], sf2[0], sf1[1], sf2[1])],
+        real_matchups, storage, s3, predictions_table, ratings, 0.0,
+    )
+
+    bracket = {
+        "rounds": [round_of_12, quarterfinals, semifinals, championship],
+        "champion": championship_advancing[0][0],
+    }
+    return enrich_bracket_team_names(storage, SPORT, bracket)
+
+
+def build_season_projection(storage: FeatureStorage, s3, predictions_table) -> dict:
     season_inputs = _season_standings_inputs(storage)
     teams = list(season_inputs["team_conference"])
 
     simulation: dict[str, dict] = {}
     current_rankings: dict[str, int] = {}
+    bracket = None
     if len(teams) >= season_simulation.CFP_FIELD_SIZE:
         try:
             estimator, model_card = model_loader.load_current_model(s3, SPORT, RANKING_MODEL_NAME)
@@ -220,6 +421,11 @@ def build_season_projection(storage: FeatureStorage, s3) -> dict:
             except Exception:
                 logger.exception("Failed to compute current_rank for %s -- standings will omit it this run", SPORT)
 
+            try:
+                bracket = _bracket_payload(storage, s3, predictions_table, season_inputs, estimator, model_card, teams)
+            except Exception:
+                logger.exception("Failed to build season bracket")
+
     standings = sorted(
         (
             {
@@ -242,14 +448,18 @@ def build_season_projection(storage: FeatureStorage, s3) -> dict:
         "sport": SPORT,
         "season": season_inputs["current_season"],
         "standings": standings,
+        "bracket": bracket,
         "generated_at": datetime.now(timezone.utc).isoformat(),
     }
 
 
-def run_scheduled(storage: FeatureStorage, model_bucket) -> dict:
+def run_scheduled(storage: FeatureStorage, model_bucket, predictions_table) -> dict:
     """Entry point for the weekly EventBridge Scheduler invoke -- computes the projection
-    once and writes it to S3."""
-    result = build_season_projection(storage, model_bucket)
+    once and writes it to S3. predictions_table is new (2026-08-16, the bracket
+    feature) -- _bracket_payload reads/writes real CFP games' logged predictions
+    through it, same table event_prediction.py's own compute_and_cache_event
+    already uses."""
+    result = build_season_projection(storage, model_bucket, predictions_table)
     model_bucket.put_json(season_projection_key(SPORT), result)
     logger.info("Wrote season projection for %s to S3", SPORT)
     return {"status": "ok"}

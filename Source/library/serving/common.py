@@ -46,3 +46,42 @@ def enrich_team_standings(storage, sport: str, standings: list[dict]) -> list[di
         metadata = (entity or {}).get("metadata") or {}
         enriched.append({**row, "name": (entity or {}).get("name"), "abbreviation": metadata.get("abbreviation")})
     return enriched
+
+
+def enrich_bracket_team_names(storage, sport: str, bracket: dict) -> dict:
+    """Attaches a {team_id: {"name", "abbreviation"}} lookup (`team_names`)
+    to a bracket payload (see aws-lambdas/*/predict/season_projection.py's
+    own _bracket_payload/_cup_bracket_payload) -- same "the frontend has
+    no other source for team display text" reasoning as
+    enrich_team_standings above, but a bracket's own team ids are
+    scattered across many matchup rows (team_a/team_b, one row per game)
+    rather than one row per team, so this collects every distinct id
+    across the whole bracket first and looks each up exactly once,
+    instead of once per matchup appearance."""
+    team_ids: set[str] = set()
+
+    def _collect_matchup(matchup: dict) -> None:
+        for key in ("team_a", "team_b"):
+            if matchup.get(key):
+                team_ids.add(matchup[key])
+
+    def _collect_rounds(rounds: list[dict]) -> None:
+        for round_ in rounds:
+            for matchup in round_["matchups"]:
+                _collect_matchup(matchup)
+
+    for rounds in bracket.get("conferences", {}).values():
+        _collect_rounds(rounds)
+    if bracket.get("rounds"):
+        _collect_rounds(bracket["rounds"])
+    for key in ("super_bowl", "finals", "championship"):
+        if bracket.get(key):
+            _collect_matchup(bracket[key])
+
+    team_names = {}
+    for team_id in team_ids:
+        entity = storage.get_entity(sport, team_id)
+        metadata = (entity or {}).get("metadata") or {}
+        team_names[team_id] = {"name": (entity or {}).get("name"), "abbreviation": metadata.get("abbreviation")}
+
+    return {**bracket, "team_names": team_names}

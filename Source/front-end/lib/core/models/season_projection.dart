@@ -190,6 +190,155 @@ class CupProjection {
       );
 }
 
+/// One resolved bracket slot -- the 3-state design from
+/// aws-lambdas/nfl/predict/season_projection.py's own _resolve_matchup
+/// docstring (mirrored identically in NCAAFB's/NBA's own
+/// season_projection.py): "projected" (no real game exists yet -- the
+/// model's own deterministic pick), "scheduled" (a real game exists, not
+/// yet played -- its live prediction), or "final" (a real game exists
+/// and is completed -- the actual result, plus whatever was originally
+/// predicted for it if anyone ever requested one before it was played).
+/// seedA/seedB are null on a cross-conference matchup (the Super Bowl/
+/// NBA Finals/Cup Championship) -- the two sides' own conference seeds
+/// aren't comparable on one shared scale.
+class BracketMatchup {
+  const BracketMatchup({
+    required this.teamA,
+    required this.teamB,
+    required this.status,
+    this.seedA,
+    this.seedB,
+    this.predictedWinner,
+    this.winProbability,
+    this.actualWinner,
+    this.actualHomeScore,
+    this.actualAwayScore,
+  });
+
+  final String teamA;
+  final String teamB;
+  final int? seedA;
+  final int? seedB;
+  final String status;
+
+  /// Null only if a real, scheduled game exists but nobody's ever
+  /// requested (or this run's own on-the-spot compute failed to produce)
+  /// a prediction for it yet -- a real, if rare, transient gap, not a
+  /// parse failure.
+  final String? predictedWinner;
+  final double? winProbability;
+
+  /// Only present when status == "final".
+  final String? actualWinner;
+  final int? actualHomeScore;
+  final int? actualAwayScore;
+
+  bool get isFinal => status == 'final';
+
+  factory BracketMatchup.fromJson(Map<String, dynamic> json) => BracketMatchup(
+        teamA: json['team_a'] as String,
+        teamB: json['team_b'] as String,
+        status: json['status'] as String,
+        seedA: json['seed_a'] as int?,
+        seedB: json['seed_b'] as int?,
+        predictedWinner: json['predicted_winner'] as String?,
+        winProbability: (json['win_probability'] as num?)?.toDouble(),
+        actualWinner: json['actual_winner'] as String?,
+        actualHomeScore: json['actual_home_score'] as int?,
+        actualAwayScore: json['actual_away_score'] as int?,
+      );
+}
+
+class BracketRound {
+  const BracketRound({required this.round, required this.matchups});
+
+  final String round;
+  final List<BracketMatchup> matchups;
+
+  factory BracketRound.fromJson(Map<String, dynamic> json) => BracketRound(
+        round: json['round'] as String,
+        matchups: (json['matchups'] as List<dynamic>)
+            .map((m) => BracketMatchup.fromJson(m as Map<String, dynamic>))
+            .toList(),
+      );
+}
+
+/// A full bracket -- either conference-split (NFL/NBA: two conferences'
+/// own round lists plus one cross-conference final matchup) or flat
+/// (NCAAFB: one unified 12-team bracket, its own championship already
+/// the last round in `rounds`, no separate final-matchup field at all).
+/// Exactly one of `conferences`/`rounds` is populated for any given
+/// sport -- season_page.dart's own rendering branches on which.
+/// A team's display name/abbreviation, as attached by
+/// library.serving.common.enrich_bracket_team_names -- the bracket's own
+/// equivalent of TeamStanding.abbreviation, just keyed by id in one
+/// lookup map instead of carried on every row (a bracket team id appears
+/// in several matchups, not just one).
+class BracketTeamName {
+  const BracketTeamName({this.name, this.abbreviation});
+
+  final String? name;
+  final String? abbreviation;
+
+  factory BracketTeamName.fromJson(Map<String, dynamic> json) =>
+      BracketTeamName(name: json['name'] as String?, abbreviation: json['abbreviation'] as String?);
+}
+
+class BracketProjection {
+  const BracketProjection({
+    required this.conferences,
+    required this.rounds,
+    required this.teamNames,
+    this.finalMatchup,
+    this.champion,
+  });
+
+  /// Conference name -> that conference's own round list. Empty for a
+  /// flat-bracket sport (NCAAFB).
+  final Map<String, List<BracketRound>> conferences;
+
+  /// NCAAFB's own flat round list. Null for a conference-split sport.
+  final List<BracketRound>? rounds;
+
+  /// The Super Bowl (NFL) / Finals (NBA) / Cup Championship (NBA Cup) --
+  /// null for a flat-bracket sport, where the championship is just the
+  /// last entry in `rounds` instead.
+  final BracketMatchup? finalMatchup;
+
+  final String? champion;
+
+  /// team_id -> display name/abbreviation, see BracketTeamName's own doc
+  /// comment. A team id missing here (shouldn't happen in practice, since
+  /// the backend builds this from every id actually appearing in the
+  /// bracket) falls back to the raw id, same as teamDisplayFor's own
+  /// missing-abbreviation convention.
+  final Map<String, BracketTeamName> teamNames;
+
+  factory BracketProjection.fromJson(Map<String, dynamic> json) {
+    final conferencesJson = json['conferences'] as Map<String, dynamic>?;
+    final roundsJson = json['rounds'] as List<dynamic>?;
+    // Different sports name their own cross-conference matchup
+    // differently (super_bowl/finals/championship) -- see this class's
+    // own doc comment.
+    final finalMatchupJson = (json['super_bowl'] ?? json['finals'] ?? json['championship']) as Map<String, dynamic>?;
+    final teamNamesJson = json['team_names'] as Map<String, dynamic>?;
+    return BracketProjection(
+      conferences: (conferencesJson ?? {}).map(
+        (conference, rounds) => MapEntry(
+          conference,
+          (rounds as List<dynamic>).map((r) => BracketRound.fromJson(r as Map<String, dynamic>)).toList(),
+        ),
+      ),
+      rounds: roundsJson?.map((r) => BracketRound.fromJson(r as Map<String, dynamic>)).toList(),
+      finalMatchup: finalMatchupJson != null ? BracketMatchup.fromJson(finalMatchupJson) : null,
+      champion: json['champion'] as String?,
+      teamNames: (teamNamesJson ?? {}).map(
+        (teamId, info) => MapEntry(teamId, BracketTeamName.fromJson(info as Map<String, dynamic>)),
+      ),
+    );
+  }
+}
+
 class SeasonProjection {
   const SeasonProjection({
     required this.sport,
@@ -197,6 +346,8 @@ class SeasonProjection {
     required this.standings,
     required this.leaderboards,
     this.cup,
+    this.bracket,
+    this.cupBracket,
   });
 
   final String sport;
@@ -212,6 +363,20 @@ class SeasonProjection {
 
   /// NBA only -- see CupProjection's own doc comment for the null cases.
   final CupProjection? cup;
+
+  /// The playoff bracket -- NFL/NCAAFB/NBA only (null for NCAA MBB/PGA/
+  /// F1, no elimination-bracket concept exists for those yet/at all).
+  /// Best-effort, same "hide, don't error" convention as `cup`/
+  /// `leaderboards`.
+  final BracketProjection? bracket;
+
+  /// NBA only -- the separate NBA Cup knockout bracket (distinct from
+  /// `cup`'s own group-stage standings). Null for every other sport, and
+  /// for NBA whenever this season's Cup groups aren't in CUP_GROUPS yet
+  /// (same as `cup`) -- see aws-lambdas/nba/predict/season_simulation.py's
+  /// own project_cup_knockout_bracket docstring for why this one is
+  /// PROJECTED ONLY (no real-vs-actual reconciliation, unlike `bracket`).
+  final BracketProjection? cupBracket;
 
   factory SeasonProjection.fromJson(Map<String, dynamic> json) => SeasonProjection(
         sport: json['sport'] as String,
@@ -230,5 +395,9 @@ class SeasonProjection {
               )
             : null,
         cup: json['cup'] != null ? CupProjection.fromJson(json['cup'] as Map<String, dynamic>) : null,
+        bracket: json['bracket'] != null ? BracketProjection.fromJson(json['bracket'] as Map<String, dynamic>) : null,
+        cupBracket: json['cup_bracket'] != null
+            ? BracketProjection.fromJson(json['cup_bracket'] as Map<String, dynamic>)
+            : null,
       );
 }

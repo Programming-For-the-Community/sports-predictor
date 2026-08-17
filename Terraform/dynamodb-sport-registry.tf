@@ -228,11 +228,12 @@ locals {
 # national-ranking target (NBA has no in-season poll the way NCAAFB/NCAA
 # MBB do -- same asymmetry those sports already have relative to NFL).
 #
-# season_start/season_end are a first-pass estimate (preseason through
-# just past the NBA Finals) pending live verification of the actual
-# season/play-in/playoff calendar -- open item 5 in the approved plan,
-# not yet checked. Revisit before relying on season-gating being exactly
-# right at the boundaries.
+# season_start/season_end -- resolves the approved plan's former open
+# item 5 (2026-08-16, user-confirmed): NBA's regular season starts late
+# October, and the Finals wrap up in early June, so July gives real
+# padding past the actual championship the same way "harmless if empty"
+# padding works elsewhere in this project (e.g. schedule-sync's own
+# lookahead ceiling).
 resource "aws_dynamodb_table_item" "nba_registry" {
   table_name = aws_dynamodb_table.sport_registry.name
   hash_key   = aws_dynamodb_table.sport_registry.hash_key
@@ -242,8 +243,8 @@ resource "aws_dynamodb_table_item" "nba_registry" {
     sport           = { S = "nba" }
     event_type      = { S = "head_to_head" }
     polling_cadence = { S = "daily" }
-    season_start    = { S = "09-01" } # preseason/training camp -- unverified, see comment above
-    season_end      = { S = "07-01" } # past the NBA Finals -- unverified, see comment above
+    season_start    = { S = "10-01" } # regular season starts late October
+    season_end      = { S = "07-01" } # padding past the early-June Finals
 
     training_targets = {
       L = concat(

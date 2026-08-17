@@ -132,6 +132,132 @@ def _simulate_bracket(seeds: list[str], ratings: dict[str, float], home_advantag
     return play(semi1, semi2)
 
 
+def project_matchup(
+    team_a: str, team_b: str, seed_a: int | None, seed_b: int | None,
+    ratings: dict[str, float], home_advantage: float,
+) -> dict:
+    """Deterministic single-matchup resolution -- no RNG, picks whichever
+    side has >= 50% win probability. When both seeds are known, the
+    better (numerically lower) seed always hosts; if either is None,
+    team_a/team_b keep their given order and home_advantage itself
+    decides the framing (see project_finals below, which pre-picks the
+    real home side itself and passes no seeds at all). Identical shape/
+    role to NFL's/NCAAFB's own season_simulation.project_matchup --
+    duplicated here rather than shared, same "each sport's
+    season_simulation.py is self-contained" convention project_leaderboard
+    already follows across sports.
+
+    Returns {"team_a", "team_b", "seed_a", "seed_b", "predicted_winner",
+    "win_probability"} -- win_probability is always the WINNER's own
+    probability, not "team_a's".
+    """
+    if seed_a is not None and seed_b is not None and seed_b < seed_a:
+        team_a, team_b, seed_a, seed_b = team_b, team_a, seed_b, seed_a
+    rating_a = ratings.get(team_a, DEFAULT_STARTING_RATING)
+    rating_b = ratings.get(team_b, DEFAULT_STARTING_RATING)
+    probability_a = expected_score(rating_a, rating_b, home_advantage)
+    winner = team_a if probability_a >= 0.5 else team_b
+    return {
+        "team_a": team_a,
+        "team_b": team_b,
+        "seed_a": seed_a,
+        "seed_b": seed_b,
+        "predicted_winner": winner,
+        "win_probability": probability_a if winner == team_a else 1 - probability_a,
+    }
+
+
+def project_play_in(
+    seed_7: str, seed_8: str, seed_9: str, seed_10: str, ratings: dict[str, float], home_advantage: float,
+) -> dict:
+    """Deterministic sibling of _simulate_play_in -- same 3-game format
+    (see that function's own docstring), no RNG. Returns {"games": [game1,
+    game2, game3], "final_7_seed": team_id, "final_8_seed": team_id}."""
+    seed_number = {seed_7: 7, seed_8: 8, seed_9: 9, seed_10: 10}
+    game1 = project_matchup(seed_7, seed_8, 7, 8, ratings, home_advantage)
+    game1_winner = game1["predicted_winner"]
+    game1_loser = seed_8 if game1_winner == seed_7 else seed_7
+    game2 = project_matchup(seed_9, seed_10, 9, 10, ratings, home_advantage)
+    game2_winner = game2["predicted_winner"]
+    game3 = project_matchup(
+        game1_loser, game2_winner, seed_number[game1_loser], seed_number[game2_winner], ratings, home_advantage,
+    )
+    return {"games": [game1, game2, game3], "final_7_seed": game1_winner, "final_8_seed": game3["predicted_winner"]}
+
+
+def project_bracket(seeds: list[str], ratings: dict[str, float], home_advantage: float = DEFAULT_HOME_ADVANTAGE) -> dict:
+    """Deterministic sibling of _simulate_bracket -- same fixed, NO-
+    reseeding 8-team topology (1v8/4v5/3v6/2v7 in the first round; those
+    winners meet in the two conference semifinals; those winners play for
+    the conference championship). `seeds` is the already-resolved 8-team
+    field (direct seeds 1-6 plus the play-in's own final_7_seed/
+    final_8_seed -- see project_conference_bracket below, which combines
+    both stages). Picks the higher-win-probability side every matchup and
+    returns the full round-by-round path instead of just a champion.
+
+    Returns {"rounds": [{"round": "First Round", "matchups": [...]},
+    ...], "champion": team_id}.
+    """
+    seed_number = {team_id: rank + 1 for rank, team_id in enumerate(seeds)}
+    one, two, three, four, five, six, seven, eight = seeds
+
+    first_round_pairs = [(one, eight), (four, five), (three, six), (two, seven)]
+    first_round = [
+        project_matchup(a, b, seed_number[a], seed_number[b], ratings, home_advantage) for a, b in first_round_pairs
+    ]
+    r1w = [m["predicted_winner"] for m in first_round]
+
+    semifinals = [
+        project_matchup(r1w[0], r1w[1], seed_number[r1w[0]], seed_number[r1w[1]], ratings, home_advantage),
+        project_matchup(r1w[2], r1w[3], seed_number[r1w[2]], seed_number[r1w[3]], ratings, home_advantage),
+    ]
+    sf1, sf2 = (m["predicted_winner"] for m in semifinals)
+
+    championship = project_matchup(sf1, sf2, seed_number[sf1], seed_number[sf2], ratings, home_advantage)
+
+    return {
+        "rounds": [
+            {"round": "First Round", "matchups": first_round},
+            {"round": "Conference Semifinals", "matchups": semifinals},
+            {"round": "Conference Finals", "matchups": [championship]},
+        ],
+        "champion": championship["predicted_winner"],
+    }
+
+
+def project_conference_bracket(
+    direct_seeds: list[str], seed_7: str, seed_8: str, seed_9: str, seed_10: str,
+    ratings: dict[str, float], home_advantage: float = DEFAULT_HOME_ADVANTAGE,
+) -> dict:
+    """Combines project_play_in and project_bracket into one conference's
+    full postseason path -- NBA's own two-stage format (see this module's
+    own docstring). direct_seeds is seeds 1-6, already ordered."""
+    play_in = project_play_in(seed_7, seed_8, seed_9, seed_10, ratings, home_advantage)
+    full_seeds = direct_seeds + [play_in["final_7_seed"], play_in["final_8_seed"]]
+    bracket = project_bracket(full_seeds, ratings, home_advantage)
+    return {
+        "rounds": [{"round": "Play-In", "matchups": play_in["games"]}, *bracket["rounds"]],
+        "champion": bracket["champion"],
+    }
+
+
+def project_finals(
+    champion_a: str, champion_b: str, wins: dict[str, int], point_differential: dict[str, int],
+    ratings: dict[str, float], home_advantage: float = DEFAULT_HOME_ADVANTAGE,
+) -> dict:
+    """Deterministic NBA Finals matchup -- home-court to the better
+    regular-season record (the real NBA rule, unlike NFL's/NCAAFB's own
+    fixed-neutral-site championship game), point differential as
+    tiebreak. A team_a win on a full tie is a stable, arbitrary pick (not
+    a coinflip -- simulate_season's own Finals coinflip exists because a
+    Monte Carlo run needs real randomness across thousands of paths; this
+    only ever needs one stable pick)."""
+    record_a = (wins.get(champion_a, 0), point_differential.get(champion_a, 0))
+    record_b = (wins.get(champion_b, 0), point_differential.get(champion_b, 0))
+    home, away = (champion_a, champion_b) if record_a >= record_b else (champion_b, champion_a)
+    return project_matchup(home, away, None, None, ratings, home_advantage)
+
+
 def simulate_season(
     current_wins: dict[str, int],
     current_losses: dict[str, int],
@@ -385,6 +511,78 @@ def simulate_cup(
             "champion_probability": champion_totals[team_id] / simulations,
         }
         for team_id in all_teams
+    }
+
+
+def project_cup_knockout_bracket(
+    season: int | None, cup_wins: dict[str, int], cup_losses: dict[str, int], ratings: dict[str, float],
+    home_advantage: float = 0.0,
+) -> dict | None:
+    """Deterministic sibling of simulate_cup's own knockout-stage logic
+    (3 group winners + 1 wildcard per conference, seeded by group_wins/
+    losses -- see that function's own docstring for the exact selection
+    rule, mirrored here unchanged, not re-derived) -- semis (1v4/2v3) then
+    a conference final, both conference finalists then meet in the Cup
+    Championship. None if `season` isn't in CUP_GROUPS yet, same as
+    simulate_cup. Neutral site throughout (home_advantage=0.0 default) --
+    the real Cup knockout stage is played at one neutral site (Las
+    Vegas), unlike the Play-In/main bracket's own real home-court games.
+
+    PROJECTED ONLY -- unlike the main playoff bracket's own
+    season_projection.py _bracket_payload (NFL/NCAAFB/NBA), NBA's own
+    season_projection.py does NOT attempt real-vs-actual reconciliation
+    for Cup knockout games. Live-verified 2026-08-16: the 3 real knockout
+    rounds carry 3 distinct ESPN notes headlines ("NBA Cup -
+    Quarterfinals", "NBA Cup - Semifinals", "NBA Cup Championship" -- no
+    shared prefix with each other, or with group play's own "NBA Cup -
+    Group Play"), confirmed via real 2024-25 box scores. But that same
+    check also surfaced conflicting signals over whether the real
+    knockout field is genuinely 4 teams per conference (this function's
+    own inherited assumption from simulate_cup) or 3 with a bye for the
+    top seed -- not resolved with confidence from the sources checked.
+    Real-game matching was deliberately not built against an unconfirmed
+    field-size assumption; see project-nba-onboarding memory's own
+    2026-08-16 note -- flagged for a future session to verify against an
+    authoritative source before adding it.
+    """
+    groups = CUP_GROUPS.get(season) if season is not None else None
+    if not groups:
+        return None
+
+    def record_key(team_id: str) -> tuple[int, int]:
+        return (cup_wins.get(team_id, 0), -cup_losses.get(team_id, 0))
+
+    conference_rounds: dict[str, list[dict]] = {}
+    conference_finalists: dict[str, str] = {}
+    for conference, conference_groups in groups.items():
+        group_winners = [max(team_ids, key=record_key) for team_ids in conference_groups.values()]
+        all_conference_teams = [team_id for team_ids in conference_groups.values() for team_id in team_ids]
+        wildcard_pool = [t for t in all_conference_teams if t not in group_winners]
+        wildcard = max(wildcard_pool, key=record_key)
+        field = sorted(group_winners, key=record_key, reverse=True) + [wildcard]
+        seed_number = {team_id: rank + 1 for rank, team_id in enumerate(field)}
+        one, two, three, four = field
+
+        semi1 = project_matchup(one, four, seed_number[one], seed_number[four], ratings, home_advantage)
+        semi2 = project_matchup(two, three, seed_number[two], seed_number[three], ratings, home_advantage)
+        finalist_a, finalist_b = semi1["predicted_winner"], semi2["predicted_winner"]
+        conference_final = project_matchup(
+            finalist_a, finalist_b, seed_number.get(finalist_a), seed_number.get(finalist_b), ratings, home_advantage,
+        )
+
+        conference_rounds[conference] = [
+            {"round": "Semifinals", "matchups": [semi1, semi2]},
+            {"round": "Conference Final", "matchups": [conference_final]},
+        ]
+        conference_finalists[conference] = conference_final["predicted_winner"]
+
+    (conference_a, finalist_a), (conference_b, finalist_b) = conference_finalists.items()
+    championship = project_matchup(finalist_a, finalist_b, None, None, ratings, 0.0)
+
+    return {
+        "conferences": conference_rounds,
+        "championship": championship,
+        "champion": championship["predicted_winner"],
     }
 
 

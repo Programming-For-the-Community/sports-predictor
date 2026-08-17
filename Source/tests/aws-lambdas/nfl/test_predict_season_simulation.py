@@ -139,6 +139,8 @@ class TestScheduledSeasonProjection:
     def test_writes_the_season_projection_to_s3_under_the_expected_key(self):
         nfl_predict._storage = MagicMock()
         nfl_predict._model_bucket = MagicMock()
+        nfl_predict._predictions_table = MagicMock()
+        nfl_predict._predictions_table.query.return_value = []
         nfl_predict._storage.get_all_events.side_effect = lambda sport, status: {
             "completed": [_completed_event("E1", 2025, "12", "24", 27, 20)],
             "scheduled": [],
@@ -164,6 +166,8 @@ class TestScheduledSeasonProjection:
     def test_leaderboards_is_none_when_building_them_fails_but_standings_still_write(self):
         nfl_predict._storage = MagicMock()
         nfl_predict._model_bucket = MagicMock()
+        nfl_predict._predictions_table = MagicMock()
+        nfl_predict._predictions_table.query.return_value = []
         nfl_predict._storage.get_all_events.side_effect = lambda sport, status: {
             "completed": [_completed_event("E1", 2025, "12", "24", 27, 20)],
             "scheduled": [],
@@ -180,6 +184,8 @@ class TestScheduledSeasonProjection:
     def test_leaderboards_include_player_names_and_are_capped_at_ten(self):
         nfl_predict._storage = MagicMock()
         nfl_predict._model_bucket = MagicMock()
+        nfl_predict._predictions_table = MagicMock()
+        nfl_predict._predictions_table.query.return_value = []
         nfl_predict._storage.get_all_events.side_effect = lambda sport, status: {
             "completed": [_completed_event("E1", 2025, "12", "24", 27, 20)],
             "scheduled": [_scheduled_event("E2", 2025, "2025-09-21", "12", "7")],
@@ -209,6 +215,8 @@ class TestScheduledSeasonProjection:
         # (build_live_event_leader_candidates), not season_player_stats.
         nfl_predict._storage = MagicMock()
         nfl_predict._model_bucket = MagicMock()
+        nfl_predict._predictions_table = MagicMock()
+        nfl_predict._predictions_table.query.return_value = []
         nfl_predict._storage.get_all_events.side_effect = lambda sport, status: {
             "completed": [],
             "scheduled": [_scheduled_event("E2", 2026, "2026-09-10", "12", "7")],

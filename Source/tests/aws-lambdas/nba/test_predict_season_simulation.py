@@ -154,6 +154,8 @@ class TestScheduledSeasonProjection:
     def test_writes_the_season_projection_to_s3_under_the_expected_key(self):
         nba_predict._storage = MagicMock()
         nba_predict._model_bucket = MagicMock()
+        nba_predict._predictions_table = MagicMock()
+        nba_predict._predictions_table.query.return_value = []
         nba_predict._storage.get_all_events.side_effect = lambda sport, status: {
             "completed": [_completed_event("E1", 2026, "13", "12", 112, 100)],
             "scheduled": [],
@@ -182,6 +184,8 @@ class TestScheduledSeasonProjection:
     def test_cup_is_none_when_the_seasons_groups_are_not_in_the_table(self):
         nba_predict._storage = MagicMock()
         nba_predict._model_bucket = MagicMock()
+        nba_predict._predictions_table = MagicMock()
+        nba_predict._predictions_table.query.return_value = []
         nba_predict._storage.get_all_events.side_effect = lambda sport, status: {
             "completed": [_completed_event("E1", 2099, "13", "12", 112, 100)],
             "scheduled": [],
@@ -197,6 +201,8 @@ class TestScheduledSeasonProjection:
     def test_cup_groups_are_populated_when_the_season_is_in_the_table(self):
         nba_predict._storage = MagicMock()
         nba_predict._model_bucket = MagicMock()
+        nba_predict._predictions_table = MagicMock()
+        nba_predict._predictions_table.query.return_value = []
         nba_predict._storage.get_all_events.side_effect = lambda sport, status: {
             "completed": [_completed_event("E1", 2026, "13", "12", 112, 100)],
             "scheduled": [],
@@ -214,6 +220,8 @@ class TestScheduledSeasonProjection:
     def test_cup_is_none_when_building_it_raises_but_the_write_still_happens(self):
         nba_predict._storage = MagicMock()
         nba_predict._model_bucket = MagicMock()
+        nba_predict._predictions_table = MagicMock()
+        nba_predict._predictions_table.query.return_value = []
         nba_predict._storage.get_all_events.side_effect = lambda sport, status: {
             "completed": [_completed_event("E1", 2026, "13", "12", 112, 100)],
             "scheduled": [],
@@ -233,6 +241,8 @@ class TestScheduledSeasonProjection:
     def test_leaderboards_is_none_when_building_them_fails_but_standings_still_write(self):
         nba_predict._storage = MagicMock()
         nba_predict._model_bucket = MagicMock()
+        nba_predict._predictions_table = MagicMock()
+        nba_predict._predictions_table.query.return_value = []
         nba_predict._storage.get_all_events.side_effect = lambda sport, status: {
             "completed": [_completed_event("E1", 2026, "13", "12", 112, 100)],
             "scheduled": [],
@@ -250,6 +260,8 @@ class TestScheduledSeasonProjection:
     def test_leaderboards_include_player_names_and_are_capped_at_ten(self):
         nba_predict._storage = MagicMock()
         nba_predict._model_bucket = MagicMock()
+        nba_predict._predictions_table = MagicMock()
+        nba_predict._predictions_table.query.return_value = []
         nba_predict._storage.get_all_events.side_effect = lambda sport, status: {
             "completed": [_completed_event("E1", 2026, "13", "12", 112, 100)],
             "scheduled": [_scheduled_event("E2", 2026, "2025-11-21", "13", "2")],
@@ -281,6 +293,8 @@ class TestScheduledSeasonProjection:
         # season_player_stats.
         nba_predict._storage = MagicMock()
         nba_predict._model_bucket = MagicMock()
+        nba_predict._predictions_table = MagicMock()
+        nba_predict._predictions_table.query.return_value = []
         nba_predict._storage.get_all_events.side_effect = lambda sport, status: {
             "completed": [],
             "scheduled": [_scheduled_event("E2", 2026, "2025-10-22", "13", "2")],

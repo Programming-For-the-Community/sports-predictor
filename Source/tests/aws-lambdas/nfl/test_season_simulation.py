@@ -76,6 +76,84 @@ class TestSimulateBracket:
         assert championships / 500 > 0.5
 
 
+class TestProjectBracket:
+    SEEDS = ["s1", "s2", "s3", "s4", "s5", "s6", "s7"]
+
+    def test_returns_three_rounds_with_the_right_matchup_counts(self):
+        ratings = {team: 1500 for team in self.SEEDS}
+
+        result = season_simulation.project_bracket(self.SEEDS, ratings, home_advantage=55)
+
+        rounds = {r["round"]: r["matchups"] for r in result["rounds"]}
+        assert len(rounds["Wild Card"]) == 3
+        assert len(rounds["Divisional"]) == 2
+        assert len(rounds["Conference Championship"]) == 1
+        assert result["champion"] in self.SEEDS
+
+    def test_no_rng_needed_and_deterministic_across_calls(self):
+        ratings = {"s1": 1700, "s2": 1650, "s3": 1600, "s4": 1550, "s5": 1500, "s6": 1450, "s7": 1400}
+
+        first = season_simulation.project_bracket(self.SEEDS, ratings, home_advantage=55)
+        second = season_simulation.project_bracket(self.SEEDS, ratings, home_advantage=55)
+
+        assert first == second
+
+    def test_a_much_stronger_top_seed_is_favored_to_win_it_all(self):
+        ratings = {"s1": 2200}  # everyone else defaults to DEFAULT_STARTING_RATING (1500)
+
+        result = season_simulation.project_bracket(self.SEEDS, ratings, home_advantage=55)
+
+        assert result["champion"] == "s1"
+
+    def test_wild_card_matchups_pair_two_with_seven_three_with_six_four_with_five(self):
+        ratings = {team: 1500 for team in self.SEEDS}
+
+        result = season_simulation.project_bracket(self.SEEDS, ratings, home_advantage=55)
+
+        wild_card_pairs = {frozenset((m["team_a"], m["team_b"])) for m in result["rounds"][0]["matchups"]}
+        assert wild_card_pairs == {frozenset(("s2", "s7")), frozenset(("s3", "s6")), frozenset(("s4", "s5"))}
+
+    def test_predicted_winners_win_probability_is_always_at_least_half(self):
+        ratings = {"s1": 1900, "s2": 1300, "s3": 1600, "s4": 1550, "s5": 1500, "s6": 1450, "s7": 1400}
+
+        result = season_simulation.project_bracket(self.SEEDS, ratings, home_advantage=55)
+
+        for round_ in result["rounds"]:
+            for matchup in round_["matchups"]:
+                assert matchup["win_probability"] >= 0.5
+                assert matchup["predicted_winner"] in (matchup["team_a"], matchup["team_b"])
+
+
+class TestProjectFullBracket:
+    def test_returns_both_conferences_a_super_bowl_pick_and_an_overall_champion(self):
+        conference_seeds = {
+            "AFC": ["a1", "a2", "a3", "a4", "a5", "a6", "a7"],
+            "NFC": ["n1", "n2", "n3", "n4", "n5", "n6", "n7"],
+        }
+        ratings = {team: 1500 for conference in conference_seeds.values() for team in conference}
+
+        result = season_simulation.project_full_bracket(conference_seeds, ratings, home_advantage=55)
+
+        assert set(result["conferences"]) == {"AFC", "NFC"}
+        all_teams = {team for conference in conference_seeds.values() for team in conference}
+        assert result["champion"] in all_teams
+        assert result["super_bowl"]["predicted_winner"] == result["champion"]
+        assert result["super_bowl"]["seed_a"] is None
+        assert result["super_bowl"]["seed_b"] is None
+
+    def test_the_stronger_conference_champion_is_favored_in_the_super_bowl(self):
+        conference_seeds = {
+            "AFC": ["a1", "a2", "a3", "a4", "a5", "a6", "a7"],
+            "NFC": ["n1", "n2", "n3", "n4", "n5", "n6", "n7"],
+        }
+        ratings = {team: 1500 for conference in conference_seeds.values() for team in conference}
+        ratings["a1"] = 2400  # dominant enough to win its own conference AND the Super Bowl
+
+        result = season_simulation.project_full_bracket(conference_seeds, ratings, home_advantage=55)
+
+        assert result["champion"] == "a1"
+
+
 class TestSimulateSeason:
     # Real ESPN team_ids from library.features.nfl_teams.TEAM_DIVISIONS --
     # _divisions_by_conference() reads the real table, so a meaningful

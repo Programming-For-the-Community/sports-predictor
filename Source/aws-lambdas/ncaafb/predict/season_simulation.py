@@ -95,6 +95,89 @@ def _simulate_cfp_bracket(seeds: list[str], ratings: dict[str, float], home_adva
     return _play(sf1, sf2, ratings, home_advantage, rng, neutral=True)
 
 
+def project_matchup(
+    team_a: str, team_b: str, seed_a: int | None, seed_b: int | None,
+    ratings: dict[str, float], home_advantage: float,
+) -> dict:
+    """Deterministic single-matchup resolution -- no RNG, picks whichever
+    side has >= 50% win probability. When both seeds are known, the
+    better (numerically lower) seed always hosts (Round of 12's own
+    campus-site convention); if either is None, or home_advantage is
+    passed as 0.0 (every round from the Quarterfinals on is neutral-site,
+    see project_cfp_bracket), team_a/team_b keep their given order and
+    home_advantage itself decides the framing. Identical shape/role to
+    NFL's own season_simulation.project_matchup -- see that module's
+    docstring; duplicated here rather than shared, same "each sport's
+    season_simulation.py is self-contained" convention project_leaderboard
+    already follows across sports.
+
+    Returns {"team_a", "team_b", "seed_a", "seed_b", "predicted_winner",
+    "win_probability"} -- win_probability is always the WINNER's own
+    probability, not "team_a's".
+    """
+    if seed_a is not None and seed_b is not None and seed_b < seed_a:
+        team_a, team_b, seed_a, seed_b = team_b, team_a, seed_b, seed_a
+    rating_a = ratings.get(team_a, DEFAULT_STARTING_RATING)
+    rating_b = ratings.get(team_b, DEFAULT_STARTING_RATING)
+    probability_a = expected_score(rating_a, rating_b, home_advantage)
+    winner = team_a if probability_a >= 0.5 else team_b
+    return {
+        "team_a": team_a,
+        "team_b": team_b,
+        "seed_a": seed_a,
+        "seed_b": seed_b,
+        "predicted_winner": winner,
+        "win_probability": probability_a if winner == team_a else 1 - probability_a,
+    }
+
+
+def project_cfp_bracket(seeds: list[str], ratings: dict[str, float], home_advantage: float = DEFAULT_HOME_ADVANTAGE) -> dict:
+    """Deterministic sibling of _simulate_cfp_bracket -- same 12-team
+    topology (seeds 1-4 bye; Round of 12 campus-site 5v12/6v11/7v10/8v9;
+    Quarterfinals/Semifinals/Championship all neutral-site, fixed, no
+    reseeding), but picks the higher-win-probability side every matchup
+    and returns the full round-by-round path instead of just the national
+    champion -- used to render a single "most likely" bracket on the
+    season tab. See season_projection.py's own _bracket_payload for how
+    this gets reconciled against real CFP results as they happen.
+
+    Returns {"rounds": [{"round": "Round of 12", "matchups": [...]},
+    ...], "champion": team_id}.
+    """
+    seed_number = {team_id: rank + 1 for rank, team_id in enumerate(seeds)}
+    one, two, three, four, five, six, seven, eight, nine, ten, eleven, twelve = seeds
+
+    round_of_12_pairs = [(five, twelve), (six, eleven), (seven, ten), (eight, nine)]
+    round_of_12_matchups = [
+        project_matchup(a, b, seed_number[a], seed_number[b], ratings, home_advantage) for a, b in round_of_12_pairs
+    ]
+    r1_5v12, r1_6v11, r1_7v10, r1_8v9 = (m["predicted_winner"] for m in round_of_12_matchups)
+
+    quarterfinal_pairs = [(one, r1_8v9), (two, r1_5v12), (three, r1_6v11), (four, r1_7v10)]
+    quarterfinal_matchups = [
+        project_matchup(a, b, seed_number.get(a), seed_number.get(b), ratings, 0.0) for a, b in quarterfinal_pairs
+    ]
+    qf1, qf2, qf3, qf4 = (m["predicted_winner"] for m in quarterfinal_matchups)
+
+    semifinal_matchups = [
+        project_matchup(qf1, qf4, None, None, ratings, 0.0),
+        project_matchup(qf2, qf3, None, None, ratings, 0.0),
+    ]
+    sf1, sf2 = (m["predicted_winner"] for m in semifinal_matchups)
+
+    championship_matchup = project_matchup(sf1, sf2, None, None, ratings, 0.0)
+
+    return {
+        "rounds": [
+            {"round": "Round of 12", "matchups": round_of_12_matchups},
+            {"round": "Quarterfinals", "matchups": quarterfinal_matchups},
+            {"round": "Semifinals", "matchups": semifinal_matchups},
+            {"round": "National Championship", "matchups": [championship_matchup]},
+        ],
+        "champion": championship_matchup["predicted_winner"],
+    }
+
+
 def simulate_season(
     current_wins: dict[str, int],
     current_losses: dict[str, int],

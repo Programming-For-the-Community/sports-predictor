@@ -1,0 +1,141 @@
+"""
+Unit tests for the season tab's playoff-bracket reconciliation
+(season_projection._resolve_matchup/_bracket_payload) -- same 3-state
+design as NFL's/NCAAFB's own test_predict_bracket.py, adapted for NBA's
+play-in-aware topology. Real ESPN team ids from library.features.
+nba_teams.TEAM_DIVISIONS -- _bracket_payload's seeding reads the real
+table via season_simulation._teams_by_conference, so a meaningful
+full-bracket test needs real ids.
+
+With every team's wins/point_differential left at their 0 default,
+Eastern conference seeding is fully deterministic (NBA's own
+_seed_conference sorts the SAME list _teams_by_conference already builds
+from TEAM_DIVISIONS' own dict-insertion order -- no set-comprehension tie-
+break the way NFL's own _seed_conference has, confirmed stable across
+PYTHONHASHSEED values): seeds 1-6 = 2,17,18,20,28,4; seeds 7-10 =
+5,8,11,15. With equal ratings, every play-in game is won by the better
+(numerically lower) seed, so the resolved 8-team field is
+2,17,18,20,28,4,5,8 and the First Round pairs are (2,8)/(20,28)/(18,4)/
+(17,5).
+"""
+from unittest.mock import MagicMock, patch
+
+import event_prediction
+import season_projection
+import season_simulation
+
+SEED_1, SEED_2, SEED_3, SEED_4, SEED_5, SEED_6 = "2", "17", "18", "20", "28", "4"
+SEED_7, SEED_8, SEED_9, SEED_10 = "5", "8", "11", "15"
+
+
+def _postseason_event(event_key, season, home_id, away_id, *, status="scheduled",
+                       home_score=None, away_score=None, event_id=None, season_type=3):
+    participants = [
+        {"entity_id": home_id, "role": "home", "result": None if home_score is None else {"score": home_score, "won": home_score > away_score}},
+        {"entity_id": away_id, "role": "away", "result": None if away_score is None else {"score": away_score, "won": away_score > home_score}},
+    ]
+    return {
+        "event_key": event_key, "event_id": event_id or event_key, "event_date": "2026-04-20",
+        "season": season, "season_type": season_type, "status": status, "participants": participants,
+    }
+
+
+class TestResolveMatchup:
+    def test_no_real_game_falls_back_to_the_deterministic_projection(self):
+        result = season_projection._resolve_matchup(
+            "a", "b", 1, 2, {}, MagicMock(), MagicMock(), MagicMock(), {"a": 1900, "b": 1400},
+            season_simulation.DEFAULT_HOME_ADVANTAGE,
+        )
+
+        assert result["status"] == "projected"
+        assert result["predicted_winner"] == "a"
+
+    def test_real_completed_game_reports_the_actual_winner_and_score(self):
+        event = _postseason_event("E1", 2026, SEED_1, SEED_8, status="completed", home_score=112, away_score=98)
+        predictions_table = MagicMock()
+        predictions_table.query.return_value = []
+
+        result = season_projection._resolve_matchup(
+            SEED_1, SEED_8, 1, 8, {frozenset((SEED_1, SEED_8)): event}, MagicMock(), MagicMock(), predictions_table, {},
+            season_simulation.DEFAULT_HOME_ADVANTAGE,
+        )
+
+        assert result["status"] == "final"
+        assert result["actual_winner"] == SEED_1
+        assert result["actual_home_score"] == 112
+
+    def test_real_scheduled_game_with_no_logged_prediction_computes_one_in_process(self):
+        event = _postseason_event("E1", 2026, SEED_1, SEED_8, status="scheduled")
+        predictions_table = MagicMock()
+        predictions_table.query.side_effect = [
+            [],
+            [{"model_key": "MODEL#win-probability#v1", "predicted_value": {"home_win_probability": 0.62}}],
+        ]
+
+        with patch.object(event_prediction, "compute_and_cache_event") as compute:
+            result = season_projection._resolve_matchup(
+                SEED_1, SEED_8, 1, 8, {frozenset((SEED_1, SEED_8)): event}, MagicMock(), MagicMock(), predictions_table, {},
+                season_simulation.DEFAULT_HOME_ADVANTAGE,
+            )
+
+        compute.assert_called_once()
+        assert result["status"] == "scheduled"
+        assert result["predicted_winner"] == SEED_1
+        assert result["win_probability"] == 0.62
+
+
+class TestBracketPayload:
+    def _season_inputs(self, remaining_games=None):
+        return {
+            "current_season": 2026,
+            "remaining_games": remaining_games or [],
+            "wins": {}, "point_differential": {}, "current_ratings": {},
+        }
+
+    def test_returns_both_conferences_finals_and_a_champion(self):
+        storage = MagicMock()
+        storage.get_all_events.return_value = []  # no real games yet -- fully projected
+        predictions_table = MagicMock()
+        predictions_table.query.return_value = []
+
+        result = season_projection._bracket_payload(storage, MagicMock(), predictions_table, self._season_inputs(), {})
+
+        assert set(result["conferences"]) == {"Eastern", "Western"}
+        for rounds in result["conferences"].values():
+            assert [r["round"] for r in rounds] == [
+                "Play-In", "First Round", "Conference Semifinals", "Conference Finals",
+            ]
+            assert len(rounds[0]["matchups"]) == 3  # play-in's 3 games
+        assert result["champion"] == result["finals"]["predicted_winner"]
+
+    def test_a_real_completed_play_in_game_is_reflected_in_the_bracket(self):
+        # Seed 7 vs. seed 8 -- the play-in's own Game 1.
+        real_game = _postseason_event("E1", 2026, SEED_7, SEED_8, status="completed", home_score=120, away_score=110, season_type=5)
+        storage = MagicMock()
+        storage.get_all_events.side_effect = lambda sport, status: [real_game] if status == "completed" else []
+        predictions_table = MagicMock()
+        predictions_table.query.return_value = []
+
+        result = season_projection._bracket_payload(storage, MagicMock(), predictions_table, self._season_inputs(), {})
+
+        play_in_matchups = result["conferences"]["Eastern"][0]["matchups"]
+        real_matchup = next((m for m in play_in_matchups if {m["team_a"], m["team_b"]} == {SEED_7, SEED_8}), None)
+        assert real_matchup is not None
+        assert real_matchup["status"] == "final"
+        assert real_matchup["actual_winner"] == SEED_7
+
+    def test_seeds_from_projected_wins_when_the_regular_season_is_still_in_progress(self):
+        storage = MagicMock()
+        storage.get_all_events.return_value = []
+        predictions_table = MagicMock()
+        predictions_table.query.return_value = []
+        simulation = {team_id: {"projected_wins": 60.0 if team_id == SEED_10 else 0.0} for team_id in season_simulation.TEAM_DIVISIONS}
+        season_inputs = self._season_inputs(remaining_games=[(SEED_1, SEED_2)])  # non-empty -- still in progress
+
+        result = season_projection._bracket_payload(storage, MagicMock(), predictions_table, season_inputs, simulation)
+
+        # SEED_10 (otherwise a bottom seed under all-zero real wins)
+        # should now be seed 1 in the East -- verified indirectly: it
+        # must have a bye out of the Play-In round (never appears there).
+        play_in_teams = {t for m in result["conferences"]["Eastern"][0]["matchups"] for t in (m["team_a"], m["team_b"])}
+        assert SEED_10 not in play_in_teams

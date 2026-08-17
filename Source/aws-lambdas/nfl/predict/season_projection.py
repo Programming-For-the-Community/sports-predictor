@@ -14,20 +14,29 @@ from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 
+from boto3.dynamodb.conditions import Key
+
 import event_prediction
 import live_features
 import model_loader
 import season_simulation
 from library.features.common import compute_elo_ratings
 from library.features.nfl_teams import TEAM_DIVISIONS, is_real_franchise_matchup
-from library.serving.common import enrich_team_standings
-from library.serving.nfl_reads import _home_and_away
+from library.serving.common import enrich_bracket_team_names, enrich_team_standings
+from library.serving.nfl_reads import WIN_PROBABILITY_MODEL, _actual_result, _home_and_away
 from library.storage.feature_storage import FeatureStorage
 from library.storage.season_projections import season_projection_key
 
 logger = logging.getLogger("nfl-predict")
 
 SPORT = "nfl"
+
+# ESPN's own season.type convention (see nfl/ingest/handler.py's
+# PRESEASON_TYPE) -- 3 is postseason. Only postseason-flagged events are
+# ever matched against a bracket slot in _real_postseason_matchups, so a
+# coincidental regular-season rematch between the same two teams never
+# gets mistaken for their real playoff meeting.
+POSTSEASON_TYPE = 3
 
 # Source of truth is Terraform/scheduler-nfl-train-player-prop-model.tf's
 # nfl_player_prop_stats map -- duplicated here as a plain list (not read
@@ -249,7 +258,223 @@ def _leaderboards(storage: FeatureStorage, s3, model_cache: dict, season_inputs:
     return leaderboards
 
 
-def build_season_projection(storage: FeatureStorage, s3) -> dict:
+def _real_postseason_matchups(storage: FeatureStorage, current_season: int | None) -> dict[frozenset, dict]:
+    """{frozenset({home_id, away_id}): event} for every real postseason
+    game (season_type == POSTSEASON_TYPE) this season, scheduled or
+    completed -- _resolve_matchup checks here before falling back to the
+    model's own deterministic pick for a bracket slot.
+
+    get_all_events has no "every status at once" option (its own status
+    argument defaults to "completed" only, see feature_storage.py) --
+    fetches "scheduled" and "completed" separately and merges, same two
+    calls _season_standings_inputs already makes for its own (differently
+    filtered -- no season_type check there) scheduled/completed lists.
+    """
+    result: dict[frozenset, dict] = {}
+    for status in ("scheduled", "completed"):
+        for event in storage.get_all_events(SPORT, status=status):
+            if event.get("season") != current_season or event.get("season_type") != POSTSEASON_TYPE:
+                continue
+            home_away = _home_and_away(event)
+            if home_away is None:
+                continue
+            result[frozenset(home_away)] = event
+    return result
+
+
+def _logged_win_probability(predictions_table, event_key_value: str) -> dict | None:
+    """This event's own logged win-probability prediction -- the audit
+    trail predict_event's own record_prediction call already wrote, if
+    anyone's ever requested a prediction for it. None otherwise, same
+    "read the audit trail, never recompute" rule library/serving/
+    nfl_reads.py's own _prediction_comparison follows (recomputing after
+    the fact would build live features that may already include this
+    very game's own now-normalized result)."""
+    rows = predictions_table.query(Key("event_key").eq(event_key_value))
+    row = next((r for r in rows if r["model_key"].startswith(f"MODEL#{WIN_PROBABILITY_MODEL}#")), None)
+    return row["predicted_value"] if row else None
+
+
+def _resolve_matchup(
+    team_a: str, team_b: str, seed_a: int | None, seed_b: int | None,
+    real_matchups: dict[frozenset, dict], storage: FeatureStorage, s3, predictions_table,
+    current_ratings: dict[str, float], home_advantage: float,
+) -> dict:
+    """Resolves one bracket slot into a display row -- the 3-state design
+    from the approved plan: (1) no real postseason game exists yet for
+    this pair -- the model's own deterministic pick (project_matchup,
+    "status": "projected"); (2) a real game exists and is completed --
+    the actual result plus whatever was originally predicted for it, if
+    anyone ever requested one ("status": "final"); (3) a real game
+    exists, not yet played -- its live prediction, computed on the spot
+    right here (in-process -- this Lambda already holds storage/s3/
+    predictions_table, no self-invoke needed, same
+    event_prediction.compute_and_cache_event predict-read's own cache-
+    miss path calls) if nobody's viewed it yet ("status": "scheduled").
+
+    Whichever team this returns as "predicted_winner" (real or projected)
+    is what the CALLER advances to the next round's slot -- see
+    _bracket_payload's own round-by-round loop -- so the bracket
+    self-corrects as real results arrive, with no separate "which round
+    is real yet" state to track.
+    """
+    real_event = real_matchups.get(frozenset((team_a, team_b)))
+    if real_event is None:
+        matchup = season_simulation.project_matchup(team_a, team_b, seed_a, seed_b, current_ratings, home_advantage)
+        matchup["status"] = "projected"
+        return matchup
+
+    event_key_value = real_event["event_key"]
+    home_id, away_id = _home_and_away(real_event)
+
+    if real_event.get("status") == "completed":
+        actual = _actual_result(real_event)
+        logged = _logged_win_probability(predictions_table, event_key_value)
+        predicted_winner = win_probability = None
+        if logged is not None:
+            probability = logged["home_win_probability"]
+            predicted_winner = home_id if probability >= 0.5 else away_id
+            win_probability = probability if predicted_winner == home_id else 1 - probability
+        return {
+            "status": "final",
+            "team_a": home_id, "team_b": away_id, "seed_a": seed_a, "seed_b": seed_b,
+            "predicted_winner": predicted_winner, "win_probability": win_probability,
+            "actual_winner": home_id if actual["home_won"] else away_id,
+            "actual_home_score": actual["home_score"], "actual_away_score": actual["away_score"],
+        }
+
+    logged = _logged_win_probability(predictions_table, event_key_value)
+    if logged is None:
+        try:
+            event_prediction.compute_and_cache_event(storage, s3, predictions_table, real_event["event_id"])
+            logged = _logged_win_probability(predictions_table, event_key_value)
+        except Exception:
+            logger.exception("Failed computing a live prediction for bracket game %s", event_key_value)
+
+    predicted_winner = win_probability = None
+    if logged is not None:
+        probability = logged["home_win_probability"]
+        predicted_winner = home_id if probability >= 0.5 else away_id
+        win_probability = probability if predicted_winner == home_id else 1 - probability
+
+    return {
+        "status": "scheduled",
+        "team_a": home_id, "team_b": away_id, "seed_a": seed_a, "seed_b": seed_b,
+        "predicted_winner": predicted_winner, "win_probability": win_probability,
+    }
+
+
+def _project_bracket_round(
+    round_name: str, pairs: list[tuple[str, str, int | None, int | None]],
+    real_matchups: dict[frozenset, dict], storage: FeatureStorage, s3, predictions_table,
+    current_ratings: dict[str, float], home_advantage: float,
+) -> tuple[dict, list[tuple[str, int | None]]]:
+    """Resolves one round's worth of (team_a, team_b, seed_a, seed_b)
+    slots via _resolve_matchup, returning that round's display dict
+    alongside [(advancing_team, its_own_seed), ...] for the next round to
+    consume -- the advancing team's seed carries forward unchanged (a
+    team doesn't get reseeded mid-run just because reality diverged from
+    projection for someone else's game)."""
+    matchups = []
+    advancing = []
+    for team_a, team_b, seed_a, seed_b in pairs:
+        matchup = _resolve_matchup(
+            team_a, team_b, seed_a, seed_b, real_matchups, storage, s3, predictions_table,
+            current_ratings, home_advantage,
+        )
+        matchups.append(matchup)
+        winner = matchup["predicted_winner"] if matchup["status"] != "final" else matchup["actual_winner"]
+        winner_seed = seed_a if winner == team_a else seed_b
+        advancing.append((winner, winner_seed))
+    return {"round": round_name, "matchups": matchups}, advancing
+
+
+def _project_conference_bracket(
+    seeds: list[str], real_matchups: dict[frozenset, dict], storage: FeatureStorage, s3, predictions_table,
+    current_ratings: dict[str, float], home_advantage: float,
+) -> tuple[list[dict], str]:
+    """Same reseeded 7-team topology as season_simulation.project_bracket,
+    but each matchup goes through _resolve_matchup's real-vs-projected
+    reconciliation instead of a pure Elo pick -- see that function's own
+    docstring. Returns (rounds, champion)."""
+    seed_number = {team_id: rank + 1 for rank, team_id in enumerate(seeds)}
+    one, two, three, four, five, six, seven = seeds
+
+    wild_card_round, wild_card_advancing = _project_bracket_round(
+        "Wild Card",
+        [(a, b, seed_number[a], seed_number[b]) for a, b in ((two, seven), (three, six), (four, five))],
+        real_matchups, storage, s3, predictions_table, current_ratings, home_advantage,
+    )
+
+    divisional_field = sorted(wild_card_advancing, key=lambda pair: pair[1])
+    lowest_remaining = divisional_field[-1]
+    other_two = divisional_field[:-1]
+    divisional_round, divisional_advancing = _project_bracket_round(
+        "Divisional",
+        [
+            (one, lowest_remaining[0], seed_number[one], lowest_remaining[1]),
+            (other_two[0][0], other_two[1][0], other_two[0][1], other_two[1][1]),
+        ],
+        real_matchups, storage, s3, predictions_table, current_ratings, home_advantage,
+    )
+
+    championship_round, championship_advancing = _project_bracket_round(
+        "Conference Championship",
+        [(divisional_advancing[0][0], divisional_advancing[1][0], divisional_advancing[0][1], divisional_advancing[1][1])],
+        real_matchups, storage, s3, predictions_table, current_ratings, home_advantage,
+    )
+
+    return [wild_card_round, divisional_round, championship_round], championship_advancing[0][0]
+
+
+def _bracket_payload(
+    storage: FeatureStorage, s3, predictions_table, season_inputs: dict, simulation: dict[str, dict],
+) -> dict:
+    """Builds the full playoff bracket (both conferences + Super Bowl),
+    reconciled against real postseason results as they exist right now --
+    see _resolve_matchup's own docstring for the 3-state design. Reseeds
+    from REAL wins/point-differential once the regular season is actually
+    over (season_inputs["remaining_games"] empty); otherwise from
+    simulate_season's own projected_wins (today's best guess), same
+    real-vs-projected split applied to seeding as to everything else
+    here."""
+    regular_season_over = not season_inputs["remaining_games"]
+    if regular_season_over:
+        wins, point_differential = season_inputs["wins"], season_inputs["point_differential"]
+    else:
+        wins = {team_id: projection["projected_wins"] for team_id, projection in simulation.items()}
+        point_differential = season_inputs["point_differential"]
+
+    conferences = season_simulation._divisions_by_conference()
+    current_season = season_inputs["current_season"]
+    real_matchups = _real_postseason_matchups(storage, current_season)
+
+    conference_results: dict[str, list[dict]] = {}
+    champions: dict[str, str] = {}
+    for conference, division_teams in conferences.items():
+        seeds, _ = season_simulation._seed_conference(division_teams, wins, point_differential)
+        rounds, champion = _project_conference_bracket(
+            seeds, real_matchups, storage, s3, predictions_table, season_inputs["current_ratings"],
+            season_simulation.DEFAULT_HOME_ADVANTAGE,
+        )
+        conference_results[conference] = rounds
+        champions[conference] = champion
+
+    (conference_a, champion_a), (conference_b, champion_b) = champions.items()
+    super_bowl, super_bowl_advancing = _project_bracket_round(
+        "Super Bowl", [(champion_a, champion_b, None, None)],
+        real_matchups, storage, s3, predictions_table, season_inputs["current_ratings"], 0.0,
+    )
+
+    bracket = {
+        "conferences": conference_results,
+        "super_bowl": super_bowl["matchups"][0],
+        "champion": super_bowl_advancing[0][0],
+    }
+    return enrich_bracket_team_names(storage, SPORT, bracket)
+
+
+def build_season_projection(storage: FeatureStorage, s3, predictions_table) -> dict:
     model_cache: dict = {}
 
     season_inputs = _season_standings_inputs(storage)
@@ -285,16 +510,23 @@ def build_season_projection(storage: FeatureStorage, s3) -> dict:
         logger.exception("Failed to build season leaderboards")
         leaderboards = None
 
+    try:
+        bracket = _bracket_payload(storage, s3, predictions_table, season_inputs, simulation)
+    except Exception:
+        logger.exception("Failed to build season bracket")
+        bracket = None
+
     return {
         "sport": SPORT,
         "season": season_inputs["current_season"],
         "standings": standings,
         "leaderboards": leaderboards,
+        "bracket": bracket,
         "generated_at": datetime.now(timezone.utc).isoformat(),
     }
 
 
-def run_scheduled(storage: FeatureStorage, model_bucket) -> dict:
+def run_scheduled(storage: FeatureStorage, model_bucket, predictions_table) -> dict:
     """Entry point for Terraform/scheduler-nfl-season-projection.tf's
     weekly EventBridge Scheduler -> Lambda direct invoke -- computes
     build_season_projection() once and writes it to S3 instead of
@@ -302,8 +534,13 @@ def run_scheduled(storage: FeatureStorage, model_bucket) -> dict:
     handler.py's API-Gateway-triggered routes use: there's no HTTP caller
     waiting on a status code here, so a real failure should propagate and
     show up as a Lambda error/CloudWatch alarm, not get silently reshaped
-    into a 500 nobody reads."""
-    result = build_season_projection(storage, model_bucket)
+    into a 500 nobody reads.
+
+    predictions_table is new (2026-08-16, the bracket feature) --
+    _bracket_payload reads/writes real postseason games' logged
+    predictions through it, same table event_prediction.py's own
+    compute_and_cache_event already uses."""
+    result = build_season_projection(storage, model_bucket, predictions_table)
     model_bucket.put_json(season_projection_key(SPORT), result)
     logger.info("Wrote season projection for %s to S3", SPORT)
     return {"status": "ok"}

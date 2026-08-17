@@ -1,13 +1,15 @@
 """
 Unit tests for library.serving.common -- enrich_participants (shared by
-nfl_reads.py and ncaafb_reads.py's own list_events) and
-enrich_team_standings (shared by both sports' season_projection.py). See
-their respective test files for the through-list_events/
-through-build_season_projection integration.
+nfl_reads.py and ncaafb_reads.py's own list_events), enrich_team_standings
+(shared by every sport's season_projection.py), and
+enrich_bracket_team_names (shared by every sport's own _bracket_payload,
+added 2026-08-16 for the playoff-bracket feature). See their respective
+test files for the through-list_events/through-build_season_projection
+integration.
 """
 from unittest.mock import MagicMock
 
-from library.serving.common import enrich_participants, enrich_team_standings
+from library.serving.common import enrich_bracket_team_names, enrich_participants, enrich_team_standings
 
 
 class TestEnrichParticipants:
@@ -100,3 +102,70 @@ class TestEnrichTeamStandings:
 
     def test_empty_list_passes_through_unchanged(self):
         assert enrich_team_standings(MagicMock(), "nfl", []) == []
+
+
+class TestEnrichBracketTeamNames:
+    def _storage(self):
+        storage = MagicMock()
+        storage.get_entity.side_effect = lambda sport, team_id: {
+            "12": {"name": "Chiefs", "metadata": {"abbreviation": "KC"}},
+            "24": {"name": "Chargers", "metadata": {"abbreviation": "LAC"}},
+        }.get(team_id)
+        return storage
+
+    def test_collects_team_ids_from_conference_split_rounds(self):
+        bracket = {
+            "conferences": {
+                "AFC": [{"round": "Wild Card", "matchups": [{"team_a": "12", "team_b": "24"}]}],
+            },
+        }
+
+        result = enrich_bracket_team_names(self._storage(), "nfl", bracket)
+
+        assert result["team_names"]["12"] == {"name": "Chiefs", "abbreviation": "KC"}
+        assert result["team_names"]["24"] == {"name": "Chargers", "abbreviation": "LAC"}
+
+    def test_collects_team_ids_from_a_flat_rounds_list(self):
+        bracket = {"rounds": [{"round": "Round of 12", "matchups": [{"team_a": "12", "team_b": "24"}]}]}
+
+        result = enrich_bracket_team_names(self._storage(), "ncaafb", bracket)
+
+        assert set(result["team_names"]) == {"12", "24"}
+
+    def test_collects_team_ids_from_the_final_matchup(self):
+        bracket = {"conferences": {}, "super_bowl": {"team_a": "12", "team_b": "24"}}
+
+        result = enrich_bracket_team_names(self._storage(), "nfl", bracket)
+
+        assert set(result["team_names"]) == {"12", "24"}
+
+    def test_a_team_id_appearing_in_multiple_matchups_is_only_looked_up_once(self):
+        bracket = {
+            "conferences": {
+                "AFC": [
+                    {"round": "Wild Card", "matchups": [{"team_a": "12", "team_b": "24"}]},
+                    {"round": "Divisional", "matchups": [{"team_a": "12", "team_b": "99"}]},
+                ],
+            },
+        }
+        storage = self._storage()
+
+        enrich_bracket_team_names(storage, "nfl", bracket)
+
+        assert storage.get_entity.call_count == 3  # 12, 24, 99 -- not 4
+
+    def test_missing_entity_degrades_to_none_fields_not_an_error(self):
+        storage = MagicMock()
+        storage.get_entity.return_value = None
+        bracket = {"conferences": {}, "rounds": [{"round": "R1", "matchups": [{"team_a": "1", "team_b": "2"}]}]}
+
+        result = enrich_bracket_team_names(storage, "ncaafb", bracket)
+
+        assert result["team_names"]["1"] == {"name": None, "abbreviation": None}
+
+    def test_the_original_bracket_fields_are_preserved(self):
+        bracket = {"conferences": {}, "champion": "12"}
+
+        result = enrich_bracket_team_names(self._storage(), "nfl", bracket)
+
+        assert result["champion"] == "12"

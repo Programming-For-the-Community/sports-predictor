@@ -178,6 +178,8 @@ class TestScheduledSeasonProjection:
     def test_writes_the_season_projection_to_s3_under_the_expected_key(self):
         ncaafb_predict._storage = MagicMock()
         ncaafb_predict._model_bucket = MagicMock()
+        ncaafb_predict._predictions_table = MagicMock()
+        ncaafb_predict._predictions_table.query.return_value = []
         ncaafb_predict._storage.get_all_events.side_effect = lambda sport, status: {
             "completed": [_completed_event("E1", 2025, "12", "24", 27, 20)],
             "scheduled": [],
@@ -201,6 +203,8 @@ class TestScheduledSeasonProjection:
     def test_fewer_than_twelve_tracked_teams_skips_simulation_but_still_writes_standings(self):
         ncaafb_predict._storage = MagicMock()
         ncaafb_predict._model_bucket = MagicMock()
+        ncaafb_predict._predictions_table = MagicMock()
+        ncaafb_predict._predictions_table.query.return_value = []
         ncaafb_predict._storage.get_all_events.side_effect = lambda sport, status: {
             "completed": [_completed_event("E1", 2025, "12", "24", 27, 20)],
             "scheduled": [],
@@ -220,6 +224,8 @@ class TestScheduledSeasonProjection:
     def test_no_promoted_ranking_model_skips_simulation_but_still_writes_standings(self):
         ncaafb_predict._storage = MagicMock()
         ncaafb_predict._model_bucket = MagicMock()
+        ncaafb_predict._predictions_table = MagicMock()
+        ncaafb_predict._predictions_table.query.return_value = []
         ncaafb_predict._storage.get_all_events.side_effect = lambda sport, status: {
             "completed": self.TWELVE_TEAM_EVENTS,
             "scheduled": [],
@@ -235,6 +241,8 @@ class TestScheduledSeasonProjection:
     def test_simulation_runs_and_standings_include_projected_fields_when_enough_teams_are_tracked(self):
         ncaafb_predict._storage = MagicMock()
         ncaafb_predict._model_bucket = MagicMock()
+        ncaafb_predict._predictions_table = MagicMock()
+        ncaafb_predict._predictions_table.query.return_value = []
         ncaafb_predict._storage.get_all_events.side_effect = lambda sport, status: {
             "completed": self.TWELVE_TEAM_EVENTS,
             "scheduled": [],
@@ -268,6 +276,8 @@ class TestScheduledSeasonProjection:
         # rather than the whole invocation failing.
         ncaafb_predict._storage = MagicMock()
         ncaafb_predict._model_bucket = MagicMock()
+        ncaafb_predict._predictions_table = MagicMock()
+        ncaafb_predict._predictions_table.query.return_value = []
         ncaafb_predict._storage.get_all_events.side_effect = lambda sport, status: {
             "completed": self.TWELVE_TEAM_EVENTS,
             "scheduled": [],

@@ -96,6 +96,122 @@ def _simulate_bracket(seeds: list[str], ratings: dict[str, float], home_advantag
     return play(divisional_winners[0], divisional_winners[1])
 
 
+def project_matchup(
+    team_a: str, team_b: str, seed_a: int | None, seed_b: int | None,
+    ratings: dict[str, float], home_advantage: float,
+) -> dict:
+    """Deterministic single-matchup resolution -- no RNG, picks whichever
+    side has >= 50% win probability. When both seeds are known, the
+    better (numerically lower) seed always hosts, same convention as
+    every bracket's own reseeding rule; if either is None (e.g. the
+    Super Bowl, or season_projection.py resolving a real matchup with no
+    bracket-seed concept), team_a/team_b keep their given order and
+    home_advantage itself decides the game's home/neutral framing (pass
+    0.0 for a genuinely neutral-site game). Reused both by project_bracket
+    below (with real bracket seeds) and by season_projection.py's own
+    reconciliation (comparing a real team pair with no seed argument at
+    all) -- one shared implementation for both callers.
+
+    Returns {"team_a", "team_b", "seed_a", "seed_b", "predicted_winner",
+    "win_probability"} -- team_a/team_b reflect whichever side actually
+    ended up "home" above, and win_probability is always the WINNER's own
+    probability, not "team_a's", so the frontend can show "predicted_
+    winner, X% to win" without caring which side is nominally home.
+    """
+    if seed_a is not None and seed_b is not None and seed_b < seed_a:
+        team_a, team_b, seed_a, seed_b = team_b, team_a, seed_b, seed_a
+    rating_a = ratings.get(team_a, DEFAULT_STARTING_RATING)
+    rating_b = ratings.get(team_b, DEFAULT_STARTING_RATING)
+    probability_a = expected_score(rating_a, rating_b, home_advantage)
+    winner = team_a if probability_a >= 0.5 else team_b
+    return {
+        "team_a": team_a,
+        "team_b": team_b,
+        "seed_a": seed_a,
+        "seed_b": seed_b,
+        "predicted_winner": winner,
+        "win_probability": probability_a if winner == team_a else 1 - probability_a,
+    }
+
+
+def project_bracket(seeds: list[str], ratings: dict[str, float], home_advantage: float = DEFAULT_HOME_ADVANTAGE) -> dict:
+    """Deterministic sibling of _simulate_bracket -- same reseeded 7-team
+    topology (seed 1 bye; 2v7/3v6/4v5 wild card; seed 1 vs. lowest
+    remaining seed + the other two survivors in the divisional round;
+    winners meet for the conference title), but instead of rolling one
+    random path and returning just the champion, picks the higher-
+    win-probability side every matchup and returns the FULL round-by-
+    round path -- used to render a single "most likely" bracket on the
+    season tab, not aggregated into probabilities the way simulate_season
+    already is. See season_projection.py's own _bracket_payload for how
+    this gets reconciled against real postseason results as they happen.
+
+    Returns {"rounds": [{"round": "Wild Card", "matchups": [...]}, ...],
+    "champion": team_id}.
+    """
+    seed_number = {team_id: rank + 1 for rank, team_id in enumerate(seeds)}
+    seed_rank = {team_id: rank for rank, team_id in enumerate(seeds)}
+
+    def play(team_a: str, team_b: str) -> tuple[str, dict]:
+        matchup = project_matchup(team_a, team_b, seed_number[team_a], seed_number[team_b], ratings, home_advantage)
+        return matchup["predicted_winner"], matchup
+
+    one, two, three, four, five, six, seven = seeds
+    wild_card_winners = []
+    wild_card_matchups = []
+    for a, b in ((two, seven), (three, six), (four, five)):
+        winner, matchup = play(a, b)
+        wild_card_winners.append(winner)
+        wild_card_matchups.append(matchup)
+
+    divisional_field = sorted(wild_card_winners, key=lambda team_id: seed_rank[team_id])
+    lowest_remaining_seed = divisional_field[-1]
+    other_two = divisional_field[:-1]
+    divisional_winners = []
+    divisional_matchups = []
+    for a, b in ((one, lowest_remaining_seed), (other_two[0], other_two[1])):
+        winner, matchup = play(a, b)
+        divisional_winners.append(winner)
+        divisional_matchups.append(matchup)
+
+    champion, championship_matchup = play(divisional_winners[0], divisional_winners[1])
+
+    return {
+        "rounds": [
+            {"round": "Wild Card", "matchups": wild_card_matchups},
+            {"round": "Divisional", "matchups": divisional_matchups},
+            {"round": "Conference Championship", "matchups": [championship_matchup]},
+        ],
+        "champion": champion,
+    }
+
+
+def project_full_bracket(
+    conference_seeds: dict[str, list[str]], ratings: dict[str, float], home_advantage: float = DEFAULT_HOME_ADVANTAGE,
+) -> dict:
+    """Both conferences' own project_bracket walk, plus a deterministic
+    Super Bowl pick -- unlike simulate_season's own Super Bowl coinflip
+    (no real home side, so a Monte Carlo path just flips a coin), a
+    single "most likely" bracket needs an actual pick: rating-based win
+    probability at neutral-site odds (home_advantage=0.0 via
+    project_matchup's own no-seeds framing), favoring whichever
+    conference champion actually rates higher instead of an arbitrary
+    tiebreak. seed_a/seed_b are None on the Super Bowl matchup row -- the
+    two champions' conference seeds aren't comparable on one shared
+    scale, so there's nothing meaningful to show there."""
+    conference_results = {
+        conference: project_bracket(seeds, ratings, home_advantage) for conference, seeds in conference_seeds.items()
+    }
+    (conference_a, result_a), (conference_b, result_b) = conference_results.items()
+    super_bowl_matchup = project_matchup(result_a["champion"], result_b["champion"], None, None, ratings, 0.0)
+
+    return {
+        "conferences": {conference: result["rounds"] for conference, result in conference_results.items()},
+        "super_bowl": super_bowl_matchup,
+        "champion": super_bowl_matchup["predicted_winner"],
+    }
+
+
 def simulate_season(
     current_wins: dict[str, int],
     current_losses: dict[str, int],

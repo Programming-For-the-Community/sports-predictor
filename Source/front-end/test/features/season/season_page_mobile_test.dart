@@ -87,6 +87,59 @@ final _nbaCupSeason = SeasonProjection(
   }),
 );
 
+// Full 3-round conference-split bracket plus a championship card -- the
+// widest content this page has (multiple horizontally-scrolling round
+// columns stacked per conference), same "realistic, not a trivial
+// placeholder" philosophy as _season/_nbaCupSeason above.
+final _bracketSeason = SeasonProjection(
+  sport: 'nfl',
+  season: 2026,
+  standings: [_standing('12', 'AFC West')],
+  leaderboards: null,
+  bracket: const BracketProjection(
+    conferences: {
+      'AFC': [
+        BracketRound(round: 'Wild Card', matchups: [
+          BracketMatchup(teamA: '12', teamB: '13', seedA: 2, seedB: 7, status: 'projected', predictedWinner: '12', winProbability: 0.62),
+          BracketMatchup(teamA: '2', teamB: '17', seedA: 3, seedB: 6, status: 'scheduled', predictedWinner: '2', winProbability: 0.58),
+          BracketMatchup(
+            teamA: '4', teamB: '5', seedA: 4, seedB: 5, status: 'final',
+            predictedWinner: '4', winProbability: 0.51, actualWinner: '5', actualHomeScore: 20, actualAwayScore: 24,
+          ),
+        ]),
+        BracketRound(round: 'Divisional', matchups: [
+          BracketMatchup(teamA: '1', teamB: '12', seedA: 1, seedB: 2, status: 'projected', predictedWinner: '1', winProbability: 0.55),
+          BracketMatchup(teamA: '2', teamB: '5', seedA: 3, seedB: 5, status: 'projected', predictedWinner: '2', winProbability: 0.6),
+        ]),
+        BracketRound(round: 'Conference Championship', matchups: [
+          BracketMatchup(teamA: '1', teamB: '2', seedA: 1, seedB: 3, status: 'projected', predictedWinner: '1', winProbability: 0.53),
+        ]),
+      ],
+      'NFC': [
+        BracketRound(round: 'Wild Card', matchups: [
+          BracketMatchup(teamA: '19', teamB: '24', seedA: 2, seedB: 7, status: 'projected', predictedWinner: '19', winProbability: 0.55),
+          BracketMatchup(teamA: '21', teamB: '25', seedA: 3, seedB: 6, status: 'projected', predictedWinner: '21', winProbability: 0.52),
+          BracketMatchup(teamA: '18', teamB: '20', seedA: 4, seedB: 5, status: 'projected', predictedWinner: '18', winProbability: 0.5),
+        ]),
+        BracketRound(round: 'Divisional', matchups: [
+          BracketMatchup(teamA: '22', teamB: '19', seedA: 1, seedB: 2, status: 'projected', predictedWinner: '22', winProbability: 0.51),
+          BracketMatchup(teamA: '21', teamB: '18', seedA: 3, seedB: 4, status: 'projected', predictedWinner: '21', winProbability: 0.5),
+        ]),
+        BracketRound(round: 'Conference Championship', matchups: [
+          BracketMatchup(teamA: '22', teamB: '21', seedA: 1, seedB: 3, status: 'projected', predictedWinner: '22', winProbability: 0.52),
+        ]),
+      ],
+    },
+    rounds: null,
+    teamNames: {
+      '1': BracketTeamName(name: 'Baltimore Ravens', abbreviation: 'BAL'),
+      '22': BracketTeamName(name: 'Arizona Cardinals', abbreviation: 'ARI'),
+    },
+    finalMatchup: BracketMatchup(teamA: '1', teamB: '22', status: 'projected', predictedWinner: '1', winProbability: 0.51),
+    champion: '1',
+  ),
+);
+
 void main() {
   for (final width in mobileViewportWidths) {
     testWidgets('standings tab renders with no overflow at ${width}px wide', (tester) async {
@@ -134,6 +187,23 @@ void main() {
 
       await tester.ensureVisible(find.text('NBA Cup'));
       await tester.tap(find.text('NBA Cup'));
+      await tester.pumpAndSettle();
+
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('Playoff Bracket tab renders a full 2-conference, 3-round bracket with no overflow at ${width}px wide', (tester) async {
+      await pumpAtWidth(
+        tester,
+        width,
+        ProviderScope(
+          overrides: [seasonProjectionProvider.overrideWith((ref, sport) async => _bracketSeason)],
+          child: const MaterialApp(home: Scaffold(body: SeasonPage(sportId: 'nfl'))),
+        ),
+      );
+
+      await tester.ensureVisible(find.text('Playoff Bracket'));
+      await tester.tap(find.text('Playoff Bracket'));
       await tester.pumpAndSettle();
 
       expect(tester.takeException(), isNull);

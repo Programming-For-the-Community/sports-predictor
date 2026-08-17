@@ -51,7 +51,7 @@ def _get_predictions_table() -> DynamoDBTable:
 
 def lambda_handler(event, context):
     if event.get("detail-type") == "ScheduledSeasonProjection":
-        return season_projection.run_scheduled(_get_storage(), _get_model_bucket())
+        return season_projection.run_scheduled(_get_storage(), _get_model_bucket(), _get_predictions_table())
 
     if event.get("detail-type") == "ComputeAndCachePrediction":
         if event["route"] == "event":

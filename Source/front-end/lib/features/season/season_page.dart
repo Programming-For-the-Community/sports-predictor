@@ -81,20 +81,19 @@ class _SeasonPageState extends ConsumerState<SeasonPage> {
               style: AppTextStyles.pageH1(),
             ),
             const SizedBox(height: 20),
-            // Player Prop Leaders/NBA Cup only exist as toggle options
-            // when the backend actually sent that block -- NCAAFB's own
-            // season simulation is team-outcomes-only, no player-level
-            // simulation and no in-season tournament (see aws-lambdas/
-            // ncaafb/predict/season_projection.py's own docstring), so
-            // both `season.leaderboards` and `season.cup` are always null
-            // there and this whole toggle collapses to just the standings
-            // section, unchanged from before this toggle existed. NBA's
-            // own `season.cup` is null too whenever the current season's
-            // Cup groups haven't been added to CUP_GROUPS yet (see
-            // CupProjection's own doc comment) -- same best-effort
-            // treatment as leaderboards.
-            if (season.leaderboards != null || season.cup != null) ...[
-              // Standings/player props/NBA Cup each stand alone (a
+            // Player Prop Leaders/NBA Cup/Bracket only exist as toggle
+            // options when the backend actually sent that block --
+            // NCAAFB's own season simulation is team-outcomes-only, no
+            // player-level simulation and no in-season tournament (see
+            // aws-lambdas/ncaafb/predict/season_projection.py's own
+            // docstring), so `season.leaderboards`/`season.cup`/
+            // `season.cupBracket` are always null there. `season.bracket`
+            // is null for every sport without an elimination-bracket
+            // concept (NCAA MBB/PGA/F1, not onboarded/not applicable) and,
+            // same best-effort convention as `cup`, whenever building it
+            // failed for a sport that normally has one.
+            if (season.leaderboards != null || season.cup != null || season.bracket != null) ...[
+              // Standings/player props/NBA Cup/Bracket each stand alone (a
               // toggle, not all stacked on one page) -- each is already a
               // tall multi-column section on its own, and stacking them
               // turns this into a very long scroll for no reason once a
@@ -127,6 +126,22 @@ class _SeasonPageState extends ConsumerState<SeasonPage> {
                         onTap: () => setState(() => _tab = 'cup'),
                       ),
                     ],
+                    if (season.bracket != null) ...[
+                      const SizedBox(width: 8),
+                      _StatusToggle(
+                        label: 'Playoff Bracket',
+                        selected: _tab == 'bracket',
+                        onTap: () => setState(() => _tab = 'bracket'),
+                      ),
+                    ],
+                    if (season.cupBracket != null) ...[
+                      const SizedBox(width: 8),
+                      _StatusToggle(
+                        label: 'NBA Cup Bracket',
+                        selected: _tab == 'cup_bracket',
+                        onTap: () => setState(() => _tab = 'cup_bracket'),
+                      ),
+                    ],
                   ],
                 ),
               ),
@@ -136,6 +151,10 @@ class _SeasonPageState extends ConsumerState<SeasonPage> {
               _Leaderboards(leaderboards: season.leaderboards)
             else if (_tab == 'cup' && season.cup != null)
               _CupSection(sport: season.sport, cup: season.cup!)
+            else if (_tab == 'bracket' && season.bracket != null)
+              _BracketSection(sport: season.sport, bracket: season.bracket!)
+            else if (_tab == 'cup_bracket' && season.cupBracket != null)
+              _BracketSection(sport: season.sport, bracket: season.cupBracket!)
             else ...[
               // Only shown once there's more than one conference/division
               // to filter -- a single-conference standings list (or NFL's
@@ -616,6 +635,224 @@ class _CupTeamRow extends StatelessWidget {
         ),
         Expanded(flex: 2, child: _PercentText(team.knockoutProbability)),
         Expanded(flex: 2, child: _PercentText(team.championProbability)),
+      ],
+    );
+  }
+}
+
+/// Playoff/Cup-knockout bracket -- a simple sequential row of round
+/// columns per conference (horizontally scrollable), not a converging
+/// dual-bracket graphic. Same "don't over-engineer the visual" approach
+/// _CupSection's own plain group cards already take. Conference-split
+/// sports (NFL/NBA -- bracket.conferences non-empty) get one round-row
+/// per conference stacked vertically, then the cross-conference final as
+/// its own small card; a flat-bracket sport (NCAAFB -- bracket.rounds
+/// non-null) gets just one round-row, its own championship already the
+/// last column in it.
+class _BracketSection extends StatelessWidget {
+  const _BracketSection({required this.sport, required this.bracket});
+
+  final String sport;
+  final BracketProjection bracket;
+
+  @override
+  Widget build(BuildContext context) {
+    final flatRounds = bracket.rounds;
+    if (flatRounds != null) {
+      return _BracketRoundsRow(sport: sport, rounds: flatRounds, teamNames: bracket.teamNames);
+    }
+
+    final conferenceNames = bracket.conferences.keys.toList()..sort();
+    final finalMatchup = bracket.finalMatchup;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        for (final conference in conferenceNames) ...[
+          Padding(
+            padding: const EdgeInsets.only(bottom: 8),
+            child: Text(conference.toUpperCase(), style: AppTextStyles.microLabel(color: AppColors.cyan)),
+          ),
+          _BracketRoundsRow(sport: sport, rounds: bracket.conferences[conference]!, teamNames: bracket.teamNames),
+          const SizedBox(height: 20),
+        ],
+        if (finalMatchup != null) ...[
+          Text('CHAMPIONSHIP', style: AppTextStyles.microLabel(color: AppColors.cyan)),
+          const SizedBox(height: 8),
+          SizedBox(
+            width: 240,
+            child: _BracketMatchupCard(sport: sport, matchup: finalMatchup, teamNames: bracket.teamNames),
+          ),
+        ],
+      ],
+    );
+  }
+}
+
+class _BracketRoundsRow extends StatelessWidget {
+  const _BracketRoundsRow({required this.sport, required this.rounds, required this.teamNames});
+
+  final String sport;
+  final List<BracketRound> rounds;
+  final Map<String, BracketTeamName> teamNames;
+
+  @override
+  Widget build(BuildContext context) {
+    return SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          for (final round in rounds) ...[
+            _BracketRoundColumn(sport: sport, round: round, teamNames: teamNames),
+            const SizedBox(width: 16),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+class _BracketRoundColumn extends StatelessWidget {
+  const _BracketRoundColumn({required this.sport, required this.round, required this.teamNames});
+
+  final String sport;
+  final BracketRound round;
+  final Map<String, BracketTeamName> teamNames;
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      width: 220,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(round.round.toUpperCase(), style: AppTextStyles.microLabel()),
+          const SizedBox(height: 8),
+          for (final matchup in round.matchups) ...[
+            _BracketMatchupCard(sport: sport, matchup: matchup, teamNames: teamNames),
+            const SizedBox(height: 12),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+class _BracketMatchupCard extends StatelessWidget {
+  const _BracketMatchupCard({required this.sport, required this.matchup, required this.teamNames});
+
+  final String sport;
+  final BracketMatchup matchup;
+  final Map<String, BracketTeamName> teamNames;
+
+  @override
+  Widget build(BuildContext context) {
+    final winner = matchup.isFinal ? matchup.actualWinner : matchup.predictedWinner;
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(12),
+        gradient: LinearGradient(begin: Alignment.topLeft, end: Alignment.bottomRight, colors: AppColors.surfaceGrad),
+        border: Border.all(color: AppColors.borderRaised),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          _BracketTeamRow(
+            sport: sport,
+            teamId: matchup.teamA,
+            seed: matchup.seedA,
+            teamNames: teamNames,
+            isWinner: winner == matchup.teamA,
+            score: matchup.isFinal ? matchup.actualHomeScore : null,
+          ),
+          const SizedBox(height: 4),
+          _BracketTeamRow(
+            sport: sport,
+            teamId: matchup.teamB,
+            seed: matchup.seedB,
+            teamNames: teamNames,
+            isWinner: winner == matchup.teamB,
+            score: matchup.isFinal ? matchup.actualAwayScore : null,
+          ),
+          const SizedBox(height: 6),
+          Text(_statusLabel(), style: AppTextStyles.microLabel(color: _statusColor()), overflow: TextOverflow.ellipsis),
+        ],
+      ),
+    );
+  }
+
+  String _teamLabel(String teamId) {
+    final info = teamNames[teamId];
+    return teamDisplayFor(sport, teamId, info?.abbreviation).abbreviation;
+  }
+
+  // "Projected"/"Scheduled"/"Final" -- the 3-state design from
+  // season_projection.py's own _resolve_matchup docstring, see
+  // BracketMatchup's own doc comment.
+  String _statusLabel() {
+    final winnerLabel = matchup.predictedWinner != null ? _teamLabel(matchup.predictedWinner!) : null;
+    switch (matchup.status) {
+      case 'final':
+        return 'FINAL';
+      case 'scheduled':
+        return matchup.winProbability != null && winnerLabel != null
+            ? '${(matchup.winProbability! * 100).round()}% $winnerLabel'
+            : 'PREDICTION PENDING';
+      default:
+        return matchup.winProbability != null && winnerLabel != null
+            ? 'PROJECTED — ${(matchup.winProbability! * 100).round()}% $winnerLabel'
+            : 'PROJECTED';
+    }
+  }
+
+  Color _statusColor() {
+    switch (matchup.status) {
+      case 'final':
+        return AppColors.cyan;
+      case 'scheduled':
+        return AppColors.ink;
+      default:
+        return AppColors.inkMute;
+    }
+  }
+}
+
+class _BracketTeamRow extends StatelessWidget {
+  const _BracketTeamRow({
+    required this.sport,
+    required this.teamId,
+    required this.seed,
+    required this.teamNames,
+    required this.isWinner,
+    this.score,
+  });
+
+  final String sport;
+  final String teamId;
+  final int? seed;
+  final Map<String, BracketTeamName> teamNames;
+  final bool isWinner;
+  final int? score;
+
+  @override
+  Widget build(BuildContext context) {
+    final info = teamDisplayFor(sport, teamId, teamNames[teamId]?.abbreviation);
+    return Row(
+      children: [
+        if (seed != null)
+          SizedBox(width: 20, child: Text('$seed', style: AppTextStyles.microLabel(color: AppColors.inkMute))),
+        TeamColorDot(color: info.primary),
+        if (info.primary != null) const SizedBox(width: 8),
+        Expanded(
+          child: Text(
+            info.abbreviation,
+            style: AppTextStyles.body(color: isWinner ? AppColors.ink : AppColors.inkSub),
+            overflow: TextOverflow.ellipsis,
+          ),
+        ),
+        if (score != null)
+          Text('$score', style: AppTextStyles.metricValue(color: isWinner ? AppColors.cyan : AppColors.inkMute)),
       ],
     );
   }
