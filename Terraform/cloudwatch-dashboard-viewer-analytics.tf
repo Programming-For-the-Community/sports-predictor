@@ -200,7 +200,11 @@ resource "aws_cloudwatch_dashboard" "viewer_analytics" {
         width  = 12
         height = 6
         properties = {
-          region = var.region
+          # us-east-1, not var.region -- cloudfront_edge_access_logs
+          # itself lives there (see cloudfront-standard-logging.tf's own
+          # comment on why a CloudWatch Logs delivery destination for
+          # CloudFront can't be cross-region the way S3 can).
+          region = "us-east-1"
           title  = "Blocked requests by country"
           view   = "bar"
           query  = <<-QUERY
@@ -218,7 +222,7 @@ resource "aws_cloudwatch_dashboard" "viewer_analytics" {
         width  = 12
         height = 6
         properties = {
-          region = var.region
+          region = "us-east-1" # see "Blocked requests by country" widget's own comment
           title  = "Blocked requests by attempted path"
           view   = "table"
           query  = <<-QUERY
@@ -237,7 +241,7 @@ resource "aws_cloudwatch_dashboard" "viewer_analytics" {
         width  = 24
         height = 8
         properties = {
-          region = var.region
+          region = "us-east-1" # see "Blocked requests by country" widget's own comment
           title  = "Recent blocked requests"
           view   = "table"
           query  = <<-QUERY

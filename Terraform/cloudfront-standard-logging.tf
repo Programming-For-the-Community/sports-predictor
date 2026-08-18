@@ -22,33 +22,55 @@
 # request. This is an architectural ceiling, not a cost tradeoff.
 #
 # Must run in us-east-1 regardless of var.region -- AWS's own docs for
-# this feature are explicit that the CloudWatch Logs Delivery API these
-# 3 resources wrap must be called against us-east-1 even when the
-# destination itself lives in another region (same requirement ACM
-# already has for a CloudFront-attached certificate, see acm.tf).
+# this feature say every one of these CloudWatch Logs Delivery API calls
+# must be made against us-east-1. That doc also shows a working S3 cross-
+# region example, which the destination log group itself was originally
+# read to permit here too -- confirmed WRONG by a real `terraform apply`:
+# PutDeliveryDestination 400'd with "Region from identity does not match
+# the Destination Resource ARN" when the log group lived in var.region
+# (us-east-2) while the API call ran in us-east-1. Unlike S3, a CloudWatch
+# Logs destination has to live in us-east-1 itself, so the log group is
+# pinned there too now (same requirement ACM already has for a
+# CloudFront-attached certificate, see acm.tf).
 #
-# Log group name deliberately lives under /aws/vendedlogs/ -- that's the
-# exact prefix iam-stepfunctions-orchestrator.tf's aws_cloudwatch_log_
-# resource_policy.vended_logs already grants "delivery.logs.amazonaws.com"
-# CreateLogStream/PutLogEvents on, account-wide. Reusing that existing
-# policy instead of writing a second one -- CloudWatch Logs resource
-# policies are account-scoped and capped at 10, so prefix reuse across
-# unrelated delivery sources is the intended pattern, not a shortcut.
-# UNVERIFIED: that policy was written for the classic vended-logs
-# mechanism (VPC Flow Logs/Step Functions); this feature is documented as
-# using the same underlying "Logs Delivery" resource-policy model (same
-# delivery.logs.amazonaws.com principal, same doc section AWS's CloudFront
-# guide links to), but this hasn't been confirmed against a real `terraform
-# apply` -- check the CloudFront console's Logging tab shows "Enabled"
-# after applying, per AWS's own documented verification step.
+# Log group name lives under /aws/vendedlogs/, same prefix convention as
+# iam-stepfunctions-orchestrator.tf's aws_cloudwatch_log_resource_policy.
+# vended_logs -- but that policy's own Resource ARN is hardcoded to
+# var.region (us-east-2) and CloudWatch Logs resource policies are
+# per-region, so it can't cover a us-east-1 log group. A second, us-east-1
+# copy of that same policy is defined below instead of trying to reuse it.
 
 resource "aws_cloudwatch_log_group" "cloudfront_edge_access_logs" {
+  provider = aws.us_east_1
+
   name              = "/aws/vendedlogs/${var.project}-cloudfront-edge-access"
   retention_in_days = 30
 
   tags = merge(local.common_tags, {
     Sport     = "shared"
     Component = "frontend"
+  })
+}
+
+# us-east-1-scoped twin of iam-stepfunctions-orchestrator.tf's
+# vended_logs policy -- CloudWatch Logs resource policies are per-region,
+# so the existing one (created against var.region) has no effect here.
+# Capped at 10 per account per region same as that file's own comment
+# notes; us-east-1 had none before this, so headroom isn't a concern.
+resource "aws_cloudwatch_log_resource_policy" "vended_logs_us_east_1" {
+  provider = aws.us_east_1
+
+  policy_name = "${var.project}-vended-logs-us-east-1"
+  policy_document = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect    = "Allow"
+        Principal = { Service = "delivery.logs.amazonaws.com" }
+        Action    = ["logs:CreateLogStream", "logs:PutLogEvents"]
+        Resource  = "arn:aws:logs:us-east-1:${var.account_id}:log-group:/aws/vendedlogs/*:*"
+      }
+    ]
   })
 }
 
@@ -73,6 +95,14 @@ resource "aws_cloudwatch_log_delivery_destination" "cloudfront_edge_access_logs"
 
 resource "aws_cloudwatch_log_delivery" "cloudfront_edge_access_logs" {
   provider = aws.us_east_1
+
+  # Explicit, since nothing else in this resource's own arguments
+  # references vended_logs_us_east_1 -- without it, Terraform has no
+  # reason to create the resource policy before the delivery, and
+  # CreateDelivery would fail the same way PutDeliveryDestination did
+  # before the region fix above, just for a permissions reason instead of
+  # a region one.
+  depends_on = [aws_cloudwatch_log_resource_policy.vended_logs_us_east_1]
 
   delivery_source_name     = aws_cloudwatch_log_delivery_source.cloudfront_edge_access_logs.name
   delivery_destination_arn = aws_cloudwatch_log_delivery_destination.cloudfront_edge_access_logs.arn
