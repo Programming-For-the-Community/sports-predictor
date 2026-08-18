@@ -174,6 +174,81 @@ resource "aws_cloudwatch_dashboard" "viewer_analytics" {
           QUERY
         }
       },
+      # Everything below is sourced from CloudFront's own edge logs
+      # (cloudfront-standard-logging.tf), not any Lambda's -- these are
+      # the requests CloudFront's geo-restriction blocks outright, which
+      # never reach predict-read (or any other Lambda) at all, so
+      # everything above this point structurally can't show them. No
+      # city here -- CloudFront never determines a blocked request's city,
+      # only country, since that lookup only happens when forwarding to
+      # an origin (see that file's own docstring for the confirmed
+      # finding this is built on).
+      {
+        type   = "text"
+        x      = 0
+        y      = 28
+        width  = 24
+        height = 2
+        properties = {
+          markdown = "## Turned away (blocked) traffic\nSourced from CloudFront's own edge logs, not a Lambda -- includes requests blocked by geo-restriction before they ever reached the app."
+        }
+      },
+      {
+        type   = "log"
+        x      = 0
+        y      = 30
+        width  = 12
+        height = 6
+        properties = {
+          region = var.region
+          title  = "Blocked requests by country"
+          view   = "bar"
+          query  = <<-QUERY
+            SOURCE '${aws_cloudwatch_log_group.cloudfront_edge_access_logs.name}'
+            | filter `sc-status` = "403"
+            | stats count(*) as requests by `c-country`
+            | sort requests desc
+          QUERY
+        }
+      },
+      {
+        type   = "log"
+        x      = 12
+        y      = 30
+        width  = 12
+        height = 6
+        properties = {
+          region = var.region
+          title  = "Blocked requests by attempted path"
+          view   = "table"
+          query  = <<-QUERY
+            SOURCE '${aws_cloudwatch_log_group.cloudfront_edge_access_logs.name}'
+            | filter `sc-status` = "403"
+            | stats count(*) as attempts by `cs-uri-stem`
+            | sort attempts desc
+            | limit 20
+          QUERY
+        }
+      },
+      {
+        type   = "log"
+        x      = 0
+        y      = 36
+        width  = 24
+        height = 8
+        properties = {
+          region = var.region
+          title  = "Recent blocked requests"
+          view   = "table"
+          query  = <<-QUERY
+            SOURCE '${aws_cloudwatch_log_group.cloudfront_edge_access_logs.name}'
+            | filter `sc-status` = "403"
+            | fields date, time, `c-ip`, `c-country`, `cs-method`, `cs-uri-stem`, `x-edge-detailed-result-type`, `cs(User-Agent)`
+            | sort @timestamp desc
+            | limit 50
+          QUERY
+        }
+      },
     ]
   })
 }

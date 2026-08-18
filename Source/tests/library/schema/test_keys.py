@@ -8,8 +8,17 @@ from library.schema.keys import entity_key, entity_team_key, event_key, player_k
 
 
 class TestEntityKey:
-    def test_builds_sport_scoped_key(self):
-        assert entity_key("nfl", "12483") == "SPORT#NFL#ENTITY#12483"
+    def test_builds_sport_and_type_scoped_key_for_a_team(self):
+        assert entity_key("nfl", "26", "team") == "SPORT#NFL#ENTITY#TEAM#26"
+
+    def test_builds_sport_and_type_scoped_key_for_a_player(self):
+        assert entity_key("nfl", "12483", "player") == "SPORT#NFL#ENTITY#PLAYER#12483"
+
+    def test_a_team_and_a_player_never_collide_for_the_same_raw_id(self):
+        # Real, confirmed collision this key format fixes: NBA team id 25
+        # (Oklahoma City) and athlete id 25 (Metta World Peace) used to
+        # share one key -- see project-nba-entity-collision memory.
+        assert entity_key("nba", "25", "team") != entity_key("nba", "25", "player")
 
 
 class TestEventKey:

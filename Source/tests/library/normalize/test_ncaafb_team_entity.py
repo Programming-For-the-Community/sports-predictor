@@ -22,7 +22,7 @@ class TestTeamToEntity:
     def test_entity_key_and_id_use_the_team_id(self):
         entity = team_to_entity(_team(team_id="61"), "ncaafb")
         assert entity["entity_id"] == "61"
-        assert entity["entity_key"] == "SPORT#NCAAFB#ENTITY#61"
+        assert entity["entity_key"] == "SPORT#NCAAFB#ENTITY#TEAM#61"
 
     def test_entity_type_is_team(self):
         entity = team_to_entity(_team(), "ncaafb")

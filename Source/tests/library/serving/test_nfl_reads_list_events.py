@@ -49,7 +49,7 @@ class TestListEvents:
     def test_participants_carry_name_and_abbreviation_from_their_entity(self):
         storage = MagicMock()
         storage.get_all_events.return_value = [_scheduled_event("EVT#1", 2025, _future(4), "12", "24")]
-        storage.get_entity.side_effect = lambda sport, entity_id: {
+        storage.get_entity.side_effect = lambda sport, entity_id, entity_type: {
             "12": {"name": "Kansas City Chiefs", "metadata": {"abbreviation": "KC"}},
             "24": {"name": "Los Angeles Chargers", "metadata": {"abbreviation": "LAC"}},
         }[entity_id]

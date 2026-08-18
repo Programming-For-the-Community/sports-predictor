@@ -93,6 +93,9 @@ class DynamoDBTable:
         item = response.get("Item")
         return _from_dynamodb_safe(item) if item is not None else None
 
+    def delete_item(self, key: dict) -> None:
+        self._table.delete_item(Key=key)
+
     def batch_write(self, items: list[dict], key_names: list[str]) -> None:
         if not items:
             return

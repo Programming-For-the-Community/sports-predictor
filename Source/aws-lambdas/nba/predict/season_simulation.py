@@ -26,6 +26,15 @@ module: ties broken by point differential then arbitrarily -- the real
 NBA's tiebreaker rules (head-to-head, division record, etc.) aren't
 implemented.
 
+Every real NBA playoff round except Play-In (First Round, Conference
+Semifinals, Conference Finals, NBA Finals) is a best-of-7 series, not a
+single game (confirmed live, 2026-08-17 -- every round has been best-of-7
+since 2003; Play-In alone stays single-elimination, both games and the
+7-vs-8 game). series_win_probability below is what makes a bracket slot
+series-aware; aws-lambdas/nba/predict/season_projection.py's
+_resolve_series_matchup is the actual caller that threads a live series'
+real win/loss record through it.
+
 NBA Cup (in-season tournament) simulation -- see simulate_cup's own
 docstring -- is a separate, optional layer: it needs real group
 membership from library.features.nba_cup_groups.CUP_GROUPS, a hand-
@@ -165,6 +174,25 @@ def project_matchup(
         "predicted_winner": winner,
         "win_probability": probability_a if winner == team_a else 1 - probability_a,
     }
+
+
+def series_win_probability(game_probability: float, wins_a: int, wins_b: int) -> float:
+    """P(team A wins a best-of-7 series | already leads wins_a-wins_b),
+    with every remaining game independently won by A at game_probability
+    -- the standard recursive series-win-probability formula. wins_a=
+    wins_b=0 (a series that hasn't started, or hasn't been reached yet)
+    reduces to the pure binomial best-of-7 formula; a live in-progress
+    record (e.g. 3-1) correctly narrows the remaining uncertainty to just
+    the games left to play. Recursion depth is capped at 7 (a team can't
+    lead a series by more than 4 wins), so this needs no memoization."""
+    if wins_a >= 4:
+        return 1.0
+    if wins_b >= 4:
+        return 0.0
+    return (
+        game_probability * series_win_probability(game_probability, wins_a + 1, wins_b)
+        + (1 - game_probability) * series_win_probability(game_probability, wins_a, wins_b + 1)
+    )
 
 
 def project_play_in(

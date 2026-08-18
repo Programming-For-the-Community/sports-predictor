@@ -90,6 +90,37 @@ class TestSimulateBracket:
         assert championships / 500 > 0.5
 
 
+class TestSeriesWinProbability:
+    def test_a_coinflip_series_from_scratch_is_a_coinflip(self):
+        assert season_simulation.series_win_probability(0.5, 0, 0) == pytest.approx(0.5)
+
+    def test_already_leading_four_is_a_certain_win_regardless_of_game_probability(self):
+        assert season_simulation.series_win_probability(0.01, 4, 2) == 1.0
+
+    def test_already_trailing_four_is_a_certain_loss_regardless_of_game_probability(self):
+        assert season_simulation.series_win_probability(0.99, 2, 4) == 0.0
+
+    def test_a_favorite_leading_the_series_has_higher_win_probability_than_starting_fresh(self):
+        fresh = season_simulation.series_win_probability(0.6, 0, 0)
+        leading = season_simulation.series_win_probability(0.6, 2, 1)
+        assert leading > fresh
+
+    def test_a_true_toss_up_series_is_more_certain_than_a_single_game(self):
+        # Best-of-7 compounds a per-game edge -- even a small one (55%)
+        # should be a much stronger series favorite than a single game.
+        single_game = 0.55
+        series = season_simulation.series_win_probability(single_game, 0, 0)
+        assert series > single_game
+
+    def test_symmetric_for_the_trailing_side(self):
+        # P(A wins | A leads 3-2) should equal 1 - P(B wins | B trails 2-3)
+        # -- i.e. plugging in B's own game probability and swapping the
+        # win counts gives the complementary result.
+        a_wins = season_simulation.series_win_probability(0.7, 3, 2)
+        b_wins = season_simulation.series_win_probability(0.3, 2, 3)
+        assert a_wins == pytest.approx(1 - b_wins)
+
+
 class TestProjectPlayIn:
     def test_seed_ten_can_never_win_the_final_seven_or_eight_seed(self):
         ratings = {team: 1500 for team in ("s7", "s8", "s9", "s10")}

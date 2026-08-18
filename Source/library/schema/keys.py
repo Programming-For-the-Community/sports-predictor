@@ -7,8 +7,16 @@ format can't drift between sports.
 """
 
 
-def entity_key(sport: str, entity_id: str) -> str:
-    return f"SPORT#{sport.upper()}#ENTITY#{entity_id}"
+def entity_key(sport: str, entity_id: str, entity_type: str) -> str:
+    """entity_type ("team" or "player") is part of the key, not just an
+    attribute on the item -- ESPN's team-id and athlete-id numeric spaces
+    overlap for low legacy ids (confirmed real: NBA team id 25, Oklahoma
+    City, collided with athlete id 25, Metta World Peace, silently
+    clobbering each other under the old type-less key -- see
+    project-nba-entity-collision memory). Callers always know which kind
+    of entity they're keying, so this is a required argument, not a
+    default, to keep an ambiguous call from compiling."""
+    return f"SPORT#{sport.upper()}#ENTITY#{entity_type.upper()}#{entity_id}"
 
 
 def event_key(sport: str, event_id: str) -> str:

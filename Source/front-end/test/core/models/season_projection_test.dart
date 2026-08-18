@@ -99,4 +99,26 @@ void main() {
 
     expect(entry.displayName, '3139477');
   });
+
+  test('a bracket matchup with wins_a/wins_b parses as a series', () {
+    final matchup = BracketMatchup.fromJson({
+      'team_a': '2', 'team_b': '8', 'seed_a': 1, 'seed_b': 8, 'status': 'scheduled',
+      'predicted_winner': '2', 'win_probability': 0.81, 'wins_a': 2, 'wins_b': 1,
+    });
+
+    expect(matchup.isSeries, isTrue);
+    expect(matchup.winsA, 2);
+    expect(matchup.winsB, 1);
+  });
+
+  test('a bracket matchup with no wins_a/wins_b is not a series (NFL/NCAAFB, NBA Play-In)', () {
+    final matchup = BracketMatchup.fromJson({
+      'team_a': '12', 'team_b': '13', 'status': 'projected',
+      'predicted_winner': '12', 'win_probability': 0.6,
+    });
+
+    expect(matchup.isSeries, isFalse);
+    expect(matchup.winsA, isNull);
+    expect(matchup.winsB, isNull);
+  });
 }

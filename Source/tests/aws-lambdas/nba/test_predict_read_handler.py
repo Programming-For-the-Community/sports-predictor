@@ -46,6 +46,20 @@ def _model_version_state(sport: str, versions: dict) -> dict:
     return {current_version_key(sport, _CORE_MODEL_NAMES[key]): {"version": version} for key, version in versions.items()}
 
 
+class TestWarmup:
+    def test_warmup_ping_touches_singletons_and_skips_routing(self):
+        with patch.object(nba_predict_read, "_get_storage") as mock_storage, \
+             patch.object(nba_predict_read, "_get_model_bucket") as mock_bucket, \
+             patch.object(nba_predict_read, "_get_predictions_table") as mock_table:
+            response = nba_predict_read.lambda_handler({"warmup": True}, None)
+
+        assert response["statusCode"] == 200
+        assert json.loads(response["body"]) == {"status": "warm"}
+        mock_storage.assert_called_once()
+        mock_bucket.assert_called_once()
+        mock_table.assert_called_once()
+
+
 class TestRouting:
     def test_events_route(self):
         with patch.object(nba_predict_read, "_get_storage"), \

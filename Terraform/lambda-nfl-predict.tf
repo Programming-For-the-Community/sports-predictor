@@ -41,7 +41,14 @@ resource "aws_lambda_function" "nfl_predict" {
   # setting and the pushed image's own platform fails at invoke time, not
   # at `terraform apply`.
   architectures = ["arm64"]
-  timeout       = 300 # not on the API Gateway request path; covers a slow season projection
+  # Not on the API Gateway request path (fired async -- see this file's
+  # own event-source wiring), so this only bounds how long a scheduled/
+  # background season-projection run gets. Raised from 300s -- NBA's own
+  # equivalent (identical shape, play-in + bracket + cup adds more work)
+  # needed a real 600s run to finish, confirmed by the user manually
+  # bumping it to unblock themselves; matched here for consistency even
+  # though NFL hasn't itself been observed needing more than 300s.
+  timeout = 600
   # Lambda CPU scales with memory (roughly linear up to ~1,769MB = 1
   # vCPU) -- sized for import/init CPU (xgboost/scikit-learn/pandas), not
   # runtime memory need, which stays well under 512MB even on the

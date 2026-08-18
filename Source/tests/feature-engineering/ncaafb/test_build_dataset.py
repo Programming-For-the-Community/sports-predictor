@@ -32,7 +32,7 @@ def _storage(events, player_games=None, team_game_stats=None, entities=None):
     storage.get_all_events.return_value = events
     storage.get_all_player_game_stats.return_value = player_games or []
     storage.get_all_team_game_stats.return_value = team_game_stats or []
-    storage.get_entity.side_effect = lambda sport, team_id: (entities or {}).get(team_id)
+    storage.get_entity.side_effect = lambda sport, team_id, entity_type: (entities or {}).get(team_id)
     return storage
 
 

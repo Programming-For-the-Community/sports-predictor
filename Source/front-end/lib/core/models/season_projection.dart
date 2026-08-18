@@ -221,6 +221,8 @@ class BracketMatchup {
     this.actualWinner,
     this.actualHomeScore,
     this.actualAwayScore,
+    this.winsA,
+    this.winsB,
   });
 
   final String teamA;
@@ -241,7 +243,22 @@ class BracketMatchup {
   final int? actualHomeScore;
   final int? actualAwayScore;
 
+  /// NBA best-of-7 series record (teamA's/teamB's own win count so far
+  /// this series -- see aws-lambdas/nba/predict/season_projection.py's
+  /// _resolve_series_matchup). Null for a sport/round with no series
+  /// concept (NFL/NCAAFB, and NBA's own Play-In round, both single
+  /// elimination) -- present (0/0 at minimum) for every other NBA
+  /// playoff round, including a series that hasn't started yet.
+  final int? winsA;
+  final int? winsB;
+
   bool get isFinal => status == 'final';
+
+  /// True for a real best-of-7 series slot (see winsA/winsB's own doc
+  /// comment) -- lets the UI show a running series record instead of a
+  /// single game's score, without needing to know which sport/round
+  /// produced this matchup.
+  bool get isSeries => winsA != null && winsB != null;
 
   factory BracketMatchup.fromJson(Map<String, dynamic> json) => BracketMatchup(
         teamA: json['team_a'] as String,
@@ -254,6 +271,8 @@ class BracketMatchup {
         actualWinner: json['actual_winner'] as String?,
         actualHomeScore: json['actual_home_score'] as int?,
         actualAwayScore: json['actual_away_score'] as int?,
+        winsA: json['wins_a'] as int?,
+        winsB: json['wins_b'] as int?,
       );
 }
 

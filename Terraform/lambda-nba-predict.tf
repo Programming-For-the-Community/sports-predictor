@@ -23,7 +23,12 @@ resource "aws_lambda_function" "nba_predict" {
   package_type  = "Image"
   image_uri     = "${var.ecr_repo_url}:nba-predict-latest"
   architectures = ["arm64"]
-  timeout       = 300 # not on the API Gateway request path; covers a slow season simulation (play-in + bracket)
+  # Not on the API Gateway request path (fired async). Raised from 300s
+  # to 600s -- the user had to manually bump this to 600s in the console
+  # to get a real NBA season-projection run (play-in + bracket + cup) to
+  # finish at all, confirmed live; Terraform's declared value was stale
+  # against what production actually needed.
+  timeout = 600
 
   memory_size = 3008
 

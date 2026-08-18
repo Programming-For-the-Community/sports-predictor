@@ -58,6 +58,18 @@ def _model_version_state(sport: str, versions: dict) -> dict:
     return {current_version_key(sport, _CORE_MODEL_NAMES[key]): {"version": version} for key, version in versions.items()}
 
 
+class TestWarmup:
+    def test_warmup_ping_touches_singletons_and_skips_routing(self):
+        nfl_predict_read._storage = MagicMock()
+        nfl_predict_read._model_bucket = MagicMock()
+        nfl_predict_read._predictions_table = MagicMock()
+
+        response = nfl_predict_read.lambda_handler({"warmup": True}, None)
+
+        assert response["statusCode"] == 200
+        assert json.loads(response["body"]) == {"status": "warm"}
+
+
 class TestEventsRoute:
     def test_returns_events_and_defaults_to_scheduled_status(self):
         nfl_predict_read._storage = MagicMock()

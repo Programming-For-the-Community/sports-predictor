@@ -83,7 +83,7 @@ def _team_coordinates(storage: FeatureStorage, team_ids: set[str]) -> dict[str, 
     not a crash."""
     coordinates = {}
     for team_id in team_ids:
-        entity = storage.get_entity(SPORT, team_id)
+        entity = storage.get_entity(SPORT, team_id, "team")
         if entity is None:
             continue
         metadata = entity.get("metadata", {})

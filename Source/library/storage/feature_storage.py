@@ -182,12 +182,14 @@ class FeatureStorage:
         game, unlike get_all_events/get_team_events which return many."""
         return self._events_table.get_item({"event_key": event_key})
 
-    def get_entity(self, sport: str, entity_id: str) -> dict | None:
-        """One entity (team or player) by id -- a direct GetItem. Only
-        get_entity needs ENTITIES_TABLE_NAME; every other method here
-        reads events/player_game_stats/team_game_stats, which batch
-        feature engineering never needs the entities table for."""
-        return self._entities_table.get_item({"entity_key": entity_key(sport, entity_id)})
+    def get_entity(self, sport: str, entity_id: str, entity_type: str) -> dict | None:
+        """One entity by id -- a direct GetItem. entity_type ("team" or
+        "player") is required, not inferred -- see entity_key's own
+        docstring for why a type-less key can't disambiguate two different
+        entities. Only get_entity needs ENTITIES_TABLE_NAME; every other
+        method here reads events/player_game_stats/team_game_stats, which
+        batch feature engineering never needs the entities table for."""
+        return self._entities_table.get_item({"entity_key": entity_key(sport, entity_id, entity_type)})
 
     def get_team_entities(self, sport: str, team_id: str) -> list[dict]:
         """Every player currently rostered to team_id (team_key, kept

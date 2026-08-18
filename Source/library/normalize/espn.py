@@ -14,7 +14,7 @@ from library.schema.keys import entity_key, entity_team_key, event_key, player_k
 def team_to_entity(team: dict, sport: str) -> dict:
     team_id = str(team["id"])
     return {
-        "entity_key": entity_key(sport, team_id),
+        "entity_key": entity_key(sport, team_id, "team"),
         "entity_id": team_id,
         "sport": sport,
         "entity_type": "team",
@@ -204,7 +204,7 @@ def roster_to_player_entities(roster: dict, sport: str) -> list[dict]:
     entities = []
     for athlete in _flatten_roster_athletes(roster.get("athletes", [])):
         entities.append({
-            "entity_key": entity_key(sport, athlete["id"]),
+            "entity_key": entity_key(sport, athlete["id"], "player"),
             "entity_id": athlete["id"],
             "sport": sport,
             "entity_type": "player",
@@ -379,7 +379,7 @@ def boxscore_to_player_game_stats(
             "stat_line": line,
         })
         player_entities.append({
-            "entity_key": entity_key(sport, athlete_id),
+            "entity_key": entity_key(sport, athlete_id, "player"),
             "entity_id": athlete_id,
             "sport": sport,
             "entity_type": "player",

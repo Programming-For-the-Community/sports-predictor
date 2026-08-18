@@ -13,6 +13,42 @@ locals {
   api_path_prefixes = ["nfl", "ncaafb", "nba"]
 }
 
+# Managed-CachingOptimized (DefaultTTL 86400s) only respects an origin's
+# Cache-Control when it carries an explicit max-age/s-maxage -- s3-frontend
+# sends a bare `Cache-Control: no-cache` (no max-age, since every deploy
+# reuses the same unhashed filenames and relies on revalidation instead),
+# which CloudFront can't turn into a TTL from that header alone, so it
+# silently substitutes its own 24h DefaultTTL. Confirmed live: a second
+# request for the same object came back `X-Cache: Hit from cloudfront`.
+# Normally masked by frontend_sync_deploy.yml's own `/*` invalidation on
+# every successful deploy, but a distribution-wide TTL of 0 removes the
+# dependency on that invalidation step being what stands between a viewer
+# and a stale edge copy. Origin headers are still honored (so an
+# explicit max-age would still be cacheable) -- only the fallback changes.
+resource "aws_cloudfront_cache_policy" "frontend_edge" {
+  name        = "${var.project}-frontend-edge"
+  min_ttl     = 0
+  default_ttl = 0
+  max_ttl     = 31536000
+
+  parameters_in_cache_key_and_forwarded_to_origin {
+    enable_accept_encoding_gzip   = true
+    enable_accept_encoding_brotli = true
+
+    cookies_config {
+      cookie_behavior = "none"
+    }
+
+    headers_config {
+      header_behavior = "none"
+    }
+
+    query_strings_config {
+      query_string_behavior = "none"
+    }
+  }
+}
+
 resource "aws_cloudfront_origin_access_control" "frontend" {
   name                              = "${var.project}-frontend"
   origin_access_control_origin_type = "s3"
@@ -92,12 +128,11 @@ resource "aws_cloudfront_distribution" "main" {
   }
 
   default_cache_behavior {
-    target_origin_id       = "frontend-s3"
-    viewer_protocol_policy = "redirect-to-https"
-    allowed_methods        = ["GET", "HEAD"]
-    cached_methods         = ["GET", "HEAD"]
-    # Managed-CachingOptimized -- static assets, safe to cache aggressively.
-    cache_policy_id            = "658327ea-f89d-4fab-a63d-7e88639e58f6"
+    target_origin_id           = "frontend-s3"
+    viewer_protocol_policy     = "redirect-to-https"
+    allowed_methods            = ["GET", "HEAD"]
+    cached_methods             = ["GET", "HEAD"]
+    cache_policy_id            = aws_cloudfront_cache_policy.frontend_edge.id
     response_headers_policy_id = aws_cloudfront_response_headers_policy.security_headers.id
   }
 
@@ -128,14 +163,19 @@ resource "aws_cloudfront_distribution" "main" {
   }
 
   # go_router's client-side routing means a hard refresh/deep link (e.g.
-  # /nfl/events) has no matching S3 object -- S3 returns 403 (no public
-  # ListBucket) which CloudFront remaps to index.html so the Flutter app
-  # boots and its own router takes over.
-  custom_error_response {
-    error_code         = 403
-    response_code      = 200
-    response_page_path = "/index.html"
-  }
+  # /nfl/events) has no matching S3 object -- S3 returns 404 for a missing
+  # key (s3-frontend.tf's bucket policy grants CloudFront's OAC
+  # s3:ListBucket specifically so this is a real 404, not S3's ambiguous
+  # "no ListBucket" 403) which CloudFront remaps to index.html so the
+  # Flutter app boots and its own router takes over.
+  #
+  # Deliberately no 403 entry here -- custom_error_response is
+  # distribution-wide, not scoped to the frontend's own cache behavior,
+  # and CloudFront's geo-restriction block below also returns 403
+  # (confirmed against AWS's own docs). A 403->200 rule here would
+  # silently rewrite every geo-blocked request into a served app too,
+  # which is exactly what was happening before this comment -- see
+  # s3-frontend.tf's bucket-policy docstring for the full finding.
   custom_error_response {
     error_code         = 404
     response_code      = 200

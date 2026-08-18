@@ -101,7 +101,7 @@ def team_to_entity(team: dict, sport: str) -> dict:
     team_id = str(team["id"])
     location = team.get("location") or {}
     return {
-        "entity_key": entity_key(sport, team_id),
+        "entity_key": entity_key(sport, team_id, "team"),
         "entity_id": team_id,
         "sport": sport,
         "entity_type": "team",
@@ -279,7 +279,7 @@ def game_player_stats_to_player_game_stats(game_box_score: dict, sport: str) -> 
             "stat_line": line,
         })
         player_entities.append({
-            "entity_key": entity_key(sport, athlete_id),
+            "entity_key": entity_key(sport, athlete_id, "player"),
             "entity_id": athlete_id,
             "sport": sport,
             "entity_type": "player",
@@ -336,7 +336,7 @@ def roster_to_player_entities(roster: list[dict], sport: str, as_of_date: str) -
         athlete_id, team_id = str(athlete_id), str(team_id)
         name = " ".join(part for part in (player.get("firstName"), player.get("lastName")) if part)
         entities.append({
-            "entity_key": entity_key(sport, athlete_id),
+            "entity_key": entity_key(sport, athlete_id, "player"),
             "entity_id": athlete_id,
             "sport": sport,
             "entity_type": "player",

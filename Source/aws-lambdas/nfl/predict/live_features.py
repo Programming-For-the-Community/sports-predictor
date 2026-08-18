@@ -468,7 +468,7 @@ def build_live_player_features(
         raise EventNotFoundError(f"No event found for {event_key}")
     home_id, away_id = _home_away_ids(event)
 
-    entity = storage.get_entity(sport, entity_id)
+    entity = storage.get_entity(sport, entity_id, "player")
     if entity is None:
         raise EventNotFoundError(f"No entity found for {entity_id}")
     team_id = entity.get("metadata", {}).get("team_id")

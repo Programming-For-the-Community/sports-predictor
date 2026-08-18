@@ -94,7 +94,7 @@ def _live_elo_ratings(
 def _team_coordinates_for(storage, sport: str, *team_ids: str) -> dict[str, tuple[float, float]]:
     coordinates = {}
     for team_id in team_ids:
-        entity = storage.get_entity(sport, team_id)
+        entity = storage.get_entity(sport, team_id, "team")
         if entity is None:
             continue
         metadata = entity.get("metadata", {})
@@ -114,7 +114,7 @@ def _team_player_games_for_event(storage, team_id: str, event_key: str) -> list[
 
 
 def _still_on_team(storage, sport: str, entity_id: str, team_id: str) -> bool:
-    entity = storage.get_entity(sport, entity_id)
+    entity = storage.get_entity(sport, entity_id, "player")
     return bool(entity) and (entity.get("metadata") or {}).get("team_id") == team_id
 
 
@@ -209,7 +209,7 @@ def build_live_player_features(
         raise EventNotFoundError(f"No event found for {event_key}")
     home_id, away_id = _home_away_ids(event)
 
-    entity = storage.get_entity(sport, entity_id)
+    entity = storage.get_entity(sport, entity_id, "player")
     if entity is None:
         raise EventNotFoundError(f"No entity found for {entity_id}")
     team_id = (entity.get("metadata") or {}).get("team_id")

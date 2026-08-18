@@ -24,7 +24,7 @@ class TestRosterToPlayerEntities:
     def test_entity_key_and_id_use_the_player_id(self):
         entities = roster_to_player_entities([_player(player_id="101")], "ncaafb", "2026-01-15")
         assert entities[0]["entity_id"] == "101"
-        assert entities[0]["entity_key"] == "SPORT#NCAAFB#ENTITY#101"
+        assert entities[0]["entity_key"] == "SPORT#NCAAFB#ENTITY#PLAYER#101"
 
     def test_entity_type_is_player(self):
         entities = roster_to_player_entities([_player()], "ncaafb", "2026-01-15")

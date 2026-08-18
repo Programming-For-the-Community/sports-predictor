@@ -224,14 +224,22 @@ class TestGetEvent:
 
 
 class TestGetEntity:
-    def test_gets_by_sport_scoped_entity_key(self, storage_env):
+    def test_gets_by_sport_and_type_scoped_entity_key(self, storage_env):
         storage, mock_entities, _, _, _ = _make_storage(storage_env)
         mock_entities.get_item.return_value = {"entity_id": "mahomes-patrick"}
 
-        result = storage.get_entity("nfl", "mahomes-patrick")
+        result = storage.get_entity("nfl", "mahomes-patrick", "player")
 
         assert result == {"entity_id": "mahomes-patrick"}
-        mock_entities.get_item.assert_called_once_with({"entity_key": "SPORT#NFL#ENTITY#mahomes-patrick"})
+        mock_entities.get_item.assert_called_once_with({"entity_key": "SPORT#NFL#ENTITY#PLAYER#mahomes-patrick"})
+
+    def test_team_and_player_types_never_collide_for_the_same_raw_id(self, storage_env):
+        storage, mock_entities, _, _, _ = _make_storage(storage_env)
+        mock_entities.get_item.return_value = None
+
+        storage.get_entity("nba", "25", "team")
+
+        mock_entities.get_item.assert_called_once_with({"entity_key": "SPORT#NBA#ENTITY#TEAM#25"})
 
 
 class TestGetTeamEntities:

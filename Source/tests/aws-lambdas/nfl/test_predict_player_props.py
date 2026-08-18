@@ -32,7 +32,7 @@ class TestPlayerPropRoute:
              patch.object(model_loader, "predict", return_value=267.4):
             result = event_prediction.predict_player_prop(storage, s3, predictions_table, "401547417", "mahomes-patrick", "passing_yards")
 
-        assert result["entity_key"] == "SPORT#NFL#ENTITY#mahomes-patrick"
+        assert result["entity_key"] == "SPORT#NFL#ENTITY#PLAYER#mahomes-patrick"
         assert result["stat"] == "passing_yards"
         assert result["prediction"] == {"value": 267.4, "model_version": 5}
         build.assert_called_once_with(storage, "nfl", "SPORT#NFL#EVENT#401547417", "mahomes-patrick")

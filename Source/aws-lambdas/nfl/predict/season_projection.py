@@ -250,7 +250,7 @@ def _leaderboards(storage: FeatureStorage, s3, model_cache: dict, season_inputs:
 
         top = season_simulation.project_leaderboard(current_totals, per_game_projections, games_remaining, top_n=10)
         for row in top:
-            entity = storage.get_entity(SPORT, row["entity_id"])
+            entity = storage.get_entity(SPORT, row["entity_id"], "player")
             if entity and entity.get("name"):
                 row["name"] = entity["name"]
         leaderboards[stat] = top

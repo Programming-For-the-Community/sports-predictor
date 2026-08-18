@@ -120,6 +120,17 @@ def _serve_or_trigger(s3, cache_key: str, current_model_versions, async_payload:
 
 
 def lambda_handler(event, context):
+    # EventBridge Scheduler warmup ping (scheduler-nfl-predict-read-
+    # warmup.tf) -- no "resource" key, so this can't collide with a real
+    # API Gateway route. Touches the same lazy singletons a real request
+    # would build, so the container that picks this up already has its
+    # boto3 clients constructed by the time a real request lands on it.
+    if event.get("warmup"):
+        _get_storage()
+        _get_model_bucket()
+        _get_predictions_table()
+        return _response(200, {"status": "warm"})
+
     path_params = event.get("pathParameters") or {}
     query_params = event.get("queryStringParameters") or {}
     resource = event.get("resource", "")

@@ -117,13 +117,21 @@ class TestGetEntity:
         storage, mock_entities = _make_storage(storage_env)
         mock_entities.get_item.return_value = {"entity_id": "61", "name": "Georgia"}
 
-        result = storage.get_entity("ncaafb", "61")
+        result = storage.get_entity("ncaafb", "61", "team")
 
-        mock_entities.get_item.assert_called_once_with({"entity_key": "SPORT#NCAAFB#ENTITY#61"})
+        mock_entities.get_item.assert_called_once_with({"entity_key": "SPORT#NCAAFB#ENTITY#TEAM#61"})
         assert result == {"entity_id": "61", "name": "Georgia"}
+
+    def test_player_and_team_types_read_different_keys(self, storage_env):
+        storage, mock_entities = _make_storage(storage_env)
+        mock_entities.get_item.return_value = None
+
+        storage.get_entity("nba", "25", "player")
+
+        mock_entities.get_item.assert_called_once_with({"entity_key": "SPORT#NBA#ENTITY#PLAYER#25"})
 
     def test_returns_none_when_missing(self, storage_env):
         storage, mock_entities = _make_storage(storage_env)
         mock_entities.get_item.return_value = None
 
-        assert storage.get_entity("ncaafb", "999") is None
+        assert storage.get_entity("ncaafb", "999", "team") is None

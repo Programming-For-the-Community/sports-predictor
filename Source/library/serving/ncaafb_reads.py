@@ -213,7 +213,7 @@ def _leaders_comparison(storage, rows: list[dict], sport: str, event: dict) -> d
         category = next((_STAT_CATEGORY[stat] for stat in predicted_stats if stat in _STAT_CATEGORY), None)
         if category is None:
             continue
-        entity = storage.get_entity(sport, entity_id)
+        entity = storage.get_entity(sport, entity_id, "player")
         team_id = (entity.get("metadata") or {}).get("team_id") if entity else None
         if team_id == home_id:
             bucket = home

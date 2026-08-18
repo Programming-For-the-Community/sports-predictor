@@ -74,7 +74,7 @@ class TestBoxScoreCandidateIds:
             _player_game("101", "61", "e1", "2025-10-11", {"rushing_yards": 90}),
             _player_game("102", "61", "e1", "2025-10-11", {"rushing_yards": 40}),
         ]
-        storage.get_entity.side_effect = lambda sport, entity_id: {
+        storage.get_entity.side_effect = lambda sport, entity_id, entity_type: {
             "101": _entity("61"), "102": _entity("99"),  # 102 has since transferred
         }[entity_id]
 
@@ -151,7 +151,7 @@ class TestPresumptiveLeader:
         storage.get_player_game_stats_for_event.side_effect = _games_for_event
         # 101 (most recent game's leader) has since transferred to team 99;
         # 102 (the older game's leader) is still on 61.
-        storage.get_entity.side_effect = lambda sport, entity_id: _entity("99") if entity_id == "101" else _entity("61")
+        storage.get_entity.side_effect = lambda sport, entity_id, entity_type: _entity("99") if entity_id == "101" else _entity("61")
         storage.get_player_game_stats.return_value = [{"entity_id": "102"}]
 
         result = live_features._presumptive_leader(storage, "ncaafb", "61", "2025-10-11", 2025, "passing", 5)

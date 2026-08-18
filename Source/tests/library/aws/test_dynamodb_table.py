@@ -78,6 +78,15 @@ class TestConditionalPutItem:
             pass
 
 
+class TestDeleteItem:
+    def test_passes_key_through(self):
+        table, mock_boto_table = _make_table()
+
+        table.delete_item({"entity_key": "SPORT#NBA#ENTITY#25"})
+
+        mock_boto_table.delete_item.assert_called_once_with(Key={"entity_key": "SPORT#NBA#ENTITY#25"})
+
+
 class TestQuery:
     def test_passes_key_condition_and_defaults(self):
         table, mock_boto_table = _make_table(query_pages=[{"Items": [{"id": "1"}]}])

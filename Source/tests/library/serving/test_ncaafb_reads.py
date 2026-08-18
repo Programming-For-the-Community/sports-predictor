@@ -63,7 +63,7 @@ class TestListEvents:
         storage = MagicMock()
         predictions_table = MagicMock()
         storage.get_all_events.return_value = [_event("e1", _future(4), "333", "61", week=5)]
-        storage.get_entity.side_effect = lambda sport, entity_id: {
+        storage.get_entity.side_effect = lambda sport, entity_id, entity_type: {
             "333": {"name": "Alabama", "metadata": {"abbreviation": "ALA", "conference": "SEC"}},
             "61": {"name": "Georgia", "metadata": {"abbreviation": "UGA", "conference": "SEC"}},
         }[entity_id]
@@ -232,7 +232,7 @@ class TestLeadersComparison:
 
     def test_rushing_leaders_are_grouped_as_a_list(self):
         storage = MagicMock()
-        storage.get_entity.side_effect = lambda sport, entity_id: {
+        storage.get_entity.side_effect = lambda sport, entity_id, entity_type: {
             "rb1": {"metadata": {"team_id": "61"}, "name": "RB One"},
             "rb2": {"metadata": {"team_id": "61"}, "name": "RB Two"},
         }[entity_id]
@@ -254,7 +254,7 @@ class TestLeadersComparison:
         # rushing predictions -- the comparison should still only ever show
         # the top 2, same as the pre-game leaders block did.
         storage = MagicMock()
-        storage.get_entity.side_effect = lambda sport, entity_id: {
+        storage.get_entity.side_effect = lambda sport, entity_id, entity_type: {
             "metadata": {"team_id": "61"}, "name": entity_id,
         }
         storage.get_player_game_stats_for_event.return_value = []

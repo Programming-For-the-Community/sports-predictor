@@ -49,7 +49,7 @@ class TestLeadersComparison:
 
     def test_receiving_leaders_are_grouped_as_a_list(self):
         storage = MagicMock()
-        storage.get_entity.side_effect = lambda sport, entity_id: {
+        storage.get_entity.side_effect = lambda sport, entity_id, entity_type: {
             "wr1": {"entity_id": "wr1", "metadata": {"team_id": "12"}, "name": "WR One"},
             "wr2": {"entity_id": "wr2", "metadata": {"team_id": "12"}, "name": "WR Two"},
         }[entity_id]
@@ -73,7 +73,7 @@ class TestLeadersComparison:
         # comparison should still only ever show the top 3, same as the
         # pre-game leaders block did.
         storage = MagicMock()
-        storage.get_entity.side_effect = lambda sport, entity_id: {
+        storage.get_entity.side_effect = lambda sport, entity_id, entity_type: {
             "entity_id": entity_id, "metadata": {"team_id": "12"}, "name": entity_id,
         }
         storage.get_player_game_stats_for_event.return_value = []

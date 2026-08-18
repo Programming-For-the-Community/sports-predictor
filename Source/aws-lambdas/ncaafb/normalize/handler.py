@@ -108,7 +108,7 @@ def _preserve_roster_position(storage: PipelineStorage, entity: dict) -> None:
     if entity["metadata"]["position"] is not None:
         return
     try:
-        existing = storage.get_entity(SPORT, entity["entity_id"])
+        existing = storage.get_entity(SPORT, entity["entity_id"], "player")
     except Exception:
         logger.exception("Failed looking up existing entity %s for position preservation", entity["entity_id"])
         return

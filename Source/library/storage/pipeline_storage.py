@@ -75,15 +75,17 @@ class PipelineStorage:
         items = self._events_table.query(Key("status").eq(status), index_name="status-index")
         return [item for item in items if item.get("sport") == sport]
 
-    def get_entity(self, sport: str, entity_id: str) -> dict | None:
-        """One entity (team or player) by id -- a direct GetItem. Read-side
-        counterpart to upsert_entity/upsert_player_entity, needed by
-        normalize itself (not just downstream feature engineering/serving,
-        which already has this same lookup via FeatureStorage.get_entity)
-        whenever a write needs to see the entity it's about to overwrite
-        first -- see aws-lambdas/ncaafb/normalize/handler.py's
-        _preserve_roster_position for the motivating case."""
-        return self._entities_table.get_item({"entity_key": entity_key(sport, entity_id)})
+    def get_entity(self, sport: str, entity_id: str, entity_type: str) -> dict | None:
+        """One entity by id -- a direct GetItem. entity_type ("team" or
+        "player") is required, not inferred -- see entity_key's own
+        docstring for why a type-less key can't disambiguate two different
+        entities. Read-side counterpart to upsert_entity/upsert_player_entity,
+        needed by normalize itself (not just downstream feature
+        engineering/serving, which already has this same lookup via
+        FeatureStorage.get_entity) whenever a write needs to see the entity
+        it's about to overwrite first -- see aws-lambdas/ncaafb/normalize/
+        handler.py's _preserve_roster_position for the motivating case."""
+        return self._entities_table.get_item({"entity_key": entity_key(sport, entity_id, entity_type)})
 
     def write_player_game_stats(self, items: list[dict]) -> None:
         self._player_game_stats_table.batch_write(items, key_names=["event_key", "player_key"])

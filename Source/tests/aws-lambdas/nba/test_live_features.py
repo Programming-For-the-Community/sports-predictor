@@ -73,7 +73,7 @@ class TestBoxScoreCandidateIds:
             _player_game("101", "13", "e1", "2025-11-11", {"points": 28}),
             _player_game("102", "13", "e1", "2025-11-11", {"points": 12}),
         ]
-        storage.get_entity.side_effect = lambda sport, entity_id: {
+        storage.get_entity.side_effect = lambda sport, entity_id, entity_type: {
             "101": _entity("13"), "102": _entity("99"),  # 102 has since been traded
         }[entity_id]
 

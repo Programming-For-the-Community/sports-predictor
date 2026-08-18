@@ -129,7 +129,7 @@ def _record_leader_predictions(
     actual read of it) only ever contains the players actually shown in
     the leaders block, not the whole unranked pool scoring considered."""
     entity_id = scored["entity_id"]
-    entity = storage.get_entity(SPORT, entity_id)
+    entity = storage.get_entity(SPORT, entity_id, "player")
     result = dict(scored)
     if entity and entity.get("name"):
         result["name"] = entity["name"]
@@ -246,7 +246,7 @@ def predict_player_prop(storage, s3, predictions_table, event_id: str, entity_id
     booster, model_card = model_loader.load_current_model(s3, SPORT, model_name)
     value = non_negative(model_loader.predict(booster, model_card, feature_row))
 
-    entity_key_value = build_entity_key(SPORT, entity_id)
+    entity_key_value = build_entity_key(SPORT, entity_id, "player")
     record_prediction(
         predictions_table, event_key_value,
         f"MODEL#{model_name}#v{model_card['version']}#PLAYER#{entity_id}", {"value": value},

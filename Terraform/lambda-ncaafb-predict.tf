@@ -23,7 +23,11 @@ resource "aws_lambda_function" "ncaafb_predict" {
   package_type  = "Image"
   image_uri     = "${var.ecr_repo_url}:ncaafb-predict-latest"
   architectures = ["arm64"]
-  timeout       = 300 # not on the API Gateway request path; covers a slow season simulation
+  # Not on the API Gateway request path (fired async). Raised from 300s --
+  # NBA's own equivalent (identical shape) needed a real 600s run to
+  # finish, confirmed by the user manually bumping it to unblock
+  # themselves; matched here for consistency.
+  timeout = 600
 
   memory_size = 3008
 

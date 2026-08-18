@@ -68,6 +68,43 @@ void main() {
     expect(find.text('PLAY-IN%'), findsNothing);
   });
 
+  testWidgets('nba standings group by conference only, not the 3 divisions within each', (tester) async {
+    // Real NBA standings convention (unlike NFL's by-division grouping) --
+    // 2 teams from different divisions in the same conference collapse
+    // into one "EASTERN" group, not two ("EASTERN ATLANTIC"/"EASTERN
+    // CENTRAL") -- see _standingsGroupKey's own docstring.
+    final projection = SeasonProjection(
+      sport: 'nba',
+      season: 2026,
+      standings: [
+        TeamStanding(
+          teamId: '2', division: 'Eastern Atlantic', wins: 10, losses: 5, ties: 0,
+          projectedWins: 55.0, projectedLosses: 27.0,
+          divisionWinnerProbability: 0.2, playoffProbability: 0.7, championshipProbability: 0.05,
+        ),
+        TeamStanding(
+          teamId: '4', division: 'Eastern Central', wins: 8, losses: 7, ties: 0,
+          projectedWins: 45.0, projectedLosses: 37.0,
+          divisionWinnerProbability: 0.1, playoffProbability: 0.5, championshipProbability: 0.02,
+        ),
+        TeamStanding(
+          teamId: '7', division: 'Western Northwest', wins: 12, losses: 3, ties: 0,
+          projectedWins: 60.0, projectedLosses: 22.0,
+          divisionWinnerProbability: 0.3, playoffProbability: 0.8, championshipProbability: 0.08,
+        ),
+      ],
+      leaderboards: null,
+    );
+
+    await pumpSeasonPage(tester, 'nba', projection);
+
+    expect(find.text('EASTERN'), findsOneWidget);
+    expect(find.text('WESTERN'), findsOneWidget);
+    expect(find.text('EASTERN ATLANTIC'), findsNothing);
+    expect(find.text('EASTERN CENTRAL'), findsNothing);
+    expect(find.text('WESTERN NORTHWEST'), findsNothing);
+  });
+
   testWidgets('no toggle row at all when neither leaderboards nor cup is present', (tester) async {
     final projection = SeasonProjection(sport: 'nba', season: 2026, standings: [_nbaStanding('2')], leaderboards: null);
 
@@ -151,7 +188,11 @@ void main() {
     expect(find.text('AFC'), findsOneWidget);
     expect(find.text('NFC'), findsOneWidget);
     expect(find.text('CHAMPIONSHIP'), findsOneWidget);
-    expect(find.text('WILD CARD'), findsNWidgets(2));
+    // Both conferences now share one combined tree (see _BracketSection's
+    // own docstring) -- "Wild Card" is one round column holding both
+    // conferences' matchups, not two separate trees with their own
+    // independent round headers, so the label itself appears once.
+    expect(find.text('WILD CARD'), findsOneWidget);
   });
 
   testWidgets('a flat (NCAAFB-shaped) bracket renders its rounds with no conference headers', (tester) async {
@@ -214,6 +255,73 @@ void main() {
     expect(find.text('FINAL'), findsOneWidget);
     expect(find.text('27'), findsOneWidget);
     expect(find.text('13'), findsOneWidget);
+  });
+
+  testWidgets('an NBA series matchup shows the live win-loss record, not a single score', (tester) async {
+    final projection = SeasonProjection(
+      sport: 'nba',
+      season: 2026,
+      standings: [],
+      leaderboards: null,
+      bracket: const BracketProjection(
+        conferences: {
+          'Eastern': [
+            BracketRound(round: 'First Round', matchups: [
+              BracketMatchup(
+                teamA: '2', teamB: '8', seedA: 1, seedB: 8, status: 'scheduled',
+                predictedWinner: '2', winProbability: 0.81, winsA: 2, winsB: 1,
+              ),
+            ]),
+          ],
+        },
+        rounds: null,
+        teamNames: {
+          '2': BracketTeamName(name: 'Boston Celtics', abbreviation: 'BOS'),
+          '8': BracketTeamName(name: 'Detroit Pistons', abbreviation: 'DET'),
+        },
+      ),
+    );
+
+    await pumpSeasonPage(tester, 'nba', projection);
+    await tester.tap(find.text('Playoff Bracket'));
+    await tester.pumpAndSettle();
+
+    // The series record (2-1), not a raw box score.
+    expect(find.textContaining('2-1'), findsOneWidget);
+    expect(find.text('BOS'), findsOneWidget);
+    expect(find.text('DET'), findsOneWidget);
+  });
+
+  testWidgets('a decided NBA series (4 wins) shows as final with the series record', (tester) async {
+    final projection = SeasonProjection(
+      sport: 'nba',
+      season: 2026,
+      standings: [],
+      leaderboards: null,
+      bracket: const BracketProjection(
+        conferences: {
+          'Eastern': [
+            BracketRound(round: 'First Round', matchups: [
+              BracketMatchup(
+                teamA: '2', teamB: '8', seedA: 1, seedB: 8, status: 'final',
+                actualWinner: '2', winsA: 4, winsB: 2,
+              ),
+            ]),
+          ],
+        },
+        rounds: null,
+        teamNames: {
+          '2': BracketTeamName(name: 'Boston Celtics', abbreviation: 'BOS'),
+          '8': BracketTeamName(name: 'Detroit Pistons', abbreviation: 'DET'),
+        },
+      ),
+    );
+
+    await pumpSeasonPage(tester, 'nba', projection);
+    await tester.tap(find.text('Playoff Bracket'));
+    await tester.pumpAndSettle();
+
+    expect(find.textContaining('BOS WINS SERIES 4-2'), findsOneWidget);
   });
 
   testWidgets('ncaafb has neither PLAY-IN% nor an NBA Cup toggle', (tester) async {

@@ -32,7 +32,7 @@ class TestEnrichParticipants:
         assert result[0]["conference"] == "SEC"
         assert result[0]["entity_id"] == "333"
         assert result[0]["role"] == "home"
-        storage.get_entity.assert_called_once_with("ncaafb", "333")
+        storage.get_entity.assert_called_once_with("ncaafb", "333", "team")
 
     def test_missing_entity_degrades_to_none_fields_not_an_error(self):
         storage = MagicMock()
@@ -55,7 +55,7 @@ class TestEnrichParticipants:
 
     def test_each_participant_resolved_independently(self):
         storage = MagicMock()
-        storage.get_entity.side_effect = lambda sport, entity_id: {
+        storage.get_entity.side_effect = lambda sport, entity_id, entity_type: {
             "12": {"name": "Chiefs", "metadata": {"abbreviation": "KC"}},
             "24": {"name": "Chargers", "metadata": {"abbreviation": "LAC"}},
         }[entity_id]
@@ -78,7 +78,7 @@ class TestEnrichTeamStandings:
         assert result[0]["abbreviation"] == "ALA"
         assert result[0]["team_id"] == "333"
         assert result[0]["wins"] == 5
-        storage.get_entity.assert_called_once_with("ncaafb", "333")
+        storage.get_entity.assert_called_once_with("ncaafb", "333", "team")
 
     def test_missing_entity_degrades_to_none_fields_not_an_error(self):
         storage = MagicMock()
@@ -91,7 +91,7 @@ class TestEnrichTeamStandings:
 
     def test_each_row_resolved_independently(self):
         storage = MagicMock()
-        storage.get_entity.side_effect = lambda sport, team_id: {
+        storage.get_entity.side_effect = lambda sport, team_id, entity_type: {
             "12": {"name": "Chiefs", "metadata": {"abbreviation": "KC"}},
             "24": {"name": "Chargers", "metadata": {"abbreviation": "LAC"}},
         }[team_id]
@@ -107,7 +107,7 @@ class TestEnrichTeamStandings:
 class TestEnrichBracketTeamNames:
     def _storage(self):
         storage = MagicMock()
-        storage.get_entity.side_effect = lambda sport, team_id: {
+        storage.get_entity.side_effect = lambda sport, team_id, entity_type: {
             "12": {"name": "Chiefs", "metadata": {"abbreviation": "KC"}},
             "24": {"name": "Chargers", "metadata": {"abbreviation": "LAC"}},
         }.get(team_id)

@@ -66,7 +66,7 @@ def _score_and_record_leader(storage, s3, predictions_table, model_cache: dict, 
     Missing a stat key entirely if that stat's model hasn't been promoted yet."""
     entity_id = feature_row["entity_id"]
     result = {"entity_id": entity_id}
-    entity = storage.get_entity(SPORT, entity_id)
+    entity = storage.get_entity(SPORT, entity_id, "player")
     if entity and entity.get("name"):
         result["name"] = entity["name"]
 
@@ -157,7 +157,7 @@ def predict_player_prop(storage, s3, predictions_table, event_id: str, entity_id
     booster, model_card = model_loader.load_current_model(s3, SPORT, model_name)
     value = non_negative(model_loader.predict(booster, model_card, feature_row))
 
-    entity_key_value = build_entity_key(SPORT, entity_id)
+    entity_key_value = build_entity_key(SPORT, entity_id, "player")
     record_prediction(
         predictions_table, event_key_value,
         f"MODEL#{model_name}#v{model_card['version']}#PLAYER#{entity_id}", {"value": value},

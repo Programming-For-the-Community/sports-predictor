@@ -34,16 +34,32 @@ const _statLabels = {
   'three_pointers_made': '3-Pointers Made',
 };
 
-/// Buckets standings by division, preserving each team's relative order --
+/// NBA's own `division` value is the fine-grained "Eastern Atlantic"/
+/// "Western Pacific"/etc (library.features.nba_teams.TEAM_DIVISIONS,
+/// unchanged -- still the real division a team belongs to) -- but real
+/// NBA standings pages are conventionally shown by conference only (2
+/// groups), not sub-divided by division the way NFL's AFC East/NFC West
+/// etc. conventionally are. This takes just the conference-prefix word
+/// off NBA's division string for grouping purposes only; every other
+/// sport's grouping is unaffected.
+String _standingsGroupKey(String sport, String? division) {
+  final raw = division ?? 'Other';
+  if (sport != 'nba') return raw;
+  final firstWord = raw.split(' ').first;
+  return firstWord.isEmpty ? raw : firstWord;
+}
+
+/// Buckets standings by division (or, for NBA, by conference -- see
+/// _standingsGroupKey), preserving each team's relative order --
 /// standings arrives already sorted by projected_wins descending (see
-/// SeasonProjection's own doc comment), so each division's own bucket is
+/// SeasonProjection's own doc comment), so each group's own bucket is
 /// automatically best-to-worst with no separate sort needed here. filter,
-/// when non-empty, keeps only divisions whose own name contains it
+/// when non-empty, keeps only groups whose own name contains it
 /// (case-insensitive) -- see _ConferenceFilterField.
-List<MapEntry<String, List<TeamStanding>>> _groupByDivision(List<TeamStanding> standings, String filter) {
+List<MapEntry<String, List<TeamStanding>>> _groupByDivision(String sport, List<TeamStanding> standings, String filter) {
   final byDivision = <String, List<TeamStanding>>{};
   for (final team in standings) {
-    byDivision.putIfAbsent(team.division ?? 'Other', () => []).add(team);
+    byDivision.putIfAbsent(_standingsGroupKey(sport, team.division), () => []).add(team);
   }
   final needle = filter.trim().toLowerCase();
   final divisions = byDivision.keys.where((d) => needle.isEmpty || d.toLowerCase().contains(needle)).toList()
@@ -160,7 +176,7 @@ class _SeasonPageState extends ConsumerState<SeasonPage> {
               // to filter -- a single-conference standings list (or NFL's
               // fixed 8 divisions, small enough to just scroll) has
               // nothing this would meaningfully narrow down.
-              if (_groupByDivision(season.standings, '').length > 1) ...[
+              if (_groupByDivision(season.sport, season.standings, '').length > 1) ...[
                 ConferenceFilterField(
                   value: _conferenceFilter,
                   onChanged: (value) => setState(() => _conferenceFilter = value),
@@ -179,7 +195,7 @@ class _SeasonPageState extends ConsumerState<SeasonPage> {
                   // sized for NFL alone, and cramming a 7th column into the
                   // same width was clipping the RANK header.
                   final width = cardWidth(season.sport == 'ncaafb' ? 560 : 480, constraints.maxWidth);
-                  final divisions = _groupByDivision(season.standings, _conferenceFilter);
+                  final divisions = _groupByDivision(season.sport, season.standings, _conferenceFilter);
                   if (divisions.isEmpty) {
                     return Text('No conferences match "$_conferenceFilter".', style: AppTextStyles.body(color: AppColors.inkSub));
                   }
@@ -642,13 +658,20 @@ class _CupTeamRow extends StatelessWidget {
   }
 }
 
-/// Playoff/Cup-knockout bracket -- a converging tree (_BracketTree) per
-/// conference, connector lines drawn between a matchup and whichever
-/// next-round matchup its own winner feeds into. Conference-split sports
-/// (NFL/NBA -- bracket.conferences non-empty) get one tree per conference
-/// stacked vertically, then the cross-conference final as its own small
-/// card; a flat-bracket sport (NCAAFB -- bracket.rounds non-null) gets
-/// just one tree, its own championship already the last round in it.
+/// Playoff/Cup-knockout bracket -- a single converging tree (_BracketTree).
+/// A flat-bracket sport (NCAAFB -- bracket.rounds non-null) already has its
+/// own championship as the last round. A conference-split sport (NFL/NBA
+/// -- bracket.conferences non-empty) has two conferences that must
+/// visually converge into one shared championship card, not two
+/// independent trees with a disconnected final floating below them --
+/// built by concatenating both conferences' same-index rounds into one
+/// combined round list (round r's matchups = conference A's round r ++
+/// conference B's round r, so each conference occupies its own vertical
+/// band via plain concatenation order) and appending the final matchup as
+/// one more round after that. _computeBracketSlotLayout's own winner-
+/// tracing already handles the cross-conference convergence for free --
+/// it has no notion of "conference" at all, just "does this round's
+/// matchup contain a team the previous round's matchup produced."
 class _BracketSection extends StatelessWidget {
   const _BracketSection({required this.sport, required this.bracket});
 
@@ -664,26 +687,44 @@ class _BracketSection extends StatelessWidget {
 
     final conferenceNames = bracket.conferences.keys.toList()..sort();
     final finalMatchup = bracket.finalMatchup;
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        for (final conference in conferenceNames) ...[
-          Padding(
-            padding: const EdgeInsets.only(bottom: 8),
-            child: Text(conference.toUpperCase(), style: AppTextStyles.microLabel(color: AppColors.cyan)),
-          ),
-          _BracketTree(sport: sport, rounds: bracket.conferences[conference]!, teamNames: bracket.teamNames),
-          const SizedBox(height: 20),
+    if (conferenceNames.length != 2 || finalMatchup == null) {
+      // Not the shape this combined layout assumes -- fall back to
+      // independent per-conference trees rather than guessing.
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          for (final conference in conferenceNames) ...[
+            Padding(
+              padding: const EdgeInsets.only(bottom: 8),
+              child: Text(conference.toUpperCase(), style: AppTextStyles.microLabel(color: AppColors.cyan)),
+            ),
+            _BracketTree(sport: sport, rounds: bracket.conferences[conference]!, teamNames: bracket.teamNames),
+            const SizedBox(height: 20),
+          ],
         ],
-        if (finalMatchup != null) ...[
-          Text('CHAMPIONSHIP', style: AppTextStyles.microLabel(color: AppColors.cyan)),
-          const SizedBox(height: 8),
-          SizedBox(
-            width: 240,
-            child: _BracketMatchupCard(sport: sport, matchup: finalMatchup, teamNames: bracket.teamNames),
-          ),
-        ],
-      ],
+      );
+    }
+
+    final roundsA = bracket.conferences[conferenceNames[0]]!;
+    final roundsB = bracket.conferences[conferenceNames[1]]!;
+    final roundCount = roundsA.length < roundsB.length ? roundsA.length : roundsB.length;
+
+    final combinedRounds = [
+      for (var r = 0; r < roundCount; r++)
+        BracketRound(round: roundsA[r].round, matchups: [...roundsA[r].matchups, ...roundsB[r].matchups]),
+      BracketRound(round: 'Championship', matchups: [finalMatchup]),
+    ];
+
+    final conferenceLabels = [
+      (name: conferenceNames[0], slot: 0.0),
+      (name: conferenceNames[1], slot: roundsA[0].matchups.length.toDouble()),
+    ];
+
+    return _BracketTree(
+      sport: sport,
+      rounds: combinedRounds,
+      teamNames: bracket.teamNames,
+      conferenceLabels: conferenceLabels,
     );
   }
 }
@@ -812,11 +853,23 @@ class _BracketConnectorPainter extends CustomPainter {
 /// overflow the way a Row/Column would, so an unusually tall bracket just
 /// extends the page's own scroll, never a RenderFlex error.
 class _BracketTree extends StatelessWidget {
-  const _BracketTree({required this.sport, required this.rounds, required this.teamNames});
+  const _BracketTree({
+    required this.sport,
+    required this.rounds,
+    required this.teamNames,
+    this.conferenceLabels = const [],
+  });
 
   final String sport;
   final List<BracketRound> rounds;
   final Map<String, BracketTeamName> teamNames;
+
+  /// Optional per-conference labels for a combined conference-split tree
+  /// (see _BracketSection's own docstring) -- each names the round-0 slot
+  /// where that conference's own band of matchups starts, so a small
+  /// label can mark it since there's no longer a separate Column/heading
+  /// per conference once both are merged into one Stack.
+  final List<({String name, double slot})> conferenceLabels;
 
   static const double _cardWidth = 220;
   static const double _cardHeight = 108;
@@ -865,17 +918,44 @@ class _BracketTree extends StatelessWidget {
                 ],
               ),
             ),
-            const SizedBox(height: 10),
+            // Extra headroom (vs. the flat-bracket case's plain 10px gap)
+            // when conference labels are present -- the first conference's
+            // label sits at a negative `top` inside the Stack below (see
+            // its own clipBehavior comment), and this reserves the actual
+            // layout space for that overflow instead of just permitting
+            // it to render into nothing, which is exactly the class of
+            // RenderFlex-overflow bug this page has hit for real before.
+            SizedBox(height: conferenceLabels.isEmpty ? 10 : 10 + _headerHeight),
             SizedBox(
               width: totalWidth,
               height: totalHeight,
               child: Stack(
+                // conferenceLabels can sit slightly above the first
+                // card's own top (a negative `top`, for the first
+                // conference's label) -- Stack clips to its own bounds by
+                // default, which would silently drop that label.
+                clipBehavior: Clip.none,
                 children: [
+                  for (final label in conferenceLabels)
+                    Positioned(
+                      left: 0,
+                      top: label.slot * _verticalUnit - _headerHeight,
+                      width: _cardWidth,
+                      child: Text(
+                        label.name.toUpperCase(),
+                        style: AppTextStyles.microLabel(color: AppColors.cyan),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
                   Positioned.fill(
                     child: CustomPaint(
                       painter: _BracketConnectorPainter(
                         connections: layout.connections,
-                        color: AppColors.borderRaised,
+                        // Muted but clearly visible against the dark
+                        // background -- borderRaised (8% white) used to
+                        // sit here, which was reported as barely legible.
+                        color: AppColors.inkSub,
                         cardWidth: _cardWidth,
                         cardHeight: _cardHeight,
                         roundGap: _roundGap,
@@ -928,7 +1008,10 @@ class _BracketMatchupCard extends StatelessWidget {
             seed: matchup.seedA,
             teamNames: teamNames,
             isWinner: winner == matchup.teamA,
-            score: matchup.isFinal ? matchup.actualHomeScore : null,
+            // A series' running win count takes priority over a single
+            // game's score -- shown throughout (0-0 included), not just
+            // once final, since the record matters while it's still live.
+            score: matchup.isSeries ? matchup.winsA : (matchup.isFinal ? matchup.actualHomeScore : null),
           ),
           const SizedBox(height: 4),
           _BracketTeamRow(
@@ -937,7 +1020,7 @@ class _BracketMatchupCard extends StatelessWidget {
             seed: matchup.seedB,
             teamNames: teamNames,
             isWinner: winner == matchup.teamB,
-            score: matchup.isFinal ? matchup.actualAwayScore : null,
+            score: matchup.isSeries ? matchup.winsB : (matchup.isFinal ? matchup.actualAwayScore : null),
           ),
           const SizedBox(height: 6),
           Text(_statusLabel(), style: AppTextStyles.microLabel(color: _statusColor()), overflow: TextOverflow.ellipsis),
@@ -953,9 +1036,28 @@ class _BracketMatchupCard extends StatelessWidget {
 
   // "Projected"/"Scheduled"/"Final" -- the 3-state design from
   // season_projection.py's own _resolve_matchup docstring, see
-  // BracketMatchup's own doc comment.
+  // BracketMatchup's own doc comment. A series matchup (isSeries) folds
+  // in its running win-loss record -- "win probability" alone doesn't
+  // convey a best-of-7 slot's real state the way it does for a true
+  // single-elimination one.
   String _statusLabel() {
     final winnerLabel = matchup.predictedWinner != null ? _teamLabel(matchup.predictedWinner!) : null;
+    if (matchup.isSeries) {
+      final record = '${matchup.winsA}-${matchup.winsB}';
+      switch (matchup.status) {
+        case 'final':
+          final winnerName = matchup.actualWinner != null ? _teamLabel(matchup.actualWinner!) : null;
+          return winnerName != null ? '$winnerName WINS SERIES $record' : 'SERIES FINAL $record';
+        case 'scheduled':
+          return matchup.winProbability != null && winnerLabel != null
+              ? '$record — ${(matchup.winProbability! * 100).round()}% $winnerLabel'
+              : '$record — PREDICTION PENDING';
+        default:
+          return matchup.winProbability != null && winnerLabel != null
+              ? 'PROJECTED — ${(matchup.winProbability! * 100).round()}% $winnerLabel'
+              : 'PROJECTED';
+      }
+    }
     switch (matchup.status) {
       case 'final':
         return 'FINAL';

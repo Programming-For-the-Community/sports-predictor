@@ -1,7 +1,7 @@
 # Assumed by EventBridge Scheduler to start the two orchestrator state
 # machines (sfn-ingest-orchestrator.tf, sfn-training-orchestrator.tf) on
-# their own cron, plus the two direct-invoke Lambda jobs below. (Normalize
-# is triggered by an S3 event notification on the raw bucket, not by
+# their own cron, plus the direct-invoke Lambda jobs below. (Normalize is
+# triggered by an S3 event notification on the raw bucket, not by
 # EventBridge, so it isn't covered by this role.)
 data "aws_iam_policy_document" "eventbridge_invoke_assume" {
   statement {
@@ -42,6 +42,16 @@ data "aws_iam_policy_document" "eventbridge_invoke_permissions" {
   # ncaafb_predict: scheduler-ncaafb-season-projection.tf's own target.
   # ncaafb_live_scores: scheduler-ncaafb-live-scores.tf's own target,
   # same every-60s reasoning as nfl_live_scores.
+  #
+  # nba_predict/nba_live_scores/nba_schedule_sync were missing from this
+  # list even though scheduler-nba-season-projection.tf, scheduler-nba-
+  # live-scores.tf, and scheduler-nba-schedule-sync.tf all target this same
+  # role -- every scheduled NBA invocation (season projection, 60s live-
+  # score refresh, weekly schedule sync) has been failing AccessDenied
+  # since those files were added. Found 2026-08-18, fixed here.
+  #
+  # The 3 predict-read functions: scheduler-predict-read-warmup.tf's own
+  # 5-minute warmup ping.
   statement {
     sid     = "InvokeDirectLambdaJobs"
     actions = ["lambda:InvokeFunction"]
@@ -49,8 +59,14 @@ data "aws_iam_policy_document" "eventbridge_invoke_permissions" {
       aws_lambda_function.nfl_predict.arn,
       aws_lambda_function.nfl_schedule_sync.arn,
       aws_lambda_function.nfl_live_scores.arn,
+      aws_lambda_function.nfl_predict_read.arn,
       aws_lambda_function.ncaafb_predict.arn,
       aws_lambda_function.ncaafb_live_scores.arn,
+      aws_lambda_function.ncaafb_predict_read.arn,
+      aws_lambda_function.nba_predict.arn,
+      aws_lambda_function.nba_live_scores.arn,
+      aws_lambda_function.nba_schedule_sync.arn,
+      aws_lambda_function.nba_predict_read.arn,
     ]
   }
 }
