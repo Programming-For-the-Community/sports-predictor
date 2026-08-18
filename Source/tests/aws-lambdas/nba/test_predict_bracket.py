@@ -15,7 +15,7 @@ break the way NFL's own _seed_conference has, confirmed stable across
 PYTHONHASHSEED values): seeds 1-6 = 2,17,18,20,28,4; seeds 7-10 =
 5,8,11,15. With equal ratings, every play-in game is won by the better
 (numerically lower) seed, so the resolved 8-team field is
-2,17,18,20,28,4,5,8 and the First Round pairs are (2,8)/(20,28)/(18,4)/
+2,17,18,20,28,4,5,8 and the Conference Quarterfinals pairs are (2,8)/(20,28)/(18,4)/
 (17,5).
 """
 from unittest.mock import MagicMock, patch
@@ -205,10 +205,47 @@ class TestBracketPayload:
         assert set(result["conferences"]) == {"Eastern", "Western"}
         for rounds in result["conferences"].values():
             assert [r["round"] for r in rounds] == [
-                "Play-In", "First Round", "Conference Semifinals", "Conference Finals",
+                "Play-In", "Play-In Elimination", "Conference Quarterfinals", "Conference Semifinals", "Conference Finals",
             ]
-            assert len(rounds[0]["matchups"]) == 3  # play-in's 3 games
+            assert len(rounds[0]["matchups"]) == 2  # play-in's games 1/2
+            assert len(rounds[1]["matchups"]) == 1  # the elimination game, built from games 1/2's results
         assert result["champion"] == result["finals"]["predicted_winner"]
+
+    def test_the_elimination_game_is_built_from_play_ins_own_two_games(self):
+        # The elimination game's own participants are game 1's loser and
+        # game 2's winner -- neither is a fresh team id, both trace back
+        # to one of Play-In's own two games.
+        storage = MagicMock()
+        storage.get_all_events.return_value = []  # no real games yet -- fully projected
+        predictions_table = MagicMock()
+        predictions_table.query.return_value = []
+
+        result = season_projection._bracket_payload(storage, MagicMock(), predictions_table, self._season_inputs(), {})
+
+        for rounds in result["conferences"].values():
+            play_in_games, elimination = rounds[0]["matchups"], rounds[1]["matchups"][0]
+            play_in_teams = {t for m in play_in_games for t in (m["team_a"], m["team_b"])}
+            assert elimination["team_a"] in play_in_teams
+            assert elimination["team_b"] in play_in_teams
+
+    def test_a_play_in_games_winner_reaches_its_own_quarterfinal_seed_pairing(self):
+        # game 1's own winner (the seed-7 side) never plays in the
+        # elimination game -- it advances straight to the Quarterfinals'
+        # own (2 vs 7) pairing. Confirms the backend list order still
+        # supports that (frontend connector-drawing is covered
+        # separately, in season_page_test.dart).
+        storage = MagicMock()
+        storage.get_all_events.return_value = []  # no real games yet -- fully projected
+        predictions_table = MagicMock()
+        predictions_table.query.return_value = []
+
+        result = season_projection._bracket_payload(storage, MagicMock(), predictions_table, self._season_inputs(), {})
+
+        for rounds in result["conferences"].values():
+            play_in_games, quarterfinals = rounds[0]["matchups"], rounds[2]["matchups"]
+            game1 = next(m for m in play_in_games if m["seed_a"] == 7 or m["seed_b"] == 7)
+            game1_winner = game1["predicted_winner"]
+            assert any(game1_winner in (m["team_a"], m["team_b"]) for m in quarterfinals)
 
     def test_a_real_completed_play_in_game_is_reflected_in_the_bracket(self):
         # Seed 7 vs. seed 8 -- the play-in's own Game 1.
@@ -243,7 +280,7 @@ class TestBracketPayload:
         assert SEED_10 not in play_in_teams
 
     def test_a_real_first_round_series_in_progress_shows_the_live_record_not_one_game(self):
-        # SEED_1 (2) vs SEED_8 (8) is First Round's own (2, 8) pair --
+        # SEED_1 (2) vs SEED_8 (8) is Conference Quarterfinals' own (2, 8) pair --
         # season_type=3 (real playoff, not play-in's 5).
         real_games = [
             _postseason_event(f"F{i}", 2026, SEED_1, SEED_8, status="completed", home_score=110, away_score=100, season_type=3)
@@ -258,7 +295,7 @@ class TestBracketPayload:
 
         result = season_projection._bracket_payload(storage, MagicMock(), predictions_table, self._season_inputs(), {})
 
-        first_round = result["conferences"]["Eastern"][1]["matchups"]
+        first_round = result["conferences"]["Eastern"][2]["matchups"]  # index 2 -- Play-In/Play-In Elimination come first
         series = next(m for m in first_round if {m["team_a"], m["team_b"]} == {SEED_1, SEED_8})
         assert series["status"] == "scheduled"
         assert (series["wins_a"], series["wins_b"]) == (2, 0)

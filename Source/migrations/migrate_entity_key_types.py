@@ -72,7 +72,8 @@ def migrate(region: str | None, dry_run: bool) -> None:
         return
 
     migrated, skipped = 0, 0
-    for row in stale:
+    total = len(stale)
+    for i, row in enumerate(stale, start=1):
         entity_type = row.get("entity_type")
         sport = row.get("sport")
         entity_id = row.get("entity_id")
@@ -86,6 +87,13 @@ def migrate(region: str | None, dry_run: bool) -> None:
         table.put_item(new_row)
         table.delete_item({"entity_key": old_key})
         migrated += 1
+
+        # Two serial round-trips per row (put + delete, no batching -- see
+        # module docstring on why this can't just overwrite) means large
+        # tables take a while; log periodically so a long run reads as
+        # progressing, not hung.
+        if i % 50 == 0 or i == total:
+            logger.info("%s: %d/%d rows processed (%d migrated, %d skipped)", table_name, i, total, migrated, skipped)
 
     logger.info("%s: migrated %d rows, skipped %d", table_name, migrated, skipped)
 

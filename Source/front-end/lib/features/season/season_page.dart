@@ -663,15 +663,18 @@ class _CupTeamRow extends StatelessWidget {
 /// own championship as the last round. A conference-split sport (NFL/NBA
 /// -- bracket.conferences non-empty) has two conferences that must
 /// visually converge into one shared championship card, not two
-/// independent trees with a disconnected final floating below them --
-/// built by concatenating both conferences' same-index rounds into one
-/// combined round list (round r's matchups = conference A's round r ++
-/// conference B's round r, so each conference occupies its own vertical
-/// band via plain concatenation order) and appending the final matchup as
-/// one more round after that. _computeBracketSlotLayout's own winner-
-/// tracing already handles the cross-conference convergence for free --
-/// it has no notion of "conference" at all, just "does this round's
-/// matchup contain a team the previous round's matchup produced."
+/// independent trees with a disconnected final floating below them.
+/// _computeConferenceBracketLayout lays each conference's own tree out
+/// independently, then stacks conference B underneath conference A as a
+/// fixed vertical band -- concatenating both conferences' matchups into
+/// one list and running _computeBracketSlotLayout on the merged list
+/// directly (the previous approach) let a bye's collision-avoidance in
+/// one conference land on a slot that numerically coincides with the
+/// other conference's own traced slot, silently swapping two of that
+/// conference's own matchups out of their normal (1v8)/(4v5)/(3v6)/(2v7)
+/// seed order and producing crossed, multi-elbow connector lines -- a
+/// real bug reported against NBA's own bracket. Two isolated per-
+/// conference layouts can never collide this way.
 class _BracketSection extends StatelessWidget {
   const _BracketSection({required this.sport, required this.bracket});
 
@@ -712,12 +715,14 @@ class _BracketSection extends StatelessWidget {
     final combinedRounds = [
       for (var r = 0; r < roundCount; r++)
         BracketRound(round: roundsA[r].round, matchups: [...roundsA[r].matchups, ...roundsB[r].matchups]),
-      BracketRound(round: 'Championship', matchups: [finalMatchup]),
+      BracketRound(round: sport == 'nfl' ? 'Super Bowl' : 'Championship', matchups: [finalMatchup]),
     ];
+
+    final combined = _computeConferenceBracketLayout(roundsA, roundsB, finalMatchup);
 
     final conferenceLabels = [
       (name: conferenceNames[0], slot: 0.0),
-      (name: conferenceNames[1], slot: roundsA[0].matchups.length.toDouble()),
+      (name: conferenceNames[1], slot: combined.conferenceBOffset),
     ];
 
     return _BracketTree(
@@ -725,21 +730,23 @@ class _BracketSection extends StatelessWidget {
       rounds: combinedRounds,
       teamNames: bracket.teamNames,
       conferenceLabels: conferenceLabels,
+      precomputedLayout: combined.layout,
     );
   }
 }
 
 /// One resolved bracket slot's position, in "slot units" (1 unit = one
 /// vertical card-row) -- round 0 gets simple sequential slots 0,1,2,...;
-/// every later round's own slot is the average of whichever earlier-round
-/// slot(s) its own winner traces back to. Matched generically by winner
-/// team id (predicted or actual, see BracketMatchup.isFinal) rather than
-/// assuming round sizes always halve, so a bye (a team with no
-/// prior-round game at all, e.g. NFL's #1 seed skipping Wild Card,
-/// NCAAFB's top-4 seeds skipping Round of 12) naturally gets zero found
-/// sources on that side and just keeps its own round's sequential slot,
-/// and a play-in-style round (NBA) that doesn't cleanly halve still
-/// resolves correctly the same way -- nothing here is sport-specific.
+/// every later round's own slot starts as the average of whichever
+/// earlier-round slot(s) its own winner traces back to (a bye -- a team
+/// with no prior-round game at all, e.g. NFL's #1 seed skipping Wild
+/// Card -- has no source slots, so its own round index stands in
+/// instead). Matched generically by winner team id (predicted or actual,
+/// see BracketMatchup.isFinal) rather than assuming round sizes always
+/// halve, so a play-in-style round (NBA) that doesn't cleanly halve still
+/// resolves correctly -- nothing here is sport-specific. Every round then
+/// gets a single dedup pass (see _computeBracketSlotLayout) so no two
+/// matchups -- traced or bye -- ever land on the same slot.
 class _BracketSlotLayout {
   const _BracketSlotLayout(this.slots, this.connections);
 
@@ -767,29 +774,160 @@ _BracketSlotLayout _computeBracketSlotLayout(List<BracketRound> rounds) {
       continue;
     }
 
+    // A matchup's own VERTICAL POSITION is based only on sources found in
+    // the IMMEDIATELY preceding round -- a source found further back (see
+    // the connector search below) is deliberately excluded here, even
+    // though it's real. Averaging it in can pull a card toward an
+    // unrelated bye's own fallback position and scramble a round's
+    // otherwise-canonical seed order: NBA's Play-In "Elimination Game"
+    // splits Play-In into two rounds, so one Quarterfinal side's real
+    // source sits two rounds back (the OTHER Play-In game's winner skips
+    // the Elimination round entirely) -- confirmed via hand-trace that
+    // using it for position, not just the connector line, swaps two
+    // Quarterfinal cards out of their (1v8)/(4v5)/(3v6)/(2v7) order. A
+    // matchup whose only source is further back is positioned exactly
+    // like a bye instead -- its own list index -- and the actual
+    // connector to that further-back source is still drawn correctly
+    // (see below), it just doesn't drive placement.
     final previousMatchups = rounds[r - 1].matchups;
     final previousSlots = slots[r - 1];
-    final roundSlots = <double>[];
+    final desired = List<double>.filled(matchups.length, 0);
     for (var i = 0; i < matchups.length; i++) {
       final matchup = matchups[i];
-      final foundSlots = <double>[];
+      final immediateSources = <double>[];
       for (var j = 0; j < previousMatchups.length; j++) {
         final previous = previousMatchups[j];
-        final winner = previous.isFinal ? previous.actualWinner : previous.predictedWinner;
-        if (winner != null && (winner == matchup.teamA || winner == matchup.teamB)) {
-          foundSlots.add(previousSlots[j]);
+        if (previous.teamA == matchup.teamA || previous.teamA == matchup.teamB ||
+            previous.teamB == matchup.teamA || previous.teamB == matchup.teamB) {
+          immediateSources.add(previousSlots[j]);
         }
       }
-      final slot = foundSlots.isEmpty ? i.toDouble() : foundSlots.reduce((a, b) => a + b) / foundSlots.length;
-      roundSlots.add(slot);
-      for (final sourceSlot in foundSlots) {
-        connections.add(_BracketConnection(r - 1, sourceSlot, r, slot));
+      // A matchup with no traceable source in the immediately preceding
+      // round ("bye" into this round -- e.g. NBA's direct #4/#5 seeds,
+      // which skip Play-In entirely) has no average to compute; its own
+      // index stands in as its desired slot until the dedup pass below
+      // places it.
+      desired[i] = immediateSources.isEmpty
+          ? i.toDouble()
+          : immediateSources.reduce((a, b) => a + b) / immediateSources.length;
+    }
+
+    // Assign final slots by desired position (ties broken by original
+    // index), nudging forward a full row on collision so no two matchups
+    // in the round share a vertical slot. A collision isn't only a bye's
+    // raw index clashing with an already-traced slot -- once an earlier
+    // round's own dedup has nudged a bye away from its natural position
+    // (NBA's 3-game Play-In feeding a 4-matchup Conference Quarterfinals),
+    // two later, fully-traced Conference Semifinal averages can land on
+    // the same value even though neither side is itself a bye. Dedup
+    // every slot the same way, not just the byes.
+    final order = List<int>.generate(matchups.length, (i) => i)
+      ..sort((a, b) {
+        final cmp = desired[a].compareTo(desired[b]);
+        return cmp != 0 ? cmp : a.compareTo(b);
+      });
+    final roundSlots = List<double?>.filled(matchups.length, null);
+    final used = <double>{};
+    for (final i in order) {
+      var candidate = desired[i];
+      while (used.contains(candidate)) {
+        candidate += 1;
+      }
+      roundSlots[i] = candidate;
+      used.add(candidate);
+    }
+
+    // Connector lines search back through EVERY earlier round (nearest
+    // first, matching either of a previous matchup's two participants,
+    // not just its resolved winner), independent of what drove position
+    // above -- draws the real source even for a side that skips the
+    // immediately preceding round entirely (NBA's Play-In winner
+    // advancing straight to the Quarterfinals) or that only reappears as
+    // the LOSER of an earlier game (NBA's Play-In Elimination Game). A
+    // normal single-elimination loser is never placed into any later
+    // matchup, so the "either participant" check is a no-op everywhere
+    // except Play-In's own two-stage relationship.
+    for (var i = 0; i < matchups.length; i++) {
+      final matchup = matchups[i];
+      for (final side in [matchup.teamA, matchup.teamB]) {
+        for (var back = r - 1; back >= 0; back--) {
+          final foundIndex = rounds[back].matchups.indexWhere((m) => m.teamA == side || m.teamB == side);
+          if (foundIndex != -1) {
+            connections.add(_BracketConnection(back, slots[back][foundIndex], r, roundSlots[i]!));
+            break;
+          }
+        }
       }
     }
-    slots.add(roundSlots);
+
+    slots.add(roundSlots.cast<double>());
   }
 
   return _BracketSlotLayout(slots, connections);
+}
+
+/// Merges two conferences' own independently-computed bracket layouts
+/// into one combined layout for the converging tree (see _BracketSection's
+/// own docstring for why this can't just run _computeBracketSlotLayout on
+/// a concatenated round list -- one conference's dedup fallback can steal
+/// a slot from the other's). Conference B is stacked as a fixed band
+/// directly underneath conference A's own tallest slot, so nothing in
+/// either conference's dedup pass ever sees the other's rows at all.
+({_BracketSlotLayout layout, double conferenceBOffset}) _computeConferenceBracketLayout(
+  List<BracketRound> roundsA,
+  List<BracketRound> roundsB,
+  BracketMatchup finalMatchup,
+) {
+  final layoutA = _computeBracketSlotLayout(roundsA);
+  final layoutB = _computeBracketSlotLayout(roundsB);
+  final roundCount = roundsA.length < roundsB.length ? roundsA.length : roundsB.length;
+
+  var maxSlotA = 0.0;
+  for (final roundSlots in layoutA.slots) {
+    for (final slot in roundSlots) {
+      if (slot > maxSlotA) maxSlotA = slot;
+    }
+  }
+  final offset = maxSlotA + 1;
+
+  final slots = <List<double>>[];
+  final connections = <_BracketConnection>[
+    ...layoutA.connections,
+    for (final c in layoutB.connections) _BracketConnection(c.fromRound, c.fromSlot + offset, c.toRound, c.toSlot + offset),
+  ];
+  for (var r = 0; r < roundCount; r++) {
+    slots.add([...layoutA.slots[r], for (final slot in layoutB.slots[r]) slot + offset]);
+  }
+
+  // The championship's two sides are each conference's own last-round
+  // winner -- trace which of that round's matchups produced it (same
+  // winner-matching _computeBracketSlotLayout itself uses) so the
+  // championship card converges at the right height instead of an
+  // arbitrary fallback; a conference whose winner can't be traced (should
+  // never happen in practice) just contributes no connector.
+  double? sourceSlot(List<BracketRound> rounds, List<double> lastRoundSlots, double bandOffset) {
+    final lastMatchups = rounds[roundCount - 1].matchups;
+    for (var j = 0; j < lastMatchups.length; j++) {
+      final previous = lastMatchups[j];
+      final winner = previous.isFinal ? previous.actualWinner : previous.predictedWinner;
+      if (winner != null && (winner == finalMatchup.teamA || winner == finalMatchup.teamB)) {
+        return lastRoundSlots[j] + bandOffset;
+      }
+    }
+    return null;
+  }
+
+  final finalSources = [
+    sourceSlot(roundsA, layoutA.slots[roundCount - 1], 0),
+    sourceSlot(roundsB, layoutB.slots[roundCount - 1], offset),
+  ].whereType<double>().toList();
+  final finalSlot = finalSources.isEmpty ? 0.0 : finalSources.reduce((a, b) => a + b) / finalSources.length;
+  for (final source in finalSources) {
+    connections.add(_BracketConnection(roundCount - 1, source, roundCount, finalSlot));
+  }
+  slots.add([finalSlot]);
+
+  return (layout: _BracketSlotLayout(slots, connections), conferenceBOffset: offset);
 }
 
 /// Draws each round-to-round connector as a simple 3-segment elbow
@@ -858,6 +996,7 @@ class _BracketTree extends StatelessWidget {
     required this.rounds,
     required this.teamNames,
     this.conferenceLabels = const [],
+    this.precomputedLayout,
   });
 
   final String sport;
@@ -871,6 +1010,14 @@ class _BracketTree extends StatelessWidget {
   /// per conference once both are merged into one Stack.
   final List<({String name, double slot})> conferenceLabels;
 
+  /// A combined conference-split tree can't let _computeBracketSlotLayout
+  /// run on the merged round list directly -- see
+  /// _computeConferenceBracketLayout's own docstring for why -- so
+  /// _BracketSection passes its own already-merged layout here instead.
+  /// Null for the flat (NCAAFB) and independent-tree fallback cases,
+  /// which still compute their own from `rounds` below.
+  final _BracketSlotLayout? precomputedLayout;
+
   static const double _cardWidth = 220;
   static const double _cardHeight = 108;
   static const double _roundGap = 40;
@@ -883,7 +1030,7 @@ class _BracketTree extends StatelessWidget {
       return Text('Bracket not available yet.', style: AppTextStyles.body(color: AppColors.inkSub));
     }
 
-    final layout = _computeBracketSlotLayout(rounds);
+    final layout = precomputedLayout ?? _computeBracketSlotLayout(rounds);
     var maxSlot = 0.0;
     for (final roundSlots in layout.slots) {
       for (final slot in roundSlots) {
@@ -1053,9 +1200,13 @@ class _BracketMatchupCard extends StatelessWidget {
               ? '$record — ${(matchup.winProbability! * 100).round()}% $winnerLabel'
               : '$record — PREDICTION PENDING';
         default:
+          // A projected series slot still has a real (usually 0-0)
+          // record -- the team rows above already show it per-team (see
+          // this card's build()), but the status line itself was
+          // dropping it, the only one of the 3 states to do so.
           return matchup.winProbability != null && winnerLabel != null
-              ? 'PROJECTED — ${(matchup.winProbability! * 100).round()}% $winnerLabel'
-              : 'PROJECTED';
+              ? '$record — PROJECTED — ${(matchup.winProbability! * 100).round()}% $winnerLabel'
+              : '$record — PROJECTED';
       }
     }
     switch (matchup.status) {

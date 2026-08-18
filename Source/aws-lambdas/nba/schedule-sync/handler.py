@@ -51,15 +51,26 @@ since yesterday, plus however many still-preseason dates remain unwritten
 so they get re-checked, and re-cost one call, on every run until the
 season actually starts).
 
-KNOWN LIMITATION: a date, once written, is never re-fetched -- if the NBA
-reschedules a future game to a different date after this Lambda has
-already synced its original date, that date's now-stale entry won't
-self-correct here. It corrects itself once the game is actually played:
-daily ingest's own "yesterday" fetch always writes that day's real
-scoreboard/box score unconditionally, regardless of what schedule-sync
-already wrote for it. Until then, the frontend may show the old date --
-a cosmetic gap, not a data-correctness one, and rare enough (NBA
-reschedules are uncommon) not to justify a TTL/re-check mechanism.
+RESCHEDULE HANDLING (2026-08-19): the idempotent skip above only applies
+BEYOND SCHEDULE_SYNC_REFRESH_WINDOW_DAYS -- every date inside that near-
+term window is re-fetched and overwritten on every run, regardless of
+whether it was already written. A rescheduled game moves BOTH its old
+date's entry (now stale, still lists a game that no longer plays there)
+and its new date's entry (missing, if that date was already synced
+before the move happened) -- neither self-corrects under a pure
+idempotent skip; ESPN's own scoreboard response is the only source of
+truth for "what's actually on this date now" and has to be re-asked.
+Scoped to the near-term window, not every date, for the same reason the
+lookahead itself is capped: re-fetching all ~270 dates daily would cost
+~270 ESPN calls/run for a class of change (reschedule) that's rare and,
+per the NBA's own scheduling practice, virtually never announced more
+than a few weeks out -- a date already outside the window when this runs
+will have entered it (and been caught) well before it's played. Beyond
+the window, a date still ultimately self-corrects once the game is
+actually played: daily ingest's own "yesterday" fetch always writes that
+day's real scoreboard/box score unconditionally, regardless of what
+schedule-sync already wrote for it -- the refresh window just makes that
+correction happen days/weeks earlier, before the game, not only after.
 """
 import json
 import logging
@@ -84,6 +95,14 @@ PRESEASON_TYPE = 1
 # just costs a few cheap empty-events calls, not a real problem.
 SCHEDULE_SYNC_MAX_LOOKAHEAD_DAYS = 270
 
+# Every date inside this window is re-fetched every run regardless of the
+# idempotent skip below -- see this module's own RESCHEDULE HANDLING
+# docstring section for why. 14 days is a deliberate balance: cheap (14
+# extra ESPN calls/run, same shared RateLimiter as everything else here)
+# while still catching a reschedule with real advance notice before the
+# game, not just after it's already happened.
+SCHEDULE_SYNC_REFRESH_WINDOW_DAYS = 14
+
 _s3 = boto3.client("s3")
 
 
@@ -103,12 +122,14 @@ def lambda_handler(event: dict, context) -> dict:
     start = date.today()
     client = NBAClient()
 
-    synced = skipped = failed = 0
+    synced = refreshed = skipped = failed = 0
     for offset in range(SCHEDULE_SYNC_MAX_LOOKAHEAD_DAYS):
         target_date = (start + timedelta(days=offset)).strftime("%Y%m%d")
         scoreboard_key = f"nba/scoreboard/{target_date}.json"
 
-        if _object_exists(scoreboard_key):
+        already_written = _object_exists(scoreboard_key)
+        in_refresh_window = offset < SCHEDULE_SYNC_REFRESH_WINDOW_DAYS
+        if already_written and not in_refresh_window:
             skipped += 1
             continue
 
@@ -120,14 +141,26 @@ def lambda_handler(event: dict, context) -> dict:
                 skipped += 1
                 continue
             _put_json(scoreboard_key, scoreboard)
-            synced += 1
+            # A refresh-window overwrite still re-triggers normalize's own
+            # S3 PUT trigger the exact same way a first-time write does --
+            # this only distinguishes the two for observability (how many
+            # dates actually had a schedule change worth re-fetching vs.
+            # how many were newly seeded), not for any behavior difference.
+            if already_written:
+                refreshed += 1
+            else:
+                synced += 1
         except Exception:
             # One date's transient ESPN failure doesn't block the rest of
             # the lookahead window from syncing -- tomorrow's scheduled
-            # run retries it anyway (its own S3 object was never written,
-            # so the idempotent skip above won't hide the retry).
+            # run retries it anyway (either its S3 object was never
+            # written, so the idempotent skip won't hide the retry, or
+            # it's still inside the refresh window and gets retried
+            # unconditionally regardless).
             logger.exception("Failed syncing date %s", target_date)
             failed += 1
 
-    logger.info("Schedule sync complete: %d synced, %d skipped, %d failed", synced, skipped, failed)
-    return {"synced": synced, "skipped": skipped, "failed": failed}
+    logger.info(
+        "Schedule sync complete: %d synced, %d refreshed, %d skipped, %d failed", synced, refreshed, skipped, failed,
+    )
+    return {"synced": synced, "refreshed": refreshed, "skipped": skipped, "failed": failed}

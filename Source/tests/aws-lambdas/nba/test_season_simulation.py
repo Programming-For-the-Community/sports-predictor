@@ -146,6 +146,19 @@ class TestProjectPlayIn:
 
         assert result["final_7_seed"] == "s7"
 
+    def test_games_are_ordered_to_match_the_quarterfinal_they_feed(self):
+        # The bracket UI lays Play-In games out top-to-bottom in list
+        # order; Conference Quarterfinals' own (1v8) pair sits above
+        # (2v7), so the game deciding the 8 seed must come first and the
+        # 7v8 game (which decides the 7 seed) must come last.
+        ratings = {team: 1500 for team in ("s7", "s8", "s9", "s10")}
+
+        result = season_simulation.project_play_in("s7", "s8", "s9", "s10", ratings, home_advantage=55)
+
+        assert result["games"][0]["predicted_winner"] == result["final_8_seed"]
+        assert {result["games"][-1]["team_a"], result["games"][-1]["team_b"]} == {"s7", "s8"}
+        assert result["games"][-1]["predicted_winner"] == result["final_7_seed"]
+
 
 class TestProjectBracket:
     SEEDS = [f"s{i}" for i in range(1, 9)]
@@ -156,7 +169,7 @@ class TestProjectBracket:
         result = season_simulation.project_bracket(self.SEEDS, ratings, home_advantage=55)
 
         rounds = {r["round"]: r["matchups"] for r in result["rounds"]}
-        assert len(rounds["First Round"]) == 4
+        assert len(rounds["Conference Quarterfinals"]) == 4
         assert len(rounds["Conference Semifinals"]) == 2
         assert len(rounds["Conference Finals"]) == 1
         assert result["champion"] in self.SEEDS
@@ -180,7 +193,7 @@ class TestProjectBracket:
 
 
 class TestProjectConferenceBracket:
-    def test_combines_play_in_and_bracket_into_four_rounds(self):
+    def test_combines_play_in_and_bracket_into_five_rounds(self):
         direct_seeds = [f"s{i}" for i in range(1, 7)]
         ratings = {f"s{i}": 1500 for i in range(1, 11)}
 
@@ -189,10 +202,30 @@ class TestProjectConferenceBracket:
         )
 
         assert [r["round"] for r in result["rounds"]] == [
-            "Play-In", "First Round", "Conference Semifinals", "Conference Finals",
+            "Play-In", "Play-In Elimination", "Conference Quarterfinals", "Conference Semifinals", "Conference Finals",
         ]
         all_teams = {f"s{i}" for i in range(1, 11)}
         assert result["champion"] in all_teams
+
+    def test_play_in_round_has_two_games_and_elimination_round_has_one(self):
+        direct_seeds = [f"s{i}" for i in range(1, 7)]
+        ratings = {f"s{i}": 1500 for i in range(1, 11)}
+
+        result = season_simulation.project_conference_bracket(
+            direct_seeds, "s7", "s8", "s9", "s10", ratings, home_advantage=55,
+        )
+
+        rounds = {r["round"]: r["matchups"] for r in result["rounds"]}
+        assert len(rounds["Play-In"]) == 2
+        assert len(rounds["Play-In Elimination"]) == 1
+        # The elimination game's own participants are game 1's loser and
+        # game 2's winner -- neither is a fresh seed_7-10 team id on its
+        # own, both trace back to one of the first round's two games.
+        game1, game2 = rounds["Play-In"]
+        elimination = rounds["Play-In Elimination"][0]
+        first_round_teams = {game1["team_a"], game1["team_b"], game2["team_a"], game2["team_b"]}
+        assert elimination["team_a"] in first_round_teams
+        assert elimination["team_b"] in first_round_teams
 
 
 class TestProjectFinals:

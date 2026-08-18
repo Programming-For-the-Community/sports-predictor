@@ -48,6 +48,26 @@ CUP_GROUPS: dict[int, dict[str, dict[str, list[str]]]] = {
             "C": ["24", "7", "10", "22", "9"],    # SA, DEN, HOU, POR, GS
         },
     },
+    # 2026-27 season. ESPN's own standings/_/view/nba-cup page was checked
+    # first (2026-08-18) and rejected as a source -- it still showed last
+    # season's (2025-26) group membership despite a "2026-27" page header,
+    # i.e. stale, not yet updated. Cross-checked against two independent
+    # sources instead (Bleacher Report's and ClutchPoints' own 2026-27 NBA
+    # Cup group-assignment articles) -- both list the identical 30-team
+    # membership below (only their own group-letter labels differ, which
+    # don't matter here), so treated as confirmed.
+    2027: {
+        "Eastern": {
+            "A": ["17", "8", "15", "19", "28"],  # BKN, DET, MIL, ORL, TOR
+            "B": ["5", "11", "14", "18", "20"],  # CLE, IND, MIA, NY, PHI
+            "C": ["1", "2", "30", "4", "27"],    # ATL, BOS, CHA, CHI, WSH
+        },
+        "Western": {
+            "A": ["6", "7", "10", "21", "26"],   # DAL, DEN, HOU, PHX, UTAH
+            "B": ["12", "29", "16", "3", "25"],  # LAC, MEM, MIN, NO, OKC
+            "C": ["9", "13", "22", "23", "24"],  # GS, LAL, POR, SAC, SA
+        },
+    },
 }
 
 

@@ -26,11 +26,11 @@ module: ties broken by point differential then arbitrarily -- the real
 NBA's tiebreaker rules (head-to-head, division record, etc.) aren't
 implemented.
 
-Every real NBA playoff round except Play-In (First Round, Conference
-Semifinals, Conference Finals, NBA Finals) is a best-of-7 series, not a
-single game (confirmed live, 2026-08-17 -- every round has been best-of-7
-since 2003; Play-In alone stays single-elimination, both games and the
-7-vs-8 game). series_win_probability below is what makes a bracket slot
+Every real NBA playoff round except Play-In (Conference Quarterfinals,
+Conference Semifinals, Conference Finals, NBA Finals) is a best-of-7
+series, not a single game (confirmed live, 2026-08-17 -- every round has
+been best-of-7 since 2003; Play-In alone stays single-elimination, both
+games and the 7-vs-8 game). series_win_probability below is what makes a bracket slot
 series-aware; aws-lambdas/nba/predict/season_projection.py's
 _resolve_series_matchup is the actual caller that threads a live series'
 real win/loss record through it.
@@ -199,8 +199,14 @@ def project_play_in(
     seed_7: str, seed_8: str, seed_9: str, seed_10: str, ratings: dict[str, float], home_advantage: float,
 ) -> dict:
     """Deterministic sibling of _simulate_play_in -- same 3-game format
-    (see that function's own docstring), no RNG. Returns {"games": [game1,
-    game2, game3], "final_7_seed": team_id, "final_8_seed": team_id}."""
+    (see that function's own docstring), no RNG. Returns {"games": [game3,
+    game2, game1], "final_7_seed": team_id, "final_8_seed": team_id} --
+    game3 first and game1 last so the list already reads top-to-bottom in
+    the order the bracket UI's Conference Quarterfinals column expects:
+    game3's winner (final_8_seed) feeds the top Quarterfinal (1 vs 8) and
+    game1's winner (final_7_seed) feeds the bottom one (2 vs 7), with
+    game2 (which has no Quarterfinal of its own -- it only feeds game3)
+    kept next to game3."""
     seed_number = {seed_7: 7, seed_8: 8, seed_9: 9, seed_10: 10}
     game1 = project_matchup(seed_7, seed_8, 7, 8, ratings, home_advantage)
     game1_winner = game1["predicted_winner"]
@@ -210,7 +216,7 @@ def project_play_in(
     game3 = project_matchup(
         game1_loser, game2_winner, seed_number[game1_loser], seed_number[game2_winner], ratings, home_advantage,
     )
-    return {"games": [game1, game2, game3], "final_7_seed": game1_winner, "final_8_seed": game3["predicted_winner"]}
+    return {"games": [game3, game2, game1], "final_7_seed": game1_winner, "final_8_seed": game3["predicted_winner"]}
 
 
 def project_bracket(seeds: list[str], ratings: dict[str, float], home_advantage: float = DEFAULT_HOME_ADVANTAGE) -> dict:
@@ -223,7 +229,7 @@ def project_bracket(seeds: list[str], ratings: dict[str, float], home_advantage:
     both stages). Picks the higher-win-probability side every matchup and
     returns the full round-by-round path instead of just a champion.
 
-    Returns {"rounds": [{"round": "First Round", "matchups": [...]},
+    Returns {"rounds": [{"round": "Conference Quarterfinals", "matchups": [...]},
     ...], "champion": team_id}.
     """
     seed_number = {team_id: rank + 1 for rank, team_id in enumerate(seeds)}
@@ -245,7 +251,7 @@ def project_bracket(seeds: list[str], ratings: dict[str, float], home_advantage:
 
     return {
         "rounds": [
-            {"round": "First Round", "matchups": first_round},
+            {"round": "Conference Quarterfinals", "matchups": first_round},
             {"round": "Conference Semifinals", "matchups": semifinals},
             {"round": "Conference Finals", "matchups": [championship]},
         ],
@@ -259,12 +265,27 @@ def project_conference_bracket(
 ) -> dict:
     """Combines project_play_in and project_bracket into one conference's
     full postseason path -- NBA's own two-stage format (see this module's
-    own docstring). direct_seeds is seeds 1-6, already ordered."""
+    own docstring). direct_seeds is seeds 1-6, already ordered.
+
+    Play-In itself renders as two rounds, not one -- game 3 (the
+    elimination game) isn't played in parallel with games 1/2, it's built
+    FROM their results (game 1's loser vs game 2's winner -- see
+    project_play_in's own docstring), so it belongs one round later, not
+    beside them. Within that first round, game2 goes first and game1
+    last: game1's WINNER (unlike game2's) never appears in the
+    elimination game at all -- it advances straight through to the
+    Quarterfinals' own (2 vs 7) pairing -- so putting game1 last keeps it
+    next to that pairing's own position two rounds later."""
     play_in = project_play_in(seed_7, seed_8, seed_9, seed_10, ratings, home_advantage)
     full_seeds = direct_seeds + [play_in["final_7_seed"], play_in["final_8_seed"]]
     bracket = project_bracket(full_seeds, ratings, home_advantage)
+    game3, game2, game1 = play_in["games"]
     return {
-        "rounds": [{"round": "Play-In", "matchups": play_in["games"]}, *bracket["rounds"]],
+        "rounds": [
+            {"round": "Play-In", "matchups": [game2, game1]},
+            {"round": "Play-In Elimination", "matchups": [game3]},
+            *bracket["rounds"],
+        ],
         "champion": bracket["champion"],
     }
 

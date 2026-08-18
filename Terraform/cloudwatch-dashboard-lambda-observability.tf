@@ -26,12 +26,22 @@
 # instant), same simplification any SUM-of-SEARCH concurrency rollup makes;
 # fine for spotting real single-sport concurrency pressure, not exact.
 #
-# Each SEARCH's metric name is a bare term (e.g. `Invocations "prefix"`),
+# Each SEARCH's metric name is a bare term (e.g. `Invocations prefix`),
 # NOT `MetricName="Invocations" "prefix"` -- live-verified 2026-08-16 via
 # GetMetricData that mixing a MetricName= property clause with a plain
 # quoted term silently matches zero series, which is why this dashboard
 # originally showed no data at all despite the underlying Lambda metrics
 # being populated.
+#
+# The prefix term itself must ALSO stay unquoted -- live-verified
+# 2026-08-18 via GetMetricData that `Invocations "sports-predictor-nfl-"`
+# (quoted, trailing hyphen) still matches zero series even after the fix
+# above; CloudWatch's SEARCH full-text tokenizer can't phrase-match a
+# quoted string ending in a hyphen against "sports-predictor-nfl-predict".
+# Dropping the quotes entirely (`Invocations sports-predictor-nfl-`) is
+# what actually returns data -- confirmed to still scope correctly per
+# sport (no cross-contamination between nfl/ncaafb/nba) and to return one
+# distinct series per function for the by-function panels.
 locals {
   lambda_dashboard_sports = ["nfl", "ncaafb", "nba"]
 }
@@ -57,7 +67,7 @@ resource "aws_cloudwatch_dashboard" "lambda_observability" {
           metrics = [
             for sport in local.lambda_dashboard_sports : [
               {
-                expression = "SUM(SEARCH('{AWS/Lambda,FunctionName} Invocations \"${var.project}-${sport}-\"', 'Sum', 300))"
+                expression = "SUM(SEARCH('{AWS/Lambda,FunctionName} Invocations ${var.project}-${sport}-', 'Sum', 300))"
                 label      = upper(sport)
                 id         = "inv_${sport}"
               }
@@ -80,7 +90,7 @@ resource "aws_cloudwatch_dashboard" "lambda_observability" {
           metrics = [
             [
               {
-                expression = "SEARCH('{AWS/Lambda,FunctionName} Invocations \"${var.project}-\"', 'Sum', 300)"
+                expression = "SEARCH('{AWS/Lambda,FunctionName} Invocations ${var.project}-', 'Sum', 300)"
                 id         = "inv_all"
               }
             ]
@@ -104,7 +114,7 @@ resource "aws_cloudwatch_dashboard" "lambda_observability" {
           metrics = [
             for sport in local.lambda_dashboard_sports : [
               {
-                expression = "SUM(SEARCH('{AWS/Lambda,FunctionName} Errors \"${var.project}-${sport}-\"', 'Sum', 300))"
+                expression = "SUM(SEARCH('{AWS/Lambda,FunctionName} Errors ${var.project}-${sport}-', 'Sum', 300))"
                 label      = upper(sport)
                 id         = "err_${sport}"
               }
@@ -126,7 +136,7 @@ resource "aws_cloudwatch_dashboard" "lambda_observability" {
           metrics = [
             [
               {
-                expression = "SEARCH('{AWS/Lambda,FunctionName} Errors \"${var.project}-\"', 'Sum', 300)"
+                expression = "SEARCH('{AWS/Lambda,FunctionName} Errors ${var.project}-', 'Sum', 300)"
                 id         = "err_all"
               }
             ]
@@ -150,7 +160,7 @@ resource "aws_cloudwatch_dashboard" "lambda_observability" {
           metrics = [
             for sport in local.lambda_dashboard_sports : [
               {
-                expression = "AVG(SEARCH('{AWS/Lambda,FunctionName} Duration \"${var.project}-${sport}-\"', 'Average', 300))"
+                expression = "AVG(SEARCH('{AWS/Lambda,FunctionName} Duration ${var.project}-${sport}-', 'Average', 300))"
                 label      = upper(sport)
                 id         = "dur_${sport}"
               }
@@ -173,7 +183,7 @@ resource "aws_cloudwatch_dashboard" "lambda_observability" {
           metrics = [
             [
               {
-                expression = "SEARCH('{AWS/Lambda,FunctionName} Duration \"${var.project}-\"', 'Average', 300)"
+                expression = "SEARCH('{AWS/Lambda,FunctionName} Duration ${var.project}-', 'Average', 300)"
                 id         = "dur_all"
               }
             ]
@@ -197,7 +207,7 @@ resource "aws_cloudwatch_dashboard" "lambda_observability" {
           metrics = [
             for sport in local.lambda_dashboard_sports : [
               {
-                expression = "SUM(SEARCH('{AWS/Lambda,FunctionName} ConcurrentExecutions \"${var.project}-${sport}-\"', 'Maximum', 300))"
+                expression = "SUM(SEARCH('{AWS/Lambda,FunctionName} ConcurrentExecutions ${var.project}-${sport}-', 'Maximum', 300))"
                 label      = upper(sport)
                 id         = "conc_${sport}"
               }
@@ -220,7 +230,7 @@ resource "aws_cloudwatch_dashboard" "lambda_observability" {
           metrics = [
             [
               {
-                expression = "SEARCH('{AWS/Lambda,FunctionName} ConcurrentExecutions \"${var.project}-\"', 'Maximum', 300)"
+                expression = "SEARCH('{AWS/Lambda,FunctionName} ConcurrentExecutions ${var.project}-', 'Maximum', 300)"
                 id         = "conc_all"
               }
             ]
@@ -249,7 +259,7 @@ resource "aws_cloudwatch_dashboard" "lambda_observability" {
           metrics = [
             for sport in local.lambda_dashboard_sports : [
               {
-                expression = "SUM(SEARCH('{AWS/Lambda,FunctionName} Throttles \"${var.project}-${sport}-\"', 'Sum', 300))"
+                expression = "SUM(SEARCH('{AWS/Lambda,FunctionName} Throttles ${var.project}-${sport}-', 'Sum', 300))"
                 label      = upper(sport)
                 id         = "thr_${sport}"
               }
@@ -271,7 +281,7 @@ resource "aws_cloudwatch_dashboard" "lambda_observability" {
           metrics = [
             [
               {
-                expression = "SEARCH('{AWS/Lambda,FunctionName} Throttles \"${var.project}-\"', 'Sum', 300)"
+                expression = "SEARCH('{AWS/Lambda,FunctionName} Throttles ${var.project}-', 'Sum', 300)"
                 id         = "thr_all"
               }
             ]

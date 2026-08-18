@@ -347,7 +347,7 @@ def _real_postseason_series(storage: FeatureStorage, current_season: int | None)
     """{frozenset({team_a, team_b}): [games chronological]} for every real
     playoff/play-in game (season_type in POSTSEASON_TYPES) this season --
     every real game between a pair, not just one, since a real playoff
-    series (First Round onward) is best-of-7 -- _resolve_series_matchup
+    series (Conference Quarterfinals onward) is best-of-7 -- _resolve_series_matchup
     reads a pair's whole game list to know the series' running record and
     which game (if any) is next. Sorted by event_date so "the next
     unplayed game" is well-defined."""
@@ -460,8 +460,8 @@ def _resolve_series_matchup(
     current_ratings: dict[str, float], home_advantage: float,
 ) -> dict:
     """Best-of-7 sibling of _resolve_matchup -- every real NBA playoff
-    round except Play-In (First Round, Conference Semifinals, Conference
-    Finals, NBA Finals) is a series, not a single game, so this tracks a
+    round except Play-In (Conference Quarterfinals, Conference Semifinals,
+    Conference Finals, NBA Finals) is a series, not a single game, so this tracks a
     running win count per side across every real game found for the pair
     instead of resolving just one (see _series_record). "final" means the
     SERIES is decided (someone reached 4 wins), not that one game
@@ -583,8 +583,8 @@ def _project_conference_bracket_reconciled(
     through _resolve_matchup's real-vs-projected reconciliation (real
     NBA rule: both play-in games are single elimination, not a series);
     every round after it goes through _resolve_series_matchup instead --
-    real NBA rule, First Round onward is best-of-7. Returns (rounds,
-    champion)."""
+    real NBA rule, Conference Quarterfinals onward is best-of-7. Returns
+    (rounds, champion)."""
     # Play-In is built game-by-game (unlike the other rounds), since
     # game 3's own participants depend on games 1/2's own results --
     # _project_bracket_round's own "resolve a static list of pairs" shape
@@ -608,14 +608,20 @@ def _project_conference_bracket_reconciled(
     )
     final_8_seed = game3["predicted_winner"] if game3["status"] != "final" else game3["actual_winner"]
 
-    play_in = {"round": "Play-In", "matchups": [game1, game2, game3]}
+    # Two rounds, not one -- game3 isn't played in parallel with games
+    # 1/2, it's built FROM their results (matches
+    # season_simulation.project_conference_bracket's own shape, see that
+    # function's docstring for why, including why game2 goes first and
+    # game1 last within the first round).
+    play_in_round1 = {"round": "Play-In", "matchups": [game2, game1]}
+    play_in_round2 = {"round": "Play-In Elimination", "matchups": [game3]}
     full_seeds = direct_seeds + [game1_winner, final_8_seed]
 
     seed_number = {team_id: rank + 1 for rank, team_id in enumerate(full_seeds)}
     one, two, three, four, five, six, seven, eight = full_seeds
 
     first_round, first_round_advancing = _project_series_round(
-        "First Round",
+        "Conference Quarterfinals",
         [
             (one, eight, seed_number[one], seed_number[eight]),
             (four, five, seed_number[four], seed_number[five]),
@@ -640,7 +646,7 @@ def _project_conference_bracket_reconciled(
         real_series, storage, s3, predictions_table, current_ratings, home_advantage,
     )
 
-    return [play_in, first_round, semifinals, championship], championship_advancing[0][0]
+    return [play_in_round1, play_in_round2, first_round, semifinals, championship], championship_advancing[0][0]
 
 
 def _bracket_payload(
