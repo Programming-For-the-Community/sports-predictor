@@ -709,28 +709,28 @@ _BracketSlotLayout _computeBracketSlotLayout(List<BracketRound> rounds) {
     }
 
     // Assign final slots by desired position (ties broken by original
-    // index), nudging forward a full row on collision so no two matchups
-    // in the round share a vertical slot. A collision isn't only a bye's
-    // raw index clashing with an already-traced slot -- once an earlier
-    // round's own dedup has nudged a bye away from its natural position
-    // (NBA's 3-game Play-In feeding a 4-matchup Conference Quarterfinals),
-    // two later, fully-traced Conference Semifinal averages can land on
-    // the same value even though neither side is itself a bye. Dedup
-    // every slot the same way, not just the byes.
+    // index), walking through in ascending order and pushing each one at
+    // least a full row past whichever slot was just assigned before it.
+    // An EXACT duplicate isn't the only collision to guard against -- two
+    // desired values that are merely close (e.g. Play-In Elimination's
+    // own single-game average landing on 0.5, half a row above a bye's
+    // integer fallback at 1.0) are numerically distinct but still overlap
+    // visually, since a card is taller than half a row (a real bug: NBA's
+    // own 1v8/4v5 Quarterfinal cards, at slots 0.5 and 1.0, physically
+    // overlapped despite never computing the same slot). Enforcing a full
+    // 1-row minimum gap between every consecutive pair, not just an
+    // inequality check, catches both cases the same way.
     final order = List<int>.generate(matchups.length, (i) => i)
       ..sort((a, b) {
         final cmp = desired[a].compareTo(desired[b]);
         return cmp != 0 ? cmp : a.compareTo(b);
       });
     final roundSlots = List<double?>.filled(matchups.length, null);
-    final used = <double>{};
+    var lastAssigned = double.negativeInfinity;
     for (final i in order) {
-      var candidate = desired[i];
-      while (used.contains(candidate)) {
-        candidate += 1;
-      }
+      final candidate = desired[i] > lastAssigned + 1 ? desired[i] : lastAssigned + 1;
       roundSlots[i] = candidate;
-      used.add(candidate);
+      lastAssigned = candidate;
     }
 
     // Connector lines search back through EVERY earlier round (nearest
@@ -962,20 +962,48 @@ class _BracketTree extends StatelessWidget {
     }
     final totalWidth = rounds.length * _cardWidth + (rounds.length - 1) * _roundGap;
     final totalHeight = maxSlot * _verticalUnit + _cardHeight;
+    // Only NBA's own Play-In has a skip connection at all (see
+    // _BracketConnection.isSkip's own doc comment) -- every other sport's
+    // bracket never produces one, so the legend only earns its place here
+    // when there's actually a dashed line on screen to explain.
+    final hasSkipConnection = layout.connections.any((c) => c.isSkip);
 
-    return SingleChildScrollView(
-      scrollDirection: Axis.horizontal,
-      child: SizedBox(
-        width: totalWidth,
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            SizedBox(
-              height: _headerHeight,
-              child: Stack(
-                children: [
-                  for (var r = 0; r < rounds.length; r++)
-                    Positioned(
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        if (hasSkipConnection) ...[
+          // No mainAxisSize.min here -- the explanatory text is long
+          // enough to overflow a narrow viewport (a real RenderFlex
+          // overflow, same class of bug this page has hit before) unless
+          // it's allowed to wrap within the Row's own available width.
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              CustomPaint(size: const Size(28, 12), painter: _DashedLegendSwatchPainter(color: AppColors.violet)),
+              const SizedBox(width: 8),
+              Flexible(
+                child: Text(
+                  'Winner advances directly to a later round, skipping the Elimination Game',
+                  style: AppTextStyles.microLabel(color: AppColors.inkSub),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+        ],
+        SingleChildScrollView(
+          scrollDirection: Axis.horizontal,
+          child: SizedBox(
+            width: totalWidth,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                SizedBox(
+                  height: _headerHeight,
+                  child: Stack(
+                    children: [
+                      for (var r = 0; r < rounds.length; r++)
+                        Positioned(
                       left: r * (_cardWidth + _roundGap),
                       width: _cardWidth,
                       child: Text(
@@ -1053,8 +1081,39 @@ class _BracketTree extends StatelessWidget {
           ],
         ),
       ),
+        ),
+      ],
     );
   }
+}
+
+/// Small dashed-line swatch for the skip-connection legend (see
+/// _BracketTree's own build()) -- reuses the connector painter's dash
+/// geometry so the sample actually matches what's drawn on the real
+/// connector lines, not just an approximation.
+class _DashedLegendSwatchPainter extends CustomPainter {
+  const _DashedLegendSwatchPainter({required this.color});
+  final Color color;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final paint = Paint()
+      ..color = color
+      ..strokeWidth = 1.5
+      ..style = PaintingStyle.stroke;
+    const dashLength = 5.0;
+    const gapLength = 4.0;
+    final y = size.height / 2;
+    var x = 0.0;
+    while (x < size.width) {
+      final segmentEnd = (x + dashLength).clamp(0.0, size.width);
+      canvas.drawLine(Offset(x, y), Offset(segmentEnd, y), paint);
+      x += dashLength + gapLength;
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant _DashedLegendSwatchPainter oldDelegate) => oldDelegate.color != color;
 }
 
 class _BracketMatchupCard extends StatelessWidget {

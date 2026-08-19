@@ -243,6 +243,9 @@ void main() {
     expect(find.text('ROUND OF 12'), findsOneWidget);
     expect(find.text('NATIONAL CHAMPIONSHIP'), findsOneWidget);
     expect(find.text('CHAMPIONSHIP'), findsNothing); // that label is only the conference-split final's own header
+    // No skip connection exists in this bracket -- the legend explaining
+    // one shouldn't show up for a sport that never has one.
+    expect(find.textContaining('skipping the Elimination Game'), findsNothing);
   });
 
   testWidgets('a completed bracket matchup shows the real score, not a probability', (tester) async {
@@ -474,6 +477,54 @@ void main() {
   });
 
   testWidgets(
+      'adjacent Quarterfinal cards stay a full card-height apart even when one lands on a '
+      'fractional slot -- regression for a real visual overlap distinct-value checks missed',
+      (tester) async {
+    // The Play-In-split shape (see the test below) puts the (1v8)
+    // Quarterfinal at slot 0.5 (the average of Play-In Elimination's own
+    // 2-source trace) right next to (4v5)'s bye fallback at slot 1.0 --
+    // two DISTINCT slot values, so the earlier "isNot(equals(...))"-style
+    // checks passed, but only half a row apart, and a card is taller
+    // than half a row: the cards physically overlapped in production
+    // despite never computing the same slot.
+    final projection = SeasonProjection(
+      sport: 'nba',
+      season: 2026,
+      standings: [],
+      leaderboards: null,
+      bracket: const BracketProjection(
+        conferences: {
+          'Eastern': [
+            BracketRound(round: 'Play-In', matchups: [
+              BracketMatchup(teamA: '209', teamB: '210', status: 'projected', predictedWinner: '209', winProbability: 0.6),
+              BracketMatchup(teamA: '207', teamB: '208', status: 'projected', predictedWinner: '207', winProbability: 0.6),
+            ]),
+            BracketRound(round: 'Play-In Elimination', matchups: [
+              BracketMatchup(teamA: '208', teamB: '209', status: 'projected', predictedWinner: '208', winProbability: 0.6),
+            ]),
+            BracketRound(round: 'Conference Quarterfinals', matchups: [
+              BracketMatchup(teamA: '201', teamB: '208', status: 'projected', predictedWinner: '201', winProbability: 0.7),
+              BracketMatchup(teamA: '204', teamB: '205', status: 'projected', predictedWinner: '204', winProbability: 0.55),
+            ]),
+          ],
+        },
+        rounds: null,
+        teamNames: {},
+      ),
+    );
+
+    await pumpSeasonPage(tester, 'nba', projection);
+    await tester.tap(find.text('Playoff Bracket'));
+    await tester.pumpAndSettle();
+
+    // Card height is 108px (_BracketTree's own _cardHeight) -- two
+    // vertically-stacked cards must be at least that far apart or they
+    // overlap, regardless of whether their slot VALUES happen to differ.
+    final topGap = tester.getTopLeft(find.text('204')).dy - tester.getTopLeft(find.text('201')).dy;
+    expect(topGap, greaterThanOrEqualTo(108));
+  });
+
+  testWidgets(
       'NBA Conference Semifinals also lay out at distinct vertical slots -- regression for a '
       'real overlapping-card bug the Quarterfinals-only fix did not cover', (tester) async {
     // Same Play-In/Quarterfinals shape as the regression test above, one
@@ -642,6 +693,11 @@ void main() {
     expect(tops['201'], lessThan(tops['204']!));
     expect(tops['204'], lessThan(tops['203']!));
     expect(tops['203'], lessThan(tops['202']!));
+
+    // A dashed-line legend explains what the skip connection (207's own
+    // winner, bypassing Play-In Elimination) means -- this fixture is
+    // exactly the shape that produces one.
+    expect(find.textContaining('skipping the Elimination Game'), findsOneWidget);
   });
 
   testWidgets('ncaafb has neither PLAY-IN% nor an NBA Cup toggle', (tester) async {
