@@ -195,6 +195,36 @@ def series_win_probability(game_probability: float, wins_a: int, wins_b: int) ->
     )
 
 
+def predicted_series_score(game_probability: float, wins_a: int = 0, wins_b: int = 0) -> tuple[int, int]:
+    """The single most likely final (wins_a, wins_b) a best-of-7 series
+    ends at, given a fixed per-game win probability for team A and the
+    series' current record -- deterministic (no RNG), same philosophy as
+    project_matchup's own >=50% pick, not a Monte Carlo simulation. Picks
+    the highest-probability terminal state out of every way the series
+    can end (at most 2*C(6,3)=40 terminal states from a 0-0 start).
+    wins_a=wins_b=0 predicts a series that hasn't started (or hasn't been
+    reached yet) end to end; a live in-progress record (e.g. 3-1) predicts
+    only the games left to play, same scoping series_win_probability's
+    own docstring describes."""
+    memo: dict[tuple[int, int], dict[tuple[int, int], float]] = {}
+
+    def terminal_probabilities(a: int, b: int) -> dict[tuple[int, int], float]:
+        if a >= 4 or b >= 4:
+            return {(a, b): 1.0}
+        if (a, b) in memo:
+            return memo[(a, b)]
+        combined: dict[tuple[int, int], float] = {}
+        for state, probability in terminal_probabilities(a + 1, b).items():
+            combined[state] = combined.get(state, 0.0) + probability * game_probability
+        for state, probability in terminal_probabilities(a, b + 1).items():
+            combined[state] = combined.get(state, 0.0) + probability * (1 - game_probability)
+        memo[(a, b)] = combined
+        return combined
+
+    probabilities = terminal_probabilities(wins_a, wins_b)
+    return max(probabilities, key=probabilities.get)
+
+
 def project_play_in(
     seed_7: str, seed_8: str, seed_9: str, seed_10: str, ratings: dict[str, float], home_advantage: float,
 ) -> dict:
@@ -601,6 +631,19 @@ def project_cup_knockout_bracket(
     def record_key(team_id: str) -> tuple[int, int]:
         return (cup_wins.get(team_id, 0), -cup_losses.get(team_id, 0))
 
+    # project_matchup's own return shape has no "status" key -- every
+    # other bracket payload's matchups get one from season_projection.py's
+    # real-vs-projected reconciliation layer, but this whole bracket is
+    # unconditionally projected-only (see this function's own docstring),
+    # so that layer never runs here. The frontend's BracketMatchup.fromJson
+    # requires "status" as a non-nullable field on every matchup regardless
+    # of bracket type -- a bare project_matchup() result reaching the
+    # payload without one crashes there (confirmed live, 2026-08-19, the
+    # first real run after CUP_GROUPS[2027] made this bracket non-null for
+    # real: "type 'Null' is not a subtype of type 'String'").
+    def projected(matchup: dict) -> dict:
+        return {**matchup, "status": "projected"}
+
     conference_rounds: dict[str, list[dict]] = {}
     conference_finalists: dict[str, str] = {}
     for conference, conference_groups in groups.items():
@@ -612,12 +655,12 @@ def project_cup_knockout_bracket(
         seed_number = {team_id: rank + 1 for rank, team_id in enumerate(field)}
         one, two, three, four = field
 
-        semi1 = project_matchup(one, four, seed_number[one], seed_number[four], ratings, home_advantage)
-        semi2 = project_matchup(two, three, seed_number[two], seed_number[three], ratings, home_advantage)
+        semi1 = projected(project_matchup(one, four, seed_number[one], seed_number[four], ratings, home_advantage))
+        semi2 = projected(project_matchup(two, three, seed_number[two], seed_number[three], ratings, home_advantage))
         finalist_a, finalist_b = semi1["predicted_winner"], semi2["predicted_winner"]
-        conference_final = project_matchup(
+        conference_final = projected(project_matchup(
             finalist_a, finalist_b, seed_number.get(finalist_a), seed_number.get(finalist_b), ratings, home_advantage,
-        )
+        ))
 
         conference_rounds[conference] = [
             {"round": "Semifinals", "matchups": [semi1, semi2]},
@@ -626,7 +669,7 @@ def project_cup_knockout_bracket(
         conference_finalists[conference] = conference_final["predicted_winner"]
 
     (conference_a, finalist_a), (conference_b, finalist_b) = conference_finalists.items()
-    championship = project_matchup(finalist_a, finalist_b, None, None, ratings, 0.0)
+    championship = projected(project_matchup(finalist_a, finalist_b, None, None, ratings, 0.0))
 
     return {
         "conferences": conference_rounds,

@@ -97,23 +97,28 @@ class _SeasonPageState extends ConsumerState<SeasonPage> {
               style: AppTextStyles.pageH1(),
             ),
             const SizedBox(height: 20),
-            // Player Prop Leaders/NBA Cup/Bracket only exist as toggle
-            // options when the backend actually sent that block --
+            // Player Prop Leaders/Bracket/NBA Cup Bracket only exist as
+            // toggle options when the backend actually sent that block --
             // NCAAFB's own season simulation is team-outcomes-only, no
             // player-level simulation and no in-season tournament (see
             // aws-lambdas/ncaafb/predict/season_projection.py's own
-            // docstring), so `season.leaderboards`/`season.cup`/
-            // `season.cupBracket` are always null there. `season.bracket`
-            // is null for every sport without an elimination-bracket
-            // concept (NCAA MBB/PGA/F1, not onboarded/not applicable) and,
-            // same best-effort convention as `cup`, whenever building it
-            // failed for a sport that normally has one.
-            if (season.leaderboards != null || season.cup != null || season.bracket != null) ...[
-              // Standings/player props/NBA Cup/Bracket each stand alone (a
-              // toggle, not all stacked on one page) -- each is already a
-              // tall multi-column section on its own, and stacking them
-              // turns this into a very long scroll for no reason once a
-              // viewer only wants one.
+            // docstring), so `season.leaderboards`/`season.cupBracket` are
+            // always null there. `season.bracket` is null for every sport
+            // without an elimination-bracket concept (NCAA MBB/PGA/F1, not
+            // onboarded/not applicable) and, same best-effort convention,
+            // whenever building it failed for a sport that normally has
+            // one. `season.cup` (NBA Cup group standings) still exists on
+            // the payload -- `project_cup_knockout_bracket`'s own seeding
+            // still needs the group win/loss records it carries -- but no
+            // longer has a tab of its own; the Cup's own bracket tab
+            // (`cupBracket`) already shows the same tournament without a
+            // separate group-standings view alongside it.
+            if (season.leaderboards != null || season.bracket != null || season.cupBracket != null) ...[
+              // Standings/player props/Bracket/NBA Cup Bracket each stand
+              // alone (a toggle, not all stacked on one page) -- each is
+              // already a tall multi-column section on its own, and
+              // stacking them turns this into a very long scroll for no
+              // reason once a viewer only wants one.
               // Horizontal-scroll, not a bare Row -- these labels
               // together don't fit a phone-width screen (see
               // sport_shell_page.dart's _TabToggle for the same pattern).
@@ -132,14 +137,6 @@ class _SeasonPageState extends ConsumerState<SeasonPage> {
                         label: 'Player Prop Leaders',
                         selected: _tab == 'props',
                         onTap: () => setState(() => _tab = 'props'),
-                      ),
-                    ],
-                    if (season.cup != null) ...[
-                      const SizedBox(width: 8),
-                      _StatusToggle(
-                        label: 'NBA Cup',
-                        selected: _tab == 'cup',
-                        onTap: () => setState(() => _tab = 'cup'),
                       ),
                     ],
                     if (season.bracket != null) ...[
@@ -165,8 +162,6 @@ class _SeasonPageState extends ConsumerState<SeasonPage> {
             ],
             if (_tab == 'props' && season.leaderboards != null)
               _Leaderboards(leaderboards: season.leaderboards)
-            else if (_tab == 'cup' && season.cup != null)
-              _CupSection(sport: season.sport, cup: season.cup!)
             else if (_tab == 'bracket' && season.bracket != null)
               _BracketSection(sport: season.sport, bracket: season.bracket!)
             else if (_tab == 'cup_bracket' && season.cupBracket != null)
@@ -549,115 +544,6 @@ class _LeaderboardCard extends StatelessWidget {
   }
 }
 
-/// NBA Cup (in-season tournament) groups -- one card per group, sorted
-/// alphabetically ("Eastern A" before "Eastern B" before "Western A",
-/// etc). Same fixed-width-cards-in-a-Wrap layout as _Leaderboards above.
-class _CupSection extends StatelessWidget {
-  const _CupSection({required this.sport, required this.cup});
-
-  final String sport;
-  final CupProjection cup;
-
-  @override
-  Widget build(BuildContext context) {
-    final groupNames = cup.groups.keys.toList()..sort();
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        final width = cardWidth(340, constraints.maxWidth);
-        return Wrap(
-          spacing: 20,
-          runSpacing: 20,
-          children: [
-            for (final groupName in groupNames)
-              SizedBox(
-                width: width,
-                child: _CupGroupCard(sport: sport, groupName: groupName, teams: cup.groups[groupName]!),
-              ),
-          ],
-        );
-      },
-    );
-  }
-}
-
-class _CupGroupCard extends StatelessWidget {
-  const _CupGroupCard({required this.sport, required this.groupName, required this.teams});
-
-  final String sport;
-  final String groupName;
-  final List<CupTeamStanding> teams;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(20),
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(16),
-        gradient: LinearGradient(begin: Alignment.topLeft, end: Alignment.bottomRight, colors: AppColors.surfaceGrad),
-        border: Border.all(color: AppColors.borderRaised),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(groupName.toUpperCase(), style: AppTextStyles.microLabel(color: AppColors.cyan)),
-          const SizedBox(height: 14),
-          Row(
-            children: [
-              const Expanded(flex: 3, child: SizedBox()),
-              Expanded(flex: 2, child: Text('REC', style: AppTextStyles.microLabel(), textAlign: TextAlign.center)),
-              Expanded(flex: 2, child: Text('ADV%', style: AppTextStyles.microLabel(), textAlign: TextAlign.center)),
-              Expanded(flex: 2, child: Text('CHAMP%', style: AppTextStyles.microLabel(), textAlign: TextAlign.center)),
-            ],
-          ),
-          const Divider(height: 16, color: AppColors.border),
-          for (final team in teams) ...[
-            _CupTeamRow(sport: sport, team: team),
-            const SizedBox(height: 8),
-          ],
-        ],
-      ),
-    );
-  }
-}
-
-class _CupTeamRow extends StatelessWidget {
-  const _CupTeamRow({required this.sport, required this.team});
-
-  final String sport;
-  final CupTeamStanding team;
-
-  @override
-  Widget build(BuildContext context) {
-    final info = teamDisplayFor(sport, team.teamId, team.abbreviation, apiColor: team.color);
-    return Row(
-      children: [
-        Expanded(
-          flex: 3,
-          child: Row(
-            children: [
-              TeamColorDot(color: info.primary),
-              if (info.primary != null) const SizedBox(width: 8),
-              Flexible(
-                child: Text(info.abbreviation, style: AppTextStyles.body(color: AppColors.ink), overflow: TextOverflow.ellipsis),
-              ),
-            ],
-          ),
-        ),
-        Expanded(
-          flex: 2,
-          child: Text(
-            '${team.groupWins}-${team.groupLosses}',
-            style: AppTextStyles.metricValue(),
-            textAlign: TextAlign.center,
-          ),
-        ),
-        Expanded(flex: 2, child: _PercentText(team.knockoutProbability)),
-        Expanded(flex: 2, child: _PercentText(team.championProbability)),
-      ],
-    );
-  }
-}
-
 /// Playoff/Cup-knockout bracket -- a single converging tree (_BracketTree).
 /// A flat-bracket sport (NCAAFB -- bracket.rounds non-null) already has its
 /// own championship as the last round. A conference-split sport (NFL/NBA
@@ -761,6 +647,16 @@ class _BracketConnection {
   final double fromSlot;
   final int toRound;
   final double toSlot;
+
+  /// True when this connection's source is more than one round back --
+  /// NBA's Play-In "Elimination Game" is the only round shape in this
+  /// project where a single source card has two DIFFERENT real
+  /// destinations (its loser feeds the very next round, its winner skips
+  /// that round entirely and reappears two rounds later, straight in the
+  /// Quarterfinals -- see _computeBracketSlotLayout's own connector-
+  /// search comment). Styled differently in the painter so a card that
+  /// feeds two different places doesn't read as a routing mistake.
+  bool get isSkip => toRound - fromRound > 1;
 }
 
 _BracketSlotLayout _computeBracketSlotLayout(List<BracketRound> rounds) {
@@ -935,10 +831,18 @@ _BracketSlotLayout _computeBracketSlotLayout(List<BracketRound> rounds) {
 /// horizontal into the target card) -- the standard bracket-diagram
 /// connector shape, positioned entirely from _computeBracketSlotLayout's
 /// own slot math, no widget measurement needed.
+///
+/// A skip connection (see _BracketConnection.isSkip) is drawn dashed, in
+/// `skipColor` instead of `color` -- one source card genuinely feeding
+/// two different destinations (its own next round AND, for its other
+/// side, a round further ahead) reads as a mistake if both lines look
+/// identical; the visual break makes it legible as "this one jumps a
+/// round" on sight instead.
 class _BracketConnectorPainter extends CustomPainter {
   const _BracketConnectorPainter({
     required this.connections,
     required this.color,
+    required this.skipColor,
     required this.cardWidth,
     required this.cardHeight,
     required this.roundGap,
@@ -947,6 +851,7 @@ class _BracketConnectorPainter extends CustomPainter {
 
   final List<_BracketConnection> connections;
   final Color color;
+  final Color skipColor;
   final double cardWidth;
   final double cardHeight;
   final double roundGap;
@@ -955,10 +860,32 @@ class _BracketConnectorPainter extends CustomPainter {
   double _x(int round) => round * (cardWidth + roundGap);
   double _y(double slot) => slot * verticalUnit + cardHeight / 2;
 
+  void _drawSegment(Canvas canvas, Offset from, Offset to, Paint paint, {required bool dashed}) {
+    if (!dashed) {
+      canvas.drawLine(from, to, paint);
+      return;
+    }
+    const dashLength = 5.0;
+    const gapLength = 4.0;
+    final total = (to - from).distance;
+    if (total == 0) return;
+    final direction = (to - from) / total;
+    var walked = 0.0;
+    while (walked < total) {
+      final segmentEnd = (walked + dashLength).clamp(0.0, total);
+      canvas.drawLine(from + direction * walked, from + direction * segmentEnd, paint);
+      walked += dashLength + gapLength;
+    }
+  }
+
   @override
   void paint(Canvas canvas, Size size) {
-    final paint = Paint()
+    final normalPaint = Paint()
       ..color = color
+      ..strokeWidth = 1.5
+      ..style = PaintingStyle.stroke;
+    final skipPaint = Paint()
+      ..color = skipColor
       ..strokeWidth = 1.5
       ..style = PaintingStyle.stroke;
     for (final connection in connections) {
@@ -967,14 +894,10 @@ class _BracketConnectorPainter extends CustomPainter {
       final x2 = _x(connection.toRound);
       final y2 = _y(connection.toSlot);
       final midX = x1 + roundGap / 2;
-      canvas.drawPath(
-        Path()
-          ..moveTo(x1, y1)
-          ..lineTo(midX, y1)
-          ..lineTo(midX, y2)
-          ..lineTo(x2, y2),
-        paint,
-      );
+      final paint = connection.isSkip ? skipPaint : normalPaint;
+      _drawSegment(canvas, Offset(x1, y1), Offset(midX, y1), paint, dashed: connection.isSkip);
+      _drawSegment(canvas, Offset(midX, y1), Offset(midX, y2), paint, dashed: connection.isSkip);
+      _drawSegment(canvas, Offset(midX, y2), Offset(x2, y2), paint, dashed: connection.isSkip);
     }
   }
 
@@ -1103,6 +1026,11 @@ class _BracketTree extends StatelessWidget {
                         // background -- borderRaised (8% white) used to
                         // sit here, which was reported as barely legible.
                         color: AppColors.inkSub,
+                        // A distinct accent (not inkSub's gray, not a
+                        // signal color like warn/neg -- this isn't an
+                        // error) plus a dashed stroke (see the painter's
+                        // own docstring) for a skip connection.
+                        skipColor: AppColors.violet,
                         cardWidth: _cardWidth,
                         cardHeight: _cardHeight,
                         roundGap: _roundGap,
@@ -1191,22 +1119,36 @@ class _BracketMatchupCard extends StatelessWidget {
     final winnerLabel = matchup.predictedWinner != null ? _teamLabel(matchup.predictedWinner!) : null;
     if (matchup.isSeries) {
       final record = '${matchup.winsA}-${matchup.winsB}';
+      // The predicted FINAL record, winner-first (e.g. "4-2"), distinct
+      // from `record` above (the current/live one, 0-0 before the series
+      // starts) -- see BracketMatchup.predictedWinsA/B's own doc comment.
+      // Null once "final" (nothing left to predict) or if either side is
+      // somehow missing, matching predictedWinner's own null-safety.
+      final predictedRecord = matchup.predictedWinsA != null && matchup.predictedWinsB != null
+          ? (matchup.predictedWinner == matchup.teamA
+              ? '${matchup.predictedWinsA}-${matchup.predictedWinsB}'
+              : '${matchup.predictedWinsB}-${matchup.predictedWinsA}')
+          : null;
       switch (matchup.status) {
         case 'final':
           final winnerName = matchup.actualWinner != null ? _teamLabel(matchup.actualWinner!) : null;
           return winnerName != null ? '$winnerName WINS SERIES $record' : 'SERIES FINAL $record';
         case 'scheduled':
-          return matchup.winProbability != null && winnerLabel != null
-              ? '$record — ${(matchup.winProbability! * 100).round()}% $winnerLabel'
-              : '$record — PREDICTION PENDING';
+          if (matchup.winProbability == null || winnerLabel == null) return '$record — PREDICTION PENDING';
+          final probability = '${(matchup.winProbability! * 100).round()}%';
+          return predictedRecord != null
+              ? '$record — $probability $winnerLabel (predicted $predictedRecord)'
+              : '$record — $probability $winnerLabel';
         default:
           // A projected series slot still has a real (usually 0-0)
           // record -- the team rows above already show it per-team (see
           // this card's build()), but the status line itself was
           // dropping it, the only one of the 3 states to do so.
-          return matchup.winProbability != null && winnerLabel != null
-              ? '$record — PROJECTED — ${(matchup.winProbability! * 100).round()}% $winnerLabel'
-              : '$record — PROJECTED';
+          if (matchup.winProbability == null || winnerLabel == null) return '$record — PROJECTED';
+          final probability = '${(matchup.winProbability! * 100).round()}%';
+          return predictedRecord != null
+              ? '$record — PROJECTED — $probability $winnerLabel (predicted $predictedRecord)'
+              : '$record — PROJECTED — $probability $winnerLabel';
       }
     }
     switch (matchup.status) {

@@ -121,4 +121,16 @@ void main() {
     expect(matchup.winsA, isNull);
     expect(matchup.winsB, isNull);
   });
+
+  test('a bracket matchup with no status field defaults to projected instead of crashing', () {
+    // Regression for a real production crash (2026-08-19): a real
+    // payload's cup_bracket matchups came from the backend with no
+    // "status" key at all, and the previous `json['status'] as String`
+    // (non-nullable, no fallback) threw on the missing key.
+    final matchup = BracketMatchup.fromJson({
+      'team_a': '2', 'team_b': '8', 'predicted_winner': '2', 'win_probability': 0.6,
+    });
+
+    expect(matchup.status, 'projected');
+  });
 }

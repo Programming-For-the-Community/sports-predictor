@@ -223,6 +223,8 @@ class BracketMatchup {
     this.actualAwayScore,
     this.winsA,
     this.winsB,
+    this.predictedWinsA,
+    this.predictedWinsB,
   });
 
   final String teamA;
@@ -252,6 +254,14 @@ class BracketMatchup {
   final int? winsA;
   final int? winsB;
 
+  /// The single most likely FINAL record the series ends at (see
+  /// aws-lambdas/nba/predict/season_simulation.py's own
+  /// predicted_series_score) -- distinct from winsA/winsB's own
+  /// current/live record. Null once "final" (the real record already
+  /// answers the question) or for a non-series matchup.
+  final int? predictedWinsA;
+  final int? predictedWinsB;
+
   bool get isFinal => status == 'final';
 
   /// True for a real best-of-7 series slot (see winsA/winsB's own doc
@@ -263,7 +273,15 @@ class BracketMatchup {
   factory BracketMatchup.fromJson(Map<String, dynamic> json) => BracketMatchup(
         teamA: json['team_a'] as String,
         teamB: json['team_b'] as String,
-        status: json['status'] as String,
+        // Defensive fallback, not the fix -- every real producer must
+        // always send status (a missing one crashed the whole season
+        // page in production, 2026-08-19: project_cup_knockout_bracket
+        // was building matchups straight from project_matchup, which has
+        // no "status" key at all). "projected" is the correct fallback
+        // regardless of which producer omits it, since every bracket
+        // payload this page renders starts life "projected" before any
+        // real game exists.
+        status: json['status'] as String? ?? 'projected',
         seedA: json['seed_a'] as int?,
         seedB: json['seed_b'] as int?,
         predictedWinner: json['predicted_winner'] as String?,
@@ -273,6 +291,8 @@ class BracketMatchup {
         actualAwayScore: json['actual_away_score'] as int?,
         winsA: json['wins_a'] as int?,
         winsB: json['wins_b'] as int?,
+        predictedWinsA: json['predicted_wins_a'] as int?,
+        predictedWinsB: json['predicted_wins_b'] as int?,
       );
 }
 

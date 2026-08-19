@@ -121,6 +121,37 @@ class TestSeriesWinProbability:
         assert a_wins == pytest.approx(1 - b_wins)
 
 
+class TestPredictedSeriesScore:
+    def test_a_coinflip_series_from_scratch_predicts_the_longest_close_finish(self):
+        # Counter-intuitive but correct: for a true coinflip (p=0.5), 4-2
+        # and 4-3 are EACH more probable than 4-0 -- a longer series has
+        # combinatorially more ways to reach that exact record (C(5,2)=10,
+        # C(6,3)=20) than a sweep has (C(3,0)=1), and that multiplicity
+        # advantage outweighs the shrinking p^4*(1-p)^k term through k=2,3
+        # at p=0.5 specifically. 4-2/4-3 (and their mirror 2-4/3-4) are an
+        # exact 4-way tie for the true maximum.
+        assert season_simulation.predicted_series_score(0.5, 0, 0) in {(4, 2), (4, 3), (2, 4), (3, 4)}
+
+    def test_a_big_favorite_is_predicted_to_sweep(self):
+        assert season_simulation.predicted_series_score(0.95, 0, 0) == (4, 0)
+
+    def test_already_leading_four_predicts_the_series_already_decided(self):
+        assert season_simulation.predicted_series_score(0.5, 4, 2) == (4, 2)
+
+    def test_a_live_in_progress_record_only_predicts_the_games_left_to_play(self):
+        # Leading 3-1 with any positive game probability -- the predicted
+        # final score's own trailing side can only be 1, 2, or 3 (the
+        # already-played record is fixed, not re-predicted).
+        predicted_a, predicted_b = season_simulation.predicted_series_score(0.6, 3, 1)
+        assert predicted_a == 4
+        assert predicted_b in {1, 2, 3}
+
+    def test_symmetric_for_the_trailing_side(self):
+        a_perspective = season_simulation.predicted_series_score(0.8, 0, 0)
+        b_perspective = season_simulation.predicted_series_score(0.2, 0, 0)
+        assert a_perspective == (b_perspective[1], b_perspective[0])
+
+
 class TestProjectPlayIn:
     def test_seed_ten_can_never_win_the_final_seven_or_eight_seed(self):
         ratings = {team: 1500 for team in ("s7", "s8", "s9", "s10")}
@@ -415,6 +446,19 @@ class TestProjectCupKnockoutBracket:
             assert [r["round"] for r in rounds] == ["Semifinals", "Conference Final"]
             assert len(rounds[0]["matchups"]) == 2
         assert result["champion"] == result["championship"]["predicted_winner"]
+
+    def test_every_matchup_has_a_status_field(self):
+        # Regression for a real production crash (2026-08-19): every
+        # matchup here comes straight from project_matchup, which has no
+        # "status" key at all -- the frontend's BracketMatchup.fromJson
+        # requires one on every matchup regardless of bracket type.
+        result = season_simulation.project_cup_knockout_bracket(2026, {}, {}, {})
+
+        for rounds in result["conferences"].values():
+            for round_ in rounds:
+                for matchup in round_["matchups"]:
+                    assert matchup["status"] == "projected"
+        assert result["championship"]["status"] == "projected"
 
     def test_no_rng_needed_and_deterministic_across_calls(self):
         cup_wins = {"2": 4, "19": 3, "8": 2, "20": 1, "17": 0}

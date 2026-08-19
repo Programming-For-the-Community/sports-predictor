@@ -45,11 +45,12 @@ final _season = SeasonProjection(
   },
 );
 
-// Realistic group size (5 teams, real-length abbreviations aren't long
-// enough to stress anything on their own, but a full group plus every
-// probability column together is a genuinely wide row) -- same "don't
-// just use short placeholder strings" philosophy as _season above.
-final _nbaCupSeason = SeasonProjection(
+// Full 2-conference Cup knockout bracket (Semifinals -> Conference Final
+// -> Championship) -- the NBA Cup group-standings tab is gone (see
+// season_page.dart's own comment), so the Cup's own overflow risk now
+// lives entirely in its bracket tab, same shared _BracketSection/
+// _BracketTree code path the main Playoff Bracket test below exercises.
+final _nbaCupBracketSeason = SeasonProjection(
   sport: 'nba',
   season: 2026,
   standings: [
@@ -61,30 +62,32 @@ final _nbaCupSeason = SeasonProjection(
     ),
   ],
   leaderboards: null,
-  cup: const CupProjection(groups: {
-    'Eastern B': [
-      CupTeamStanding(
-        teamId: '2', name: 'Boston Celtics', abbreviation: 'BOS', groupWins: 4, groupLosses: 1,
-        groupWinnerProbability: 0.55, knockoutProbability: 0.7, cupFinalistProbability: 0.32, championProbability: 0.14,
-      ),
-      CupTeamStanding(
-        teamId: '19', name: 'Orlando Magic', abbreviation: 'ORL', groupWins: 3, groupLosses: 2,
-        groupWinnerProbability: 0.2, knockoutProbability: 0.35, cupFinalistProbability: 0.11, championProbability: 0.03,
-      ),
-      CupTeamStanding(
-        teamId: '8', name: 'Detroit Pistons', abbreviation: 'DET', groupWins: 2, groupLosses: 3,
-        groupWinnerProbability: 0.15, knockoutProbability: 0.22, cupFinalistProbability: 0.05, championProbability: 0.01,
-      ),
-      CupTeamStanding(
-        teamId: '20', name: 'Philadelphia 76ers', abbreviation: 'PHI', groupWins: 2, groupLosses: 3,
-        groupWinnerProbability: 0.08, knockoutProbability: 0.15, cupFinalistProbability: 0.03, championProbability: 0.01,
-      ),
-      CupTeamStanding(
-        teamId: '17', name: 'Brooklyn Nets', abbreviation: 'BKN', groupWins: 1, groupLosses: 4,
-        groupWinnerProbability: 0.02, knockoutProbability: 0.04, cupFinalistProbability: 0.01, championProbability: 0.0,
-      ),
-    ],
-  }),
+  cupBracket: const BracketProjection(
+    conferences: {
+      'Eastern': [
+        BracketRound(round: 'Semifinals', matchups: [
+          BracketMatchup(teamA: '2', teamB: '8', seedA: 1, seedB: 4, status: 'projected', predictedWinner: '2', winProbability: 0.6),
+          BracketMatchup(teamA: '19', teamB: '17', seedA: 2, seedB: 3, status: 'projected', predictedWinner: '19', winProbability: 0.55),
+        ]),
+        BracketRound(round: 'Conference Final', matchups: [
+          BracketMatchup(teamA: '2', teamB: '19', seedA: 1, seedB: 2, status: 'projected', predictedWinner: '2', winProbability: 0.58),
+        ]),
+      ],
+      'Western': [
+        BracketRound(round: 'Semifinals', matchups: [
+          BracketMatchup(teamA: '24', teamB: '25', seedA: 1, seedB: 4, status: 'projected', predictedWinner: '24', winProbability: 0.6),
+          BracketMatchup(teamA: '7', teamB: '13', seedA: 2, seedB: 3, status: 'projected', predictedWinner: '7', winProbability: 0.52),
+        ]),
+        BracketRound(round: 'Conference Final', matchups: [
+          BracketMatchup(teamA: '24', teamB: '7', seedA: 1, seedB: 2, status: 'projected', predictedWinner: '24', winProbability: 0.57),
+        ]),
+      ],
+    },
+    rounds: null,
+    teamNames: {},
+    finalMatchup: BracketMatchup(teamA: '2', teamB: '24', status: 'projected', predictedWinner: '24', winProbability: 0.51),
+    champion: '24',
+  ),
 );
 
 // Full 3-round conference-split bracket plus a championship card -- the
@@ -175,18 +178,18 @@ void main() {
       expect(tester.takeException(), isNull);
     });
 
-    testWidgets('NBA Cup tab renders a full 5-team group with no overflow at ${width}px wide', (tester) async {
+    testWidgets('NBA Cup Bracket tab renders a full 2-conference bracket with no overflow at ${width}px wide', (tester) async {
       await pumpAtWidth(
         tester,
         width,
         ProviderScope(
-          overrides: [seasonProjectionProvider.overrideWith((ref, sport) async => _nbaCupSeason)],
+          overrides: [seasonProjectionProvider.overrideWith((ref, sport) async => _nbaCupBracketSeason)],
           child: const MaterialApp(home: Scaffold(body: SeasonPage(sportId: 'nba'))),
         ),
       );
 
-      await tester.ensureVisible(find.text('NBA Cup'));
-      await tester.tap(find.text('NBA Cup'));
+      await tester.ensureVisible(find.text('NBA Cup Bracket'));
+      await tester.tap(find.text('NBA Cup Bracket'));
       await tester.pumpAndSettle();
 
       expect(tester.takeException(), isNull);

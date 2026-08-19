@@ -479,7 +479,14 @@ def _resolve_series_matchup(
     falling back to a fresh Elo estimate when no real game is logged yet
     (series hasn't started, or ingest hasn't caught up to the next game)
     -- both cases go through the exact same formula, just with wins_a/
-    wins_b at 0/0 or the real partial record respectively."""
+    wins_b at 0/0 or the real partial record respectively.
+
+    Not-yet-final slots also carry predicted_wins_a/predicted_wins_b (via
+    season_simulation.predicted_series_score) -- the single most likely
+    FINAL record the series ends at, distinct from wins_a/wins_b's own
+    current/live record (always 0-0 before the series starts). Omitted
+    once "final", since the real record already answers the same
+    question with no need for a prediction."""
     games = real_series.get(frozenset((team_a, team_b)), [])
     wins_a, wins_b = _series_record(team_a, team_b, games)
 
@@ -519,12 +526,14 @@ def _resolve_series_matchup(
     series_probability_a = season_simulation.series_win_probability(game_probability_a, wins_a, wins_b)
     predicted_winner = team_a if series_probability_a >= 0.5 else team_b
     win_probability = series_probability_a if predicted_winner == team_a else 1 - series_probability_a
+    predicted_wins_a, predicted_wins_b = season_simulation.predicted_series_score(game_probability_a, wins_a, wins_b)
 
     return {
         "status": "scheduled" if games else "projected",
         "team_a": team_a, "team_b": team_b, "seed_a": seed_a, "seed_b": seed_b,
         "predicted_winner": predicted_winner, "win_probability": win_probability,
         "wins_a": wins_a, "wins_b": wins_b,
+        "predicted_wins_a": predicted_wins_a, "predicted_wins_b": predicted_wins_b,
     }
 
 

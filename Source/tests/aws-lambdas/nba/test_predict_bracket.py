@@ -116,6 +116,11 @@ class TestResolveSeriesMatchup:
         assert result["status"] == "projected"
         assert result["predicted_winner"] == "a"
         assert (result["wins_a"], result["wins_b"]) == (0, 0)
+        # A predicted FINAL score, distinct from wins_a/wins_b's own
+        # current (always 0-0 pre-series) record -- "a" (the favorite,
+        # 1900 vs 1400 Elo) should be predicted to win the series outright.
+        assert result["predicted_wins_a"] == 4
+        assert result["predicted_wins_b"] < 4
 
     def test_a_series_decided_four_to_two_is_final_with_the_real_record(self):
         games = [
@@ -136,6 +141,10 @@ class TestResolveSeriesMatchup:
         assert result["actual_winner"] == SEED_1
         assert (result["wins_a"], result["wins_b"]) == (4, 2)
         assert result["predicted_winner"] is None  # decided -- nothing left to predict
+        # A final series has nothing left to predict -- the real record
+        # already answers the "how did it end" question.
+        assert "predicted_wins_a" not in result
+        assert "predicted_wins_b" not in result
 
     def test_an_in_progress_series_reports_the_live_record_and_a_series_probability(self):
         # 2-1 SEED_1, game 4 scheduled next.

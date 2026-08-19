@@ -105,7 +105,7 @@ void main() {
     expect(find.text('WESTERN NORTHWEST'), findsNothing);
   });
 
-  testWidgets('no toggle row at all when neither leaderboards nor cup is present', (tester) async {
+  testWidgets('no toggle row at all when neither leaderboards nor bracket nor cup bracket is present', (tester) async {
     final projection = SeasonProjection(sport: 'nba', season: 2026, standings: [_nbaStanding('2')], leaderboards: null);
 
     await pumpSeasonPage(tester, 'nba', projection);
@@ -114,12 +114,17 @@ void main() {
     expect(find.text('NBA Cup'), findsNothing);
   });
 
-  testWidgets('NBA Cup toggle appears when cup is present and switches to the group view', (tester) async {
+  testWidgets(
+      "the NBA Cup group-standings tab is gone -- cup's own bracket tab covers the same tournament without it",
+      (tester) async {
     final projection = SeasonProjection(
       sport: 'nba',
       season: 2026,
       standings: [_nbaStanding('2')],
       leaderboards: null,
+      // `cup` (group standings) still exists on the payload -- see
+      // season_page.dart's own comment on why -- but must not surface a
+      // tab of its own anymore, even when present.
       cup: const CupProjection(groups: {
         'Eastern B': [
           CupTeamStanding(
@@ -128,20 +133,35 @@ void main() {
           ),
         ],
       }),
+      cupBracket: const BracketProjection(
+        conferences: {
+          'Eastern': [
+            BracketRound(round: 'Semifinals', matchups: [
+              BracketMatchup(teamA: '2', teamB: '8', seedA: 1, seedB: 4, status: 'projected', predictedWinner: '2', winProbability: 0.6),
+            ]),
+          ],
+        },
+        rounds: null,
+        teamNames: {'2': BracketTeamName(name: 'Boston Celtics', abbreviation: 'BOS')},
+      ),
     );
 
     await pumpSeasonPage(tester, 'nba', projection);
 
-    expect(find.text('NBA Cup'), findsOneWidget);
-    // Standings tab is the default -- the Cup group isn't visible yet.
-    expect(find.text('EASTERN B'), findsNothing);
+    expect(find.text('NBA Cup'), findsNothing);
+    expect(find.text('NBA Cup Bracket'), findsOneWidget);
+    // Standings tab is the default -- the Cup bracket isn't visible yet.
+    expect(find.text('SEMIFINALS'), findsNothing);
 
-    await tester.tap(find.text('NBA Cup'));
+    await tester.tap(find.text('NBA Cup Bracket'));
     await tester.pumpAndSettle();
 
-    expect(find.text('EASTERN B'), findsOneWidget);
+    expect(find.text('SEMIFINALS'), findsOneWidget);
     expect(find.text('BOS'), findsOneWidget);
-    expect(find.text('4-1'), findsOneWidget);
+    // The group-standings-only content (record/ADV%/CHAMP% columns) must
+    // not appear anywhere -- confirms _CupSection is truly gone, not just
+    // unreachable via the toggle.
+    expect(find.text('ADV%'), findsNothing);
   });
 
   testWidgets('Playoff Bracket toggle appears when bracket is present and switches to the bracket view', (tester) async {
@@ -339,6 +359,7 @@ void main() {
               BracketMatchup(
                 teamA: '2', teamB: '8', seedA: 1, seedB: 8, status: 'projected',
                 predictedWinner: '2', winProbability: 0.7, winsA: 0, winsB: 0,
+                predictedWinsA: 4, predictedWinsB: 2,
               ),
             ]),
           ],
@@ -357,6 +378,47 @@ void main() {
 
     expect(find.textContaining('0-0'), findsOneWidget);
     expect(find.textContaining('PROJECTED'), findsOneWidget);
+    // The predicted FINAL record (4-2, BOS the predicted winner), distinct
+    // from the 0-0 current record above.
+    expect(find.textContaining('predicted 4-2'), findsOneWidget);
+  });
+
+  testWidgets(
+      "a scheduled (real, in-progress) NBA series shows its predicted final record alongside the "
+      'live one', (tester) async {
+    final projection = SeasonProjection(
+      sport: 'nba',
+      season: 2026,
+      standings: [],
+      leaderboards: null,
+      bracket: const BracketProjection(
+        conferences: {
+          'Eastern': [
+            BracketRound(round: 'Conference Quarterfinals', matchups: [
+              BracketMatchup(
+                teamA: '2', teamB: '8', seedA: 1, seedB: 8, status: 'scheduled',
+                predictedWinner: '2', winProbability: 0.81, winsA: 2, winsB: 1,
+                predictedWinsA: 4, predictedWinsB: 1,
+              ),
+            ]),
+          ],
+        },
+        rounds: null,
+        teamNames: {
+          '2': BracketTeamName(name: 'Boston Celtics', abbreviation: 'BOS'),
+          '8': BracketTeamName(name: 'Detroit Pistons', abbreviation: 'DET'),
+        },
+      ),
+    );
+
+    await pumpSeasonPage(tester, 'nba', projection);
+    await tester.tap(find.text('Playoff Bracket'));
+    await tester.pumpAndSettle();
+
+    // The live 2-1 record and the predicted 4-1 final are both shown --
+    // distinct pieces of information, not conflated into one number.
+    expect(find.textContaining('2-1'), findsOneWidget);
+    expect(find.textContaining('predicted 4-1'), findsOneWidget);
   });
 
   testWidgets(
