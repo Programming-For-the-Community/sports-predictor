@@ -1,7 +1,5 @@
-# 30-day retention so logs don't grow unbounded (see design/PROJECT_PLAN.md
-# Phase 7) -- a backfill run's logs are only useful for debugging a recent
-# failure, not as a long-term record (that's what S3's raw landing zone
-# and DynamoDB are for).
+# 30-day retention so logs don't grow unbounded; a backfill run's logs are
+# only useful for debugging a recent failure, not as a long-term record.
 resource "aws_cloudwatch_log_group" "nfl_backfill" {
   name              = "/ecs/${var.project}-nfl-backfill"
   retention_in_days = 30
@@ -13,20 +11,16 @@ resource "aws_cloudwatch_log_group" "nfl_backfill" {
 }
 
 # Standalone Fargate task (launched via `aws ecs run-task`, not a Service
-# -- this runs to completion and stops, no always-on cost). Pass
-# --propagate-tags TASK_DEFINITION on that command (or the equivalent
-# console option) or the running task won't carry this file's tags for
-# cost allocation -- RunTask doesn't propagate them by default. Runs in a
-# public subnet with a public IP rather than a private subnet + NAT
-# Gateway, since it needs to reach ESPN's public API and a NAT Gateway
-# alone (~$32/month) exceeds this project's $15/month budget. See
-# aws_security_group.fargate_internet_egress in security-groups.tf.
+# -- runs to completion and stops, no always-on cost). Pass
+# --propagate-tags TASK_DEFINITION on that command or the running task
+# won't carry these tags for cost allocation -- RunTask doesn't propagate
+# them by default. Runs in a public subnet with a public IP rather than a
+# private subnet + NAT Gateway to reach ESPN's public API.
 #
 # START_SEASON/END_SEASON/BATCH_SIZE/REQUEST_DELAY_SECONDS default to a
 # full historical run here; override them per-run via ECS "Run Task" ->
 # Container overrides -> Environment variables to backfill a narrower
-# range (e.g. retrying one failed season) without touching this
-# definition. See Source/data-backfills/nfl/backfill.py's docstring.
+# range without touching this definition.
 resource "aws_ecs_task_definition" "nfl_backfill" {
   family                   = "${var.project}-nfl-backfill"
   requires_compatibilities = ["FARGATE"]

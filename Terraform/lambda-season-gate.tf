@@ -1,13 +1,11 @@
-# Season-gate Lambda -- see Source/aws-lambdas/shared/season-gate/
-# handler.py's own docstring. Invoked synchronously by both orchestrator
+# Season-gate Lambda. Invoked synchronously by both orchestrator
 # state machines (sfn-ingest-orchestrator.tf, sfn-training-orchestrator.tf)
-# as a Task inside their ForEachSport Map, replacing the old $.active.Bool
-# Choice. Shared across every sport, not sport-specific -- lives at the
-# same "shared" tier as scheduler-group.tf, not under a per-sport file.
+# as a Task inside their ForEachSport Map. Shared across every sport, not
+# sport-specific.
 #
 # Code is deployed by shared_lambdas_deploy.yml (via `aws lambda
-# update-function-code`) -- NOT by Terraform. Same placeholder-ZIP +
-# lifecycle.ignore_changes pattern as lambda-nfl-schedule-sync.tf.
+# update-function-code`), not by Terraform, using a placeholder ZIP with
+# lifecycle.ignore_changes.
 
 resource "aws_cloudwatch_log_group" "season_gate" {
   name              = "/aws/lambda/${var.project}-season-gate"

@@ -1,4 +1,4 @@
-# 30-day retention, same rationale as ecs-task-nfl-backfill.tf.
+# 30-day retention so logs don't grow unbounded.
 resource "aws_cloudwatch_log_group" "ncaafb_backfill" {
   name              = "/ecs/${var.project}-ncaafb-backfill"
   retention_in_days = 30
@@ -9,27 +9,19 @@ resource "aws_cloudwatch_log_group" "ncaafb_backfill" {
   })
 }
 
-# Standalone Fargate task (launched via `aws ecs run-task`, not a Service or
-# Step Functions -- unlike the feature-engineering/train-* tasks, whose
-# ecs:runTask.sync calls in sfn-training-orchestrator.tf already set
-# "PropagateTags": "TASK_DEFINITION"). Pass --propagate-tags TASK_DEFINITION
-# on that command yourself (or the equivalent console option) or the
-# running task won't carry this file's tags for cost allocation -- RunTask
-# doesn't propagate them by default. Same gotcha ecs-task-nfl-backfill.tf's
-# own comment documents, and the one that actually bit NFL's backfill task
-# the first time it was run manually without the flag. Runs in a public
-# subnet (fargate_internet_egress) to reach CFBD's public API, same
-# NAT-Gateway-cost reasoning.
+# Standalone Fargate task (launched via `aws ecs run-task`, not a Service).
+# Pass --propagate-tags TASK_DEFINITION on that command or the running
+# task won't carry these tags for cost allocation -- RunTask doesn't
+# propagate them by default. Runs in a public subnet
+# (fargate_internet_egress) to reach CFBD's public API.
 #
-# Uses the dedicated CFBD_API_KEY_SECRET_FIELD "ncaa_fb_backfill_key" --
-# deliberately a different key than ingest/schedule-sync's
-# "ncaa_fb_ingest_key" (see project memory's Phase 0 notes), so a month-long
-# backfill run never competes with production ingest for the same
-# 1,000-call/month CFBD free-tier budget.
+# Uses the dedicated CFBD_API_KEY_SECRET_FIELD "ncaa_fb_backfill_key",
+# separate from ingest/schedule-sync's "ncaa_fb_ingest_key", so a
+# long-running backfill never competes with production ingest for the
+# same CFBD free-tier call budget.
 #
-# START_SEASON/END_SEASON default to a full historical run; override per-run
-# via ECS "Run Task" -> Container overrides, same as
-# ecs-task-nfl-backfill.tf's own pattern.
+# START_SEASON/END_SEASON default to a full historical run; override
+# per-run via ECS "Run Task" -> Container overrides.
 resource "aws_ecs_task_definition" "ncaafb_backfill" {
   family                   = "${var.project}-ncaafb-backfill"
   requires_compatibilities = ["FARGATE"]

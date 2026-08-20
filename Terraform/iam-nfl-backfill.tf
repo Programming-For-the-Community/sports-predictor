@@ -1,9 +1,9 @@
 # Used as both the task execution role (ECR pull, log writes -- via the
 # attached AWS-managed policy) and the task role (the application code's
-# own AWS access), same combined-role pattern as iam-ecs-pipeline.tf.
-# Scoped only to what Source/data-backfills/nfl actually calls: write raw
-# JSON to the raw data lake, upsert the four DynamoDB tables. No read
-# access -- the backfill job doesn't need to read anything back out.
+# own AWS access). Scoped only to what Source/data-backfills/nfl actually
+# calls: write raw JSON to the raw data lake, upsert the four DynamoDB
+# tables. No read access -- the backfill job doesn't need to read
+# anything back out.
 data "aws_iam_policy_document" "nfl_backfill_assume" {
   statement {
     actions = ["sts:AssumeRole"]

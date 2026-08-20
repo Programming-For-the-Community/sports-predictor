@@ -11,13 +11,7 @@ import '../../core/widgets/team_color_dot.dart';
 import '../../static/conference_order.dart';
 import '../../static/nfl_team_colors.dart';
 
-// Source of truth is Terraform/scheduler-nfl-train-player-prop-model.tf's
-// nfl_player_prop_stats map / scheduler-nba-train-player-prop-model.tf's
-// nba_player_prop_stats map -- same duplication handler.py's own
-// PLAYER_PROP_STATS accepts, since there's no model registry to read
-// display labels from at runtime either. One shared map -- NFL's and
-// NBA's stat keys never collide (different sports, different leaderboards
-// maps), so there's nothing sport-conditional needed here.
+// Shared NFL/NBA player-prop stat display labels.
 const _statLabels = {
   'passing_yards': 'Passing Yards',
   'passing_touchdowns': 'Passing TDs',
@@ -34,14 +28,8 @@ const _statLabels = {
   'three_pointers_made': '3-Pointers Made',
 };
 
-/// NBA's own `division` value is the fine-grained "Eastern Atlantic"/
-/// "Western Pacific"/etc (library.features.nba_teams.TEAM_DIVISIONS,
-/// unchanged -- still the real division a team belongs to) -- but real
-/// NBA standings pages are conventionally shown by conference only (2
-/// groups), not sub-divided by division the way NFL's AFC East/NFC West
-/// etc. conventionally are. This takes just the conference-prefix word
-/// off NBA's division string for grouping purposes only; every other
-/// sport's grouping is unaffected.
+/// NBA standings group by conference only; every other sport groups by
+/// division.
 String _standingsGroupKey(String sport, String? division) {
   final raw = division ?? 'Other';
   if (sport != 'nba') return raw;
@@ -49,13 +37,9 @@ String _standingsGroupKey(String sport, String? division) {
   return firstWord.isEmpty ? raw : firstWord;
 }
 
-/// Buckets standings by division (or, for NBA, by conference -- see
-/// _standingsGroupKey), preserving each team's relative order --
-/// standings arrives already sorted by projected_wins descending (see
-/// SeasonProjection's own doc comment), so each group's own bucket is
-/// automatically best-to-worst with no separate sort needed here. filter,
-/// when non-empty, keeps only groups whose own name contains it
-/// (case-insensitive) -- see _ConferenceFilterField.
+/// Buckets standings by division (or NBA conference), preserving each
+/// team's relative order. `filter`, when non-empty, keeps only groups whose
+/// name contains it (case-insensitive).
 List<MapEntry<String, List<TeamStanding>>> _groupByDivision(String sport, List<TeamStanding> standings, String filter) {
   final byDivision = <String, List<TeamStanding>>{};
   for (final team in standings) {
@@ -97,31 +81,10 @@ class _SeasonPageState extends ConsumerState<SeasonPage> {
               style: AppTextStyles.pageH1(),
             ),
             const SizedBox(height: 20),
-            // Player Prop Leaders/Bracket/NBA Cup Bracket only exist as
-            // toggle options when the backend actually sent that block --
-            // NCAAFB's own season simulation is team-outcomes-only, no
-            // player-level simulation and no in-season tournament (see
-            // aws-lambdas/ncaafb/predict/season_projection.py's own
-            // docstring), so `season.leaderboards`/`season.cupBracket` are
-            // always null there. `season.bracket` is null for every sport
-            // without an elimination-bracket concept (NCAA MBB/PGA/F1, not
-            // onboarded/not applicable) and, same best-effort convention,
-            // whenever building it failed for a sport that normally has
-            // one. `season.cup` (NBA Cup group standings) still exists on
-            // the payload -- `project_cup_knockout_bracket`'s own seeding
-            // still needs the group win/loss records it carries -- but no
-            // longer has a tab of its own; the Cup's own bracket tab
-            // (`cupBracket`) already shows the same tournament without a
-            // separate group-standings view alongside it.
+            // Toggle options only appear when the backend sent that block.
             if (season.leaderboards != null || season.bracket != null || season.cupBracket != null) ...[
-              // Standings/player props/Bracket/NBA Cup Bracket each stand
-              // alone (a toggle, not all stacked on one page) -- each is
-              // already a tall multi-column section on its own, and
-              // stacking them turns this into a very long scroll for no
-              // reason once a viewer only wants one.
-              // Horizontal-scroll, not a bare Row -- these labels
-              // together don't fit a phone-width screen (see
-              // sport_shell_page.dart's _TabToggle for the same pattern).
+              // Horizontal-scroll Row -- the toggle labels don't fit a
+              // phone-width screen.
               SingleChildScrollView(
                 scrollDirection: Axis.horizontal,
                 child: Row(
@@ -167,10 +130,8 @@ class _SeasonPageState extends ConsumerState<SeasonPage> {
             else if (_tab == 'cup_bracket' && season.cupBracket != null)
               _BracketSection(sport: season.sport, bracket: season.cupBracket!)
             else ...[
-              // Only shown once there's more than one conference/division
-              // to filter -- a single-conference standings list (or NFL's
-              // fixed 8 divisions, small enough to just scroll) has
-              // nothing this would meaningfully narrow down.
+              // Only shown when there's more than one conference/division
+              // to filter.
               if (_groupByDivision(season.sport, season.standings, '').length > 1) ...[
                 ConferenceFilterField(
                   value: _conferenceFilter,
@@ -178,17 +139,10 @@ class _SeasonPageState extends ConsumerState<SeasonPage> {
                 ),
                 const SizedBox(height: 16),
               ],
-              // Fixed-width (capped by the viewport -- see
-              // core/widgets/responsive.dart) division cards in a Wrap --
-              // multiple divisions per row on a wide screen, same pattern
-              // the leaderboard cards use, instead of one division per
-              // full-width row.
+              // Fixed-width division cards in a Wrap so multiple divisions
+              // fit per row on a wide screen.
               LayoutBuilder(
                 builder: (context, constraints) {
-                  // NCAAFB's extra RANK column (see _standingsColumns) needs
-                  // more room than NFL's fixed 6-column table -- 480 was
-                  // sized for NFL alone, and cramming a 7th column into the
-                  // same width was clipping the RANK header.
                   final width = cardWidth(season.sport == 'ncaafb' ? 560 : 480, constraints.maxWidth);
                   final divisions = _groupByDivision(season.sport, season.standings, _conferenceFilter);
                   if (divisions.isEmpty) {
@@ -228,10 +182,6 @@ class _SeasonPageState extends ConsumerState<SeasonPage> {
   }
 }
 
-// Same toggle-pill shape as events/event_list_page.dart's own
-// _StatusToggle -- not shared code between the two pages, but the
-// smallest of the two features (StatelessWidget wrapping InkWell) doesn't
-// carry its own weight as a cross-page core/widgets export yet.
 class _StatusToggle extends StatelessWidget {
   const _StatusToggle({required this.label, required this.selected, required this.onTap});
   final String label;
@@ -260,14 +210,7 @@ class _StatusToggle extends StatelessWidget {
 }
 
 // One list of (label, flex, cell) drives both the header row and every
-// data row -- the two used to be built from independently-maintained
-// label/flex arrays and a hardcoded Row, which is how NCAAFB ended up
-// silently showing NFL's own column set (DIV%/PO%/SB%, no RANK) despite
-// carrying genuinely different data underneath (conference_champion_
-// probability, no division concept, a real ranking model NFL doesn't
-// have -- see TeamStanding's own doc comments). Sport-conditional so the
-// header label and the value it's actually showing can never drift apart
-// again.
+// data row, keeping each column's label and value in sync per sport.
 class _StandingsColumn {
   const _StandingsColumn(this.label, this.flex, this.cell);
   final String label;
@@ -279,8 +222,7 @@ List<_StandingsColumn> _standingsColumns(String sport) {
   final isNcaafb = sport == 'ncaafb';
   final isNba = sport == 'nba';
   return [
-    // NCAAFB only -- NFL has no equivalent model/concept (see
-    // TeamStanding.currentRank's own doc comment).
+    // NCAAFB only.
     if (isNcaafb)
       _StandingsColumn('RANK', 2, (context, sport, team) {
         final rank = team.currentRank;
@@ -288,9 +230,6 @@ List<_StandingsColumn> _standingsColumns(String sport) {
           rank != null ? '#$rank' : '--',
           style: AppTextStyles.metricValue(color: AppColors.inkMute),
           textAlign: TextAlign.center,
-          // A 3-digit rank (#100+) was wrapping onto a second line in
-          // this narrow flex:1 column -- same hard backstop the header
-          // row above already uses.
           maxLines: 1,
           softWrap: false,
           overflow: TextOverflow.ellipsis,
@@ -309,35 +248,22 @@ List<_StandingsColumn> _standingsColumns(String sport) {
       );
     }),
     _StandingsColumn('PROJ', 2, (context, sport, team) => Text(
-          // Rounded to whole games -- projectedWins/projectedLosses are
-          // Monte Carlo averages (e.g. 10.6-6.4), not something that can
-          // land on a real final record digit-for-digit.
+          // Rounded to whole games -- projectedWins/Losses are Monte Carlo
+          // averages, not a real final record.
           '${team.projectedWins.round()}-${team.projectedLosses.round()}',
           style: AppTextStyles.metricValue(color: AppColors.cyan),
           textAlign: TextAlign.center,
         )),
     _StandingsColumn('REC', 2, (context, sport, team) => Text(
-          // Ties only appended when this team actually has one -- most
-          // teams most seasons don't, and a universal "-0" reads as
-          // noise on every other row. NBA never has one (team.ties is
-          // always 0 there -- see TeamStanding's own doc comment), so
-          // this already renders correctly for NBA with no branch needed.
+          // Ties only appended when non-zero (always 0 for NBA).
           team.ties > 0 ? '${team.wins}-${team.losses}-${team.ties}' : '${team.wins}-${team.losses}',
           style: AppTextStyles.metricValue(),
           textAlign: TextAlign.center,
         )),
-    // NBA swaps DIV% for PLAY-IN% -- the NBA hasn't tied any playoff-
-    // seeding benefit to division titles since 2015-16 (see
-    // season_simulation.py's own simulate_season docstring), so a DIV%
-    // column would be misleading there; the play-in round is the real
-    // extra tier NBA's own bracket has that NFL's/NCAAFB's don't.
+    // NBA swaps DIV% for PLAY-IN%, its extra playoff-seeding tier.
     if (isNba)
       _StandingsColumn('PLAY-IN%', 2, (context, sport, team) => _PercentText(team.playInProbability ?? 0.0))
     else
-      // "Division"/"Super Bowl" are NFL-specific words -- NCAAFB has no
-      // division concept (conference championship stands in, see
-      // TeamStanding.division's own doc comment) and plays for a national
-      // championship, not a Super Bowl.
       _StandingsColumn(
         isNcaafb ? 'CONF%' : 'DIV%', 2, (context, sport, team) => _PercentText(team.divisionWinnerProbability),
       ),
@@ -405,10 +331,6 @@ class _StandingsHeaderRow extends StatelessWidget {
               columns[i].label,
               style: AppTextStyles.microLabel(),
               textAlign: i == 0 ? TextAlign.start : TextAlign.center,
-              // Short, fixed-abbreviation labels sized to comfortably fit
-              // this column width -- maxLines/softWrap/ellipsis here are
-              // a hard backstop against ever silently wrapping to a
-              // second line, not the actual fit strategy.
               maxLines: 1,
               softWrap: false,
               overflow: TextOverflow.ellipsis,
@@ -522,10 +444,7 @@ class _LeaderboardCard extends StatelessWidget {
                       overflow: TextOverflow.ellipsis,
                     ),
                   ),
-                  // Actual season-to-date total -> projected season-end
-                  // total -- both, not just the projection, so this reads
-                  // as "how far along" a leader is, not just where they'll
-                  // land.
+                  // Current total -> projected season-end total.
                   Text(
                     entries[i].currentTotal.toStringAsFixed(0),
                     style: AppTextStyles.metricValue(color: AppColors.inkMute),
@@ -544,23 +463,13 @@ class _LeaderboardCard extends StatelessWidget {
   }
 }
 
-/// Playoff/Cup-knockout bracket -- a single converging tree (_BracketTree).
-/// A flat-bracket sport (NCAAFB -- bracket.rounds non-null) already has its
-/// own championship as the last round. A conference-split sport (NFL/NBA
-/// -- bracket.conferences non-empty) has two conferences that must
-/// visually converge into one shared championship card, not two
-/// independent trees with a disconnected final floating below them.
-/// _computeConferenceBracketLayout lays each conference's own tree out
-/// independently, then stacks conference B underneath conference A as a
-/// fixed vertical band -- concatenating both conferences' matchups into
-/// one list and running _computeBracketSlotLayout on the merged list
-/// directly (the previous approach) let a bye's collision-avoidance in
-/// one conference land on a slot that numerically coincides with the
-/// other conference's own traced slot, silently swapping two of that
-/// conference's own matchups out of their normal (1v8)/(4v5)/(3v6)/(2v7)
-/// seed order and producing crossed, multi-elbow connector lines -- a
-/// real bug reported against NBA's own bracket. Two isolated per-
-/// conference layouts can never collide this way.
+/// Playoff/Cup-knockout bracket, rendered as a single converging tree
+/// (_BracketTree). A flat-bracket sport (NCAAFB -- bracket.rounds
+/// non-null) already has its championship as the last round. A
+/// conference-split sport (NFL/NBA -- bracket.conferences non-empty) has
+/// two conferences that converge into one shared championship card;
+/// _computeConferenceBracketLayout lays each conference's tree out
+/// independently and stacks them so their slot layouts can never collide.
 class _BracketSection extends StatelessWidget {
   const _BracketSection({required this.sport, required this.bracket});
 
@@ -578,7 +487,7 @@ class _BracketSection extends StatelessWidget {
     final finalMatchup = bracket.finalMatchup;
     if (conferenceNames.length != 2 || finalMatchup == null) {
       // Not the shape this combined layout assumes -- fall back to
-      // independent per-conference trees rather than guessing.
+      // independent per-conference trees.
       return Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -622,17 +531,13 @@ class _BracketSection extends StatelessWidget {
 }
 
 /// One resolved bracket slot's position, in "slot units" (1 unit = one
-/// vertical card-row) -- round 0 gets simple sequential slots 0,1,2,...;
-/// every later round's own slot starts as the average of whichever
-/// earlier-round slot(s) its own winner traces back to (a bye -- a team
-/// with no prior-round game at all, e.g. NFL's #1 seed skipping Wild
-/// Card -- has no source slots, so its own round index stands in
-/// instead). Matched generically by winner team id (predicted or actual,
-/// see BracketMatchup.isFinal) rather than assuming round sizes always
-/// halve, so a play-in-style round (NBA) that doesn't cleanly halve still
-/// resolves correctly -- nothing here is sport-specific. Every round then
-/// gets a single dedup pass (see _computeBracketSlotLayout) so no two
-/// matchups -- traced or bye -- ever land on the same slot.
+/// vertical card-row). Round 0 gets sequential slots 0,1,2,...; each later
+/// round's slot is the average of the earlier-round slot(s) its winner
+/// traces back to (a bye uses its own round index instead). Matched by
+/// winner team id rather than assuming round sizes halve, so a
+/// non-halving round (NBA's play-in) still resolves correctly. Every round
+/// then gets a dedup pass (see _computeBracketSlotLayout) so no two
+/// matchups ever land on the same slot.
 class _BracketSlotLayout {
   const _BracketSlotLayout(this.slots, this.connections);
 
@@ -648,14 +553,10 @@ class _BracketConnection {
   final int toRound;
   final double toSlot;
 
-  /// True when this connection's source is more than one round back --
-  /// NBA's Play-In "Elimination Game" is the only round shape in this
-  /// project where a single source card has two DIFFERENT real
-  /// destinations (its loser feeds the very next round, its winner skips
-  /// that round entirely and reappears two rounds later, straight in the
-  /// Quarterfinals -- see _computeBracketSlotLayout's own connector-
-  /// search comment). Styled differently in the painter so a card that
-  /// feeds two different places doesn't read as a routing mistake.
+  /// True when the source is more than one round back (NBA's Play-In
+  /// Elimination Game: a card's loser feeds the next round while its
+  /// winner skips ahead two rounds). Styled differently in the painter so
+  /// it doesn't read as a routing mistake.
   bool get isSkip => toRound - fromRound > 1;
 }
 
@@ -670,21 +571,10 @@ _BracketSlotLayout _computeBracketSlotLayout(List<BracketRound> rounds) {
       continue;
     }
 
-    // A matchup's own VERTICAL POSITION is based only on sources found in
-    // the IMMEDIATELY preceding round -- a source found further back (see
-    // the connector search below) is deliberately excluded here, even
-    // though it's real. Averaging it in can pull a card toward an
-    // unrelated bye's own fallback position and scramble a round's
-    // otherwise-canonical seed order: NBA's Play-In "Elimination Game"
-    // splits Play-In into two rounds, so one Quarterfinal side's real
-    // source sits two rounds back (the OTHER Play-In game's winner skips
-    // the Elimination round entirely) -- confirmed via hand-trace that
-    // using it for position, not just the connector line, swaps two
-    // Quarterfinal cards out of their (1v8)/(4v5)/(3v6)/(2v7) order. A
-    // matchup whose only source is further back is positioned exactly
-    // like a bye instead -- its own list index -- and the actual
-    // connector to that further-back source is still drawn correctly
-    // (see below), it just doesn't drive placement.
+    // A matchup's vertical position is based only on sources in the
+    // immediately preceding round; a source found further back is drawn
+    // as a connector (below) but doesn't drive placement, since averaging
+    // it in can scramble a round's canonical seed order.
     final previousMatchups = rounds[r - 1].matchups;
     final previousSlots = slots[r - 1];
     final desired = List<double>.filled(matchups.length, 0);
@@ -698,28 +588,19 @@ _BracketSlotLayout _computeBracketSlotLayout(List<BracketRound> rounds) {
           immediateSources.add(previousSlots[j]);
         }
       }
-      // A matchup with no traceable source in the immediately preceding
-      // round ("bye" into this round -- e.g. NBA's direct #4/#5 seeds,
-      // which skip Play-In entirely) has no average to compute; its own
-      // index stands in as its desired slot until the dedup pass below
-      // places it.
+      // No traceable source in the immediately preceding round ("bye"
+      // into this round) -- its own index stands in until the dedup pass
+      // below places it.
       desired[i] = immediateSources.isEmpty
           ? i.toDouble()
           : immediateSources.reduce((a, b) => a + b) / immediateSources.length;
     }
 
     // Assign final slots by desired position (ties broken by original
-    // index), walking through in ascending order and pushing each one at
-    // least a full row past whichever slot was just assigned before it.
-    // An EXACT duplicate isn't the only collision to guard against -- two
-    // desired values that are merely close (e.g. Play-In Elimination's
-    // own single-game average landing on 0.5, half a row above a bye's
-    // integer fallback at 1.0) are numerically distinct but still overlap
-    // visually, since a card is taller than half a row (a real bug: NBA's
-    // own 1v8/4v5 Quarterfinal cards, at slots 0.5 and 1.0, physically
-    // overlapped despite never computing the same slot). Enforcing a full
-    // 1-row minimum gap between every consecutive pair, not just an
-    // inequality check, catches both cases the same way.
+    // index), pushing each one at least a full row past the slot just
+    // assigned before it -- a full 1-row minimum gap, not just an
+    // inequality check, since two desired values can be close enough to
+    // overlap visually without being numerically equal.
     final order = List<int>.generate(matchups.length, (i) => i)
       ..sort((a, b) {
         final cmp = desired[a].compareTo(desired[b]);
@@ -733,16 +614,11 @@ _BracketSlotLayout _computeBracketSlotLayout(List<BracketRound> rounds) {
       lastAssigned = candidate;
     }
 
-    // Connector lines search back through EVERY earlier round (nearest
-    // first, matching either of a previous matchup's two participants,
-    // not just its resolved winner), independent of what drove position
-    // above -- draws the real source even for a side that skips the
-    // immediately preceding round entirely (NBA's Play-In winner
-    // advancing straight to the Quarterfinals) or that only reappears as
-    // the LOSER of an earlier game (NBA's Play-In Elimination Game). A
-    // normal single-elimination loser is never placed into any later
-    // matchup, so the "either participant" check is a no-op everywhere
-    // except Play-In's own two-stage relationship.
+    // Connector lines search back through every earlier round (nearest
+    // first, matching either of a previous matchup's two participants),
+    // independent of what drove position above -- draws the real source
+    // even for a side that skips the immediately preceding round or that
+    // only reappears as the loser of an earlier game.
     for (var i = 0; i < matchups.length; i++) {
       final matchup = matchups[i];
       for (final side in [matchup.teamA, matchup.teamB]) {
@@ -762,13 +638,10 @@ _BracketSlotLayout _computeBracketSlotLayout(List<BracketRound> rounds) {
   return _BracketSlotLayout(slots, connections);
 }
 
-/// Merges two conferences' own independently-computed bracket layouts
-/// into one combined layout for the converging tree (see _BracketSection's
-/// own docstring for why this can't just run _computeBracketSlotLayout on
-/// a concatenated round list -- one conference's dedup fallback can steal
-/// a slot from the other's). Conference B is stacked as a fixed band
-/// directly underneath conference A's own tallest slot, so nothing in
-/// either conference's dedup pass ever sees the other's rows at all.
+/// Merges two conferences' independently-computed bracket layouts into one
+/// combined layout for the converging tree. Conference B is stacked as a
+/// fixed band directly underneath conference A's tallest slot, so neither
+/// conference's dedup pass ever sees the other's rows.
 ({_BracketSlotLayout layout, double conferenceBOffset}) _computeConferenceBracketLayout(
   List<BracketRound> roundsA,
   List<BracketRound> roundsB,
@@ -796,11 +669,8 @@ _BracketSlotLayout _computeBracketSlotLayout(List<BracketRound> rounds) {
   }
 
   // The championship's two sides are each conference's own last-round
-  // winner -- trace which of that round's matchups produced it (same
-  // winner-matching _computeBracketSlotLayout itself uses) so the
-  // championship card converges at the right height instead of an
-  // arbitrary fallback; a conference whose winner can't be traced (should
-  // never happen in practice) just contributes no connector.
+  // winner -- trace which matchup produced it so the championship card
+  // converges at the right height.
   double? sourceSlot(List<BracketRound> rounds, List<double> lastRoundSlots, double bandOffset) {
     final lastMatchups = rounds[roundCount - 1].matchups;
     for (var j = 0; j < lastMatchups.length; j++) {
@@ -826,18 +696,13 @@ _BracketSlotLayout _computeBracketSlotLayout(List<BracketRound> rounds) {
   return (layout: _BracketSlotLayout(slots, connections), conferenceBOffset: offset);
 }
 
-/// Draws each round-to-round connector as a simple 3-segment elbow
-/// (horizontal out of the source card, vertical to the target's own row,
-/// horizontal into the target card) -- the standard bracket-diagram
-/// connector shape, positioned entirely from _computeBracketSlotLayout's
-/// own slot math, no widget measurement needed.
+/// Draws each round-to-round connector as a 3-segment elbow (horizontal out
+/// of the source card, vertical to the target's row, horizontal into the
+/// target card), positioned from _computeBracketSlotLayout's slot math.
 ///
 /// A skip connection (see _BracketConnection.isSkip) is drawn dashed, in
-/// `skipColor` instead of `color` -- one source card genuinely feeding
-/// two different destinations (its own next round AND, for its other
-/// side, a round further ahead) reads as a mistake if both lines look
-/// identical; the visual break makes it legible as "this one jumps a
-/// round" on sight instead.
+/// `skipColor` instead of `color`, so a card feeding two different
+/// destinations reads as intentional rather than a mistake.
 class _BracketConnectorPainter extends CustomPainter {
   const _BracketConnectorPainter({
     required this.connections,
@@ -906,13 +771,10 @@ class _BracketConnectorPainter extends CustomPainter {
 }
 
 /// Converging bracket tree -- rounds placed left to right, each matchup
-/// card positioned by its own computed slot (see _computeBracketSlotLayout),
-/// connector lines drawn underneath. Horizontally scrollable (the same
-/// pattern this page's other wide content uses); the outer page itself
-/// already scrolls vertically, so a fixed-height inner Stack here (driven
-/// by the widest round's own card count) is safe -- Stack doesn't throw on
-/// overflow the way a Row/Column would, so an unusually tall bracket just
-/// extends the page's own scroll, never a RenderFlex error.
+/// card positioned by its computed slot, connector lines drawn underneath.
+/// Horizontally scrollable; the outer page already scrolls vertically, so a
+/// fixed-height inner Stack (sized to the widest round's card count) never
+/// throws on overflow the way a Row/Column would.
 class _BracketTree extends StatelessWidget {
   const _BracketTree({
     required this.sport,
@@ -926,25 +788,20 @@ class _BracketTree extends StatelessWidget {
   final List<BracketRound> rounds;
   final Map<String, BracketTeamName> teamNames;
 
-  /// Optional per-conference labels for a combined conference-split tree
-  /// (see _BracketSection's own docstring) -- each names the round-0 slot
-  /// where that conference's own band of matchups starts, so a small
-  /// label can mark it since there's no longer a separate Column/heading
-  /// per conference once both are merged into one Stack.
+  /// Per-conference labels for a combined conference-split tree; each names
+  /// the round-0 slot where that conference's band of matchups starts.
   final List<({String name, double slot})> conferenceLabels;
 
-  /// A combined conference-split tree can't let _computeBracketSlotLayout
-  /// run on the merged round list directly -- see
-  /// _computeConferenceBracketLayout's own docstring for why -- so
-  /// _BracketSection passes its own already-merged layout here instead.
-  /// Null for the flat (NCAAFB) and independent-tree fallback cases,
-  /// which still compute their own from `rounds` below.
+  /// Precomputed layout for a combined conference-split tree (see
+  /// _computeConferenceBracketLayout). Null for the flat (NCAAFB) and
+  /// independent-tree fallback cases, which compute their own from
+  /// `rounds` below.
   final _BracketSlotLayout? precomputedLayout;
 
   static const double _cardWidth = 220;
-  static const double _cardHeight = 108;
+  static const double _cardHeight = 140;
   static const double _roundGap = 40;
-  static const double _verticalUnit = 124;
+  static const double _verticalUnit = 156;
   static const double _headerHeight = 20;
 
   @override
@@ -962,20 +819,12 @@ class _BracketTree extends StatelessWidget {
     }
     final totalWidth = rounds.length * _cardWidth + (rounds.length - 1) * _roundGap;
     final totalHeight = maxSlot * _verticalUnit + _cardHeight;
-    // Only NBA's own Play-In has a skip connection at all (see
-    // _BracketConnection.isSkip's own doc comment) -- every other sport's
-    // bracket never produces one, so the legend only earns its place here
-    // when there's actually a dashed line on screen to explain.
     final hasSkipConnection = layout.connections.any((c) => c.isSkip);
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         if (hasSkipConnection) ...[
-          // No mainAxisSize.min here -- the explanatory text is long
-          // enough to overflow a narrow viewport (a real RenderFlex
-          // overflow, same class of bug this page has hit before) unless
-          // it's allowed to wrap within the Row's own available width.
           Row(
             crossAxisAlignment: CrossAxisAlignment.center,
             children: [
@@ -1016,22 +865,14 @@ class _BracketTree extends StatelessWidget {
                 ],
               ),
             ),
-            // Extra headroom (vs. the flat-bracket case's plain 10px gap)
-            // when conference labels are present -- the first conference's
-            // label sits at a negative `top` inside the Stack below (see
-            // its own clipBehavior comment), and this reserves the actual
-            // layout space for that overflow instead of just permitting
-            // it to render into nothing, which is exactly the class of
-            // RenderFlex-overflow bug this page has hit for real before.
             SizedBox(height: conferenceLabels.isEmpty ? 10 : 10 + _headerHeight),
             SizedBox(
               width: totalWidth,
               height: totalHeight,
               child: Stack(
-                // conferenceLabels can sit slightly above the first
-                // card's own top (a negative `top`, for the first
-                // conference's label) -- Stack clips to its own bounds by
-                // default, which would silently drop that label.
+                // conferenceLabels can sit above the first card's top (a
+                // negative `top`); Stack clips by default, which would
+                // silently drop that label.
                 clipBehavior: Clip.none,
                 children: [
                   for (final label in conferenceLabels)
@@ -1050,14 +891,7 @@ class _BracketTree extends StatelessWidget {
                     child: CustomPaint(
                       painter: _BracketConnectorPainter(
                         connections: layout.connections,
-                        // Muted but clearly visible against the dark
-                        // background -- borderRaised (8% white) used to
-                        // sit here, which was reported as barely legible.
                         color: AppColors.inkSub,
-                        // A distinct accent (not inkSub's gray, not a
-                        // signal color like warn/neg -- this isn't an
-                        // error) plus a dashed stroke (see the painter's
-                        // own docstring) for a skip connection.
                         skipColor: AppColors.violet,
                         cardWidth: _cardWidth,
                         cardHeight: _cardHeight,
@@ -1073,7 +907,12 @@ class _BracketTree extends StatelessWidget {
                         top: layout.slots[r][i] * _verticalUnit,
                         width: _cardWidth,
                         height: _cardHeight,
-                        child: _BracketMatchupCard(sport: sport, matchup: rounds[r].matchups[i], teamNames: teamNames),
+                        child: _BracketMatchupCard(
+                          sport: sport,
+                          matchup: rounds[r].matchups[i],
+                          teamNames: teamNames,
+                          cardWidth: _cardWidth,
+                        ),
                       ),
                 ],
               ),
@@ -1087,10 +926,8 @@ class _BracketTree extends StatelessWidget {
   }
 }
 
-/// Small dashed-line swatch for the skip-connection legend (see
-/// _BracketTree's own build()) -- reuses the connector painter's dash
-/// geometry so the sample actually matches what's drawn on the real
-/// connector lines, not just an approximation.
+/// Small dashed-line swatch for the skip-connection legend, reusing the
+/// connector painter's dash geometry so the sample matches the real lines.
 class _DashedLegendSwatchPainter extends CustomPainter {
   const _DashedLegendSwatchPainter({required this.color});
   final Color color;
@@ -1117,11 +954,15 @@ class _DashedLegendSwatchPainter extends CustomPainter {
 }
 
 class _BracketMatchupCard extends StatelessWidget {
-  const _BracketMatchupCard({required this.sport, required this.matchup, required this.teamNames});
+  const _BracketMatchupCard({required this.sport, required this.matchup, required this.teamNames, required this.cardWidth});
 
   final String sport;
   final BracketMatchup matchup;
   final Map<String, BracketTeamName> teamNames;
+
+  /// Threaded from _BracketTree's _cardWidth -- gives the status line a
+  /// real width to wrap against inside the FittedBox below.
+  final double cardWidth;
 
   @override
   Widget build(BuildContext context) {
@@ -1143,8 +984,7 @@ class _BracketMatchupCard extends StatelessWidget {
             teamNames: teamNames,
             isWinner: winner == matchup.teamA,
             // A series' running win count takes priority over a single
-            // game's score -- shown throughout (0-0 included), not just
-            // once final, since the record matters while it's still live.
+            // game's score, shown throughout (including 0-0).
             score: matchup.isSeries ? matchup.winsA : (matchup.isFinal ? matchup.actualHomeScore : null),
           ),
           const SizedBox(height: 4),
@@ -1157,7 +997,23 @@ class _BracketMatchupCard extends StatelessWidget {
             score: matchup.isSeries ? matchup.winsB : (matchup.isFinal ? matchup.actualAwayScore : null),
           ),
           const SizedBox(height: 6),
-          Text(_statusLabel(), style: AppTextStyles.microLabel(color: _statusColor()), overflow: TextOverflow.ellipsis),
+          // Shrinks the wrapped status text to fit whatever vertical space
+          // remains, so it can't overflow the fixed-height card.
+          Expanded(
+            child: FittedBox(
+              fit: BoxFit.scaleDown,
+              alignment: Alignment.topLeft,
+              child: SizedBox(
+                width: cardWidth - 24, // Container's own 12px padding each side
+                child: Text(
+                  _statusLabel(),
+                  style: AppTextStyles.microLabel(color: _statusColor()),
+                  maxLines: 3,
+                  softWrap: true,
+                ),
+              ),
+            ),
+          ),
         ],
       ),
     );
@@ -1168,21 +1024,15 @@ class _BracketMatchupCard extends StatelessWidget {
     return teamDisplayFor(sport, teamId, info?.abbreviation).abbreviation;
   }
 
-  // "Projected"/"Scheduled"/"Final" -- the 3-state design from
-  // season_projection.py's own _resolve_matchup docstring, see
-  // BracketMatchup's own doc comment. A series matchup (isSeries) folds
-  // in its running win-loss record -- "win probability" alone doesn't
-  // convey a best-of-7 slot's real state the way it does for a true
-  // single-elimination one.
+  // "Projected"/"Scheduled"/"Final". A series matchup (isSeries) folds in
+  // its running win-loss record.
   String _statusLabel() {
     final winnerLabel = matchup.predictedWinner != null ? _teamLabel(matchup.predictedWinner!) : null;
     if (matchup.isSeries) {
-      final record = '${matchup.winsA}-${matchup.winsB}';
-      // The predicted FINAL record, winner-first (e.g. "4-2"), distinct
-      // from `record` above (the current/live one, 0-0 before the series
-      // starts) -- see BracketMatchup.predictedWinsA/B's own doc comment.
-      // Null once "final" (nothing left to predict) or if either side is
-      // somehow missing, matching predictedWinner's own null-safety.
+      // The live win-loss record (winsA/winsB) is shown per-team by this
+      // card's own team rows, so it isn't repeated here. Only the
+      // predicted final record (winner-first, e.g. "4-2") appears on the
+      // status line.
       final predictedRecord = matchup.predictedWinsA != null && matchup.predictedWinsB != null
           ? (matchup.predictedWinner == matchup.teamA
               ? '${matchup.predictedWinsA}-${matchup.predictedWinsB}'
@@ -1191,23 +1041,19 @@ class _BracketMatchupCard extends StatelessWidget {
       switch (matchup.status) {
         case 'final':
           final winnerName = matchup.actualWinner != null ? _teamLabel(matchup.actualWinner!) : null;
-          return winnerName != null ? '$winnerName WINS SERIES $record' : 'SERIES FINAL $record';
+          return winnerName != null ? '$winnerName WINS SERIES' : 'SERIES FINAL';
         case 'scheduled':
-          if (matchup.winProbability == null || winnerLabel == null) return '$record — PREDICTION PENDING';
+          if (matchup.winProbability == null || winnerLabel == null) return 'PREDICTION PENDING';
           final probability = '${(matchup.winProbability! * 100).round()}%';
           return predictedRecord != null
-              ? '$record — $probability $winnerLabel (predicted $predictedRecord)'
-              : '$record — $probability $winnerLabel';
+              ? '$probability $winnerLabel (predicted $predictedRecord)'
+              : '$probability $winnerLabel';
         default:
-          // A projected series slot still has a real (usually 0-0)
-          // record -- the team rows above already show it per-team (see
-          // this card's build()), but the status line itself was
-          // dropping it, the only one of the 3 states to do so.
-          if (matchup.winProbability == null || winnerLabel == null) return '$record — PROJECTED';
+          if (matchup.winProbability == null || winnerLabel == null) return 'PROJECTED';
           final probability = '${(matchup.winProbability! * 100).round()}%';
           return predictedRecord != null
-              ? '$record — PROJECTED — $probability $winnerLabel (predicted $predictedRecord)'
-              : '$record — PROJECTED — $probability $winnerLabel';
+              ? 'PROJECTED — $probability $winnerLabel (predicted $predictedRecord)'
+              : 'PROJECTED — $probability $winnerLabel';
       }
     }
     switch (matchup.status) {

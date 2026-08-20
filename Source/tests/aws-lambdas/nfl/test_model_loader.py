@@ -2,15 +2,11 @@
 Unit tests for the inference Lambda's model loader. Uses tiny real
 XGBoost/scikit-learn models (trained on trivial synthetic data, not
 mocked) to verify the actual serialize -> deserialize -> predict round
-trip and column ordering are correct for BOTH algorithms this Lambda can
-now be asked to serve -- see library/ml/model_types.py's ADAPTERS
-registry, which model_loader.py dispatches through instead of hardcoding
-XGBoost. S3 access itself is mocked; only the model bytes/model_card
-content are real. This is a different concern from model-training's
-"never touch real fitting" tests (see test_train_win_probability_model.py) -- those exist
-to avoid an expensive hyperparameter search running by accident; this is
-a handful of rows that takes milliseconds and is the actual thing under
-test.
+trip and column ordering are correct for both algorithms this Lambda can
+be asked to serve -- see library/ml/model_types.py's ADAPTERS registry,
+which model_loader.py dispatches through instead of hardcoding XGBoost.
+S3 access itself is mocked; only the model bytes/model_card content are
+real.
 """
 from unittest.mock import MagicMock, patch
 
@@ -24,12 +20,11 @@ from library.ml.model_types import LogisticRegressionAdapter
 
 @pytest.fixture(autouse=True)
 def _clear_model_cache():
-    """model_loader._model_cache is module-level by design (see its own
-    top-of-file comment -- it has to survive across requests within a
-    warm Lambda container), which means it'd otherwise survive across
-    tests too: every test in this file loads "nfl"/"win-probability", so
-    without this, whichever test runs first would populate the cache and
-    every test after it would silently skip its own mocked S3 calls."""
+    """model_loader._model_cache is module-level, so it'd otherwise
+    survive across tests too: every test in this file loads
+    "nfl"/"win-probability", so without this, whichever test runs first
+    would populate the cache and every test after it would silently skip
+    its own mocked S3 calls."""
     model_loader._model_cache.clear()
     yield
     model_loader._model_cache.clear()
@@ -81,9 +76,8 @@ class TestLoadCurrentModel:
         s3.object_exists.assert_called_once_with("nfl/win-probability/current.json")
 
     def test_loads_the_pointed_at_logistic_regression_version(self):
-        # The whole point of run_backtest is that ANY candidate algorithm
-        # can end up promoted -- this is what actually proves
-        # model_loader.py no longer hardcodes XGBoost.
+        # Confirms model_loader.py dispatches by algorithm rather than
+        # assuming XGBoost.
         feature_columns = ["home_elo", "away_elo"]
         s3 = MagicMock()
         s3.object_exists.return_value = True

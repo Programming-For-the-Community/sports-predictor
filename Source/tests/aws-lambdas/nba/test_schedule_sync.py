@@ -52,7 +52,7 @@ class TestLambdaHandler:
             result = nba_schedule_sync.lambda_handler({}, None)
 
         # Only the refresh window's own dates call ESPN -- everything
-        # beyond it stays skipped, same as the old always-skip behavior.
+        # beyond it stays skipped.
         assert mock_client.get_scoreboard_for_date.call_count == nba_schedule_sync.SCHEDULE_SYNC_REFRESH_WINDOW_DAYS
         assert result["refreshed"] == nba_schedule_sync.SCHEDULE_SYNC_REFRESH_WINDOW_DAYS
         assert result["skipped"] == (
@@ -61,9 +61,6 @@ class TestLambdaHandler:
         assert result["synced"] == 0
 
     def test_a_date_already_synced_inside_the_refresh_window_is_refetched_and_overwritten(self):
-        # Regression for a real complaint: a date once written was never
-        # re-fetched at all, so a rescheduled game within this window
-        # would silently never self-correct until the day it's played.
         mock_client = MagicMock()
         mock_client.get_scoreboard_for_date.return_value = _scoreboard([_event(season_type=2)])
         mock_s3 = MagicMock()

@@ -18,7 +18,7 @@ void main() {
     });
 
     testWidgets('floors a near-black team color to a visibly brighter shade', (tester) async {
-      const navy = Color(0xFF002244); // Seahawks navy -- reads as nearly invisible pre-fix
+      const navy = Color(0xFF002244); // Seahawks navy -- near the lightness floor
       await tester.pumpWidget(MaterialApp(home: Scaffold(body: TeamColorDot(color: navy))));
 
       final fill = _decorationOf(tester).color!;

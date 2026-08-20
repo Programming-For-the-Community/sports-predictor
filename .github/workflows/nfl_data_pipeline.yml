@@ -1,18 +1,11 @@
 # Builds and deploys the NFL recurring data pipeline Lambdas: nfl-ingest
 # (EventBridge-triggered, writes raw JSON to S3), nfl-normalize
 # (S3-triggered, writes to DynamoDB), and nfl-schedule-sync (EventBridge-
-# triggered, writes raw JSON to S3 for every week of the current season).
-# All three are deployed in parallel since they are independent -- a
-# failure in one does not block the others.
+# triggered, writes raw schedule JSON to S3). Deployed in parallel; each
+# is independent.
 #
-# Lambda function names are supplied by the caller (nfl_deploy.yml) from
-# Terraform outputs so this workflow never hard-codes names that Terraform
-# owns. Defaults are provided so workflow_dispatch (manual, standalone run)
-# still works without needing the Terraform output values.
-#
-# Terraform (tf_install.yml) creates each Lambda function with a placeholder
-# ZIP and lifecycle { ignore_changes } so it never overwrites what this
-# workflow deploys. This workflow owns all subsequent code updates.
+# Lambda function names come from the caller (nfl_deploy.yml) via
+# Terraform outputs, with defaults for standalone workflow_dispatch runs.
 
 name: NFL Data Pipeline
 
@@ -41,21 +34,10 @@ permissions:
   contents: read
 
 jobs:
-  # Each Lambda gets its own upstream test job, pointed at its own
-  # specific test file -- not the whole Source/tests/aws-lambdas/nfl/
-  # directory. conftest.py there loads both nfl_ingest and nfl_normalize
-  # regardless (either test file could run standalone), but a failing
-  # normalize test used to fail the ingest deploy too, and vice versa,
-  # purely because both deploys pointed at the same shared directory.
   test-ingest:
     name: Run nfl-ingest tests
     uses: ./.github/workflows/run_python_tests.yml
     with:
-      # test_ingest.py was split into several concern-scoped files
-      # (lambda_handler/helpers/rosters/depth-charts/coaches) -- listed
-      # individually here, same discipline this workflow's own comment
-      # above already calls for (a specific file list, not the whole
-      # directory).
       test_path: >-
         Source/tests/aws-lambdas/nfl/test_ingest_lambda_handler.py
         Source/tests/aws-lambdas/nfl/test_ingest_helpers.py

@@ -15,15 +15,12 @@ import '../../core/widgets/prediction_freshness_badge.dart';
 import '../../core/widgets/team_leaders_panel.dart';
 import '../../static/nfl_team_colors.dart';
 
-// Mirrors live_scores.py's own POLL_START_BEFORE_KICKOFF/
-// POLL_SAFETY_CAP_AFTER_KICKOFF window -- re-fetching the prediction
-// outside this window would just repeat the exact same live-compute
-// backend call for a game whose relevant inputs (roster, injuries, Elo)
-// essentially never change minute to minute this far from kickoff.
+// Prediction is only re-fetched within this window around kickoff --
+// outside it, the relevant inputs (roster, injuries, Elo) essentially
+// never change minute to minute.
 const _predictionPollWindowBefore = Duration(minutes: 15);
 const _predictionPollWindowAfter = Duration(hours: 7);
 
-// Same cadence as event_list_page.dart's own live-scores poll.
 const _pollInterval = Duration(seconds: 30);
 
 bool _withinPredictionPollWindow(SportEvent event) {
@@ -34,33 +31,18 @@ bool _withinPredictionPollWindow(SportEvent event) {
 }
 
 /// Event-level predictions (win probability, margin, home/away score) plus
-/// player leaders per team -- see core/models/event_leaders.dart.
-/// `EventPrediction.leaders` stays nullable since it's a best-effort field
-/// server-side (see handler.py's _predict_event_leaders): the panel simply
-/// doesn't render if the backend couldn't compute it for a given event.
-/// Once the event is actually live, the same predicted leaders are instead
-/// shown against their own live-so-far stat line (see
-/// EventLeadersLiveComparison.toLiveComparison, sourced from the same
-/// live-scores poll below) rather than the plain predicted-only panel.
+/// player leaders per team. `EventPrediction.leaders` stays nullable since
+/// it's a best-effort field server-side. Once the event is actually live,
+/// the same predicted leaders are instead shown against their own
+/// live-so-far stat line (see EventLeadersLiveComparison.toLiveComparison)
+/// rather than the plain predicted-only panel.
 ///
-/// A completed event does NOT call the live prediction endpoint -- same
-/// rule game_row.dart's own docstring documents for the list view: a
-/// fresh "live" prediction for an already-played game is built from
-/// rolling stats that may already include this game's own now-normalized
-/// result, making it a misleading, circular-looking number, not an
-/// honest pre-game prediction. Completed games instead use
+/// A completed event does not call the live prediction endpoint -- it uses
 /// event.predictionComparison, the prediction actually logged before the
-/// game was played (already fetched as part of the completed events
-/// list, no extra request needed) -- see MatchupResultHero.
+/// game was played (already fetched as part of the completed events list).
 ///
-/// Polls live scores/prediction every 30s while the event is scheduled --
-/// without this, both stay frozen at whatever they were on page load for
-/// as long as this page stays open (Riverpod caches the fetched value,
-/// there's no time-based TTL), which is stale during a live game and
-/// also meant this page never made another API call on its own, letting
-/// AuthRepository's inactivityTtl clock expire under someone who never
-/// stopped actively reading the page (see auth_repository.dart's
-/// recordActivity for the other half of that fix).
+/// Polls live scores/prediction every 30s while the event is scheduled, so
+/// both stay current while this page stays open.
 class EventDetailPage extends ConsumerStatefulWidget {
   const EventDetailPage({super.key, required this.sportId, required this.eventId});
 
@@ -93,9 +75,7 @@ class _EventDetailPageState extends ConsumerState<EventDetailPage> {
     return null;
   }
 
-  // Only polls once the event is known AND still scheduled -- a
-  // completed event (or one that hasn't loaded yet) has nothing here
-  // worth refreshing.
+  // Only polls once the event is known and still scheduled.
   void _poll() {
     final scheduled = ref.read(eventsListProvider((sport: widget.sportId, status: 'scheduled'))).value ?? const <SportEvent>[];
     final event = _findEvent(scheduled);
@@ -110,17 +90,14 @@ class _EventDetailPageState extends ConsumerState<EventDetailPage> {
   @override
   Widget build(BuildContext context) {
     // There's no "get one event" route -- the event could be in either
-    // list depending on whether it's already been played, so both are
-    // checked rather than assuming 'scheduled'.
+    // list depending on whether it's already been played.
     final scheduledAsync = ref.watch(eventsListProvider((sport: widget.sportId, status: 'scheduled')));
     final completedAsync = ref.watch(eventsListProvider((sport: widget.sportId, status: 'completed')));
 
     if (scheduledAsync.isLoading || completedAsync.isLoading) {
       return const Center(child: CircularProgressIndicator());
     }
-    // Surface a real error instead of silently treating it as "no
-    // events" and misreporting "Event not found" for what might be a
-    // session/network failure.
+    // Surface a real error instead of misreporting "Event not found".
     if (scheduledAsync.hasError) {
       return Text('Couldn\'t load events: ${scheduledAsync.error}', style: AppTextStyles.body(color: AppColors.neg));
     }
@@ -165,13 +142,11 @@ class _EventDetailPageState extends ConsumerState<EventDetailPage> {
               final leaders = prediction.leaders;
               final liveScores = ref.watch(liveScoresProvider(widget.sportId)).value ?? const {};
               final liveState = liveScores[widget.eventId];
-              // Once the game is actually live, "predicted leaders" alone
-              // is stale framing -- swap to the same predicted-vs-actual
-              // panel a completed event uses, just fed this event's live
-              // (so-far, not final) stat lines instead of the box score
-              // ingest eventually writes. Falls back to the predicted-only
-              // panel before kickoff or if the live poll hasn't produced
-              // any player stats yet.
+              // Once the game is live, swap to the same predicted-vs-actual
+              // panel a completed event uses, fed this event's live
+              // (so-far) stat lines. Falls back to the predicted-only
+              // panel before kickoff or before the live poll has produced
+              // any player stats.
               final liveComparison =
                   leaders != null && liveState != null && liveState.live ? leaders.toLiveComparison(liveState.playerStats) : null;
               return Column(

@@ -1,14 +1,9 @@
 """
 Per-request live prediction logic for GET /nfl/predictions/events/{event_id}
-and GET /nfl/predictions/events/{event_id}/players/{entity_id} -- the two
-on-demand routes handler.py's lambda_handler serves directly. Split out of
-handler.py to keep the request-routing entry point focused on routing;
-season_projection.py's weekly leaderboard scoring reuses _get_cached_model/
-model_name_to_prop from here for the same per-stat model lookups.
+and GET /nfl/predictions/events/{event_id}/players/{entity_id}.
 
 Every function here takes storage/s3/predictions_table as parameters
-rather than holding its own singleton, same convention live_features.py
-and model_loader.py already use.
+rather than holding its own singleton.
 """
 import logging
 from datetime import datetime, timezone
@@ -34,17 +29,8 @@ LEADER_CATEGORY_STATS = {
     "sacks": ["defensive_sacks"],
 }
 
-# How many make the leaders block per category -- matches
-# team_leaders_panel.dart's own documented shape ("top 3 receivers, top 2
-# rushers, top 3 in sacks"). live_features._team_leader_candidates
-# intentionally leaves the RECEIVING candidate pool UNCAPPED (every
-# eligible player across every depth-chart slot -- WR/TE/RB/QB, see that
-# function's own docstring) specifically so THIS is where the actual
-# per-candidate model predictions do the ranking, not depth-chart rank.
-# Also enforced for rushing/sacks here even though their own candidate
-# generation already caps them, so this stays the one place that decides
-# "how many make the leaders block" rather than depending on two layers
-# staying in sync.
+# How many make the leaders block per category: top 3 receivers, top 2
+# rushers, top 3 in sacks.
 LEADER_CATEGORY_LIMITS = {"receiving": 3, "rushing": 2, "sacks": 3}
 
 
@@ -62,11 +48,10 @@ def non_negative(value: float) -> float:
 
 def reconcile_scores(margin: float, home_score: float, away_score: float) -> dict[str, float]:
     """margin/home_score/away_score are three independently trained
-    regressors -- nothing constrains raw home_score - away_score to equal
-    the raw margin prediction. Splits the discrepancy evenly between
-    home_score and away_score, preserving their combined total, so the
-    reconciled pair agrees exactly with margin instead of the two
-    predictions silently disagreeing on which team is even favored."""
+    regressors, so raw home_score - away_score need not equal margin.
+    Splits the discrepancy evenly between home_score and away_score,
+    preserving their combined total, so the reconciled pair agrees
+    exactly with margin."""
     adjustment = ((home_score - away_score) - margin) / 2
     return {
         "margin": margin,
@@ -97,22 +82,15 @@ def get_cached_model(model_cache: dict, s3, model_name: str):
 def _score_leader_candidate(s3, model_cache: dict, feature_row: dict, stats: list[str]) -> dict:
     """Predicted value per stat for one leader candidate -- {"entity_id",
     stat: value, ...}, missing a stat key entirely when that stat's model
-    hasn't been promoted yet (see the NoPromotedModelError catch below).
-    Scoring only: no predictions-table write and no entity-name lookup --
-    both are deferred to the candidates that actually survive ranking
-    (see team_leaders below), since scoring itself runs over the full,
-    often much larger, unranked candidate pool (receiving in particular is
-    deliberately uncapped upstream -- see live_features.
-    _team_leader_candidates' own docstring)."""
+    hasn't been promoted yet. Scoring only: no predictions-table write and
+    no entity-name lookup -- both are deferred to the candidates that
+    actually survive ranking (see team_leaders below)."""
     result = {"entity_id": feature_row["entity_id"]}
     for stat in stats:
         model_name = model_name_to_prop(stat)
         try:
             booster, model_card = get_cached_model(model_cache, s3, model_name)
         except model_loader.NoPromotedModelError:
-            # This one stat's model hasn't been promoted yet -- leave it
-            # out of the candidate's result rather than failing the whole
-            # event prediction over a gap in an enhancement field.
             continue
         result[stat] = non_negative(model_loader.predict(booster, model_card, feature_row))
     return result
@@ -124,10 +102,7 @@ def _record_leader_predictions(
     """Writes the audit-trail prediction row for every stat in `scored`
     (an already-ranked candidate's _score_leader_candidate result) and
     attaches its display name -- called only for candidates that made the
-    final cut (see team_leaders below), so the predictions-table audit
-    trail (and, downstream, nfl_reads._leaders_comparison's predicted-vs-
-    actual read of it) only ever contains the players actually shown in
-    the leaders block, not the whole unranked pool scoring considered."""
+    final cut (see team_leaders below)."""
     entity_id = scored["entity_id"]
     entity = storage.get_entity(SPORT, entity_id, "player")
     result = dict(scored)
@@ -138,18 +113,9 @@ def _record_leader_predictions(
         if stat == "entity_id":
             continue
         model_name = model_name_to_prop(stat)
-        # Already in model_cache from this same candidate's own scoring
-        # pass -- this can only re-raise NoPromotedModelError if the stat
-        # somehow made it into `scored` without a successful load, which
-        # _score_leader_candidate never does.
         _, model_card = get_cached_model(model_cache, s3, model_name)
-        # Same model_key shape predict_player_prop already writes for a
-        # manually-queried single player+stat -- makes a leader's
-        # prediction and a manual one interchangeable in the audit trail,
-        # which is what lets nfl_reads._leaders_comparison read either
-        # kind back for a completed event later. Best-effort like every
-        # other call in this function: a write failure here shouldn't take
-        # down the leaders block over what's purely an audit-trail concern.
+        # Best-effort: a write failure here shouldn't take down the
+        # leaders block over what's purely an audit-trail concern.
         try:
             record_prediction(
                 predictions_table, event_key_value,
@@ -174,10 +140,8 @@ def predict_event_leaders(storage, s3, predictions_table, event_key_value: str, 
     def ranked(team_candidates: dict, category: str) -> list[dict]:
         """Every candidate in this category, scored, ranked by its
         primary stat (yards for receiving/rushing, sacks for sacks) and
-        cut down to LEADER_CATEGORY_LIMITS[category] -- a candidate
-        missing its primary stat entirely (model not promoted) sorts
-        last, not first, so an unpromoted model can't accidentally crowd
-        out real predictions."""
+        cut down to LEADER_CATEGORY_LIMITS[category]. A candidate missing
+        its primary stat entirely (model not promoted) sorts last."""
         primary_stat = LEADER_CATEGORY_STATS[category][0]
         scored = [_score_leader_candidate(s3, model_cache, row, LEADER_CATEGORY_STATS[category])
                   for row in team_candidates[category]]

@@ -4,9 +4,7 @@ path: season_projection._season_standings_inputs (wins/losses/point
 differential/Elo carryover/remaining-games/Cup-game derivation from
 stored events) and the EventBridge-triggered ScheduledSeasonProjection
 handler branch that runs season_simulation.simulate_season/simulate_cup
-and writes the result to S3. Mirrors NFL's own
-test_predict_season_simulation.py, minus ties (the NBA has none) and with
-NBA's own 6-stat player-prop set and NBA Cup block.
+and writes the result to S3.
 
 The nba_predict module is registered in sys.modules by conftest.py, whose
 reset_nba_predict_singletons fixture (autouse) resets nba_predict._storage/

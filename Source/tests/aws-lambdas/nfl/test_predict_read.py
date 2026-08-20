@@ -43,8 +43,7 @@ def _predict_event(resource: str, path_params: dict, query_params: dict | None =
 
 def _s3_with_state(state: dict):
     """A MagicMock standing in for S3Manager, backed by a plain
-    {key: json_value} dict -- see test_predict_read_handler.py's own
-    identical helper (NCAAFB) for the full reasoning."""
+    {key: json_value} dict."""
     s3 = MagicMock()
     s3.object_exists.side_effect = lambda key: key in state
     s3.get_json.side_effect = lambda key: state[key]
@@ -178,12 +177,10 @@ class TestRouting:
 
 class TestPredictionRoutes:
     """GET /nfl/predictions/events/{event_id} and .../players/{entity_id}
-    -- moved here from predict/handler.py, now a read-through prediction
-    cache (library.storage.prediction_cache) with async populate-on-miss.
-    Exercises the real prediction_cache functions end to end against a
-    stateful fake S3 (_s3_with_state) rather than mocking them out, same
-    reasoning as test_predict_read_handler.py's own identical NCAAFB
-    tests."""
+    -- a read-through prediction cache (library.storage.prediction_cache)
+    with async populate-on-miss. Exercises the real prediction_cache
+    functions end to end against a stateful fake S3 (_s3_with_state)
+    rather than mocking them out."""
 
     EVENT_ID = "401547417"
     EVENT_KEY = build_event_key("nfl", EVENT_ID)

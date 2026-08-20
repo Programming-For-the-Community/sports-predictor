@@ -1,20 +1,10 @@
-# Builds and deploys the NCAAFB recurring data pipeline Lambdas:
-# ncaafb-ingest (invoked by the shared ingest-orchestrator Step Function,
-# writes raw CFBD JSON to S3), ncaafb-normalize (S3-triggered, writes to
+# Builds and deploys the NCAAFB recurring data pipeline Lambdas: ncaafb-ingest
+# (writes raw CFBD JSON to S3), ncaafb-normalize (S3-triggered, writes to
 # DynamoDB), and ncaafb-schedule-sync (EventBridge-triggered, writes raw
-# JSON to S3 for every week of the current season). All three are
-# deployed in parallel since they are independent -- a failure in one
-# does not block the others. Mirrors nfl_data_pipeline.yml exactly.
+# schedule JSON to S3). Deployed in parallel; each is independent.
 #
-# Lambda function names are supplied by the caller (ncaafb_deploy.yml)
-# from Terraform outputs so this workflow never hard-codes names that
-# Terraform owns. Defaults are provided so workflow_dispatch (manual,
-# standalone run) still works without needing the Terraform output values.
-#
-# Terraform (tf_install.yml) creates each Lambda function with a
-# placeholder ZIP and lifecycle { ignore_changes } so it never overwrites
-# what this workflow deploys. This workflow owns all subsequent code
-# updates.
+# Lambda function names come from the caller (ncaafb_deploy.yml) via
+# Terraform outputs, with defaults for standalone workflow_dispatch runs.
 
 name: NCAAFB Data Pipeline
 
@@ -43,10 +33,6 @@ permissions:
   contents: read
 
 jobs:
-  # Each Lambda gets its own upstream test job, pointed at its own
-  # specific test file(s) -- not the whole Source/tests/aws-lambdas/ncaafb/
-  # directory -- same discipline as nfl_data_pipeline.yml's own comment:
-  # a failing normalize test shouldn't block the ingest deploy, or vice versa.
   test-ingest:
     name: Run ncaafb-ingest tests
     uses: ./.github/workflows/run_python_tests.yml

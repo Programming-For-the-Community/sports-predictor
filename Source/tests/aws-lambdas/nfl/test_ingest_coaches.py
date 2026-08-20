@@ -1,12 +1,10 @@
 """
 Unit tests for the NFL ingest Lambda's season-detection helper
 (_current_nfl_season) and its daily, unconditional coach-cache refresh
-(_fetch_coaches) -- same every-run cadence as rosters/depth charts (see
-test_ingest_rosters.py/test_ingest_depth_charts.py), added specifically so
-next season's coaches get seeded during the off-season instead of only
+(_fetch_coaches) -- same every-run cadence as rosters/depth charts,
+seeding next season's coaches during the off-season instead of only
 ever appearing as a side effect of enriching a specific week's events
-(which never runs before Week 1). Split out of what used to be one large
-test_ingest.py -- see test_ingest_lambda_handler.py's own history note.
+(which never runs before Week 1).
 
 The nfl_ingest module is registered in sys.modules by conftest.py, which
 also sets RAW_BUCKET_NAME before the module is imported (it's read at
@@ -34,9 +32,6 @@ class TestCurrentNflSeason:
         assert nfl_ingest._current_nfl_season(date(2026, 2, 5)) == 2025
 
     def test_march_through_august_resolves_to_the_upcoming_season(self):
-        # The off-season case this whole fix exists for -- e.g. today's
-        # actual date at the time this was written, August 2026, should
-        # already resolve to the 2026 season, not still 2025.
         assert nfl_ingest._current_nfl_season(date(2026, 8, 8)) == 2026
         assert nfl_ingest._current_nfl_season(date(2026, 3, 1)) == 2026
 
@@ -65,10 +60,9 @@ class TestFetchCoaches:
         assert fetched is False
 
     def test_lambda_handler_fetches_coaches_even_before_any_regular_season_week_exists(self):
-        # The off-season gap this whole fix closes: no week to
-        # auto-detect yet (auto-detection resolves preseason and returns
-        # early), but coaches should still get fetched/cached for the
-        # upcoming season regardless.
+        # No week to auto-detect yet (auto-detection resolves preseason
+        # and returns early), but coaches should still get fetched/cached
+        # for the upcoming season regardless.
         mock_s3 = make_s3()
         mock_client = make_client(scoreboard([], season_type=1))  # preseason, auto-detected
         core_client = make_core_client()

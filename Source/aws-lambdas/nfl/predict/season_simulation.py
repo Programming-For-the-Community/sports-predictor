@@ -1,22 +1,14 @@
 """
 Regular-season Monte Carlo simulation (win totals, division winners,
 playoff field, Super Bowl pick) and player-prop leaderboard projection
-for the NFL Season tab. Pure functions -- no AWS/storage access, same
-testability philosophy as library/features/nfl.py's functions -- but
-lives here, not there, since none of this runs at training time; it
-exists purely to answer a serving-time question ("how does the rest of
-the season likely play out").
+for the NFL Season tab. Pure functions -- no AWS/storage access.
 
-Uses Elo win probability (library.features.nfl.expected_score), NOT the
-full trained XGBoost win-probability model. The trained model needs a
-full feature vector (rolling averages, QB/RB/WR identity, rest days...)
-that depends on how the season actually unfolds -- reconstructing that
-for thousands of Monte Carlo paths through the rest of a season is
-intractable for an on-request Lambda call with no caching. Elo already
-captures relative team strength and updates in closed form, so it's the
-only approach compatible with "recomputed on request".
+Uses Elo win probability (library.features.nfl.expected_score), not the
+full trained XGBoost win-probability model: Elo captures relative team
+strength and updates in closed form, cheap enough for thousands of
+Monte Carlo paths through the rest of a season.
 
-Playoff seeding is SIMPLIFIED: 4 division winners + 3 best-remaining-
+Playoff seeding is simplified: 4 division winners + 3 best-remaining-
 record wildcards per conference, tiebroken by each team's real (not
 simulated) point differential as of today. The NFL's actual tiebreaker
 rules (head-to-head, strength of victory, common games, conference
@@ -102,21 +94,15 @@ def project_matchup(
 ) -> dict:
     """Deterministic single-matchup resolution -- no RNG, picks whichever
     side has >= 50% win probability. When both seeds are known, the
-    better (numerically lower) seed always hosts, same convention as
-    every bracket's own reseeding rule; if either is None (e.g. the
-    Super Bowl, or season_projection.py resolving a real matchup with no
-    bracket-seed concept), team_a/team_b keep their given order and
+    better (numerically lower) seed always hosts; if either is None (e.g.
+    a neutral-site game), team_a/team_b keep their given order and
     home_advantage itself decides the game's home/neutral framing (pass
-    0.0 for a genuinely neutral-site game). Reused both by project_bracket
-    below (with real bracket seeds) and by season_projection.py's own
-    reconciliation (comparing a real team pair with no seed argument at
-    all) -- one shared implementation for both callers.
+    0.0 for a genuinely neutral-site game).
 
     Returns {"team_a", "team_b", "seed_a", "seed_b", "predicted_winner",
     "win_probability"} -- team_a/team_b reflect whichever side actually
-    ended up "home" above, and win_probability is always the WINNER's own
-    probability, not "team_a's", so the frontend can show "predicted_
-    winner, X% to win" without caring which side is nominally home.
+    ended up "home" above, and win_probability is always the winner's
+    own probability, not "team_a's".
     """
     if seed_a is not None and seed_b is not None and seed_b < seed_a:
         team_a, team_b, seed_a, seed_b = team_b, team_a, seed_b, seed_a
@@ -135,16 +121,12 @@ def project_matchup(
 
 
 def project_bracket(seeds: list[str], ratings: dict[str, float], home_advantage: float = DEFAULT_HOME_ADVANTAGE) -> dict:
-    """Deterministic sibling of _simulate_bracket -- same reseeded 7-team
-    topology (seed 1 bye; 2v7/3v6/4v5 wild card; seed 1 vs. lowest
-    remaining seed + the other two survivors in the divisional round;
-    winners meet for the conference title), but instead of rolling one
-    random path and returning just the champion, picks the higher-
-    win-probability side every matchup and returns the FULL round-by-
-    round path -- used to render a single "most likely" bracket on the
-    season tab, not aggregated into probabilities the way simulate_season
-    already is. See season_projection.py's own _bracket_payload for how
-    this gets reconciled against real postseason results as they happen.
+    """Deterministic 7-team playoff bracket: seed 1 has a bye; 2v7/3v6/4v5
+    in the wild-card round; seed 1 then plays the lowest remaining seed
+    while the other two survivors play each other in the divisional
+    round; winners meet for the conference title. Picks the
+    higher-win-probability side every matchup and returns the full
+    round-by-round path.
 
     Returns {"rounds": [{"round": "Wild Card", "matchups": [...]}, ...],
     "champion": team_id}.
@@ -190,15 +172,11 @@ def project_full_bracket(
     conference_seeds: dict[str, list[str]], ratings: dict[str, float], home_advantage: float = DEFAULT_HOME_ADVANTAGE,
 ) -> dict:
     """Both conferences' own project_bracket walk, plus a deterministic
-    Super Bowl pick -- unlike simulate_season's own Super Bowl coinflip
-    (no real home side, so a Monte Carlo path just flips a coin), a
-    single "most likely" bracket needs an actual pick: rating-based win
-    probability at neutral-site odds (home_advantage=0.0 via
-    project_matchup's own no-seeds framing), favoring whichever
-    conference champion actually rates higher instead of an arbitrary
-    tiebreak. seed_a/seed_b are None on the Super Bowl matchup row -- the
+    Super Bowl pick: rating-based win probability at neutral-site odds
+    (home_advantage=0.0), favoring whichever conference champion rates
+    higher. seed_a/seed_b are None on the Super Bowl matchup row -- the
     two champions' conference seeds aren't comparable on one shared
-    scale, so there's nothing meaningful to show there."""
+    scale."""
     conference_results = {
         conference: project_bracket(seeds, ratings, home_advantage) for conference, seeds in conference_seeds.items()
     }
@@ -231,25 +209,18 @@ def simulate_season(
     Returns {team_id: {"projected_wins": float, "projected_losses": float,
     "division_winner_probability": float, "playoff_probability": float,
     "championship_probability": float}}. projected_losses is tracked
-    directly in the simulation loop (current_losses forward through each
-    simulated remaining game) rather than derived from projected_wins and
-    a hardcoded season length, since it needs no assumption about how
-    many games a team has left. No projected_ties -- home_won below is a
-    strict win/loss draw, the same simplification this function's own
-    docstring already documents for margin-of-victory.
+    directly in the simulation loop rather than derived from
+    projected_wins and a hardcoded season length. No projected_ties --
+    home_won below is a strict win/loss draw.
 
     Simulated rating updates use a plain K-factor adjustment, no
-    margin-of-victory scaling (compute_elo_ratings' own MOV multiplier
-    needs a real score, which this never generates -- only a win/loss
-    draw) -- a documented simplification, not an oversight.
+    margin-of-victory scaling, since no real score is ever generated.
     """
     rng = rng or random.Random()
     # Always the full real league (TEAM_DIVISIONS' own 32 teams), not just
-    # whoever appears in current_wins/remaining_games -- _seed_conference
-    # picks division winners/wildcards from the FULL division rosters
-    # below, and every team in a division needs an entry in every
-    # aggregate dict even if it wasn't explicitly passed in (e.g. a team
-    # with a bye and no remaining games still needs a projection).
+    # whoever appears in current_wins/remaining_games -- every team in a
+    # division needs an entry in every aggregate dict even if it wasn't
+    # explicitly passed in.
     teams = set(TEAM_DIVISIONS)
 
     win_totals = {team_id: 0.0 for team_id in teams}
@@ -319,9 +290,8 @@ def project_leaderboard(
     """Projects each candidate's season-end total as their current total
     plus a flat per-remaining-game estimate (their own player-prop
     model's prediction for their team's next game, applied across every
-    remaining game) -- not a per-opponent simulation, which would
-    multiply the same intractability problem simulate_season's own
-    docstring explains. Returns the top_n by projected total, descending.
+    remaining game) rather than a per-opponent simulation. Returns the
+    top_n by projected total, descending.
     """
     projected = []
     for entity_id, current_total in current_totals.items():

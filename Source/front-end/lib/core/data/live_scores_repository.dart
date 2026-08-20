@@ -3,7 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../api/api_client.dart';
 import '../models/live_score.dart';
 
-/// Generic, sport-parametrized -- same convention as EventsRepository.
+/// Generic, sport-parametrized repository over GET /{sport}/live-scores.
 class LiveScoresRepository {
   LiveScoresRepository(this._api);
 

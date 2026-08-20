@@ -1,9 +1,7 @@
 """
-Unit tests for the NCAAFB player-prop training entrypoint -- mirrors
-tests/model-training/nfl/test_train_player_prop_model.py, adjusted for
-CFBD's own category set (DEFENSIVE_CATEGORIES is just {"defensive"} here,
-no separate "interceptions" category -- see train_player_prop_model.py's
-own comment).
+Unit tests for the NCAAFB player-prop training entrypoint. CFBD's own
+category set has no separate "interceptions" category, so
+DEFENSIVE_CATEGORIES here is just {"defensive"}.
 """
 import json
 from unittest.mock import MagicMock, patch
@@ -85,8 +83,7 @@ class TestStatCategory:
         assert train_player_prop_model._stat_category("receiving_receptions") == "receiving"
 
     def test_recognizes_the_single_defensive_category(self):
-        # CFBD has no separate bare "interceptions" category (confirmed
-        # live) -- unlike NFL, DEFENSIVE_CATEGORIES is just {"defensive"}.
+        # CFBD has no separate bare "interceptions" category.
         assert train_player_prop_model._stat_category("defensive_sacks") == "defensive"
         assert train_player_prop_model.DEFENSIVE_CATEGORIES == {"defensive"}
 

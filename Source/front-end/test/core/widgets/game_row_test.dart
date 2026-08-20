@@ -7,8 +7,7 @@ import 'package:front_end/core/models/event.dart';
 import 'package:front_end/core/models/prediction.dart';
 import 'package:front_end/core/widgets/game_row.dart';
 
-// '12' = KC (home), '13' = LV (away) -- see nfl_team_colors.dart, matching
-// the convention event_list_page_mobile_test.dart already established.
+// '12' = KC (home), '13' = LV (away) -- see nfl_team_colors.dart.
 SportEvent _scheduledEvent({String? venueName, String? venueCity, String? venueState}) => SportEvent(
       eventId: '401547417',
       eventDate: '2026-09-14',
@@ -74,11 +73,11 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.text('@'), findsNothing);
-      // Predicted scores now render in parens next to each team's own
-      // line, not only inside the right-hand pick/margin text.
+      // Predicted scores render in parens next to each team's own line,
+      // as well as inside the right-hand pick/margin text.
       expect(find.textContaining('(27)'), findsOneWidget);
       expect(find.textContaining('(21)'), findsOneWidget);
-      // Percentage now lives only on the right (_LivePredictionSummary).
+      // Percentage lives only on the right (_LivePredictionSummary).
       expect(find.textContaining('68%'), findsOneWidget);
     });
 
@@ -142,11 +141,11 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.text('@'), findsNothing);
-      // Predicted score now shows next to each team's own actual score...
+      // Predicted score shows next to each team's own actual score, so
+      // the right-hand recap states the pick/margin/probability only,
+      // not the same score pair a second time.
       expect(find.textContaining('(27)'), findsOneWidget);
       expect(find.textContaining('(17)'), findsOneWidget);
-      // ...so the right-hand recap states the pick/margin/probability only,
-      // not the same score pair a second time.
       expect(find.textContaining('Predicted KC (67%) by 10.0'), findsOneWidget);
       expect(find.textContaining('31-17'), findsNothing);
     });

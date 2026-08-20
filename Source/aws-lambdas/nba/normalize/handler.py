@@ -9,9 +9,8 @@ One Lambda invocation may receive multiple S3 records if notifications
 are batched. Each record is processed independently so a failure in one
 doesn't block the others.
 
-Key routing (based on S3 key pattern), mirroring NFL's own normalize --
-NBA's raw payloads are single dicts per object (ESPN's site API, same as
-NFL), unlike NCAAFB's CFBD-sourced bulk-per-week lists:
+Key routing (based on S3 key pattern). NBA's raw payloads are single
+dicts per object (ESPN's site API):
     nba/teams.json               -> team entities
     nba/scoreboard/{date}.json   -> event records
     nba/boxscore/{season}/{event_id}.json -> player stats, player entities, team stats
@@ -21,19 +20,13 @@ NFL), unlike NCAAFB's CFBD-sourced bulk-per-week lists:
                                      daily)
 
 Reuses library.normalize.espn's shared normalizers directly (no separate
-library/normalize/nba.py module) -- NBA's box-score/scoreboard/roster
-response shapes were confirmed live (2026-08-13/14, see
-project-nba-onboarding memory) to match NFL's site-API shapes closely
-enough that only two things needed generalizing in the shared module
-itself, not forking: roster_to_player_entities now handles NBA's flat
-(ungrouped) athletes list alongside NFL's position-grouped one, and
-boxscore_to_player_game_stats now handles NBA's single unnamed stat
-category (vs NFL's named passing/rushing/receiving categories) without
-fabricating a "misc" prefix that would otherwise corrupt TARGET_STAT
-field names like "points"/"rebounds". compound_key_splits below is NBA's
-own map (one shared dict for both team- and player-level box scores,
-unlike NFL's two separate maps, since NBA's "made-attempted" compound
-keys are identical strings at both levels).
+library/normalize/nba.py module): roster_to_player_entities handles NBA's
+flat (ungrouped) athletes list, and boxscore_to_player_game_stats handles
+NBA's single unnamed stat category without fabricating a "misc" prefix
+that would otherwise corrupt TARGET_STAT field names like
+"points"/"rebounds". compound_key_splits below is NBA's own map -- one
+shared dict for both team- and player-level box scores, since NBA's
+"made-attempted" compound keys are identical strings at both levels.
 """
 import json
 import logging
@@ -55,14 +48,13 @@ logger = logging.getLogger("nba-normalize")
 
 SPORT = "nba"
 
-# One shared map for both team- and player-level box scores -- confirmed
-# live, 2026-08-13/14, that NBA's "made-attempted" compound stat keys
-# ("fieldGoalsMade-fieldGoalsAttempted" etc.) are identical strings at
-# both levels, unlike NFL's own two separate maps. three_pointers_made/
-# three_point_attempts match the sport registry's own player-prop
-# TARGET_STAT name exactly (Terraform/dynamodb-sport-registry.tf) -- this
-# is what makes that model trainable without a separate field-name
-# translation step.
+# One shared map for both team- and player-level box scores -- NBA's
+# "made-attempted" compound stat keys ("fieldGoalsMade-
+# fieldGoalsAttempted" etc.) are identical strings at both levels.
+# three_pointers_made/three_point_attempts match the sport registry's own
+# player-prop TARGET_STAT name exactly (Terraform/dynamodb-sport-
+# registry.tf) -- this is what makes that model trainable without a
+# separate field-name translation step.
 _COMPOUND_KEY_SPLITS = {
     "fieldGoalsMade-fieldGoalsAttempted": ("field_goals_made", "field_goal_attempts"),
     "threePointFieldGoalsMade-threePointFieldGoalsAttempted": ("three_pointers_made", "three_point_attempts"),

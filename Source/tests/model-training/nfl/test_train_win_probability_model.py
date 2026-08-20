@@ -2,13 +2,9 @@
 Unit tests for the NFL win-probability training entrypoint.
 
 library.ml.backtest.run_backtest is mocked here -- these tests verify
-train_win_probability_model.py's own orchestration (column selection, chronological
-split, naive-baseline computation, and what gets handed to run_backtest),
-not the tournament itself (see Source/tests/library/ml/test_backtest.py)
-or any real algorithm fitting (see Source/tests/library/ml/
-test_model_types.py). Same "never touch real training" boundary this
-suite always drew, just moved up a layer now that train_win_probability_model.py delegates
-the actual fitting to run_backtest instead of doing it inline.
+train_win_probability_model.py's own orchestration (column selection,
+chronological split, naive-baseline computation, and what gets handed to
+run_backtest), not the tournament itself or any real algorithm fitting.
 """
 import io
 from unittest.mock import MagicMock, patch
@@ -41,13 +37,10 @@ def _parquet_bytes(df: pd.DataFrame) -> bytes:
 
 
 class _StatefulFakeS3:
-    """Minimal stateful S3 stand-in -- unlike a flat MagicMock (which
-    returns the same canned value no matter how many times it's called),
-    this actually remembers what's been written so far. run_backtest's
-    incremental promotion depends on that: each candidate after the first
-    needs to see whatever an EARLIER candidate in the same run already
-    promoted (would_beat_current reads the pointer force_promote/
-    promote_if_better just set), which a static MagicMock can't simulate."""
+    """Minimal stateful S3 stand-in that remembers what's been written so
+    far, since run_backtest's incremental promotion depends on each
+    candidate seeing what an earlier candidate in the same run already
+    promoted."""
     bucket = "test-bucket"
 
     def __init__(self):
@@ -93,9 +86,8 @@ class TestFeatureColumns:
         assert columns == ["home_elo", "elo_diff"]
 
     def test_excludes_venue_city_and_state(self):
-        # venue_indoor/weather_temperature ARE real feature inputs, but raw
-        # city/state strings aren't model-consumable without encoding --
-        # see design/DATA_SCHEMA.md's events table notes.
+        # venue_indoor/weather_temperature are real feature inputs, but
+        # raw city/state strings aren't model-consumable without encoding.
         df = _make_df()
         df["venue_indoor"] = [False] * len(df)
         df["venue_city"] = ["Kansas City"] * len(df)
@@ -172,11 +164,10 @@ class TestTrain:
         assert mock_run.call_args.kwargs["promotion_metric"] == "log_loss"
 
     def test_all_null_feature_column_is_still_numeric_not_object(self):
-        # A real production crash: weather_temperature (and, at the time,
-        # a QB-average-column naming bug) came back from Parquet as all
-        # None for the training window, which pandas types as `object` --
-        # both XGBoost and scikit-learn raise on an object dtype column
-        # even though every value is just a missing float.
+        # weather_temperature can come back from Parquet as all None for
+        # the training window, which pandas types as `object`; both
+        # XGBoost and scikit-learn raise on an object dtype column even
+        # though every value is just a missing float.
         df = _make_df(10)
         df["weather_temperature"] = [None] * len(df)  # entirely null -- object dtype from Parquet
 
@@ -208,13 +199,10 @@ class TestMain:
 
 
 class TestEndToEndWithRealBacktest:
-    """One test that lets run_backtest itself run for real, with every
-    candidate adapter's own tune_and_fit mocked (the same "never touch
-    real fitting" boundary every other test in this pipeline draws) --
-    proves train_win_probability_model.py's arguments actually thread through
-    run_backtest -> save_model_artifact -> promote_if_better correctly
-    end to end, not just that train_win_probability_model.py calls run_backtest with
-    plausible-looking arguments in isolation."""
+    """Lets run_backtest run for real, with each candidate adapter's
+    tune_and_fit mocked, to prove train_win_probability_model.py's
+    arguments thread through run_backtest -> save_model_artifact ->
+    promote_if_better end to end."""
 
     def test_first_candidate_wins_and_no_worse_candidate_displaces_it(self, monkeypatch):
         monkeypatch.setenv("MODEL_ARTIFACTS_BUCKET_NAME", "test-bucket")
@@ -250,13 +238,10 @@ class TestEndToEndWithRealBacktest:
                     p.stop()
 
         # xgboost, first in CANDIDATES, wins outright -- no existing
-        # production version yet, so it's promoted directly. Every
-        # candidate after it (logistic, RF, MLP) is directionally correct
-        # but progressively less confident than xgboost's near-perfect
-        # prediction, so none of their log_loss values ever beat what's
-        # now live, and none of them get an artifact written at all (a
-        # losing candidate is never persisted -- see run_backtest's own
-        # docstring).
+        # production version yet, so it's promoted directly. Every other
+        # candidate is progressively less confident, so none of their
+        # log_loss values beat what's now live, and none get an artifact
+        # written (a losing candidate is never persisted).
         written_models = dict(mock_s3.put_bytes_calls)
         assert written_models == {"nfl/win-probability/v1/model.xgb": b"xgb-bytes"}
 

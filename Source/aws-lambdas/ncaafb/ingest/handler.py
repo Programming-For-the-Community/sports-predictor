@@ -1,45 +1,36 @@
 """
 NCAAFB ingest Lambda. Triggered daily by the shared ingest-orchestrator
-Step Function (Terraform/sfn-ingest-orchestrator.tf), which invokes every
-active sport's own "${project}-<sport>-ingest" Lambda by naming
-convention -- no separate per-sport EventBridge Scheduler is needed for
-this Lambda (unlike schedule-sync/live-scores below, which ARE invoked
-directly by their own scheduler). Fetches the current week's CFBD games
-plus player/team box scores and writes raw JSON to S3; the normalize
-Lambda is triggered automatically by the resulting S3 PutObject events,
-so this function never touches DynamoDB directly.
+Step Function, which invokes every active sport's own
+"${project}-<sport>-ingest" Lambda by naming convention. Fetches the
+current week's CFBD games plus player/team box scores and writes raw
+JSON to S3; the normalize Lambda is triggered automatically by the
+resulting S3 PutObject events, so this function never touches DynamoDB
+directly.
 
-CFBD has no per-date scoreboard lookup like ESPN's -- the current season/
-week is resolved via CFBDClient.get_calendar (see _resolve_current_week),
-confirmed live against real 2025 data. The invocation payload can override
-auto-detection, same convention as NFL's own ingest:
+CFBD has no per-date scoreboard lookup like ESPN's -- the current
+season/week is resolved via CFBDClient.get_calendar (see
+_resolve_current_week). The invocation payload can override
+auto-detection:
     { "season": 2025, "week": 4, "season_type": "regular" }
 All three must be given together for a manual override.
 
 Also refreshes the season-teams (library.storage.ncaafb_team_cache) and
-season-coaches (enrichment.py) S3 caches on every run, unconditionally --
-same cadence reasoning as NFL's own ingest: both are cheap, TTL-backed
-bulk calls, and refreshing daily just guarantees the cache gets a chance
-to turn over rather than staying stale for a whole week.
+season-coaches (enrichment.py) S3 caches on every run, unconditionally.
 
-No injury or depth-chart equivalent exists for college football (see
-project plan) -- enrichment here is limited to coach info, current AP
-rank, and venue_indoor (see enrichment.enrich_games).
+No injury or depth-chart equivalent exists for college football --
+enrichment here is limited to coach info, current AP rank, and
+venue_indoor (see enrichment.enrich_games).
 
 Also fetches CFBD's bulk /roster (see CFBDClient.get_roster) on a
-monthly cadence -- see _fetch_roster_if_stale below -- and writes it to
-S3 under ncaafb/roster/{season}.json for normalize to pick up the same
-way games/boxscore/teamstats already are; this is what backfills
-metadata.position onto player entities (see library/normalize/ncaafb.py's
-roster_to_player_entities), which box scores alone can never set (CFBD's
-box-score athletes carry no position field -- see
-game_player_stats_to_player_game_stats' own docstring).
+monthly cadence (see _fetch_roster_if_stale below) and writes it to S3
+under ncaafb/roster/{season}.json for normalize to pick up the same way
+games/boxscore/teamstats already are; this backfills metadata.position
+onto player entities, which box scores alone never set (CFBD's box-score
+athletes carry no position field).
 
 CFBD's /roster gives each player's team as a school name ("team"), not a
-numeric id, unlike /games' home_id/away_id -- confirmed live. Resolved to
-teamId here via the same season-teams cache get_cached_teams already
-fetches, same "enrich before persisting to S3" pattern _annotate_box_
-scores uses for home_id/away_id/event_date.
+numeric id, unlike /games' home_id/away_id. Resolved to teamId here via
+the same season-teams cache get_cached_teams already fetches.
 """
 import json
 import logging
@@ -77,10 +68,8 @@ def _parse_iso(value: str) -> datetime:
 
 def _resolve_current_week(client: CFBDClient, season: int, today: date | None = None) -> tuple[str, int] | None:
     """Picks the most-recently-started week as of `today` from CFBD's
-    /calendar -- the role NFL's _most_recent_sunday plays via ESPN's
-    per-date scoreboard lookup, which CFBD has no equivalent of. Returns
-    (season_type, week), or None if no week in the season's calendar has
-    started yet."""
+    /calendar. Returns (season_type, week), or None if no week in the
+    season's calendar has started yet."""
     today = today or date.today()
     now = datetime.combine(today, datetime.min.time(), tzinfo=timezone.utc)
 
@@ -99,12 +88,9 @@ def _annotate_box_scores(box_scores: list[dict], games_by_id: dict[str, dict]) -
     """Injects home_id/away_id/event_date into each per-game box score
     entry from that week's own /games response, resolved by game id --
     CFBD's box score endpoints carry no numeric team id or event date of
-    their own (see cfbd.py's get_game_player_stats/get_game_team_stats
-    docstrings), unlike ESPN's box scores which embed everything needed.
-    Doing this once at ingest time (which already has both responses in
-    hand) means normalize never needs a second CFBD/DynamoDB lookup to
-    join the two -- same "enrich before persisting to S3" pattern
-    enrichment.py's coach/ranking attachment already uses."""
+    their own. Doing this once at ingest time (which already has both
+    responses in hand) means normalize never needs a second CFBD/DynamoDB
+    lookup to join the two."""
     for entry in box_scores:
         game = games_by_id.get(str(entry.get("id")))
         if game is None:
@@ -122,10 +108,9 @@ def _annotate_roster(roster: list[dict], teams: list[dict]) -> None:
     """Injects teamId into each roster entry, resolved from its "team"
     school name via `teams` (that season's get_cached_teams result) --
     CFBD's /roster carries no numeric team id of its own, only the school
-    name (see this module's own docstring). A player whose school isn't
-    in `teams` (e.g. a since-moved-on transfer CFBD's roster snapshot is
-    slightly stale about) is left without a teamId; roster_to_player_
-    entities already skips those."""
+    name. A player whose school isn't in `teams` (e.g. a since-moved-on
+    transfer) is left without a teamId; roster_to_player_entities already
+    skips those."""
     by_school = teams_by_school(teams)
     for player in roster:
         team = by_school.get(player.get("team"))
@@ -142,14 +127,11 @@ def _roster_marker_key(season: int) -> str:
 
 def _roster_needs_refresh(season: int) -> bool:
     """True if season's roster hasn't been fetched within
-    ROSTER_CACHE_TTL_DAYS -- CFBD's /roster is one ~9MB bulk call
-    covering every team, and college rosters barely move outside the
-    transfer portal windows, so this is refreshed monthly rather than on
-    ingest's own daily cadence. Marker-file pattern, same TTL-cache shape
-    as library.storage.ncaafb_team_cache.get_cached_teams, but kept local
-    to this Lambda (not shared) since, unlike teams/coaches, the roster
-    payload itself has to be written to S3 for normalize to pick up, not
-    just held in memory for in-process enrichment."""
+    ROSTER_CACHE_TTL_DAYS. CFBD's /roster is one ~9MB bulk call covering
+    every team, and college rosters barely move outside the transfer
+    portal windows, so this is refreshed monthly rather than daily.
+    Marker-file pattern, kept local to this Lambda since the roster
+    payload has to be written to S3 for normalize to pick up."""
     try:
         response = _s3.get_object(Bucket=RAW_BUCKET, Key=_roster_marker_key(season))
         fetched_at = datetime.fromisoformat(json.loads(response["Body"].read())["fetched_at"])
@@ -160,22 +142,16 @@ def _roster_needs_refresh(season: int) -> bool:
 
 def _fetch_roster_if_stale(client: CFBDClient, season: int, teams: list[dict]) -> bool:
     """Fetches and writes season's full roster to
-    ncaafb/roster/{season}.json (picked up by normalize's own S3 trigger,
-    same as games/boxscore/teamstats) if the TTL marker says it's due.
-    Returns True if a fetch actually happened, False on a cache hit -- the
-    caller reports this as roster_fetched, same "did real work or not"
-    signal teams_cached/coaches_cached already report.
+    ncaafb/roster/{season}.json (picked up by normalize's own S3 trigger)
+    if the TTL marker says it's due. Returns True if a fetch actually
+    happened, False on a cache hit.
 
-    Wraps the payload in a {"fetched_at", "data"} envelope, same shape
-    ncaafb_team_cache's own cache entries use -- CFBD's /roster has no
-    per-payload timestamp of its own (unlike ESPN's roster, which embeds
-    "timestamp"), so normalize reads fetched_at from here for
-    metadata.team_id_as_of (see library/normalize/ncaafb.py's
-    roster_to_player_entities).
+    Wraps the payload in a {"fetched_at", "data"} envelope -- CFBD's
+    /roster has no per-payload timestamp of its own, so normalize reads
+    fetched_at from here for metadata.team_id_as_of.
 
-    teams is that same season's get_cached_teams result, passed in by the
-    caller (already fetched unconditionally each run) rather than
-    re-fetched here -- see _annotate_roster."""
+    teams is that same season's get_cached_teams result, passed in by
+    the caller rather than re-fetched here."""
     if not _roster_needs_refresh(season):
         logger.info(
             "Roster for season %s was already fetched within the last %d days -- skipping (delete %s to force a refresh)",
@@ -199,11 +175,8 @@ def lambda_handler(event: dict, context) -> dict:
     client = CFBDClient()
     resolved_season = season or _current_ncaafb_season()
 
-    # Unconditional -- see this module's own docstring for why these run
-    # before week resolution rather than being gated behind it. Wrapped
-    # individually (not left to propagate) so a transient CFBD failure on
-    # either cache refresh can't take down the whole run -- same
-    # best-effort convention as enrich_games' own coach/ranking fetches.
+    # Wrapped individually so a transient CFBD failure on either cache
+    # refresh can't take down the whole run.
     try:
         season_teams = get_cached_teams(_s3, RAW_BUCKET, client, resolved_season)
         teams_cached = True
@@ -249,13 +222,10 @@ def lambda_handler(event: dict, context) -> dict:
     if not completed_games:
         logger.info("No completed games yet in season %s type %s week %s -- box scores not fetched", season, season_type, week)
     else:
-        # Bulk per-week calls, always re-fetched (no per-game idempotency
-        # skip like NFL's own ingest) -- CFBD's box score endpoints cost
-        # one call per week regardless of how many of that week's games
-        # are done, so re-fetching daily while a week is still in
-        # progress just picks up newly-completed games at the same cost
-        # as skipping would have saved. Matches the project plan's own
-        # "batched per week-since-last-run, not per-game" ingest design.
+        # Bulk per-week calls, always re-fetched -- CFBD's box score
+        # endpoints cost one call per week regardless of how many of that
+        # week's games are done, so re-fetching daily while a week is
+        # still in progress just picks up newly-completed games.
         try:
             player_box_scores = client.get_game_player_stats(season, week, season_type)
             _annotate_box_scores(player_box_scores, games_by_id)

@@ -42,11 +42,8 @@ ModelCard _regressorCard({List<ModelCandidate>? candidates, String? candidatesRa
 
 void main() {
   testWidgets('VS BASELINE uses the same relative-percentage format for a classifier and a regressor', (tester) async {
-    // Previously the classifier showed a percentage-POINT lift ("+6.2
-    // PTS") while every regressor showed a relative percentage ("23%
-    // BETTER") under the identical "VS BASELINE" label -- a real
-    // inconsistency a user reported live. accuracy=0.63 vs
-    // naiveBaselineAccuracy=0.57 -> (0.63-0.57)/0.57*100 ~= 10.5% -> "11%".
+    // accuracy=0.63 vs naiveBaselineAccuracy=0.57 ->
+    // (0.63-0.57)/0.57*100 ~= 10.5% -> "11%".
     await _pump(tester, _classifierCard());
     expect(find.text('+11% BETTER'), findsOneWidget);
   });

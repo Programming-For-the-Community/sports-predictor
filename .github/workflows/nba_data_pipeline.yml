@@ -4,8 +4,7 @@
 # triggered, writes raw JSON to S3 for the next 14 days -- see
 # Terraform/lambda-nba-schedule-sync.tf for why 14 days, not a full
 # season). All three are deployed in parallel since they are independent
-# -- a failure in one does not block the others. Mirrors
-# nfl_data_pipeline.yml exactly.
+# -- a failure in one does not block the others.
 #
 # Lambda function names are supplied by the caller (nba_deploy.yml) from
 # Terraform outputs so this workflow never hard-codes names that Terraform
@@ -45,12 +44,9 @@ permissions:
 jobs:
   # Each Lambda gets its own upstream test job, pointed at its own
   # specific test file -- not the whole Source/tests/aws-lambdas/nba/
-  # directory. Same reasoning as nfl_data_pipeline.yml's own comment: a
-  # failing normalize test shouldn't fail the ingest deploy, or vice
-  # versa, purely because both deploys pointed at the same shared
-  # directory. NBA's own test suite isn't split into concern-scoped files
-  # per Lambda the way NFL's ingest test suite is -- one file per Lambda
-  # is enough at NBA's current size.
+  # directory. A failing normalize test shouldn't fail the ingest deploy,
+  # or vice versa, purely because both deploys pointed at the same shared
+  # directory.
   test-ingest:
     name: Run nba-ingest tests
     uses: ./.github/workflows/run_python_tests.yml

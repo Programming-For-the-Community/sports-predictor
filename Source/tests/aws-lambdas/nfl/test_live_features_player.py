@@ -2,9 +2,7 @@
 Unit tests for live_features.build_live_player_features -- the
 single-player feature row the inference Lambda's manually-queried
 player-prop route (GET /nfl/predictions/events/{event_id}/players/
-{entity_id}) uses. FeatureStorage is mocked. Split out of what used to be
-one large test_live_features.py -- see test_live_features_event.py's own
-history note.
+{entity_id}) uses. FeatureStorage is mocked.
 """
 from unittest.mock import MagicMock
 

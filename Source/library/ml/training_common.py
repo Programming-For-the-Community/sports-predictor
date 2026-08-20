@@ -3,18 +3,14 @@ Shared plumbing for every sport's model-training scripts -- loading a
 training set, splitting it chronologically, coercing feature dtypes,
 computing holdout metrics, and writing a versioned model artifact plus
 model card are identical regardless of sport, algorithm, or which
-dataset/label a script targets. Moved here from
-Source/model-training/nfl/model_common.py, which had no NFL-specific
-assumptions except a hardcoded SPORT constant -- every function below
-takes `sport` explicitly instead, so a future sport's training scripts
-import this exact module rather than reaching across a sport boundary or
-copy-pasting it (see design/PROJECT_PLAN.md Phase 4).
+dataset/label a script targets. Every function below takes `sport`
+explicitly, so a future sport's training scripts import this exact
+module rather than reaching across a sport boundary or copy-pasting it.
 
 evaluate_holdout/evaluate_regression_holdout take already-computed
 predictions/probabilities rather than a model object -- library.ml.
 model_types.ModelAdapter.predict() is what produces those, uniformly
-across every algorithm, so this module never needs to know how any
-particular algorithm turns a feature matrix into a prediction.
+across every algorithm.
 """
 import io
 import logging
@@ -52,16 +48,12 @@ TEST_FRACTION = 0.2
 
 def load_features(s3: S3Manager, key: str) -> pd.DataFrame:
     """Retries on a truncated/corrupt read (pyarrow.ArrowInvalid) rather
-    than failing the whole training run over one bad S3 GET -- seen in
-    practice for several concurrent training tasks reading the same key
-    (Terraform's TrainAllTargets Map state), transient enough that a
-    second attempt reads the object cleanly.
+    than failing the whole training run over one bad S3 GET.
 
     Imports pyarrow locally rather than at module level -- it's not one
-    of library's own declared dependencies (see pyproject.toml), only its
-    training-script callers' own requirements.txt, and a module-level
-    import would make every caller of this module need it installed just
-    to import training_common at all, not just to call this function."""
+    of library's own declared dependencies, only its training-script
+    callers', and a module-level import would make every caller of this
+    module need it installed just to import training_common at all."""
     import pyarrow
 
     last_exc: Exception | None = None
@@ -91,14 +83,12 @@ def chronological_split(df: pd.DataFrame, test_fraction: float) -> tuple[pd.Data
 
 
 def numeric_frame(df: pd.DataFrame, columns: list[str]) -> pd.DataFrame:
-    """A feature column that's entirely null in the training window (e.g.
-    weather_temperature, which ESPN history frequently doesn't report) has
-    no non-null value for pandas to infer a numeric dtype from, so it
-    comes back from Parquet as dtype `object` rather than float64 -- and
-    both XGBoost and scikit-learn reject `object` columns outright, even
-    when every value is just a missing float. Coercing explicitly (bools
-    included) guarantees every feature column is numeric before it ever
-    reaches a model, regardless of how sparse any single column is."""
+    """A feature column that's entirely null in the training window has no
+    non-null value for pandas to infer a numeric dtype from, so it comes
+    back from Parquet as dtype `object` rather than float64 -- and both
+    XGBoost and scikit-learn reject `object` columns outright. Coercing
+    explicitly (bools included) guarantees every feature column is
+    numeric before it ever reaches a model."""
     return df[columns].apply(pd.to_numeric, errors="coerce")
 
 
@@ -120,10 +110,9 @@ def evaluate_holdout(probabilities, y_test: pd.Series) -> dict:
 def evaluate_regression_holdout(predictions, y_test: pd.Series) -> dict:
     """Regression counterpart to evaluate_holdout -- for a target
     predicting a continuous value, not a win/loss classification, so
-    accuracy/log_loss don't apply. rmse is the gate metric (see
-    PROMOTION_TOLERANCE); mae is carried on the model card alongside it
-    since it's easier to read in the target's own units without RMSE's
-    squared-error weighting toward big misses."""
+    accuracy/log_loss don't apply. mae is carried on the model card
+    alongside rmse since it's easier to read in the target's own units
+    without RMSE's squared-error weighting toward big misses."""
     return {
         "rmse": float(root_mean_squared_error(y_test, predictions)),
         "mae": float(mean_absolute_error(y_test, predictions)),
@@ -142,21 +131,14 @@ def save_model_artifact(
 ) -> dict:
     """Writes a versioned model artifact plus its model card -- everything
     needed to know what a given version is (training window, row counts,
-    hyperparameters, holdout metrics) without re-running anything or
-    cross-referencing CloudWatch Logs. See library.storage.model_artifacts
-    for the versioning scheme -- each (sport, model_name) pair (e.g.
-    nfl/win-probability, nfl/win-probability-logistic,
-    nfl/player-prop-passing-yards) versions independently under its own
-    prefix, so one model's runs never collide with or skip another's
-    version numbers, and different algorithms trained for the SAME target
-    (see library.ml.backtest.run_backtest) simply share that target's one
-    version counter -- nothing here needs to know or care that v7 was
-    xgboost and v8 was logistic_regression.
+    hyperparameters, holdout metrics) without re-running anything.
+    Each (sport, model_name) pair versions independently under its own
+    prefix, so different algorithms trained for the same target simply
+    share that target's one version counter.
 
     summary_metrics: which metadata keys (e.g. ["accuracy", "log_loss"]
     or ["rmse", "mae"]) to fold into the one-line CloudWatch summary
-    below -- the metric names vary by task type, everything else about
-    writing the artifact doesn't."""
+    below."""
     prefix = model_artifact_prefix(sport, model_name)
     version = next_model_version(s3.list_keys(prefix))
     model_key = model_artifact_key(sport, model_name, version, artifact_filename)
@@ -193,15 +175,10 @@ def update_promoted_candidates(
     ends up leaving live -- run_backtest promotes a winning candidate the
     moment it beats current production, which can be before the rest of
     that run's candidates have even been tried, so the card written at
-    promotion time only carries a partial "candidates" summary (see
-    run_backtest's own docstring). This fills it in with the COMPLETE
-    tournament (every candidate that run evaluated, win or lose) once the
-    whole run is known.
+    promotion time only carries a partial "candidates" summary. This
+    fills it in with the complete tournament once the whole run is known.
 
-    Every other field on the card (metrics, hyperparameters, feature
-    importances, trained_at) is left untouched -- only the summary list
-    was ever incomplete; nothing else about the promoted version itself
-    changes after the fact."""
+    Every other field on the card is left untouched."""
     key = model_artifact_key(sport, model_name, version, MODEL_CARD_FILENAME)
     card = s3.get_json(key)
     card["candidates"] = candidates
@@ -216,14 +193,11 @@ def update_promoted_candidates(
 def would_beat_current(s3: S3Manager, sport: str, model_name: str, metadata: dict, metric: str) -> bool:
     """Read-only counterpart to promote_if_better's own comparison --
     answers "would this candidate get promoted" without writing anything,
-    so library.ml.backtest.run_backtest can decide whether a candidate is
-    even worth persisting to S3 BEFORE calling save_model_artifact (a
-    losing candidate should never get a version at all -- see
-    save_model_artifact's own docstring on why). Same rule as
+    so a caller can decide whether a candidate is even worth persisting
+    to S3 before calling save_model_artifact. Same rule as
     promote_if_better: True if there's no current production version yet,
     or metadata[metric] is genuinely at least as good as the current
-    production version's own metric value -- see that function's own
-    docstring for why there's no percentage tolerance here."""
+    production version's own metric value."""
     current_version = get_current_version(s3, sport, model_name)
     if current_version is None:
         return True
@@ -234,15 +208,11 @@ def would_beat_current(s3: S3Manager, sport: str, model_name: str, metadata: dic
 def resolve_run_id() -> str:
     """Every train_*.py script's own run identity, threaded through to
     library.ml.backtest.run_backtest as its resumable-progress breadcrumb
-    key (see run_progress_key/load_run_progress/save_run_progress below).
-    TRAINING_RUN_ID is set by Terraform/sfn-training-orchestrator.tf from
-    the Step Functions execution's own $$.Execution.Name -- stable across
-    a RunTrainingTask Retry attempt and the Catch-driven
-    RunTrainingTaskOnDemand fallback (same execution, same name), so a
-    task that gets interrupted and relaunched resumes the SAME run
-    instead of starting a fresh one with no memory of what already ran.
-    Falls back to a fresh uuid4 for a manual/local run outside the
-    orchestrator, where there's no prior attempt to resume anyway."""
+    key. TRAINING_RUN_ID is set from the Step Functions execution's own
+    name, stable across a retry attempt and its fallback, so a task that
+    gets interrupted and relaunched resumes the same run instead of
+    starting a fresh one. Falls back to a fresh uuid4 for a manual/local
+    run outside the orchestrator."""
     return os.environ.get("TRAINING_RUN_ID") or str(uuid.uuid4())
 
 
@@ -290,40 +260,25 @@ def get_current_version(s3: S3Manager, sport: str, model_name: str) -> int | Non
 def promote_if_better(s3: S3Manager, sport: str, model_name: str, version: int, metadata: dict, metric: str) -> bool:
     """Points model_name's "current" pointer (current_version_key) at
     `version` unless an existing production version already scores better
-    on `metric` -- guards against a retrain with bad luck (an unlucky
-    hyperparameter search, or a bug) silently becoming production just
-    because it's the newest. A held-back version is still fully trained
-    and versioned, never deleted -- only not promoted -- so it stays
-    available for manual review or promotion.
+    on `metric` -- guards against a retrain with bad luck silently
+    becoming production just because it's the newest. A held-back
+    version is still fully trained and versioned, never deleted -- only
+    not promoted -- so it stays available for manual review or promotion.
 
     Requires genuine improvement (new_score <= current_score, no
-    percentage slack) -- an earlier version of this function allowed a
-    candidate up to 2% WORSE than the incumbent to still take over, which
-    inverted the whole point of a promotion gate: with every candidate in
-    a CANDIDATES list effectively guaranteed to pass unless it regressed
-    badly, whichever algorithm happened to run last in list order (always
-    MLPRegressorAdapter, for every regression/player-prop target) won by
-    default regardless of whether it was actually the best of the
-    cohort, not just the ones evaluated before it.
+    percentage slack).
 
     `metric` must name a lower-is-better value present on both model
     cards (log_loss for a classifier, rmse for a regressor) -- accuracy
     or anything else higher-is-better would invert this comparison.
     Algorithm-agnostic: `version`'s own algorithm doesn't have to match
     whatever algorithm the currently-promoted version happens to be --
-    this only ever compares the two versions' own `metric` value, so a
-    logistic-regression version can beat and replace an xgboost one, or
-    vice versa, with no special-casing here (see
-    library.ml.backtest.run_backtest, which is what actually runs several
-    algorithms and calls this once on whichever one wins among them).
+    this only ever compares the two versions' own `metric` value.
 
     Not a controlled A/B: the current production version's score was
     measured on an older, now-stale holdout window, while `version`'s was
     measured on a newer one that includes since-completed games -- so a
     "win" here is against a moving target, not a perfectly fair rematch.
-    Good enough to catch a genuine regression; run_backtest's own
-    baseline-comparison warning (see its docstring) is the other half of
-    this system's actual quality bar.
     """
     current_version = get_current_version(s3, sport, model_name)
     if current_version is None:

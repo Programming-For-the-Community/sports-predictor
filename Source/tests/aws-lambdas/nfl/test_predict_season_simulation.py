@@ -4,8 +4,6 @@ path: season_projection._season_standings_inputs (wins/losses/ties/point
 differential/Elo carryover/remaining-games derivation from stored events)
 and the EventBridge-triggered ScheduledSeasonProjection handler branch
 that runs season_simulation.simulate_season and writes the result to S3.
-Split out of what used to be one large test_predict.py -- see
-test_predict_event_outcome.py's own history note.
 
 The nfl_predict module is registered in sys.modules by conftest.py, whose
 reset_nfl_predict_singletons fixture (autouse) resets nfl_predict._storage/
@@ -95,10 +93,9 @@ class TestSeasonStandingsInputs:
     def test_elo_carries_over_regressed_into_a_new_season_not_a_hard_reset(self):
         # A blowout in the prior season swings team "12"'s Elo rating well
         # above DEFAULT_STARTING_RATING -- confirm the new season's
-        # current_ratings reflects a PARTIAL carryover (regressed toward
+        # current_ratings reflects a partial carryover (regressed toward
         # the default per compute_elo_ratings' season_carryover), not a
-        # full reset to empty/default the way this used to work, and not
-        # the full unregressed rating either.
+        # full reset and not the full unregressed rating either.
         storage = MagicMock()
         storage.get_all_events.side_effect = lambda sport, status: {
             "completed": [_completed_event("E1", 2024, "12", "24", 45, 3)],
@@ -128,13 +125,9 @@ class TestSeasonStandingsInputs:
 
 
 class TestScheduledSeasonProjection:
-    """GET /nfl/season no longer terminates on this Lambda at all -- moved
-    to predict-read/handler.py (see test_predict_routing.py's own
-    TestRouting.test_season_is_not_served_here and
-    Source/tests/aws-lambdas/nfl/test_predict_read.py). This Lambda
-    instead computes the projection on Terraform/scheduler-nfl-season-
-    projection.tf's weekly direct EventBridge Scheduler invoke and writes
-    it to S3 -- see predict/handler.py's own docstring for why."""
+    """GET /nfl/season is served from predict-read/handler.py. This Lambda
+    computes the projection on the weekly direct EventBridge Scheduler
+    invoke and writes it to S3."""
 
     def test_writes_the_season_projection_to_s3_under_the_expected_key(self):
         nfl_predict._storage = MagicMock()

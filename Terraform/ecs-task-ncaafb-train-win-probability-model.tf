@@ -1,4 +1,4 @@
-# 30-day retention, same rationale as ecs-task-nfl-backfill.tf.
+# 30-day retention so logs don't grow unbounded.
 resource "aws_cloudwatch_log_group" "ncaafb_train_win_probability_model" {
   name              = "/ecs/${var.project}-ncaafb-train-win-probability-model"
   retention_in_days = 30
@@ -9,18 +9,15 @@ resource "aws_cloudwatch_log_group" "ncaafb_train_win_probability_model" {
   })
 }
 
-# Standalone Fargate task, same shape as
-# ecs-task-nfl-train-win-probability-model.tf. Reads event_features.parquet,
-# trains the NCAAFB win-probability model against the existing training
-# harness's hyperparameter search, and writes a versioned artifact to the
-# model artifacts bucket -- see
-# Source/model-training/ncaafb/train_win_probability_model.py.
+# Standalone Fargate task. Reads event_features.parquet, trains the
+# NCAAFB win-probability model against the training harness's
+# hyperparameter search, and writes a versioned artifact to the model
+# artifacts bucket.
 #
 # Scheduled via the registry-driven training orchestrator
 # (sfn-training-orchestrator.tf, dynamodb-sport-registry.tf's ncaafb_registry
 # item) -- no per-sport scheduler file needed. cpu/memory come from
-# locals-training-compute.tf, same shared budget every sport's training
-# tasks draw from.
+# locals-training-compute.tf.
 resource "aws_ecs_task_definition" "ncaafb_train_win_probability_model" {
   family                   = "${var.project}-ncaafb-train-win-probability-model"
   requires_compatibilities = ["FARGATE"]
@@ -38,8 +35,8 @@ resource "aws_ecs_task_definition" "ncaafb_train_win_probability_model" {
       environment = [
         { name = "MODEL_ARTIFACTS_BUCKET_NAME", value = aws_s3_bucket.model_artifacts.bucket },
         { name = "AWS_REGION", value = var.region },
-        # Same BLAS-oversubscription guard as
-        # ecs-task-nfl-train-win-probability-model.tf's own comment.
+        # BLAS-oversubscription guard: caps thread pools so scikit-learn
+        # doesn't over-parallelize on a bounded-vCPU Fargate task.
         { name = "OMP_NUM_THREADS", value = "1" },
         { name = "OPENBLAS_NUM_THREADS", value = "1" },
         { name = "MKL_NUM_THREADS", value = "1" },

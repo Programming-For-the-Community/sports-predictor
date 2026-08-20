@@ -1,13 +1,10 @@
 """
 NBA-specific normalization: thin wrappers over library.normalize.espn that
-bind the sport string and compound stat-key map so callers get the same
-simple single-argument API regardless of which shared function does the work.
+bind the sport string and compound stat-key map so callers get a simple
+single-argument API.
 
-Player entities during backfill come from box scores only (via
-boxscore_to_player_game_stats), same as NFL's own normalize.py wrapper --
-there's no roster-based entity seeding here, since a CURRENT roster fetch
-(aws-lambdas/nba/ingest/handler.py's own daily _fetch_rosters) has nothing
-meaningful to say about a historical season's roster.
+Player entities during backfill come from box scores only, via
+boxscore_to_player_game_stats; there is no roster-based entity seeding.
 """
 from library.normalize.espn import (
     team_to_entity as _team_to_entity,
@@ -18,13 +15,7 @@ from library.normalize.espn import (
 
 SPORT = "nba"
 
-# Same single shared map (both team- and player-level box scores use
-# identical compound-key strings) as aws-lambdas/nba/normalize/handler.py's
-# own _COMPOUND_KEY_SPLITS -- duplicated here rather than imported across
-# packages, same as NFL's own normalize.py wrapper duplicates
-# aws-lambdas/nfl/normalize/handler.py's map (the backfill Docker image
-# only installs library/, not aws-lambdas/ -- see this directory's own
-# Dockerfile).
+# Both team- and player-level box scores use identical compound-key strings.
 _COMPOUND_KEY_SPLITS: dict[str, tuple[str, str]] = {
     "fieldGoalsMade-fieldGoalsAttempted": ("field_goals_made", "field_goal_attempts"),
     "threePointFieldGoalsMade-threePointFieldGoalsAttempted": ("three_pointers_made", "three_point_attempts"),

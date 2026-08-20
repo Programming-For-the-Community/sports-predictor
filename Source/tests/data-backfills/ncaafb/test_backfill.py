@@ -1,13 +1,10 @@
 """
-Unit tests for data-backfills/ncaafb/backfill.py. Unlike NFL's own
-backfill test suite (which hits ESPN's real, keyless API), everything
-here is mocked -- see .github/workflows/ncaafb_backfill.yml's own
-comment for why a CFBD-key-requiring, quota-capped API isn't a good fit
-for a live-hitting CI suite. Hand-built synthetic payloads, same
-discipline as the rest of the ncaafb test suite.
+Unit tests for data-backfills/ncaafb/backfill.py. Everything here is
+mocked with hand-built synthetic payloads, since CFBD's API is
+key-requiring and quota-capped.
 
 The backfill module is importable directly (conftest.py inserts its
-directory onto sys.path, same as its sibling normalize.py).
+directory onto sys.path).
 """
 from unittest.mock import MagicMock, patch
 

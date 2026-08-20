@@ -4,8 +4,7 @@ Unit tests for live_features' roster-freshness/eligibility helpers
 position-pool mapping (which positions compete for which leader
 category's candidate slots -- WR pulls in TE/RB, RB pulls in FB/a
 scrambling QB). No FeatureStorage involved -- these operate on plain
-dicts. Split out of what used to be one large test_live_features.py --
-see test_live_features_event.py's own history note.
+dicts.
 """
 from datetime import date
 
@@ -34,8 +33,7 @@ class TestIsRosterEntryFresh:
         assert live_features._is_roster_entry_fresh(entity, "2025-09-21") is False  # 51 days
 
     def test_years_stale_is_not_fresh(self):
-        # The exact reported bug: a retired player's roster entry frozen
-        # years in the past.
+        # A retired player's roster entry frozen years in the past.
         entity = {"metadata": {"team_id_as_of": "2020-01-01"}}
         assert live_features._is_roster_entry_fresh(entity, "2025-09-21") is False
 

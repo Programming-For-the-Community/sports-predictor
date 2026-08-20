@@ -231,9 +231,8 @@ class TestLambdaHandlerBoxScores:
 
 
 def _make_s3():
-    """Same dict-backed fake as test_ncaafb_team_cache.py's own _make_s3
-    -- a cache-miss GetObject raises ClientError, matching real boto3
-    behavior."""
+    """Dict-backed fake S3 client -- a cache-miss GetObject raises
+    ClientError, matching real boto3 behavior."""
     mock_s3 = MagicMock()
     store: dict[str, bytes] = {}
 

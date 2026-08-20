@@ -25,10 +25,8 @@ class ModelCardView extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Title on its own full-width line(s), badges wrapped below --
-          // a Row with both competing for width would truncate the title.
-          // maxLines: 2 covers every model name this project has; the
-          // Tooltip is a safety net for names that still don't fit.
+          // Title on its own full-width line(s), badges wrapped below.
+          // Tooltip is a safety net for a name that doesn't fit maxLines: 2.
           Tooltip(
             message: _displayName(model.modelName),
             child: Text(
@@ -48,11 +46,8 @@ class ModelCardView extends StatelessWidget {
             ],
           ),
           const SizedBox(height: 18),
-          // Wrap, not a plain Row -- an unconstrained Row of _MetricStats
-          // has no flexible children, so a wide value string ("+23%
-          // BETTER"/"-100.0 PTS") could overflow it outright on a narrow
-          // phone-width card. Wrap reflows onto a second line instead of
-          // overflowing, same fix as the badges below.
+          // Wrap, not a plain Row -- a wide value string could overflow an
+          // unconstrained Row on a narrow phone-width card.
           Wrap(
             spacing: 32,
             runSpacing: 12,
@@ -82,13 +77,9 @@ class ModelCardView extends StatelessWidget {
 
   String _displayName(String modelName) => modelName.split('-').map((w) => w[0].toUpperCase() + w.substring(1)).join(' ');
 
-  // log_loss/rmse are real evaluation metrics, but neither means anything
-  // to someone without an ML background -- "log loss 0.65" and "RMSE 9.8"
-  // don't say whether that's good. Showing skill relative to a trivial
-  // baseline (always pick the home team; predict the player's own rolling
-  // average) answers the question a viewer actually has: "is this model
-  // better than just guessing?" -- see naive_baseline_accuracy/
-  // naive_baseline_mae's docs in model_card.dart.
+  // Shows skill relative to a trivial baseline (always pick the home team;
+  // predict the player's own rolling average) rather than a raw
+  // log_loss/rmse number, which doesn't say whether that's good.
   List<(String, String)> _metrics() {
     if (model.isClassifier) {
       return [
@@ -103,13 +94,8 @@ class ModelCardView extends StatelessWidget {
   }
 
   /// Unit for a regressor candidate's +/- value in the comparison list
-  /// (e.g. "±7.4 YDS") -- without it, "±7.4" doesn't say whether that's
-  /// yards, touchdowns, or sacks, which matters since this card could be
-  /// showing any of the seven player-prop stats or a score target.
-  /// Pattern-matched on modelName rather than an exhaustive per-stat
-  /// switch, so a future player-prop stat whose name contains "yards"/
-  /// "touchdowns"/"sacks" (the only units this project's targets use)
-  /// picks up the right label with no change needed here.
+  /// (e.g. "±7.4 YDS"). Pattern-matched on modelName rather than an
+  /// exhaustive per-stat switch.
   String _unitLabel(String modelName) {
     if (modelName.contains('yards')) return 'YDS';
     if (modelName.contains('touchdowns')) return 'TDS';
@@ -117,13 +103,9 @@ class ModelCardView extends StatelessWidget {
     return 'PTS'; // score-margin / home-score / away-score
   }
 
-  /// Always "+X% BETTER" (or "-X% WORSE" in the rare case a promoted
-  /// card's own baseline comparison went slightly negative) -- same
-  /// relative-improvement formula for every card type, classifier or
-  /// regressor: how much better the actual value is than the baseline,
-  /// as a fraction of the baseline itself. '--' if either value is
-  /// missing, which happens for any model card trained before these
-  /// baseline fields existed.
+  /// Always "+X% BETTER" (or "-X% WORSE") -- how much better the actual
+  /// value is than the baseline, as a fraction of the baseline itself.
+  /// '--' if either value is missing.
   String _vsBaseline(double? actual, double? baseline, {required bool higherIsBetter}) {
     if (actual == null || baseline == null || baseline == 0) return '--';
     final relativeChange = higherIsBetter
@@ -134,12 +116,9 @@ class ModelCardView extends StatelessWidget {
   }
 }
 
-/// Every algorithm the backtesting harness (library/ml/backtest.py) tried
-/// for this target, already ranked best-first server-side. Each
-/// candidate's `score` is deliberately already the human-readable metric
-/// (accuracy or mae, never log_loss/rmse) -- the model card's raw metrics
-/// still carry the real evaluation numbers for anyone who wants them
-/// (see model_card.dart), this widget just never renders those directly.
+/// Every algorithm the backtesting harness tried for this target, already
+/// ranked best-first server-side. Each candidate's `score` is the
+/// human-readable metric (accuracy or mae, never log_loss/rmse).
 class _CandidateComparison extends StatelessWidget {
   const _CandidateComparison({
     required this.candidates, required this.currentAlgorithm, required this.isClassifier, required this.unit,

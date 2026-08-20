@@ -1,19 +1,14 @@
 """
 Season-long standings/leaderboard/Cup orchestration -- builds the payload
 Terraform/scheduler-nba-season-projection.tf's weekly EventBridge
-Scheduler invoke writes to S3 for GET /nba/season (see handler.py's own
-docstring for why that route can't compute this live per-request). Pulls
-season-wide data once via FeatureStorage, derives Elo ratings and
-remaining-schedule inputs (_season_standings_inputs), runs
-season_simulation's pure Monte Carlo logic (play-in-aware playoff bracket
-+, separately, the NBA Cup in-season tournament), and scores each tracked
-player-prop leaderboard using the same model-loading helpers
-event_prediction.py uses for a single live request.
-
-NBA gets a season-long player-prop leaderboard, same as NFL's own shape
--- unlike NCAAFB's team-outcomes-only season_projection.py, this is a
-pro-vs-college distinction, not a football-vs-basketball one (see
-project-nba-onboarding memory's 2026-08-16 note).
+Scheduler invoke writes to S3 for GET /nba/season (see handler.py for why
+that route can't compute this live per-request). Pulls season-wide data
+once via FeatureStorage, derives Elo ratings and remaining-schedule
+inputs (_season_standings_inputs), runs season_simulation's pure Monte
+Carlo logic (play-in-aware playoff bracket plus the NBA Cup in-season
+tournament), and scores each tracked player-prop leaderboard using the
+same model-loading helpers event_prediction.py uses for a single live
+request.
 """
 import logging
 from collections import Counter
@@ -35,36 +30,27 @@ from library.storage.season_projections import season_projection_key
 
 logger = logging.getLogger("nba-predict")
 
-# ESPN's own season.type convention (confirmed live -- see project-nba-
-# onboarding memory) -- 3 is postseason, 5 is the play-in tournament, its
-# own distinct type, not folded into postseason. Both count as "real
-# playoff bracket" games for _real_postseason_matchups below; a
-# coincidental regular-season rematch between the same two teams never
-# collides since neither type is 2 (regular season).
+# ESPN's season.type convention: 3 is postseason, 5 is the play-in
+# tournament, its own distinct type, not folded into postseason. Both
+# count as "real playoff bracket" games for _real_postseason_matchups
+# below; a coincidental regular-season rematch between the same two teams
+# never collides since neither type is 2 (regular season).
 POSTSEASON_TYPES = {3, 5}
 
 SPORT = "nba"
 
 # Source of truth is Terraform/scheduler-nba-train-player-prop-model.tf's
-# nba_player_prop_stats map -- duplicated here as a plain list, same
-# "no DynamoDB-backed model registry yet" reasoning as NFL's own
-# PLAYER_PROP_STATS. Only points/rebounds/assists have a season-wide
-# depth-chart-style candidate search behind them (see
-# _season_wide_candidate_rows/event_prediction.LEADER_CATEGORY_STATS) --
-# steals/blocks/three_pointers_made leaderboards are seeded only from
-# players who've already recorded at least one stat line this season, a
-# real but minor gap: no basketball equivalent of a starting-QB-style
-# pre-game candidate list exists for those three stats (see
-# aws-lambdas/nba/predict/live_features.py's own LEADER_VOLUME_STATS,
-# which covers the same three panel categories, not six).
+# nba_player_prop_stats map, duplicated here as a plain list. Only
+# points/rebounds/assists have a season-wide depth-chart-style candidate
+# search behind them (see _season_wide_candidate_rows/
+# event_prediction.LEADER_CATEGORY_STATS) -- steals/blocks/
+# three_pointers_made leaderboards are seeded only from players who've
+# already recorded at least one stat line this season.
 PLAYER_PROP_STATS = ["points", "rebounds", "assists", "steals", "blocks", "three_pointers_made"]
 
-# Group-play games only -- see library/normalize/espn.py's own
-# tournament_note comment for why this exact string, not a prefix match:
-# knockout-round games carry their own different note text, and this
-# module never needs to detect those (the knockout bracket itself is
-# entirely simulated, not sourced from real completed knockout results --
-# see season_simulation.simulate_cup's own docstring).
+# Group-play games only; knockout-round games carry different note text
+# and are never matched here (the knockout bracket is entirely simulated,
+# not sourced from real results -- see season_simulation.simulate_cup).
 CUP_GROUP_PLAY_NOTE = "NBA Cup - Group Play"
 
 
@@ -76,10 +62,7 @@ def _season_standings_inputs(storage: FeatureStorage) -> dict:
     # roster "teams" aren't real franchises (see
     # library.features.nba_teams.is_real_franchise_matchup), so a played
     # one would otherwise count as a real win/loss and Elo update for a
-    # non-existent team_id. Unverified whether ESPN's NBA scoreboard
-    # actually surfaces the All-Star Game as a regular scoreboard event
-    # at all (see that function's own docstring) -- this filter costs
-    # nothing to have in place either way.
+    # non-existent team_id.
     scheduled = [e for e in storage.get_all_events(SPORT, status="scheduled") if is_real_franchise_matchup(e)]
     all_completed = [e for e in storage.get_all_events(SPORT, status="completed") if is_real_franchise_matchup(e)]
     current_season = max(
@@ -181,10 +164,8 @@ def _season_wide_candidate_rows(storage: FeatureStorage, season_inputs: dict) ->
 
 def _leaderboards(storage: FeatureStorage, s3, model_cache: dict, season_inputs: dict) -> dict:
     """Top-10 season-long leaderboard per tracked player-prop stat,
-    projected as current season-to-date total + (their own model's
-    prediction for their team's NEXT scheduled game * games remaining) --
-    see season_simulation.project_leaderboard's own docstring for why
-    this is a flat estimate rather than a per-opponent simulation."""
+    projected as current season-to-date total plus (their own model's
+    prediction for their team's next scheduled game * games remaining)."""
     season_player_stats = [
         row for row in storage.get_all_player_game_stats(SPORT)
         if row.get("event_key") in season_inputs["completed_event_keys"]
@@ -278,12 +259,8 @@ def _leaderboards(storage: FeatureStorage, s3, model_cache: dict, season_inputs:
 def _cup_payload(storage: FeatureStorage, season_inputs: dict) -> dict | None:
     """Groups the NBA Cup simulation's flat team->probabilities map (see
     season_simulation.simulate_cup) into {"groups": {"Eastern A": [row,
-    ...], ...}} -- the same "grouped list of enriched rows" shape
-    build_season_projection's own `standings` already uses for divisions,
-    just keyed by Cup group instead. None if this season's groups aren't
-    in library.features.nba_cup_groups.CUP_GROUPS yet (see that module's
-    own docstring) -- the whole Cup section is a best-effort field on the
-    response, same convention as `leaders`/`leaderboards` elsewhere."""
+    ...], ...}}. None if this season's groups aren't in
+    library.features.nba_cup_groups.CUP_GROUPS yet."""
     cup_simulation = season_simulation.simulate_cup(
         season_inputs["current_season"], season_inputs["cup_wins"], season_inputs["cup_losses"],
         season_inputs["remaining_cup_games"], season_inputs["current_ratings"],
@@ -305,13 +282,11 @@ def _cup_payload(storage: FeatureStorage, season_inputs: dict) -> dict | None:
 
 
 def _cup_bracket_payload(storage: FeatureStorage, season_inputs: dict) -> dict | None:
-    """Deterministic NBA Cup knockout bracket -- see
-    season_simulation.project_cup_knockout_bracket's own docstring for
-    why this is PROJECTED ONLY, unlike the main playoff bracket's own
-    _bracket_payload below (no real-vs-actual reconciliation for Cup
-    knockout games, pending a real-field-size verification this session
-    couldn't resolve with confidence). None if this season's groups
-    aren't in CUP_GROUPS yet, same best-effort convention as `cup`."""
+    """Deterministic NBA Cup knockout bracket (see
+    season_simulation.project_cup_knockout_bracket) -- projected only,
+    unlike the main playoff bracket's own _bracket_payload below (no
+    real-vs-actual reconciliation for Cup knockout games). None if this
+    season's groups aren't in CUP_GROUPS yet."""
     bracket = season_simulation.project_cup_knockout_bracket(
         season_inputs["current_season"], season_inputs["cup_wins"], season_inputs["cup_losses"],
         season_inputs["current_ratings"],
@@ -367,9 +342,7 @@ def _real_postseason_series(storage: FeatureStorage, current_season: int | None)
 
 def _logged_win_probability(predictions_table, event_key_value: str) -> dict | None:
     """This event's own logged win-probability prediction, or None if
-    nobody's ever requested one -- same "read the audit trail, never
-    recompute" rule library/serving/nba_reads.py's own
-    _prediction_comparison follows."""
+    nobody's ever requested one."""
     rows = predictions_table.query(Key("event_key").eq(event_key_value))
     row = next((r for r in rows if r["model_key"].startswith(f"MODEL#{WIN_PROBABILITY_MODEL}#")), None)
     return row["predicted_value"] if row else None
@@ -380,13 +353,12 @@ def _resolve_matchup(
     real_matchups: dict[frozenset, dict], storage: FeatureStorage, s3, predictions_table,
     current_ratings: dict[str, float], home_advantage: float,
 ) -> dict:
-    """Resolves one bracket slot -- the same 3-state design as NFL's own
-    season_projection.py: (1) no real game exists yet -- the model's own
-    deterministic pick ("status": "projected"); (2) a real game exists
-    and is completed -- the actual result plus whatever was originally
-    predicted, if anyone ever requested one ("status": "final"); (3) a
-    real game exists, not yet played -- computed on the spot right here
-    if nobody's viewed it yet ("status": "scheduled")."""
+    """Resolves one bracket slot: (1) no real game exists yet -- the
+    model's own deterministic pick ("status": "projected"); (2) a real
+    game exists and is completed -- the actual result plus whatever was
+    originally predicted, if anyone ever requested one ("status":
+    "final"); (3) a real game exists, not yet played -- computed on the
+    spot right here if nobody's viewed it yet ("status": "scheduled")."""
     real_event = real_matchups.get(frozenset((team_a, team_b)))
     if real_event is None:
         matchup = season_simulation.project_matchup(team_a, team_b, seed_a, seed_b, current_ratings, home_advantage)
@@ -588,12 +560,12 @@ def _project_conference_bracket_reconciled(
     current_ratings: dict[str, float], home_advantage: float,
 ) -> tuple[list[dict], str]:
     """Same two-stage shape as season_simulation.project_conference_bracket
-    (Play-In then the fixed no-reseed 8-team bracket). Play-In goes
-    through _resolve_matchup's real-vs-projected reconciliation (real
-    NBA rule: both play-in games are single elimination, not a series);
-    every round after it goes through _resolve_series_matchup instead --
-    real NBA rule, Conference Quarterfinals onward is best-of-7. Returns
-    (rounds, champion)."""
+    (Play-In then the fixed no-reseed 8-team bracket), but reconciled
+    against real results: Play-In goes through _resolve_matchup's
+    real-vs-projected reconciliation (both play-in games are single
+    elimination, not a series); every round after it goes through
+    _resolve_series_matchup instead (Conference Quarterfinals onward is
+    best-of-7). Returns (rounds, champion)."""
     # Play-In is built game-by-game (unlike the other rounds), since
     # game 3's own participants depend on games 1/2's own results --
     # _project_bracket_round's own "resolve a static list of pairs" shape
@@ -619,9 +591,7 @@ def _project_conference_bracket_reconciled(
 
     # Two rounds, not one -- game3 isn't played in parallel with games
     # 1/2, it's built FROM their results (matches
-    # season_simulation.project_conference_bracket's own shape, see that
-    # function's docstring for why, including why game2 goes first and
-    # game1 last within the first round).
+    # season_simulation.project_conference_bracket's own shape).
     play_in_round1 = {"round": "Play-In", "matchups": [game2, game1]}
     play_in_round2 = {"round": "Play-In Elimination", "matchups": [game3]}
     full_seeds = direct_seeds + [game1_winner, final_8_seed]
@@ -663,11 +633,10 @@ def _bracket_payload(
 ) -> dict:
     """Builds the full NBA playoff bracket (both conferences, play-in
     included, plus the Finals), reconciled against real results as they
-    exist right now -- see _resolve_matchup's own docstring for the
-    3-state design. Seeds from REAL wins/point-differential once the
-    regular season is actually over (season_inputs["remaining_games"]
-    empty), else from simulate_season's own projected_wins -- same
-    real-vs-projected split NFL's own _bracket_payload uses for seeding."""
+    exist right now (see _resolve_matchup for the 3-state design). Seeds
+    from real wins/point-differential once the regular season is actually
+    over (season_inputs["remaining_games"] empty), else from
+    simulate_season's own projected_wins."""
     regular_season_over = not season_inputs["remaining_games"]
     if regular_season_over:
         wins, point_differential = season_inputs["wins"], season_inputs["point_differential"]
@@ -697,10 +666,7 @@ def _bracket_payload(
 
     # NBA Finals is also best-of-7 (_resolve_series_matchup, not
     # _resolve_matchup) -- home-court goes to the better regular-season
-    # record (the real NBA rule, unlike NFL's/NCAAFB's fixed-neutral-site
-    # championship), point differential as tiebreak, same reasoning
-    # season_simulation.project_finals used before this call site stopped
-    # using it -- decided here, once, rather than per-game, since a
+    # record, point differential as tiebreak. Decided once here since a
     # series' host team stays fixed across all 7 possible games even
     # though which games it physically hosts alternates (2-2-1-1-1).
     (conference_a, champion_a), (conference_b, champion_b) = champions.items()
@@ -730,11 +696,10 @@ def build_season_projection(storage: FeatureStorage, s3, predictions_table) -> d
     )
 
     # division lets the frontend group standings by division (see
-    # season_page.dart), same display role as NFL's own -- informational
-    # only for NBA, no seeding benefit (see simulate_season's own
-    # docstring). Sorted by projected_wins descending BEFORE grouping, so
-    # each division's own teams are already best-to-worst within their
-    # group.
+    # season_page.dart) -- informational only for NBA, no seeding benefit
+    # (see simulate_season). Sorted by projected_wins descending BEFORE
+    # grouping, so each division's own teams are already best-to-worst
+    # within their group.
     standings = sorted(
         (
             {
@@ -797,10 +762,9 @@ def run_scheduled(storage: FeatureStorage, model_bucket, predictions_table) -> d
     show up as a Lambda error/CloudWatch alarm, not get silently reshaped
     into a 500 nobody reads.
 
-    predictions_table is new (2026-08-16, the bracket feature) --
     _bracket_payload reads/writes real playoff/play-in games' logged
-    predictions through it, same table event_prediction.py's own
-    compute_and_cache_event already uses."""
+    predictions through predictions_table, the same table
+    event_prediction.py's own compute_and_cache_event uses."""
     result = build_season_projection(storage, model_bucket, predictions_table)
     model_bucket.put_json(season_projection_key(SPORT), result)
     logger.info("Wrote season projection for %s to S3", SPORT)

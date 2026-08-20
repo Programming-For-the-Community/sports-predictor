@@ -3,9 +3,7 @@ Unit tests for the NFL ingest Lambda's small pure-function helpers:
 _most_recent_sunday (the date-math that makes the Tuesday run and the
 Wednesday retry agree on the same week), _object_exists/_put_json (S3
 plumbing), and _all_team_ids (the league-wide team list every unconditional
-fetch -- rosters, depth charts -- is sourced from). Split out of what used
-to be one large test_ingest.py -- see test_ingest_lambda_handler.py's own
-history note.
+fetch -- rosters, depth charts -- is sourced from).
 
 The nfl_ingest module is registered in sys.modules by conftest.py, which
 also sets RAW_BUCKET_NAME before the module is imported (it's read at
@@ -22,9 +20,6 @@ from _ingest_test_helpers import teams_response
 
 
 class TestMostRecentSunday:
-    # 2026-09-13 is a confirmed Sunday (live ESPN response for
-    # dates=20260913 returned week 1, season.type 2, games at the classic
-    # Sunday 1pm ET slot -- see the ingest handler's module docstring).
     SUNDAY = date(2026, 9, 13)
 
     def test_sunday_itself_returns_same_day(self):

@@ -1,16 +1,13 @@
 """
-NBA live-score cache Lambda -- the NBA equivalent of aws-lambdas/nfl/
-live-scores/handler.py and aws-lambdas/ncaafb/live-scores/handler.py. Two
-distinct triggers, one function:
+NBA live-score cache Lambda. Two distinct triggers, one function:
 
   - EventBridge Scheduler (scheduler-nba-live-scores.tf), every 60s,
     event shape {"detail-type": "LiveScoreRefresh"}.
   - API Gateway (REST API, Lambda proxy integration), GET /nba/live-
     scores, behind the same Cognito authorizer as every other NBA route.
 
-Its own Lambda/IAM role, same reasoning as NFL's/NCAAFB's own modules:
-zero impact on ingest's daily batch shape or predict-read's light
-cold-start shape either way, a dedicated function keeps both unchanged.
+Its own Lambda/IAM role -- a dedicated function keeps ingest's daily
+batch shape and predict-read's light cold-start shape both unchanged.
 """
 import json
 import logging
@@ -33,8 +30,7 @@ _CORS_HEADERS = {
     "Content-Type": "application/json",
 }
 
-# Initialized once per container lifetime, reused across warm invocations
-# -- same lazy-singleton pattern as nfl-live-scores/handler.py's own.
+# Initialized once per container lifetime, reused across warm invocations.
 _s3 = boto3.client("s3")
 _storage: FeatureStorage | None = None
 

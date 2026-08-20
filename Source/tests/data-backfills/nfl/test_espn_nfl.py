@@ -12,24 +12,14 @@ Run from the repo root:
 All ESPN calls are made once per session via module-scoped fixtures so
 the rate limiter is only hit a handful of times across the full suite.
 
-ESPN's site API sits behind Akamai, which occasionally returns a blanket
-403 "Access Denied" (Server: AkamaiGHost) to a caller entirely independent
-of request content -- confirmed live by curling the same endpoint
-seconds apart and getting 403 then 200 with byte-identical headers, and
-separately confirmed this isn't a User-Agent/bot-signature check (a
-realistic browser UA got 403 too, see library/http/client.py's own
-comment). This reads as a transient, IP-reputation/rate-window block --
-plausible on shared-IP CI infrastructure (GitHub Actions runners can
-share egress ranges with unrelated concurrent jobs) -- not something this
-project's own request pattern controls. HttpClient's own 5-attempt
-retry-with-backoff already tries to ride it out; _skip_if_espn_unreachable
-below is the last line of defense for whenever that backoff window still
-isn't enough: a persistent block after retries is treated as "ESPN
-unreachable from here right now" (skip, not fail) rather than a code
-defect, so a transient upstream block doesn't fail CI red for a reason
-no code change here could fix. A real schema regression still fails
-loudly -- this only catches the specific "couldn't reach ESPN at all"
-case, via HttpClient's own RuntimeError.
+ESPN's site API occasionally returns a transient 403 unrelated to
+request content. HttpClient's own retry-with-backoff tries to ride it
+out; _fetch_or_skip below is the last line of defense for whenever that
+backoff window still isn't enough: a persistent block after retries is
+treated as "ESPN unreachable from here right now" (skip, not fail)
+rather than a code defect. A real schema regression still fails loudly
+-- this only catches the "couldn't reach ESPN at all" case, via
+HttpClient's own RuntimeError.
 """
 import pytest
 

@@ -1,30 +1,19 @@
-# Single public entry point for the whole app -- the frontend (default
-# behavior, S3 origin) and every sport's API (path-routed to API Gateway's
-# own execute-api endpoint, one shared REST API for all sports), both
-# under local.domain. See acm.tf/route53.tf for the matching cert/DNS
-# records.
+# Single public entry point for the app: frontend (default behavior, S3
+# origin) and every sport's API (path-routed to API Gateway's shared REST
+# API), both under local.domain.
 #
-# One list entry per active sport's API prefix -- a path not in this list
-# falls through to the default behavior (the frontend's S3 origin)
-# instead of reaching API Gateway at all. File-scoped locals block, same
-# convention as scheduler-nfl-train-player-prop-model.tf's own
-# nfl_player_prop_stats.
+# One entry per active sport's API prefix; a path not listed falls through
+# to the frontend's S3 origin instead of reaching API Gateway.
 locals {
   api_path_prefixes = ["nfl", "ncaafb", "nba"]
 }
 
-# Managed-CachingOptimized (DefaultTTL 86400s) only respects an origin's
-# Cache-Control when it carries an explicit max-age/s-maxage -- s3-frontend
-# sends a bare `Cache-Control: no-cache` (no max-age, since every deploy
-# reuses the same unhashed filenames and relies on revalidation instead),
-# which CloudFront can't turn into a TTL from that header alone, so it
-# silently substitutes its own 24h DefaultTTL. Confirmed live: a second
-# request for the same object came back `X-Cache: Hit from cloudfront`.
-# Normally masked by frontend_sync_deploy.yml's own `/*` invalidation on
-# every successful deploy, but a distribution-wide TTL of 0 removes the
-# dependency on that invalidation step being what stands between a viewer
-# and a stale edge copy. Origin headers are still honored (so an
-# explicit max-age would still be cacheable) -- only the fallback changes.
+# Managed-CachingOptimized only respects an origin's Cache-Control when it
+# carries an explicit max-age/s-maxage; s3-frontend sends a bare
+# `Cache-Control: no-cache` with no max-age, which CloudFront can't turn
+# into a TTL, so it falls back to its own 24h DefaultTTL. min/default TTL
+# of 0 forces revalidation instead. Origin headers with an explicit
+# max-age are still honored.
 resource "aws_cloudfront_cache_policy" "frontend_edge" {
   name        = "${var.project}-frontend-edge"
   min_ttl     = 0
@@ -58,14 +47,6 @@ resource "aws_cloudfront_origin_access_control" "frontend" {
 
 # Baseline security headers on every response -- HSTS, MIME-sniffing
 # protection, clickjacking protection, and a conservative Referrer-Policy.
-# Free (a native CloudFront feature, no Lambda@Edge/CloudFront Function
-# needed) -- added 2026-08-14 as part of a security review, since the
-# distribution previously set none of these.
-#
-# No Content-Security-Policy here -- the Flutter Web build's own script/
-# style loading pattern hasn't been audited against a CSP yet, and a wrong
-# CSP silently breaks the app in a way that's hard to notice from the
-# Terraform side. Worth adding once that audit happens, not guessed here.
 resource "aws_cloudfront_response_headers_policy" "security_headers" {
   name = "${var.project}-security-headers"
 
@@ -113,10 +94,8 @@ resource "aws_cloudfront_distribution" "main" {
   origin {
     origin_id   = "api"
     domain_name = "${aws_api_gateway_rest_api.main.id}.execute-api.${var.region}.amazonaws.com"
-    # Prefixes every forwarded request with the deployed stage, so a
-    # public request to /nfl/... or /ncaafb/... reaches the API at
-    # /<stage>/nfl/... etc., exactly what the default execute-api
-    # endpoint expects.
+    # Prefixes forwarded requests with the deployed stage, so a request to
+    # /nfl/... reaches the API at /<stage>/nfl/....
     origin_path = "/${aws_api_gateway_stage.main.stage_name}"
 
     custom_origin_config {
@@ -147,46 +126,29 @@ resource "aws_cloudfront_distribution" "main" {
       # Managed-CachingDisabled -- predictions are always dynamic.
       cache_policy_id            = "4135ea2d-6df8-44a3-9df3-4b5a84be39ad"
       response_headers_policy_id = aws_cloudfront_response_headers_policy.security_headers.id
-      # Managed-AllViewerExceptHostHeader -- forwards Authorization + all
-      # query strings (needed for the Cognito authorizer and player-prop
-      # `?stat=` params), same as Managed-AllViewer, but substitutes the
-      # origin's own domain as the Host header instead of forwarding the
-      # viewer's. API Gateway's regional execute-api endpoint rejects a
-      # Host header that doesn't match its own domain, so plain AllViewer
-      # 403s every request to this origin. This same managed policy also
-      # forwards CloudFront's device-type/viewer-location headers (per
-      # AWS's own docs for it) -- library/serving/viewer_analytics.py reads
-      # those from inside predict-read, no separate plumbing needed for
-      # that data to arrive.
+      # Managed-AllViewerExceptHostHeader -- forwards Authorization, query
+      # strings, and CloudFront's device-type/viewer-location headers, but
+      # substitutes the origin's own domain as the Host header; API
+      # Gateway's execute-api endpoint rejects a mismatched Host header.
       origin_request_policy_id = "b689b0a8-53d0-40ab-baf2-68738e2966ac"
     }
   }
 
-  # go_router's client-side routing means a hard refresh/deep link (e.g.
-  # /nfl/events) has no matching S3 object -- S3 returns 404 for a missing
-  # key (s3-frontend.tf's bucket policy grants CloudFront's OAC
-  # s3:ListBucket specifically so this is a real 404, not S3's ambiguous
-  # "no ListBucket" 403) which CloudFront remaps to index.html so the
-  # Flutter app boots and its own router takes over.
+  # go_router's client-side routing means a deep link (e.g. /nfl/events)
+  # has no matching S3 object; CloudFront remaps S3's 404 to index.html so
+  # the Flutter app boots and its own router takes over.
   #
-  # Deliberately no 403 entry here -- custom_error_response is
-  # distribution-wide, not scoped to the frontend's own cache behavior,
-  # and CloudFront's geo-restriction block below also returns 403
-  # (confirmed against AWS's own docs). A 403->200 rule here would
-  # silently rewrite every geo-blocked request into a served app too,
-  # which is exactly what was happening before this comment -- see
-  # s3-frontend.tf's bucket-policy docstring for the full finding.
+  # No 403 entry here -- custom_error_response is distribution-wide, and
+  # CloudFront's geo-restriction block below also returns 403, so a
+  # 403->200 rule would rewrite geo-blocked requests into a served app too.
   custom_error_response {
     error_code         = 404
     response_code      = 200
     response_page_path = "/index.html"
   }
 
-  # US-only -- this is a single-user project with no expected traffic from
-  # outside the US; every request from elsewhere is a scan/bot/probe by
-  # construction, not a legitimate user this app needs to reach. Free,
-  # native CloudFront feature (no WAF needed for this specific control).
-  # Added 2026-08-14 as part of a security review.
+  # US-only; no expected traffic from outside the US for this single-user
+  # project.
   restrictions {
     geo_restriction {
       restriction_type = "whitelist"

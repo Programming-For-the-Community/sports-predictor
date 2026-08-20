@@ -56,14 +56,11 @@ data "aws_iam_policy_document" "stepfunctions_orchestrator_permissions" {
     resources = [aws_iam_role.ecs_pipeline.arn]
   }
 
-  # The ecs:RunTask.sync integration (used so a Map iteration actually
-  # waits for the ECS task to finish, rather than firing-and-forgetting)
-  # works by having Step Functions create/manage an EventBridge rule that
-  # forwards ECS Task State Change events back to it -- this needs its own
-  # permissions on top of ecs:RunTask itself, or .sync executions hang
-  # until they time out rather than ever seeing the task complete. Per
-  # AWS's own documented requirement for this integration pattern, not
-  # something ecs:RunTask alone implies.
+  # The ecs:RunTask.sync integration (used so a Map iteration waits for
+  # the ECS task to finish) works by having Step Functions manage an
+  # EventBridge rule that forwards ECS Task State Change events back to
+  # it -- this needs its own permissions on top of ecs:RunTask itself, or
+  # .sync executions hang until they time out.
   statement {
     sid       = "ManageEcsSyncEventRule"
     actions   = ["events:PutTargets", "events:PutRule", "events:DescribeRule"]
@@ -84,13 +81,10 @@ data "aws_iam_policy_document" "stepfunctions_orchestrator_permissions" {
     ]
   }
 
-  # training_orchestrator's logging_configuration (sfn-training-
-  # orchestrator.tf) needs these to deliver execution logs to CloudWatch.
-  # Resource "*" is per AWS's own documented policy for this feature, not
-  # a broadening of scope by choice -- the log delivery API these actions
-  # cover (CreateLogDelivery/ListLogDeliveries/etc.) operates on the
-  # account's log delivery configurations generally, not any one
-  # resource, so it can't be scoped to a specific log group ARN.
+  # training_orchestrator's logging_configuration needs these to deliver
+  # execution logs to CloudWatch. Resource "*" is required since the log
+  # delivery API these actions cover operates on the account's log
+  # delivery configurations generally, not any one resource.
   statement {
     sid = "DeliverExecutionLogsToCloudWatch"
     actions = [

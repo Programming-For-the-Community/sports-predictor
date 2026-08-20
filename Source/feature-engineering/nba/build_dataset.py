@@ -5,17 +5,12 @@ using library.features.nba's pure functions, and writes two Parquet
 training datasets to S3 (via S3Manager) for the training Fargate task to
 read.
 
-Not scheduled -- run manually via `aws ecs run-task`, same as
-Source/data-backfills/nba (see
-Terraform/ecs-task-nba-feature-engineering.tf). Safe to re-run at any
-time: it always rebuilds both datasets from the current DynamoDB contents
-and overwrites the same two S3 keys, there's no incremental/partial state
-to worry about.
+Not scheduled -- run manually via `aws ecs run-task`. Safe to re-run at
+any time: it always rebuilds both datasets from the current DynamoDB
+contents and overwrites the same two S3 keys.
 
-Simpler than NFL's/NCAAFB's own build_dataset.py -- no per-position
-leader identification (no QB/RB/WR-equivalent in basketball, see
-library.features.nba's own docstring) and no third dataset (no National
-Ranking model for NBA), just team-level and player-level history walks.
+Produces two datasets: team-level event features and player-level
+features.
 
 Required environment variables:
     ENTITIES_TABLE_NAME
@@ -55,19 +50,14 @@ PLAYER_FEATURES_KEY = "nba/training-data/player_features.parquet"
 
 
 def _index_team_game_stats(team_game_stats: list[dict]) -> dict[tuple[str, str], dict]:
-    # One row per (event, team) -- a direct lookup, not a list to pick a
-    # leader from (no leader concept here, see this module's own docstring).
+    # One row per (event, team), keyed for direct lookup.
     return {(row["event_key"], row["team_id"]): row for row in team_game_stats}
 
 
 def build_event_dataset(storage: FeatureStorage, window: int) -> list[dict]:
     """Walks events in a single chronological pass, growing each team's
-    own history one game at a time, rather than re-filtering that team's
-    whole history from scratch for every one of its games -- same
-    incremental-history approach as
-    Source/feature-engineering/nfl/build_dataset.py's own
-    build_event_dataset (see its own docstring for why), minus the
-    per-position leader tracking that function also does (no analog here)."""
+    own history one game at a time rather than re-filtering that team's
+    whole history for every game."""
     events = storage.get_all_events(SPORT)
     events = [e for e in events if is_real_franchise_matchup(e)]
     logger.info("Loaded %d completed events (excluding exhibition games)", len(events))
@@ -128,9 +118,7 @@ def _group_player_games_by_player(player_games: list[dict]) -> dict[str, list[di
 
 
 def _team_previous_event_dates(events: list[dict]) -> dict[tuple[str, str], str | None]:
-    """Maps (team_id, event_key) -> that team's own previous event's date
-    -- see Source/feature-engineering/nfl/build_dataset.py's own version
-    for the full reasoning, identical here."""
+    """Maps (team_id, event_key) -> that team's previous event's date."""
     by_team: dict[str, list[dict]] = defaultdict(list)
     for event in events:
         for participant in event.get("participants", []):
@@ -148,10 +136,7 @@ def _team_previous_event_dates(events: list[dict]) -> dict[tuple[str, str], str 
 
 def build_player_dataset(storage: FeatureStorage, window: int) -> list[dict]:
     """Same incremental-history approach as build_event_dataset, per
-    player instead of per team -- see
-    Source/feature-engineering/nfl/build_dataset.py's own
-    build_player_dataset docstring for the full reasoning, identical
-    here."""
+    player instead of per team."""
     events = storage.get_all_events(SPORT)
     events = [e for e in events if is_real_franchise_matchup(e)]
     events_by_key = {event["event_key"]: event for event in events}
@@ -164,7 +149,7 @@ def build_player_dataset(storage: FeatureStorage, window: int) -> list[dict]:
     games_by_player = _group_player_games_by_player(player_games)
 
     total = len(player_games)
-    seen = 0  # rows examined, including skipped ones -- see == total is what marks completion
+    seen = 0  # rows examined, including skipped ones
     skipped = 0
     rows = []
     for games in games_by_player.values():
@@ -192,10 +177,8 @@ def build_player_dataset(storage: FeatureStorage, window: int) -> list[dict]:
 
 
 def _write_parquet(rows: list[dict]) -> bytes:
-    """Same JSON-encode-dict-columns approach as
-    Source/feature-engineering/nfl/build_dataset.py's own _write_parquet
-    -- see its own docstring; identical reasoning here (label_stat_line is
-    the only dict-valued column either dataset produces)."""
+    """JSON-encodes dict-valued columns (e.g. label_stat_line) before
+    writing, since Parquet doesn't support raw dict values."""
     if not rows:
         return b""
     df = pd.DataFrame(rows)

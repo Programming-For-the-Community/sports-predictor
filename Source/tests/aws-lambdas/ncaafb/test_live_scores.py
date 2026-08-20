@@ -3,13 +3,11 @@ Unit tests for live-scores/live_scores.py -- candidate gating (which
 events are even worth an ESPN call this cycle), the ESPN response ->
 cached-state extraction, and the S3 cache's read/write/staleness behavior.
 All AWS calls are mocked; live_scores.py takes s3/bucket/storage/client as
-explicit arguments rather than holding its own, same convention
-aws-lambdas/nfl/live-scores/live_scores.py uses.
+explicit arguments rather than holding its own.
 
 Matching a candidate to its ESPN scoreboard entry is a direct event_id
-lookup, same as NFL's own module -- CFBD's own ids (game/team/player) are
-confirmed to share ESPN's exact numbering (live-verified, see project
-memory), so there's no separate matching logic here to test.
+lookup -- CFBD's own ids (game/team/player) share ESPN's exact numbering,
+so there's no separate matching logic here to test.
 
 live_scores is registered on sys.path by conftest.py.
 """

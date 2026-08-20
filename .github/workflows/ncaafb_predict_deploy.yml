@@ -1,8 +1,4 @@
-# Points the ncaafb-predict Lambda at an already-pushed image. Split out
-# of ncaafb_ai_hosting.yml so build (no infra dependency) and deploy
-# (needs the Lambda function to already exist) can run on opposite sides
-# of `terraform apply` in ncaafb_deploy.yml -- mirrors nfl_predict_deploy.yml
-# exactly (see that file's own comment for the full ordering rationale).
+# Points the ncaafb-predict Lambda at an already-pushed image.
 
 name: NCAAFB Predict Deploy
 

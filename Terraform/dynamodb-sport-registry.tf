@@ -1,8 +1,7 @@
 # Drives the ingest-orchestrator and training-orchestrator Step Functions
 # Map states (sfn-ingest-orchestrator.tf, sfn-training-orchestrator.tf) --
 # one row per sport: polling cadence, a season_start/season_end window,
-# and a training_targets list. See design/DATA_SCHEMA.md's Sport registry
-# table section.
+# and a training_targets list.
 resource "aws_dynamodb_table" "sport_registry" {
   name         = local.sport_registry_table
   billing_mode = "PAY_PER_REQUEST"
@@ -40,19 +39,10 @@ locals {
   }
 }
 
-# NFL's own registry row, managed as data (not applied by hand) -- see
-# design/DATA_SCHEMA.md for the full attribute reference. season_start/
-# season_end ("MM-DD", inclusive, crosses the calendar year boundary same
-# as library/season.py handles) is the season on/off switch; the
-# orchestrators' own schedules run year-round (sfn-ingest-orchestrator.tf),
-# so this -- checked by the season-gate Lambda (lambda-season-gate.tf) --
-# is what actually gates a sport in or out. Deliberately NOT a runtime-
-# mutable `active` flag: that was tried first and every `terraform apply`
-# kept silently resetting it back to this file's declared value, since
-# aws_dynamodb_table_item's `item` is managed as one opaque blob with no
-# way to let something outside Terraform own just one of its fields.
-# season_start/season_end don't have that problem -- they're static,
-# intended to change only via a deliberate edit here.
+# NFL's registry row, managed as data rather than applied by hand.
+# season_start/season_end ("MM-DD", inclusive, crosses the calendar year
+# boundary) is the season on/off switch checked by the season-gate Lambda
+# (lambda-season-gate.tf); the orchestrators' own schedules run year-round.
 #
 # training_targets: task_definition_suffix appends to
 # "${var.project}-<sport>-" to resolve the ECS task-definition family at
@@ -113,13 +103,12 @@ resource "aws_dynamodb_table_item" "nfl_registry" {
     }
   })
 
-  # current_model_version is deliberately absent from the item above --
-  # that pointer is meant to be moved by the (future, Phase 7)
-  # model-promotion approval flow, not by a `terraform apply`.
+  # current_model_version is deliberately absent -- that pointer is moved
+  # by the model-promotion approval flow, not by terraform apply.
 }
 
-# Same 7 player-prop stats as NFL (TARGET_STAT values verified against
-# CFBD's actual field names -- see project memory's Phase 1 notes).
+# Same 7 player-prop stats as NFL, with TARGET_STAT values matching
+# CFBD's field names.
 locals {
   ncaafb_score_targets = {
     "margin"     = true
@@ -137,11 +126,9 @@ locals {
   }
 }
 
-# NCAAFB's registry row -- same shape as nfl_registry above, plus one extra
-# training target with no real env-var override: national-ranking is a
-# team-week model, not scoped by a SCORE_TARGET/TARGET_STAT the way
-# score/player-prop targets are, so it re-asserts AWS_REGION as a no-op,
-# same as win-probability does.
+# NCAAFB's registry row -- same shape as nfl_registry, plus one extra
+# training target: national-ranking is a team-week model not scoped by a
+# SCORE_TARGET/TARGET_STAT, so it re-asserts AWS_REGION as a no-op.
 resource "aws_dynamodb_table_item" "ncaafb_registry" {
   table_name = aws_dynamodb_table.sport_registry.name
   hash_key   = aws_dynamodb_table.sport_registry.hash_key
@@ -203,11 +190,10 @@ resource "aws_dynamodb_table_item" "ncaafb_registry" {
   })
 }
 
-# 3 score targets, same shape as NFL/NCAAFB. 6 player-prop stats -- per the
-# approved Phase 3 plan, turnovers and free_throws_made are deliberately
-# excluded here (kept as feature inputs only, not trained targets) and
-# personal_fouls_drawn isn't a field ESPN's NBA box score exposes at all
-# (confirmed via live verification 2026-08-13 -- see project memory).
+# 3 score targets, same shape as NFL/NCAAFB. 6 player-prop stats --
+# turnovers and free_throws_made are kept as feature inputs only, not
+# trained targets; personal_fouls_drawn isn't a field ESPN's NBA box score
+# exposes.
 locals {
   nba_score_targets = {
     "margin"     = true
@@ -224,16 +210,9 @@ locals {
   }
 }
 
-# NBA's registry row -- same shape as nfl_registry above, minus a
-# national-ranking target (NBA has no in-season poll the way NCAAFB/NCAA
-# MBB do -- same asymmetry those sports already have relative to NFL).
-#
-# season_start/season_end -- resolves the approved plan's former open
-# item 5 (2026-08-16, user-confirmed): NBA's regular season starts late
-# October, and the Finals wrap up in early June, so July gives real
-# padding past the actual championship the same way "harmless if empty"
-# padding works elsewhere in this project (e.g. schedule-sync's own
-# lookahead ceiling).
+# NBA's registry row -- same shape as nfl_registry, minus a
+# national-ranking target since NBA has no in-season poll. season_start
+# covers preseason; season_end pads past the early-June Finals into July.
 resource "aws_dynamodb_table_item" "nba_registry" {
   table_name = aws_dynamodb_table.sport_registry.name
   hash_key   = aws_dynamodb_table.sport_registry.hash_key

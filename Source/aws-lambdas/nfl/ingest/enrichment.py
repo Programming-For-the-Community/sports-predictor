@@ -1,13 +1,5 @@
-"""
-Coach/injury/depth-chart enrichment for ingest/handler.py's scoreboard
-writes -- see that module's own docstring for why this runs on every
-ingest cycle and what's cached vs. fetched fresh. Split out of handler.py
-to keep the main fetch loop focused on the scoreboard/box-score write
-path.
-
-enrich_events takes its S3 client and bucket explicitly rather than
-holding its own, same convention predict/live_features.py and
-model_loader.py use for their own dependencies.
+"""Coach/injury/depth-chart enrichment attached to scoreboard events before
+ingest/handler.py writes them to S3.
 """
 import json
 import logging
@@ -22,9 +14,8 @@ from library.storage.depth_chart_cache import attach_depth_charts, home_away_tea
 
 logger = logging.getLogger("nfl-ingest")
 
-# Injuries are deliberately NOT cached (no TTL constant here), they're
-# fetched fresh every run -- see this module's own docstring.
-COACHES_CACHE_TTL_DAYS = 7  # tied to the weekly training cadence
+# Injuries have no TTL constant -- fetched fresh every run, never cached.
+COACHES_CACHE_TTL_DAYS = 7
 
 _T = TypeVar("_T")
 
@@ -47,17 +38,8 @@ def _put_json(s3, bucket: str, key: str, payload: dict) -> None:
 def _cached_or_fetch(s3, bucket: str, key: str, ttl_days: int, fetch: Callable[[], _T]) -> _T:
     """Returns the value cached at `key` if it was fetched within the last
     `ttl_days`, otherwise calls `fetch()`, caches the result (wrapped with
-    a fetched_at timestamp so the next call can judge its own age), and
-    returns it. Used for coach/depth-chart data (see this module's own
-    docstring for the ESPN-call-volume reasoning) -- deliberately NOT used
-    for injuries, which need to be fetched fresh every run regardless of
-    any cache.
-
-    A fetch failure propagates to the caller rather than falling back to
-    a stale cache entry -- matches enrich_events' existing best-effort
-    handling (the field is simply omitted for that run), and avoids ever
-    silently serving data stale enough to have missed its own TTL twice
-    over."""
+    a fetched_at timestamp), and returns it. A fetch failure propagates to
+    the caller rather than falling back to a stale cache entry."""
     cached = _get_json(s3, bucket, key)
     if cached is not None:
         fetched_at = datetime.fromisoformat(cached["fetched_at"])
@@ -74,16 +56,9 @@ def _coaches_cache_key(season: int) -> str:
 
 
 def get_cached_coaches(s3, bucket: str, core_client: EspnCoreApiClient, season: int) -> dict:
-    """Every currently-listed team's head coach for `season`, keyed by
-    team id -- TTL-cached (COACHES_CACHE_TTL_DAYS) in S3 under
-    _coaches_cache_key(season). Shared by enrich_events below (attaches
-    coaches to a specific week's events, whatever season that week
-    happens to be) and ingest/handler.py's own unconditional daily call
-    (seeds/refreshes the cache regardless of whether there's a week to
-    enrich at all -- see that module's own docstring for why this can't
-    rely on enrich_events alone) -- both hit the exact same cache key for
-    the same season, so during the season this is a cache hit the second
-    time either one runs that day, not a doubled ESPN cost."""
+    """Every currently-listed team's head coach for `season`, keyed by team
+    id -- TTL-cached (COACHES_CACHE_TTL_DAYS) in S3 under
+    _coaches_cache_key(season)."""
     return _cached_or_fetch(
         s3, bucket, _coaches_cache_key(season), COACHES_CACHE_TTL_DAYS,
         lambda: core_client.get_season_coaches(season),
@@ -94,21 +69,9 @@ def enrich_events(
     events: list[dict], season: int, nfl_client: NFLClient, core_client: EspnCoreApiClient, s3, bucket: str,
 ) -> None:
     """Attaches home_coach/away_coach, home_injuries/away_injuries, and
-    home_depth_chart/away_depth_chart onto each event dict in place,
-    before the scoreboard payload is written to S3 -- see ingest/
-    handler.py's own docstring for why this has to run on every ingest
-    cycle rather than a lighter subset of them. Best-effort throughout: a
-    coach/injury/depth-chart fetch failure is logged and that field is
-    simply omitted, never allowed to take down the scoreboard write
-    itself, which every other feature depends on regardless of this
-    enrichment's success.
-
-    Takes both clients (and the S3 client/bucket) as parameters rather
-    than constructing its own -- lambda_handler already builds one
-    NFLClient for the scoreboard/box score fetches, and a second,
-    independent instantiation here would both duplicate that and, in
-    tests, silently escape whatever mock a caller patched the
-    module-level NFLClient/EspnCoreApiClient constructor with."""
+    home_depth_chart/away_depth_chart onto each event dict in place.
+    Best-effort throughout: a coach/injury/depth-chart fetch failure is
+    logged and that field is simply omitted."""
     team_ids: set[str] = set()
     for event in events:
         ids = home_away_team_ids(event)
@@ -124,8 +87,6 @@ def enrich_events(
     injuries_by_team: dict[str, list[dict]] = {}
     for team_id in team_ids:
         try:
-            # Not cached, unlike coaches -- see this module's own
-            # docstring for why injuries need daily freshness.
             injuries_by_team[team_id] = core_client.get_team_injuries(team_id)
         except Exception:
             logger.exception("Failed fetching injuries for team %s -- injuries field will be omitted", team_id)

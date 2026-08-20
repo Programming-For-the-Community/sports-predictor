@@ -2,9 +2,7 @@
 Builds the season projection (standings, bowl/CFP/championship
 probabilities) that Terraform/scheduler-ncaafb-season-projection.tf's
 weekly EventBridge Scheduler invoke writes to S3 for GET /ncaafb/season.
-Team outcomes only -- no player-prop leaderboard here, unlike NFL's own
-season_projection.py (NCAAFB's season simulation was deliberately scoped
-to team outcomes, see design/PROJECT_PLAN.md's NCAAFB section).
+Team outcomes only -- no player-prop leaderboard here.
 
 Pulls this season's data once via FeatureStorage, derives Elo ratings and
 each team's conference/record/scoring/strength-of-schedule snapshot
@@ -182,10 +180,7 @@ def _current_model_scores(estimator, model_card: dict, teams: list[str], season_
     real current wins/losses/ratings instead of a simulated future. Lower
     is better (see _batch_score_teams). Used both by _current_rankings
     (below, for the standings table's current_rank column) and by
-    _bracket_payload (for real bracket seeding -- see that function's own
-    docstring for why "today's real ranking" is used for seeding
-    regardless of how much season remains, rather than trying to project
-    a future ranking-model score forward)."""
+    _bracket_payload (for real bracket seeding)."""
     return _batch_score_teams(
         estimator, model_card, teams, season_inputs,
         season_inputs["wins"], season_inputs["losses"], season_inputs["current_ratings"],
@@ -204,10 +199,9 @@ def _current_rankings(estimator, model_card: dict, teams: list[str], season_inpu
 
 def _real_postseason_matchups(storage: FeatureStorage, current_season: int | None) -> dict[frozenset, dict]:
     """{frozenset({home_id, away_id}): event} for every real CFP game
-    (is_playoff_game -- CFBD's own `playoff` field, confirmed live to be
-    populated only for real 12-team CFP games, not every bowl -- see
-    library/normalize/ncaafb.py's own docstring) this season, scheduled
-    or completed."""
+    (is_playoff_game -- CFBD's own `playoff` field, populated only for
+    real 12-team CFP games, not every bowl) this season, scheduled or
+    completed."""
     result: dict[frozenset, dict] = {}
     for status in ("scheduled", "completed"):
         for event in storage.get_all_events(SPORT, status=status):
@@ -222,9 +216,7 @@ def _real_postseason_matchups(storage: FeatureStorage, current_season: int | Non
 
 def _logged_win_probability(predictions_table, event_key_value: str) -> dict | None:
     """This event's own logged win-probability prediction, or None if
-    nobody's ever requested one -- same "read the audit trail, never
-    recompute" rule library/serving/ncaafb_reads.py's own
-    _prediction_comparison follows."""
+    nobody's ever requested one."""
     rows = predictions_table.query(Key("event_key").eq(event_key_value))
     row = next((r for r in rows if r["model_key"].startswith(f"MODEL#{WIN_PROBABILITY_MODEL}#")), None)
     return row["predicted_value"] if row else None
@@ -235,13 +227,13 @@ def _resolve_matchup(
     real_matchups: dict[frozenset, dict], storage: FeatureStorage, s3, predictions_table,
     current_ratings: dict[str, float], home_advantage: float,
 ) -> dict:
-    """Resolves one bracket slot -- the same 3-state design as NFL's own
-    season_projection.py: (1) no real CFP game exists yet -- the model's
-    own deterministic pick ("status": "projected"); (2) a real game
-    exists and is completed -- the actual result plus whatever was
-    originally predicted, if anyone ever requested one ("status":
-    "final"); (3) a real game exists, not yet played -- computed on the
-    spot right here if nobody's viewed it yet ("status": "scheduled")."""
+    """Resolves one bracket slot -- a 3-state design: (1) no real CFP
+    game exists yet -- the model's own deterministic pick ("status":
+    "projected"); (2) a real game exists and is completed -- the actual
+    result plus whatever was originally predicted, if anyone ever
+    requested one ("status": "final"); (3) a real game exists, not yet
+    played -- computed on the spot right here if nobody's viewed it yet
+    ("status": "scheduled")."""
     real_event = real_matchups.get(frozenset((team_a, team_b)))
     if real_event is None:
         matchup = season_simulation.project_matchup(team_a, team_b, seed_a, seed_b, current_ratings, home_advantage)
@@ -318,16 +310,9 @@ def _bracket_payload(
     they exist right now -- see _resolve_matchup's own docstring for the
     3-state design. Seeds from the season simulation's own projected
     end-of-year wins once the regular season still has games left, else
-    real wins -- same real-vs-projected split NFL's/NBA's own
-    _bracket_payload use for seeding (2026-08-16 -- this module previously
-    always seeded off TODAY's real record regardless of how much season
-    remained, which put the bracket's field out of step with the
-    standings table's own end-of-season projection; changed to match).
-    point_differential/ratings stay at today's real value either way --
-    simulate_season doesn't project either forward, same simplification
-    NFL's/NBA's own seeding already accepts. None if fewer than
-    CFP_FIELD_SIZE teams are tracked (mirrors build_season_projection's
-    own simulate_season gate)."""
+    real wins. point_differential/ratings stay at today's real value
+    either way -- simulate_season doesn't project either forward. None
+    if fewer than CFP_FIELD_SIZE teams are tracked."""
     if len(teams) < season_simulation.CFP_FIELD_SIZE:
         return None
 
@@ -419,10 +404,7 @@ def build_season_projection(storage: FeatureStorage, s3, predictions_table) -> d
             logger.warning("No promoted %s model -- season simulation and ranking skipped this run", RANKING_MODEL_NAME)
         else:
             # Separate try/except from simulate_season above -- a bug here
-            # shouldn't cost the whole run its (already-computed, working)
-            # simulation. logger.exception captures the full traceback,
-            # unlike the NoPromotedModelError branch above which is an
-            # expected, routine condition, not a bug to diagnose.
+            # shouldn't cost the whole run its already-computed simulation.
             try:
                 current_rankings = _current_rankings(estimator, model_card, teams, season_inputs)
             except Exception:
@@ -462,10 +444,8 @@ def build_season_projection(storage: FeatureStorage, s3, predictions_table) -> d
 
 def run_scheduled(storage: FeatureStorage, model_bucket, predictions_table) -> dict:
     """Entry point for the weekly EventBridge Scheduler invoke -- computes the projection
-    once and writes it to S3. predictions_table is new (2026-08-16, the bracket
-    feature) -- _bracket_payload reads/writes real CFP games' logged predictions
-    through it, same table event_prediction.py's own compute_and_cache_event
-    already uses."""
+    once and writes it to S3. predictions_table is used by _bracket_payload to
+    read/write real CFP games' logged predictions."""
     result = build_season_projection(storage, model_bucket, predictions_table)
     model_bucket.put_json(season_projection_key(SPORT), result)
     logger.info("Wrote season projection for %s to S3", SPORT)

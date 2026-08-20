@@ -14,9 +14,8 @@ class PredictionComputingException implements Exception {
   final int retryAfterSeconds;
 }
 
-/// Generic, sport-parametrized -- not one repository class per sport,
-/// since every sport hits the same route shapes by backend design (see
-/// core/models/sport_config.dart's own doc comment).
+/// Generic, sport-parametrized: every sport hits the same route shapes
+/// (see core/models/sport_config.dart's own doc comment).
 class EventsRepository {
   EventsRepository(this._api);
 

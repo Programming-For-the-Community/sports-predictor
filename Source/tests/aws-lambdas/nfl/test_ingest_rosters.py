@@ -2,9 +2,7 @@
 Unit tests for the NFL ingest Lambda's daily, unconditional, uncached
 roster fetch (_fetch_rosters) -- one team at a time from _all_team_ids,
 independent of any week's own scoreboard (so it covers every team, not
-just whoever's playing that week, and runs even during preseason -- see
-_fetch_rosters' own docstring). Split out of what used to be one large
-test_ingest.py -- see test_ingest_lambda_handler.py's own history note.
+just whoever's playing that week, and runs even during preseason).
 
 The nfl_ingest module is registered in sys.modules by conftest.py, which
 also sets RAW_BUCKET_NAME before the module is imported (it's read at

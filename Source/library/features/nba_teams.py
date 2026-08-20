@@ -3,28 +3,16 @@ Static NBA team reference data -- division/conference assignments and
 approximate home-market coordinates, keyed by ESPN's numeric team_id (the
 same id used as entity_id throughout this project). Not fetched from any
 API: NBA's 6-division alignment has been stable since the 2004
-Bobcats/Hornets realignment, well before this project's data window
-starts, and franchise relocations (e.g. Sonics->Thunder) are rare enough
-events to just update this table by hand when they happen -- same
-reasoning as nfl_teams.py's own docstring, and the same "closer to NFL's
-static pattern than NCAAFB's dynamic per-season lookup" call made in
-design/PROJECT_PLAN.md's Phase 3 plan (NBA is a fixed 30 franchises,
-unlike NCAA MBB's ~360 teams with real yearly conference realignment).
-
-Team ids and abbreviations confirmed live, 2026-08-14, against
-site.web.api.espn.com/apis/site/v2/sports/basketball/nba/teams/{id} for
-every one of the 30 ids below (not assumed from a remembered mapping --
-an initial guess at a few ids turned out wrong and was corrected against
-a real per-id fetch before being used here).
+Bobcats/Hornets realignment, and franchise relocations are rare enough
+events to update this table by hand when they happen.
 
 Coordinates are each team's home city/downtown arena, not exact
 geolocation -- sufficient precision for a travel-distance feature at this
-scale (see travel_distances_km). Deliberately distinct from nfl_teams.py's
-own coordinates for shared markets where the arenas are genuinely in a
-different part of the metro (Miami's Kaseya Center is downtown, the
-Dolphins' stadium is in Miami Gardens; Washington's Capital One Arena is
-downtown DC, the Commanders' stadium is in Landover, MD) -- not reused
-even though the city name is the same.
+scale (see travel_distances_km). Distinct from nfl_teams.py's own
+coordinates for shared markets where the arenas are in a different part
+of the metro (Miami's Kaseya Center is downtown, the Dolphins' stadium is
+in Miami Gardens; Washington's Capital One Arena is downtown DC, the
+Commanders' stadium is in Landover, MD).
 """
 from library.features import geo
 
@@ -56,14 +44,8 @@ def is_real_franchise_matchup(event: dict) -> bool:
     """False for an event involving a non-franchise "team" -- an NBA
     All-Star Game roster (Team [Captain] vs Team [Captain], or a
     conference-vs-conference format depending on the season) isn't in
-    TEAM_DIVISIONS, since it's an exhibition roster, not a real franchise.
-    Same guard NFL's own is_real_franchise_matchup applies for the Pro
-    Bowl -- see that function's docstring; unverified live whether ESPN's
-    NBA scoreboard actually surfaces the All-Star Game as a regular
-    scoreboard event at all (its season.type may already distinguish it),
-    but this filter costs nothing to have in place either way and is the
-    same defensive pattern feature engineering already applies for NFL/
-    NCAAFB (via is_real_franchise_matchup/no filter respectively)."""
+    TEAM_DIVISIONS, since it's an exhibition roster, not a real
+    franchise."""
     return all(p.get("entity_id") in TEAM_DIVISIONS for p in event.get("participants", []))
 
 
@@ -101,12 +83,8 @@ TEAM_COORDINATES: dict[str, tuple[float, float]] = {
     "30": (35.2251, -80.8392),   # CHA -- Charlotte (Spectrum Center)
 }
 
-# Recurring NBA international/neutral-site game host cities -- Mexico
-# City and Paris regular-season games are the established recent pattern
-# (2023-2025 seasons); London hosted NBA preseason/exhibition play in
-# past years but no confirmed regular-season game in this project's
-# backfill window as of this writing. Same "designated home team isn't
-# actually at their own market" caveat as nfl_teams.py's own table.
+# Recurring NBA international/neutral-site game host cities. The
+# designated home team isn't actually at their own market for these.
 INTERNATIONAL_VENUES: dict[str, tuple[float, float]] = {
     "Mexico City": (19.4022, -99.0956),  # Arena CDMX / Palacio de los Deportes
     "Paris": (48.8397, 2.3775),          # Accor Arena

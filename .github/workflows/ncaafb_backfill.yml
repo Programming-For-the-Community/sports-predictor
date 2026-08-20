@@ -1,33 +1,9 @@
-# Builds, packages, and deploys the NCAAFB historical backfill job
-# (Source/data-backfills/ncaafb). Runs standalone (workflow_dispatch) or
-# called from ncaafb_deploy.yml (workflow_call, once that workflow
-# exists -- see project plan's CI wiring phase) -- either way the work is
-# identical: run tests, then build and push an image only if they pass.
-# Mirrors nfl_backfill.yml exactly except for the test approach below.
+# Runs tests, then builds and pushes the NCAAFB historical backfill image
+# (Source/data-backfills/ncaafb) only if they pass. Tests mock CFBDClient
+# rather than hitting the live CFBD API.
 #
-# IMAGE_VERSION lives here, once, as a plain constant -- bump it by
-# editing this line, never by typing a version into a manual dispatch
-# input. GitHub Actions doesn't let a `uses:` job read workflow-level
-# `env:` directly in its `with:`, so `set-version` below exists purely to
-# expose that constant as a job output the build job(s) can reference.
-#
-# Unlike NFL's own backfill test suite (which hits ESPN's real, keyless
-# API), Source/tests/data-backfills/ncaafb/ mocks CFBDClient entirely --
-# CFBD requires an API key and caps the free tier at 1,000 calls/month
-# (see project plan), so a CI job that hits it live on every push would
-# both need a key available to the runner (a second credential-exposure
-# surface beyond the Secrets-Manager-at-runtime design this project
-# otherwise uses) and could burn a meaningful chunk of the monthly
-# budget on nothing but test runs. Hand-built synthetic payloads instead,
-# same discipline as the rest of the ncaafb test suite (Phase 1/3
-# verification against real CFBD responses already happened once,
-# out-of-band -- see project memory).
-#
-# Only one image today. If this stage grows a second component, add
-# another job below following the same shape as `build-backfill-image`:
-# `needs: [set-version, test]`, `uses: ./.github/workflows/docker_build_push.yml`,
-# a distinct `image_name`, and the same `needs.set-version.outputs.version`
-# -- every image built in the same run of this workflow shares one version.
+# `set-version` exposes the IMAGE_VERSION env constant as a job output since
+# a `uses:` job cannot read workflow-level `env:` directly in its `with:`.
 
 name: NCAAFB Backfill
 

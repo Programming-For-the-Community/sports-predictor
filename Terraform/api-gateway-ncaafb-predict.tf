@@ -1,8 +1,5 @@
-# Routes for the two NCAAFB serving Lambdas. All resources sit under
-# aws_api_gateway_rest_api.main (api-gateway.tf); the shared
-# aws_api_gateway_deployment/stage/usage-plan stay owned in
-# api-gateway-nfl-predict.tf, whose deployment trigger list includes
-# this file's resources too.
+# Routes for the two NCAAFB serving Lambdas under aws_api_gateway_rest_api.main.
+# Deployment/stage/usage-plan are managed in api-gateway-nfl-predict.tf.
 #
 #   GET /ncaafb/events                                              -> ncaafb_predict_read
 #   GET /ncaafb/models                                              -> ncaafb_predict_read
@@ -135,7 +132,7 @@ resource "aws_api_gateway_integration" "ncaafb_predict_event" {
   http_method             = aws_api_gateway_method.ncaafb_predict_event.http_method
   type                    = "AWS_PROXY"
   integration_http_method = "POST"
-  uri                     = aws_lambda_function.ncaafb_predict_read.invoke_arn # cache read-through; see handler.py
+  uri                     = aws_lambda_function.ncaafb_predict_read.invoke_arn # cache read-through
 }
 
 # --- GET /ncaafb/predictions/events/{event_id}/players/{entity_id} -------------
@@ -164,12 +161,6 @@ resource "aws_api_gateway_integration" "ncaafb_predict_player" {
 }
 
 # --- CORS preflight (OPTIONS) -------------------------------------------
-# Own local map (not api-gateway-nfl-predict.tf's local.cors_resources --
-# Terraform can't redeclare the same local name twice in one root module,
-# and this file deliberately keeps every NCAAFB-owned resource out of
-# that NFL-named file, touching it only for the one unavoidable shared-
-# deployment-trigger addition described above). Same MOCK-integration
-# pattern/reasoning as api-gateway-nfl-predict.tf's own CORS block.
 locals {
   ncaafb_cors_resources = {
     events         = aws_api_gateway_resource.ncaafb_events.id
@@ -177,8 +168,7 @@ locals {
     season         = aws_api_gateway_resource.ncaafb_season.id
     predict_event  = aws_api_gateway_resource.ncaafb_predictions_event.id
     predict_player = aws_api_gateway_resource.ncaafb_predictions_event_player.id
-    # live-scores -- resource declared in api-gateway-ncaafb-live-scores.tf,
-    # a third Lambda target.
+    # live-scores resource declared in api-gateway-ncaafb-live-scores.tf
     live_scores = aws_api_gateway_resource.ncaafb_live_scores.id
   }
 }

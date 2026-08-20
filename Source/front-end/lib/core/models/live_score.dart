@@ -21,10 +21,9 @@ class LiveEventState {
   final String? detail;
   final double? homeScore;
   final double? awayScore;
-  // entity_id -> stat_line, from ESPN's own live boxscore -- only ever
-  // populated while `live` is true (see live_scores.py's own refresh()),
-  // absent entirely otherwise, same "not fetched this tick" meaning an
-  // absent key already carries elsewhere in this model.
+  // entity_id -> stat_line, from ESPN's own live boxscore -- populated
+  // only while `live` is true (see live_scores.py's own refresh()),
+  // absent entirely otherwise.
   final Map<String, Map<String, double>> playerStats;
 
   factory LiveEventState.fromJson(Map<String, dynamic> json) => LiveEventState(

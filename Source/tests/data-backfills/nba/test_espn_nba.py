@@ -4,10 +4,7 @@ Integration tests for the NBA backfill ESPN client and normalization layer.
 These tests hit the real ESPN public API and verify that both the raw
 responses have the expected shape AND that normalize.py maps them into
 the schema this project writes to AWS. No AWS credentials are needed --
-the storage layer is never touched here. Same discipline as
-tests/data-backfills/nfl/test_espn_nfl.py, adapted for NBA's date-based
-scoreboard (see library/http/nba.py's own docstring for why there's no
-week-shaped equivalent).
+the storage layer is never touched here.
 
 Run from the repo root:
     pytest Source/tests/data-backfills/nba/
@@ -15,18 +12,12 @@ Run from the repo root:
 All ESPN calls are made once per session via module-scoped fixtures so
 the rate limiter is only hit a handful of times across the full suite.
 
-TEST_DATE is a fixed, well-in-the-past regular-season date rather than
-"yesterday" -- unlike a scheduled Lambda, this suite has no reason to
-track a moving target, and a fixed date keeps the suite deterministic
-(no dependency on today's actual NBA schedule, which may have zero games
-on any given day, especially off-season).
+TEST_DATE is a fixed, well-in-the-past regular-season date so the suite
+stays deterministic regardless of today's actual NBA schedule.
 
-See test_espn_nfl.py's own docstring for why a persistent ESPN block
-after HttpClient's own retry-with-backoff is treated as "unreachable from
-here right now" (skip) rather than a code defect (fail) -- same
-_fetch_or_skip pattern, duplicated rather than shared since each sport's
-test suite is a standalone pytest target with no shared conftest across
-sport directories.
+A persistent ESPN block after HttpClient's own retry-with-backoff is
+treated as "unreachable from here right now" (skip) rather than a code
+defect (fail), via _fetch_or_skip below.
 """
 import pytest
 
@@ -180,10 +171,8 @@ class TestNormalizeBoxscore:
                 assert field in item, f"Missing field: {field}"
 
     def test_stat_line_has_no_misc_prefixed_keys(self, summary_response):
-        # Regression check for the category-with-no-name bug caught during
-        # Sub-phase 3A step 3 (see project-nba-onboarding memory) -- NBA's
-        # single unnamed stat category must not fabricate a "misc_" prefix
-        # that would silently break TARGET_STAT field-name matching.
+        # NBA's single unnamed stat category must not fabricate a "misc_"
+        # prefix, which would silently break TARGET_STAT field-name matching.
         stats_items, _ = normalize.boxscore_to_player_game_stats(summary_response)
         for item in stats_items:
             assert not any(key.startswith("misc_") for key in item["stat_line"]), item["stat_line"]

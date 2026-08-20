@@ -1,13 +1,9 @@
-# NCAAFB live-score cache Lambda -- mirrors lambda-nfl-live-scores.tf's
-# two-trigger shape (scheduler refresh + API Gateway read), but calls
-# ESPN's supplemental college-football scoreboard client instead of CFBD,
-# costing zero CFBD quota (see design/DATA_SOURCES.md). Uses its own
-# per-sport role (iam-ncaafb-live-scores.tf), not NFL's, since that one's
-# permissions are scoped to NFL's own raw-bucket cache prefix.
+# NCAAFB live-score cache Lambda -- refreshed by EventBridge Scheduler and
+# read via API Gateway. Calls ESPN's supplemental college-football
+# scoreboard client. Uses its own per-sport role (iam-ncaafb-live-scores.tf).
 #
-# Zip-packaged, not VPC-attached -- same reasoning as
-# lambda-nfl-live-scores.tf. Code is deployed by the
-# ncaafb_live_scores_deploy workflow -- NOT by Terraform.
+# Zip-packaged, not VPC-attached. Code is deployed by the
+# ncaafb_live_scores_deploy workflow, not by Terraform.
 
 resource "aws_cloudwatch_log_group" "ncaafb_live_scores" {
   name              = "/aws/lambda/${var.project}-ncaafb-live-scores"
@@ -34,10 +30,9 @@ resource "aws_lambda_function" "ncaafb_live_scores" {
   role          = aws_iam_role.ncaafb_live_scores.arn
   runtime       = "python3.12"
   handler       = "handler.lambda_handler"
-  # See lambda-nfl-live-scores.tf's own comment -- same LiveScoreRefresh
-  # worst case (per-event boxscore fetch for every currently-live event,
-  # parallelized), just more headroom here since a busy NCAAFB Saturday
-  # can have noticeably more games live at once than an NFL Sunday.
+  # Worst case is a per-event boxscore fetch for every currently-live
+  # event, parallelized; a busy NCAAFB Saturday can have many games live
+  # at once.
   timeout     = 45
   memory_size = 256
 
@@ -50,8 +45,7 @@ resource "aws_lambda_function" "ncaafb_live_scores" {
       ESPN_API_ROOT_URL = var.espn_api_root_url
       ESPN_USER_AGENT   = var.espn_user_agent
       # FeatureStorage's constructor requires all four of these regardless
-      # of which methods actually get called -- live_scores.py only ever
-      # queries the events table, same as lambda-nfl-live-scores.tf.
+      # of which methods actually get called.
       ENTITIES_TABLE_NAME          = aws_dynamodb_table.entities.name
       EVENTS_TABLE_NAME            = aws_dynamodb_table.events.name
       PLAYER_GAME_STATS_TABLE_NAME = aws_dynamodb_table.player_game_stats.name

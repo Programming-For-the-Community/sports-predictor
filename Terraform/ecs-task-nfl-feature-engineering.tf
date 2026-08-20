@@ -1,4 +1,4 @@
-# 30-day retention, same rationale as ecs-task-nfl-backfill.tf.
+# 30-day log retention.
 resource "aws_cloudwatch_log_group" "nfl_feature_engineering" {
   name              = "/ecs/${var.project}-nfl-feature-engineering"
   retention_in_days = 30
@@ -9,20 +9,15 @@ resource "aws_cloudwatch_log_group" "nfl_feature_engineering" {
   })
 }
 
-# Standalone Fargate task (launched via `aws ecs run-task`, not a Service --
-# runs to completion and stops, same pattern as ecs-task-nfl-backfill.tf).
-# Reads the full events/player_game_stats history and writes two training
-# Parquet files to the model artifacts bucket -- see
-# Source/feature-engineering/nfl/build_dataset.py.
+# Standalone Fargate task (run via `aws ecs run-task`, not a Service). Reads
+# the full events/player_game_stats history and writes two training Parquet
+# files to the model artifacts bucket (Source/feature-engineering/nfl/build_dataset.py).
 #
 # Uses the shared aws_iam_role.ecs_pipeline (iam-ecs-pipeline.tf), scoped
 # to read the three data tables and write model artifacts.
 #
-# Runs in the same public subnet + fargate_internet_egress security group
-# as backfill (set at `run-task` time, not here -- see security-groups.tf),
-# not the more tightly-scoped ecs_pipeline security group, since that
-# group's private-subnet path requires paid ECR VPC Interface Endpoints
-# this task doesn't otherwise need.
+# Runs in the public subnet + fargate_internet_egress security group (set
+# at `run-task` time, not here -- see security-groups.tf).
 resource "aws_ecs_task_definition" "nfl_feature_engineering" {
   family                   = "${var.project}-nfl-feature-engineering"
   requires_compatibilities = ["FARGATE"]

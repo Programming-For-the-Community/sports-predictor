@@ -17,9 +17,9 @@ played for a new team yet still shows their old team_id.
 
 Leaders panel (build_live_event_leader_candidates): a separate, multi-
 candidate version of the same idea -- no depth chart/roster position
-data exists for NCAAFB (unlike NFL's live_features.py), so candidates
-are every still-rostered player credited with the category's volume
-stat anywhere in the team's recent box scores, ranked by recent volume.
+data exists for NCAAFB, so candidates are every still-rostered player
+credited with the category's volume stat anywhere in the team's recent
+box scores, ranked by recent volume.
 
 `events` (an already-fetched get_all_events(sport) result) is an
 optional pass-through accepted by every public function here and threaded
@@ -48,8 +48,7 @@ LEADER_IDENTIFIERS = {
 }
 
 # Leaders-panel candidate generation -- box-score volume stat and final
-# candidate count per category. Matches nfl/predict/live_features.py's own
-# roster-less fallback counts (its depth-chart path doesn't apply here).
+# candidate count per category.
 LEADER_VOLUME_STATS = {
     "passing": "passing_attempts",
     "rushing": "rushing_attempts",
@@ -230,15 +229,10 @@ def _box_score_candidate_ids(
     score history, walking most-recent-first, bounded the same as _presumptive_leader
     (current season plus SEASON_LOOKBACK prior).
 
-    Two phases: first collect every distinct candidate id from box scores
-    (cheap, no I/O beyond the already-fetched events/box-score rows),
+    Two phases: first collect every distinct candidate id from box scores,
     then check roster membership (_still_on_team, one GetItem each)
-    concurrently -- a real, reported source of live-request latency when
-    sequential, since a team's SEASON_LOOKBACK-bounded box-score history
-    can hold dozens of distinct candidates for a single category. Unlike
-    _presumptive_leader below, there's no early exit to lose here -- this
-    function always needs every candidate's roster status, not just the
-    first match, so concurrency is a clean win with no wasted work."""
+    concurrently, since a team's SEASON_LOOKBACK-bounded box-score history
+    can hold dozens of distinct candidates for a single category."""
     team_events = storage.get_team_events(sport, team_id, before_date=before_date, events=events)
     seen: set[str] = set()
     ordered_ids: list[str] = []
@@ -289,7 +283,7 @@ def build_live_event_leader_candidates(
     "receiving": [row, row, row], "sacks": [row, row, row]}, "away": {...}} -- each row is
     build_player_features' usual output (carries entity_id). Deliberately doesn't touch S3 or
     load any model -- scoring these against the right player-prop model is the caller's job
-    (event_prediction.py), same separation build_live_player_features/model_loader.py have."""
+    (event_prediction.py)."""
     event = storage.get_event(event_key)
     if event is None:
         raise EventNotFoundError(f"No event found for {event_key}")

@@ -1,15 +1,11 @@
 """
-Unit tests for RUSHING-specific leader behavior -- the top-2-by-
+Unit tests for rushing-specific leader behavior -- the top-2-by-
 predicted-yards cap event_prediction.py enforces after scoring the full
 rushing candidate pool (RB + a scrambling QB, see live_features.
-_LEADER_POSITIONS). Split out of what used to be one large
-test_predict.py -- see test_predict_event_outcome.py's own history note,
-and test_predict_receiving_props.py/test_predict_leaders.py for this
-same mechanism's other category-specific and category-agnostic tests.
+_LEADER_POSITIONS).
 
 Calls event_prediction.predict_event directly, not through nfl_predict.
-lambda_handler -- see test_predict_event_outcome.py's own docstring for
-why.
+lambda_handler.
 """
 from unittest.mock import MagicMock, patch
 

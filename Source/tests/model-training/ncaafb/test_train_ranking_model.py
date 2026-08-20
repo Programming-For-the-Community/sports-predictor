@@ -1,8 +1,6 @@
 """
-Unit tests for the NCAAFB National Ranking training entrypoint -- a new
-model shape (team-week granularity) with no NFL equivalent to mirror.
-library.ml.backtest.run_backtest is mocked here, same boundary as every
-other training-entrypoint test in this project.
+Unit tests for the NCAAFB National Ranking training entrypoint (team-week
+granularity). library.ml.backtest.run_backtest is mocked here.
 """
 from unittest.mock import MagicMock, patch
 

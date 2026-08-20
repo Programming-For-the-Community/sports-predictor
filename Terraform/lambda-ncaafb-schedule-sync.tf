@@ -1,18 +1,16 @@
 # NCAAFB schedule-sync Lambda. Triggered directly by EventBridge Scheduler
-# once its own scheduler-ncaafb-schedule-sync.tf exists. Calls CFBD's
-# per-week /games endpoint across the current season in one invocation and
-# writes each week's results to S3 -- normalize's S3 trigger
+# (scheduler-ncaafb-schedule-sync.tf). Calls CFBD's per-week /games endpoint
+# across the current season in one invocation and writes each week's
+# results to S3; normalize's S3 trigger
 # (s3-raw-data-lake-notifications.tf) picks these up the same way daily
-# ingest's output does. Same role as schedule-sync mirrors lambda-nfl-
-# schedule-sync.tf's own reasoning: one call per week is a strict subset of
-# what ingest/normalize already need.
+# ingest's output does.
 #
 # Code is deployed by the ncaafb_data_pipeline workflow (via `aws lambda
-# update-function-code`) -- NOT by Terraform. Same placeholder-ZIP +
-# lifecycle.ignore_changes pattern as lambda-nfl-schedule-sync.tf.
+# update-function-code`), not by Terraform, using a placeholder ZIP with
+# lifecycle.ignore_changes.
 #
-# Uses the ingest key field, not the backfill key -- this runs against
-# production ingest's own call budget, same key as lambda-ncaafb-ingest.tf.
+# Uses the ingest key field, not the backfill key -- runs against
+# production ingest's own call budget.
 
 resource "aws_cloudwatch_log_group" "ncaafb_schedule_sync" {
   name              = "/aws/lambda/${var.project}-ncaafb-schedule-sync"
@@ -39,11 +37,8 @@ resource "aws_lambda_function" "ncaafb_schedule_sync" {
   role          = aws_iam_role.lambda_pipeline.arn
   runtime       = "python3.12"
   handler       = "handler.lambda_handler"
-  # CFBD's bulk per-week endpoint means far fewer calls than NFL's own
-  # per-week-scoreboard walk needs (one call per week vs. NFL's per-game
-  # calls) -- same generous ceiling as lambda-nfl-schedule-sync.tf anyway,
-  # since a season's worth of weeks plus retry/backoff still comfortably
-  # fits.
+  # A season's worth of weekly CFBD calls plus retry/backoff comfortably
+  # fits within this ceiling.
   timeout     = 600
   memory_size = 256
 

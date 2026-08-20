@@ -6,11 +6,8 @@ import 'package:front_end/core/widgets/conference_filter_field.dart';
 void main() {
   group('ConferenceFilterField', () {
     testWidgets('the clear button empties the displayed text, not just the caller\'s filter state', (tester) async {
-      // Regression: an earlier, fully-uncontrolled version only called
-      // onChanged('') from the clear button, which reset the caller's
-      // own filter state but left the field's own still-typed text
-      // visibly unchanged, since nothing had ever told the widget itself
-      // to clear.
+      // The clear button must clear the field's own visible text, not
+      // just call onChanged('') and leave stale text on screen.
       var value = 'SEC';
       await tester.pumpWidget(
         MaterialApp(

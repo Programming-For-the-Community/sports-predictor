@@ -9,12 +9,8 @@ const _prefsKey = 'cognito_tokens';
 const _lastActivityPrefsKey = 'last_activity_at';
 
 /// How long the app tolerates zero authenticated activity before forcing
-/// a fresh login -- independent of whether the refresh token itself
-/// (Terraform/cognito-app-client.tf's refresh_token_validity = 30 days)
-/// is still valid. Without this, staying silently signed in depends only
-/// on touching the app once every 30 days, not on any real usage cadence
-/// -- closing the window and coming back a week later would otherwise
-/// refresh right through, with no re-login ever required.
+/// a fresh login, independent of whether the refresh token itself is
+/// still valid.
 const inactivityTtl = Duration(minutes: 30);
 
 /// How often recordActivity actually writes -- see its own docstring.
@@ -29,8 +25,7 @@ class AuthInitial extends AuthState {}
 
 class AuthUnauthenticated extends AuthState {}
 
-/// Admin-created users land here on first login -- see
-/// CognitoNewPasswordRequired's own doc comment.
+/// Admin-created users land here on first login.
 class AuthNeedsNewPassword extends AuthState {
   AuthNeedsNewPassword(this.session, this.username);
   final String session;
@@ -63,10 +58,8 @@ class AuthRepository extends StateNotifier<AuthState> {
       return;
     }
 
-    // Checked before even attempting a refresh -- there's no point
-    // refreshing a session inactivityTtl is about to invalidate anyway,
-    // and this is the exact "closed the window, came back later" path
-    // inactivityTtl exists for.
+    // Checked before even attempting a refresh -- no point refreshing a
+    // session inactivityTtl is about to invalidate anyway.
     if (await _isInactive()) {
       await _clear();
       state = AuthUnauthenticated();
@@ -120,31 +113,25 @@ class AuthRepository extends StateNotifier<AuthState> {
   /// Called by ApiClient before every request -- refreshes proactively
   /// within ~60s of expiry rather than waiting for a 401. If the refresh
   /// token itself has expired or been revoked, transitions to
-  /// AuthUnauthenticated (same as _restoreSession's own failure path)
-  /// instead of leaving the caller to surface a raw exception on whatever
-  /// page happened to trigger it -- app_router's redirect already listens
-  /// to this state and bounces to /login as soon as it changes.
+  /// AuthUnauthenticated instead of leaving the caller to surface a raw
+  /// exception; app_router's redirect listens to this state and bounces to
+  /// /login as soon as it changes.
   ///
   /// Returns the ID token, not the access token -- API Gateway's
-  /// COGNITO_USER_POOLS authorizer only accepts access tokens for methods
-  /// with authorization_scopes configured (see Terraform/api-gateway-nfl-
-  /// predict.tf's aws_api_gateway_method resources -- none set any), and
-  /// falls back to expecting an ID token otherwise.
+  /// COGNITO_USER_POOLS authorizer expects an ID token for methods with no
+  /// authorization_scopes configured.
   ///
   /// forceRefresh skips the isNearExpiry check -- ApiClient's 401-retry
-  /// path needs this: a token can be rejected server-side (revoked, clock
-  /// skew, whatever) while still looking fresh by its own local expiresAt,
-  /// and resending that same not-actually-valid token on "retry" would
-  /// just fail identically.
+  /// path needs this: a token can be rejected server-side while still
+  /// looking fresh by its own local expiresAt.
   Future<String> getValidIdToken({bool forceRefresh = false}) async {
     final current = state;
     if (current is! AuthAuthenticated) {
       throw StateError('No authenticated session');
     }
-    // Every real call through here IS "using the site" -- checked before
-    // the normal near-expiry refresh below so a session that's merely
-    // idle-too-long gets bounced to a fresh login even when its token
-    // technically still has time left on the clock.
+    // Checked before the normal near-expiry refresh below so a session
+    // that's merely idle-too-long gets bounced to a fresh login even when
+    // its token technically still has time left on the clock.
     if (await _isInactive()) {
       await _clear();
       state = AuthUnauthenticated();
@@ -188,19 +175,13 @@ class AuthRepository extends StateNotifier<AuthState> {
   }
 
   /// Called by app.dart's app-shell pointer listener on any real user
-  /// interaction (tap, drag, scroll) -- this is what makes inactivityTtl
-  /// track actual usage instead of just API-call cadence. Without this,
-  /// passively reading one already-loaded page (nothing on it triggers a
-  /// new request) for longer than inactivityTtl force-logs-out someone
-  /// who never stopped using the site.
+  /// interaction (tap, drag, scroll) -- makes inactivityTtl track actual
+  /// usage instead of just API-call cadence.
   ///
   /// Throttled to once per _recordActivityThrottle, checked against the
-  /// same persisted timestamp _isInactive reads (not a separate in-memory
-  /// cache, which could drift from it) -- a drag/scroll gesture fires
-  /// pointer-move events many times a second, and none of that needs a
-  /// SharedPreferences write on anywhere near that cadence against a
-  /// 30-minute TTL. No-ops while unauthenticated -- there's no session's
-  /// inactivity clock to reset.
+  /// same persisted timestamp _isInactive reads, since a drag/scroll
+  /// gesture fires pointer-move events many times a second. No-ops while
+  /// unauthenticated.
   Future<void> recordActivity() async {
     if (state is! AuthAuthenticated) return;
     final prefs = await _prefsInstance;
@@ -209,10 +190,8 @@ class AuthRepository extends StateNotifier<AuthState> {
     await _touchActivity();
   }
 
-  /// False when no activity has ever been recorded (e.g. a session
-  /// persisted by a build before this existed) -- treated as active
-  /// rather than instantly expiring every existing signed-in user the
-  /// moment this ships.
+  /// False when no activity has ever been recorded -- treated as active
+  /// rather than instantly expiring the session.
   Future<bool> _isInactive() async {
     final prefs = await _prefsInstance;
     final raw = prefs.getString(_lastActivityPrefsKey);

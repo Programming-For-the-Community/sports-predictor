@@ -39,17 +39,11 @@ class ModelCardsPage extends ConsumerWidget {
   }
 }
 
-/// Rows of fixed-width cards, each row stretched (via IntrinsicHeight) so
-/// every card in that row matches the tallest one -- card height varies
-/// for real content reasons (the COMPARED AGAINST section only appears
-/// on cards with more than one recorded candidate, titles wrap to 1 or 2
-/// lines depending on the model name), so this evens them out visually
-/// without a fixed height that would risk clipping a taller card's
-/// content. A plain Wrap can't do this itself -- it has no concept of
-/// "everything in this row", which is exactly what IntrinsicHeight needs
-/// to stretch against. Rows are chunked here (via LayoutBuilder, so the
-/// column count adapts to how many 420-wide cards actually fit) rather
-/// than left to Wrap's own automatic flow.
+/// Cards are chunked into rows by available width (via LayoutBuilder),
+/// each row stretched via IntrinsicHeight so every card in it matches the
+/// tallest one. Card height varies with content (the COMPARED AGAINST
+/// section only appears on cards with more than one recorded candidate,
+/// titles wrap to 1 or 2 lines depending on the model name).
 class _ModelCardGrid extends StatelessWidget {
   const _ModelCardGrid({required this.models});
 

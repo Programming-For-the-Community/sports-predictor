@@ -3,27 +3,15 @@
 # either way the work is identical: run tests, then build only if they
 # pass, and upload the built site as an artifact.
 #
-# Build-only, same shape as nfl_ai_hosting.yml -- no deploy step here.
-# Deploying (syncing to S3 + invalidating CloudFront) is
-# frontend_sync_deploy.yml's job.
+# Build-only -- no deploy step here. Deploying (syncing to S3 +
+# invalidating CloudFront) is frontend_sync_deploy.yml's job.
 #
 # The build job reads its config (API URL, Cognito IDs) directly from
-# Terraform state via `terraform output`, rather than receiving them as
-# workflow_call inputs from a parent's `needs.infra.outputs.*`. That
-# pass-through was tried first and proved unreliable in practice across
-# several real runs even with verified-correct upstream state -- relaying
-# a value through two layers of reusable-workflow-call outputs
-# (frontend_deploy.yml -> tf_install.yml, and separately
-# frontend_deploy.yml -> this workflow) is a known flaky spot in GitHub
-# Actions. Reading Terraform state directly is the same one-hop read
-# tf_install.yml's own job already does successfully -- no relay, nothing
-# to propagate incorrectly. The tradeoff: this job needs AWS credentials
-# and the Terraform CLI, which it otherwise wouldn't -- accepted in
-# exchange for actually working.
+# Terraform state via `terraform output`, so it needs AWS credentials and
+# the Terraform CLI.
 #
 # No Dockerfile -- flutter build web runs directly on the runner via
-# subosito/flutter-action, the same way run_python_tests.yml installs
-# Python directly rather than containerizing test runs.
+# subosito/flutter-action.
 
 name: Frontend Hosting
 

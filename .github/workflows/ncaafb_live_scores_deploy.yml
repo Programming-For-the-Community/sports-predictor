@@ -1,12 +1,5 @@
 # Tests and deploys the NCAAFB live-scores Lambda -- GET /ncaafb/live-scores
-# plus the EventBridge-triggered cache refresh. Mirrors
-# nfl_live_scores_deploy.yml exactly -- see that file's own docstring for
-# why this is a separate reusable workflow rather than jobs inlined into
-# ncaafb_deploy.yml/app_deploy.yml directly.
-#
-# Function name is supplied by the caller from a Terraform output, with a
-# default so workflow_dispatch (manual, standalone run) still works
-# without needing that wiring -- same pattern as nfl_live_scores_deploy.yml.
+# plus the EventBridge-triggered cache refresh.
 
 name: NCAAFB Live Scores Deploy
 

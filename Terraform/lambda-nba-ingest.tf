@@ -1,20 +1,17 @@
 # NBA ingest Lambda. Triggered daily by the shared sfn-ingest-orchestrator.tf,
 # which invokes every active sport's own "${var.project}-<sport>-ingest"
-# function by naming convention -- no per-sport scheduler-nba-ingest.tf is
-# needed (unlike schedule-sync/live-scores below, which ARE invoked directly
-# by their own scheduler). Fetches the day's scoreboard + completed
-# box-scores from ESPN's basketball/nba endpoints and writes raw JSON to S3;
-# the normalize Lambda picks up from there via S3 event notification, same
-# as lambda-nfl-ingest.tf.
+# function by naming convention -- no per-sport scheduler file needed.
+# Fetches the day's scoreboard + completed box-scores from ESPN's
+# basketball/nba endpoints and writes raw JSON to S3; the normalize Lambda
+# picks up from there via S3 event notification.
 #
-# ESPN is keyless (see design/DATA_SOURCES.md's 2026-08-13 NBA source-switch
-# note -- nba_api was tried first and dropped: blocked by nba.com's bot
-# protection, a real risk against Lambda's own datacenter IPs). No
-# CFBD_API_KEY_SECRET_ARN/FIELD env vars, unlike lambda-ncaafb-ingest.tf.
+# ESPN is keyless, so this Lambda has no CFBD_API_KEY_SECRET_ARN/FIELD env
+# vars.
 #
 # Code is deployed by the nba_data_pipeline GitHub Actions workflow (via
-# `aws lambda update-function-code`) -- NOT by Terraform. Same placeholder-
-# ZIP + lifecycle.ignore_changes pattern as lambda-nfl-ingest.tf.
+# `aws lambda update-function-code`), not by Terraform -- the archive_file
+# below is a placeholder the workflow overwrites, and
+# lifecycle.ignore_changes keeps subsequent applies from reverting it.
 
 resource "aws_cloudwatch_log_group" "nba_ingest" {
   name              = "/aws/lambda/${var.project}-nba-ingest"

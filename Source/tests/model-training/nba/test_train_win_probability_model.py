@@ -3,11 +3,7 @@ Unit tests for the NBA win-probability training entrypoint.
 
 library.ml.backtest.run_backtest is mocked here -- these tests verify
 train_win_probability_model.py's own orchestration, not the tournament
-itself (see Source/tests/library/ml/test_backtest.py) or any real
-algorithm fitting (see Source/tests/library/ml/test_model_types.py). Same
-shape as tests/model-training/nfl's own equivalent, minus venue_city/
-venue_state (NBA's event_features.parquet has no such columns), plus the
-LightGBM candidate.
+itself or any real algorithm fitting.
 """
 from unittest.mock import MagicMock, patch
 

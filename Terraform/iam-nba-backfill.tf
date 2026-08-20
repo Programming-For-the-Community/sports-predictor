@@ -1,8 +1,7 @@
-# Mirrors iam-nfl-backfill.tf -- used as both the task execution role (ECR
-# pull, log writes) and the task role (the application code's own AWS
-# access) for Source/data-backfills/nba. Write-only on the raw data lake
-# and the four DynamoDB tables. No secretsmanager grant -- ESPN is keyless,
-# unlike iam-ncaafb-backfill.tf's CFBD key read.
+# Used as both the task execution role (ECR pull, log writes) and the
+# task role (the application code's own AWS access) for
+# Source/data-backfills/nba. Write-only on the raw data lake and the four
+# DynamoDB tables. No secretsmanager grant -- ESPN is keyless.
 data "aws_iam_policy_document" "nba_backfill_assume" {
   statement {
     actions = ["sts:AssumeRole"]
@@ -35,9 +34,10 @@ data "aws_iam_policy_document" "nba_backfill_permissions" {
     resources = ["${aws_s3_bucket.raw_data_lake.arn}/nba/*"]
   }
 
-  # Same HeadObject/ListBucket rationale as iam-nfl-backfill.tf's own
-  # comment -- scoped to the nba/ prefix so this role still can't
-  # enumerate other sports' data in the same bucket.
+  # HeadObject is authorized by s3:GetObject above, but without
+  # s3:ListBucket too, S3 can't tell "object doesn't exist" from "not
+  # allowed to know" and returns 403 instead of 404. Scoped to the nba/
+  # prefix so this role still can't enumerate other sports' data.
   statement {
     sid       = "ListRawDataLakeNbaPrefix"
     actions   = ["s3:ListBucket"]

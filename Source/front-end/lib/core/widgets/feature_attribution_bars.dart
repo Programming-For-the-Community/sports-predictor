@@ -4,13 +4,9 @@ import '../models/model_card.dart';
 import '../theme/app_colors.dart';
 import '../theme/app_text_styles.dart';
 
-/// Adapted from design/FRONTEND_STYLE.md's "Feature attribution" component.
-/// That spec describes SIGNED per-prediction contributions (diverging
-/// left/right from a centerline); what the model card actually carries is
+/// design/FRONTEND_STYLE.md's "Feature attribution" component. Renders
 /// unsigned training-time gain (see Source/model-training/nfl/model_common.py,
-/// XGBoost's get_score(importance_type="gain")) -- there's no sign to
-/// diverge on. This keeps the same cyan-fill visual language as a ranked
-/// bar chart instead of fabricating a sign that isn't in the data.
+/// XGBoost's get_score(importance_type="gain")) as ranked cyan-fill bars.
 class FeatureAttributionBars extends StatelessWidget {
   const FeatureAttributionBars({super.key, required this.features});
 
@@ -43,14 +39,10 @@ class _FeatureBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // Flex-based, not fixed pixel widths -- a fixed SizedBox wide enough
-    // for a long feature name (e.g. "away_coach_season_win_pct") either
-    // overflows a narrow phone-width card or forces the card wider than
-    // it should ever need to be just to fit that one row. Expanded
-    // shares whatever width the card actually has proportionally, so
-    // this scales down gracefully on a small screen instead of doing
-    // either of those -- the Tooltip is what covers a name that still
-    // doesn't fully fit at any given width, not a wider fixed column.
+    // Flex-based so column widths scale with the card's own width instead
+    // of overflowing a narrow card for a long feature name (e.g.
+    // "away_coach_season_win_pct"); the Tooltip covers a name still
+    // truncated at any given width.
     return Row(
       children: [
         Expanded(

@@ -1,7 +1,6 @@
 # Dedicated, minimal role -- season-gate does pure date math on its event
-# payload only, no AWS API calls of its own (see Source/aws-lambdas/shared/
-# season-gate/handler.py), so CloudWatch Logs via the AWS-managed basic
-# execution policy is the entire permission set it needs.
+# payload only, no AWS API calls of its own, so CloudWatch Logs via the
+# AWS-managed basic execution policy is the entire permission set it needs.
 data "aws_iam_policy_document" "lambda_season_gate_assume" {
   statement {
     actions = ["sts:AssumeRole"]

@@ -1,11 +1,9 @@
 """
 Unit tests for the Season tab's Monte Carlo simulation (regular season +
 play-in + playoffs) and the NBA Cup (in-season tournament) simulation. No
-AWS involved -- every function here is pure, same testability philosophy
-as tests/library/features/test_nba.py. Private helpers (_seed_conference,
-_simulate_play_in, _simulate_bracket) are tested directly with small
-custom setups, matching how this repo already tests NFL's own equivalents
-directly rather than only through simulate_season.
+AWS involved -- every function here is pure. Private helpers
+(_seed_conference, _simulate_play_in, _simulate_bracket) are tested
+directly with small custom setups, not only through simulate_season.
 """
 import random
 
@@ -448,10 +446,10 @@ class TestProjectCupKnockoutBracket:
         assert result["champion"] == result["championship"]["predicted_winner"]
 
     def test_every_matchup_has_a_status_field(self):
-        # Regression for a real production crash (2026-08-19): every
-        # matchup here comes straight from project_matchup, which has no
-        # "status" key at all -- the frontend's BracketMatchup.fromJson
-        # requires one on every matchup regardless of bracket type.
+        # Every matchup here comes straight from project_matchup, which
+        # has no "status" key at all -- the frontend's
+        # BracketMatchup.fromJson requires one on every matchup
+        # regardless of bracket type.
         result = season_simulation.project_cup_knockout_bracket(2026, {}, {}, {})
 
         for rounds in result["conferences"].values():

@@ -1,9 +1,7 @@
 """
-NCAAFB game score model training -- the CFBD-sourced equivalent of
-Source/model-training/nfl/train_score_model.py. One model per score
-target: SCORE_TARGET=margin/home_score/away_score, same event_features.
-parquet as train_win_probability_model.py -- see the NFL script's own
-docstring for why one script covers all three targets.
+NCAAFB game score model training. One model per score target:
+SCORE_TARGET=margin/home_score/away_score, reading the same
+event_features.parquet as train_win_probability_model.py.
 
 Required environment variables:
     MODEL_ARTIFACTS_BUCKET_NAME

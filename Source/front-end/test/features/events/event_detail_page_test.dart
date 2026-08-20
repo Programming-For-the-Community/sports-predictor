@@ -161,9 +161,9 @@ void main() {
 
     expect(find.text('PLAYER LEADERS -- LIVE'), findsOneWidget);
     expect(find.text('PLAYER LEADERS'), findsNothing);
-    // Predicted 250 still shown alongside the live-so-far 140 -- same
-    // "actual X (pred Y)" row TeamLeadersComparisonPanel already renders
-    // for a completed event, unmodified.
+    // Predicted 250 shown alongside the live-so-far 140, the same
+    // "actual X (pred Y)" row TeamLeadersComparisonPanel renders for a
+    // completed event.
     expect(find.textContaining('140'), findsOneWidget);
     expect(find.textContaining('pred 250'), findsOneWidget);
   });
@@ -194,14 +194,12 @@ void main() {
           eventsListProvider.overrideWith((ref, query) async => query.status == 'scheduled' ? [_scheduledEvent('2026-09-14T17:00:00Z')] : []),
           eventPredictionProvider.overrideWith((ref, query) async {
             predictionCalls++;
-            // Resolves on the 3rd attempt -- past what a single retry
-            // (see PredictionComputingRetry's own doc comment on why it
-            // must reschedule itself, not just retry once) would cover.
-            // pumpAndSettle below fast-forwards through pending timers on
-            // its own, so this only asserts the end state: with the old
-            // single-shot-timer bug, the 2nd attempt's failure would never
-            // schedule a 3rd, and this would settle stuck on "Computing
-            // prediction..." at predictionCalls == 2 instead.
+            // Resolves on the 3rd attempt, past what a single retry would
+            // cover (see PredictionComputingRetry's own doc comment).
+            // pumpAndSettle fast-forwards through pending timers, so this
+            // only asserts the end state: stuck at predictionCalls == 2
+            // would mean the retry failed to reschedule after a failed
+            // attempt.
             if (predictionCalls < 3) throw const PredictionComputingException(1);
             return _prediction;
           }),

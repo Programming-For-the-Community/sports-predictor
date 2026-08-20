@@ -2,18 +2,12 @@
 NBA game score model training -- one model per score target:
 SCORE_TARGET=margin for the game's final margin (home score minus away
 score), SCORE_TARGET=home_score or SCORE_TARGET=away_score for each
-team's actual final score. Reads the exact same event_features.parquet as
-train_win_probability_model.py -- same feature columns, same
-chronological split -- and derives whichever label SCORE_TARGET asks for
-from the already-present label_home_score/label_away_score columns at
-training time. Same shape as
-Source/model-training/nfl/train_score_model.py -- see its own docstring
-for the harness-level reasoning, identical here (deliberately one script
-for all three targets, run via the SCORE_TARGET environment variable at
-`aws ecs run-task` time -- see Terraform/ecs-task-nba-train-score-model.tf).
+team's actual final score. Reads event_features.parquet and derives
+whichever label SCORE_TARGET asks for from the label_home_score/
+label_away_score columns at training time.
 
-CANDIDATES includes LightGBMRegressorAdapter -- see
-train_win_probability_model.py's own comment for why.
+One script covers all three targets; run a given target via the
+SCORE_TARGET environment variable at `aws ecs run-task` time.
 
 Required environment variables:
     MODEL_ARTIFACTS_BUCKET_NAME
@@ -27,8 +21,7 @@ import logging
 import os
 
 try:
-    # See train_win_probability_model.py's own comment -- must run before
-    # any sklearn import (including the one directly below).
+    # Must run before any sklearn import (including the one directly below).
     from sklearnex import patch_sklearn
     patch_sklearn()
 except ImportError:
@@ -96,14 +89,13 @@ def _feature_columns(df: pd.DataFrame) -> list[str]:
 
 def _column_or_mean(df: pd.DataFrame, column: str) -> pd.Series:
     """Fills a team with no rolling history yet with the column's own
-    mean across these rows, same reasoning as NFL's own train_score_model.py."""
+    mean across these rows."""
     return df[column].fillna(df[column].mean())
 
 
 def _naive_prediction(df: pd.DataFrame, score_target: str) -> pd.Series:
-    """A trivial baseline built entirely from each team's own existing
-    rolling scoring/allowing averages -- same shape as NFL's own
-    train_score_model.py."""
+    """A trivial baseline built from each team's own rolling
+    scoring/allowing averages, no model."""
     home_scored = _column_or_mean(df, "home_avg_points_scored")
     home_allowed = _column_or_mean(df, "home_avg_points_allowed")
     away_scored = _column_or_mean(df, "away_avg_points_scored")

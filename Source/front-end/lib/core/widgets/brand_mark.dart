@@ -4,12 +4,10 @@ import '../theme/app_colors.dart';
 
 /// design/FRONTEND_STYLE.md's top-bar spec: "gradient brandMark tile (34px,
 /// BorderRadius.circular(10))". Reused standalone on the login page at a
-/// larger size for the same brand mark. Three ascending bars (trend/
-/// prediction) in white, scaled proportionally to `size` -- same glyph
-/// and gradient as the app's own favicon/PWA icons (see
-/// front-end/web/icons/ and the generation script referenced in their
-/// own commit), so the browser tab and the in-app header show the same
-/// mark, not two different ones.
+/// larger size. Three ascending bars (trend/prediction) in white, scaled
+/// proportionally to `size` -- matches the app's favicon/PWA icons (see
+/// front-end/web/icons/) so the browser tab and in-app header show the
+/// same mark.
 class BrandMark extends StatelessWidget {
   const BrandMark({super.key, this.size = 34});
 

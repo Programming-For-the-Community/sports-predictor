@@ -1,21 +1,18 @@
-# NFL inference Lambda. Never triggered by API Gateway directly -- runs
-# only in the background (EventBridge Scheduler or an async invoke from
-# nfl_predict_read). Reads live feature context from DynamoDB and the
-# current promoted model, computes a prediction, and audits it to the
+# NFL inference Lambda. Not triggered by API Gateway directly -- runs in
+# the background via EventBridge Scheduler or an async invoke from
+# nfl_predict_read. Reads live feature context from DynamoDB and the
+# current promoted model, computes a prediction, and writes it to the
 # predictions table. See Source/aws-lambdas/nfl/predict/handler.py.
 #
-# Container image, not the zip packaging ingest/normalize use -- xgboost
-# pulls in numpy and scipy, which alone leave almost no headroom under
-# Lambda's 250MB unzipped zip limit; container Lambdas get a 10GB image
-# limit instead. Code is built and pushed by the nfl_ai_hosting GitHub
-# Actions workflow, not Terraform. image_uri references the shared ECR
-# repo's floating "-latest" tag, so the URI string itself never changes
-# between deploys.
+# Container image -- xgboost pulls in numpy/scipy, which leave no headroom
+# under Lambda's zip size limit; container Lambdas get a 10GB image limit
+# instead. Built and pushed by the nfl_ai_hosting GitHub Actions workflow,
+# not Terraform. image_uri references the shared ECR repo's floating
+# "-latest" tag, so the URI string itself never changes between deploys.
 #
-# VPC-attached (unlike ingest/normalize) -- this is the one Lambda
-# reachable from outside the account, so it stays inside the private
-# subnets on the dedicated aws_security_group.lambda_inference
-# (security-groups.tf), reaching DynamoDB/S3 only via the VPC Gateway
+# VPC-attached -- reachable from outside the account, stays inside the
+# private subnets on aws_security_group.lambda_inference
+# (security-groups.tf), reaching DynamoDB/S3 via the VPC Gateway
 # Endpoints in vpc-endpoints.tf.
 resource "aws_cloudwatch_log_group" "nfl_predict" {
   name              = "/aws/lambda/${var.project}-nfl-predict"
@@ -33,21 +30,14 @@ resource "aws_lambda_function" "nfl_predict" {
   role          = aws_iam_role.lambda_inference.arn
   package_type  = "Image"
   image_uri     = "${var.ecr_repo_url}:nfl-predict-latest"
-  # Graviton -- better price/performance for inference than x86_64. Only
-  # this Lambda (the one that actually computes predictions); every other
-  # Lambda in this project stays on the default x86_64. The image itself
-  # is built for arm64 by nfl_ai_hosting.yml's docker_build_push.yml call
-  # (platform: linux/arm64) -- an architecture mismatch between this
-  # setting and the pushed image's own platform fails at invoke time, not
-  # at `terraform apply`.
+  # Graviton (arm64) -- better price/performance for inference. Image is
+  # built for arm64 by nfl_ai_hosting.yml's docker_build_push (platform:
+  # linux/arm64); a mismatch between this setting and the pushed image's
+  # platform fails at invoke time, not at `terraform apply`.
   architectures = ["arm64"]
-  # Not on the API Gateway request path (fired async -- see this file's
-  # own event-source wiring), so this only bounds how long a scheduled/
-  # background season-projection run gets. Raised from 300s -- NBA's own
-  # equivalent (identical shape, play-in + bracket + cup adds more work)
-  # needed a real 600s run to finish, confirmed by the user manually
-  # bumping it to unblock themselves; matched here for consistency even
-  # though NFL hasn't itself been observed needing more than 300s.
+  # Not on the API Gateway request path (invoked async), so this only
+  # bounds how long a scheduled/background prediction or season-projection
+  # run gets.
   timeout = 600
   # Lambda CPU scales with memory (roughly linear up to ~1,769MB = 1
   # vCPU) -- sized for import/init CPU (xgboost/scikit-learn/pandas), not

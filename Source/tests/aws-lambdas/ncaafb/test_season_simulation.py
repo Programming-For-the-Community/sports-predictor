@@ -1,12 +1,9 @@
 """
 Unit tests for the NCAAFB Season tab's Monte Carlo simulation and
-leaderboard projection. No AWS involved -- every function here is pure,
-same testability philosophy as tests/library/features/test_ncaafb.py.
+leaderboard projection. No AWS involved -- every function here is pure.
 Private helpers (_group_by_conference, _conference_champion,
 _select_cfp_field, _simulate_cfp_bracket) are tested directly with small
-custom conference setups, same convention
-tests/aws-lambdas/nfl/test_season_simulation.py's own docstring
-describes for its own private helpers.
+custom conference setups.
 """
 import random
 
@@ -254,10 +251,9 @@ class TestSimulateSeason:
         assert first == second
 
     def test_a_game_against_an_untracked_team_is_skipped_not_a_crash(self):
-        # "fcs" has no entry in TEAM_CONFERENCE -- see season_projection.
-        # _season_standings_inputs' own docstring for why a remaining_games
-        # pairing like this should never reach here in production, but
-        # this is the defensive guard in case one does.
+        # "fcs" has no entry in TEAM_CONFERENCE -- a remaining_games
+        # pairing like this should never reach here in production; this
+        # is the defensive guard in case one does.
         current_wins = {self.STRONG_TEAM: 5}
         current_losses = {self.STRONG_TEAM: 0}
         remaining_games = [(self.STRONG_TEAM, "fcs")]

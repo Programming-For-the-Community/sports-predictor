@@ -13,9 +13,7 @@ Key routing (based on S3 key pattern):
     nfl/teams.json                             -> team entities
     nfl/scoreboard/{season}/{type}/{week}.json -> event records
     nfl/boxscore/{season}/{event_id}.json      -> player stats, player entities, team stats
-    nfl/roster/{team_id}.json                  -> player entities (team_id correction --
-                                                   see aws-lambdas/nfl/ingest/handler.py's own
-                                                   docstring for why this is fetched daily)
+    nfl/roster/{team_id}.json                  -> player entities (team_id correction)
 """
 import json
 import logging

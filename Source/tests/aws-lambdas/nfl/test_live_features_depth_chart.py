@@ -5,8 +5,6 @@ _healthy_athletes_across_slots) -- the pure functions
 build_live_event_features/build_live_event_leader_candidates use to turn
 a raw filtered depth chart plus an injuries list into ranked, healthy
 candidate ids. No FeatureStorage involved -- these operate on plain dicts.
-Split out of what used to be one large test_live_features.py -- see
-test_live_features_event.py's own history note.
 """
 import live_features
 

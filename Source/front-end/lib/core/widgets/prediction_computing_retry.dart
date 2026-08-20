@@ -13,14 +13,12 @@ import '../theme/app_text_styles.dart';
 /// server-side on the request that surfaced this, so all this does is
 /// wait `retryAfterSeconds` then invalidate eventPredictionProvider to
 /// pick up the now-cached result. Reschedules on every rebuild
-/// (didUpdateWidget), not just once in initState -- if the compute is
-/// still running when a retry lands, the caller's `.when()` renders this
-/// widget again with a fresh PredictionComputingException, and this keeps
-/// counting down from there rather than going quiet after one attempt.
-/// Doesn't re-trigger the compute itself on each retry -- a single miss
-/// only ever starts one background compute server-side (see handler.py's
-/// _trigger_refresh's claim_in_progress guard), so repeated retries here
-/// are just re-reading the same in-progress cache entry until it resolves.
+/// (didUpdateWidget), not just once in initState, so it keeps counting
+/// down from a fresh PredictionComputingException if the compute is still
+/// running when a retry lands. Doesn't re-trigger the compute itself on
+/// each retry -- a single miss only ever starts one background compute
+/// server-side, so repeated retries here are just re-reading the same
+/// in-progress cache entry until it resolves.
 class PredictionComputingRetry extends ConsumerStatefulWidget {
   const PredictionComputingRetry({
     super.key,
@@ -60,11 +58,9 @@ class _PredictionComputingRetryState extends ConsumerState<PredictionComputingRe
 
   // +0-40% jitter on top of the server's own retryAfterSeconds -- every
   // card on a page whose caches went stale/missing at the same moment
-  // (e.g. a model promotion) otherwise gets the exact same delay and
-  // re-requests in the same tick, over and over, every cycle. That
-  // synchronized fan-out is what actually produced a real batch of
-  // API Gateway 429s (see api-gateway-nfl-predict.tf's own note) --
-  // jitter spreads retries out instead of recreating the burst.
+  // otherwise gets the exact same delay and re-requests in the same tick,
+  // over and over. Jitter spreads retries out instead of a synchronized
+  // burst.
   void _scheduleRetry() {
     _retryTimer?.cancel();
     final baseMs = widget.retryAfterSeconds * 1000;

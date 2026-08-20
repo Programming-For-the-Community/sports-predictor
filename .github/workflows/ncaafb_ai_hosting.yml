@@ -1,13 +1,5 @@
-# Builds, tests, and pushes the NCAAFB AI hosting/inference image. Runs
-# standalone (workflow_dispatch) or called from ncaafb_deploy.yml
-# (workflow_call) -- mirrors nfl_ai_hosting.yml's own shape and reasoning
-# exactly (see that file's own comment for the full build-before-infra,
-# deploy-after-infra ordering rationale).
-#
-# Container image, not the zip packaging ingest/normalize/schedule-sync
-# use (see python_lambda_build.yml) -- same xgboost/numpy/scipy size
-# reasoning as nfl_ai_hosting.yml's own comment. See
-# Source/aws-lambdas/ncaafb/predict/Dockerfile.
+# Builds, tests, and pushes the NCAAFB AI hosting/inference container image
+# (Source/aws-lambdas/ncaafb/predict/Dockerfile).
 
 name: NCAAFB AI Hosting
 
@@ -38,11 +30,7 @@ jobs:
         Source/tests/aws-lambdas/ncaafb/test_predict_handler.py
         Source/tests/aws-lambdas/ncaafb/test_season_simulation.py
         Source/tests/aws-lambdas/ncaafb/test_season_projection.py
-      # Both requirements files -- requirements-nodeps.txt (xgboost, only
-      # ever installed --no-deps in the real Dockerfile build to dodge its
-      # nvidia-nccl-cu12 GPU dependency) still needs to be installed HERE
-      # for xgboost itself to be importable at all in this test job. Same
-      # reasoning as nfl_ai_hosting.yml's own identical comment.
+      # Both requirements files are installed so xgboost is importable in this test job.
       requirements_files: 'Source/aws-lambdas/ncaafb/predict/requirements.txt Source/aws-lambdas/ncaafb/predict/requirements-nodeps.txt'
 
   set-versions:
@@ -64,7 +52,5 @@ jobs:
       docker_context: 'Source'
       image_name: 'ncaafb-predict'
       image_version: ${{ needs.set-versions.outputs.predict_version }}
-      # arm64 (Graviton) -- matches aws_lambda_function.ncaafb_predict's
-      # own architectures = ["arm64"] (Terraform/lambda-ncaafb-predict.tf).
-      # Same reasoning as nfl_ai_hosting.yml's own identical setting.
+      # Matches the ncaafb-predict Lambda's arm64 architecture.
       platform: 'linux/arm64'

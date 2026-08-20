@@ -1,34 +1,18 @@
 """
-NFL schedule-sync Lambda. Triggered directly by EventBridge Scheduler --
-see Terraform/scheduler-nfl-schedule-sync.tf. In ONE invocation, walks
-every week of the current NFL season (regular season 1-18, postseason
-1-5) and writes each week's scoreboard to S3 under the exact same
-nfl/scoreboard/{season}/{type}/{week}.json key ingest/handler.py already
-uses -- the existing normalize Lambda's S3 trigger picks these up and
-upserts events into DynamoDB automatically, same as daily ingest, no new
-normalize code needed.
+NFL schedule-sync Lambda. In one invocation, walks every week of the
+current NFL season (regular season 1-18, postseason 1-5) and writes each
+week's scoreboard to S3 under the same
+nfl/scoreboard/{season}/{type}/{week}.json key ingest/handler.py uses --
+the existing normalize Lambda's S3 trigger picks these up and upserts
+events into DynamoDB automatically.
 
-Exists because daily ingest (aws-lambdas/nfl/ingest/handler.py) only ever
-fetches ONE week per run (whichever week "most recent Sunday" auto-
-detects) -- nothing seeded future weeks ahead of time, so
-Source/aws-lambdas/nfl/predict/handler.py's season simulation
-(_season_standings_inputs' remaining_games) and the frontend's upcoming-
-events list (library.serving.nfl_reads._next_week_events) had nothing to
-look ahead into.
+Does not call ingest/handler.py's enrichment for coach/injury data, and
+does not fetch box scores -- both are meaningless months ahead of a game
+that hasn't been played. Does attach depth charts
+(library.storage.depth_chart_cache).
 
-Deliberately does NOT call ingest/handler.py or its _enrich_events for
-coach/injury data, and does not fetch box scores -- both are meaningless
-months ahead of a game that hasn't been played. Daily ingest remains the
-ONLY source of coach/injury freshness and of box-score fetches.
-
-Does attach depth charts (library.storage.depth_chart_cache) -- position
-assignments don't need daily refreshing the way injuries do.
-
-ONE shared NFLClient for the whole run, not a separate client per week --
-every one of this run's ~23 requests is paced by the SAME RateLimiter
-instance, the same guarantee data-backfills/nfl/backfill.py's own
-season-wide sweep relies on, so nothing here can burst past ESPN's rate
-limit regardless of how many weeks are being synced.
+Uses one shared NFLClient for the whole run so every request is paced
+by the same RateLimiter instance.
 """
 import json
 import logging
@@ -45,14 +29,9 @@ logger = logging.getLogger("nfl-schedule-sync")
 
 RAW_BUCKET = os.environ["RAW_BUCKET_NAME"]
 
-# Mirrors data-backfills/nfl/backfill.py's REGULAR_SEASON_WEEKS/
-# POSTSEASON_WEEKS/SEASON_TYPES -- same NFL structural fact, duplicated
-# rather than imported since this is a separate Lambda deployment package
-# (same reasoning PLAYER_PROP_STATS's own duplication comment in
-# predict/handler.py documents). Looping through week 18 is harmless for
-# pre-2021 seasons (only 17 weeks existed then) -- ESPN just returns an
-# empty events list for that week. Preseason (season_type 1) deliberately
-# absent, matching ingest/handler.py's own PRESEASON_TYPE skip.
+# Looping through week 18 is harmless for pre-2021 seasons (only 17 weeks
+# existed then) -- ESPN just returns an empty events list for that week.
+# Preseason (season_type 1) is deliberately absent.
 REGULAR_SEASON_WEEKS = range(1, 19)
 POSTSEASON_WEEKS = range(1, 6)
 SEASON_TYPES = {"regular": 2, "postseason": 3}
@@ -64,10 +43,7 @@ def _current_nfl_season(today: date | None = None) -> int:
     """The NFL season year for `today`: Sep-Dec resolves to this year (the
     season in progress), Jan-Feb resolves to last year (still finishing
     that season's playoffs -- the Super Bowl is in February), and Mar-Aug
-    resolves to this year (the upcoming, not-yet-started season -- this
-    is what lets an off-season run seed next season's schedule before
-    Week 1 has even been played). Only used when the schedule's input
-    doesn't override `season` explicitly."""
+    resolves to this year (the upcoming, not-yet-started season)."""
     today = today or date.today()
     return today.year if today.month >= 3 else today.year - 1
 

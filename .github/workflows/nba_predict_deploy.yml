@@ -1,8 +1,7 @@
-# Points the nba-predict Lambda at an already-pushed image. Mirrors
-# nfl_predict_deploy.yml exactly -- split out of nba_ai_hosting.yml so
-# build (no infra dependency) and deploy (needs the Lambda function to
-# already exist) can run on opposite sides of `terraform apply` in
-# nba_deploy.yml.
+# Points the nba-predict Lambda at an already-pushed image. Split out of
+# nba_ai_hosting.yml so build (no infra dependency) and deploy (needs the
+# Lambda function to already exist) can run on opposite sides of
+# `terraform apply` in nba_deploy.yml.
 #
 # Runs standalone (workflow_dispatch, defaulting to whatever is currently
 # tagged nba-predict-latest) or called from nba_deploy.yml with the exact

@@ -1,27 +1,15 @@
 """
-Loads a promoted model artifact (see library.ml.backtest.run_backtest,
-which is what actually decides which version/algorithm gets promoted) for
-live inference, and scores one feature row against it. Reads the same
-current.json pointer and model_card.json layout the training scripts
-write -- library.storage.model_artifacts is the shared, sport-agnostic
-key-naming module both sides already depend on, so no duplicated key
-convention exists between training and serving.
-
-Byte-for-byte identical to Source/aws-lambdas/nfl/predict/model_loader.py
--- every function here already takes `sport` as a parameter, so there was
-nothing NFL-specific to change. Duplicated rather than shared, same
-per-Lambda-deployment-package convention this project already uses
-throughout (each Lambda is its own zip/image -- see
-aws-lambdas/ncaafb/schedule-sync/handler.py's own docstring for why a
-shared module has to live under library/ instead).
+Loads a promoted model artifact for live inference, and scores one
+feature row against it. Reads the same current.json pointer and
+model_card.json layout the training scripts write --
+library.storage.model_artifacts is the shared, sport-agnostic
+key-naming module both sides already depend on.
 
 Dispatches on model_card["algorithm"] through library.ml.model_types.
-ADAPTERS -- deliberately NOT hardcoded to XGBoost, since run_backtest lets
-several algorithms compete for the same target and promotes whichever
-wins, so the currently-promoted algorithm for any given model_name can
-change from one retrain to the next. See this Lambda's own
-requirements.txt for the scikit-learn/joblib/pandas this pulls in on top
-of xgboost as a result.
+ADAPTERS -- not hardcoded to XGBoost, since run_backtest lets several
+algorithms compete for the same target and promotes whichever wins, so
+the currently-promoted algorithm for any given model_name can change
+from one retrain to the next.
 """
 import time
 
@@ -33,18 +21,11 @@ from library.storage.model_artifacts import current_version_key, model_artifact_
 MODEL_CARD_FILENAME = "model_card.json"
 
 # Module-level, not per-request -- a Lambda execution environment reuses
-# this module's state across every invocation it stays warm for (AWS's
-# own documented behavior, not something this code has to opt into), so
-# a plain dict here means one promoted model gets fetched from S3 once
-# per warm container instead of once per request. GameRow's own docstring
-# (Source/front-end/lib/core/widgets/game_row.dart) already notes the
-# upcoming-games list fires one prediction request per visible row
-# (~16/week) -- each of those was independently re-fetching all four
-# models (win-probability, margin, home-score, away-score) from scratch
-# before this cache existed. Keyed by (sport, model_name); TTL'd rather
-# than cached forever so a newly-promoted model (weekly retrain cadence)
-# doesn't stay stale for a container's whole potentially-hours-long warm
-# lifetime under sustained traffic.
+# this module's state across every invocation it stays warm for, so a
+# plain dict here means one promoted model gets fetched from S3 once per
+# warm container instead of once per request. Keyed by (sport,
+# model_name); TTL'd rather than cached forever so a newly-promoted
+# model doesn't stay stale for a container's whole warm lifetime.
 _MODEL_CACHE_TTL_SECONDS = 300
 _model_cache: dict[tuple[str, str], tuple[float, tuple]] = {}
 

@@ -1,12 +1,10 @@
 """
-NCAAFB player-prop model training -- the CFBD-sourced equivalent of
-Source/model-training/nfl/train_player_prop_model.py. One model per
-target stat (TARGET_STAT=passing_yards, rushing_yards, etc. -- the same
-7 stats as NFL, see Terraform/dynamodb-sport-registry.tf's
-ncaafb_player_prop_stats). Reads player_features.parquet (written by
+NCAAFB player-prop model training. One model per target stat
+(TARGET_STAT=passing_yards, rushing_yards, etc. -- see
+Terraform/dynamodb-sport-registry.tf's ncaafb_player_prop_stats). Reads
+player_features.parquet (written by
 Source/feature-engineering/ncaafb/build_dataset.py's build_player_dataset)
-from S3 -- see the NFL script's own docstring for the filtering/training
-mechanics, which this mirrors exactly.
+from S3.
 
 Required environment variables:
     MODEL_ARTIFACTS_BUCKET_NAME
@@ -55,13 +53,9 @@ MIN_PRIOR_GAMES_WITH_STAT = 2
 MIN_AVG_FRACTION_OF_MEDIAN = 0.35
 MIN_NON_NULL_FRACTION = 0.05
 
-# CFBD's own box-score category names (confirmed live: passing, rushing,
-# receiving, fumbles, defensive, kicking, punting -- no separate bare
-# "interceptions" category the way ESPN/NFL has one, so DEFENSIVE_
-# CATEGORIES here is just {"defensive"}, not the two-entry set NFL's own
-# script needs). "fumbles"/"kicking"/"punting" are deliberately in
-# neither set, same reasoning as NFL's own docstring -- left to
-# MIN_NON_NULL_FRACTION to decide their fate.
+# CFBD's box-score categories: passing, rushing, receiving, fumbles,
+# defensive, kicking, punting. "fumbles"/"kicking"/"punting" are in
+# neither set here, left to MIN_NON_NULL_FRACTION to decide their fate.
 OFFENSIVE_CATEGORIES = {"passing", "rushing", "receiving"}
 DEFENSIVE_CATEGORIES = {"defensive"}
 

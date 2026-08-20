@@ -1,20 +1,16 @@
-# NFL live-score cache Lambda. Two triggers, one function -- see
-# Source/aws-lambdas/nfl/live-scores/handler.py's own docstring:
+# NFL live-score cache Lambda. Two triggers, one function:
 #   - scheduler-nfl-live-scores.tf invokes it every 60s to refresh the
 #     cache (LiveScoreRefresh detail-type).
 #   - api-gateway-nfl-live-scores.tf routes GET /nfl/live-scores to it.
 #
-# Zip-packaged like ingest/normalize/predict-read, not a container image --
-# no ML dependency footprint here at all (see handler.py's own docstring
-# for why this isn't just folded into ingest or predict-read). Code is
-# deployed by the nfl_live_scores_deploy GitHub Actions workflow (via `aws
-# lambda update-function-code`) -- NOT by Terraform. The placeholder ZIP
-# below satisfies Terraform's requirement that a Lambda function have code
-# at creation time. lifecycle.ignore_changes ensures a subsequent
-# `terraform apply` never reverts CI-deployed code back to the placeholder.
+# Zip-packaged, not a container image. Code is deployed by the
+# nfl_live_scores_deploy GitHub Actions workflow (via `aws lambda
+# update-function-code`), not by Terraform. The placeholder ZIP below
+# satisfies Terraform's requirement that a Lambda function have code at
+# creation time; lifecycle.ignore_changes keeps `terraform apply` from
+# reverting CI-deployed code back to the placeholder.
 #
-# Not VPC-attached -- needs direct internet access to reach ESPN, same as
-# ingest/schedule-sync.
+# Not VPC-attached -- needs direct internet access to reach ESPN.
 
 resource "aws_cloudwatch_log_group" "nfl_live_scores" {
   name              = "/aws/lambda/${var.project}-nfl-live-scores"
@@ -42,12 +38,9 @@ resource "aws_lambda_function" "nfl_live_scores" {
   runtime       = "python3.12"
   handler       = "handler.lambda_handler"
   # Covers the LiveScoreRefresh trigger's worst case: one scoreboard call
-  # plus a per-event boxscore fetch for every event ESPN currently reports
-  # as live (parallelized, see live_scores.py's BOXSCORE_MAX_WORKERS) on a
-  # Sunday with several games live at once. GET /nfl/live-scores (the other
-  # trigger this same function serves) never approaches this -- it's just
-  # an S3 read, so this headroom doesn't risk API Gateway's own 29s
-  # integration ceiling on that path.
+  # plus a per-event boxscore fetch for every currently-live event,
+  # parallelized (live_scores.py's BOXSCORE_MAX_WORKERS). The GET
+  # /nfl/live-scores trigger is just an S3 read and never approaches this.
   timeout     = 45
   memory_size = 256
 
@@ -60,8 +53,7 @@ resource "aws_lambda_function" "nfl_live_scores" {
       ESPN_API_ROOT_URL = var.espn_api_root_url
       ESPN_USER_AGENT   = var.espn_user_agent
       # FeatureStorage's constructor requires all four of these regardless
-      # of which methods actually get called (see iam-lambda-live-scores.tf's
-      # own comment) -- live_scores.py only ever queries the events table.
+      # of which methods actually get called.
       ENTITIES_TABLE_NAME          = aws_dynamodb_table.entities.name
       EVENTS_TABLE_NAME            = aws_dynamodb_table.events.name
       PLAYER_GAME_STATS_TABLE_NAME = aws_dynamodb_table.player_game_stats.name
@@ -87,10 +79,8 @@ resource "aws_lambda_function" "nfl_live_scores" {
 resource "aws_lambda_function_event_invoke_config" "nfl_live_scores" {
   function_name = aws_lambda_function.nfl_live_scores.function_name
 
-  # Same reasoning as lambda-nfl-ingest.tf's own event-invoke config --
-  # explicit retry/age bounds for the async (EventBridge) trigger path so
-  # a stale refresh tick doesn't queue indefinitely. Irrelevant to the
-  # synchronous API Gateway trigger path.
+  # Explicit retry/age bounds for the async (EventBridge) trigger path so
+  # a stale refresh tick doesn't queue indefinitely.
   maximum_retry_attempts       = 2
   maximum_event_age_in_seconds = 3600
 }

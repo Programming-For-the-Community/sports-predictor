@@ -3,8 +3,7 @@ Unit tests for the NFL ingest Lambda's daily, unconditional depth-chart
 refresh (_fetch_depth_charts) -- same every-team, every-run cadence as
 rosters (test_ingest_rosters.py), but cache-backed (get_cached_depth_chart's
 own TTL) since position assignments don't need genuinely-daily freshness
-the way roster membership does. Split out of what used to be one large
-test_ingest.py -- see test_ingest_lambda_handler.py's own history note.
+the way roster membership does.
 
 The nfl_ingest module is registered in sys.modules by conftest.py, which
 also sets RAW_BUCKET_NAME before the module is imported (it's read at
@@ -34,9 +33,8 @@ class TestFetchDepthCharts:
         client.get_depth_chart.assert_any_call("13")
 
     def test_fetches_every_team_regardless_of_any_weeks_schedule(self):
-        # Same reasoning as test_ingest_rosters.py's own version of this
-        # test -- sourced from get_teams, not any week's scoreboard, so
-        # this covers all 32 regardless of who's playing.
+        # Sourced from get_teams, not any week's scoreboard, so this
+        # covers all 32 regardless of who's playing.
         client = make_client(scoreboard([]))
         client.get_teams.return_value = teams_response(*[str(i) for i in range(1, 33)])
         mock_s3 = make_s3()

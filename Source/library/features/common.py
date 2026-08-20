@@ -1,14 +1,12 @@
 """
 Sport-agnostic feature-computation functions, shared by every head-to-head
-sport's adapter (see design/PROJECT_PLAN.md Phase 4's "extract shared
-feature-engineering primitives" item). Extracted out of library.features.nfl,
-which had no NFL-specific assumptions in these functions -- they operate
-purely on the generic event/participant shape library.normalize.espn
-produces (participants[].{entity_id,role,result.score}) and on the generic
-stat_line dict shape player_game_stats/team_game_stats rows carry, with no
-football-only field names. Kept separate from library.features.nfl so a
-second sport's adapter can import these without also importing NFL-only
-names (identify_starting_qb, build_event_features, etc.).
+sport's adapter. These operate purely on the generic event/participant
+shape library.normalize.espn produces (participants[].{entity_id,role,
+result.score}) and on the generic stat_line dict shape player_game_stats/
+team_game_stats rows carry, with no football-only field names. Kept
+separate from library.features.nfl so a second sport's adapter can import
+these without also importing NFL-only names (identify_starting_qb,
+build_event_features, etc.).
 """
 import math
 from datetime import date, datetime
@@ -322,13 +320,9 @@ def _rate(averages: dict, numerator_key: str, denominator_key: str) -> float | N
 
 
 # Ordinal, not one-hot -- these statuses form a real severity order (a
-# tree model can split on "status >= Doubtful" directly), matching the
-# severity threshold used for live leader-selection exclusion (Out AND
-# Doubtful, not just Out -- see live_features.py). Any status
-# string ESPN reports that isn't one of these three (rare -- IR/PUP-style
-# season-ending designations mostly show up as "Out" already) falls back
-# to 1, a conservative "something's reported" floor rather than silently
-# treating an unrecognized status as healthy.
+# tree model can split on "status >= Doubtful" directly). Any status
+# string that isn't one of these three falls back to 1, a conservative
+# "something's reported" floor rather than treating it as healthy.
 _INJURY_STATUS_ORDINAL = {"Questionable": 1, "Doubtful": 2, "Out": 3}
 _TEAM_INJURY_COUNT_STATUSES = {"Doubtful", "Out"}
 
@@ -351,11 +345,8 @@ def _injury_status_ordinal(injuries: list[dict] | None, entity_id: str | None) -
 
 def _team_injury_count(injuries: list[dict] | None) -> int | None:
     """Count of players Doubtful or Out -- Questionable isn't counted
-    here, same reasoning _injury_status_ordinal's severity order and the
-    live leader-selection threshold both use: most Questionable players
-    do play, so counting them would dilute this into a much noisier
-    signal. None (not 0) when injuries data is entirely absent -- same
-    missing-vs-zero distinction as _injury_status_ordinal."""
+    here since most Questionable players do play. None (not 0) when
+    injuries data is entirely absent."""
     if injuries is None:
         return None
     return sum(1 for injury in injuries if injury.get("status") in _TEAM_INJURY_COUNT_STATUSES)

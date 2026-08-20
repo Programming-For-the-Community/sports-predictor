@@ -1,20 +1,6 @@
 # Tests and deploys the NFL live-scores Lambda -- GET /nfl/live-scores plus
-# the EventBridge-triggered cache refresh, split into its own Lambda (see
-# Terraform/lambda-nfl-live-scores.tf's own docstring for why this isn't
-# folded into ingest or predict-read). Zip-packaged, so this deploys via
-# python_lambda_build.yml directly, same as nfl_predict_read_deploy.yml.
-#
-# A separate reusable workflow, not jobs inlined into nfl_deploy.yml/
-# app_deploy.yml directly -- same reason nfl_predict_read_deploy.yml is its
-# own file: BOTH nfl_deploy.yml (nfl*-branch pushes) and app_deploy.yml
-# (main-branch pushes, the actual production deploy path) need to run this
-# exact same test+deploy pair, and duplicating it inline in each one is
-# exactly how nfl_predict_read_deploy.yml's own deploy got missed from
-# app_deploy.yml the first time -- see that workflow's own docstring.
-#
-# Function name is supplied by the caller from a Terraform output, with a
-# default so workflow_dispatch (manual, standalone run) still works
-# without needing that wiring -- same pattern as nfl_predict_read_deploy.yml.
+# the EventBridge-triggered cache refresh. Zip-packaged, deployed via
+# python_lambda_build.yml.
 
 name: NFL Live Scores Deploy
 

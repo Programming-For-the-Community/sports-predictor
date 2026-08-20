@@ -1,9 +1,8 @@
 """
 Unit tests for the NCAAFB win-probability training entrypoint.
 
-library.ml.backtest.run_backtest is mocked here -- same "never touch real
-training" boundary as tests/model-training/nfl's own suite (see that
-file's own docstring).
+library.ml.backtest.run_backtest is mocked here -- these tests verify
+orchestration, not the tournament itself or any real algorithm fitting.
 """
 from unittest.mock import MagicMock, patch
 
@@ -45,8 +44,8 @@ class TestFeatureColumns:
         assert columns == ["home_elo", "elo_diff"]
 
     def test_no_venue_city_or_state_columns_exist(self):
-        # Unlike NFL, build_event_features never surfaces raw venue
-        # strings at all -- nothing to exclude here.
+        # build_event_features never surfaces raw venue strings, so
+        # there's nothing to exclude here.
         df = _make_df()
         df["venue_indoor"] = [False] * len(df)
 

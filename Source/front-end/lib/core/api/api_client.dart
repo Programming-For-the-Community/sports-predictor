@@ -12,35 +12,26 @@ import 'api_exception.dart';
 /// Thin GET-only wrapper (every route this app calls today is a GET) around
 /// the nfl-predict API. Sends the raw ID token as the Authorization header
 /// value -- no "Bearer " prefix. API Gateway's COGNITO_USER_POOLS
-/// authorizer expects an ID token specifically when a method has no
-/// authorization_scopes configured (true of every route here); it only
-/// accepts an access token when scopes ARE configured. See
-/// AuthRepository.getValidIdToken's own doc comment.
+/// authorizer expects an ID token when a method has no authorization_scopes
+/// configured (true of every route here).
 class ApiClient {
   ApiClient(this._ref, {http.Client? httpClient}) : _httpClient = httpClient ?? http.Client();
 
-  // 30s, not 15s -- API Gateway's integration timeout for every route here
-  // is a hard 29s (see Terraform/lambda-nfl-predict.tf), so a 15s client
-  // timeout was giving up before the backend's own authoritative response
-  // (success OR its 504) could ever arrive, most visibly on /nfl/season
-  // (its multi-model leaderboard computation routinely ran 26-29s). 30s
-  // gives just enough margin to actually observe that 504 instead of
-  // masking it with a misleading client-side "timed out" message.
+  // API Gateway's integration timeout for every route here is a hard 29s,
+  // so 30s gives just enough margin to observe that timeout's own 504
+  // instead of masking it with a client-side "timed out" message first.
   static const _timeout = Duration(seconds: 30);
 
   final Ref _ref;
   final http.Client _httpClient;
   final Random _random = Random();
 
-  // API Gateway's stage-wide throttle (see api-gateway-nfl-predict.tf) is
-  // one shared budget across every route and every sport -- a single event
-  // list page load fans out one request per visible event, so a burst of
-  // 429s is an expected, recoverable condition here, not just an abuse
-  // signal. Retried with exponential backoff + full jitter (not a fixed
-  // delay) specifically so that when many rows 429 in the same tick, their
-  // retries land spread out instead of re-forming the exact same burst --
-  // the bug that motivated this (see prediction_computing_retry.dart's own
-  // jitter for the matching fix on the "computing" 202/203 path).
+  // API Gateway's stage-wide throttle is one shared budget across every
+  // route and every sport -- a single event list page load fans out one
+  // request per visible event, so a burst of 429s is expected here.
+  // Retried with exponential backoff + full jitter so that when many rows
+  // 429 in the same tick, their retries land spread out instead of
+  // re-forming the same burst.
   static const _maxRetries429 = 4;
   static const _baseBackoff = Duration(milliseconds: 250);
 
@@ -71,11 +62,9 @@ class ApiClient {
   }
 
   Future<http.Response> _send(Uri uri, Map<String, String> headers) async {
-    // Without this, a stalled connection (DNS not resolved, a CloudFront
-    // distribution still propagating, a hung TCP handshake) never
-    // resolves OR rejects the Future -- the UI just spins forever instead
-    // of ever reaching an error state. A CORS rejection specifically
-    // still fails fast on its own and isn't what this guards against.
+    // Without the .timeout below, a stalled connection never resolves or
+    // rejects the Future -- the UI would spin forever instead of reaching
+    // an error state.
     final stopwatch = Stopwatch()..start();
     debugPrint('[ApiClient] -> sending GET $uri');
     try {

@@ -1,19 +1,14 @@
 """
-Unit tests for RECEIVING-specific leader behavior: live_features.
-_team_leader_candidates deliberately leaves this one category's candidate
-pool uncapped (every eligible WR/TE/RB/QB across the depth chart, see
-that function's own docstring), which makes event_prediction.py itself
-responsible for ranking by predicted yards and cutting down to the top 3
--- and for only writing THOSE top 3 to the predictions-table audit
-trail, not the whole pool it scored along the way. Split out of what
-used to be one large test_predict.py -- see test_predict_event_outcome.
-py's own history note, and test_predict_rushing_props.py/
-test_predict_leaders.py for this same mechanism's other category-
-specific and category-agnostic tests.
+Unit tests for receiving-specific leader behavior: live_features.
+_team_leader_candidates leaves this one category's candidate pool
+uncapped (every eligible WR/TE/RB/QB across the depth chart), which
+makes event_prediction.py responsible for ranking by predicted yards and
+cutting down to the top 3 -- and for only writing those top 3 to the
+predictions-table audit trail, not the whole pool it scored along the
+way.
 
 Calls event_prediction.predict_event directly, not through nfl_predict.
-lambda_handler -- see test_predict_event_outcome.py's own docstring for
-why.
+lambda_handler.
 """
 from unittest.mock import MagicMock, patch
 
@@ -71,7 +66,6 @@ class TestReceivingLeaders:
              patch.object(model_loader, "predict", return_value=50.0):
             event_prediction.predict_event(storage, s3, predictions_table, "401547417")
 
-        # 4 core + 2 stats * 3 capped receiving winners = 10, NOT 4 + 2*5 --
-        # all 5 candidates get SCORED, but only the top 3 get WRITTEN to
-        # the audit trail nfl_reads._leaders_comparison later reads back.
+        # 4 core + 2 stats * 3 capped receiving winners = 10, not 4 + 2*5 --
+        # all 5 candidates get scored, but only the top 3 get written.
         assert predictions_table.put_item.call_count == 10

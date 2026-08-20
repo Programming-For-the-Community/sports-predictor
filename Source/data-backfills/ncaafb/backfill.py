@@ -1,48 +1,28 @@
 """
-NCAAFB historical backfill job -- the CFBD-sourced equivalent of
-data-backfills/nfl/backfill.py.
+NCAAFB historical backfill job.
 
 Pulls games, player/team box scores, coach, and AP Top 25 ranking data
 from CollegeFootballData.com (CFBD) for a range of seasons and loads it
 into the raw data lake (S3) and normalized tables (DynamoDB). Safe to
-re-run at any time: every DynamoDB write is an upsert (put_item on the
-same key). Unlike NFL's per-game raw_object_exists skip, CFBD's box
-score endpoints are bulk-per-week (see library/http/cfbd.py) and cost
-the same one call per week regardless of how many of that week's games
-are already loaded, so a week's box scores are always re-fetched rather
-than skipped -- same design ingest/handler.py's own daily run already
-uses.
+re-run at any time: every DynamoDB write is an upsert. CFBD's box score
+endpoints are bulk-per-week and cost one call per week regardless of how
+many of that week's games are already loaded, so a week's box scores are
+always re-fetched rather than skipped.
 
-Team entities are seeded ONCE, from END_SEASON's /teams response, not
-once per season -- CFBD's /teams is season-scoped (conference
-realignment happens ~yearly) but a team entity row isn't a dated
-snapshot, only a "current" one. Seeding from every season (this runs
-seasons concurrently) would let whichever season's fetch happens to
-finish last win the race for a given team's conference value; using the
-most recent season keeps entities current, matching NFL's own single
-get_teams() call.
+Team entities are seeded once, from END_SEASON's /teams response, since a
+team entity row holds only "current" conference info rather than a dated
+snapshot.
 
-Coach and AP Top 25 rank enrichment (the same fields ingest's own
-enrich_games attaches per-week -- see aws-lambdas/ncaafb/ingest/
-enrichment.py) are resolved once per SEASON here, not once per week:
-teams and coaches don't change week to week, and CFBD's /rankings
-returns every week of a season in one call when `week` is omitted --
-confirmed live this session (2025 data: one call returned all 16 weeks,
-same shape as /calendar's own no-week-returns-everything behavior).
-Each AP rank entry also carries CFBD's own numeric teamId directly
-(`{"rank","teamId","school","conference",...}`), not just school name --
-not currently used (rank_lookup_by_school still joins by school name,
-matching the ingest-side lookup this mirrors), but worth knowing as a
-simpler alternative if that join ever needs revisiting. Rankings scoped
-to season_type="regular" only -- whether/how CFBD's postseason bowl weeks
-carry a "current" AP rank of their own is unverified, so postseason
-games are left without home_current_rank/away_current_rank rather than
-guessing at unverified behavior.
+Coach and AP Top 25 rank enrichment are resolved once per season: teams
+and coaches don't change week to week, and CFBD's /rankings returns every
+week of a season in one call when `week` is omitted. Rankings are scoped
+to season_type="regular" only, so postseason games are left without
+home_current_rank/away_current_rank.
 
 Seasons are split into batches (default: 2 seasons each) processed
 concurrently by a thread pool, one thread per batch. All threads share a
-single CFBDClient / rate limiter so N concurrent batches don't multiply
-the request rate by N against CFBD's monthly call budget.
+single CFBDClient / rate limiter so concurrent batches don't multiply the
+request rate against CFBD's monthly call budget.
 
 Required environment variables:
     RAW_BUCKET_NAME
@@ -55,9 +35,7 @@ Required environment variables:
     CFBD_API_KEY_SECRET_ARN
     CFBD_API_KEY_SECRET_FIELD
 
-Optional environment variables -- overridable per ECS "Run Task" console
-launch via container overrides, without editing the task definition.
-CLI flags, when passed, take precedence over both.
+Optional environment variables (CLI flags take precedence):
     START_SEASON (default 2015)
     END_SEASON (default 2025)
     BATCH_SIZE (default 2)
@@ -88,18 +66,11 @@ logging.basicConfig(
 )
 logger = logging.getLogger("ncaafb-backfill")
 
-# Starts at 1, not 0 -- confirmed live this session that CFBD's own
-# server-side validation treats week=0 as "not provided" (a falsy-value
-# bug on their end, not ours): GET /games/players and /games/teams both
-# hard-reject week=0 with 400 ("either week, team, or conference are
-# required"), and GET /games doesn't error but silently returns the
-# ENTIRE season instead of filtering to week 0 (868 games for one 2023
-# test call, not a real single week). There is no way to request week-0
-# data specifically through this endpoint family -- any real "Week 0"
-# season-opener games are a known, accepted gap, not silently mishandled.
-# A week past the real season length is still harmless (empty games
-# list), same "generous ceiling" convention as NFL's own
-# REGULAR_SEASON_WEEKS/POSTSEASON_WEEKS.
+# Starts at 1, not 0 -- CFBD treats week=0 as "not provided": GET
+# /games/players and /games/teams reject it with 400, and GET /games
+# silently returns the entire season instead of filtering to week 0.
+# Week-0 games are not fetchable through this endpoint family. A week
+# past the real season length is harmless (empty games list).
 REGULAR_SEASON_WEEKS = range(1, 17)
 POSTSEASON_WEEKS = range(1, 6)
 SEASON_TYPES = ("regular", "postseason")
@@ -120,10 +91,8 @@ def seed_teams(client: CFBDClient, storage: PipelineStorage, s3, bucket: str, se
 
 def _season_rank_lookup(client: CFBDClient, storage: PipelineStorage, season: int) -> dict[int, dict[str, int]]:
     """{week: {school: rank}} for every week of `season`'s AP Top 25 poll,
-    from ONE get_rankings call (week omitted) -- also lands the raw
-    payload in S3 for feature-engineering's national-ranking model to
-    consume directly (no DynamoDB table for rank history exists -- see
-    project plan's "no new tables" storage design)."""
+    from one get_rankings call. Also writes the raw payload to S3 for
+    feature-engineering to consume."""
     weekly = client.get_rankings(season)
     storage.put_raw_json(f"ncaafb/rankings/{season}.json", weekly)
 
@@ -143,10 +112,7 @@ def _attach_enrichment(
     rank_by_school: dict[str, int],
 ) -> None:
     """Attaches venue_indoor, home/away coach, and home/away current rank
-    to each game dict in place -- the same fields ingest's own
-    enrich_games attaches, resolved the same way (school name via
-    `by_id`'s season-scoped /teams join), but from data already fetched
-    once for the whole season rather than re-fetching per week."""
+    to each game dict in place, joined by school name via `by_id`."""
     for game in games:
         home_id = str(game["homeId"]) if game.get("homeId") is not None else None
         away_id = str(game["awayId"]) if game.get("awayId") is not None else None
@@ -163,12 +129,7 @@ def _attach_enrichment(
 
 def _annotate_box_scores(box_scores: list[dict], games_by_id: dict[str, dict]) -> None:
     """Injects home_id/away_id/event_date into each per-game box score
-    entry from that week's own /games response -- same join
-    aws-lambdas/ncaafb/ingest/handler.py's own _annotate_box_scores
-    performs, duplicated here rather than shared since it's small,
-    stateless glue and backfill can't import a sibling Lambda's local
-    file (see library/storage/ncaafb_team_cache.py's own docstring for
-    why shared logic lives in library/, not aws-lambdas/)."""
+    entry from that week's /games response."""
     for entry in box_scores:
         game = games_by_id.get(str(entry.get("id")))
         if game is None:

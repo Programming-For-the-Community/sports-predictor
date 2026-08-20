@@ -1,12 +1,10 @@
 """
 Unit tests for live-scores/live_scores.py -- candidate gating (which
 events are even worth an ESPN call this cycle), the ESPN response ->
-cached-state extraction (verified against a real live MLB scoreboard
-response's status shape, since NFL games weren't in season while this
-was built), and the S3 cache's read/write/staleness behavior. All AWS
-calls are mocked; live_scores.py takes s3/bucket/storage/client as
-explicit arguments rather than holding its own, same convention
-enrichment.py already uses.
+cached-state extraction, and the S3 cache's read/write/staleness
+behavior. All AWS calls are mocked; live_scores.py takes
+s3/bucket/storage/client as explicit arguments rather than holding its
+own.
 
 live_scores is registered on sys.path by conftest.py.
 """
@@ -47,10 +45,8 @@ def _event(event_id: str, kickoff_time: str) -> dict:
     return {"event_id": event_id, "kickoff_time": kickoff_time, "status": "scheduled"}
 
 
-# Trimmed to just what live_scores.py reads -- verified against the real
-# ESPN response for a live MLB game (competitions[0].status.type.state
-# =="in", completed=False, shortDetail="Bot 9th"); NFL's own scoreboard
-# shares the same site-API status shape.
+# Trimmed to just what live_scores.py reads: competitions[0].status.type
+# .state/completed/shortDetail plus each competitor's homeAway/score.
 def _espn_event(event_id: str, *, state: str, completed: bool, detail: str, home_score, away_score) -> dict:
     return {
         "id": event_id,

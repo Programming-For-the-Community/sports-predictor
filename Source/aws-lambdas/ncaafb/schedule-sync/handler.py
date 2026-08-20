@@ -7,26 +7,24 @@ key ingest/handler.py already uses -- normalize's S3 trigger
 (Terraform/s3-raw-data-lake-notifications.tf) picks these up the same
 way daily ingest's output does, no new normalize code needed.
 
-Exists for the same reason as NFL's own schedule-sync: daily ingest only
-ever fetches the current week, so nothing seeds future weeks ahead of
-time for season simulation or the frontend's upcoming-events list.
+Daily ingest only ever fetches the current week, so nothing else seeds
+future weeks ahead of time for season simulation or the frontend's
+upcoming-events list.
 
-Deliberately does NOT call CFBD's /coaches or /rankings endpoints (see
-aws-lambdas/ncaafb/ingest/enrichment.py's own docstring on why full
-enrichment is ingest-only) -- rankings especially would be meaningless
-weeks ahead of a game, and re-fetching them once per week of a
-season-wide walk would blow well past the project plan's 1-call/week
-ranking budget. Does attach venue_indoor
-(library.storage.ncaafb_team_cache.attach_venue_indoor) -- cheap (one
-TTL-cached bulk call) and stable ahead of time, unlike rankings. Imports
-that piece from the shared library package rather than ingest's own
-enrichment.py -- Lambda deployment packages are built per-function (see
-python_lambda_build.yml), so this Lambda's ZIP never contains ingest's
-local files, only library/.
+Deliberately does NOT call CFBD's /coaches or /rankings endpoints --
+rankings especially would be meaningless weeks ahead of a game, and
+re-fetching them once per week of a season-wide walk would blow well
+past the project plan's 1-call/week ranking budget. Does attach
+venue_indoor (library.storage.ncaafb_team_cache.attach_venue_indoor) --
+cheap (one TTL-cached bulk call) and stable ahead of time, unlike
+rankings. Imports that piece from the shared library package rather
+than ingest's own enrichment.py -- Lambda deployment packages are built
+per-function, so this Lambda's ZIP never contains ingest's local files,
+only library/.
 
-ONE shared CFBDClient for the whole run, not a separate client per week --
-every one of this run's requests is paced by the SAME RateLimiter
-instance, same reasoning as NFL's own schedule-sync.
+ONE shared CFBDClient for the whole run, not a separate client per week
+-- every one of this run's requests is paced by the SAME RateLimiter
+instance.
 """
 import json
 import logging
@@ -43,19 +41,15 @@ logger = logging.getLogger("ncaafb-schedule-sync")
 
 RAW_BUCKET = os.environ["RAW_BUCKET_NAME"]
 
-# Starts at 1, not 0 -- confirmed live (see data-backfills/ncaafb/
-# backfill.py's own REGULAR_SEASON_WEEKS comment for the full CFBD
-# quirk): GET /games?week=0 doesn't filter at all, it silently returns
-# the ENTIRE season (868 games for one test call), which would get
-# mislabeled and written to S3 as this season's "week 0" file and
-# double-upsert every game via normalize's S3 trigger. Any real "Week 0"
-# season-opener games are a known, accepted gap.
+# Starts at 1, not 0: GET /games?week=0 doesn't filter at all, it
+# silently returns the ENTIRE season, which would get mislabeled and
+# written to S3 as this season's "week 0" file and double-upsert every
+# game via normalize's S3 trigger. Any real "Week 0" season-opener games
+# are a known, accepted gap.
 #
 # A week past the real season length is still harmless (empty games
-# list), same "generous ceiling" convention as NFL's own
-# REGULAR_SEASON_WEEKS/POSTSEASON_WEEKS. Postseason (bowls plus the
-# 12-team CFP through the championship) spans a handful of weeks in
-# CFBD's own numbering.
+# list). Postseason (bowls plus the 12-team CFP through the
+# championship) spans a handful of weeks in CFBD's own numbering.
 REGULAR_SEASON_WEEKS = range(1, 17)
 POSTSEASON_WEEKS = range(1, 6)
 SEASON_TYPES = ("regular", "postseason")
@@ -64,9 +58,8 @@ _s3 = boto3.client("s3")
 
 
 def _current_ncaafb_season(today: date | None = None) -> int:
-    """Mirrors ingest/handler.py's own _current_ncaafb_season -- same
-    duplication convention NFL's schedule-sync/ingest pair already uses
-    (each Lambda is its own deployment package)."""
+    """Mirrors ingest/handler.py's own _current_ncaafb_season --
+    duplicated since each Lambda is its own deployment package."""
     today = today or date.today()
     return today.year - 1 if today.month == 1 else today.year
 

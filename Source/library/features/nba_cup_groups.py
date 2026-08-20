@@ -1,40 +1,13 @@
 """
 NBA in-season tournament ("NBA Cup") group assignments, keyed by season
-(ESPN's own ending-year convention -- see nba_teams.py's docstring and
-project-nba-onboarding memory's 2026-08-14 note for why NBA seasons are
-labeled by the year they end in, not the year they start in). Unlike
-TEAM_DIVISIONS (nba_teams.py), these are NOT stable -- the NBA redraws
-Cup groups every season, seeded off the prior season's conference
-standings. Update this table by hand once a year when the new season's
-groups are announced (public, well before the season starts) -- same
-"re-set once a season" maintenance pattern NCAAFB's own conference-
-membership data needs, just done by hand here rather than pulled live.
-
-WHY HARDCODED, NOT FETCHED: confirmed live, 2026-08-16, that ESPN's own
-JSON APIs never expose group membership structurally -- a Cup game's
-summary/scoreboard payload only ever carries the generic notes headline
-"NBA Cup - Group Play" (see library/normalize/espn.py's tournament_note
-field), with the actual group letter/name buried in unstructured article
-prose, not a JSON field. The ONLY place real group assignments exist is
-ESPN's human-rendered standings page (espn.com/nba/standings/_/view/
-nba-cup) -- not a documented/versioned API, and scraping HTML in a
-production Lambda is a materially worse reliability bet than this
-project's other ESPN integrations (which all use its semi-stable JSON
-endpoints): a page-template change would silently break group data with
-no error, where a hardcoded table just goes stale in an obvious,
-correctable way (a missing season key -- see cup_group_for_team below).
-
-A season missing from this table means "not yet transcribed" -- NBA Cup
-simulation degrades gracefully to skipped (None group for every team),
-not an error. See aws-lambdas/nba/predict/season_simulation.py's own
-simulate_cup for how that's handled.
+(ESPN's own ending-year convention). Redrawn every season -- update by
+hand once the new season's groups are announced. A season missing from
+this table returns None (no group) for every team.
 """
 
 # {season: {conference: {group_letter: [team_id, ...]}}}. Team ids match
-# nba_teams.py's own ESPN numeric ids. 2025-26 season (ESPN season.year
-# 2026) confirmed live and re-confirmed unchanged against espn.com/nba/
-# standings/_/view/nba-cup, both checks 2026-08-16 -- 3 groups of 5 per
-# conference, 30 teams total.
+# nba_teams.py's own ESPN numeric ids. 3 groups of 5 per conference, 30
+# teams total.
 CUP_GROUPS: dict[int, dict[str, dict[str, list[str]]]] = {
     2026: {
         "Eastern": {
@@ -48,14 +21,6 @@ CUP_GROUPS: dict[int, dict[str, dict[str, list[str]]]] = {
             "C": ["24", "7", "10", "22", "9"],    # SA, DEN, HOU, POR, GS
         },
     },
-    # 2026-27 season. ESPN's own standings/_/view/nba-cup page was checked
-    # first (2026-08-18) and rejected as a source -- it still showed last
-    # season's (2025-26) group membership despite a "2026-27" page header,
-    # i.e. stale, not yet updated. Cross-checked against two independent
-    # sources instead (Bleacher Report's and ClutchPoints' own 2026-27 NBA
-    # Cup group-assignment articles) -- both list the identical 30-team
-    # membership below (only their own group-letter labels differ, which
-    # don't matter here), so treated as confirmed.
     2027: {
         "Eastern": {
             "A": ["17", "8", "15", "19", "28"],  # BKN, DET, MIL, ORL, TOR

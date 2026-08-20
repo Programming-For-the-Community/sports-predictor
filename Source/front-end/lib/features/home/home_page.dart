@@ -30,10 +30,9 @@ class HomePage extends ConsumerWidget {
                     children: [
                       const BrandMark(),
                       const SizedBox(width: 12),
-                      // Expanded, not a bare Text -- on a narrow (mobile)
-                      // viewport the title needs to be able to give
-                      // ground and ellipsize rather than push the sign-out
-                      // button past the edge of the screen.
+                      // Expanded so the title can give ground and
+                      // ellipsize instead of pushing the sign-out button
+                      // past the edge on a narrow (mobile) viewport.
                       Expanded(
                         child: Text(
                           'sports-predictor',

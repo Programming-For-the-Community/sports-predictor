@@ -3,9 +3,7 @@ Unit tests for the NBA feature-engineering entrypoint's orchestration
 logic -- grouping, history-filtering, and Parquet assembly. The actual
 feature math is tested in tests/library/features/test_nba.py; FeatureStorage
 is mocked here so these tests only cover build_dataset.py's own wiring.
-Simpler than NFL's own equivalent -- no QB/RB/WR leader-history sections
-(no analog for basketball, see library.features.nba's own docstring), and
-uses real NBA team ids (BOS=2, LAL=13, NY=18, PHI=20, TOR=28) since
+Uses real NBA team ids (BOS=2, LAL=13, NY=18, PHI=20, TOR=28) since
 build_event_dataset/build_player_dataset filter through
 is_real_franchise_matchup.
 """

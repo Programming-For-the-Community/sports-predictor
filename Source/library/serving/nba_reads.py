@@ -1,26 +1,19 @@
 """
 Read-only NBA serving logic -- GET /nba/events, GET /nba/models -- shared
 between the heavy inference Lambda (Source/aws-lambdas/nba/predict) and
-the light read-only Lambda (Source/aws-lambdas/nba/predict-read). Same
-split, and same reasoning, as library.serving.ncaafb_reads (see its own
-docstring) -- NOT a port of it, duplicated deliberately so this Lambda
-never has to import that NCAAFB-named module.
+the light read-only Lambda (Source/aws-lambdas/nba/predict-read).
 
-get_season_projection (Sub-phase 3A step 8) just reads the standings +
-NBA Cup + player-prop leaderboard projection written weekly by the
-scheduled compute path (aws-lambdas/nba/predict/season_projection.py's
-run_scheduled) -- never computed live here, same read-only-cache role
-nfl_reads.py's/ncaafb_reads.py's own get_season_projection play. No round
-label -- NBA has no postseason-round concept the way NCAAFB's national
-ranking does.
+get_season_projection reads the standings + NBA Cup + player-prop
+leaderboard projection written weekly by the scheduled compute path,
+never computed live here. No round label -- NBA has no postseason-round
+concept.
 
-No round/week grouping -- NBA has no CFBD-style week numbering (ESPN's
-schedule is date-based, ~10-15 games/night most nights of the season), so
-list_events groups by calendar date instead of week, unlike nfl_reads.py/
-ncaafb_reads.py's own _previous_week_events/_next_week_events.
+No round/week grouping -- NBA's schedule is date-based (~10-15
+games/night most nights of the season), so list_events groups by
+calendar date instead of week.
 
 Callers own their own storage/s3/predictions_table objects and Lambda-
-lifecycle concerns, same boundary nfl_reads.py/ncaafb_reads.py draw.
+lifecycle concerns.
 """
 import re
 from concurrent.futures import ThreadPoolExecutor
@@ -38,19 +31,13 @@ WIN_PROBABILITY_MODEL = "win-probability"
 SCORE_MODELS = {"margin": "score-margin", "home_score": "home-score", "away_score": "away-score"}
 
 # Mirrors predict/event_prediction.py's own LEADER_CATEGORY_STATS, inverted
-# (stat -> category instead of category -> stats) -- duplicated rather than
-# imported, same reasoning ncaafb_reads.py's own _STAT_CATEGORY gives.
-# Basketball's 3 categories (no football-style passing/rushing/receiving/
-# sacks split -- no position concept, see library.features.nba's own
-# docstring) each key off exactly one primary stat.
+# (stat -> category instead of category -> stats). Basketball's 3
+# categories each key off exactly one primary stat.
 _STAT_CATEGORY = {"points": "scoring", "rebounds": "rebounding", "assists": "assists"}
 
 # Mirrors predict/event_prediction.py's own LEADER_CATEGORY_STATS primary
-# stat per category -- duplicated for the same reason _STAT_CATEGORY above
-# is. 2 leaders per category -- NBA box scores are far less crowded than
-# football depth charts (10-12 rotation players, not ~50), and every
-# category is a list here (no NCAAFB-style singular "passing" category --
-# no leader is inherently singular in basketball the way a starting QB is).
+# stat per category. Every category is a list here -- no singular
+# category the way NCAAFB's "passing" is.
 _LEADER_CATEGORY_LIMITS = {"scoring": 2, "rebounding": 2, "assists": 2}
 _CATEGORY_PRIMARY_STAT = {"scoring": "points", "rebounding": "rebounds", "assists": "assists"}
 
@@ -65,8 +52,7 @@ def _home_and_away(event: dict) -> tuple[str, str] | None:
 
 
 def _previous_day_events(completed: list[dict]) -> list[dict]:
-    """Only the most recently completed date's games -- the date-based
-    analog of nfl_reads.py's/ncaafb_reads.py's own _previous_week_events."""
+    """Only the most recently completed date's games."""
     if not completed:
         return []
     latest_date = max(e.get("event_date", "") for e in completed)
@@ -75,12 +61,9 @@ def _previous_day_events(completed: list[dict]) -> list[dict]:
 
 def _next_day_events(scheduled: list[dict]) -> list[dict]:
     """Only the soonest upcoming date's games. No grace-period/cutoff step
-    the way nfl_reads.py's/ncaafb_reads.py's own _next_week_events need --
-    that exists there to stop one already-played game from hiding the rest
-    of its own week's later games, which only matters because a "week" of
-    theirs spans several dates. Grouping by single calendar date here makes
-    that scenario moot: filtering straight to today-or-later before picking
-    the earliest date is both simpler and correct."""
+    needed: grouping by single calendar date means filtering straight to
+    today-or-later before picking the earliest date is both simpler and
+    correct."""
     today = datetime.now(timezone.utc).date().isoformat()
     plausible = [e for e in scheduled if e.get("event_date", "") >= today]
     if not plausible:
@@ -107,8 +90,7 @@ def _actual_result(event: dict) -> dict | None:
 def _prediction_comparison(rows: list[dict], event: dict) -> dict | None:
     """Compares this event's logged prediction against the actual result --
     reads the audit trail predict/event_prediction.py's record_prediction
-    already wrote, never recomputes one now (see nfl_reads.py's own
-    identical docstring for why)."""
+    already wrote, never recomputes one now."""
     actual = _actual_result(event)
     if actual is None:
         return None
@@ -207,9 +189,8 @@ def _leaders_comparison(storage, rows: list[dict], sport: str, event: dict) -> d
 
 def list_events(storage, predictions_table, sport: str, status: str) -> dict:
     """GET /nba/events?status=scheduled|completed -- scoped to exactly one
-    calendar date, not the whole matching history (see this module's own
-    docstring for why NBA groups by date instead of week). Each participant
-    also carries `name`/`abbreviation` off its own team entity -- see
+    calendar date, not the whole matching history. Each participant also
+    carries `name`/`abbreviation` off its own team entity -- see
     enrich_participants."""
     events = storage.get_all_events(sport, status=status)
 
@@ -229,10 +210,8 @@ def list_events(storage, predictions_table, sport: str, status: str) -> dict:
             "venue_name": e.get("venue_name"),
         }
         if status == "completed":
-            # One query, not two -- _prediction_comparison and
-            # _leaders_comparison need the exact same predictions-table
-            # partition, same "fetch once, pass to both" shape
-            # ncaafb_reads.py's own _entry uses.
+            # One query shared by _prediction_comparison and
+            # _leaders_comparison rather than each querying independently.
             rows = predictions_table.query(Key("event_key").eq(e["event_key"]))
             entry["prediction_comparison"] = _prediction_comparison(rows, e)
             entry["leaders_comparison"] = _leaders_comparison(storage, rows, sport, e)
@@ -241,10 +220,8 @@ def list_events(storage, predictions_table, sport: str, status: str) -> dict:
     if not events:
         return {"sport": sport, "events": []}
 
-    # Concurrent, not sequential -- a completed date's own entries each make
-    # several DynamoDB round trips, same reasoning ncaafb_reads.list_events
-    # gives (though NBA's own nightly slate, ~10-15 games, is far smaller
-    # than NCAAFB's 60+-game week).
+    # Concurrent, not sequential -- each entry makes several DynamoDB round
+    # trips, independent per event.
     with ThreadPoolExecutor(max_workers=min(len(events), 16)) as executor:
         entries = list(executor.map(_entry, events))
 
@@ -253,8 +230,7 @@ def list_events(storage, predictions_table, sport: str, status: str) -> dict:
 
 def _load_model_summary(s3, sport: str, model_name: str) -> dict | None:
     """One model's card summary, or None if it's never had a version
-    promoted. Same 3-round-trip, run-every-model-concurrently shape as
-    nfl_reads._load_model_summary/ncaafb_reads._load_model_summary."""
+    promoted."""
     pointer_key = current_version_key(sport, model_name)
     if not s3.object_exists(pointer_key):
         return None
@@ -297,13 +273,10 @@ def list_models(s3, sport: str) -> dict:
 
 def get_season_projection(s3, sport: str) -> dict | None:
     """GET /nba/season -- reads the standings + NBA Cup + leaderboard
-    projection written weekly by the scheduled compute path (predict/
-    handler.py's ScheduledSeasonProjection branch), never computed live
-    here. None if the schedule hasn't fired yet (e.g. right after a fresh
-    deploy) -- the caller is expected to surface that as "not yet
-    available" rather than treat it like a real 500. Identical to
-    nfl_reads.py's/ncaafb_reads.py's own get_season_projection -- the S3
-    read-through shape has no sport-specific logic in it at all."""
+    projection written weekly by the scheduled compute path, never
+    computed live here. None if the schedule hasn't fired yet -- the
+    caller is expected to surface that as "not yet available" rather than
+    treat it like a real 500."""
     key = season_projection_key(sport)
     if not s3.object_exists(key):
         return None

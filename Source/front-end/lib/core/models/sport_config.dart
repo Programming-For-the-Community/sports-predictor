@@ -2,17 +2,16 @@ import 'package:flutter/material.dart';
 
 import '../theme/app_colors.dart';
 
-/// Determines UI shape, not data shape -- design/DATA_SCHEMA.md's
-/// `participants` array is the same structure either way. h2h shows win
-/// probability + margin; field events show a finishing-position
-/// distribution (not yet built -- no field-event sport has a backend yet).
+/// Determines UI shape, not data shape -- the `participants` array is the
+/// same structure either way. h2h shows win probability + margin; field
+/// events show a finishing-position distribution.
 enum EventShape { headToHead, field }
 
 /// One entry per sport this app knows about, active or not. Adding a new
 /// sport to the backend means flipping `active: true` here -- no new
 /// widgets, no new repository code, since every sport hits the same
 /// `/{sport}/events`, `/{sport}/predictions/...`, `/{sport}/models` route
-/// shapes by backend design (see design/CLAUDE.md item 3).
+/// shapes.
 class SportConfig {
   const SportConfig({
     required this.id,
@@ -30,10 +29,9 @@ class SportConfig {
   final bool active;
 
   // False hides sport_shell_page.dart's Season tab entirely -- for a sport
-  // whose backend has no /{sport}/season route yet, GET-ing it would just
+  // whose backend has no /{sport}/season route, GET-ing it would just
   // surface a raw "couldn't load" error on every tap. Defaults true so
-  // every existing entry below needs no change; only a sport activated
-  // before its own season simulation ships (see the nba entry) sets this.
+  // most entries below need no change.
   final bool hasSeasonProjection;
 }
 
@@ -68,9 +66,7 @@ const kSports = [
     eventShape: EventShape.headToHead,
     accentColor: AppColors.cyan,
     active: false,
-    // No /{sport}/season route exists for this sport yet (Sub-phase 3B,
-    // not started) -- see hasSeasonProjection's own doc comment. Costs
-    // nothing to set correctly now even while inactive/unreachable.
+    // No /{sport}/season route exists for this sport.
     hasSeasonProjection: false,
   ),
   SportConfig(

@@ -23,12 +23,7 @@ def team_to_entity(team: dict, sport: str) -> dict:
             "abbreviation": team.get("abbreviation"),
             "location": team.get("location"),
             "nickname": team.get("nickname") or team.get("name"),
-            # Bare 6-digit hex, no "#" (confirmed live, e.g. "c8102e") --
-            # frontend's own job to prefix it. NFL prefers its own
-            # hand-typed static/nfl_team_colors.dart table over this (real
-            # brand colors, longer-established) -- this exists for every
-            # other sport, which has no such table (see teamDisplayFor's
-            # own doc comment).
+            # Bare 6-digit hex, no "#" (e.g. "c8102e") -- frontend prefixes it.
             "color": team.get("color"),
         },
     }
@@ -37,14 +32,7 @@ def team_to_entity(team: dict, sport: str) -> dict:
 # ESPN status.type.name values for a game that will never be played (or
 # resume) under this event_id -- status.type.completed is False for all
 # of these, same as a genuinely upcoming game, so without this a canceled/
-# postponed game defaults to "scheduled" and sits there permanently (see
-# [[project-nfl-data-quality-edge-cases]] for the 3 known real records
-# this was confirmed against: a canceled Pro Bowl, the Damar Hamlin
-# permanently-suspended game, and a hurricane-postponed game replayed
-# under a different event_id). STATUS_SUSPENDED/STATUS_FORFEIT are
-# included on the same reasoning even though no known record has hit
-# them yet -- ESPN's public API is unofficial, so any status wholly
-# distinct from "will be/was played normally" gets the same treatment.
+# postponed game defaults to "scheduled" and sits there permanently.
 _NON_PLAYED_STATUS_NAMES = {"STATUS_CANCELED", "STATUS_POSTPONED", "STATUS_SUSPENDED", "STATUS_FORFEIT"}
 
 
@@ -70,10 +58,8 @@ def scoreboard_event_to_event_item(event: dict, sport: str) -> dict:
             },
         })
     event_id = event["id"]
-    # venue/weather already come back on the same scoreboard response
-    # ingest already fetches -- no extra API call. weather is frequently
-    # null (most reliably for indoor games, where it doesn't apply), so
-    # this is a real but partial signal, not a guaranteed one.
+    # venue/weather come back on the same scoreboard response. weather is
+    # frequently null, most reliably for indoor games.
     venue = competition.get("venue") or {}
     venue_address = venue.get("address") or {}
     weather = competition.get("weather") or {}
@@ -84,8 +70,8 @@ def scoreboard_event_to_event_item(event: dict, sport: str) -> dict:
         "event_type": "head_to_head",
         "event_date": event["date"][:10],
         # Full ISO 8601 timestamp, unlike event_date above -- kickoff time
-        # of day is a feature input (see library.features.nfl) and lets
-        # the frontend sort/group by actual kickoff, not just calendar day.
+        # of day is a feature input and lets the frontend sort/group by
+        # actual kickoff, not just calendar day.
         "kickoff_time": event["date"],
         "status": _event_status(event.get("status", {})),
         "participants": participants,
@@ -99,36 +85,23 @@ def scoreboard_event_to_event_item(event: dict, sport: str) -> dict:
         "weather_temperature": weather.get("temperature"),
     }
 
-    # Sport-agnostic passthrough of ESPN's own event-level "notes" --
-    # confirmed live, 2026-08-16, that NBA in-season-tournament (NBA Cup)
-    # group-play games carry event["notes"] == [{"type": "event",
-    # "headline": "NBA Cup - Group Play"}], a sibling of "competitions",
-    # not nested inside it. Stored as the raw headline string rather than
-    # a parsed boolean so interpretation stays with whichever sport's own
-    # feature/serving code cares about it (only NBA's season_projection.py
-    # does today) -- this function itself doesn't know what "NBA Cup"
-    # means, same "generic extraction, sport-specific interpretation"
-    # split every other optional field on this item already follows. Omit
-    # rather than write None when absent, same convention as the
-    # coach/injuries fields below.
+    # Sport-agnostic passthrough of ESPN's event-level "notes" (a sibling
+    # of "competitions", not nested inside it). Stored as the raw headline
+    # string rather than a parsed boolean; interpretation is left to
+    # whichever sport's feature/serving code cares about it. Omitted when
+    # absent.
     notes = event.get("notes") or []
     if tournament_headline := next((n.get("headline") for n in notes if n.get("headline")), None):
         item["tournament_note"] = tournament_headline
 
     # Coach/injuries/depth-chart are absent on any event not enriched by
-    # ingest's _enrich_events (aws-lambdas/nfl/ingest/handler.py), or where
-    # that fetch failed. Omitted rather than written as None/empty, same
-    # sparse-optional-field convention weather_temperature uses (frequently
-    # null for outdoor games ESPN simply didn't report on). Coach is
-    # flattened into separate top-level
-    # attributes (not a nested map) to match every other feature-ready
-    # field on this item; injuries/depth-chart stay as their own
-    # list/dict since they're not single scalar values.
+    # ingest, or where that fetch failed, and are omitted rather than
+    # written as None/empty. Coach is flattened into separate top-level
+    # attributes; injuries/depth-chart stay as their own list/dict.
     #
-    # Distinguishes "no data" (omit) from "fetched, genuinely empty"
-    # (keep) via `is not None` rather than a truthiness check for
-    # injuries/depth-chart specifically -- an empty injuries list is real
-    # signal ("checked, nobody's hurt"), not the same as "never checked".
+    # injuries/depth-chart use `is not None` rather than a truthiness
+    # check: an empty injuries list is real signal ("checked, nobody's
+    # hurt"), not the same as "never checked".
     if home_coach := event.get("home_coach"):
         item["home_coach_id"] = home_coach.get("coach_id")
         item["home_coach_name"] = home_coach.get("coach_name")
@@ -154,13 +127,9 @@ def scoreboard_event_to_event_item(event: dict, sport: str) -> dict:
 
 
 def _flatten_roster_athletes(raw_athletes: list) -> list[dict]:
-    """NFL's roster groups athletes by position group (offense/defense/
-    specialTeam/injuredReserveOrOut/suspended/practiceSquad --
-    `[{"items": [athlete, ...]}, ...]`); NBA's is a flat list of athlete
-    dicts with no grouping wrapper at all -- confirmed live, 2026-08-14
-    (see project-nba-onboarding memory). Detected per-entry rather than
-    branched on sport, since that's the actual structural signal and keeps
-    this function sport-agnostic, matching this module's own docstring."""
+    """Flattens either roster shape ESPN returns: grouped by position group
+    (`[{"items": [athlete, ...]}, ...]`) or a flat list of athlete dicts.
+    Detected per-entry rather than branched on sport."""
     flat = []
     for entry in raw_athletes:
         if "items" in entry:
@@ -171,33 +140,21 @@ def _flatten_roster_athletes(raw_athletes: list) -> list[dict]:
 
 
 def roster_to_player_entities(roster: dict, sport: str) -> list[dict]:
-    """Every player entity item for one team's current roster (see
-    NFLClient.get_roster/NBAClient.get_roster) -- same item shape
-    boxscore_to_player_game_stats already produces for its own
-    player_entities return value, written through the same guarded
-    PipelineStorage.upsert_player_entity, so this is a second SOURCE for
-    that one write path, not a second write path.
+    """Every player entity item for one team's current roster. Same item
+    shape boxscore_to_player_game_stats produces, written through the same
+    guarded PipelineStorage.upsert_player_entity.
 
-    Unlike a box score, a roster fetch has no game of its own to derive a
-    date from -- team_id_as_of comes from the roster payload's own
-    "timestamp" field (same [:10] truncation scoreboard_event_to_event_item
-    already applies to event_date), not "now" at normalize time, so it
-    stays correct even if normalize processes this S3 object some time
-    after ingest actually fetched it.
+    team_id_as_of comes from the roster payload's own "timestamp" field
+    (truncated to a date), not "now" at normalize time, so it stays
+    correct even if normalize processes this S3 object after ingest
+    fetched it.
 
     Includes every player ESPN's roster response returns for the team,
     including IR/practice-squad-equivalent statuses where the sport has
-    them (NFL's own position groups) -- a player on IR is still on this
-    team, not some other one, which is exactly the fact this function
-    exists to keep current.
+    them -- a player on IR is still on this team.
 
-    metadata.position is the athlete's own specific position abbreviation
-    ("QB"/"WR"/"CB" for NFL, "F"/"G"/"C" for NBA -- same
-    position.abbreviation shape confirmed on both, live). live_features.py's
-    roster-driven candidate selection (predict/live_features.py) uses this
-    to know which roster players are even eligible for a given slot, since
-    a player with no recorded stats yet (a rookie) has no other signal to
-    identify their position from.
+    metadata.position is the athlete's specific position abbreviation
+    ("QB"/"WR"/"CB" for NFL, "F"/"G"/"C" for NBA).
     """
     team_id = str(roster["team"]["id"])
     as_of_date = roster["timestamp"][:10]
@@ -223,40 +180,19 @@ def roster_to_player_entities(roster: dict, sport: str) -> list[dict]:
     return entities
 
 
-# Same status vocabulary EspnCoreApiClient.get_team_injuries filters to
-# (NFL's separate core-API injury-report endpoint) -- ESPN uses this same
-# three-status set project-wide wherever it reports a current injury
-# report, so it's a reasonable default here too. Duplicated locally
-# rather than imported from library.http.espn_core: that module is a
-# different concern (an HTTP client for a different ESPN host), and
-# library.features.common already holds the canonical status-severity
-# vocabulary (_INJURY_STATUS_ORDINAL/_TEAM_INJURY_COUNT_STATUSES) that
-# this module deliberately doesn't import either, to keep normalize free
-# of feature-layer knowledge.
+# ESPN's current-injury-report status vocabulary.
 _CURRENT_INJURY_STATUSES = {"Questionable", "Doubtful", "Out"}
 
 
 def roster_to_team_injuries(roster: dict) -> list[dict]:
     """Extracts each currently-injured athlete's status from a roster
-    response. NBA's site-API roster embeds `injuries` directly on each
-    athlete (confirmed live, 2026-08-14 -- see NBAClient.get_roster's own
-    docstring) -- unlike NFL, which needs a separate core-API injury-report
-    call (EspnCoreApiClient.get_team_injuries), so no extra fetch is
-    needed for what's already collected here. Returns the same
-    [{"entity_id", "status"}, ...] contract that function returns (raw
-    ESPN status string unmapped -- severity thresholding is a
-    feature-layer concern, library.features.common), so downstream code
-    doesn't need to know which of the two sources an event's injuries
-    field came from.
+    response. Some sports' site-API rosters embed `injuries` directly on
+    each athlete, so no extra fetch is needed here. Returns
+    [{"entity_id", "status"}, ...] with the raw ESPN status string
+    unmapped (severity thresholding is a feature-layer concern).
 
-    UNVERIFIED: only the existence of athlete["injuries"] was confirmed
-    live, not the exact key holding each entry's status string -- this
-    assumes a top-level "status" string per entry (matching
-    EspnCoreApiClient.get_team_injuries' own confirmed shape from the
-    same ESPN status vocabulary), with a fallback to a nested
-    type.description shape in case the site API differs from the core
-    API here. Treat as needing a real payload check before trusting it in
-    production (see project-nba-onboarding memory).
+    Assumes a top-level "status" string per injury entry, with a fallback
+    to a nested type.description shape.
     """
     result = []
     for athlete in _flatten_roster_athletes(roster.get("athletes", [])):
@@ -285,11 +221,9 @@ def boxscore_to_player_game_stats(
 
     Each returned player entity carries metadata.position, same field/shape
     roster_to_player_entities sets from the roster feed -- upsert_player_entity
-    (library.storage.pipeline_storage) writes whichever of the two sources
-    ran most recently as a full item replacement, not a merge, so this
-    entity dropping position would blank out whatever a prior roster sync
-    had already set for an actively-playing player, exactly the case
-    live_features.py's roster-driven candidate selection depends on it for.
+    writes whichever of the two sources ran most recently as a full item
+    replacement, not a merge, so omitting position here would blank out
+    whatever a prior roster sync had already set.
     """
     header = summary["header"]
     event_id = header["id"]
@@ -306,28 +240,20 @@ def boxscore_to_player_game_stats(
     for team_block in summary.get("boxscore", {}).get("players", []):
         team_id = str(team_block["team"]["id"])
         for category in team_block.get("statistics", []):
-            # NFL's categories are always named ("passing"/"rushing"/etc,
-            # prefixed below); NBA's single stat block has no "name" field
-            # at all (only a display-label "names" array) -- confirmed
-            # live, 2026-08-14. Falling back to a fabricated "misc" prefix
-            # there would silently rename "points" to "misc_points",
-            # breaking TARGET_STAT's exact stat_line key match (see
-            # model-training/nba/train_player_prop_model.py). Distinguish
-            # "genuinely unnamed" (category.get("name") is None -- no
-            # prefix at all) from "named" (prefix as before) rather than
-            # defaulting a name in.
+            # Some sports' categories are always named ("passing"/"rushing",
+            # prefixed below); others have no "name" field at all (only a
+            # display-label "names" array). Distinguish "genuinely unnamed"
+            # (category.get("name") is None -- no prefix at all) from
+            # "named" rather than defaulting a name in, since a fabricated
+            # prefix would silently rename a stat key.
             raw_category_name = category.get("name")
             category_name = snake_case(raw_category_name) if raw_category_name is not None else None
             keys = category.get("keys", [])
             for athlete_entry in category.get("athletes", []):
                 athlete = athlete_entry["athlete"]
-                # Confirmed live, 2025-12-07 game 401810216 (2025-26 season):
-                # a deep-bench player held out for "COACH'S DECISION" can
-                # carry a stub athlete object with no "id" at all (just
-                # `links`/`shortName`) -- every other athlete entry in the
-                # same response has a normal numeric id. No stat line is
-                # recoverable without an id to key it by, and a scoreless
-                # DNP entry has nothing worth capturing anyway.
+                # A DNP player can carry a stub athlete object with no "id"
+                # at all (just `links`/`shortName`). No stat line is
+                # recoverable without an id to key it by.
                 athlete_id = athlete.get("id")
                 if athlete_id is None:
                     continue
@@ -390,10 +316,8 @@ def boxscore_to_player_game_stats(
             "metadata": {
                 "team_id": team_id,
                 # This game's own event_date -- lets upsert_player_entity
-                # guard against an out-of-order write (a concurrent backfill
-                # processing games out of chronological order) clobbering a
-                # player's team_id with a stale one. See that method's own
-                # docstring.
+                # guard against an out-of-order write clobbering a player's
+                # team_id with a stale one.
                 "team_id_as_of": event_date,
                 "jersey": jersey,
                 "position": position,
@@ -412,13 +336,10 @@ def boxscore_to_team_game_stats(
     of possession, third/fourth-down and red-zone efficiency, etc.).
 
     ESPN's team statistics are a flat list with no category grouping, so
-    every stat name snake-cases to a unique field directly, unlike
-    boxscore_to_player_game_stats. compound_key_splits follows the same
-    "one string packs two numbers" contract as the player-stats version,
-    with team-level field names (e.g. "thirdDownEff": "3-9" -> conversions,
-    attempts) -- a separate map from the player one, since the raw ESPN
-    key strings differ at this level ("completionAttempts", not
-    "completions/passingAttempts").
+    every stat name snake-cases to a unique field directly. compound_key_splits
+    follows the same "one string packs two numbers" contract as the
+    player-stats version, with team-level field names (e.g.
+    "thirdDownEff": "3-9" -> conversions, attempts).
 
     ESPN's team statistics list contains "interceptions" twice with an
     identical value both times; the second occurrence just overwrites the

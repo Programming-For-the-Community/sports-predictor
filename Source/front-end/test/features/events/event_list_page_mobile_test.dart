@@ -97,9 +97,7 @@ void main() {
       );
       expect(tester.takeException(), isNull);
 
-      // _ComparisonSummary (game_row.dart) is only reached on this tab --
-      // never exercised at all before the predicted-win-percentage text
-      // was added to its own line.
+      // _ComparisonSummary (game_row.dart) is only reached on this tab.
       await tester.tap(find.text('Completed'));
       await tester.pumpAndSettle();
       expect(tester.takeException(), isNull);
@@ -107,13 +105,10 @@ void main() {
   }
 
   testWidgets('team abbreviations render at a legible width, not just without overflow', (tester) async {
-    // "No overflow" alone doesn't catch this class of bug: a Flexible
-    // Text squeezed by sibling content can render at an effectively
-    // invisible sliver of a width without ever throwing an exception --
-    // confirmed live (real report: team names weren't showing at all,
-    // just the color dot + score). Live scores present, same worst case
-    // event_list_page_mobile_test.dart's other tests already flag as the
-    // first time this line had to carry real (non-null) score content.
+    // "No overflow" alone doesn't catch this: a Flexible Text squeezed by
+    // sibling content can render at an effectively invisible sliver of a
+    // width without ever throwing. Asserts the team abbreviations are
+    // actually legible with live scores present.
     await pumpAtWidth(
       tester,
       360,

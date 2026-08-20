@@ -55,15 +55,12 @@ data "aws_iam_policy_document" "ecs_pipeline_permissions" {
     resources = ["arn:aws:s3:::${local.model_artifacts_bucket}/*"]
   }
 
-  # ListBucket (scoped to each sport's own prefix, same pattern as
-  # iam-nfl-backfill.tf's raw-data-lake listing) is what lets a training
+  # ListBucket (scoped to each sport's own prefix) is what lets a training
   # task discover the next version number for whichever model it's
   # training -- it lists <sport>/<model-name>/v*/ and picks max(existing) + 1
   # rather than needing a separate version-tracking resource. Each model
   # (win-probability, score-margin, one per player-prop stat) versions
-  # independently -- see Terraform/s3-model-artifacts.tf. This role is
-  # shared across every sport's feature-engineering/training tasks, so its
-  # prefix list grows by one entry per sport onboarded, not a new role.
+  # independently -- see Terraform/s3-model-artifacts.tf.
   #
   # training-runs/* is also listed here even though nothing ever calls
   # ListBucket against it directly: S3 returns 403 (not 404) on a

@@ -1,15 +1,8 @@
 # Reusable workflow: builds a Python Lambda deployment ZIP and updates the
-# live function code. Mirrors the role docker_build_push.yml plays for ECS:
-# Terraform owns the function infrastructure (created with a placeholder ZIP),
-# this workflow owns every subsequent code deployment.
-#
-# Testing is NOT done here -- it used to be an inline step gated by a
-# test_dir input, but that meant every caller's own test run was bundled
-# into the same job as its build+deploy, and a shared test_dir (e.g. one
-# directory covering both the ingest and normalize Lambdas) meant one
-# Lambda's failing test could block the other's deploy. Callers now run
-# run_python_tests.yml as their own upstream job and gate this workflow's
-# invocation on it via `needs:` instead -- see nfl_data_pipeline.yml.
+# live function code. Terraform owns the function infrastructure (created
+# with a placeholder ZIP); this workflow owns every subsequent code
+# deployment. Callers run tests upstream via run_python_tests.yml and gate
+# this workflow's invocation on that via `needs:`.
 #
 # Build layout inside the ZIP:
 #   library/   <- shared library, installed via pip --no-deps

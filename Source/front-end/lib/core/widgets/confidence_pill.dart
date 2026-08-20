@@ -5,12 +5,9 @@ import '../theme/app_text_styles.dart';
 
 /// design/FRONTEND_STYLE.md's confidence tiers: "distance off 50/50: edge
 /// >= 0.13 -> HIGH (cyan), >= 0.06 -> MED (amber), else LOW (muted)".
-/// Only meaningful for the win-probability classifier -- margin/score/
-/// player-prop predictions are plain regression point estimates with no
-/// probability distribution, so there's no analogous confidence % for
-/// those without new model work (quantile regression); this widget is
-/// deliberately win-probability-only, not a generic "prediction
-/// confidence" concept.
+/// Win-probability only -- margin/score/player-prop predictions are plain
+/// regression point estimates with no probability distribution to derive
+/// a tier from.
 class ConfidencePill extends StatelessWidget {
   const ConfidencePill({super.key, required this.homeWinProbability});
 

@@ -86,10 +86,8 @@ class TestBuildEventDataset:
     def test_team_history_stays_capped_at_window_across_many_games(self):
         # KC (12) plays 7 games against 7 different real opponents (so KC
         # is the only shared team); window=3 means game 7 should only see
-        # the 3 most recent prior games, not all 6 -- the case the
-        # incremental-history rewrite (replacing a full per-game history
-        # re-filter) needs to get right. Opponent identities don't matter
-        # for what this test checks, just that each is a real franchise
+        # the 3 most recent prior games, not all 6. Opponent identities
+        # don't matter here, just that each is a real franchise
         # (is_real_franchise_matchup would otherwise exclude the event).
         opponents = ["13", "24", "25", "26", "27", "28", "29"]
         events = [
@@ -104,9 +102,7 @@ class TestBuildEventDataset:
         assert e7["home_games_played"] == 3
 
     def _qb_game(self, event_key, team_id, event_date, entity_id="mahomes", passing_yards=300, passing_attempts=30):
-        # "passing_yards", matching what normalize.py actually produces for
-        # ESPN's passing category (see library/features/nfl.py's
-        # build_event_features comment).
+        # "passing_yards" matches what normalize.py produces for ESPN's passing category.
         return {
             "event_key": event_key, "player_key": f"PLAYER#{entity_id}", "entity_id": entity_id,
             "team_id": team_id, "event_date": event_date,

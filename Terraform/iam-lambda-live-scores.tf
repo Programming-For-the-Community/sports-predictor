@@ -1,9 +1,5 @@
-# Dedicated role, not shared with iam-lambda-pipeline.tf (ingest/normalize)
-# or iam-lambda-inference.tf (predict/predict-read) -- this Lambda's own
-# access needs are genuinely narrower than either: read-only on the events
-# table (no write access at all, unlike the pipeline role) and read+write
-# on only the live-scores cache prefix of the raw bucket (not the whole
-# bucket, unlike the pipeline role's raw-bucket access).
+# Read-only on the events table; read+write limited to the live-scores
+# cache prefix of the raw bucket.
 data "aws_iam_policy_document" "lambda_live_scores_assume" {
   statement {
     actions = ["sts:AssumeRole"]
@@ -30,11 +26,8 @@ resource "aws_iam_role_policy_attachment" "lambda_live_scores_logs" {
 }
 
 data "aws_iam_policy_document" "lambda_live_scores_permissions" {
-  # FeatureStorage's constructor requires all four table names regardless
-  # of which methods actually get called (same as lambda-nfl-predict-read.tf's
-  # own comment on this) -- live_scores.py only ever calls get_all_events,
-  # but only the events table + its status-index GSI actually need a grant
-  # here since the other three are never queried.
+  # live_scores.py only ever calls get_all_events, so only the events
+  # table + its status-index GSI need a grant here.
   statement {
     sid     = "ReadEvents"
     actions = ["dynamodb:Query"]
@@ -44,9 +37,7 @@ data "aws_iam_policy_document" "lambda_live_scores_permissions" {
     ]
   }
 
-  # Scoped to the live-scores cache prefix only, not the whole raw bucket
-  # -- this role has no business reading/writing scoreboard/boxscore/
-  # coach/depth-chart data ingest's own role manages.
+  # Scoped to the live-scores cache prefix only, not the whole raw bucket.
   statement {
     sid       = "ReadWriteLiveScoresCache"
     actions   = ["s3:GetObject", "s3:PutObject"]

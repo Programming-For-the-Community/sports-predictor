@@ -1,14 +1,6 @@
-# Points the nfl-predict Lambda at an already-pushed image. Split out of
-# nfl_ai_hosting.yml so build (no infra dependency) and deploy (needs the
-# Lambda function to already exist) can run on opposite sides of
-# `terraform apply` in nfl_deploy.yml -- see that file's comment for the
-# full ordering rationale.
-#
-# Runs standalone (workflow_dispatch, defaulting to whatever is currently
-# tagged nfl-predict-latest -- useful for redeploying without a rebuild,
-# or rolling forward/back to a specific previously-pushed versioned tag)
-# or called from nfl_deploy.yml with the exact versioned tag
-# nfl_ai_hosting.yml just pushed.
+# Points the nfl-predict Lambda at an already-pushed image. Runs standalone
+# (workflow_dispatch, defaulting to the current nfl-predict-latest tag) or
+# called from nfl_deploy.yml with a specific versioned tag.
 
 name: NFL Predict Deploy
 

@@ -2,18 +2,14 @@ import 'package:flutter/material.dart';
 
 import '../core/models/event.dart';
 
-/// Frontend-only -- the backend has no team COLOR data for any sport (see
-/// Source/library/features/nfl_teams.py, which only carries
-/// division/conference/coordinates). Keyed by ESPN's numeric team_id, the
-/// same id used as entity_id throughout the backend. NFL-only: hand-typed
-/// real brand colors for its 32 teams. No other sport has an equivalent
-/// table -- see teamDisplay below for how everyone else is handled.
+/// Frontend-only, hand-typed real brand colors for NFL's 32 teams, keyed
+/// by ESPN's numeric team_id. No other sport has an equivalent table --
+/// see teamDisplay below for how everyone else is handled.
 class NflTeam {
   const NflTeam(this.abbreviation, this.primary);
   final String abbreviation;
   // Null means "no official color for this team" -- TeamColorDot omits
-  // itself entirely rather than guess (see teamDisplayFor's own doc
-  // comment for why a hashed placeholder was worse than nothing).
+  // itself entirely rather than guess.
   final Color? primary;
 }
 
@@ -54,9 +50,8 @@ const Map<String, NflTeam> kNflTeams = {
 
 /// Parses a bare 6-digit hex string (ESPN's own format, e.g. "c8102e", no
 /// "#") into a Color -- null on anything else (missing, malformed, an
-/// already-"#"-prefixed string some other source might send) so a bad
-/// value degrades to "no dot" the same way a missing color already does,
-/// never a thrown FormatException.
+/// already-"#"-prefixed string) so a bad value degrades to "no dot" rather
+/// than a thrown FormatException.
 Color? _parseApiColor(String? hex) {
   if (hex == null) return null;
   final match = RegExp(r'^#?([0-9a-fA-F]{6})$').firstMatch(hex);
@@ -65,25 +60,15 @@ Color? _parseApiColor(String? hex) {
 }
 
 /// The one function every team-display widget should call -- prefers the
-/// NFL static table above (real brand colors, hand-typed and longer-
-/// established) ONLY when sport is 'nfl'; every other sport falls back to
-/// `apiColor` (see Participant.color's own doc comment for where that
-/// comes from -- library.normalize.espn.team_to_entity, confirmed live to
-/// carry ESPN's own real per-team hex). Gated on sport, not just "is
-/// entityId in the table": raw ESPN team ids are NOT unique across sports
-/// (see library/schema/keys.py's own entity_team_key docstring, and
-/// design/DATA_SCHEMA.md's `SPORT#<sport>#` prefix convention every
-/// backend key follows for the same reason) -- kNflTeams only has ~34
-/// entries (NFL's own low-numbered legacy ESPN ids), and a NCAAFB team
-/// whose id happens to fall in that same range would silently render as
-/// the wrong NFL team's abbreviation/color if this checked the table
-/// unconditionally. No hashed placeholder color for a team with neither
-/// source (a prior version of this function did that) -- TeamColorDot
-/// omits itself entirely rather than show an arbitrary made-up color.
-/// Takes the raw fields rather than a Participant so both event-shaped
-/// callers (teamDisplay below) and standings/bracket/cup rows (no
-/// Participant/role/result on those shapes at all -- see GET /{sport}/
-/// season's own row shapes) share one rule.
+/// NFL static table above only when sport is 'nfl'; every other sport
+/// falls back to `apiColor`. Gated on sport, not just "is entityId in the
+/// table": raw ESPN team ids are not unique across sports, so a non-NFL
+/// team whose id happens to fall in kNflTeams' range would otherwise
+/// render as the wrong NFL team. No hashed placeholder color for a team
+/// with neither source -- TeamColorDot omits itself entirely rather than
+/// show an arbitrary made-up color. Takes the raw fields rather than a
+/// Participant so both event-shaped callers (teamDisplay below) and
+/// standings/bracket/cup rows share one rule.
 NflTeam teamDisplayFor(String sport, String entityId, String? abbreviation, {String? apiColor}) {
   if (sport == 'nfl') {
     final known = kNflTeams[entityId];

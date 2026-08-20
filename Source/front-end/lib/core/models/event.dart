@@ -1,20 +1,12 @@
 import 'event_leaders.dart';
 
-/// Mirrors GET /{sport}/events' response shape (see
-/// Source/library/serving/{nfl,ncaafb}_reads.py's own list_events).
+/// Mirrors GET /{sport}/events' response shape.
 class ParticipantResult {
   const ParticipantResult({required this.score, required this.won});
 
-  // Both nullable -- NFL's own normalize (espn.py) fills a not-yet-played
-  // game's score with ESPN's literal "0"/false rather than omitting it,
-  // so `result` itself being non-null was previously treated as "the
-  // game finished" everywhere this gets read. NCAAFB's normalize
-  // (ncaafb.py's game_to_event_item) instead leaves score/won genuinely
-  // None pre-game -- deliberately, CFBD really has no score to report --
-  // so `result` is non-null there even for a scheduled event, with these
-  // two fields null inside it. Every caller already reads these via `?.`
-  // (result itself was already nullable), so widening just these two to
-  // match costs nothing at the call sites.
+  // Both nullable -- `result` can be non-null for a not-yet-played event
+  // (e.g. NCAAFB) with these two fields still null inside it, so a null
+  // check on `result` alone doesn't mean "the game finished".
   final double? score;
   final bool? won;
 
@@ -33,20 +25,18 @@ class Participant {
   final String entityId;
   final String role; // 'home' or 'away'
   final ParticipantResult? result; // null until the event is completed
-  // Off the participant's own team entity (see enrich_participants) --
-  // null on an entity that's never been seeded. NFL prefers its own
-  // static/nfl_team_colors.dart table over this (real brand colors,
-  // longer-established); every other sport has no such table, so this is
-  // its only source. See teamDisplay's own doc comment.
+  // Off the participant's own team entity -- null on an entity that's
+  // never been seeded. NFL prefers its own static/nfl_team_colors.dart
+  // table (real brand colors); every other sport uses this as its only
+  // source. See teamDisplay's own doc comment.
   final String? abbreviation;
   // Also off the team entity -- null for NFL (no conference field on its
-  // team entities at all, see espn.py's team_to_entity). Used to group
-  // event_list_page.dart's list when present -- see its own grouping doc.
+  // team entities). Used to group event_list_page.dart's list when
+  // present.
   final String? conference;
-  // Bare 6-digit hex, no "#" (ESPN's own format, see espn.py's own
-  // team_to_entity) -- teamDisplayFor/_parseApiColor (nfl_team_colors.dart)
-  // parse it. Null for NFL (that table's own doc comment) and for any
-  // entity never seeded.
+  // Bare 6-digit hex, no "#" -- teamDisplayFor/_parseApiColor
+  // (nfl_team_colors.dart) parse it. Null for NFL and for any entity
+  // never seeded.
   final String? color;
 
   factory Participant.fromJson(Map<String, dynamic> json) => Participant(
@@ -59,9 +49,8 @@ class Participant {
       );
 }
 
-/// Only present on a completed event -- see handler.py's
-/// _prediction_comparison. Null (not just absent) means no prediction was
-/// ever logged for this event before it was played, not that the backend
+/// Only present on a completed event. Null means no prediction was ever
+/// logged for this event before it was played, not that the backend
 /// failed to compute one.
 class PredictionComparison {
   const PredictionComparison({
@@ -120,31 +109,25 @@ class SportEvent {
 
   final String eventId;
   final String eventDate;
-  // Full ISO 8601 kickoff timestamp -- null for an event ingested before
-  // this field existed. Prefer this over eventDate for sorting/display;
-  // eventDate is day-only.
+  // Full ISO 8601 kickoff timestamp. Prefer this over eventDate for
+  // sorting/display; eventDate is day-only.
   final String? kickoffTime;
   final String status;
   final int? week;
   // Playoff round name (Wild Card/Divisional/Conference Championship/Super
   // Bowl) for a postseason game -- null for regular season, in which case
-  // `week` is what the UI should show instead. See handler.py's _round_label.
+  // `week` is what the UI should show instead.
   final String? round;
   final List<Participant> participants;
   final PredictionComparison? predictionComparison;
-  // Stadium name/city/state, straight from ESPN's own venue payload (see
-  // normalize/espn.py's scoreboard_event_to_event_item) -- city/state were
-  // already ingested as a travel-distance feature input, venueName is new.
-  // All three are independently nullable: an indoor neutral-site game can
-  // be missing state, and any of them can be absent on an event ingested
-  // before this field existed.
+  // Stadium name/city/state. All three are independently nullable: an
+  // indoor neutral-site game can be missing state.
   final String? venueName;
   final String? venueCity;
   final String? venueState;
   // Player-prop predicted-vs-actual -- only ever present alongside
-  // predictionComparison (both are completed-event-only, see
-  // nfl_reads.list_events), same "null means nobody recorded one before
-  // the game" condition as that field.
+  // predictionComparison (both are completed-event-only), same "null
+  // means nobody recorded one before the game" condition as that field.
   final EventLeadersComparison? leadersComparison;
 
   factory SportEvent.fromJson(Map<String, dynamic> json) => SportEvent(
@@ -171,10 +154,9 @@ class SportEvent {
   Participant get home => participants.firstWhere((p) => p.role == 'home');
   Participant get away => participants.firstWhere((p) => p.role == 'away');
 
-  // "Arrowhead Stadium -- Kansas City, MO", degrading gracefully as
-  // pieces go missing (a name with no city, a city with no state, or
-  // nothing at all) -- null only when there's truly nothing to show, so
-  // callers can skip rendering entirely rather than printing an empty line.
+  // "Arrowhead Stadium -- Kansas City, MO", degrading gracefully as pieces
+  // go missing. Null only when there's nothing to show, so callers can
+  // skip rendering entirely.
   String? get venueLabel {
     final cityState = [venueCity, venueState].whereType<String>().join(', ');
     final parts = [if (venueName != null) venueName!, if (cityState.isNotEmpty) cityState];

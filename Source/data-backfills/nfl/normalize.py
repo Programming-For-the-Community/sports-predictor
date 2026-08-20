@@ -13,9 +13,6 @@ from library.normalize.espn import (
 SPORT = "nfl"
 
 # ESPN box score stat keys that pack two numbers into one string.
-# Three franchises relocated inside the 2016-2025 window (Rams, Chargers,
-# Raiders) -- ESPN's numeric team id is stable across the move; these
-# compound keys are NFL-specific and don't appear in other sports' exports.
 _COMPOUND_KEY_SPLITS: dict[str, tuple[str, str]] = {
     "completions/passingAttempts": ("completions", "passing_attempts"),
     "sacks-sackYardsLost": ("sacks_taken", "sack_yards_lost"),

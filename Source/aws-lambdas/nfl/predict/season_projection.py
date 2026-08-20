@@ -1,9 +1,7 @@
 """
 Season-long standings/leaderboard orchestration -- builds the payload
-Terraform/scheduler-nfl-season-projection.tf's weekly EventBridge
-Scheduler invoke writes to S3 for GET /nfl/season (see handler.py's own
-docstring for why that route can't compute this live per-request). Pulls
-season-wide data once via FeatureStorage, derives Elo ratings and
+the weekly EventBridge Scheduler invoke writes to S3 for GET /nfl/season.
+Pulls season-wide data once via FeatureStorage, derives Elo ratings and
 remaining-schedule inputs (_season_standings_inputs), runs
 season_simulation's pure Monte Carlo logic, and scores each tracked
 player-prop leaderboard (_leaderboards) using the same model-loading
@@ -31,17 +29,12 @@ logger = logging.getLogger("nfl-predict")
 
 SPORT = "nfl"
 
-# ESPN's own season.type convention (see nfl/ingest/handler.py's
-# PRESEASON_TYPE) -- 3 is postseason. Only postseason-flagged events are
-# ever matched against a bracket slot in _real_postseason_matchups, so a
-# coincidental regular-season rematch between the same two teams never
-# gets mistaken for their real playoff meeting.
+# ESPN's own season.type convention -- 3 is postseason. Only
+# postseason-flagged events are matched against a bracket slot in
+# _real_postseason_matchups, so a coincidental regular-season rematch
+# never gets mistaken for a real playoff meeting.
 POSTSEASON_TYPE = 3
 
-# Source of truth is Terraform/scheduler-nfl-train-player-prop-model.tf's
-# nfl_player_prop_stats map -- duplicated here as a plain list (not read
-# from Terraform at runtime) since there's no DynamoDB-backed model
-# registry yet (design/PROJECT_PLAN.md Phase 4) to read it from instead.
 PLAYER_PROP_STATS = [
     "passing_yards", "passing_touchdowns", "rushing_yards", "rushing_touchdowns",
     "receiving_yards", "receiving_touchdowns", "defensive_sacks",
@@ -53,9 +46,8 @@ def _season_standings_inputs(storage: FeatureStorage) -> dict:
     everything season_simulation.simulate_season needs, plus each team's
     next scheduled event_key (reused by _leaderboards below)."""
     # Excludes the Pro Bowl and any other exhibition matchup -- its AFC/NFC
-    # all-star "teams" aren't real franchises (see
-    # library.features.nfl_teams.is_real_franchise_matchup), so a played
-    # one would otherwise count as a real win/loss and Elo update for a
+    # all-star "teams" aren't real franchises, so a played one would
+    # otherwise count as a real win/loss and Elo update for a
     # non-existent team_id.
     scheduled = [e for e in storage.get_all_events(SPORT, status="scheduled") if is_real_franchise_matchup(e)]
     all_completed = [e for e in storage.get_all_events(SPORT, status="completed") if is_real_franchise_matchup(e)]
@@ -66,7 +58,7 @@ def _season_standings_inputs(storage: FeatureStorage) -> dict:
     # Wins/losses/point-differential are scoped to just this season --
     # standings reset every year regardless of Elo. compute_elo_ratings
     # below gets the FULL (unscoped) history instead, since it does its
-    # own season-boundary regression (see that function's docstring).
+    # own season-boundary regression.
     completed = [e for e in all_completed if e.get("season") == current_season]
 
     wins: dict[str, int] = {}
@@ -157,12 +149,10 @@ def _season_wide_candidate_rows(storage: FeatureStorage, season_inputs: dict) ->
 def _leaderboards(storage: FeatureStorage, s3, model_cache: dict, season_inputs: dict) -> dict:
     """Top-10 season-long leaderboard per tracked player-prop stat,
     projected as current season-to-date total + (their own model's
-    prediction for their team's NEXT scheduled game * games remaining) --
-    see season_simulation.project_leaderboard's own docstring for why
-    this is a flat estimate rather than a per-opponent simulation. With
-    zero current-season total (before Week 1, or a candidate who simply
-    hasn't recorded this particular stat yet), this reduces to a pure
-    full-season projection, so the same formula covers both cases."""
+    prediction for their team's NEXT scheduled game * games remaining).
+    With zero current-season total (before Week 1, or a candidate who
+    simply hasn't recorded this particular stat yet), this reduces to a
+    pure full-season projection."""
     season_player_stats = [
         row for row in storage.get_all_player_game_stats(SPORT)
         if row.get("event_key") in season_inputs["completed_event_keys"]
@@ -184,9 +174,7 @@ def _leaderboards(storage: FeatureStorage, s3, model_cache: dict, season_inputs:
 
     # feature_row_cache pre-populated from the depth-chart-sourced rows --
     # build_live_event_leader_candidates already returns a full live
-    # feature row per candidate, so those never need a separate
-    # build_live_player_features call the way a this-season-stats-only
-    # candidate below still does.
+    # feature row per candidate.
     feature_row_cache: dict[str, dict] = {}
     stat_candidates: dict[str, set[str]] = {stat: set(current_totals_by_stat[stat]) for stat in PLAYER_PROP_STATS}
     for category, rows in _season_wide_candidate_rows(storage, season_inputs).items():
@@ -264,12 +252,8 @@ def _real_postseason_matchups(storage: FeatureStorage, current_season: int | Non
     completed -- _resolve_matchup checks here before falling back to the
     model's own deterministic pick for a bracket slot.
 
-    get_all_events has no "every status at once" option (its own status
-    argument defaults to "completed" only, see feature_storage.py) --
-    fetches "scheduled" and "completed" separately and merges, same two
-    calls _season_standings_inputs already makes for its own (differently
-    filtered -- no season_type check there) scheduled/completed lists.
-    """
+    get_all_events has no "every status at once" option, so this fetches
+    "scheduled" and "completed" separately and merges."""
     result: dict[frozenset, dict] = {}
     for status in ("scheduled", "completed"):
         for event in storage.get_all_events(SPORT, status=status):
@@ -285,11 +269,9 @@ def _real_postseason_matchups(storage: FeatureStorage, current_season: int | Non
 def _logged_win_probability(predictions_table, event_key_value: str) -> dict | None:
     """This event's own logged win-probability prediction -- the audit
     trail predict_event's own record_prediction call already wrote, if
-    anyone's ever requested a prediction for it. None otherwise, same
-    "read the audit trail, never recompute" rule library/serving/
-    nfl_reads.py's own _prediction_comparison follows (recomputing after
-    the fact would build live features that may already include this
-    very game's own now-normalized result)."""
+    anyone's ever requested a prediction for it. None otherwise; never
+    recomputed, since recomputing after the fact could build live
+    features that already include this game's own normalized result."""
     rows = predictions_table.query(Key("event_key").eq(event_key_value))
     row = next((r for r in rows if r["model_key"].startswith(f"MODEL#{WIN_PROBABILITY_MODEL}#")), None)
     return row["predicted_value"] if row else None
@@ -300,23 +282,18 @@ def _resolve_matchup(
     real_matchups: dict[frozenset, dict], storage: FeatureStorage, s3, predictions_table,
     current_ratings: dict[str, float], home_advantage: float,
 ) -> dict:
-    """Resolves one bracket slot into a display row -- the 3-state design
-    from the approved plan: (1) no real postseason game exists yet for
-    this pair -- the model's own deterministic pick (project_matchup,
-    "status": "projected"); (2) a real game exists and is completed --
-    the actual result plus whatever was originally predicted for it, if
-    anyone ever requested one ("status": "final"); (3) a real game
-    exists, not yet played -- its live prediction, computed on the spot
-    right here (in-process -- this Lambda already holds storage/s3/
-    predictions_table, no self-invoke needed, same
-    event_prediction.compute_and_cache_event predict-read's own cache-
-    miss path calls) if nobody's viewed it yet ("status": "scheduled").
+    """Resolves one bracket slot into a display row, one of three states:
+    (1) no real postseason game exists yet for this pair -- the model's
+    own deterministic pick (project_matchup, "status": "projected");
+    (2) a real game exists and is completed -- the actual result plus
+    whatever was originally predicted for it, if anyone ever requested
+    one ("status": "final"); (3) a real game exists, not yet played --
+    its live prediction, computed on the spot in-process if nobody's
+    viewed it yet ("status": "scheduled").
 
     Whichever team this returns as "predicted_winner" (real or projected)
-    is what the CALLER advances to the next round's slot -- see
-    _bracket_payload's own round-by-round loop -- so the bracket
-    self-corrects as real results arrive, with no separate "which round
-    is real yet" state to track.
+    is what the caller advances to the next round's slot -- see
+    _bracket_payload's own round-by-round loop.
     """
     real_event = real_matchups.get(frozenset((team_a, team_b)))
     if real_event is None:
@@ -393,10 +370,9 @@ def _project_conference_bracket(
     seeds: list[str], real_matchups: dict[frozenset, dict], storage: FeatureStorage, s3, predictions_table,
     current_ratings: dict[str, float], home_advantage: float,
 ) -> tuple[list[dict], str]:
-    """Same reseeded 7-team topology as season_simulation.project_bracket,
-    but each matchup goes through _resolve_matchup's real-vs-projected
-    reconciliation instead of a pure Elo pick -- see that function's own
-    docstring. Returns (rounds, champion)."""
+    """Reseeded 7-team playoff topology; each matchup goes through
+    _resolve_matchup's real-vs-projected reconciliation instead of a
+    pure Elo pick. Returns (rounds, champion)."""
     seed_number = {team_id: rank + 1 for rank, team_id in enumerate(seeds)}
     one, two, three, four, five, six, seven = seeds
 
@@ -431,13 +407,10 @@ def _bracket_payload(
     storage: FeatureStorage, s3, predictions_table, season_inputs: dict, simulation: dict[str, dict],
 ) -> dict:
     """Builds the full playoff bracket (both conferences + Super Bowl),
-    reconciled against real postseason results as they exist right now --
-    see _resolve_matchup's own docstring for the 3-state design. Reseeds
-    from REAL wins/point-differential once the regular season is actually
-    over (season_inputs["remaining_games"] empty); otherwise from
-    simulate_season's own projected_wins (today's best guess), same
-    real-vs-projected split applied to seeding as to everything else
-    here."""
+    reconciled against real postseason results as they exist right now.
+    Reseeds from real wins/point-differential once the regular season is
+    actually over (season_inputs["remaining_games"] empty); otherwise
+    from simulate_season's own projected_wins."""
     regular_season_over = not season_inputs["remaining_games"]
     if regular_season_over:
         wins, point_differential = season_inputs["wins"], season_inputs["point_differential"]
@@ -483,10 +456,10 @@ def build_season_projection(storage: FeatureStorage, s3, predictions_table) -> d
         season_inputs["remaining_games"], season_inputs["current_ratings"],
     )
 
-    # division lets the frontend group standings by division (see
-    # season_page.dart) without duplicating TEAM_DIVISIONS client-side.
-    # Sorted by projected_wins descending BEFORE grouping, so each
-    # division's own teams are already best-to-worst within their group.
+    # division lets the frontend group standings by division without
+    # duplicating TEAM_DIVISIONS client-side. Sorted by projected_wins
+    # descending before grouping, so each division's own teams are
+    # already best-to-worst within their group.
     standings = sorted(
         (
             {
@@ -527,19 +500,12 @@ def build_season_projection(storage: FeatureStorage, s3, predictions_table) -> d
 
 
 def run_scheduled(storage: FeatureStorage, model_bucket, predictions_table) -> dict:
-    """Entry point for Terraform/scheduler-nfl-season-projection.tf's
-    weekly EventBridge Scheduler -> Lambda direct invoke -- computes
-    build_season_projection() once and writes it to S3 instead of
-    returning it through API Gateway. Not wrapped in the same try/except
-    handler.py's API-Gateway-triggered routes use: there's no HTTP caller
-    waiting on a status code here, so a real failure should propagate and
-    show up as a Lambda error/CloudWatch alarm, not get silently reshaped
-    into a 500 nobody reads.
-
-    predictions_table is new (2026-08-16, the bracket feature) --
-    _bracket_payload reads/writes real postseason games' logged
-    predictions through it, same table event_prediction.py's own
-    compute_and_cache_event already uses."""
+    """Entry point for the weekly EventBridge Scheduler -> Lambda direct
+    invoke -- computes build_season_projection() once and writes it to
+    S3 instead of returning it through API Gateway. Not wrapped in the
+    same try/except handler.py's API-Gateway-triggered routes use: there
+    is no HTTP caller waiting on a status code here, so a real failure
+    should propagate and show up as a Lambda error/CloudWatch alarm."""
     result = build_season_projection(storage, model_bucket, predictions_table)
     model_bucket.put_json(season_projection_key(SPORT), result)
     logger.info("Wrote season projection for %s to S3", SPORT)

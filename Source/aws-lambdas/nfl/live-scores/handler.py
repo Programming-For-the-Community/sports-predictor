@@ -4,20 +4,10 @@ NFL live-score cache Lambda. Two distinct triggers, one function:
   - EventBridge Scheduler (scheduler-nfl-live-scores.tf), every 60s, event
     shape {"detail-type": "LiveScoreRefresh"} -- checks events near their
     kickoff window against ESPN's live scoreboard and caches the result to
-    S3. See live_scores.refresh's own docstring for why this almost never
-    actually calls ESPN.
+    S3.
   - API Gateway (REST API, Lambda proxy integration), GET /nfl/live-scores,
     behind the same Cognito authorizer as every other NFL route -- serves
     whatever live_scores.refresh last cached.
-
-Deliberately its own Lambda/IAM role rather than folded into ingest or
-predict-read: ingest's whole job is a once-daily DynamoDB-writing batch
-run (see its own docstring -- "this function never touches DynamoDB
-directly" would stop being true if this lived there), and predict-read's
-whole reason for existing is a light, boto3-only cold start serving
-already-ingested data, not a second scheduled-refresh responsibility
-layered on top. This function's own footprint stays just as small: reads
-events (DynamoDB, read-only) and calls ESPN, nothing else.
 """
 import json
 import logging
@@ -40,8 +30,7 @@ _CORS_HEADERS = {
     "Content-Type": "application/json",
 }
 
-# Initialized once per container lifetime, reused across warm invocations
-# -- same lazy-singleton pattern as predict/handler.py's _get_storage().
+# Initialized once per container lifetime, reused across warm invocations.
 _s3 = boto3.client("s3")
 _storage: FeatureStorage | None = None
 

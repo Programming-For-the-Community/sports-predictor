@@ -23,10 +23,7 @@ Required environment variables:
     TEAM_GAME_STATS_TABLE_NAME
     AWS_REGION
 
-Optional environment variables -- these exist so an ECS "Run Task" console
-launch can override just the season range for that one run (via container
-overrides) without editing the task definition. CLI flags, when passed,
-take precedence over both.
+Optional environment variables (CLI flags take precedence):
     START_SEASON (default 2016)
     END_SEASON (default 2025)
     BATCH_SIZE (default 2)

@@ -1,11 +1,9 @@
 """
-Unit tests for nba/predict/live_features.py. No _presumptive_leader
-equivalent to test here, unlike NCAAFB's own test_live_features.py --
-NBA's build_event_features carries no leader-tracking sub-feature at all
-(see library.features.nba's own docstring for why), so
-_box_score_candidate_ids is only ever used by the leaders panel
-(build_live_event_leader_candidates), not by build_live_event_features
-itself. FeatureStorage is mocked throughout.
+Unit tests for nba/predict/live_features.py. NBA's build_event_features
+carries no leader-tracking sub-feature (see library.features.nba's own
+docstring for why), so _box_score_candidate_ids is only ever used by the
+leaders panel (build_live_event_leader_candidates), not by
+build_live_event_features itself. FeatureStorage is mocked throughout.
 
 The nba_predict module (and this directory's own sys.path entry for
 predict/) is registered by conftest.py.

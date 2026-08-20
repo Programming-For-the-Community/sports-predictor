@@ -1,19 +1,6 @@
-# Builds, packages, and deploys the NFL AI training code. Runs standalone
-# (workflow_dispatch) or called from nfl_deploy.yml (workflow_call) --
-# either way the work is identical: build and push image(s).
-#
-# This stage builds more than one image (see design/ARCHITECTURE.md's
-# "Scheduled Training" subgraph: separate Feature Engineering and Train
-# Win-Probability Model Fargate tasks). Both exist now; a future
-# score-margin or player-prop training task would get its own job here
-# too, shaped exactly like the two below.
-#
-# Each image gets its OWN version constant below, bumped independently --
-# feature engineering and train win-probability model are unrelated
-# Fargate tasks with unrelated code, so a change to one has no reason to
-# force a version bump (and a new image tag/deploy) of the other. Bump
-# only the constant for whichever image actually changed, never both just
-# to keep them in sync.
+# Builds and pushes the NFL training images: feature engineering and
+# win-probability model training. Each image has its own version
+# constant, bumped independently.
 
 name: NFL AI Training
 
@@ -30,30 +17,6 @@ permissions:
   contents: read
 
 jobs:
-  # Two independent test jobs, not one shared one -- a failing
-  # model-training test used to fail feature engineering's deployment too
-  # (and vice versa) purely because they shared one test job both image
-  # builds depended on, even though the two Fargate tasks are otherwise
-  # unrelated. Each re-runs Source/tests/library/ redundantly (a
-  # ~1-second cost) rather than trying to split library tests by exact
-  # consumer -- library.aws.dynamodb_table, for instance, is used by
-  # both, so there's no clean partition anyway.
-  #
-  # feature-engineering's own requirements.txt deliberately has no reason
-  # to carry xgboost/scikit-learn/pandas's ML-training extras (it only
-  # writes Parquet, never trains or evaluates a model) -- library/tests/ml/
-  # needs those (see library/ml/model_types.py's own imports) and is
-  # excluded here rather than bloating this job's install for a component
-  # that doesn't use it. train-win-probability-model's own job below DOES
-  # already have every one of those (pandas/pyarrow/scikit-learn/xgboost),
-  # so it needs no such exclusion.
-  #
-  # Both test_paths below scope to their own nfl/ subdirectory, not the
-  # shared parent (Source/tests/feature-engineering/, Source/tests/
-  # model-training/) -- ncaafb_ai_training.yml's own test jobs cover the
-  # identically-named sibling files under .../ncaafb/, and pytest can't
-  # collect two same-basename test modules in one run without package
-  # __init__.py files, which this repo's test tree doesn't have.
   test-feature-engineering:
     name: Run feature engineering tests
     uses: ./.github/workflows/run_python_tests.yml

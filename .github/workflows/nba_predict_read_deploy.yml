@@ -1,11 +1,7 @@
 # Tests and deploys the NBA predict-read Lambda -- GET /nba/events and GET
 # /nba/models, split out of nba-predict for cold start (see
 # Terraform/lambda-nba-predict-read.tf). Zip-packaged like
-# ingest/normalize, not a container image -- mirrors
-# nfl_predict_read_deploy.yml/ncaafb_predict_read_deploy.yml exactly (see
-# nfl_predict_read_deploy.yml's own comment for the full reasoning,
-# including why this lives in its own reusable workflow rather than
-# inlined jobs).
+# ingest/normalize, not a container image.
 
 name: NBA Predict Read Deploy
 

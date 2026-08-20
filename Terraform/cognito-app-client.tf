@@ -8,10 +8,6 @@
 #
 # prevent_user_existence_errors ensures both valid and invalid usernames
 # return the same error, preventing username enumeration.
-#
-# API Gateway authorizer dependency: wire the authorizer to
-# aws_cognito_user_pool.main.id (REST API Cognito authorizer) or
-# aws_cognito_user_pool.main.arn (see outputs.tf) when API Gateway is built.
 resource "aws_cognito_user_pool_client" "web" {
   name         = "${var.project}-web-client"
   user_pool_id = aws_cognito_user_pool.main.id

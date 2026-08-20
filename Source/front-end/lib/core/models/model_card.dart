@@ -1,7 +1,6 @@
-/// Mirrors GET /{sport}/models' response shape (see
-/// Source/aws-lambdas/nfl/predict/handler.py's _list_models). `topFeatures`
-/// is already sliced to 5 and sorted descending by gain server-side --
-/// this model never re-sorts or re-slices.
+/// Mirrors GET /{sport}/models' response shape. `topFeatures` is already
+/// sliced to 5 and sorted descending by gain server-side -- this model
+/// never re-sorts or re-slices.
 class ModelFeatureImportance {
   const ModelFeatureImportance({required this.feature, required this.importance});
 
@@ -14,18 +13,15 @@ class ModelFeatureImportance {
       );
 }
 
-/// One algorithm library.ml.backtest.run_backtest tried for this target on
-/// this run. Carries TWO numbers, deliberately not one: `score` is the
-/// same human-readable metric as the card's own top-level accuracy/mae
-/// (easy to eyeball, but NOT what decided the ranking), while `rankScore`
-/// is the value of whatever ModelCard.candidatesRankedBy names (log_loss/
-/// rmse -- always lower-is-better) for this candidate specifically. The
-/// two can disagree in ranking direction -- a candidate with the highest
-/// `score` isn't guaranteed to be first in ModelCard.candidates, because a
-/// better raw accuracy doesn't always mean better-calibrated
-/// probabilities. `rankScore` is nullable since it's absent on any
-/// candidate list written before this field existed (older cards only
-/// ever had `score`).
+/// One algorithm the backtesting harness tried for this target on this
+/// run. Carries two numbers, deliberately not one: `score` is the same
+/// human-readable metric as the card's own top-level accuracy/mae (easy to
+/// eyeball, but not what decided the ranking), while `rankScore` is the
+/// value of whatever ModelCard.candidatesRankedBy names (log_loss/rmse,
+/// always lower-is-better) for this candidate specifically. The two can
+/// disagree in ranking direction, since a better raw accuracy doesn't
+/// always mean better-calibrated probabilities. `rankScore` is nullable
+/// since older candidate lists only ever had `score`.
 class ModelCandidate {
   const ModelCandidate({required this.algorithm, required this.score, required this.rankScore});
 
@@ -68,8 +64,7 @@ class ModelCard {
   final double? logLoss;
   // Accuracy of always picking the home team -- lets the UI show skill
   // relative to a trivial baseline instead of the much less intuitive
-  // log_loss (see model_card_view.dart). Absent on model cards trained
-  // before this field was added.
+  // log_loss. Absent on older model cards.
   final double? naiveBaselineAccuracy;
 
   // Present for regressors (score-margin, home/away score, player props).
@@ -77,16 +72,15 @@ class ModelCard {
   final double? mae;
   // mae of predicting this player's/team's own rolling average -- same
   // baseline-skill role as naiveBaselineAccuracy above, just for
-  // regressors. Absent on model cards trained before this field was added.
+  // regressors. Absent on older model cards.
   final double? naiveBaselineMae;
 
-  // Every algorithm this run's tournament tried, including this card's own
-  // -- null (not empty) on any model card trained before the backtesting
-  // harness existed, distinct from a hypothetical single-candidate run.
+  // Every algorithm this run's tournament tried, including this card's
+  // own. Null (not empty) when no backtesting harness ran, distinct from
+  // a single-candidate run.
   final List<ModelCandidate>? candidates;
-  // Which metric each candidate's rankScore is ("log_loss"/"rmse") -- see
-  // ModelCandidate's own docs for why this needs to be visible at all.
-  // Null alongside candidates on any card predating this field.
+  // Which metric each candidate's rankScore is ("log_loss"/"rmse"). Null
+  // alongside candidates.
   final String? candidatesRankedBy;
 
   bool get isClassifier => accuracy != null;

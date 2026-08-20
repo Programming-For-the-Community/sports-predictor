@@ -50,22 +50,16 @@ List<(String, List<SportEvent>)> _groupByDate(List<SportEvent> events) {
 
 // Home's conference stands in for the whole matchup -- the away side can
 // differ (a non-conference game), but grouping needs exactly one key per
-// event and this reads naturally as "which conference's slate is this
-// game part of". Null for NFL (its team entities carry no conference
-// field at all -- see event.dart's Participant.conference) and for any
-// NCAAFB game whose home participant hasn't been enriched.
+// event. Null for NFL (no conference field on its team entities) and for
+// any NCAAFB game whose home participant hasn't been enriched.
 String? _primaryConference(SportEvent event) => event.home.conference ?? event.away.conference;
 
 /// Buckets an already-date-sorted event list into (conference, dateGroups)
 /// sections, Power 5 first then Group of 5 (see static/conference_order.
-/// dart -- the same priority order season_page.dart's standings use) with
-/// anything unclassified ("Other") last -- makes a large NCAAFB slate
-/// (100+ FBS games/week) easy to scan for one conference's games instead
-/// of one long chronological list. Skips the outer grouping entirely (one
-/// null-keyed section) when nothing in the list has a conference at all,
-/// so NFL's list renders exactly as it did before this grouping existed.
-/// filter, when non-empty, keeps only conferences whose own name contains
-/// it (case-insensitive) -- see _ConferenceFilterField.
+/// dart) with anything unclassified ("Other") last. Skips the outer
+/// grouping entirely (one null-keyed section) when nothing in the list has
+/// a conference at all. `filter`, when non-empty, keeps only conferences
+/// whose own name contains it (case-insensitive).
 List<(String?, List<(String, List<SportEvent>)>)> _groupByConferenceThenDate(List<SportEvent> events, String filter) {
   if (!events.any((e) => _primaryConference(e) != null)) {
     return [(null, _groupByDate(events))];
@@ -111,10 +105,8 @@ class _EventListPageState extends ConsumerState<EventListPage> {
     super.dispose();
   }
 
-  // Only while showing Upcoming -- a live game is never relevant on the
-  // Completed tab. Torn down and rebuilt on every status change (see
-  // _setStatus) so switching to Completed actually stops the ticking
-  // rather than just hiding its effect.
+  // Only while showing Upcoming. Torn down and rebuilt on every status
+  // change so switching to Completed actually stops the ticking.
   void _scheduleLiveScoresPoll() {
     _liveScoresTimer?.cancel();
     if (_status != 'scheduled') return;
@@ -131,7 +123,7 @@ class _EventListPageState extends ConsumerState<EventListPage> {
   @override
   Widget build(BuildContext context) {
     final events = ref.watch(eventsListProvider((sport: widget.sportId, status: _status)));
-    // Only fetched/watched for the Upcoming tab -- see _scheduleLiveScoresPoll.
+    // Only fetched/watched for the Upcoming tab.
     final liveScores = _status == 'scheduled'
         ? ref.watch(liveScoresProvider(widget.sportId)).value ?? const <String, LiveEventState>{}
         : const <String, LiveEventState>{};
@@ -160,27 +152,20 @@ class _EventListPageState extends ConsumerState<EventListPage> {
           ),
           const SizedBox(height: 8),
           // Stated once for the whole list rather than repeated on every
-          // GameRow -- every kickoff time below is already in this same
-          // local time (game_row.dart's own _kickoffTimeLabel), so
-          // repeating it per row would just be noise, and there's no
-          // spare width in that row's tight time column for it anyway.
+          // GameRow.
           Text('Times shown in your local time (${localTimezoneLabel()})', style: AppTextStyles.microLabel()),
           const SizedBox(height: 12),
           events.when(
             data: (list) {
               if (list.isEmpty) {
-                // Both routes are scoped server-side to exactly one week
-                // (see handler.py's _next_week_events/_previous_week_events)
-                // -- an empty "scheduled" list specifically means next
-                // week hasn't been ingested yet (see
-                // Terraform/scheduler-nfl-ingest.tf), not that there's
-                // nothing to show.
+                // An empty "scheduled" list means next week hasn't been
+                // ingested yet, not that there's nothing to show.
                 final message = _status == 'scheduled' ? 'Coming Soon' : 'No games found.';
                 return Text(message, style: AppTextStyles.body(color: AppColors.inkSub));
               }
               // Soonest-first for Upcoming, most-recent-first for
               // Completed -- both read top-to-bottom as "closest to now
-              // at the top" for their own tab.
+              // at the top".
               final sorted = [...list]..sort(
                   (a, b) => _status == 'scheduled'
                       ? _sortKey(a).compareTo(_sortKey(b))
@@ -190,10 +175,8 @@ class _EventListPageState extends ConsumerState<EventListPage> {
               return Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  // Same >1-conference gate as season_page.dart's own
-                  // filter field -- NFL's date-only list (no conference
-                  // field at all) and a single-conference slate both have
-                  // nothing this would narrow down.
+                  // Only shown when there's more than one conference to
+                  // filter.
                   if (_groupByConferenceThenDate(sorted, '').length > 1) ...[
                     ConferenceFilterField(
                       value: _conferenceFilter,

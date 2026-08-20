@@ -1,15 +1,13 @@
 # Builds, packages, and deploys the NBA AI training code. Runs standalone
 # (workflow_dispatch) or called from nba_deploy.yml (workflow_call) --
-# either way the work is identical: build and push image(s). Mirrors
-# nfl_ai_training.yml exactly -- same two-image split, same reasoning.
+# either way the work is identical: build and push image(s).
 #
 # This stage builds two images: Feature Engineering and Train
 # Win-Probability Model (the latter also serves the score and player-prop
 # Fargate tasks -- ecs-task-nba-train-score-model.tf and
 # ecs-task-nba-train-player-prop-model.tf both point at this same image
 # tag and override `command` to run train_score_model.py /
-# train_player_prop_model.py instead, same pattern
-# ecs-task-nfl-train-score-model.tf uses).
+# train_player_prop_model.py instead).
 #
 # Each image gets its OWN version constant below, bumped independently --
 # feature engineering and train win-probability model are unrelated
@@ -33,18 +31,17 @@ permissions:
   contents: read
 
 jobs:
-  # Two independent test jobs, not one shared one -- same reasoning as
-  # nfl_ai_training.yml: a failing model-training test shouldn't fail
-  # feature engineering's deployment too, even though both re-run
-  # Source/tests/library/ redundantly (no clean partition exists, since
-  # e.g. library.aws.dynamodb_table is used by both).
+  # Two independent test jobs, not one shared one -- a failing
+  # model-training test shouldn't fail feature engineering's deployment
+  # too, even though both re-run Source/tests/library/ redundantly (no
+  # clean partition exists, since e.g. library.aws.dynamodb_table is used
+  # by both).
   #
   # feature-engineering's own requirements.txt has no reason to carry
   # xgboost/scikit-learn/pandas/lightgbm's ML-training extras (it only
   # writes Parquet) -- library/tests/ml/ needs those and is excluded here.
-  # train-win-probability-model's own job below already has all of them
-  # (including lightgbm, unlike NFL's/NCAAFB's own requirements.txt), so
-  # it needs no such exclusion.
+  # train-win-probability-model's own job below already has all of them,
+  # so it needs no such exclusion.
   test-feature-engineering:
     name: Run feature engineering tests
     uses: ./.github/workflows/run_python_tests.yml

@@ -135,7 +135,7 @@ resource "aws_api_gateway_integration" "nfl_predict_event" {
   http_method             = aws_api_gateway_method.nfl_predict_event.http_method
   type                    = "AWS_PROXY"
   integration_http_method = "POST"
-  uri                     = aws_lambda_function.nfl_predict_read.invoke_arn # cache read-through; see handler.py
+  uri                     = aws_lambda_function.nfl_predict_read.invoke_arn # cache read-through
 }
 
 # --- GET /nfl/predictions/events/{event_id}/players/{entity_id} -------------
@@ -164,15 +164,7 @@ resource "aws_api_gateway_integration" "nfl_predict_player" {
 }
 
 # --- CORS preflight (OPTIONS) -------------------------------------------
-# Irrelevant in production -- the frontend and API share one origin via
-# CloudFront (cloudfront.tf), so real traffic never triggers a browser CORS
-# check. Needed for local dev: `flutter run` serves the app from
-# http://localhost while still calling the real deployed API, and every
-# request carries a custom Authorization header, which alone forces a
-# preflight OPTIONS regardless of method. The actual GET responses already
-# carry Access-Control-Allow-Origin from handler.py's _CORS_HEADERS --
-# only the preflight itself needs a mock response here, since API Gateway
-# calls the real Lambda for every other method.
+# Mock 200 response with CORS headers for preflight OPTIONS requests.
 locals {
   cors_resources = {
     events         = aws_api_gateway_resource.nfl_events.id
@@ -247,7 +239,7 @@ resource "aws_api_gateway_deployment" "main" {
       aws_api_gateway_resource.nfl_predictions_event_player.id,
       aws_api_gateway_method.nfl_predict_event.id,
       aws_api_gateway_integration.nfl_predict_event.id,
-      aws_api_gateway_integration.nfl_predict_event.uri, # repointed nfl_predict -> nfl_predict_read
+      aws_api_gateway_integration.nfl_predict_event.uri,
       aws_api_gateway_method.nfl_predict_player.id,
       aws_api_gateway_integration.nfl_predict_player.id,
       aws_api_gateway_integration.nfl_predict_player.uri,
@@ -257,12 +249,8 @@ resource "aws_api_gateway_deployment" "main" {
       aws_api_gateway_resource.nfl_events.id,
       aws_api_gateway_method.nfl_events.id,
       aws_api_gateway_integration.nfl_events.id,
-      # .uri explicitly, not just .id -- aws_api_gateway_integration's id
-      # is a stable composite key (rest_api_id/resource_id/http_method)
-      # that does not change when only uri is updated in place, so
-      # repointing this integration at a different Lambda (see
-      # lambda-nfl-predict-read.tf) would otherwise never trigger a new
-      # deployment.
+      # .uri included since the integration's .id (a composite key) doesn't
+      # change when only .uri is updated in place.
       aws_api_gateway_integration.nfl_events.uri,
       aws_api_gateway_resource.nfl_models.id,
       aws_api_gateway_method.nfl_models.id,
@@ -271,14 +259,8 @@ resource "aws_api_gateway_deployment" "main" {
       aws_api_gateway_resource.nfl_season.id,
       aws_api_gateway_method.nfl_season.id,
       aws_api_gateway_integration.nfl_season.id,
-      # .uri explicitly, not just .id -- same reason as the nfl_events/
-      # nfl_models integrations above: .id is a stable composite key that
-      # doesn't change when only .uri is updated in place, and this
-      # integration was just repointed from nfl_predict to
-      # nfl_predict_read.
       aws_api_gateway_integration.nfl_season.uri,
-      # live-scores -- resource/method/integration declared in
-      # api-gateway-nfl-live-scores.tf, a third Lambda target.
+      # live-scores resources declared in api-gateway-nfl-live-scores.tf
       aws_api_gateway_resource.nfl_live_scores.id,
       aws_api_gateway_method.nfl_live_scores.id,
       aws_api_gateway_integration.nfl_live_scores.id,
@@ -286,11 +268,7 @@ resource "aws_api_gateway_deployment" "main" {
       sha1(jsonencode(values(aws_api_gateway_method.cors)[*].id)),
       sha1(jsonencode(values(aws_api_gateway_integration.cors)[*].id)),
       sha1(jsonencode(values(aws_api_gateway_integration_response.cors)[*].id)),
-      # NCAAFB -- every resource/method/integration declared in
-      # api-gateway-ncaafb-predict.tf, this REST API's other sport. Same
-      # single shared aws_api_gateway_deployment as every route above (one
-      # REST API, one deployment -- see that file's own comment for why
-      # its resources couldn't just define their own).
+      # NCAAFB routes declared in api-gateway-ncaafb-predict.tf
       aws_api_gateway_resource.ncaafb.id,
       aws_api_gateway_resource.ncaafb_events.id,
       aws_api_gateway_method.ncaafb_events.id,
@@ -308,12 +286,11 @@ resource "aws_api_gateway_deployment" "main" {
       aws_api_gateway_resource.ncaafb_predictions_event_player.id,
       aws_api_gateway_method.ncaafb_predict_event.id,
       aws_api_gateway_integration.ncaafb_predict_event.id,
-      aws_api_gateway_integration.ncaafb_predict_event.uri, # repointed ncaafb_predict -> ncaafb_predict_read
+      aws_api_gateway_integration.ncaafb_predict_event.uri,
       aws_api_gateway_method.ncaafb_predict_player.id,
       aws_api_gateway_integration.ncaafb_predict_player.id,
       aws_api_gateway_integration.ncaafb_predict_player.uri,
-      # live-scores -- resource/method/integration declared in
-      # api-gateway-ncaafb-live-scores.tf, a third NCAAFB Lambda target.
+      # live-scores resources declared in api-gateway-ncaafb-live-scores.tf
       aws_api_gateway_resource.ncaafb_live_scores.id,
       aws_api_gateway_method.ncaafb_live_scores.id,
       aws_api_gateway_integration.ncaafb_live_scores.id,
@@ -321,11 +298,7 @@ resource "aws_api_gateway_deployment" "main" {
       sha1(jsonencode(values(aws_api_gateway_method.ncaafb_cors)[*].id)),
       sha1(jsonencode(values(aws_api_gateway_integration.ncaafb_cors)[*].id)),
       sha1(jsonencode(values(aws_api_gateway_integration_response.ncaafb_cors)[*].id)),
-      # NBA -- every resource/method/integration declared in
-      # api-gateway-nba-predict.tf, this REST API's third sport. Same
-      # single shared aws_api_gateway_deployment as every route above (one
-      # REST API, one deployment -- see that file's own comment for why
-      # its resources couldn't just define their own).
+      # NBA routes declared in api-gateway-nba-predict.tf
       aws_api_gateway_resource.nba.id,
       aws_api_gateway_resource.nba_events.id,
       aws_api_gateway_method.nba_events.id,
@@ -343,12 +316,11 @@ resource "aws_api_gateway_deployment" "main" {
       aws_api_gateway_resource.nba_predictions_event_player.id,
       aws_api_gateway_method.nba_predict_event.id,
       aws_api_gateway_integration.nba_predict_event.id,
-      aws_api_gateway_integration.nba_predict_event.uri, # repointed nba_predict -> nba_predict_read
+      aws_api_gateway_integration.nba_predict_event.uri,
       aws_api_gateway_method.nba_predict_player.id,
       aws_api_gateway_integration.nba_predict_player.id,
       aws_api_gateway_integration.nba_predict_player.uri,
-      # live-scores -- resource/method/integration declared in
-      # api-gateway-nba-live-scores.tf, a third NBA Lambda target.
+      # live-scores resources declared in api-gateway-nba-live-scores.tf
       aws_api_gateway_resource.nba_live_scores.id,
       aws_api_gateway_method.nba_live_scores.id,
       aws_api_gateway_integration.nba_live_scores.id,
@@ -375,22 +347,9 @@ resource "aws_api_gateway_stage" "main" {
   })
 }
 
-# Throttling only -- no API key required yet (Cognito already authenticates
-# every caller). A usage plan is still the right place for throttling even
-# without keys: it's the mechanism API Gateway exposes for it.
-#
-# Raised from 20 burst / 10 rps (2026-08-14) -- that was too low for this
-# API's real traffic shape: event_list_page.dart renders every upcoming
-# event eagerly (not a lazy/viewport-limited list), and each GameRow
-# fetches its own prediction independently, so a single page load of a
-# full NCAAFB week (~130 events) fans out ~130 near-simultaneous
-# GET .../predictions/events/{id} calls -- confirmed as the cause of a
-# real batch of 429s when every cached prediction went stale/missing at
-# once and every row's request landed in the same tick. 100 burst / 60 rps
-# clears a slate that size in ~2s instead of throttling it outright, while
-# still bounding cost/abuse for what's currently a single-user, Cognito-
-# authenticated app. Raise again if a larger sport's slate (NCAA MBB,
-# Phase 3B) needs more headroom -- don't assume this number is final.
+# Throttling only -- Cognito already authenticates every caller, no API key.
+# 100 burst / 60 rps absorbs a full slate of near-simultaneous per-event
+# prediction requests fanned out by event_list_page.dart.
 resource "aws_api_gateway_method_settings" "main" {
   rest_api_id = aws_api_gateway_rest_api.main.id
   stage_name  = aws_api_gateway_stage.main.stage_name

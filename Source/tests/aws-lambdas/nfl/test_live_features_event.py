@@ -2,11 +2,7 @@
 Unit tests for live_features.build_live_event_features -- the event-level
 feature assembly (Elo, rolling stats, presumptive QB selection via depth
 chart / roster-volume fallback) the inference Lambda's core win/margin/
-score route uses. FeatureStorage is mocked. Split out of what used to be
-one large test_live_features.py -- see test_live_features_player.py,
-test_live_features_leader_candidates.py, test_live_features_depth_chart.py,
-and test_live_features_roster.py for this file's siblings, one per
-concern.
+score route uses. FeatureStorage is mocked.
 
 storage.get_team_entities defaults to [] in every test that reaches
 presumptive-leader selection but isn't specifically exercising the

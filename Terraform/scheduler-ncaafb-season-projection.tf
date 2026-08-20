@@ -1,11 +1,9 @@
 # Invokes ncaafb_predict weekly to recompute the season projection
 # (standings + bowl/playoff/championship probabilities + player-prop
 # leaderboards) and write it to S3. GET /ncaafb/season serves the cached
-# result. Mirrors scheduler-nfl-season-projection.tf.
+# result.
 #
-# Thursday 14:00 UTC (not tied to NCAAFB's monthly training cadence,
-# unlike NFL's weekly one) -- purely offset from NFL's own Wednesday slot
-# to spread load.
+# Thursday 14:00 UTC.
 resource "aws_scheduler_schedule" "ncaafb_season_projection" {
   name        = "${var.project}-ncaafb-season-projection"
   description = "Invokes the ncaafb_predict Lambda weekly, Thu 14:00 UTC, to recompute the season projection and cache it to S3 for GET /ncaafb/season."

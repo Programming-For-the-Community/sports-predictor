@@ -1,15 +1,10 @@
 # EventBridge Scheduler resource that directly invokes the
-# nba-schedule-sync Lambda (lambda-nba-schedule-sync.tf) -- direct invoke,
-# not routed through Step Functions. The Lambda walks the season's
-# schedule internally in one invocation.
+# nba-schedule-sync Lambda (lambda-nba-schedule-sync.tf), not routed
+# through Step Functions. The Lambda walks the season's schedule
+# internally in one invocation.
 #
-# Weekly, Friday 10:00 UTC -- own day offset from NFL's Thursday slot
-# (scheduler-nfl-schedule-sync.tf) to spread load; NBA's schedule itself
-# doesn't change often enough to need more than a weekly refresh even
-# though games happen nearly daily -- daily ingest (via the shared
-# sfn-ingest-orchestrator) already keeps the current day's results fresh.
-# Year-round, not gated to the season -- seeds next season's schedule ahead
-# of opening night the same way NFL's own file does.
+# Weekly, Friday 10:00 UTC. Year-round, not gated to the season, so it
+# seeds next season's schedule ahead of opening night.
 resource "aws_scheduler_schedule" "nba_schedule_sync" {
   name        = "${var.project}-nba-schedule-sync"
   description = "Invokes the nba-schedule-sync Lambda weekly, Fri 10:00 UTC, to seed/refresh the current NBA season's schedule."

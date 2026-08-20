@@ -1,9 +1,9 @@
 # Reusable workflow: builds a Docker image and pushes it to the shared
 # ECR repo under two tags -- an immutable version tag (for traceability/
 # rollback) and a floating "-latest" tag. ECS task definitions reference
-# only the floating tag (see Terraform/ecs-task-nfl-backfill.tf), so a
-# new push takes effect on the next `aws ecs run-task` with no task
-# definition update or terraform apply required.
+# only the floating tag, so a new push takes effect on the next
+# `aws ecs run-task` with no task definition update or terraform apply
+# required.
 
 name: Build and Push Docker Image to ECR
 
@@ -64,10 +64,8 @@ jobs:
       - name: Verify AWS identity
         run: aws sts get-caller-identity
 
-      # QEMU is what lets buildx cross-build linux/arm64 on this runner's
-      # native x86_64 -- a no-op setup cost for every other image here,
-      # which builds linux/amd64 (the default) and runs natively either
-      # way.
+      # QEMU lets buildx cross-build linux/arm64 on this runner's native
+      # x86_64.
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
 
@@ -80,7 +78,7 @@ jobs:
       # platform. ECR/ECS tolerate that, but Lambda's UpdateFunctionCode
       # rejects it outright ("image manifest, config or layer media type
       # ... is not supported") -- these two flags keep the push a plain
-      # single-manifest image, same shape `docker build` produced before.
+      # single-manifest image.
       - name: Build, tag, and push image to Amazon ECR
         id: build-image
         env:

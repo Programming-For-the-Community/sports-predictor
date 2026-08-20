@@ -1,15 +1,8 @@
 """
 Live score/status cache for events currently in or near their scheduled
-kickoff -- see handler.py's LiveScoreRefresh trigger. Deliberately never
-writes to DynamoDB: the once-daily batch ingest (aws-lambdas/nfl/ingest/)
-remains the only writer of anything durable, and normalize's status field
-(scheduled/completed) stays exactly two-valued for every existing
-consumer that already depends on that split (standings, backtesting,
-etc.). This is a short-lived, UI-display-only cache in S3, refreshed on
-its own schedule (scheduler-nfl-live-scores.tf, every 60s) and read back
-by GET /nfl/live-scores (this same Lambda, see handler.py) -- the
-"proper" event/score record still only ever gets written by tomorrow's
-regular batch ingest run.
+kickoff. Never writes to DynamoDB -- this is a short-lived, UI-display-
+only cache in S3, refreshed on its own schedule (scheduler-nfl-live-
+scores.tf, every 60s) and read back by GET /nfl/live-scores (handler.py).
 """
 import json
 import logging
@@ -25,12 +18,8 @@ logger = logging.getLogger("nfl-live-scores")
 
 LIVE_SCORES_CACHE_KEY = "nfl/cache/live-scores/latest.json"
 
-# Same compound-stat key shape aws-lambdas/nfl/normalize/handler.py's own
-# _COMPOUND_KEY_SPLITS uses for a completed event's box score -- duplicated
-# here rather than imported since this is a different Lambda package/deploy
-# unit (see this module's own docstring for why it never shares code with
-# normalize), same convention every other constant in this file already
-# follows. Must stay in sync with normalize/handler.py's own copy.
+# Compound-stat key shape for a completed event's box score. Must stay in
+# sync with normalize/handler.py's own copy.
 _COMPOUND_KEY_SPLITS: dict[str, tuple[str, str]] = {
     "completions/passingAttempts": ("completions", "passing_attempts"),
     "sacks-sackYardsLost": ("sacks_taken", "sack_yards_lost"),
@@ -38,11 +27,7 @@ _COMPOUND_KEY_SPLITS: dict[str, tuple[str, str]] = {
     "extraPointsMade/extraPointAttempts": ("extra_points_made", "extra_point_attempts"),
 }
 
-# One ESPN summary/boxscore call per currently-live event, on top of the
-# single scoreboard call every candidate already shares -- parallelized
-# (RateLimiter still paces actual dispatch, see library/http/rate_limiter.py)
-# so a Sunday with several games live at once doesn't pay each fetch's own
-# latency serially against this Lambda's own timeout.
+# Max parallel ESPN summary/boxscore fetches for currently-live events.
 BOXSCORE_MAX_WORKERS = 10
 
 # How early before a scheduled kickoff to start polling -- catches a game
@@ -56,10 +41,7 @@ POLL_START_BEFORE_KICKOFF = timedelta(minutes=15)
 POLL_SAFETY_CAP_AFTER_KICKOFF = timedelta(hours=7)
 
 # How stale the cache is allowed to look before a reader should treat it
-# as "unknown" rather than trust it -- a few missed 60s ticks in a row
-# (an ESPN hiccup, a Lambda error) shouldn't leave a confidently-wrong
-# LIVE pill and score on screen indefinitely. Read by handler.py, not
-# refresh() below -- refresh() always writes a fresh fetched_at itself.
+# as "unknown" rather than trust it. Read by get_live_scores below.
 STALE_AFTER = timedelta(minutes=5)
 
 
@@ -79,23 +61,15 @@ def _put_cache(s3, bucket: str, payload: dict) -> None:
 
 
 def _parse_kickoff(kickoff_time: str) -> datetime:
-    # ESPN's own timestamp shape ("...Z") -- Python 3.11+'s
-    # datetime.fromisoformat handles the Z suffix directly, but the
-    # explicit replace matches how the rest of this codebase already
-    # parses the same field (library/features/nfl.py) rather than
-    # depending on that being true of whatever Lambda runtime this ships
-    # on.
+    # ESPN's own timestamp shape ("...Z").
     return datetime.fromisoformat(kickoff_time.replace("Z", "+00:00"))
 
 
 def _candidate_events(storage, sport: str, now: datetime, already_completed: set[str]) -> list[dict]:
     """Events worth checking against ESPN's live scoreboard this cycle --
-    not yet completed per our own once-daily batch ingest (which is what
-    "scheduled" means here, not literally "hasn't started"), within the
-    plausible live window, and not already confirmed completed by a PRIOR
-    refresh cycle (already_completed) -- once this job itself has seen an
-    event reach completed, there's no reason to keep spending an ESPN
-    call re-confirming that every minute for the rest of the day."""
+    status "scheduled" per the once-daily batch ingest (not literally
+    "hasn't started"), within the plausible live window, and not already
+    confirmed completed by a prior refresh cycle (already_completed)."""
     candidates = []
     for event in storage.get_all_events(sport, status="scheduled"):
         event_id = event["event_id"]
@@ -124,14 +98,10 @@ def _extract_live_state(espn_event: dict) -> dict:
 
 
 def _live_player_stats(client, sport: str, event_id: str) -> dict[str, dict]:
-    """Best-effort entity_id -> stat_line for one currently-live event, from
-    ESPN's own boxscore/summary endpoint -- unlike the once-a-day batch
-    ingest's own box score fetch (which deliberately skips any event not
-    yet marked completed, see aws-lambdas/nfl/ingest/handler.py), this one
-    updates in near-real-time while the game is still being played. Empty
-    on any fetch/parse failure rather than raising -- one bad event
-    shouldn't cost every other live event its own score/stat refresh this
-    tick."""
+    """Best-effort entity_id -> stat_line for one currently-live event,
+    from ESPN's own boxscore/summary endpoint. Empty on any fetch/parse
+    failure rather than raising, so one bad event doesn't cost every
+    other live event its own score/stat refresh this tick."""
     try:
         summary = client.get_summary(event_id)
         stats_items, _ = boxscore_to_player_game_stats(summary, sport, _COMPOUND_KEY_SPLITS)
@@ -142,10 +112,8 @@ def _live_player_stats(client, sport: str, event_id: str) -> dict[str, dict]:
 
 
 def refresh(storage, s3, bucket: str, client, sport: str) -> dict:
-    """Called on every LiveScoreRefresh tick (every 60s -- see
-    scheduler-nfl-live-scores.tf). Cheap on every tick where nothing is
-    actually in its live window: reads already-ingested events from
-    DynamoDB (fast, no ESPN call), and only reaches out to ESPN at all
+    """Called on every LiveScoreRefresh tick (every 60s). Reads
+    already-ingested events from DynamoDB and only reaches out to ESPN
     once _candidate_events finds something worth checking."""
     now = datetime.now(timezone.utc)
 
@@ -174,12 +142,8 @@ def refresh(storage, s3, bucket: str, client, sport: str) -> dict:
         if state["live"]:
             live_event_ids.append(event["event_id"])
 
-    # Boxscore fetch is its own ESPN call per event (unlike the score/status
-    # above, which comes free for every candidate off the one scoreboard
-    # call) -- only worth paying for an event ESPN itself confirms is
-    # actually being played right now, not merely in the poll window (a
-    # scheduled-but-not-yet-kicked-off or already-final candidate has
-    # nothing live to show).
+    # Boxscore fetch is its own ESPN call per event -- only fetched for
+    # events ESPN confirms are actually being played right now.
     if live_event_ids:
         with ThreadPoolExecutor(max_workers=min(len(live_event_ids), BOXSCORE_MAX_WORKERS)) as executor:
             player_stats_by_event = dict(zip(
@@ -198,8 +162,7 @@ def get_live_scores(s3, bucket: str) -> dict:
     """Called by GET /nfl/live-scores (handler.py). Returns {"events": {}}
     (empty, not an error) whenever there's nothing usable to serve --
     never cached yet, or stale enough (STALE_AFTER) that it shouldn't be
-    trusted -- so callers never need to special-case "no live games
-    right now" differently from "the cache looks unreliable right now"."""
+    trusted."""
     cache = _get_cache(s3, bucket)
     if cache is None:
         return {"events": {}}

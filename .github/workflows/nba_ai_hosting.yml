@@ -1,23 +1,14 @@
 # Builds, tests, and pushes the NBA AI hosting/inference image. Runs
 # standalone (workflow_dispatch) or called from nba_deploy.yml
-# (workflow_call) -- mirrors nfl_ai_hosting.yml's/ncaafb_ai_hosting.yml's
-# own shape and reasoning exactly (see nfl_ai_hosting.yml's own comment
-# for the full build-before-infra, deploy-after-infra ordering
-# rationale).
+# (workflow_call).
 #
-# Real code as of Sub-phase 3A step 6 -- this file was a placeholder-only
-# stub from 2026-08-14 through step 5 (see project-nba-onboarding memory
-# for why ai_hosting had to exist that early: aws_lambda_function.
-# nba_predict is a container-image Lambda, and CreateFunction validates
-# its image tag already exists in ECR before Terraform can create it).
-# The test job is back, and docker_context changed from this directory to
-# 'Source' now that the real Dockerfile COPYs library/ from there (see
-# Source/aws-lambdas/nba/predict/Dockerfile's own comment) -- nothing else
-# about this file's shape needed to change.
+# aws_lambda_function.nba_predict is a container-image Lambda --
+# CreateFunction validates its image tag already exists in ECR before
+# Terraform can create it, so this must build before infra.
 #
 # Container image, not the zip packaging ingest/normalize/schedule-sync
-# use (see python_lambda_build.yml) -- same xgboost/numpy/scipy size
-# reasoning as nfl_ai_hosting.yml's own comment.
+# use (see python_lambda_build.yml) -- xgboost/numpy/scipy are too large
+# for a zip-based Lambda deployment package.
 
 name: NBA AI Hosting
 
@@ -51,8 +42,7 @@ jobs:
       # Both requirements files -- requirements-nodeps.txt (xgboost, only
       # ever installed --no-deps in the real Dockerfile build to dodge its
       # nvidia-nccl-cu12 GPU dependency) still needs to be installed HERE
-      # for xgboost itself to be importable at all in this test job. Same
-      # reasoning as nfl_ai_hosting.yml's own identical comment.
+      # for xgboost itself to be importable at all in this test job.
       requirements_files: 'Source/aws-lambdas/nba/predict/requirements.txt Source/aws-lambdas/nba/predict/requirements-nodeps.txt'
 
   set-versions:

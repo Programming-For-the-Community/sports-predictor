@@ -1,7 +1,6 @@
 """
 Unit tests for the season tab's playoff-bracket reconciliation
-(season_projection._resolve_matchup/_bracket_payload) -- same 3-state
-design as NFL's/NCAAFB's own test_predict_bracket.py, adapted for NBA's
+(season_projection._resolve_matchup/_bracket_payload), covering NBA's
 play-in-aware topology. Real ESPN team ids from library.features.
 nba_teams.TEAM_DIVISIONS -- _bracket_payload's seeding reads the real
 table via season_simulation._teams_by_conference, so a meaningful
@@ -9,9 +8,8 @@ full-bracket test needs real ids.
 
 With every team's wins/point_differential left at their 0 default,
 Eastern conference seeding is fully deterministic (NBA's own
-_seed_conference sorts the SAME list _teams_by_conference already builds
-from TEAM_DIVISIONS' own dict-insertion order -- no set-comprehension tie-
-break the way NFL's own _seed_conference has, confirmed stable across
+_seed_conference sorts the same list _teams_by_conference already builds
+from TEAM_DIVISIONS' own dict-insertion order, stable across
 PYTHONHASHSEED values): seeds 1-6 = 2,17,18,20,28,4; seeds 7-10 =
 5,8,11,15. With equal ratings, every play-in game is won by the better
 (numerically lower) seed, so the resolved 8-team field is

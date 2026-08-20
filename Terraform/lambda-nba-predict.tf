@@ -1,11 +1,8 @@
-# NBA inference Lambda -- mirrors lambda-ncaafb-predict.tf. Reads feature
-# context from DynamoDB and the current promoted model from the model
-# artifacts bucket. See Source/aws-lambdas/nba/predict/handler.py.
+# NBA inference Lambda. Reads feature context from DynamoDB and the current
+# promoted model from the model artifacts bucket.
 #
-# Container image (xgboost/lightgbm dependency footprint, same rationale as
-# lambda-nfl-predict.tf). Built/pushed by the nba_ai_hosting workflow.
-# VPC-attached, same shared security group/subnets as the other sports'
-# predict Lambdas.
+# Container image (xgboost/lightgbm dependency footprint). Built/pushed by
+# the nba_ai_hosting workflow. VPC-attached.
 resource "aws_cloudwatch_log_group" "nba_predict" {
   name              = "/aws/lambda/${var.project}-nba-predict"
   retention_in_days = 30
@@ -23,11 +20,8 @@ resource "aws_lambda_function" "nba_predict" {
   package_type  = "Image"
   image_uri     = "${var.ecr_repo_url}:nba-predict-latest"
   architectures = ["arm64"]
-  # Not on the API Gateway request path (fired async). Raised from 300s
-  # to 600s -- the user had to manually bump this to 600s in the console
-  # to get a real NBA season-projection run (play-in + bracket + cup) to
-  # finish at all, confirmed live; Terraform's declared value was stale
-  # against what production actually needed.
+  # Not on the API Gateway request path (fired async). Long enough for a
+  # full NBA season-projection run (play-in + bracket + cup) to finish.
   timeout = 600
 
   memory_size = 3008

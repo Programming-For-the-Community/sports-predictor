@@ -1,39 +1,26 @@
 """
-NBA historical backfill job -- the ESPN-sourced equivalent of
-data-backfills/nfl/backfill.py.
+NBA historical backfill job.
 
 Pulls team, game, and per-player box score data from ESPN's public
 (unofficial) site API for a range of seasons and loads it into the raw
 data lake (S3) and normalized tables (DynamoDB).
 
 Safe to re-run at any time: a game's box score fetch is skipped if its raw
-S3 object already exists, and every DynamoDB write is an upsert (put_item
-on the same key), so an interrupted or repeated run just fills in whatever
-is missing rather than duplicating or erroring.
+S3 object already exists, and every DynamoDB write is an upsert, so an
+interrupted or repeated run just fills in whatever is missing.
 
-Unlike NFL's/NCAAFB's week-shaped schedule, NBA has no week concept --
-ESPN's own scoreboard is date-based (see library/http/nba.py's own
-docstring), so this walks CALENDAR DATES within each season rather than
-weeks. ESPN labels a season by its ENDING year (confirmed live 2026-08-14:
-a December 2024 game returns season.year=2025) -- season_date_range below
-walks October 1 of `season - 1` through June 30 of `season`, a generous
-window that comfortably covers preseason through the Finals for every
-season in this project's default range without needing each season's
-exact start/end date: a date with no games, or a date that's still
-preseason, is simply skipped (see process_date), the same "a boundary
-that's off by a bit is harmless" convention NFL's own
-REGULAR_SEASON_WEEKS/POSTSEASON_WEEKS ceiling relies on.
+Walks calendar dates within each season (ESPN's scoreboard is date-based)
+from October 1 of `season - 1` through June 30 of `season`; ESPN labels a
+season by its ending year. A date with no games, or a date that's still
+preseason, is skipped.
 
-No roster fetching here -- unlike ingest's daily CURRENT-roster refresh,
-a historical season's roster isn't meaningfully recoverable from ESPN's
-roster endpoint (it only ever reflects today's roster), so player entities
-are derived entirely from box scores instead, same as NFL's own backfill
-(see normalize.py's own docstring).
+Player entities are derived entirely from box scores; there is no
+roster-based entity seeding.
 
 Seasons are split into batches (default: 2 seasons each) processed
 concurrently by a thread pool, one thread per batch. All threads share a
-single NBAClient / rate limiter so N concurrent batches don't multiply the
-request rate by N against a host we don't control.
+single NBAClient / rate limiter so concurrent batches don't multiply the
+request rate.
 
 Required environment variables:
     RAW_BUCKET_NAME
@@ -43,10 +30,7 @@ Required environment variables:
     TEAM_GAME_STATS_TABLE_NAME
     AWS_REGION
 
-Optional environment variables -- these exist so an ECS "Run Task" console
-launch can override just the season range for that one run (via container
-overrides) without editing the task definition. CLI flags, when passed,
-take precedence over both.
+Optional environment variables (CLI flags take precedence):
     START_SEASON (default 2016)
     END_SEASON (default 2025)
     BATCH_SIZE (default 2)
@@ -73,7 +57,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger("nba-backfill")
 
-PRESEASON_TYPE = 1  # same 1=preseason/2=regular/3=postseason/5=play-in convention confirmed live for aws-lambdas/nba/ingest/handler.py
+PRESEASON_TYPE = 1  # ESPN season.type: 1=preseason, 2=regular, 3=postseason, 5=play-in
 
 
 def chunk_seasons(start: int, end: int, batch_size: int) -> list[list[int]]:
@@ -83,20 +67,14 @@ def chunk_seasons(start: int, end: int, batch_size: int) -> list[list[int]]:
 
 def season_date_range(season: int) -> list[date]:
     """Every calendar date from October 1 of `season - 1` through June 30
-    of `season`, inclusive -- see this module's own docstring for the
-    season-year convention and why a generous, imprecise window is fine
-    here."""
+    of `season`, inclusive."""
     start = date(season - 1, 10, 1)
     end = date(season, 6, 30)
     return [start + timedelta(days=offset) for offset in range((end - start).days + 1)]
 
 
 def seed_teams(client: NBAClient, storage: PipelineStorage) -> None:
-    """ESPN's /teams isn't season-scoped and NBA franchise relocation is
-    rare (none inside this project's default season range) -- one global
-    call is enough, same as NFL's own seed_teams (unlike NCAAFB's
-    per-season CFBD lookup, which exists for yearly conference
-    realignment that basketball doesn't have)."""
+    """ESPN's /teams isn't season-scoped, so one global call seeds every team."""
     logger.info("Seeding team entities")
     teams_response = client.get_teams()
     storage.put_raw_json("nba/teams.json", teams_response)
@@ -139,13 +117,7 @@ def process_date(client: NBAClient, storage: PipelineStorage, date_str: str) -> 
         event_id = event["id"]
         try:
             storage.upsert_event(normalize.scoreboard_event_to_event_item(event))
-            # Only completed games have a real box score to fetch -- unlike
-            # NFL's own backfill (which lets a failed fetch on a
-            # postponed/canceled event fall through to the except below),
-            # this checks status up front, same as aws-lambdas/nba/ingest/
-            # handler.py's own completed-status gate, since a date-walk
-            # backfill is far more likely than a week-walk to land on a
-            # game that hasn't been played yet within the walked range.
+            # Only completed games have a box score to fetch.
             if event.get("status", {}).get("type", {}).get("completed", False):
                 process_game(client, storage, season, event_id)
             games_processed += 1

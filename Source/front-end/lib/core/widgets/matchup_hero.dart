@@ -55,12 +55,9 @@ class MatchupHero extends StatelessWidget {
               ),
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 16),
-                // "@" reads as "away @ home" in American sports (the away
-                // team is the one traveling) -- away is the LEFT column
-                // above specifically so this ordering matches that. This
-                // is the only marker of which side is home/away -- no
-                // separate "HOME"/"AWAY" label, same convention as
-                // game_row.dart's _MatchupLine.
+                // "@" reads as "away @ home"; away is the left column above
+                // so this ordering matches that. This is the only marker
+                // of which side is home/away.
                 child: Text('@', style: AppTextStyles.sectionTitle(color: AppColors.inkMute)),
               ),
               Expanded(
@@ -160,14 +157,10 @@ class _TeamColumn extends StatelessWidget {
 }
 
 /// Completed-game counterpart to MatchupHero -- same card shape/team-color
-/// language, but shows the FINAL score (not a live probability, which
-/// would be misleading for a game that's already over -- see
-/// event_detail_page.dart's own comment) plus the prediction actually
-/// logged before the game was played, via `comparison` (event.dart's
-/// PredictionComparison, already fetched by the events list -- no live
-/// /predictions/events/{id} call for a completed game). `comparison` is
-/// null when no prediction was ever logged for this event before it was
-/// played (see PredictionComparison's own docs), not a loading state.
+/// language, but shows the final score plus the prediction actually
+/// logged before the game was played, via `comparison` (already fetched
+/// by the events list). `comparison` is null when no prediction was ever
+/// logged for this event, not a loading state.
 class MatchupResultHero extends StatelessWidget {
   const MatchupResultHero({super.key, required this.sport, required this.event, required this.comparison});
 
@@ -201,9 +194,8 @@ class MatchupResultHero extends StatelessWidget {
               ),
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 16),
-                // Away-left/home-right + "@" -- same convention as
-                // MatchupHero and game_row.dart's _MatchupLine, "FINAL"
-                // underneath just adds the completed-game status on top.
+                // Away-left/home-right + "@", "FINAL" underneath adds the
+                // completed-game status on top.
                 child: Column(
                   children: [
                     Text('@', style: AppTextStyles.sectionTitle(color: AppColors.inkMute)),

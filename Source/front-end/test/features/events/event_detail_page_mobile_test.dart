@@ -36,10 +36,10 @@ const _prediction = EventPrediction(
   leaders: null,
 );
 
-// Real-length names + multiple candidates per category -- the previous
-// leaders/leadersComparison: null fixtures never exercised
-// TeamLeadersPanel/TeamLeadersComparisonPanel's real layout at all (see
-// team_leaders_panel.dart's own side-by-side-columns overflow fix).
+// Real-length names + multiple candidates per category, so this actually
+// exercises TeamLeadersPanel/TeamLeadersComparisonPanel's real layout
+// (see team_leaders_panel.dart's own side-by-side-columns overflow
+// handling).
 const _predictionWithLeaders = EventPrediction(
   homeWinProbability: 0.62,
   homeWinProbabilityModelVersion: 9,
@@ -126,9 +126,8 @@ final _completedEvent = SportEvent(
   ),
 );
 
-/// MatchupHero (core/widgets/matchup_hero.dart) is what UI #6's large-
-/// PRED-TOTAL/small-confidence restyle touched -- worth its own mobile
-/// check rather than relying only on the other pages' coverage.
+/// Dedicated mobile check for MatchupHero (core/widgets/matchup_hero.dart)'s
+/// large-PRED-TOTAL/small-confidence layout.
 void main() {
   for (final width in mobileViewportWidths) {
     testWidgets('renders with no overflow at ${width}px wide', (tester) async {

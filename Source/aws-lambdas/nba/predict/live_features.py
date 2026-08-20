@@ -4,24 +4,18 @@ player-prop target, using the same pure functions (build_event_features/
 build_player_features, library/features/nba.py) that build the training
 datasets.
 
-Simpler than NCAAFB's/NFL's own live_features.py in two ways, both
-mirroring library.features.nba.build_event_features'/build_player_features'
-own docstring:
-- No team_coordinates parameter -- library.features.nba_teams is a static
-  30-franchise table, called directly rather than threaded through from a
-  live entity lookup the way NCAAFB's dynamic per-season coordinates are.
-- No presumptive-starter tracking (no NCAAFB-style identify_starting_qb
-  equivalent) -- there's no position whose own performance dominates a
-  team's outcome in basketball, so build_event_features carries no
-  home_qb_games-style argument to populate here.
+No team_coordinates parameter -- library.features.nba_teams is a static
+30-franchise table, called directly. No presumptive-starter tracking --
+there's no position whose own performance dominates a team's outcome in
+basketball, so build_event_features carries no argument to populate here.
 
-Leaders panel (build_live_event_leader_candidates) still needs its own
-per-category candidate search, same reasoning NCAAFB's own live_features.py
-gives: no roster/depth-chart position data to pick a starter from, so
-candidates are every still-rostered player credited with the category's
-volume stat anywhere in the team's recent box scores, ranked by recent
-volume. Basketball's own category set is scoring/rebounding/assists (see
-library.serving.nba_reads' own _STAT_CATEGORY), not football's.
+Leaders panel (build_live_event_leader_candidates) needs its own
+per-category candidate search: no roster/depth-chart position data to
+pick a starter from, so candidates are every still-rostered player
+credited with the category's volume stat anywhere in the team's recent
+box scores, ranked by recent volume. Basketball's own category set is
+scoring/rebounding/assists (see library.serving.nba_reads' own
+_STAT_CATEGORY).
 
 `events` (an already-fetched get_all_events(sport) result) is an optional
 pass-through accepted by every public function here and threaded into
@@ -167,9 +161,8 @@ def _box_score_candidate_ids(
     the current season plus SEASON_LOOKBACK prior. Two phases: first
     collect every distinct candidate id (cheap, no I/O beyond the
     already-fetched events/box-score rows), then check roster membership
-    concurrently -- same reasoning ncaafb's own _box_score_candidate_ids
-    gives for why sequential roster checks are a real, reported latency
-    source once a team's SEASON_LOOKBACK-bounded history holds dozens of
+    concurrently -- sequential roster checks are a real latency source
+    once a team's SEASON_LOOKBACK-bounded history holds dozens of
     distinct candidates for a single category."""
     team_events = storage.get_team_events(sport, team_id, before_date=before_date, events=events)
     seen: set[str] = set()

@@ -8,69 +8,58 @@ trigger picks these up and upserts events into DynamoDB automatically,
 same as daily ingest, no new normalize code needed.
 
 Exists because daily ingest (aws-lambdas/nba/ingest/handler.py) only ever
-fetches YESTERDAY's date per run -- nothing seeds future dates ahead of
+fetches yesterday's date per run -- nothing seeds future dates ahead of
 time, so the frontend's upcoming-events list would otherwise only ever
 show whatever ingest happened to backfill after the fact, one day late.
 
-Deliberately does NOT fetch box scores -- meaningless days/weeks ahead of
-a game that hasn't been played. Daily ingest remains the ONLY source of
-box-score fetches. No depth-chart/coach/roster refresh here either, same
-division of responsibility as NFL's own schedule-sync (those stay on
-ingest's daily cadence).
+Deliberately does not fetch box scores -- meaningless days/weeks ahead of
+a game that hasn't been played. Daily ingest remains the only source of
+box-score fetches. No depth-chart/coach/roster refresh here either; those
+stay on ingest's daily cadence.
 
 ONE shared NBAClient for the whole run, not a separate client per date --
 every one of this run's own ESPN requests is paced by the SAME
 RateLimiter instance, so nothing here can burst past ESPN's rate limit
 regardless of how many dates are being synced.
 
-Preseason dates are skipped, same PRESEASON_TYPE convention and same
-"don't seed data that would skew training" reasoning as ingest/handler.py's
-own docstring.
+Preseason dates are skipped (PRESEASON_TYPE) -- backup-heavy preseason
+results aren't representative and would skew training data.
 
-FULL-SEASON WALK, idempotent skip-if-already-synced (2026-08-16, replacing
-the earlier 14-day-only version -- see project-nba-onboarding memory for
-why that was deliberately scoped down at step 3, and why Sub-phase 3A step
-8 (season simulation) is what finally needed the fix: season_projection.py's
-own remaining_games input, same role NFL's/NCAAFB's own full-season
-schedule-sync already provides, needs the WHOLE rest of the season seeded
-in DynamoDB, not just the next two weeks). SCHEDULE_SYNC_MAX_LOOKAHEAD_DAYS
-is a generous fixed ceiling (same "harmless if empty" philosophy as
-data-backfills/nba/backfill.py's own season_date_range), not a real
+Full-season walk with an idempotent skip-if-already-synced:
+season_projection.py's own remaining_games input needs the whole rest of
+the season seeded in DynamoDB, not just the next two weeks.
+SCHEDULE_SYNC_MAX_LOOKAHEAD_DAYS is a generous fixed ceiling, not a real
 season-end lookup -- walking past the actual Finals just costs a few
-empty-events calls, no worse than backfill's own padding.
+empty-events calls.
 
-The idempotent skip (_object_exists, same helper/reasoning as ingest's own
-box-score skip) is what keeps this affordable on a DAILY schedule despite
-the large ceiling: the first run after this shipped pays the full one-time
-cost of seeding the whole season (a few hundred ESPN calls, paced by the
-shared RateLimiter -- see this Lambda's own timeout, raised accordingly),
-but every run after that only ever calls ESPN for dates it hasn't already
+The idempotent skip (_object_exists) is what keeps this affordable on a
+daily schedule despite the large ceiling: after the season is fully
+seeded, every run only ever calls ESPN for dates it hasn't already
 written -- in steady state, just the one new day the rolling window added
 since yesterday, plus however many still-preseason dates remain unwritten
 (preseason dates are deliberately never written -- see the loop below --
 so they get re-checked, and re-cost one call, on every run until the
 season actually starts).
 
-RESCHEDULE HANDLING (2026-08-19): the idempotent skip above only applies
-BEYOND SCHEDULE_SYNC_REFRESH_WINDOW_DAYS -- every date inside that near-
-term window is re-fetched and overwritten on every run, regardless of
-whether it was already written. A rescheduled game moves BOTH its old
-date's entry (now stale, still lists a game that no longer plays there)
-and its new date's entry (missing, if that date was already synced
-before the move happened) -- neither self-corrects under a pure
-idempotent skip; ESPN's own scoreboard response is the only source of
-truth for "what's actually on this date now" and has to be re-asked.
-Scoped to the near-term window, not every date, for the same reason the
-lookahead itself is capped: re-fetching all ~270 dates daily would cost
-~270 ESPN calls/run for a class of change (reschedule) that's rare and,
-per the NBA's own scheduling practice, virtually never announced more
-than a few weeks out -- a date already outside the window when this runs
-will have entered it (and been caught) well before it's played. Beyond
-the window, a date still ultimately self-corrects once the game is
-actually played: daily ingest's own "yesterday" fetch always writes that
-day's real scoreboard/box score unconditionally, regardless of what
-schedule-sync already wrote for it -- the refresh window just makes that
-correction happen days/weeks earlier, before the game, not only after.
+RESCHEDULE HANDLING: the idempotent skip above only applies beyond
+SCHEDULE_SYNC_REFRESH_WINDOW_DAYS -- every date inside that near-term
+window is re-fetched and overwritten on every run, regardless of whether
+it was already written. A rescheduled game moves both its old date's
+entry (now stale, still lists a game that no longer plays there) and its
+new date's entry (missing, if that date was already synced before the
+move happened) -- neither self-corrects under a pure idempotent skip;
+ESPN's own scoreboard response is the only source of truth for "what's
+actually on this date now" and has to be re-asked. Scoped to the
+near-term window, not every date: re-fetching all ~270 dates daily would
+cost ~270 ESPN calls/run for a class of change (reschedule) that's rare
+and virtually never announced more than a few weeks out -- a date
+already outside the window when this runs will have entered it (and been
+caught) well before it's played. Beyond the window, a date still
+ultimately self-corrects once the game is actually played: daily
+ingest's own "yesterday" fetch always writes that day's real
+scoreboard/box score unconditionally, regardless of what schedule-sync
+already wrote for it -- the refresh window just makes that correction
+happen days/weeks earlier, before the game, not only after.
 """
 import json
 import logging
@@ -89,18 +78,16 @@ RAW_BUCKET = os.environ["RAW_BUCKET_NAME"]
 PRESEASON_TYPE = 1
 
 # Generous fixed ceiling covering preseason through the NBA Finals with
-# real padding on both ends (same philosophy as backfill's own
-# season_date_range) -- not a real season-end lookup. Combined with the
-# idempotent skip below, walking a bit past the actual end of the season
-# just costs a few cheap empty-events calls, not a real problem.
+# real padding on both ends -- not a real season-end lookup. Combined
+# with the idempotent skip below, walking a bit past the actual end of
+# the season just costs a few cheap empty-events calls.
 SCHEDULE_SYNC_MAX_LOOKAHEAD_DAYS = 270
 
 # Every date inside this window is re-fetched every run regardless of the
 # idempotent skip below -- see this module's own RESCHEDULE HANDLING
-# docstring section for why. 14 days is a deliberate balance: cheap (14
-# extra ESPN calls/run, same shared RateLimiter as everything else here)
-# while still catching a reschedule with real advance notice before the
-# game, not just after it's already happened.
+# docstring section. 14 days is a deliberate balance: cheap (14 extra
+# ESPN calls/run) while still catching a reschedule with real advance
+# notice before the game, not just after it's already happened.
 SCHEDULE_SYNC_REFRESH_WINDOW_DAYS = 14
 
 _s3 = boto3.client("s3")

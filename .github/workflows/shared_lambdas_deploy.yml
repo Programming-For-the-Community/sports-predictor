@@ -1,20 +1,6 @@
-# Tests and deploys the season-gate Lambda (Terraform/lambda-season-gate.tf)
-# -- shared across every sport, not owned by either sport's own pipeline,
-# so this is its own file rather than living in nfl_data_pipeline.yml or
-# ncaafb_data_pipeline.yml. Zip-packaged, so this deploys via
-# python_lambda_build.yml directly, same as nfl_live_scores_deploy.yml.
-#
-# A separate reusable workflow, not jobs inlined into nfl_deploy.yml/
-# ncaafb_deploy.yml/app_deploy.yml directly -- same reasoning as
-# nfl_live_scores_deploy.yml's own docstring: every one of those needs to
-# run this exact same test+deploy pair (season-gate is invoked by both
-# orchestrator state machines regardless of which sport's push triggered
-# the run), and duplicating it inline in each is how a deploy job gets
-# missed from one of them the first time.
-#
-# Function name is supplied by the caller from a Terraform output, with a
-# default so workflow_dispatch (manual, standalone run) still works
-# without needing that wiring -- same pattern as nfl_live_scores_deploy.yml.
+# Tests and deploys the season-gate Lambda (Terraform/lambda-season-gate.tf),
+# shared across every sport's orchestrator state machine. Zip-packaged,
+# deployed via python_lambda_build.yml.
 
 name: Shared Lambdas Deploy
 

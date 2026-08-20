@@ -1,9 +1,8 @@
 """
 Unit tests for ncaafb/predict/live_features.py -- especially
 _presumptive_leader, the season-crossing last-game-box-score leader
-lookup with a still-on-team verification this module uses in place of
-NFL's roster+depth-chart-driven selection (see that module's own
-docstring for why). FeatureStorage is mocked throughout.
+lookup with a still-on-team verification. FeatureStorage is mocked
+throughout.
 
 The ncaafb_predict module (and this directory's own sys.path entry for
 predict/) is registered by conftest.py.
@@ -61,11 +60,10 @@ class TestStillOnTeam:
 
 
 class TestBoxScoreCandidateIds:
-    """Roster-membership checks (_still_on_team) now run concurrently --
-    see the function's own docstring for why. These tests only lock in
-    output correctness (right candidates, still-rostered filter, season-
-    lookback bound), not the concurrency itself, which a synchronous
-    unit test can't meaningfully observe."""
+    """Roster-membership checks (_still_on_team) run concurrently. These
+    tests only lock in output correctness (right candidates,
+    still-rostered filter, season-lookback bound), not the concurrency
+    itself, which a synchronous unit test can't meaningfully observe."""
 
     def test_returns_still_rostered_candidates_credited_with_the_stat(self):
         storage = MagicMock()

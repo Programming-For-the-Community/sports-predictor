@@ -2,8 +2,7 @@ import 'event_leaders.dart';
 
 /// Mirrors GET /{sport}/predictions/events/{event_id}'s response shape
 /// (see Source/aws-lambdas/nfl/predict/handler.py's _predict_event).
-/// `leaders` is optional -- best-effort server-side (see event_leaders.dart),
-/// not a currently-missing feature.
+/// `leaders` is optional -- best-effort server-side (see event_leaders.dart).
 class EventPrediction {
   const EventPrediction({
     required this.homeWinProbability,
@@ -24,10 +23,8 @@ class EventPrediction {
   final EventLeaders? leaders;
   // True on a 203 response -- predict-read served this from a cache entry
   // it already knows is out of date (model repromotion, or the freshness
-  // TTL) and kicked off a background refresh at the same time. False on a
-  // 200 (defaults false for anything older that omits the field entirely).
-  // See core/widgets/prediction_freshness_badge.dart, the thing that
-  // actually acts on this.
+  // TTL) and kicked off a background refresh at the same time. Defaults
+  // false when the field is absent. See core/widgets/prediction_freshness_badge.dart.
   final bool stale;
   // Only meaningful when stale -- the server's own cadence hint (same
   // field/purpose as PredictionComputingException.retryAfterSeconds).

@@ -2,13 +2,11 @@
 # lake, filtered to the ncaafb/ prefix so only NCAAFB raw files invoke it.
 # Reads the raw CFBD JSON written by ncaafb-ingest from S3, maps it to the
 # project schema, and upserts entities/events/player_game_stats/
-# team_game_stats -- same shape as lambda-nfl-normalize.tf. No CFBD calls of
-# its own (transforms JSON already fetched by ingest), so it needs no
-# secretsmanager grant even though it shares a role with ingest, which does.
+# team_game_stats. No CFBD calls of its own, so it needs no secretsmanager
+# grant even though it shares a role with ingest, which does.
 #
-# Code is deployed by the ncaafb_data_pipeline GitHub Actions workflow --
-# NOT by Terraform. Same placeholder-ZIP + lifecycle.ignore_changes pattern
-# as lambda-nfl-normalize.tf.
+# Code is deployed by the ncaafb_data_pipeline GitHub Actions workflow,
+# not by Terraform, using a placeholder ZIP with lifecycle.ignore_changes.
 
 resource "aws_cloudwatch_log_group" "ncaafb_normalize" {
   name              = "/aws/lambda/${var.project}-ncaafb-normalize"
@@ -35,12 +33,9 @@ resource "aws_lambda_function" "ncaafb_normalize" {
   role          = aws_iam_role.lambda_pipeline.arn
   runtime       = "python3.12"
   handler       = "handler.lambda_handler"
-  # 60s was too short for CFBD's full-season roster write (~16k rows) even
-  # after parallelizing the entity writes (see ncaafb/normalize/handler.py's
-  # WRITE_WORKERS) -- confirmed via CloudWatch: that invocation hit the
-  # full 60s timeout twice in a row (S3's async-invoke retry) with zero
-  # application log output either time. 1024MB bumped alongside it for more
-  # network throughput under WRITE_WORKERS' concurrent connections.
+  # Sized for CFBD's full-season roster write (~16k rows) parallelized
+  # across ncaafb/normalize/handler.py's WRITE_WORKERS; 1024MB gives more
+  # network throughput for those concurrent connections.
   timeout     = 300
   memory_size = 1024
 
@@ -54,8 +49,7 @@ resource "aws_lambda_function" "ncaafb_normalize" {
       EVENTS_TABLE_NAME            = aws_dynamodb_table.events.name
       PLAYER_GAME_STATS_TABLE_NAME = aws_dynamodb_table.player_game_stats.name
       # PipelineStorage's constructor requires all four table names
-      # regardless of which one a given invocation actually writes to --
-      # same rationale as lambda-nfl-normalize.tf's own comment.
+      # regardless of which one a given invocation actually writes to.
       TEAM_GAME_STATS_TABLE_NAME = aws_dynamodb_table.team_game_stats.name
     }
   }
@@ -91,5 +85,4 @@ resource "aws_lambda_permission" "s3_invoke_ncaafb_normalize" {
 }
 
 # The bucket's S3 event notification config itself lives in
-# s3-raw-data-lake-notifications.tf -- see lambda-nfl-normalize.tf's own
-# comment for why this can't be a second aws_s3_bucket_notification here.
+# s3-raw-data-lake-notifications.tf.

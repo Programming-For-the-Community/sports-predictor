@@ -1,24 +1,11 @@
 """
-NCAAFB National Ranking (1-25) model training -- a genuinely new model
-shape for this project, team-week granularity rather than event-level or
-player-level (see library.features.ncaafb.build_team_week_features' own
-docstring). Reads ranking_features.parquet (written by
-Source/feature-engineering/ncaafb/build_dataset.py's build_ranking_dataset)
-from S3, trains only on team-weeks CFBD's own AP Top 25 poll actually
-ranked (label_current_rank not null -- an unranked team-week has no
-well-defined numeric label, same "missing, not fabricated" discipline
-this project applies everywhere else), and runs the same multi-algorithm
-candidate tournament via library.ml.backtest.run_backtest as every other
-training script here.
-
-At serving time (a later phase), every FBS team's predicted rank is
-computed and sorted; the 25 lowest predicted values become the projected
-Top 25 -- no separate is-ranked classifier, same "let the model's own
-relative ordering define membership" approach the win/margin models
-already use.
-
-Its own image (Terraform/ecs-task-ncaafb-train-ranking-model.tf), not
-train_win_probability_model.py's -- see that file's own comment for why.
+NCAAFB National Ranking (1-25) model training, at team-week granularity
+rather than event-level or player-level. Reads ranking_features.parquet
+(written by Source/feature-engineering/ncaafb/build_dataset.py's
+build_ranking_dataset) from S3, trains only on team-weeks CFBD's AP Top
+25 poll actually ranked (label_current_rank not null), and runs the same
+multi-algorithm candidate tournament via library.ml.backtest.run_backtest
+as every other training script here.
 
 Required environment variables:
     MODEL_ARTIFACTS_BUCKET_NAME
@@ -50,15 +37,9 @@ SPORT = "ncaafb"
 MODEL_NAME = "national-ranking"
 RANKING_FEATURES_KEY = "ncaafb/training-data/ranking_features.parquet"
 
-# Identifiers/non-numeric columns, never model inputs. "conference" and
-# "season_type" are raw strings -- excluded the same way NFL's own
-# event-level script excludes venue_city/venue_state (see
-# train_win_probability_model.py's NON_FEATURE_COLUMNS comment); "season"
-# is excluded too since an absolute year doesn't generalize as a feature.
-# "week" stays IN as a feature -- it's numeric and meaningfully captures
-# how far into the season this team-week snapshot falls. label_
-# current_rank is excluded automatically by training_common.feature_
-# columns' own label_ prefix rule, same as every other script here.
+# Identifiers/non-numeric columns, never model inputs. "season" is
+# excluded since an absolute year doesn't generalize as a feature; "week"
+# stays in since it's numeric and captures season progress.
 NON_FEATURE_COLUMNS = {"event_key", "team_id", "event_date", "season", "season_type", "conference"}
 LABEL_COLUMN = "label_current_rank"
 SUMMARY_METRICS = ["rmse", "mae", "naive_baseline_rmse", "naive_baseline_mae"]
@@ -98,9 +79,8 @@ def train(s3: S3Manager, df: pd.DataFrame) -> dict:
     X_test = training_common.numeric_frame(test_df, feature_columns)
     y_test = test_df[LABEL_COLUMN]
 
-    # A trivial baseline -- predict the training set's own median rank
-    # for every row, no model at all, since the AP Top 25 has no
-    # "obviously right" home-field-style prior to lean on.
+    # A trivial baseline: predict the training set's median rank for
+    # every row, no model.
     median_rank = y_train.median()
     naive_predictions = pd.Series(median_rank, index=y_test.index)
     naive_baseline_metrics = {

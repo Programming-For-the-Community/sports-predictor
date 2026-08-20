@@ -155,10 +155,7 @@ variable "third_party_api_key_secret_arn" {
 # ── Training compute budget ──────────────────────────────────────────────────
 # Drives local.training_max_concurrency (locals-training-compute.tf), which
 # sets TrainAllTargets' MaxConcurrency in sfn-training-orchestrator.tf and
-# the cpu/memory on every nfl-train-*-model ECS task definition. Changing
-# any one of these four values (e.g. a raised account quota, or a
-# per-task vCPU size found to be more than a training run actually uses)
-# is the single code change that reflows through to both.
+# the cpu/memory on every nfl-train-*-model ECS task definition.
 
 variable "fargate_account_vcpu_limit" {
   description = "Account-wide Fargate on-demand concurrent vCPU quota (as shown in the Service Quotas console for 'Fargate On-Demand vCPU count'; CI supplies the real value via FARGATE_VCPU_LIMIT, tf_install.yml). Consulted for both feature-engineering (local.feature_engineering_max_concurrency, locals-feature-engineering-compute.tf) and training's own on-demand fallback share -- RunTrainingTask itself launches on FARGATE_SPOT (see fargate_spot_account_vcpu_limit below), but its Catch can fall through to RunTrainingTaskOnDemand, on-demand, within that same concurrent slot"
@@ -207,14 +204,10 @@ variable "training_task_memory_per_vcpu_mib" {
 
 # ── Feature-engineering compute ──────────────────────────────────────────────
 # Per-sport cpu/memory for each sport's standalone feature-engineering
-# Fargate task (ecs-task-<sport>-feature-engineering.tf). Unlike training
-# compute above, this isn't budget/concurrency math -- each sport's
-# feature-engineering task runs alone, holding its full history in memory
-# at once, and that history's size varies hugely by sport (NCAAFB's full
-# FBS backfill is already well beyond NFL's; a future non-football sport
-# could be larger still). Onboarding a new sport means adding its own
-# entry to both maps below -- no fallback default, so a missed entry fails
-# the apply instead of silently under-provisioning a new sport's task.
+# Fargate task (ecs-task-<sport>-feature-engineering.tf). Each sport's task
+# runs alone, holding its full history in memory at once, and that
+# history's size varies by sport. No fallback default, so a missed entry
+# fails the apply instead of silently under-provisioning a new sport's task.
 
 variable "feature_engineering_task_cpu" {
   description = "Fargate CPU units (1024 per vCPU) for each sport's feature-engineering task, keyed by sport -- left at NFL's original size since nothing has ever indicated NFL's task is CPU-bound; only bump a sport's entry here if evidence (throttling, a run that's slow rather than OOM-killed) actually points at CPU, not just because memory needed raising"
@@ -222,14 +215,7 @@ variable "feature_engineering_task_cpu" {
   default = {
     nfl    = 1024
     ncaafb = 8192
-    # Started at NCAAFB's own post-OOM size rather than NFL's default --
-    # NBA's 10-year player-game row count (~1,230 games/season x ~26
-    # players x 10 seasons) is larger than NCAAFB's own FBS volume that
-    # actually triggered the OOM this variable's description documents, so
-    # defaulting to NFL's low setting and waiting to get OOM-killed too
-    # would be ignoring evidence already in hand, not "verify before
-    # presizing" the way the training-task vCPU override is meant to be.
-    nba = 8192
+    nba    = 8192
   }
   nullable = false
 

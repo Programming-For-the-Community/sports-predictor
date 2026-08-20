@@ -1,16 +1,13 @@
-# NCAAFB read-only serving Lambda -- GET /ncaafb/events, /ncaafb/models,
-# /ncaafb/season, and the two prediction routes (cache read-through, see
-# Source/aws-lambdas/ncaafb/predict-read/handler.py). Mirrors
-# lambda-nfl-predict-read.tf: zip-packaged, reuses aws_iam_role.lambda_inference.
+# NCAAFB read-only serving Lambda for GET /ncaafb/events, /ncaafb/models,
+# /ncaafb/season, and the two prediction routes (cache read-through).
 #
 # Not VPC-attached -- S3/DynamoDB are reachable over their public regional
 # endpoints without a VPC, and this Lambda also calls lambda:InvokeFunction
-# to trigger the predict Lambda on a cache miss, which isn't reachable at
-# all from inside the VPC (no NAT Gateway, no Lambda Interface Endpoint).
+# to trigger the predict Lambda on a cache miss, which isn't reachable
+# from inside the VPC.
 #
-# Code is deployed by the ncaafb_deploy workflow -- NOT by Terraform. Same
-# placeholder-ZIP + lifecycle.ignore_changes pattern as
-# lambda-nfl-predict-read.tf.
+# Code is deployed by the ncaafb_deploy workflow, not by Terraform, using a
+# placeholder ZIP with lifecycle.ignore_changes.
 
 resource "aws_cloudwatch_log_group" "ncaafb_predict_read" {
   name              = "/aws/lambda/${var.project}-ncaafb-predict-read"
@@ -48,8 +45,7 @@ resource "aws_lambda_function" "ncaafb_predict_read" {
       MODEL_ARTIFACTS_BUCKET_NAME = aws_s3_bucket.model_artifacts.bucket
       PREDICTIONS_TABLE_NAME      = aws_dynamodb_table.predictions.name
       # FeatureStorage's constructor requires all four of these regardless
-      # of which methods actually get called -- same rationale as
-      # lambda-nfl-predict-read.tf's own comment.
+      # of which methods actually get called.
       ENTITIES_TABLE_NAME          = aws_dynamodb_table.entities.name
       EVENTS_TABLE_NAME            = aws_dynamodb_table.events.name
       PLAYER_GAME_STATS_TABLE_NAME = aws_dynamodb_table.player_game_stats.name

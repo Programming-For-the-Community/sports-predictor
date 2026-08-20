@@ -1,14 +1,7 @@
 # Reusable workflow: installs the shared library package plus whatever
 # additional requirements files a caller needs, then runs pytest against a
-# given test path. This is the single test gate every Python artifact
-# (Lambda or Fargate task) deploy/build depends on -- each caller passes
-# its OWN test_path and requirements_files, so one artifact's test
-# failure only blocks that artifact's own job, never an unrelated one's.
-# Before this existed, multiple artifacts sharing one test job (or one
-# workflow_call's test_dir pointed at a whole directory instead of a
-# specific file) meant an ingest test failure could fail a normalize
-# deploy, or a model-training test failure could block a feature-
-# engineering image build, even though the two were otherwise unrelated.
+# given test path. Each caller passes its own test_path and
+# requirements_files.
 
 name: Run Python Tests
 

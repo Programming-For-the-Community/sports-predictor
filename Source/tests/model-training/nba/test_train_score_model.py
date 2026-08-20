@@ -2,11 +2,8 @@
 Unit tests for the NBA game score training entrypoint.
 
 library.ml.backtest.run_backtest is mocked here -- these tests verify
-train_score_model.py's own orchestration, not the tournament itself (see
-Source/tests/library/ml/test_backtest.py) or any real algorithm fitting
-(see Source/tests/library/ml/test_model_types.py). Same shape as
-tests/model-training/nfl's own equivalent, basketball-scaled scores, plus
-the LightGBM candidate.
+train_score_model.py's own orchestration, not the tournament itself or
+any real algorithm fitting.
 """
 from unittest.mock import MagicMock, patch
 

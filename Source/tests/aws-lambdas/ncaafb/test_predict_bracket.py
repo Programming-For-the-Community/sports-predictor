@@ -1,12 +1,9 @@
 """
 Unit tests for the season tab's CFP-bracket reconciliation
-(season_projection._resolve_matchup/_bracket_payload) -- same 3-state
-design as NFL's own tests/aws-lambdas/nfl/test_predict_bracket.py
-(projected/scheduled/final), adapted for NCAAFB's 12-team topology and
-ranking-model-driven seeding. Not a port -- NCAAFB's own _bracket_payload
-signature takes an estimator/model_card/teams (see that function's own
-docstring for why seeding always uses TODAY's real ranking-model score,
-never a simulated future one).
+(season_projection._resolve_matchup/_bracket_payload) -- a 3-state
+design (projected/scheduled/final), adapted for NCAAFB's 12-team
+topology and ranking-model-driven seeding. _bracket_payload's own
+signature takes an estimator/model_card/teams.
 """
 from unittest.mock import MagicMock, patch
 

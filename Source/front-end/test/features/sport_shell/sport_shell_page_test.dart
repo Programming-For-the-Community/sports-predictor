@@ -6,8 +6,8 @@ import 'package:front_end/features/sport_shell/sport_shell_page.dart';
 
 /// SportConfig.hasSeasonProjection (sport_config.dart) gates the Season tab
 /// -- nfl has a real /nfl/season route so it stays visible; ncaa_mbb has
-/// no route at all yet (Sub-phase 3B hasn't started) so it's hidden
-/// rather than linking to a route that would just error.
+/// no route at all, so it's hidden rather than linking to one that would
+/// error.
 void main() {
   Widget wrap(String sportId) {
     final router = GoRouter(

@@ -90,9 +90,9 @@ def _score_and_record_leader(storage, s3, predictions_table, model_cache: dict, 
 
 def predict_event_leaders(storage, s3, predictions_table, event_key_value: str, events: list[dict] | None = None) -> dict | None:
     """The `leaders` block -- scoring/rebounding/assists leaders per team,
-    each always a list (no NCAAFB-style singular category -- no leader is
-    inherently singular in basketball). Best-effort: a failure here is
-    logged and returns None rather than failing predict_event."""
+    each always a list (no leader is inherently singular in basketball).
+    Best-effort: a failure here is logged and returns None rather than
+    failing predict_event."""
     try:
         candidates = live_features.build_live_event_leader_candidates(storage, SPORT, event_key_value, events=events)
     except Exception:

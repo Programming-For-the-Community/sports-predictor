@@ -3,13 +3,11 @@ Unit tests for live-scores/live_scores.py -- candidate gating (which
 events are even worth an ESPN call this cycle), the ESPN response ->
 cached-state extraction, and the S3 cache's read/write/staleness behavior.
 All AWS calls are mocked; live_scores.py takes s3/bucket/storage/client as
-explicit arguments rather than holding its own, same convention every
-other sport's own live-scores module uses.
+explicit arguments rather than holding its own.
 
 Matching a candidate to its ESPN scoreboard entry is a direct event_id
 lookup -- NBA's data source and live-scores source are both ESPN, so
-there's no separate matching logic here to test (see project memory's
-2026-08-13 source-switch note).
+there's no separate matching logic here to test.
 
 live_scores is registered on sys.path by conftest.py.
 """
@@ -64,10 +62,9 @@ def _espn_event(event_id: str, *, state: str, completed: bool, detail: str, home
 
 
 def _espn_summary(event_id: str) -> dict:
-    # NBA's player-level stat block has no "name" field at all (confirmed
-    # live, 2026-08-14 -- see library/normalize/espn.py's own comment) --
-    # this fixture deliberately omits it, unlike NFL's/NCAAFB's "passing"-
-    # named categories.
+    # NBA's player-level stat block has no "name" field at all (see
+    # library/normalize/espn.py's own comment) -- this fixture
+    # deliberately omits it.
     return {
         "header": {"id": event_id, "competitions": [{"date": "2026-11-11T00:00Z"}]},
         "boxscore": {

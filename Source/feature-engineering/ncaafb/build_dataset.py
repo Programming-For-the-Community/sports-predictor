@@ -1,21 +1,15 @@
 """
-NCAAFB feature engineering -- the CFBD-sourced equivalent of
-Source/feature-engineering/nfl/build_dataset.py. Pulls full history from
-DynamoDB (via FeatureStorage), computes event-level, player-level, and
-team-week-level (National Ranking model) training features using
-library.features.ncaafb's pure functions, and writes three Parquet
-training datasets to S3 (via S3Manager) for the training Fargate tasks to
-read.
+NCAAFB feature engineering. Pulls full history from DynamoDB (via
+FeatureStorage), computes event-level, player-level, and team-week-level
+(National Ranking model) training features using library.features.ncaafb's
+pure functions, and writes three Parquet training datasets to S3 (via
+S3Manager) for the training Fargate tasks to read.
 
-Not scheduled -- run manually via `aws ecs run-task`, same as
-Source/data-backfills/ncaafb (see
-Terraform/ecs-task-ncaafb-feature-engineering.tf). Safe to re-run at any
-time: it always rebuilds all three datasets from the current DynamoDB
+Not scheduled -- run manually via `aws ecs run-task`. Safe to re-run at
+any time: it always rebuilds all three datasets from the current DynamoDB
 contents and overwrites the same three S3 keys.
 
-Unlike NFL, there's no exhibition-game contamination filter (no Pro Bowl
-equivalent in college football) -- every completed event with a resolvable
-home/away role is used as-is.
+Every completed event with a resolvable home/away role is used as-is.
 
 Required environment variables:
     ENTITIES_TABLE_NAME
@@ -27,9 +21,8 @@ Required environment variables:
 
 Optional environment variables:
     ROLLING_WINDOW (default 5) -- games of history each event/player
-    rolling average covers, see library.features.common.DEFAULT_ROLLING_
-    WINDOW. Does not affect the ranking dataset, which always uses each
-    team's full season-to-date history (see build_team_week_features).
+    rolling average covers. Does not affect the ranking dataset, which
+    always uses each team's full season-to-date history.
 
 Usage:
     python build_dataset.py
@@ -75,12 +68,8 @@ def _team_ids(events: list[dict]) -> set[str]:
 
 def _team_coordinates(storage: FeatureStorage, team_ids: set[str]) -> dict[str, tuple[float, float]]:
     """{entity_id: (latitude, longitude)} from each team entity's own
-    metadata (see library/normalize/ncaafb.py's team_to_entity) -- one
-    GetItem per team encountered (~136 for FBS, trivial), not a hardcoded
-    module constant the way NFL's nfl_teams.TEAM_COORDINATES is. Missing
-    or incomplete coordinates for a team are simply omitted -- geo.
-    travel_distances_km already treats an unresolvable team_id as None,
-    not a crash."""
+    metadata -- one GetItem per team encountered. Missing or incomplete
+    coordinates for a team are simply omitted."""
     coordinates = {}
     for team_id in team_ids:
         entity = storage.get_entity(SPORT, team_id, "team")
@@ -118,8 +107,8 @@ def _leader_and_history(
 
 
 def build_event_dataset(storage: FeatureStorage, window: int) -> list[dict]:
-    """Same incremental chronological walk as NFL's build_event_dataset --
-    see that function's own docstring for the O(games) reasoning."""
+    """Walks events in a single chronological pass, growing each team's
+    own history one game at a time."""
     events = storage.get_all_events(SPORT)
     logger.info("Loaded %d completed events", len(events))
 
@@ -222,7 +211,7 @@ def _team_previous_event_dates(events: list[dict]) -> dict[tuple[str, str], str 
 
 
 def build_player_dataset(storage: FeatureStorage, window: int) -> list[dict]:
-    """Same incremental per-player walk as NFL's build_player_dataset."""
+    """Same incremental per-player walk as build_event_dataset."""
     events = storage.get_all_events(SPORT)
     events_by_key = {event["event_key"]: event for event in events}
     team_coordinates = _team_coordinates(storage, _team_ids(events))
@@ -263,14 +252,10 @@ def build_player_dataset(storage: FeatureStorage, window: int) -> list[dict]:
 
 
 def build_ranking_dataset(storage: FeatureStorage) -> list[dict]:
-    """Team-week granularity, for the National Ranking model -- distinct
-    from build_event_dataset/build_player_dataset's per-game grain (see
-    library.features.ncaafb.build_team_week_features' own docstring).
-    Each team's own season history grows unboundedly here (unlike the
-    window-capped event/player walks above) since the ranking model wants
-    season-to-date record/scoring/SOS, not a trailing N-game average --
-    bounded in practice by one FBS season's ~13-17 games per team.
-    """
+    """Team-week granularity, for the National Ranking model. Each team's
+    own season history grows unboundedly here since the ranking model
+    uses season-to-date record/scoring/SOS rather than a trailing N-game
+    average."""
     events = storage.get_all_events(SPORT)
     elo_ratings, _ = compute_elo_ratings(events)
     events_ascending = sorted(events, key=lambda e: e.get("event_date", ""))
@@ -299,8 +284,7 @@ def build_ranking_dataset(storage: FeatureStorage) -> list[dict]:
 
 
 def _write_parquet(rows: list[dict]) -> bytes:
-    """Same union-of-columns, JSON-encode-dict-values approach as NFL's
-    own _write_parquet -- see its docstring."""
+    """JSON-encodes dict-valued columns before writing to Parquet."""
     if not rows:
         return b""
     df = pd.DataFrame(rows)
@@ -340,7 +324,7 @@ def main() -> None:
         raise RuntimeError(f"build_player_dataset produced 0 rows -- refusing to overwrite s3://{bucket}/{PLAYER_FEATURES_KEY}")
     logger.info("Writing %d player feature rows to Parquet...", player_row_count)
     player_parquet = _write_parquet(player_rows)
-    del player_rows  # free the largest of the three row lists before its own upload, not just after
+    del player_rows  # free the largest of the three row lists before its own upload
     s3.put_bytes(PLAYER_FEATURES_KEY, player_parquet, content_type="application/octet-stream")
     logger.info("Wrote %d player feature rows to s3://%s/%s", player_row_count, bucket, PLAYER_FEATURES_KEY)
 

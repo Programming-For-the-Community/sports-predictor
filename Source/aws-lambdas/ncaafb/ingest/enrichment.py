@@ -1,19 +1,15 @@
 """
-Coach/ranking enrichment for ingest/handler.py's game writes -- ingest-
-only, unlike venue_indoor (library/storage/ncaafb_team_cache.py, shared
-with schedule-sync -- see that module's own docstring for why). No injury
-or depth-chart equivalent exists for college football (see project plan),
-so enrich_games below only ever attaches coach info and current AP rank
-on top of what attach_venue_indoor already provides.
+Coach/ranking enrichment for ingest/handler.py's game writes. No injury
+or depth-chart equivalent exists for college football, so enrich_games
+below only attaches coach info and current AP rank on top of what
+attach_venue_indoor already provides.
 
-Unlike NFL's own ingest/enrichment.py, CFBD's /coaches and /rankings
-responses key teams by school name, not a numeric id, while /games only
-has numeric home_id/away_id -- ncaafb_team_cache.get_cached_teams' season-
-scoped /teams list is what bridges the two (school name <-> id) for both
-lookups below. The lookup builders and coach cache themselves live in
-library/storage/ncaafb_coach_cache.py (data-backfills/ncaafb/backfill.py
-needs the exact same season-scoped resolution for 10 seasons of
-historical games) -- this module keeps only the per-week orchestration.
+CFBD's /coaches and /rankings responses key teams by school name, not a
+numeric id, while /games only has numeric home_id/away_id --
+ncaafb_team_cache.get_cached_teams' season-scoped /teams list bridges
+the two (school name <-> id) for both lookups below. The lookup builders
+and coach cache themselves live in library/storage/ncaafb_coach_cache.py;
+this module keeps only the per-week orchestration.
 """
 import logging
 
@@ -25,19 +21,15 @@ logger = logging.getLogger("ncaafb-ingest")
 
 
 def enrich_games(games: list[dict], season: int, week: int, client: CFBDClient, s3, bucket: str) -> None:
-    """Attaches venue_indoor (see ncaafb_team_cache.attach_venue_indoor),
-    home_coach/away_coach, and home_current_rank/away_current_rank to
-    each game dict in place, before that week's games are written to S3.
-    Best-effort: a coach/ranking fetch failure is logged and those fields
-    are simply omitted, matching NFL's enrich_events convention.
+    """Attaches venue_indoor, home_coach/away_coach, and
+    home_current_rank/away_current_rank to each game dict in place,
+    before that week's games are written to S3. Best-effort: a
+    coach/ranking fetch failure is logged and those fields are simply
+    omitted.
 
-    Rankings are fetched fresh every call, unlike teams/coaches -- they
-    change weekly and this is a single bulk call scoped to one week, not
-    a per-team fan-out, so there's no TTL cache to gain from. This
-    function only ever runs for ONE week (the current one) per ingest
-    run -- exactly why schedule-sync's own season-wide walk calls
-    attach_venue_indoor directly instead of this function, rather than
-    re-fetching rankings once per week of the season."""
+    Rankings are fetched fresh every call -- a single bulk call scoped
+    to one week -- while teams and coaches use the season-scoped
+    cache."""
     try:
         attach_venue_indoor(games, season, client, s3, bucket)
     except Exception:

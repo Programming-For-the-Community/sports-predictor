@@ -1,4 +1,4 @@
-# 30-day retention, same rationale as ecs-task-nfl-backfill.tf.
+# 30-day retention so logs don't grow unbounded.
 resource "aws_cloudwatch_log_group" "ncaafb_train_player_prop_model" {
   name              = "/ecs/${var.project}-ncaafb-train-player-prop-model"
   retention_in_days = 30
@@ -10,12 +10,11 @@ resource "aws_cloudwatch_log_group" "ncaafb_train_player_prop_model" {
 }
 
 # Standalone Fargate task, one definition shared by every NCAAFB player-prop
-# stat -- same shape as ecs-task-nfl-train-player-prop-model.tf. The
-# training orchestrator's registry item (dynamodb-sport-registry.tf's
+# stat. The training orchestrator's registry item (dynamodb-sport-registry.tf's
 # ncaafb_registry) schedules it once per stat via a per-invocation
-# TARGET_STAT container override; not set here, same reasoning as the NFL
-# file. Reuses the win-probability task's own image, overriding the
-# container command to run train_player_prop_model.py.
+# TARGET_STAT container override, not set here. Reuses the win-probability
+# task's own image, overriding the container command to run
+# train_player_prop_model.py.
 resource "aws_ecs_task_definition" "ncaafb_train_player_prop_model" {
   family                   = "${var.project}-ncaafb-train-player-prop-model"
   requires_compatibilities = ["FARGATE"]

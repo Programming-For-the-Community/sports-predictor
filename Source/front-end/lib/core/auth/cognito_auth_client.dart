@@ -91,10 +91,7 @@ class CognitoAuthClient {
   Uri get _endpoint => Uri.https('cognito-idp.${AppConfig.awsRegion}.amazonaws.com', '/');
 
   Future<Map<String, dynamic>> _post(String target, Map<String, dynamic> body) async {
-    // Same reasoning as ApiClient._send's timeout -- without this, a
-    // stalled Cognito call hangs getValidIdToken() forever, which hangs
-    // every ApiClient.get() call before it ever reaches ApiClient's own
-    // timeout-guarded request.
+    // Without this, a stalled Cognito call hangs getValidIdToken() forever.
     final stopwatch = Stopwatch()..start();
     debugPrint('[CognitoAuthClient] -> POST $target');
     final http.Response response;

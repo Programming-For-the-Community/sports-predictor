@@ -1,20 +1,14 @@
 """
 Read-only NFL serving logic -- GET /nfl/events and GET /nfl/models --
-shared between the heavy inference Lambda (predictions/season,
-Source/aws-lambdas/nfl/predict) and the light read-only Lambda
-(Source/aws-lambdas/nfl/predict-read). Neither route ever loads or
-deserializes an ML model artifact (list_models only reads a model card's
-JSON metadata; list_events only reads events + already-logged predictions
-from DynamoDB) -- moved here from predict/handler.py specifically so a
-Lambda serving ONLY these two routes never has to import xgboost/
-scikit-learn/pandas at all. Those two routes are also this API's most
-frequently hit traffic (every page load), so cutting their cold start
-matters more than the less-frequent, inherently-heavier prediction routes.
+shared between the heavy inference Lambda (Source/aws-lambdas/nfl/predict)
+and the light read-only Lambda (Source/aws-lambdas/nfl/predict-read).
+Neither route loads or deserializes an ML model artifact: list_models
+only reads a model card's JSON metadata, list_events only reads events
+and already-logged predictions from DynamoDB.
 
 Callers own their own storage/s3/predictions_table objects and Lambda-
-lifecycle concerns (lazy singletons, env var lookups) -- this module is
-pure request-shaping logic, the same boundary library.ml.backtest draws
-around training orchestration vs. algorithm specifics.
+lifecycle concerns (lazy singletons, env var lookups); this module is
+pure request-shaping logic.
 """
 import re
 from concurrent.futures import ThreadPoolExecutor
@@ -31,9 +25,7 @@ WIN_PROBABILITY_MODEL = "win-probability"
 SCORE_MODELS = {"margin": "score-margin", "home_score": "home-score", "away_score": "away-score"}
 
 # Mirrors predict/handler.py's LEADER_CATEGORY_STATS, inverted (stat ->
-# category instead of category -> stats) -- duplicated rather than
-# imported since predict-read never imports predict/handler.py (that's
-# the whole point of this module's own split, see its own docstring).
+# category instead of category -> stats).
 _STAT_CATEGORY = {
     "passing_yards": "passing", "passing_touchdowns": "passing",
     "receiving_yards": "receiving", "receiving_touchdowns": "receiving",
@@ -42,21 +34,14 @@ _STAT_CATEGORY = {
 }
 
 # Matches predict/handler.py's _record_prediction model_key shape for a
-# player-prop prediction (MODEL#player-prop-passing-yards#v3#PLAYER#qb1)
-# -- written both by a manually-queried single player+stat
-# (_predict_player_prop) and, as of the leaders-comparison feature, by
-# every scored leader candidate (_score_leader_candidate) -- both are
-# interchangeable here, this doesn't care which wrote a given row.
+# player-prop prediction (MODEL#player-prop-passing-yards#v3#PLAYER#qb1).
 _PLAYER_PROP_MODEL_KEY_RE = re.compile(r"^MODEL#player-prop-([a-z-]+)#v\d+#PLAYER#(.+)$")
 
 # Mirrors predict/event_prediction.py's own LEADER_CATEGORY_LIMITS/
-# LEADER_CATEGORY_STATS (primary stat per category) -- duplicated for the
-# same reason _STAT_CATEGORY above is. A completed event's audit trail
-# can hold MORE than this many predicted rows for a category (either an
-# event predicted before that module started capping what it writes, or
-# any future drift between the two), so this re-sorts and re-slices
-# rather than trusting the audit trail already matches the leaders block
-# shown pre-game.
+# LEADER_CATEGORY_STATS (primary stat per category). A completed event's
+# audit trail can hold more than this many predicted rows for a category,
+# so this re-sorts and re-slices rather than trusting the audit trail
+# already matches the leaders block shown pre-game.
 _LEADER_CATEGORY_LIMITS = {"receiving": 3, "rushing": 2, "sacks": 3}
 _CATEGORY_PRIMARY_STAT = {"receiving": "receiving_yards", "rushing": "rushing_yards", "sacks": "defensive_sacks"}
 
@@ -108,8 +93,7 @@ def _next_week_events(scheduled: list[dict]) -> list[dict]:
     that looks like a data problem.
 
     Ignores any "scheduled" event dated more than _STALE_SCHEDULED_GRACE_DAYS
-    in the past -- a canceled/postponed game that never got its status
-    updated (no dedicated status value exists for that yet) would otherwise
+    in the past -- a game whose status was never updated would otherwise
     win min() permanently and mask every real upcoming week behind it."""
     cutoff = (datetime.now(timezone.utc).date() - timedelta(days=_STALE_SCHEDULED_GRACE_DAYS)).isoformat()
     plausible = [e for e in scheduled if e.get("event_date", "") >= cutoff]
@@ -138,18 +122,15 @@ def _actual_result(event: dict) -> dict | None:
 def _prediction_comparison(rows: list[dict], event: dict) -> dict | None:
     """Compares this event's logged prediction against the actual result --
     reads the audit trail predict/handler.py's _record_prediction already
-    wrote (whatever was predicted BEFORE the game), never recomputes one
+    wrote (whatever was predicted before the game), never recomputes one
     now. Recomputing after the fact would build live features from rolling
-    averages/Elo that may already include this very game's own
-    now-normalized stats, leaking the outcome into its own "prediction".
-    Returns None if no prediction was ever logged for this event (nobody
-    requested one before it was played) or the event has no final score
-    yet.
+    averages/Elo that may already include this game's own now-normalized
+    stats, leaking the outcome into its own "prediction". Returns None if
+    no prediction was ever logged for this event, or it has no final
+    score yet.
 
     rows: this event's own predictions-table rows, already fetched by the
-    caller (list_events' _entry) -- _leaders_comparison needs the exact
-    same query, so it's fetched once and passed to both instead of each
-    re-querying it independently."""
+    caller and shared with _leaders_comparison rather than re-queried."""
     actual = _actual_result(event)
     if actual is None:
         return None
@@ -185,18 +166,11 @@ def _prediction_comparison(rows: list[dict], event: dict) -> dict | None:
 def _leaders_comparison(storage, rows: list[dict], sport: str, event: dict) -> dict | None:
     """Player-prop predicted-vs-actual for a completed event -- the
     player-level counterpart to _prediction_comparison, same "read the
-    audit trail, never recompute" reasoning: recomputing live features for
-    an already-played game would leak that game's own now-normalized
-    result into its own "prediction" (see event_detail_page.dart's own
-    comment on the frontend side of this same rule). None if no leader/
-    player-prop prediction was ever recorded for this event -- nobody
-    viewed its detail page while it was still scheduled, same honest gap
-    _prediction_comparison already has for the team-level comparison, not
-    a bug.
+    audit trail, never recompute" reasoning. None if no leader/player-prop
+    prediction was ever recorded for this event.
 
     rows: same already-fetched predictions-table rows _prediction_
-    comparison takes -- see its own docstring for why this isn't queried
-    here too.
+    comparison takes.
 
     Shape mirrors the (predicted-only) `leaders` block
     predict/handler.py's _predict_event_leaders returns: `passing` is a
@@ -278,27 +252,19 @@ def _round_label(event: dict) -> str | None:
 def list_events(storage, predictions_table, sport: str, status: str) -> dict:
     """GET /nfl/events?status=scheduled|completed -- scoped to exactly one
     week, not the whole matching history: status=scheduled returns the
-    soonest upcoming week (empty if that week hasn't been ingested yet --
-    the frontend shows a "coming soon" state rather than mistaking that
-    for no games); status=completed returns the most recently completed
-    week, each event carrying a `prediction_comparison` block (predicted
-    vs. actual win/margin/score, `null` if no prediction was ever logged
-    for that event before it was played -- see _prediction_comparison's
-    own docstring for why this reads the predictions-table audit trail
-    rather than recomputing one now). Every event also carries `round` --
-    the playoff round name (Wild Card/Divisional/Conference Championship/
-    Super Bowl) for a postseason game, `null` for regular season -- see
-    _round_label. A completed event also carries `leaders_comparison` --
-    player-prop predicted-vs-actual, `null` under the same "nobody
-    recorded one before the game" condition as `prediction_comparison`,
-    see _leaders_comparison. Also carries `venue_name`/`venue_city`/
-    `venue_state`, straight off the stored event (already ingested for
-    the travel-distance feature -- see normalize/espn.py), `null` on any
-    of the three the venue lacked or the event was ingested before this
-    field existed. Excludes the Pro Bowl and any other exhibition game
-    entirely (see is_real_franchise_matchup). Each participant also
-    carries `name`/`abbreviation` off its own team entity -- see
-    enrich_participants."""
+    soonest upcoming week (empty if that week hasn't been ingested yet);
+    status=completed returns the most recently completed week, each event
+    carrying a `prediction_comparison` block (predicted vs. actual
+    win/margin/score, `null` if no prediction was ever logged for that
+    event before it was played). Every event also carries `round` -- the
+    playoff round name for a postseason game, `null` for regular season.
+    A completed event also carries `leaders_comparison` -- player-prop
+    predicted-vs-actual, `null` under the same condition as
+    `prediction_comparison`. Also carries `venue_name`/`venue_city`/
+    `venue_state` straight off the stored event, `null` on any of the
+    three the venue lacked. Excludes the Pro Bowl and any other exhibition
+    game entirely. Each participant also carries `name`/`abbreviation`
+    off its own team entity."""
     events = [e for e in storage.get_all_events(sport, status=status) if is_real_franchise_matchup(e)]
 
     if status == "completed":
@@ -322,9 +288,8 @@ def list_events(storage, predictions_table, sport: str, status: str) -> dict:
             "venue_state": e.get("venue_state"),
         }
         if status == "completed":
-            # One query, not two -- _prediction_comparison and
-            # _leaders_comparison used to each independently re-query the
-            # exact same event_key partition.
+            # One query shared by _prediction_comparison and
+            # _leaders_comparison rather than each querying independently.
             rows = predictions_table.query(Key("event_key").eq(e["event_key"]))
             entry["prediction_comparison"] = _prediction_comparison(rows, e)
             entry["leaders_comparison"] = _leaders_comparison(storage, rows, sport, e)
@@ -333,12 +298,9 @@ def list_events(storage, predictions_table, sport: str, status: str) -> dict:
     if not events:
         return {"sport": sport, "events": []}
 
-    # Concurrent, not sequential -- a completed week's own entries each
-    # make several DynamoDB round trips (the predictions query above plus
-    # a get_entity per matched leader candidate), and events is capped at
-    # one week (~16 games) but still turned a real request into a long
-    # fully-serialized chain as the predictions table grew. Same
-    # per-item-independent concurrency shape list_models already uses.
+    # Concurrent, not sequential -- each entry makes several DynamoDB round
+    # trips (the predictions query above plus a get_entity per matched
+    # leader candidate), independent per event.
     with ThreadPoolExecutor(max_workers=min(len(events), 16)) as executor:
         entries = list(executor.map(_entry, events))
 
@@ -347,10 +309,9 @@ def list_events(storage, predictions_table, sport: str, status: str) -> dict:
 
 def _load_model_summary(s3, sport: str, model_name: str) -> dict | None:
     """One model's card summary, or None if it's never had a version
-    promoted. 3 sequential S3 round-trips (existence check, pointer, card)
-    -- factored out so list_models can run every model's lookup
-    concurrently instead of one full round-trip chain after another. Each
-    model's lookup is fully independent of every other's."""
+    promoted. 3 sequential S3 round-trips (existence check, pointer,
+    card); each model's lookup is fully independent of every other's, so
+    list_models can run them concurrently."""
     pointer_key = current_version_key(sport, model_name)
     if not s3.object_exists(pointer_key):
         return None
@@ -370,12 +331,10 @@ def _load_model_summary(s3, sport: str, model_name: str) -> dict | None:
         )},
         "top_features": top_features,
         # Every algorithm library.ml.backtest.run_backtest tried for this
-        # target this run -- absent on a model card trained before the
-        # backtesting harness existed. Each candidate carries "score" (the
-        # same human-readable metric as this card's own top-level
-        # accuracy/mae) and "rank_score" (the value of candidates_ranked_by
-        # -- what actually decided the ranking, since the two can disagree
-        # in direction -- see run_backtest's own comment on why both exist).
+        # target this run. Each candidate carries "score" (the same
+        # human-readable metric as this card's own top-level accuracy/mae)
+        # and "rank_score" (the value of candidates_ranked_by, which
+        # actually decided the ranking).
         "candidates": card.get("candidates"),
         "candidates_ranked_by": card.get("candidates_ranked_by"),
     }
@@ -391,11 +350,8 @@ def list_models(s3, sport: str) -> dict:
     if not model_names:
         return {"sport": sport, "models": []}
 
-    # boto3 clients are thread-safe for concurrent calls -- sharing one S3
-    # client across these threads is the documented, supported usage, not
-    # a race. Running each model's own 3-call chain concurrently cuts
-    # wall-clock time to roughly the slowest single model's chain, not the
-    # sum of all of them.
+    # boto3 clients are thread-safe for concurrent calls, so one S3 client
+    # is shared across these threads.
     with ThreadPoolExecutor(max_workers=min(len(model_names), 10)) as executor:
         results = executor.map(lambda name: _load_model_summary(s3, sport, name), model_names)
 

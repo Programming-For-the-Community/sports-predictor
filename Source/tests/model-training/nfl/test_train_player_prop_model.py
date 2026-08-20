@@ -105,8 +105,7 @@ class TestFilterToTargetStat:
 
     def test_excludes_a_one_off_gadget_play_despite_having_the_stat_this_game(self):
         # Has the stat in the label game (has_stat check passes) but no
-        # real prior history of it -- exactly the passing-yards v1 model
-        # card's contamination scenario (a WR's single career pass).
+        # real prior history of it (e.g. a WR's single career pass).
         games_with_stat = [5] * 9 + [0]
         df = _make_df(10, target_stat="passing_yards", games_with_stat=games_with_stat)
 
@@ -211,9 +210,9 @@ class TestFeatureColumns:
     def test_excludes_the_opposing_side_of_the_ball_even_when_common(self):
         # avg_defensive_solo_tackles at 20% non-null -- comfortably clears
         # MIN_NON_NULL_FRACTION (real signal, e.g. a QB tackling after an
-        # interception -- see the player-prop-passing-yards v3/v4 model
-        # cards), but must still be excluded from an offensive target by
-        # the opposing-side-category rule, not just the null-fraction one.
+        # interception), but must still be excluded from an offensive
+        # target by the opposing-side-category rule, not just the
+        # null-fraction one.
         df = _make_df(100)
         df["avg_defensive_solo_tackles"] = [None] * 80 + [1.0] * 20
 

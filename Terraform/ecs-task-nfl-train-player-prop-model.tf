@@ -1,4 +1,4 @@
-# 30-day retention, same rationale as ecs-task-nfl-backfill.tf.
+# 30-day log retention.
 resource "aws_cloudwatch_log_group" "nfl_train_player_prop_model" {
   name              = "/ecs/${var.project}-nfl-train-player-prop-model"
   retention_in_days = 30
@@ -9,23 +9,19 @@ resource "aws_cloudwatch_log_group" "nfl_train_player_prop_model" {
   })
 }
 
-# Standalone Fargate task, one definition shared by every player-prop
-# stat -- see scheduler-nfl-train-player-prop-model.tf, which schedules
-# it once per stat in nfl_player_prop_stats via a per-schedule TARGET_STAT
-# override. Runnable manually via `aws ecs run-task` with your own override.
-# Reuses the same image as ecs-task-nfl-train-win-probability-model.tf (all
-# four training scripts live in one Dockerfile, see
-# Source/model-training/nfl/Dockerfile) and overrides the container
-# command to run train_player_prop_model.py.
+# Standalone Fargate task, one definition shared by every player-prop stat
+# -- see scheduler-nfl-train-player-prop-model.tf, which schedules it once
+# per stat in nfl_player_prop_stats via a per-schedule TARGET_STAT override.
+# Runnable manually via `aws ecs run-task` with your own override. All four
+# training scripts live in one Dockerfile (Source/model-training/nfl/Dockerfile);
+# this overrides the container command to run train_player_prop_model.py.
 #
 # Does not set TARGET_STAT here -- it varies per run, so it's passed as a
 # `containerOverrides[].environment` override on each invocation instead
 # of baked into the task definition. train_player_prop_model.py reads it
 # via os.environ["TARGET_STAT"], raising KeyError if it's missing.
 #
-# Uses the shared aws_iam_role.ecs_pipeline (iam-ecs-pipeline.tf). Same
-# cpu/memory sizing (locals-training-compute.tf) as
-# ecs-task-nfl-train-win-probability-model.tf.
+# Uses the shared aws_iam_role.ecs_pipeline (iam-ecs-pipeline.tf).
 resource "aws_ecs_task_definition" "nfl_train_player_prop_model" {
   family                   = "${var.project}-nfl-train-player-prop-model"
   requires_compatibilities = ["FARGATE"]
@@ -44,8 +40,7 @@ resource "aws_ecs_task_definition" "nfl_train_player_prop_model" {
       environment = [
         { name = "MODEL_ARTIFACTS_BUCKET_NAME", value = aws_s3_bucket.model_artifacts.bucket },
         { name = "AWS_REGION", value = var.region },
-        # See ecs-task-nfl-train-win-probability-model.tf's own comment --
-        # avoids BLAS oversubscribing against the outer search's own
+        # Avoids BLAS oversubscribing against the outer search's own
         # n_jobs=-1 process-level parallelism.
         { name = "OMP_NUM_THREADS", value = "1" },
         { name = "OPENBLAS_NUM_THREADS", value = "1" },

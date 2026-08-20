@@ -17,13 +17,11 @@ import 'team_color_dot.dart';
 import 'win_probability_bar.dart';
 
 // Below this width, GameRow stacks the matchup and prediction sections
-// onto their own lines instead of splitting one row between them -- see
-// GameRow.build's own comment.
+// onto their own lines instead of splitting one row between them.
 const _stackBreakpoint = 600.0;
 
 // Abbreviated for this compact row -- the backend's full round names
-// ("Conference Championship") don't fit the fixed-width week/round slot
-// this list uses. See core/models/event.dart's SportEvent.round.
+// don't fit the fixed-width week/round slot this list uses.
 const _roundAbbreviations = {
   'Wild Card': 'WC',
   'Divisional': 'DIV',
@@ -59,13 +57,12 @@ const _usTimeZones = {
   -10: ('HST', 'HST'),
 };
 
-/// The viewer's own timezone, abbreviated (e.g. "EDT") -- every kickoff
-/// time on this list is shown in this same local time (_kickoffTimeLabel
-/// above), stated once for the whole list rather than per row. Not
-/// DateTime.timeZoneName (unreliable on Flutter Web); instead derives the
-/// standard (non-DST) offset by comparing January/July, then checks
-/// whether the current offset differs from it to pick DST vs standard.
-/// Falls back to "UTC±N" outside the continental US/AK/HI.
+/// The viewer's own timezone, abbreviated (e.g. "EDT"), stated once for
+/// the whole list rather than per row. Not DateTime.timeZoneName
+/// (unreliable on Flutter Web); instead derives the standard (non-DST)
+/// offset by comparing January/July, then checks whether the current
+/// offset differs from it to pick DST vs standard. Falls back to
+/// "UTC±N" outside the continental US/AK/HI.
 String localTimezoneLabel() {
   final now = DateTime.now();
   final janOffset = DateTime(now.year, 1, 15).timeZoneOffset;
@@ -84,25 +81,19 @@ String localTimezoneLabel() {
 /// design/FRONTEND_STYLE.md's "Game row (list)" component.
 ///
 /// Scheduled events fetch their own live prediction (one request per
-/// visible row) rather than the list page batching them -- NFL's weekly
-/// game count (~16) makes this a non-issue, and it means a slow/failed
-/// prediction for one game never blocks the rest of the list from
-/// rendering. Completed events do NOT fetch a live prediction -- they use
-/// `event.predictionComparison`, the prediction actually logged before
-/// the game was played (see handler.py's _prediction_comparison). A fresh
-/// live prediction for an already-played game would be misleading (built
-/// from rolling stats that may already include this game's own now-
-/// normalized result) and wouldn't answer "how did the model do", which
-/// is the whole point of the completed tab.
+/// visible row) rather than the list page batching them, so a slow/failed
+/// prediction for one game never blocks the rest of the list. Completed
+/// events use `event.predictionComparison`, the prediction actually
+/// logged before the game was played, instead of a fresh live prediction
+/// -- that answers "how did the model do" for the completed tab.
 class GameRow extends ConsumerWidget {
   const GameRow({super.key, required this.sport, required this.event, this.liveState});
 
   final String sport;
   final SportEvent event;
-  // From liveScoresProvider (core/data/live_scores_repository.dart) --
-  // null for the vast majority of rows (anything not within 15 minutes
-  // of its own kickoff, per live_scores.py's own POLL_START_BEFORE_KICKOFF),
-  // not an error or a loading state.
+  // From liveScoresProvider. Null for the vast majority of rows (anything
+  // not within 15 minutes of its own kickoff), not an error or a loading
+  // state.
   final LiveEventState? liveState;
 
   @override
@@ -112,29 +103,22 @@ class GameRow extends ConsumerWidget {
     final isCompleted = event.status == 'completed';
     final isLive = liveState?.live ?? false;
     // Only fetched for a not-yet-started, not-live event -- watched here
-    // (not inside _LivePredictionSummary, which used to watch it itself)
-    // because _MatchupLine below needs this SAME resolved value too, for
-    // the predicted score now shown next to each team's own actual score,
-    // not a second independent fetch of it.
+    // (not inside _LivePredictionSummary) because _MatchupLine below needs
+    // this same resolved value too, for the predicted score shown next to
+    // each team's own actual score.
     final prediction = (!isLive && !isCompleted)
         ? ref.watch(eventPredictionProvider((sport: sport, eventId: event.eventId)))
         : null;
     final predicted = prediction?.when(data: (p) => p, loading: () => null, error: (_, __) => null);
-    // A completed event has no live prediction (see above), but the
-    // prediction actually logged before kickoff is already on hand via
-    // predictionComparison -- same source _ComparisonSummary below uses,
-    // so the left-hand predicted score and the right-hand pick/margin
-    // always describe the same recorded prediction.
+    // A completed event has no live prediction; the prediction logged
+    // before kickoff is already on hand via predictionComparison, the same
+    // source _ComparisonSummary below uses.
     final comparison = event.predictionComparison;
     final awayPredictedScore = predicted?.awayScore ?? (isCompleted ? comparison?.predictedAwayScore : null);
     final homePredictedScore = predicted?.homeScore ?? (isCompleted ? comparison?.predictedHomeScore : null);
 
     final weekTime = SizedBox(
-      // Wide enough for "1:00 PM" on one line -- 56 was sized for the
-      // week label ("WK 2"/"DIV") above it, not this longer string,
-      // which was wrapping onto a second line as a result. maxLines/
-      // softWrap are a backstop, not the fix itself -- a time value
-      // truncating would be worse than it wrapping.
+      // Wide enough for "1:00 PM" on one line.
       width: 72,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -158,15 +142,11 @@ class GameRow extends ConsumerWidget {
       homeScore: isLive ? liveState!.homeScore : event.home.result?.score,
       homePredictedScore: homePredictedScore,
     );
-    // Stadium name/city/state -- absent on any event ingested before this
-    // field existed, or a neutral-site game ESPN didn't report an address
-    // for, in which case this renders nothing rather than a blank line.
+    // Stadium name/city/state -- renders nothing when absent rather than
+    // a blank line.
     final venueLine = _VenueLine(label: event.venueLabel);
     // Live takes priority over completed/scheduled -- a pre-game
-    // prediction next to an actual in-progress score would be confusing,
-    // and a "completed" status hasn't caught up yet (see event.dart's
-    // own status field -- it only ever reflects yesterday's batch
-    // ingest, never today's game in progress).
+    // prediction next to an actual in-progress score would be confusing.
     final predictionArea = isLive
         ? _LiveStatus(detail: liveState!.detail)
         : isCompleted
@@ -191,11 +171,10 @@ class GameRow extends ConsumerWidget {
         child: LayoutBuilder(
           builder: (context, constraints) {
             // Two team dots/names/scores, plus a percentage/pill/margin
-            // line, together need more width than a phone-size card has
-            // to split between them on one shared row -- confirmed live:
-            // team names rendered at an effectively invisible sliver of
-            // a width. Each section gets the card's full width on its
-            // own line instead, below _stackBreakpoint.
+            // line, need more width than a phone-size card has to split
+            // between them on one shared row. Each section gets the
+            // card's full width on its own line instead, below
+            // _stackBreakpoint.
             if (constraints.maxWidth < _stackBreakpoint) {
               return Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -225,13 +204,10 @@ class GameRow extends ConsumerWidget {
 }
 
 /// Right-hand side of a scheduled event's row: win-probability bar, the
-/// favored team's own percentage (above the pick/margin line -- the
-/// percentage and the pick it belongs to read top-to-bottom as one unit),
-/// and a confidence pill. Takes the already-resolved AsyncValue rather
-/// than watching the provider itself -- GameRow.build watches it once and
-/// hands the same value here AND to _MatchupLine (for the predicted score
-/// shown next to each team's own actual score), instead of two
-/// independent fetches of the same prediction.
+/// favored team's own percentage above the pick/margin line, and a
+/// confidence pill. Takes the already-resolved AsyncValue rather than
+/// watching the provider itself, since GameRow.build hands the same value
+/// to _MatchupLine too.
 class _LivePredictionSummary extends StatelessWidget {
   const _LivePredictionSummary({
     required this.prediction, required this.homeAbbr, required this.awayAbbr,
@@ -240,8 +216,7 @@ class _LivePredictionSummary extends StatelessWidget {
   final AsyncValue<EventPrediction> prediction;
   final String homeAbbr;
   final String awayAbbr;
-  // Only needed to retry on a cold-cache-miss (see the error branch below)
-  // -- prediction itself is already resolved by the caller.
+  // Only needed to retry on a cold-cache-miss (see the error branch below).
   final String sport;
   final String eventId;
 
@@ -251,18 +226,15 @@ class _LivePredictionSummary extends StatelessWidget {
       data: (p) {
         final homeFavored = p.homeWinProbability >= 0.5;
         final pickAbbr = homeFavored ? homeAbbr : awayAbbr;
-        // The favored team's own probability, not always home's -- so
-        // this number always matches the pick/margin printed right below
-        // it instead of flipping to "35%" whenever the away team is
-        // favored.
+        // The favored team's own probability, not always home's, so this
+        // matches the pick/margin printed right below it.
         final pickWinProbability = homeFavored ? p.homeWinProbability : 1 - p.homeWinProbability;
         return Row(
           children: [
             Expanded(child: WinProbabilityBar(homeWinProbability: p.homeWinProbability)),
             const SizedBox(width: 12),
-            // Flexible+ellipsis on both lines -- on a narrow phone this
-            // column was pushing the ConfidencePill past the card's own
-            // edge instead of giving up its own width first.
+            // Flexible+ellipsis on both lines so the column gives up its
+            // own width before pushing ConfidencePill past the card edge.
             Flexible(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.end,
@@ -273,11 +245,9 @@ class _LivePredictionSummary extends StatelessWidget {
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                   ),
-                  // Predicted winner + margin -- the score half of this
-                  // used to live here too, but now renders next to each
-                  // team's own actual score on the left (_MatchupLine),
-                  // so repeating it here would just be the same two
-                  // numbers a second time.
+                  // Predicted winner + margin -- the score itself renders
+                  // next to each team's own actual score on the left
+                  // (_MatchupLine).
                   Text(
                     '$pickAbbr -${p.margin.abs().toStringAsFixed(1)}',
                     style: AppTextStyles.microLabel(color: AppColors.inkMute),
@@ -305,8 +275,8 @@ class _LivePredictionSummary extends StatelessWidget {
 }
 
 /// The pulsing-dot "LIVE" pill plus ESPN's own game-clock text (e.g. "Q3
-/// 08:14") -- replaces the pre-game prediction/completed-comparison slot
-/// while an event is actually in progress (see GameRow.build).
+/// 08:14"), replacing the pre-game prediction/completed-comparison slot
+/// while an event is in progress.
 class _LiveStatus extends StatelessWidget {
   const _LiveStatus({required this.detail});
   final String? detail;
@@ -340,10 +310,8 @@ class _ComparisonSummary extends StatelessWidget {
       return Text('No prediction recorded', style: AppTextStyles.body(color: AppColors.inkMute));
     }
     final pickAbbr = c.predictedHomeWon ? homeAbbr : awayAbbr;
-    // The predicted winner's own probability, not always home's -- same
-    // orientation as the pick/margin/score in the text below, so this
-    // always matches rather than reading like a different team's number
-    // whenever the away team was the pick.
+    // The predicted winner's own probability, not always home's, matching
+    // the pick/margin/score orientation in the text below.
     final pickWinProbability = c.predictedHomeWon ? c.predictedHomeWinProbability : 1 - c.predictedHomeWinProbability;
     return Row(
       children: [
@@ -355,10 +323,9 @@ class _ComparisonSummary extends StatelessWidget {
         const SizedBox(width: 8),
         Expanded(
           child: Text(
-            // The score half of "predicted X by Y (score)" used to live
-            // here too -- it now renders next to each team's own actual
-            // score on the left (_MatchupLine), so this only states the
-            // pick/margin/probability, not the same numbers twice.
+            // The score itself renders next to each team's own actual
+            // score on the left (_MatchupLine); this states only the
+            // pick/margin/probability.
             'Predicted $pickAbbr (${(pickWinProbability * 100).round()}%)'
             '${c.predictedMargin != null ? ' by ${c.predictedMargin!.abs().toStringAsFixed(1)}' : ''}',
             style: AppTextStyles.body(color: AppColors.inkSub),
@@ -370,19 +337,11 @@ class _ComparisonSummary extends StatelessWidget {
   }
 }
 
-/// Away line stacked over home line -- this whole block only gets a
-/// fixed flex slice of GameRow's own Row (see GameRow.build), which
-/// measured out to as little as ~74px total on a real phone width: not
-/// enough room for two team dots + names + scores side by side on one
-/// line at all (confirmed -- team names were rendering at an
-/// effectively-invisible sliver of a width). Stacking gives each team's
-/// own line the full width instead of splitting it with the other
-/// team's, which is what actually fixes it, not just squeezing further.
-/// Away-then-home (not a home/away label) is the only marker of which
-/// side is which -- same "away is listed first" convention American
-/// sports use in "away @ home" shorthand, just without printing the "@"
-/// itself (that used to prefix the home line, but blended into the
-/// score/percentage/margin already competing for room on a narrow card).
+/// Away line stacked over home line -- this block only gets a fixed flex
+/// slice of GameRow's own Row, not enough room for two team dots + names
+/// + scores side by side on one line. Stacking gives each team's own line
+/// the full width. Away-then-home (not a home/away label) is the only
+/// marker of which side is which, matching the "away @ home" convention.
 class _MatchupLine extends StatelessWidget {
   const _MatchupLine({
     required this.awayColor, required this.awayAbbr, this.awayScore, this.awayPredictedScore,
@@ -418,9 +377,7 @@ class _TeamLine extends StatelessWidget {
   final double? score;
   // The prediction logged for this team (live pre-game, or the one
   // recorded before kickoff for a completed game) -- shown in parens
-  // right next to the actual score so the two are easy to compare at a
-  // glance, rather than needing to cross-reference the pick/margin text
-  // on the other side of the card.
+  // right next to the actual score for easy comparison.
   final double? predictedScore;
 
   @override
@@ -432,11 +389,6 @@ class _TeamLine extends StatelessWidget {
         Flexible(child: Text(abbr, style: AppTextStyles.body(color: AppColors.ink), maxLines: 1, overflow: TextOverflow.ellipsis)),
         if (score != null) ...[
           const SizedBox(width: 6),
-          // Flexible, not a bare Text -- a score is normally only 1-2
-          // digits, but this line's own fixed overhead (dot, spacers) is
-          // already close enough to this card's available width on a
-          // real phone that a non-flexible score risked a hard overflow
-          // on its own, independent of how much room the name got.
           Flexible(
             child: Text(
               score!.toStringAsFixed(0),
@@ -462,10 +414,8 @@ class _TeamLine extends StatelessWidget {
   }
 }
 
-/// Stadium name + city/state -- absent entirely (renders nothing) when
-/// SportEvent.venueLabel has nothing to show, same "don't render if
-/// null" rule the rest of this card follows for optional fields.
-/// Deliberately excludes venue_indoor -- location/name only.
+/// Stadium name + city/state -- renders nothing when SportEvent.venueLabel
+/// is null. Location/name only, excludes venue_indoor.
 class _VenueLine extends StatelessWidget {
   const _VenueLine({required this.label});
   final String? label;

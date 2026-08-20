@@ -1,24 +1,12 @@
-# Viewer analytics dashboard (location/browser/device/endpoint breakdown),
-# added 2026-08-14 per a security review ask; endpoint (method + resource)
-# breakdown added same day. Built from Logs Insights queries
-# against each sport's own predict-read Lambda log group -- there's no
-# separate CloudFront access-log delivery pipeline for this (see
-# library/serving/viewer_analytics.py's own docstring for why: CloudFront's
-# AllViewerExceptHostHeader origin request policy already forwards its
-# device-type/viewer-location headers to the API origin, so predict-read
-# logs them directly into its own log group, which Lambda already creates
-# with zero new delivery infrastructure).
+# Viewer analytics dashboard: location/browser/device/endpoint breakdown,
+# built from Logs Insights queries against each sport's predict-read
+# Lambda log group. CloudFront's AllViewerExceptHostHeader origin request
+# policy forwards device-type/viewer-location headers to the API origin,
+# which predict-read logs directly.
 #
-# This is the account's first aws_cloudwatch_dashboard resource -- free
-# (the first 3 dashboards per account have no charge).
-#
-# Logs Insights `parse` patterns below rely on json.dumps' field order
-# being stable (Python dicts preserve insertion order) but don't actually
-# depend on order -- each parse is an independent substring match, so
-# reordering log_viewer_analytics' dict in the future won't break these.
-# Fields that can be null for some IPs (city, region_name -- see AWS's own
-# geolocation-coverage caveat) simply don't match those rows' parse, which
-# excludes them from that widget rather than mislabeling them "Unknown".
+# Logs Insights `parse` patterns below match by substring, not field
+# order. Fields that can be null for some IPs (city, region_name) are
+# excluded from that row's stats rather than mislabeled "Unknown".
 locals {
   viewer_analytics_log_sources = join(" | ", [
     for lg in [
@@ -175,14 +163,9 @@ resource "aws_cloudwatch_dashboard" "viewer_analytics" {
         }
       },
       # Everything below is sourced from CloudFront's own edge logs
-      # (cloudfront-standard-logging.tf), not any Lambda's -- these are
-      # the requests CloudFront's geo-restriction blocks outright, which
-      # never reach predict-read (or any other Lambda) at all, so
-      # everything above this point structurally can't show them. No
-      # city here -- CloudFront never determines a blocked request's city,
-      # only country, since that lookup only happens when forwarding to
-      # an origin (see that file's own docstring for the confirmed
-      # finding this is built on).
+      # (cloudfront-standard-logging.tf) -- requests blocked by
+      # geo-restriction, which never reach any Lambda. No city field;
+      # CloudFront only resolves country for a blocked request.
       {
         type   = "text"
         x      = 0
@@ -200,10 +183,7 @@ resource "aws_cloudwatch_dashboard" "viewer_analytics" {
         width  = 12
         height = 6
         properties = {
-          # us-east-1, not var.region -- cloudfront_edge_access_logs
-          # itself lives there (see cloudfront-standard-logging.tf's own
-          # comment on why a CloudWatch Logs delivery destination for
-          # CloudFront can't be cross-region the way S3 can).
+          # us-east-1, where cloudfront_edge_access_logs lives
           region = "us-east-1"
           title  = "Blocked requests by country"
           view   = "bar"
@@ -222,7 +202,7 @@ resource "aws_cloudwatch_dashboard" "viewer_analytics" {
         width  = 12
         height = 6
         properties = {
-          region = "us-east-1" # see "Blocked requests by country" widget's own comment
+          region = "us-east-1" # where cloudfront_edge_access_logs lives
           title  = "Blocked requests by attempted path"
           view   = "table"
           query  = <<-QUERY
@@ -241,7 +221,7 @@ resource "aws_cloudwatch_dashboard" "viewer_analytics" {
         width  = 24
         height = 8
         properties = {
-          region = "us-east-1" # see "Blocked requests by country" widget's own comment
+          region = "us-east-1" # where cloudfront_edge_access_logs lives
           title  = "Recent blocked requests"
           view   = "table"
           query  = <<-QUERY

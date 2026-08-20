@@ -1,27 +1,7 @@
-# Builds, tests, and pushes the NFL AI hosting/inference image. Runs
-# standalone (workflow_dispatch) or called from nfl_deploy.yml
-# (workflow_call) -- either way the work is identical: run tests, then
-# build and push an image only if they pass.
-#
-# Build-only, same shape as nfl_ai_training.yml/nfl_backfill.yml -- no
-# deploy step here. That's a deliberate split, not an oversight: unlike
-# an ECS task definition (which resolves its floating "-latest" tag at
-# run-task time, so nothing needs to happen after a push), a Lambda
-# function's image is resolved to a fixed digest at
-# CreateFunction/UpdateFunctionCode time and never re-resolves a tag on
-# its own. Pointing the nfl-predict Lambda at what this workflow just
-# pushed is nfl_predict_deploy.yml's job -- see nfl_deploy.yml for why it
-# runs after infra while this workflow runs before it.
-#
-# Container image, not the zip packaging ingest/normalize use (see
-# python_lambda_build.yml) -- xgboost pulls in numpy and scipy, which
-# alone measure ~225MB unzipped, leaving almost no headroom under
-# Lambda's 250MB unzipped zip limit. Container Lambdas get a 10GB image
-# limit instead. See Source/aws-lambdas/nfl/predict/Dockerfile.
-#
-# A second component (e.g. a future sport's own predict Lambda) gets its
-# own version constant and its own test/build job pair below, same shape
-# as nfl_ai_training.yml's two independent images.
+# Runs tests, then builds and pushes the NFL AI hosting/inference
+# container image (Source/aws-lambdas/nfl/predict/Dockerfile) only if
+# they pass. Deploying the Lambda to point at the pushed image is
+# nfl_predict_deploy.yml's job.
 
 name: NFL AI Hosting
 
@@ -45,16 +25,6 @@ jobs:
     name: Run nfl-predict tests
     uses: ./.github/workflows/run_python_tests.yml
     with:
-      # test_predict.py/test_live_features.py were each split into several
-      # concern-scoped files (predict's own event-outcome/player-props/
-      # routing/leaders/receiving-props/rushing-props/season-simulation;
-      # live_features' own event/player/leader-candidates/depth-chart/
-      # roster) -- listed individually here, same discipline this
-      # workflow's own reusable run_python_tests.yml docstring calls for
-      # (a specific file list, not a whole directory), rather than
-      # collapsing back to Source/tests/aws-lambdas/nfl/ and picking up
-      # every OTHER lambda's tests (ingest, normalize, ...) this job has
-      # no reason to run.
       test_path: >-
         Source/tests/library/
         Source/tests/aws-lambdas/nfl/test_predict_event_outcome.py
@@ -71,13 +41,7 @@ jobs:
         Source/tests/aws-lambdas/nfl/test_live_features_depth_chart.py
         Source/tests/aws-lambdas/nfl/test_live_features_roster.py
         Source/tests/aws-lambdas/nfl/test_model_loader.py
-      # Both requirements files -- requirements-nodeps.txt (xgboost, only
-      # ever installed --no-deps in the real Dockerfile build to dodge its
-      # nvidia-nccl-cu12 GPU dependency) still needs to be installed HERE
-      # for xgboost itself to be importable at all in this test job. The
-      # --no-deps discipline only matters for the actual deployed image's
-      # size, not this ephemeral CI runner -- a normal (deps-resolved)
-      # install here is fine.
+      # Both requirements files are installed so xgboost is importable in this test job.
       requirements_files: 'Source/aws-lambdas/nfl/predict/requirements.txt Source/aws-lambdas/nfl/predict/requirements-nodeps.txt'
 
   set-versions:
@@ -99,9 +63,5 @@ jobs:
       docker_context: 'Source'
       image_name: 'nfl-predict'
       image_version: ${{ needs.set-versions.outputs.predict_version }}
-      # arm64 (Graviton) -- the more cost/perf-efficient inference
-      # architecture; matches aws_lambda_function.nfl_predict's own
-      # architectures = ["arm64"] (Terraform/lambda-nfl-predict.tf). Every
-      # other image built through docker_build_push.yml keeps that
-      # input's linux/amd64 default.
+      # Matches the nfl-predict Lambda's arm64 architecture.
       platform: 'linux/arm64'

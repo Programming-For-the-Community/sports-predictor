@@ -1,9 +1,7 @@
 # CloudWatch Logs destination for training_orchestrator's
-# logging_configuration below -- Distributed Map's own per-iteration
-# status (dispatched/succeeded/failed child executions) shows up here,
-# not just in the top-level execution's own graph, which renders
-# TrainAllTargets as a single node with no per-iteration detail the way
-# INLINE Map's iteration array used to.
+# logging_configuration below. Distributed Map's own per-iteration status
+# (dispatched/succeeded/failed child executions) shows up here, not just
+# in the top-level execution's own graph.
 resource "aws_cloudwatch_log_group" "training_orchestrator" {
   name              = "/aws/vendedlogs/states/${var.project}-training-orchestrator"
   retention_in_days = 30
@@ -21,23 +19,15 @@ resource "aws_cloudwatch_log_group" "training_orchestrator" {
 # run every training target as its own ECS task. TrainAllTargets'
 # MaxConcurrency (locals-training-compute.tf) caps how many training
 # tasks run at once, to stay under the account's Fargate on-demand vCPU
-# quota -- and runs in Distributed mode specifically because that cap can
-# be well above Standard/INLINE Map's hard 40-concurrent-iteration
-# ceiling once training_task_vcpu is sized down.
+# quota, and runs in Distributed mode since that cap can exceed
+# Standard/INLINE Map's hard 40-concurrent-iteration ceiling.
 #
-# ForEachSport (the outer, per-sport Map) stays INLINE, but its own
-# MaxConcurrency is pinned to 1 -- deliberately, not left at some higher
-# default. training_vcpu_budget_fraction (locals-training-compute.tf) is
-# sized as a fraction of the WHOLE account's Fargate quota, on the
-# assumption that only one sport's TrainAllTargets Map is ever spending
-# it at a time; each sport's own inner Map has no visibility into any
-# other sport's concurrently-running one, so two sports training at once
-# would each independently spend up to the full budget, together well
-# over the account's real quota. Serializing sports here, not splitting
-# the budget N ways, is what actually enforces the shared limit -- it
-# costs total training wall-clock time when multiple sports are in
-# season together (NFL and NCAAFB both are, most of the year), not
-# correctness.
+# ForEachSport (the outer, per-sport Map) stays INLINE, with its own
+# MaxConcurrency pinned to 1. training_vcpu_budget_fraction
+# (locals-training-compute.tf) is sized as a fraction of the whole
+# account's Fargate quota, assuming only one sport's TrainAllTargets Map
+# spends it at a time; serializing sports here is what enforces that
+# shared limit.
 resource "aws_sfn_state_machine" "training_orchestrator" {
   name     = "${var.project}-training-orchestrator"
   role_arn = aws_iam_role.stepfunctions_orchestrator.arn

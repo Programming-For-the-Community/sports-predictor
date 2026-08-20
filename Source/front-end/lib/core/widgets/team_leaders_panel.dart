@@ -5,17 +5,13 @@ import '../theme/app_colors.dart';
 import '../theme/app_text_styles.dart';
 
 // Below this width, two team-leader columns side by side leave too little
-// room per column for a player name and its stat values on one line --
-// each Text squeezes down to single-character-wide wrapping instead of
-// giving up first (confirmed: this is what "vertical" player names on
-// mobile actually was). Stacked (one team's full column, then the
-// other's) instead of side by side below this width.
+// room per column for a player name and its stat values on one line.
+// Stacked (one team's full column, then the other's) below this width.
 const _stackBreakpoint = 560.0;
 
 /// Away column then home column, side by side above _stackBreakpoint or
 /// stacked full-width below it. Shared by TeamLeadersPanel and
-/// TeamLeadersComparisonPanel -- same layout problem, same fix, for
-/// upcoming and completed events respectively.
+/// TeamLeadersComparisonPanel.
 class _ResponsiveTeamColumns extends StatelessWidget {
   const _ResponsiveTeamColumns({required this.away, required this.home});
 
@@ -49,8 +45,7 @@ class _ResponsiveTeamColumns extends StatelessWidget {
 }
 
 // Shared by _PlayerRow (predicted-only, upcoming events) and
-// _ComparisonPlayerRow (predicted-vs-actual, completed events) below --
-// same stat keys, same short display label either way.
+// _ComparisonPlayerRow (predicted-vs-actual, completed events).
 const _statShortLabels = {
   'passing_yards': 'YDS',
   'rushing_yards': 'YDS',
@@ -71,12 +66,9 @@ class _CategoryConfig {
   final List<String> statKeys;
 }
 
-// Mirrors predict/event_prediction.py's own LEADER_CATEGORY_STATS per
-// sport -- same "sport picks its own category set" convention
-// season_page.dart's _standingsColumns uses. `passing`'s single starting-
-// QB candidate is already normalized to a 0-or-1-element list by
-// TeamLeaders.fromJson, so it needs no special-casing here, just its own
-// stat keys like every other category.
+// `passing`'s single starting-QB candidate is already normalized to a
+// 0-or-1-element list by TeamLeaders.fromJson, so it needs no
+// special-casing here, just its own stat keys like every other category.
 const _footballCategories = [
   _CategoryConfig('passing', 'Passing', ['passing_yards', 'passing_touchdowns']),
   _CategoryConfig('rushing', 'Rushing', ['rushing_yards', 'rushing_touchdowns']),
@@ -93,10 +85,9 @@ const _basketballCategories = [
 List<_CategoryConfig> _categoriesFor(String sport) =>
     sport == 'nba' || sport == 'ncaambb' ? _basketballCategories : _footballCategories;
 
-/// Renders the `leaders` block once GET /{sport}/predictions/events/{id}
-/// starts returning it (see event_leaders.dart) -- category set and limits
-/// are sport-specific (see _categoriesFor above); each category shows
-/// whatever candidates the backend actually sent.
+/// Renders the `leaders` block from GET /{sport}/predictions/events/{id}.
+/// Category set is sport-specific (see _categoriesFor above); each
+/// category shows whatever candidates the backend actually sent.
 class TeamLeadersPanel extends StatelessWidget {
   const TeamLeadersPanel({super.key, required this.sport, required this.homeAbbr, required this.awayAbbr, required this.leaders});
 
@@ -119,9 +110,6 @@ class TeamLeadersPanel extends StatelessWidget {
         children: [
           Text('PLAYER LEADERS', style: AppTextStyles.microLabel()),
           const SizedBox(height: 16),
-          // Away-then-home, same convention as matchup_hero.dart and
-          // game_row.dart's _MatchupLine -- side by side or stacked, see
-          // _ResponsiveTeamColumns.
           _ResponsiveTeamColumns(
             away: _TeamLeadersColumn(sport: sport, label: awayAbbr, team: leaders.away),
             home: _TeamLeadersColumn(sport: sport, label: homeAbbr, team: leaders.home),
@@ -219,14 +207,12 @@ class _PlayerRow extends StatelessWidget {
 
 /// Completed-event counterpart to TeamLeadersPanel above -- same card
 /// shape/away-@-home column layout, but shows predicted-vs-actual per
-/// stat instead of a predicted-only value. Renders nothing (caller's job
-/// to skip it, same "don't render if null" rule TeamLeadersPanel's own
-/// caller already follows) when there's no comparison to show.
+/// stat instead of a predicted-only value.
 ///
 /// Also reused, unmodified, for a currently-live event's predicted-vs-
-/// so-far comparison (see EventLeadersLiveComparison.toLiveComparison in
-/// event_leaders.dart) -- `title` lets that caller swap in wording that
-/// doesn't claim a final result.
+/// so-far comparison (see EventLeadersLiveComparison.toLiveComparison) --
+/// `title` lets that caller swap in wording that doesn't claim a final
+/// result.
 class TeamLeadersComparisonPanel extends StatelessWidget {
   const TeamLeadersComparisonPanel({
     super.key,
@@ -317,11 +303,8 @@ class _ComparisonPlayerRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // Predicted is what decides WHICH stats show -- actual is only ever
-    // shown as a comparison against something that was predicted, never
-    // a stat the player recorded that nobody predicted ahead of time
-    // (that would be the different, not-built, "actual game leaders
-    // regardless of prediction" feature).
+    // Predicted is what decides which stats show -- actual is only shown
+    // as a comparison against something that was predicted.
     final segments = player.predicted.entries.map((entry) {
       final label = _statShortLabels[entry.key] ?? entry.key.toUpperCase();
       final predicted = entry.value.toStringAsFixed(0);

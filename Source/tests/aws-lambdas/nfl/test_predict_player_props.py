@@ -2,15 +2,10 @@
 Unit tests for event_prediction.predict_player_prop -- the manually-
 queried counterpart to the leader-candidate scoring covered in
 test_predict_leaders.py/test_predict_receiving_props.py/
-test_predict_rushing_props.py. Split out of what used to be one large
-test_predict.py -- see that history note in test_predict_event_outcome.py.
+test_predict_rushing_props.py.
 
 Calls event_prediction.predict_player_prop directly, not through
-nfl_predict.lambda_handler -- see test_predict_event_outcome.py's own
-docstring for why (the route moved to predict-read/handler.py's cache-
-backed routing; the missing-stat-query-param 400 that used to live here
-is now covered there, test_predict_read.py, since that's the Lambda that
-actually validates query params now).
+nfl_predict.lambda_handler -- that route lives in predict-read/handler.py.
 """
 from unittest.mock import MagicMock, patch
 

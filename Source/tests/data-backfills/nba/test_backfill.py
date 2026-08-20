@@ -1,12 +1,11 @@
 """
 Unit tests for data-backfills/nba/backfill.py's own logic -- everything
-here is mocked, no real ESPN calls (those live in test_espn_nba.py's own
-integration suite). Covers the genuinely-new-vs-NFL pieces: the
-date-based (not week-based) walk, the ending-year season convention, and
-the preseason/incomplete-game skip branches in process_date.
+here is mocked, no real ESPN calls. Covers the date-based (not
+week-based) walk, the ending-year season convention, and the
+preseason/incomplete-game skip branches in process_date.
 
 The backfill module is importable directly (conftest.py inserts its
-directory onto sys.path, same as its sibling normalize.py).
+directory onto sys.path).
 """
 from datetime import date
 from unittest.mock import MagicMock, patch

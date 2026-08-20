@@ -1,13 +1,9 @@
 # Tests and deploys the NBA live-scores Lambda -- GET /nba/live-scores
-# plus the EventBridge-triggered cache refresh. Mirrors
-# ncaafb_live_scores_deploy.yml/nfl_live_scores_deploy.yml exactly -- see
-# those files' own docstrings for why this is a separate reusable workflow
-# rather than jobs inlined into nba_deploy.yml/app_deploy.yml directly.
+# plus the EventBridge-triggered cache refresh.
 #
 # Function name is supplied by the caller from a Terraform output, with a
 # default so workflow_dispatch (manual, standalone run) still works
-# without needing that wiring -- same pattern as every other sport's own
-# live_scores_deploy.yml.
+# without needing that wiring.
 
 name: NBA Live Scores Deploy
 

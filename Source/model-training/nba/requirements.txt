@@ -9,5 +9,10 @@ pandas>=2.2
 pyarrow>=16.0
 scikit-learn>=1.4
 scikit-learn-intelex>=2024.0
-xgboost>=2.0
+# Pinned to the EXACT version aws-lambdas/nba/predict/requirements-nodeps.txt
+# also pins -- xgboost's raw model format is not guaranteed compatible
+# across major versions; letting each side resolve `>=2.0` independently
+# let a real prod bug through, where an older predict-side xgboost
+# silently mispredicted a model this image had trained under a newer one.
+xgboost==3.3.0
 lightgbm>=4.3

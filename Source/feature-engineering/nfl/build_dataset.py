@@ -5,12 +5,9 @@ using library.features.nfl's pure functions, and writes two Parquet
 training datasets to S3 (via S3Manager) for the training Fargate task to
 read.
 
-Not scheduled -- run manually via `aws ecs run-task`, same as
-Source/data-backfills/nfl (see
-Terraform/ecs-task-nfl-feature-engineering.tf). Safe to re-run at any
-time: it always rebuilds both datasets from the current DynamoDB contents
-and overwrites the same two S3 keys, there's no incremental/partial state
-to worry about.
+Not scheduled -- run manually via `aws ecs run-task`. Safe to re-run at
+any time: it always rebuilds both datasets from the current DynamoDB
+contents and overwrites the same two S3 keys.
 
 Required environment variables:
     EVENTS_TABLE_NAME
@@ -75,33 +72,22 @@ def _leader_and_history(
     team_id: str,
     window: int,
 ) -> tuple[dict | None, list[dict]]:
-    """Identifies one team's leader at a position for this event (e.g. the
-    starting QB, via identify_fn -- see identify_starting_qb/
-    identify_lead_rusher/identify_lead_receiver) and returns that player's
-    own prior history, most-recent-first and capped at `window` -- the
-    same shape needed whether tracking QB, RB, or WR history, just with a
-    different identify_fn and a different position's history dict."""
+    """Identifies one team's leader at a position for this event via
+    identify_fn (e.g. identify_starting_qb) and returns that player's
+    prior history, most-recent-first and capped at `window`."""
     game = identify_fn(player_games_by_event_team.get((event_key, team_id), []))
     prior_games = history[game["entity_id"]][-window:][::-1] if game else []
     return game, prior_games
 
 
 def build_event_dataset(storage: FeatureStorage, window: int) -> list[dict]:
-    """Walks events in a single chronological pass, growing each team's own
-    history one game at a time, rather than re-filtering that team's whole
-    history from scratch for every one of its games (which was O(games^2)
-    per team -- fine for a team's ~20-game season, expensive once games
-    span 10 years). Each team's running history stays capped to the last
-    `window` games via a slice, so memory per team never grows past that
-    regardless of how long the team's full history gets.
+    """Walks events in a single chronological pass, growing each team's
+    own history one game at a time, capped to the last `window` games.
 
-    Each event's starting QB, lead rusher, and lead receiver (per side --
-    see _leader_and_history) get the same incremental treatment, each
-    keyed by that player's own entity_id rather than team -- a player's
-    rolling history follows them across a mid-season trade instead of
-    resetting, and a team without an identifiable leader that game (e.g.
-    incomplete stat_line data) just gets an empty history for that row.
-    """
+    Each event's starting QB, lead rusher, and lead receiver get the same
+    incremental treatment, keyed by player entity_id so a player's rolling
+    history follows them across a trade; a team without an identifiable
+    leader that game gets an empty history for that row."""
     events = storage.get_all_events(SPORT)
     events = [e for e in events if is_real_franchise_matchup(e)]
     logger.info("Loaded %d completed events (excluding exhibition games)", len(events))
@@ -189,11 +175,7 @@ def _group_player_games_by_player(player_games: list[dict]) -> dict[str, list[di
 
 
 def _team_previous_event_dates(events: list[dict]) -> dict[tuple[str, str], str | None]:
-    """Maps (team_id, event_key) -> that team's own previous event's date,
-    for every team's participation in every event -- computed once by
-    walking each team's own chronological event list, rather than
-    re-deriving it per player-game (a team plays dozens of players' worth
-    of rows per game)."""
+    """Maps (team_id, event_key) -> that team's previous event's date."""
     by_team: dict[str, list[dict]] = defaultdict(list)
     for event in events:
         for participant in event.get("participants", []):
@@ -211,16 +193,7 @@ def _team_previous_event_dates(events: list[dict]) -> dict[tuple[str, str], str 
 
 def build_player_dataset(storage: FeatureStorage, window: int) -> list[dict]:
     """Same incremental-history approach as build_event_dataset, per
-    player instead of per team -- walks each player's games in
-    chronological order once, growing their history one game at a time
-    instead of re-filtering their whole career from scratch per game.
-
-    Also loads events and computes Elo the same way build_event_dataset
-    does (each independently, rather than sharing one computation between
-    the two dataset builders) -- keeps both functions self-contained and
-    independently testable at the cost of one extra pass over events,
-    which is cheap next to the player-game volume this function already
-    processes."""
+    player instead of per team."""
     events = storage.get_all_events(SPORT)
     events = [e for e in events if is_real_franchise_matchup(e)]
     events_by_key = {event["event_key"]: event for event in events}
@@ -233,7 +206,7 @@ def build_player_dataset(storage: FeatureStorage, window: int) -> list[dict]:
     games_by_player = _group_player_games_by_player(player_games)
 
     total = len(player_games)
-    seen = 0  # rows examined, including skipped ones -- see == total is what marks completion
+    seen = 0  # rows examined, including skipped ones
     skipped = 0
     rows = []
     for games in games_by_player.values():
@@ -261,28 +234,13 @@ def build_player_dataset(storage: FeatureStorage, window: int) -> list[dict]:
 
 
 def _write_parquet(rows: list[dict]) -> bytes:
-    """Player feature rows don't share one fixed column set -- a QB's
-    rolling stat averages and a kicker's never overlap (see
-    library.features.nfl.rolling_player_stat_averages) -- pandas'
-    DataFrame constructor already unions every row's keys and fills NaN
-    for whichever rows are missing a given column, so no manual fieldname
-    bookkeeping is needed here.
+    """Player feature rows don't share one fixed column set (e.g. a QB's
+    and a kicker's rolling stat averages never overlap); pandas' DataFrame
+    constructor unions every row's keys and fills NaN for missing columns.
 
-    Any dict-valued field (currently just label_stat_line) is JSON-encoded
-    rather than stored as a native nested column -- Arrow structs need a
-    consistent schema across rows, and label_stat_line's keys vary by
-    player position, so a plain string column is the more robust fit.
-
-    Builds the DataFrame directly from `rows` rather than a full
-    intermediate copy, and only the dict-valued columns get touched
-    afterward (a per-column .apply, not a second copy of every row) --
-    avoids holding the original list, the DataFrame, and a second
-    dict-copy all in memory at once for a large (~150K-row) dataset.
-    Which columns need it is read off just the first row -- every row
-    shares the same schema, since they're all built by the same
-    build_event_features/build_player_features call, so there's no need
-    to scan the whole dataset to find out.
-    """
+    Dict-valued fields (currently just label_stat_line) are JSON-encoded
+    before writing, since Parquet/Arrow needs a consistent schema across
+    rows and label_stat_line's keys vary by player position."""
     if not rows:
         return b""
     df = pd.DataFrame(rows)
@@ -325,7 +283,7 @@ def main() -> None:
         )
     logger.info("Writing %d player feature rows to Parquet...", player_row_count)
     player_parquet = _write_parquet(player_rows)
-    del player_rows  # this is the ~150K-row list -- free it before the S3 upload, not just after
+    del player_rows  # free the ~150K-row list before the S3 upload
     s3.put_bytes(PLAYER_FEATURES_KEY, player_parquet, content_type="application/octet-stream")
     logger.info("Wrote %d player feature rows to s3://%s/%s", player_row_count, bucket, PLAYER_FEATURES_KEY)
 

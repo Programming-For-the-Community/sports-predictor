@@ -174,19 +174,8 @@ jobs:
       api_endpoint: ${{ steps.tf_outputs.outputs.api_endpoint }}
       frontend_bucket_name: ${{ steps.tf_outputs.outputs.frontend_bucket_name }}
       frontend_distribution_id: ${{ steps.tf_outputs.outputs.frontend_distribution_id }}
-    # Always attaches an environment, whether run directly or called via
-    # nfl_deploy.yml (which has its own separate approval job gating on the
-    # same environment -- so a full deploy run does prompt for approval
-    # twice; that's an accepted tradeoff, see nfl_deploy.yml's comment).
-    # This environment isn't just the approval gate: environment-scoped
-    # secrets/variables (e.g. the subnet CIDRs below) only resolve when a
-    # job actually has this environment attached. A prior version tried to
-    # skip the gate here when called from a workflow that already gates
-    # itself (an input named skip_approval_gate blanked this to '' in that
-    # case) -- that silently detached the job from every environment-scoped
-    # secret/variable too, since GitHub ties both to the same job-level
-    # `environment:` setting and there's no way to keep one without the
-    # other. Don't reintroduce that pattern.
+    # Always attaches an environment so environment-scoped secrets/variables
+    # (e.g. the subnet CIDRs below) resolve.
     environment: ${{ github.event.inputs.environment || 'development' }}
 
     # Use the Bash shell regardless whether the GitHub Actions runner is ubuntu-latest, macos-latest, or windows-latest
@@ -199,10 +188,8 @@ jobs:
     - name: Checkout
       uses: actions/checkout@v4
 
-    # Fails loudly here rather than letting an unset ESPN_API_ROOT_URL
-    # repo variable silently resolve to an empty string and propagate all
-    # the way into a running container's environment, where it would
-    # break every ESPN call without any clear error at the source.
+    # Fails here rather than letting an unset required variable resolve to
+    # an empty string and propagate into a running container.
     - name: Validate required variables
       run: |
         if [ -z "$TF_VAR_espn_api_root_url" ]; then
@@ -261,19 +248,8 @@ jobs:
     - name: Capture Terraform outputs
       id: tf_outputs
       run: |
-        # A failed `terraform output` inside $(...) does NOT stop this
-        # script under `set -e` -- a failing command substitution embedded
-        # in a larger command (here, the argument to echo) doesn't count
-        # as the "simple command" failing, so bash happily writes an EMPTY
-        # value and moves on. That turned a real Terraform-side failure
-        # into a confusing "env var missing" error several jobs downstream
-        # instead of a clear one here. capture_output fails the step
-        # immediately, with the real output name, if Terraform can't
-        # produce a value.
-        # Also fails on an EMPTY-but-successful value, not just a non-zero
-        # exit code -- `terraform output -raw` can exit 0 with nothing on
-        # stdout (e.g. the output genuinely resolves to ""), which the
-        # earlier version of this check let straight through.
+        # Fails immediately, with the output name, if `terraform output`
+        # errors or returns an empty value.
         capture_output() {
           local name="$1"
           local value
@@ -285,11 +261,6 @@ jobs:
             echo "::error::terraform output -raw $name succeeded but returned an empty value" >&2
             exit 1
           fi
-          # Printed to the visible log on purpose -- none of these 8 values
-          # are secrets (resource names/IDs/URLs, already visible in any
-          # `terraform plan`/`apply` output), and the whole reason this
-          # function exists is that the previous failure mode was
-          # impossible to diagnose from the log alone.
           echo "Resolved $name = $value"
           echo "$name=$value" >> "$GITHUB_OUTPUT"
         }

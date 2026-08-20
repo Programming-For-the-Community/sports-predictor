@@ -1,21 +1,7 @@
 # Top-level NCAAFB deploy pipeline. Runs on every push to an ncaafb*/
-# ncaa-fb* branch, but pauses for manual approval (via the environment's
-# required reviewers -- configure this in Settings > Environments, it
-# can't be set from this file) before doing anything. Mirrors
-# nfl_deploy.yml's shape and reasoning exactly.
-#
-# Mirrors nfl_deploy.yml's shape and reasoning exactly: backfill,
-# ai_training, the ingest/normalize/schedule-sync data pipeline,
-# ai_hosting, predict/predict-read, and live-scores are all real CI
-# workflows here. tf_install.yml already exposes every ncaafb_*_function_name
-# output these jobs need (added alongside this file).
-#
-# Both this job's `approval` step AND tf_install.yml's own terraform job
-# gate on the `development`/`production` environment, so a run through
-# this pipeline prompts for approval twice -- same accepted tradeoff
-# nfl_deploy.yml's own comment documents (keeping tf_install.yml's
-# environment always attached, for its environment-scoped secrets/
-# variables, matters more than avoiding a second click).
+# ncaa-fb* branch, pausing for manual approval (via the environment's
+# required reviewers, configured in Settings > Environments) before
+# doing anything.
 
 name: NCAAFB Deploy
 
@@ -29,10 +15,8 @@ on:
       - 'ncaa-fb/*'
   workflow_call:
 
-# Shared with every other workflow that can reach tf_install.yml's
-# terraform apply -- Terraform/main.tf's S3 backend has no state locking
-# configured, and this is one shared Terraform state for every sport, not
-# one per sport. See app_deploy.yml/nfl_deploy.yml's own identical comment.
+# Shared group across all workflows that reach tf_install.yml's terraform
+# apply, since Terraform state is shared across sports.
 concurrency:
   group: terraform-deploy-pipeline
   cancel-in-progress: false
@@ -51,10 +35,6 @@ jobs:
       - name: Approved
         run: echo "Deployment approved -- proceeding."
 
-  # approval is intentionally skipped (not failed) when called via
-  # workflow_call -- without this, a skipped `needs` job would cause
-  # everything downstream to be skipped too. Same tolerant check
-  # nfl_deploy.yml's own build jobs use.
   backfill:
     name: Historical backfill (build)
     needs: approval
@@ -120,11 +100,6 @@ jobs:
       function_name: ${{ needs.infra.outputs.ncaafb_predict_function_name }}
       image_uri: ${{ needs.ai_hosting.outputs.predict_image_uri }}
 
-  # ncaafb-predict-read -- the light GET /ncaafb/events + GET /ncaafb/models
-  # Lambda split out of ncaafb-predict for cold start (see
-  # Terraform/lambda-ncaafb-predict-read.tf). A reusable workflow, not
-  # inline jobs here -- same reasoning as nfl_deploy.yml's own
-  # predict_read_deploy job.
   predict_read_deploy:
     name: NCAAFB predict-read (test + deploy)
     needs: [approval, infra]
@@ -136,9 +111,6 @@ jobs:
     with:
       function_name: ${{ needs.infra.outputs.ncaafb_predict_read_function_name }}
 
-  # ncaafb-live-scores -- GET /ncaafb/live-scores plus the EventBridge-
-  # triggered cache refresh (Terraform/lambda-ncaafb-live-scores.tf). Same
-  # reusable-workflow reasoning as predict_read_deploy above.
   live_scores_deploy:
     name: NCAAFB live-scores (test + deploy)
     needs: [approval, infra]

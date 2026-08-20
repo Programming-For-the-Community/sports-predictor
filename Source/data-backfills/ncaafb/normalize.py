@@ -1,7 +1,6 @@
 """
 NCAAFB-specific normalization: thin wrappers over library.normalize.ncaafb
-that bind the sport string, mirroring data-backfills/nfl/normalize.py's
-own role for library.normalize.espn.
+that bind the sport string.
 """
 from library.normalize.ncaafb import (
     team_to_entity as _team_to_entity,

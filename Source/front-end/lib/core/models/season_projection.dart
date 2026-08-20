@@ -1,5 +1,4 @@
-/// Mirrors GET /{sport}/season's response shape (see
-/// Source/aws-lambdas/nfl/predict/handler.py's _season_projection).
+/// Mirrors GET /{sport}/season's response shape.
 class TeamStanding {
   const TeamStanding({
     required this.teamId,
@@ -19,65 +18,41 @@ class TeamStanding {
   });
 
   final String teamId;
-  // Off the team entity (see library.serving.common.enrich_team_standings)
-  // -- same source and null-for-an-unseeded-entity caveat as Participant.
-  // abbreviation. season_page.dart's _StandingsRow uses this via
-  // teamDisplayFor, the same fallback rule teamDisplay applies to events.
+  // Off the team entity; null for an unseeded entity.
   final String? abbreviation;
-  // Also off the team entity -- see Participant.color's own doc comment.
   final String? color;
   // NCAAFB only -- today's actual (not simulated) National Ranking
-  // position, 1-based (see aws-lambdas/ncaafb/predict/season_projection.
-  // py's _current_rankings). Null for NFL (no such model/concept) and for
-  // NCAAFB whenever the ranking model isn't promoted yet or fewer than
-  // CFP_FIELD_SIZE teams are tracked -- same routine-not-error absence as
-  // every other simulation-derived field on this class.
+  // position, 1-based. Null for NFL and for NCAAFB before the ranking
+  // model is promoted or fewer than CFP_FIELD_SIZE teams are tracked.
   final int? currentRank;
-  // "AFC East"/"NFC West"/etc for NFL, or the team's conference ("SEC"/
-  // "Big Ten"/etc, NCAAFB has no division concept) for every other sport
-  // -- see fromJson below for which backend key each maps from. Used to
-  // group standings (see season_page.dart's _groupByDivision) -- null
-  // only for a non-franchise participant that slipped past
-  // is_real_franchise_matchup (NFL) or an unresolved team_conference
-  // entry (NCAAFB), not expected in practice.
+  // "AFC East"/"NFC West"/etc for NFL, or the team's conference for every
+  // other sport (NCAAFB has no division concept). Used to group standings
+  // (see season_page.dart's _groupByDivision).
   final String? division;
-  // Actual, this-season-so-far record.
   final int wins;
   final int losses;
   final int ties;
-  // Monte Carlo season-end projection (season_simulation.simulate_season)
-  // -- no projectedTies, that simulation draws a strict win/loss per game,
-  // never a tie (see that function's own docstring).
+  // Monte Carlo season-end projection -- no projectedTies; the simulation
+  // never draws a tie.
   final double projectedWins;
   final double projectedLosses;
   final double divisionWinnerProbability;
   final double playoffProbability;
   final double championshipProbability;
-  // NBA only -- the fraction of simulated paths where this team finishes
-  // seeds 7-10 and has to play at least one play-in game (see
-  // aws-lambdas/nba/predict/season_simulation.py's own simulate_season
-  // docstring for why this is a DIFFERENT stat from playoffProbability,
-  // not a subset/superset of it). Null for every other sport -- no
-  // play-in round exists outside the NBA.
+  // NBA only -- fraction of simulated paths where this team finishes
+  // seeds 7-10 and plays at least one play-in game. Null for every other
+  // sport.
   final double? playInProbability;
 
-  // Every simulation-derived field defaults rather than requires -- both
-  // sports' build_season_projection merge `**simulation.get(team_id, {})`
-  // into each row, and simulation itself is skipped entirely (see
-  // aws-lambdas/ncaafb/predict/season_projection.py's own
-  // build_season_projection) when fewer than CFP_FIELD_SIZE teams are
-  // tracked yet or no ranking model has been promoted -- both routine
-  // early-season states, not error states, so a standings row with none
-  // of these fields is expected, not a parse failure. Same self-healing
-  // reasoning already applied to ties/projected_losses now extends to
-  // the rest: defaults now, real values once that week's job/model
-  // catches up, no coordinated deploy required.
+  // Simulation-derived fields default rather than require -- a standings
+  // row is missing them during routine early-season states (simulation
+  // skipped until enough teams are tracked or a model is promoted), not a
+  // parse failure.
   //
   // division_winner_probability (NFL) and conference_champion_probability
-  // (NCAAFB -- no division concept, see TeamStanding.division's own doc
-  // comment) are the same "won their group" concept at each sport's own
+  // (NCAAFB) are the same "won their group" concept at each sport's own
   // granularity, so divisionWinnerProbability reads whichever key its
-  // own sport's backend actually sends.
+  // sport's backend sends.
   factory TeamStanding.fromJson(Map<String, dynamic> json) => TeamStanding(
         teamId: json['team_id'] as String,
         division: json['division'] as String? ?? json['conference'] as String?,
@@ -100,7 +75,7 @@ class TeamStanding {
 }
 
 /// One row in a player-prop leaderboard -- `name` falls back to
-/// `entityId` the same way PlayerStatLine does (see event_leaders.dart).
+/// `entityId` the same way PlayerStatLine does.
 class LeaderboardEntry {
   const LeaderboardEntry({
     required this.entityId,
@@ -124,9 +99,9 @@ class LeaderboardEntry {
       );
 }
 
-/// One row in an NBA Cup group's standings -- see CupProjection's own doc
-/// comment. `group` itself isn't carried on this row (already the key of
-/// the map it lives in, see CupProjection.groups).
+/// One row in an NBA Cup group's standings. `group` itself isn't carried
+/// on this row -- it's already the key of the map it lives in (see
+/// CupProjection.groups).
 class CupTeamStanding {
   const CupTeamStanding({
     required this.teamId,
@@ -144,11 +119,9 @@ class CupTeamStanding {
   final String teamId;
   final String? name;
   final String? abbreviation;
-  // Also off the team entity -- see Participant.color's own doc comment.
   final String? color;
-  // Actual, this-Cup-so-far group-play record (NOT the team's overall
-  // season record -- see aws-lambdas/nba/predict/season_projection.py's
-  // own CUP_GROUP_PLAY_NOTE filtering).
+  // Actual, this-Cup-so-far group-play record (not the team's overall
+  // season record).
   final int groupWins;
   final int groupLosses;
   final double groupWinnerProbability;
@@ -172,20 +145,15 @@ class CupTeamStanding {
       );
 }
 
-/// NBA Cup (in-season tournament) projection -- a separate mid-season
-/// competition from the end-of-year playoff odds already on
-/// TeamStanding, see aws-lambdas/nba/predict/season_simulation.py's own
-/// simulate_cup docstring. NBA only; every other sport's `cup` is null.
-/// Null even for NBA whenever the current season's group assignments
-/// haven't been added to library.features.nba_cup_groups.CUP_GROUPS yet
-/// (season_projection.py's own best-effort field, same convention as
-/// `leaderboards`) -- the season page should treat that exactly like
-/// `leaderboards` being null: hide the section, not show an error.
+/// NBA Cup (in-season tournament) projection, separate from the
+/// end-of-year playoff odds on TeamStanding. NBA only; every other sport's
+/// `cup` is null. Also null for NBA whenever the current season's group
+/// assignments aren't in CUP_GROUPS yet.
 class CupProjection {
   const CupProjection({required this.groups});
 
-  /// "Eastern A"/"Western C"/etc -> that group's teams, already sorted
-  /// server-side by real group_wins descending.
+  /// "Eastern A"/"Western C"/etc -> that group's teams, sorted
+  /// server-side by group_wins descending.
   final Map<String, List<CupTeamStanding>> groups;
 
   factory CupProjection.fromJson(Map<String, dynamic> json) => CupProjection(
@@ -198,17 +166,12 @@ class CupProjection {
       );
 }
 
-/// One resolved bracket slot -- the 3-state design from
-/// aws-lambdas/nfl/predict/season_projection.py's own _resolve_matchup
-/// docstring (mirrored identically in NCAAFB's/NBA's own
-/// season_projection.py): "projected" (no real game exists yet -- the
-/// model's own deterministic pick), "scheduled" (a real game exists, not
-/// yet played -- its live prediction), or "final" (a real game exists
-/// and is completed -- the actual result, plus whatever was originally
-/// predicted for it if anyone ever requested one before it was played).
-/// seedA/seedB are null on a cross-conference matchup (the Super Bowl/
-/// NBA Finals/Cup Championship) -- the two sides' own conference seeds
-/// aren't comparable on one shared scale.
+/// One resolved bracket slot -- a 3-state design: "projected" (no real
+/// game exists yet -- the model's own deterministic pick), "scheduled" (a
+/// real game exists, not yet played), or "final" (a real game exists and
+/// is completed). seedA/seedB are null on a cross-conference matchup (the
+/// Super Bowl/NBA Finals/Cup Championship) since the two sides' seeds
+/// aren't on one shared scale.
 class BracketMatchup {
   const BracketMatchup({
     required this.teamA,
@@ -233,10 +196,8 @@ class BracketMatchup {
   final int? seedB;
   final String status;
 
-  /// Null only if a real, scheduled game exists but nobody's ever
-  /// requested (or this run's own on-the-spot compute failed to produce)
-  /// a prediction for it yet -- a real, if rare, transient gap, not a
-  /// parse failure.
+  /// Null when a real, scheduled game exists but no prediction has been
+  /// computed for it yet.
   final String? predictedWinner;
   final double? winProbability;
 
@@ -245,42 +206,28 @@ class BracketMatchup {
   final int? actualHomeScore;
   final int? actualAwayScore;
 
-  /// NBA best-of-7 series record (teamA's/teamB's own win count so far
-  /// this series -- see aws-lambdas/nba/predict/season_projection.py's
-  /// _resolve_series_matchup). Null for a sport/round with no series
-  /// concept (NFL/NCAAFB, and NBA's own Play-In round, both single
-  /// elimination) -- present (0/0 at minimum) for every other NBA
-  /// playoff round, including a series that hasn't started yet.
+  /// NBA best-of-7 series record (teamA's/teamB's win count so far this
+  /// series). Null for a sport/round with no series concept (NFL/NCAAFB,
+  /// and NBA's own Play-In round); present (0/0 at minimum) for every
+  /// other NBA playoff round.
   final int? winsA;
   final int? winsB;
 
-  /// The single most likely FINAL record the series ends at (see
-  /// aws-lambdas/nba/predict/season_simulation.py's own
-  /// predicted_series_score) -- distinct from winsA/winsB's own
-  /// current/live record. Null once "final" (the real record already
-  /// answers the question) or for a non-series matchup.
+  /// The single most likely final record the series ends at, distinct
+  /// from winsA/winsB's current/live record. Null once "final" or for a
+  /// non-series matchup.
   final int? predictedWinsA;
   final int? predictedWinsB;
 
   bool get isFinal => status == 'final';
 
-  /// True for a real best-of-7 series slot (see winsA/winsB's own doc
-  /// comment) -- lets the UI show a running series record instead of a
-  /// single game's score, without needing to know which sport/round
-  /// produced this matchup.
+  /// True for a real best-of-7 series slot -- lets the UI show a running
+  /// series record instead of a single game's score.
   bool get isSeries => winsA != null && winsB != null;
 
   factory BracketMatchup.fromJson(Map<String, dynamic> json) => BracketMatchup(
         teamA: json['team_a'] as String,
         teamB: json['team_b'] as String,
-        // Defensive fallback, not the fix -- every real producer must
-        // always send status (a missing one crashed the whole season
-        // page in production, 2026-08-19: project_cup_knockout_bracket
-        // was building matchups straight from project_matchup, which has
-        // no "status" key at all). "projected" is the correct fallback
-        // regardless of which producer omits it, since every bracket
-        // payload this page renders starts life "projected" before any
-        // real game exists.
         status: json['status'] as String? ?? 'projected',
         seedA: json['seed_a'] as int?,
         seedB: json['seed_b'] as int?,
@@ -310,23 +257,14 @@ class BracketRound {
       );
 }
 
-/// A full bracket -- either conference-split (NFL/NBA: two conferences'
-/// own round lists plus one cross-conference final matchup) or flat
-/// (NCAAFB: one unified 12-team bracket, its own championship already
-/// the last round in `rounds`, no separate final-matchup field at all).
-/// Exactly one of `conferences`/`rounds` is populated for any given
-/// sport -- season_page.dart's own rendering branches on which.
-/// A team's display name/abbreviation, as attached by
-/// library.serving.common.enrich_bracket_team_names -- the bracket's own
-/// equivalent of TeamStanding.abbreviation, just keyed by id in one
+/// A team's display name/abbreviation for a bracket, keyed by id in one
 /// lookup map instead of carried on every row (a bracket team id appears
-/// in several matchups, not just one).
+/// in several matchups).
 class BracketTeamName {
   const BracketTeamName({this.name, this.abbreviation, this.color});
 
   final String? name;
   final String? abbreviation;
-  // Also off the team entity -- see Participant.color's own doc comment.
   final String? color;
 
   factory BracketTeamName.fromJson(Map<String, dynamic> json) => BracketTeamName(
@@ -336,6 +274,11 @@ class BracketTeamName {
       );
 }
 
+/// A full bracket -- either conference-split (NFL/NBA: two conferences'
+/// own round lists plus one cross-conference final matchup) or flat
+/// (NCAAFB: one unified bracket, its championship already the last round
+/// in `rounds`). Exactly one of `conferences`/`rounds` is populated for
+/// any given sport.
 class BracketProjection {
   const BracketProjection({
     required this.conferences,
@@ -359,19 +302,15 @@ class BracketProjection {
 
   final String? champion;
 
-  /// team_id -> display name/abbreviation, see BracketTeamName's own doc
-  /// comment. A team id missing here (shouldn't happen in practice, since
-  /// the backend builds this from every id actually appearing in the
-  /// bracket) falls back to the raw id, same as teamDisplayFor's own
-  /// missing-abbreviation convention.
+  /// team_id -> display name/abbreviation. A team id missing here falls
+  /// back to the raw id, same as teamDisplayFor's own convention.
   final Map<String, BracketTeamName> teamNames;
 
   factory BracketProjection.fromJson(Map<String, dynamic> json) {
     final conferencesJson = json['conferences'] as Map<String, dynamic>?;
     final roundsJson = json['rounds'] as List<dynamic>?;
     // Different sports name their own cross-conference matchup
-    // differently (super_bowl/finals/championship) -- see this class's
-    // own doc comment.
+    // differently (super_bowl/finals/championship).
     final finalMatchupJson = (json['super_bowl'] ?? json['finals'] ?? json['championship']) as Map<String, dynamic>?;
     final teamNamesJson = json['team_names'] as Map<String, dynamic>?;
     return BracketProjection(
@@ -408,26 +347,21 @@ class SeasonProjection {
   /// Already sorted by projected_wins descending server-side.
   final List<TeamStanding> standings;
 
-  /// Keyed by TARGET_STAT (e.g. "passing_yards") -- see handler.py's
-  /// PLAYER_PROP_STATS for the full list. Null if the backend couldn't
-  /// compute leaderboards (best-effort field, same as EventLeaders).
+  /// Keyed by TARGET_STAT (e.g. "passing_yards"). Null if the backend
+  /// couldn't compute leaderboards.
   final Map<String, List<LeaderboardEntry>>? leaderboards;
 
   /// NBA only -- see CupProjection's own doc comment for the null cases.
   final CupProjection? cup;
 
-  /// The playoff bracket -- NFL/NCAAFB/NBA only (null for NCAA MBB/PGA/
-  /// F1, no elimination-bracket concept exists for those yet/at all).
-  /// Best-effort, same "hide, don't error" convention as `cup`/
-  /// `leaderboards`.
+  /// The playoff bracket -- NFL/NCAAFB/NBA only. Null when the sport has
+  /// no elimination-bracket concept, or best-effort when unavailable.
   final BracketProjection? bracket;
 
   /// NBA only -- the separate NBA Cup knockout bracket (distinct from
   /// `cup`'s own group-stage standings). Null for every other sport, and
-  /// for NBA whenever this season's Cup groups aren't in CUP_GROUPS yet
-  /// (same as `cup`) -- see aws-lambdas/nba/predict/season_simulation.py's
-  /// own project_cup_knockout_bracket docstring for why this one is
-  /// PROJECTED ONLY (no real-vs-actual reconciliation, unlike `bracket`).
+  /// for NBA before this season's Cup groups are in CUP_GROUPS. Projected
+  /// only -- no real-vs-actual reconciliation, unlike `bracket`.
   final BracketProjection? cupBracket;
 
   factory SeasonProjection.fromJson(Map<String, dynamic> json) => SeasonProjection(

@@ -1,7 +1,6 @@
 # Invokes the nba_live_scores Lambda every 60s to refresh its live-score
-# cache. Mirrors scheduler-ncaafb-live-scores.tf -- see that Lambda's own
-# reasoning for why a tick with nothing near tip-off costs a single cheap
-# DynamoDB Query and nothing else (live_scores._candidate_events).
+# cache. A tick with nothing near tip-off costs a single cheap DynamoDB
+# Query (live_scores._candidate_events).
 resource "aws_scheduler_schedule" "nba_live_scores" {
   name        = "${var.project}-nba-live-scores"
   description = "Invokes the nba_live_scores Lambda every 60s to refresh its live-score cache for any event within 15 minutes of tip-off or still in progress."

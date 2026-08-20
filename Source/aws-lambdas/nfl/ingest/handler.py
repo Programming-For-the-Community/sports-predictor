@@ -1,113 +1,55 @@
 """
-NFL ingest Lambda. Triggered by EventBridge Scheduler -- see
-Terraform/scheduler-nfl-ingest.tf, which runs this daily during the
-season. Fetches that week's scoreboard and completed box scores from
-ESPN and writes raw JSON to S3. The normalize Lambda is triggered
-automatically by the resulting S3 PutObject events, so this function
-never touches DynamoDB directly.
+NFL ingest Lambda. Fetches that week's scoreboard and completed box
+scores from ESPN and writes raw JSON to S3. The normalize Lambda is
+triggered automatically by the resulting S3 PutObject events, so this
+function never touches DynamoDB directly.
 
 Also enriches every event in that scoreboard payload with each
 participating team's current head coach, injury report, and depth chart
-(see enrichment.enrich_events) before writing it -- embedded directly
-into the same scoreboard JSON, not a separate S3 object, both to keep
-the write atomic (normalize's _process_scoreboard reads it all from one
-place) and because scoreboard_event_to_event_item (library/normalize/
-espn.py) rebuilds the whole event item from scratch every time it runs
--- so this enrichment has to happen on EVERY ingest run, not a lighter
-subset of runs, or a run that omitted it would silently wipe out a
-previous run's coach/injury/depth-chart fields on the next normalize
-rebuild. This is also why ingest runs daily now instead of just
-Tue/Wed: injury reports change through the week in a way box scores and
-coach data don't.
+(see enrichment.enrich_events) before writing it, embedded directly into
+the same scoreboard JSON rather than a separate S3 object.
 
-Also fetches every one of the league's 32 teams' current full roster (not
-just the depth chart's skill-position subset -- see NFLClient.get_roster,
-and get_teams for the full-league list) and writes it to its own S3
-object per team, on every run, uncached -- this one specifically exists
-to catch a roster move (trade, signing, release) as soon as possible, so
-caching it across days would defeat its own purpose. Runs
-unconditionally, before the preseason check below and independent of
-which teams have a game this week -- team membership isn't tied to
-either of those, and gating it the same way the rest of this function
-does would leave every roster stale for the entire preseason (no
-ingested games to derive team_ids from) and for any team on a bye.
-normalize picks each one up via the same S3 PutObject trigger as
-everything else here and corrects that team's players' entity records
-(library.normalize.espn.roster_to_player_entities) -- see
-library/storage/pipeline_storage.py's upsert_player_entity docstring for
-the guard that keeps this from ever clobbering a newer fact with a stale
-one.
+Also fetches every one of the league's 32 teams' current full roster
+(not just the depth chart's skill-position subset) and writes it to its
+own S3 object per team, on every run, uncached. Runs unconditionally,
+before the preseason check below and independent of which teams have a
+game this week. normalize picks each one up via the same S3 PutObject
+trigger as everything else here and corrects that team's players' entity
+records (library.normalize.espn.roster_to_player_entities).
 
 Also refreshes every one of the league's 32 teams' cached depth chart
 (library.storage.depth_chart_cache), same unconditional every-team,
-every-run cadence as the roster fetch above and for the same reason --
-depth chart used to only get refreshed as a side effect of enrich_events
-attaching one to a specific week's events, which left it stale (or, for
-preseason/a future week schedule-sync alone has reached, never even
-populated) for any team not currently in scope. Unlike the roster fetch,
-this one IS cache-backed (get_cached_depth_chart's own
-DEPTH_CHART_CACHE_TTL_DAYS) -- position assignments are stable enough
-day to day that refreshing daily just means the cache reliably GETS a
-chance to turn over on schedule, not that every run pays for 32 fresh
-ESPN calls.
+every-run cadence as the roster fetch above. This one is cache-backed
+(get_cached_depth_chart's own DEPTH_CHART_CACHE_TTL_DAYS).
 
 Coach data is cached in S3 with its own TTL (see
 enrichment.COACHES_CACHE_TTL_DAYS) -- "every ingest run" above is about
-what gets WRITTEN each time (always the complete picture, for the reason
-above), not what gets FETCHED from ESPN each time. get_season_coaches
-alone costs ~65 ESPN calls (ESPN's core API pages this via two rounds of
-$ref resolution, listing -> 32 coach details -> 32 separate win-record
-lookups) for data that barely changes day to day -- a coach's
-identity/tenure almost never changes mid-week, and season_win_pct only
-changes once a week, after that week's games. Injury-driven roster
-changes are already separately captured by the (uncached,
-genuinely-daily) injuries call.
+what gets WRITTEN each time (always the complete picture), not what gets
+FETCHED from ESPN each time.
 
 Also refreshes the season-coaches cache (_fetch_coaches) for the current
 -- or, off-season, upcoming -- season, same unconditional every-run
-cadence as the roster/depth-chart fetches above and run before the
-preseason check below for the same reason: enrich_events only ever
-populates this cache as a side effect of enriching a specific week's
-events, which never runs at all before Week 1 (preseason is skipped, and
-there's no week to auto-detect before the season starts) -- previously
-leaving next season's coaches unfetched for the entire off-season, only
-appearing once that season's Week 1 Tuesday ingest finally ran.
-get_cached_coaches' own TTL (COACHES_CACHE_TTL_DAYS above) still does the
-real rate limiting -- calling it daily just guarantees the cache gets a
-chance to turn over (in season) or get seeded in the first place
-(off-season).
+cadence as the roster/depth-chart fetches above, run before the
+preseason check below. get_cached_coaches' own TTL (COACHES_CACHE_TTL_DAYS
+above) does the rate limiting.
 
 EventBridge can override any default via the schedule's input payload:
     { "season": 2025, "season_type": 2, "week": 4 }
 
-All three must be given together for a manual override (e.g. reprocessing
-one specific past week) -- there's no partial-override path. Omitting all
-three (the normal scheduled case) auto-detects the target week from the
-most recent Sunday's date rather than from "today": ESPN's scoreboard
-endpoint resolves season/type/week entirely from a `dates=YYYYMMDD` param,
-and "most recent Sunday" is the same value on both the Tuesday run and
-the Wednesday retry within the same NFL week, unlike "today" -- which
-would otherwise depend on exactly when ESPN's own scoreboard calendar
-rolls over to the next week, an undocumented detail this function has no
-business depending on.
+All three must be given together for a manual override -- there's no
+partial-override path. Omitting all three auto-detects the target week
+from the most recent Sunday's date: ESPN's scoreboard endpoint resolves
+season/type/week entirely from a `dates=YYYYMMDD` param.
 
-Future weeks of the current season are seeded separately by
-Terraform/scheduler-nfl-schedule-sync.tf's dedicated nfl-schedule-sync
-Lambda (aws-lambdas/nfl/schedule-sync/handler.py), which writes scoreboard
-JSON directly to the same S3 key pattern this function does -- not routed
-through this handler, since that job deliberately skips the enrichment
-below (meaningless months ahead of a game) and needs one shared rate
-limiter across ~23 ESPN calls, not 23 separate invocations each with
-their own.
+Future weeks of the current season are seeded separately by the
+dedicated nfl-schedule-sync Lambda (aws-lambdas/nfl/schedule-sync/
+handler.py), which writes scoreboard JSON directly to the same S3 key
+pattern this function does, skipping the enrichment below.
 
 Preseason (season_type 1) scoreboard/box-score/enrichment data is never
-ingested, whether auto-detected or passed explicitly -- backup-heavy
-preseason rosters and results aren't representative of regular-season
-performance and would skew training data. Roster fetching (above) is the
-one exception -- it runs before this check, every day regardless of
-season_type.
-This matches the historical backfill, which only ever pulls regular season
-and postseason (see SEASON_TYPES in data-backfills/nfl/backfill.py).
+ingested, whether auto-detected or passed explicitly. Roster fetching
+(above) is the one exception -- it runs before this check, every day
+regardless of season_type.
 """
 import json
 import logging
@@ -170,9 +112,8 @@ def _all_team_ids(client: NFLClient) -> list[str]:
 
 def _fetch_rosters(client: NFLClient) -> tuple[int, int]:
     """Fetches and writes every NFL team's current roster -- one S3
-    object per team, always fresh, never TTL-cached (see this module's
-    own docstring for why). Best-effort per team, same convention as
-    enrich_events -- one team's fetch failing shouldn't lose the others'."""
+    object per team, always fresh, never TTL-cached. Best-effort per
+    team -- one team's fetch failing doesn't stop the others."""
     fetched = failed = 0
     for team_id in _all_team_ids(client):
         try:
@@ -186,34 +127,18 @@ def _fetch_rosters(client: NFLClient) -> tuple[int, int]:
 
 
 def _current_nfl_season(today: date | None = None) -> int:
-    """Mirrors schedule-sync/handler.py's own _current_nfl_season (same
-    duplication convention already used elsewhere in this file, e.g.
-    REGULAR_SEASON_WEEKS's own comment in that module) -- Sep-Dec resolves
-    to this year (the season in progress), Jan-Feb resolves to last year
-    (still finishing that season's playoffs -- the Super Bowl is in
-    February), Mar-Aug resolves to this year (the upcoming, not-yet-
-    started season). Used only by _fetch_coaches below, to seed/refresh
-    NEXT season's coaches during the off-season, before there's a week to
-    auto-detect at all -- everything else in this file gets its season
-    from that week's own ESPN scoreboard response instead."""
+    """Sep-Dec resolves to this year (the season in progress), Jan-Feb
+    resolves to last year (still finishing that season's playoffs -- the
+    Super Bowl is in February), Mar-Aug resolves to this year (the
+    upcoming, not-yet-started season)."""
     today = today or date.today()
     return today.year if today.month >= 3 else today.year - 1
 
 
 def _fetch_coaches(core_client: EspnCoreApiClient) -> bool:
     """Refreshes the season-coaches cache for the current (in season) or
-    upcoming (off-season) season -- same unconditional, every-run cadence
-    as _fetch_rosters/_fetch_depth_charts, before the preseason check
-    below, and for the same underlying reason: enrich_events only ever
-    populates this cache as a side effect of enriching a specific week's
-    events, which never runs at all before Week 1 (preseason is skipped
-    below, and there's no week to auto-detect before the season starts) --
-    leaving the upcoming season's coaches never fetched for the entire
-    off-season. enrichment.get_cached_coaches' own TTL still does the
-    real rate limiting here -- calling it daily just guarantees the cache
-    gets a chance to turn over (in season) or get seeded in the first
-    place (off-season), matching this module's roster/depth-chart
-    reasoning above."""
+    upcoming (off-season) season. enrichment.get_cached_coaches' own TTL
+    does the rate limiting."""
     season = _current_nfl_season()
     try:
         enrichment.get_cached_coaches(_s3, RAW_BUCKET, core_client, season)
@@ -225,20 +150,9 @@ def _fetch_coaches(core_client: EspnCoreApiClient) -> bool:
 
 def _fetch_depth_charts(client: NFLClient) -> tuple[int, int]:
     """Refreshes every NFL team's cached depth chart (library.storage.
-    depth_chart_cache) -- same unconditional, every-team daily cadence as
-    _fetch_rosters, run before the preseason check below for the same
-    reason. Depth charts previously only got refreshed as a side effect
-    of enrich_events attaching one to a specific week's events, which left
-    a team's cache stale (or, for a team whose week enrichment never ran
-    at all -- preseason, or a future week only schedule-sync has reached
-    -- never populated) until that team's own event happened to be
-    enriched. get_cached_depth_chart's own TTL (DEPTH_CHART_CACHE_TTL_DAYS)
-    still does the real rate limiting here -- calling it daily just
-    guarantees the cache gets a chance to refresh every day regardless of
-    which week's games are in scope, matching depth charts' actual
-    volatility (position assignments are stable outside the
-    injury-driven churn injuries.py already handles separately). Best-
-    effort per team, same convention as _fetch_rosters."""
+    depth_chart_cache). get_cached_depth_chart's own TTL
+    (DEPTH_CHART_CACHE_TTL_DAYS) does the rate limiting. Best-effort per
+    team, same convention as _fetch_rosters."""
     fetched = failed = 0
     for team_id in _all_team_ids(client):
         try:
@@ -258,10 +172,7 @@ def lambda_handler(event: dict, context) -> dict:
     client = NFLClient()
     core_client = EspnCoreApiClient()
 
-    # Unconditional -- see _fetch_rosters/_fetch_depth_charts/_fetch_coaches/
-    # _all_team_ids and the module docstring for why these run before the
-    # preseason check below rather than being gated the same way as
-    # everything else in this function.
+    # Runs unconditionally, before the preseason check below.
     rosters_fetched, rosters_failed = _fetch_rosters(client)
     logger.info("Rosters: %d fetched, %d failed", rosters_fetched, rosters_failed)
 
@@ -281,14 +192,9 @@ def lambda_handler(event: dict, context) -> dict:
         }
 
     if week is None:
-        # See the module docstring for why this resolves against the most
-        # recent Sunday rather than "today" -- it's what makes the
-        # Tuesday run and the Wednesday retry agree on the same week.
-        # site.web.api.espn.com has no top-level "season" key (unlike the
-        # old site.api.espn.com host this was written against) -- season
-        # year/type live under leagues[0].season instead, and type is
-        # itself a dict ({"id": "2", "type": 2, ...}) rather than a bare
-        # int. week is unaffected -- still top-level.
+        # Season year/type live under leagues[0].season, and type is a
+        # dict ({"id": "2", "type": 2, ...}) rather than a bare int.
+        # week is top-level.
         scoreboard = client.get_scoreboard_for_date(_most_recent_sunday())
         league_season = (scoreboard.get("leagues") or [{}])[0].get("season", {})
         season = league_season.get("year", season)
@@ -313,8 +219,7 @@ def lambda_handler(event: dict, context) -> dict:
 
     # Mutates each event dict in place -- scoreboard["events"] holds the
     # same list/dict objects, so this enrichment is already reflected in
-    # `scoreboard` by the time it's written below. See this module's own
-    # docstring for why this runs on every ingest cycle unconditionally.
+    # `scoreboard` by the time it's written below.
     enrichment.enrich_events(events, season, client, core_client, _s3, RAW_BUCKET)
 
     scoreboard_key = f"nfl/scoreboard/{season}/{season_type}/{week}.json"

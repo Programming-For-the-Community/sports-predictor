@@ -1,6 +1,5 @@
 """
-NCAAFB live-score cache Lambda -- the NCAAFB equivalent of aws-lambdas/nfl/
-live-scores/handler.py. Two distinct triggers, one function:
+NCAAFB live-score cache Lambda. Two distinct triggers, one function:
 
   - EventBridge Scheduler (scheduler-ncaafb-live-scores.tf), every 60s,
     event shape {"detail-type": "LiveScoreRefresh"}.
@@ -8,10 +7,8 @@ live-scores/handler.py. Two distinct triggers, one function:
     scores, behind the same Cognito authorizer as every other NCAAFB
     route.
 
-Its own Lambda/IAM role, same reasoning as NFL's own module's docstring:
-zero CFBD quota either way (see library/http/ncaafb_espn.py), but a
-dedicated function keeps ingest's once-daily batch shape and predict-
-read's light cold-start shape both unchanged.
+Its own Lambda/IAM role keeps ingest's once-daily batch shape and
+predict-read's light cold-start shape both unchanged.
 """
 import json
 import logging
@@ -34,8 +31,7 @@ _CORS_HEADERS = {
     "Content-Type": "application/json",
 }
 
-# Initialized once per container lifetime, reused across warm invocations
-# -- same lazy-singleton pattern as nfl-live-scores/handler.py's own.
+# Initialized once per container lifetime, reused across warm invocations.
 _s3 = boto3.client("s3")
 _storage: FeatureStorage | None = None
 

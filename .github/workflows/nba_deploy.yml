@@ -1,24 +1,13 @@
 # Top-level NBA deploy pipeline. Runs on every push to an nba* branch, but
 # pauses for manual approval (via the environment's required reviewers --
 # configure this in Settings > Environments, it can't be set from this
-# file) before doing anything. Mirrors nfl_deploy.yml's/ncaafb_deploy.yml's
-# own full 6-job shape, with the caveats below.
+# file) before doing anything.
 #
-# Why ai_hosting couldn't wait for step 6 like predict_read_deploy could:
-# unlike the zip-based Lambdas, aws_lambda_function.nba_predict
-# (Terraform/lambda-nba-predict.tf) is a container-image Lambda --
-# CreateFunction validates its image tag already exists in ECR, and
-# Terraform can't fabricate a placeholder image the way it does a
-# placeholder ZIP. infra ran without this dependency once (2026-08-14)
-# and failed at CreateFunction for exactly this reason -- see
-# project-nba-onboarding memory. nfl_deploy.yml's own `infra` job
-# depending on `ai_hosting` is what prevents this for NFL/NCAAFB; this
-# file now mirrors that same invariant instead of a manual one-off image
-# push.
-#
-# The still-missing job gets added here, not in a new file, once its own
-# workflow file exists:
-#   - live_scores_deploy -> after step 7 (live-scores)
+# aws_lambda_function.nba_predict (Terraform/lambda-nba-predict.tf) is a
+# container-image Lambda -- CreateFunction validates its image tag
+# already exists in ECR, and Terraform can't fabricate a placeholder
+# image the way it does a placeholder ZIP, so `infra` depends on
+# `ai_hosting` completing first.
 #
 # Once approved, backfill, ai_training, and ai_hosting (build) run BEFORE
 # infra -- all three only need the ECR repo URL and AWS push credentials
@@ -27,22 +16,18 @@
 # reason -- the feature-engineering/train-win-probability-model images
 # ai_training pushes must exist in ECR before the training ECS task
 # definitions infra applies could ever actually run (RunTask pulls the
-# image by tag; a missing tag fails at runtime, not at `terraform apply`,
-# so this dependency is what catches it instead of a silent later
-# failure -- see project-nba-onboarding memory for the exact same trap
-# already hit and fixed for ai_hosting/nba-predict on 2026-08-14).
-# tf_install then
-# applies infra (including the NBA ECS task definition's env vars -- see
-# Terraform/ecs-task-nba-backfill.tf -- and, for nba-predict specifically,
-# its CreateFunction call, which now finds ai_hosting's just-pushed image).
-# Only after infra do deploy_predict_lambda, predict_read_deploy,
-# data_pipeline, and live_scores_deploy run, since they deploy code into
-# functions/point Lambdas at images Terraform just created.
+# image by tag; a missing tag fails at runtime, not at `terraform apply`).
+# tf_install then applies infra (including the NBA ECS task definition's
+# env vars -- see Terraform/ecs-task-nba-backfill.tf -- and, for
+# nba-predict specifically, its CreateFunction call, which now finds
+# ai_hosting's just-pushed image). Only after infra do
+# deploy_predict_lambda, predict_read_deploy, data_pipeline, and
+# live_scores_deploy run, since they deploy code into functions/point
+# Lambdas at images Terraform just created.
 #
 # Both this job's `approval` step AND tf_install.yml's own terraform job
 # gate on the `development`/`production` environment, so a run through
-# this pipeline prompts for approval twice -- same accepted tradeoff as
-# nfl_deploy.yml's own comment explains.
+# this pipeline prompts for approval twice.
 
 name: NBA Deploy
 
@@ -54,9 +39,9 @@ on:
       - 'nba/*'
   workflow_call:
 
-# See app_deploy.yml's own comment -- shared group across every workflow
-# that can reach tf_install.yml's terraform apply, since
-# Terraform/main.tf's S3 backend has no state locking configured.
+# Shared group across every workflow that can reach tf_install.yml's
+# terraform apply, since Terraform/main.tf's S3 backend has no state
+# locking configured.
 concurrency:
   group: terraform-deploy-pipeline
   cancel-in-progress: false
@@ -88,8 +73,7 @@ jobs:
     uses: ./.github/workflows/nba_backfill.yml
     secrets: inherit
 
-  # Real code as of step 6 -- see nba_ai_hosting.yml's own header. Also
-  # ensures infra never runs without nba-predict-latest already in ECR.
+  # Ensures infra never runs without nba-predict-latest already in ECR.
   ai_hosting:
     name: AI hosting (build)
     needs: approval
@@ -99,10 +83,9 @@ jobs:
     uses: ./.github/workflows/nba_ai_hosting.yml
     secrets: inherit
 
-  # Real code (Sub-phase 3A step 5), not a stub -- pushes
-  # nba-feature-engineering-latest and nba-train-win-probability-model-
-  # latest. infra never runs without both already in ECR, same invariant
-  # ai_hosting enforces for nba-predict-latest.
+  # Pushes nba-feature-engineering-latest and
+  # nba-train-win-probability-model-latest. infra never runs without both
+  # already in ECR.
   ai_training:
     name: AI training (build)
     needs: approval
@@ -135,9 +118,7 @@ jobs:
 
   # nba-predict-read -- the light GET /nba/events + GET /nba/models Lambda
   # split out of nba-predict for cold start (see
-  # Terraform/lambda-nba-predict-read.tf). A reusable workflow, not inline
-  # jobs here -- same reasoning as nfl_deploy.yml's own predict_read_deploy
-  # job (app_deploy.yml needs this exact same test+deploy pair too).
+  # Terraform/lambda-nba-predict-read.tf).
   predict_read_deploy:
     name: NBA predict-read (test + deploy)
     needs: [approval, infra]
@@ -160,9 +141,7 @@ jobs:
       schedule_sync_function_name: ${{ needs.infra.outputs.nba_schedule_sync_function_name }}
 
   # nba-live-scores -- GET /nba/live-scores + the EventBridge-triggered
-  # cache refresh (see Terraform/lambda-nba-live-scores.tf). A reusable
-  # workflow, not inline jobs here -- same reasoning as predict_read_deploy
-  # above (app_deploy.yml needs this exact same test+deploy pair too).
+  # cache refresh (see Terraform/lambda-nba-live-scores.tf).
   live_scores_deploy:
     name: NBA live-scores (test + deploy)
     needs: [approval, infra]

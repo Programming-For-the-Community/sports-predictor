@@ -3,11 +3,8 @@ Unit tests for the NFL ingest Lambda handler's core scoreboard/box-score
 flow: event routing (explicit vs. auto-detected week), idempotency
 (skipping already-ingested box scores), error resilience (one game's
 failure doesn't block the rest), preseason skipping, and aggregate return
-counts. Split out of what used to be one large test_ingest.py -- see
-test_ingest_helpers.py, test_ingest_rosters.py, test_ingest_depth_charts.py,
-and test_ingest_coaches.py for this file's siblings, one per concern.
-Shared fixtures live in _ingest_test_helpers.py (not test_-prefixed, so
-pytest never collects it as a test module itself).
+counts. Shared fixtures live in _ingest_test_helpers.py (not
+test_-prefixed, so pytest never collects it as a test module itself).
 
 All AWS and ESPN calls are mocked -- these tests run without credentials.
 Coach/injury/depth-chart enrichment itself is covered separately in
@@ -146,9 +143,8 @@ class TestIngestLambdaHandler:
         mock_client.get_summary.assert_not_called()
 
     def test_fetches_rosters_even_during_preseason(self):
-        # The one exception to "preseason isn't ingested" -- see
-        # lambda_handler's own comment on why roster fetching runs before
-        # this check rather than being skipped alongside everything else.
+        # The one exception to "preseason isn't ingested" -- roster
+        # fetching runs before that check.
         mock_s3 = make_s3()
         mock_client = make_client(scoreboard([]))
         mock_client.get_teams.return_value = teams_response("12", "13")

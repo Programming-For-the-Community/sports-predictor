@@ -1,43 +1,26 @@
 """
 Pure NCAAFB feature-computation functions -- the CFBD-sourced equivalent
-of library.features.nfl. Same split as NFL: no AWS calls here, every
-function takes already-fetched rows and returns numbers, and train-time
-(Source/feature-engineering/ncaafb/build_dataset.py) and live-serve-time
-feature computation are meant to share these same functions once
-inference lands (a later phase) -- see library.features.nfl's own
-docstring for why that matters.
+of library.features.nfl. No AWS calls here; every function takes
+already-fetched rows and returns numbers.
 
-Genuinely different from NFL, not just renamed (see project plan):
-- No static division table -- FBS conference membership changes ~yearly,
-  so is_conference_game reads CFBD's own per-game conference_game flag
-  (season-scoped already, computed by CFBD itself) instead of a hardcoded
-  lookup like nfl_teams.TEAM_DIVISIONS.
-- No static TEAM_COORDINATES table either -- CFBD's /teams response
-  carries each team's home-stadium latitude/longitude directly (see
-  library/normalize/ncaafb.py's team_to_entity), so build_event_features/
-  build_player_features take a team_coordinates dict built from entity
-  data at call time instead of importing a hardcoded module constant.
-  No international-venue table exists yet (CFB's rare true neutral-site/
-  overseas games aren't specially handled in v1 -- travel distance for
-  those is computed as if the "home" team were still at its own market,
-  a known, documented imprecision, same spirit as weather being omitted
-  in v1).
-- is_bowl_game/is_playoff_game replace is_divisional_game -- CFP games
-  are identified from CFBD's own `playoff` field (see
-  library/normalize/ncaafb.py's game_to_event_item), not a bowl-name
-  string match.
-- No injury or depth-chart data exists for college football, and no
-  injury-derived fields are feature-engineered here at all -- unlike
-  NFL, there's no reason to carry home_qb_injury_status/
-  home_team_injury_count (etc.) as permanently-null columns just for
-  schema parity, so build_event_features never computes them.
+- is_conference_game reads CFBD's own per-game conference_game flag
+  (already season-scoped) instead of a hardcoded division lookup.
+- build_event_features/build_player_features take a team_coordinates
+  dict built from team entity data at call time (CFBD's /teams response
+  carries each team's home-stadium lat/long directly) instead of a
+  hardcoded module constant. No international-venue table exists yet;
+  travel distance is computed as if the "home" team were still at its
+  own market.
+- is_bowl_game/is_playoff_game identify CFP games from CFBD's own
+  `playoff` field, not a bowl-name string match.
+- No injury or depth-chart data exists for college football, so
+  build_event_features never computes injury-derived fields.
 - No career_playoff_win_pct -- CFBD folds bowl/playoff results into the
-  same season win-loss total a coach's record already reports, so that
-  figure doesn't exist to surface.
-- build_team_week_features is new: a team-week granularity row (not
+  same season win-loss total a coach's record already reports.
+- build_team_week_features is a team-week granularity row (not
   event-level or player-level) for the National Ranking model, labeled
-  with CFBD's own AP Top 25 rank when the ingest/backfill enrichment
-  attached one to that team's game that week.
+  with CFBD's own AP Top 25 rank when enrichment attached one to that
+  team's game that week.
 """
 from library.features import geo
 from library.features.common import (

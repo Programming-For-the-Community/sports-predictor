@@ -35,9 +35,9 @@ void main() {
   });
 
   test('ties/projected_losses default rather than throw when a stale payload omits them', () {
-    // Real scenario, not hypothetical -- the season projection is a
-    // weekly-precomputed S3 payload, so a frontend deploy can land
-    // before the backend has next run with these two fields present.
+    // The season projection is a weekly-precomputed S3 payload, so a
+    // frontend deploy can land before the backend has next produced
+    // these two fields.
     final standing = TeamStanding.fromJson({
       'team_id': '12',
       'wins': 8,
@@ -53,11 +53,10 @@ void main() {
   });
 
   test('a standing with no simulation fields yet defaults instead of throwing', () {
-    // Real scenario for NCAAFB specifically -- build_season_projection
-    // skips simulation entirely (fewer than CFP_FIELD_SIZE teams tracked,
-    // or no promoted ranking model yet) but still writes wins/losses/
-    // conference for every team. See TeamStanding.fromJson's own doc
-    // comment.
+    // NCAAFB's build_season_projection skips simulation entirely (fewer
+    // than CFP_FIELD_SIZE teams tracked, or no promoted ranking model
+    // yet) but still writes wins/losses/conference for every team. See
+    // TeamStanding.fromJson's own doc comment.
     final standing = TeamStanding.fromJson({'team_id': '333', 'conference': 'SEC', 'wins': 3, 'losses': 1});
 
     expect(standing.division, 'SEC');
@@ -123,10 +122,8 @@ void main() {
   });
 
   test('a bracket matchup with no status field defaults to projected instead of crashing', () {
-    // Regression for a real production crash (2026-08-19): a real
-    // payload's cup_bracket matchups came from the backend with no
-    // "status" key at all, and the previous `json['status'] as String`
-    // (non-nullable, no fallback) threw on the missing key.
+    // cup_bracket matchups may arrive with no "status" key -- fromJson
+    // must default rather than throw.
     final matchup = BracketMatchup.fromJson({
       'team_a': '2', 'team_b': '8', 'predicted_winner': '2', 'win_probability': 0.6,
     });

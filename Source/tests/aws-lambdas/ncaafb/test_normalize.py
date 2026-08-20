@@ -1,10 +1,10 @@
 """
 Unit tests for the NCAAFB normalize Lambda handler. All AWS calls are
 mocked. Tests verify key routing via _dispatch (every CFBD raw object is
-a JSON list, one entry per game -- unlike NFL's per-object single dict,
-since CFBD's box score endpoints are bulk-per-week), that each processor
-calls the right storage methods the right number of times, and that the
-handler is resilient to individual record failures.
+a JSON list, one entry per game, since CFBD's box score endpoints are
+bulk-per-week), that each processor calls the right storage methods the
+right number of times, and that the handler is resilient to individual
+record failures.
 
 The ncaafb_normalize module is registered in sys.modules by conftest.py.
 """
@@ -83,8 +83,7 @@ class TestDispatch:
 
     def test_logs_a_write_rejected_by_the_staleness_guard_separately_from_a_real_write(self, caplog):
         # A rejection here means some other write already landed a same-
-        # day-or-newer team_id_as_of for that entity_id first (see
-        # PipelineStorage.upsert_player_entity's own docstring) -- the
+        # day-or-newer team_id_as_of for that entity_id first -- the
         # aggregate "wrote N" count alone can't tell a real, silent
         # rejection apart from roster_to_player_entities finding nothing
         # to write in the first place, so the log line needs both numbers.

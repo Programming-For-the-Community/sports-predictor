@@ -1,21 +1,12 @@
 """
-DynamoDB key builders implementing design/DATA_SCHEMA.md's convention:
-partition keys prefixed with SPORT#<sport>#... so per-sport queries stay
-within one partition instead of scanning the whole table. Every sport
-adapter's normalize step uses these -- not just NFL's -- so the key
-format can't drift between sports.
+DynamoDB key builders: partition keys prefixed with SPORT#<sport>#... so
+per-sport queries stay within one partition.
 """
 
 
 def entity_key(sport: str, entity_id: str, entity_type: str) -> str:
-    """entity_type ("team" or "player") is part of the key, not just an
-    attribute on the item -- ESPN's team-id and athlete-id numeric spaces
-    overlap for low legacy ids (confirmed real: NBA team id 25, Oklahoma
-    City, collided with athlete id 25, Metta World Peace, silently
-    clobbering each other under the old type-less key -- see
-    project-nba-entity-collision memory). Callers always know which kind
-    of entity they're keying, so this is a required argument, not a
-    default, to keep an ambiguous call from compiling."""
+    """entity_type ("team" or "player") is part of the key -- team-id and
+    athlete-id numeric spaces can overlap, so the type disambiguates."""
     return f"SPORT#{sport.upper()}#ENTITY#{entity_type.upper()}#{entity_id}"
 
 
@@ -32,19 +23,12 @@ def team_key(team_id: str) -> str:
 
 
 def entity_team_key(sport: str, team_id: str) -> str:
-    """Groups entity items by current team for the entities table's
-    team-index GSI (see Terraform/dynamodb-entities.tf) -- sport-scoped,
-    unlike team_key() above, since a bare numeric ESPN team_id isn't
-    unique across sports and this key is used as a global GSI hash key,
-    not scoped within one event's own partition the way team_key() is."""
+    """Sport-scoped team key for the entities table's team-index GSI --
+    a bare numeric team_id isn't unique across sports."""
     return f"SPORT#{sport.upper()}#TEAM#{team_id}"
 
 
 def sport_from_event_key(event_key: str) -> str:
     """Inverse of event_key() -- recovers the lowercase sport string from
-    an existing SPORT#<SPORT>#EVENT#<event_id> key. Used by
-    Source/migrations/backfill_sport_attribute.py to derive the sport
-    attribute for rows written before player_game_stats/team_game_stats
-    stored it directly -- every row already encodes it here, so this
-    reads it back rather than needing any other data source."""
+    a SPORT#<SPORT>#EVENT#<event_id> key."""
     return event_key.split("#")[1].lower()

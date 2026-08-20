@@ -1,7 +1,4 @@
-# REST API (v1) -- chosen over HTTP API (v2) because:
-#   - Cognito User Pool Authorizer works natively via pool ARN (no issuer URL)
-#   - Usage plans and throttling are first-class REST API features
-#   - More mature custom domain support for regional endpoints
+# REST API with a Cognito User Pool authorizer and usage-plan throttling.
 resource "aws_api_gateway_rest_api" "main" {
   name = "${var.project}-api"
 
@@ -25,15 +22,11 @@ resource "aws_api_gateway_authorizer" "cognito" {
   identity_source = "method.request.header.Authorization"
 }
 
-# Deployment/stage/usage plan live in api-gateway-nfl-predict.tf, added
-# once the first routes existed (AWS rejects those resources on an API
-# with zero methods).
+# Deployment/stage/usage plan live in api-gateway-nfl-predict.tf since AWS
+# rejects those resources on an API with zero methods.
 
-# Without this, a request to an undefined path OR an existing path hit
-# with an undefined method both get API Gateway's default
-# {"message":"Missing Authentication Token"} 403 -- confusing for a client
-# that just made a typo. Overriding this gateway response to a real 404
-# covers both cases, account/API-wide, not per-route.
+# Overrides API Gateway's default 403 "Missing Authentication Token" for
+# undefined paths/methods to a real 404, account/API-wide.
 resource "aws_api_gateway_gateway_response" "missing_auth_token" {
   rest_api_id   = aws_api_gateway_rest_api.main.id
   response_type = "MISSING_AUTHENTICATION_TOKEN"
@@ -49,15 +42,9 @@ resource "aws_api_gateway_gateway_response" "missing_auth_token" {
   }
 }
 
-# Every OTHER error API Gateway generates itself -- before the request ever
-# reaches the Lambda -- also has no CORS headers by default. That includes
-# UNAUTHORIZED/ACCESS_DENIED (the Cognito authorizer rejecting a missing or
-# expired token) and THROTTLED (the usage plan's rate limit); without a CORS
-# header a browser blocks the response before it reaches application code,
-# surfacing as a generic "Failed to fetch" instead of a readable status the
-# app's own ApiClient.get() retry-on-401 logic can react to. DEFAULT_4XX/
-# DEFAULT_5XX cover every such error uniformly -- unlike missing_auth_token
-# above, these don't override the status code or body, only add the header.
+# Adds CORS headers to every other 4xx API Gateway generates itself before
+# reaching the Lambda (e.g. Cognito UNAUTHORIZED/ACCESS_DENIED, usage-plan
+# THROTTLED), without overriding status code or body.
 resource "aws_api_gateway_gateway_response" "default_4xx" {
   rest_api_id   = aws_api_gateway_rest_api.main.id
   response_type = "DEFAULT_4XX"

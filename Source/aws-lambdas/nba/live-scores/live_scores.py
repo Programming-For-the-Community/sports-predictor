@@ -1,17 +1,13 @@
 """
 Live score/status cache for NBA events currently in or near their
-scheduled tip-off -- the NBA equivalent of aws-lambdas/nfl/live-scores/
-live_scores.py and aws-lambdas/ncaafb/live-scores/live_scores.py.
-Deliberately never writes to DynamoDB, same reasoning as both: this is a
-short-lived, UI-display-only cache in S3, refreshed on its own schedule
+scheduled tip-off. Never writes to DynamoDB -- this is a short-lived,
+UI-display-only cache in S3, refreshed on its own schedule
 (scheduler-nba-live-scores.tf, every 60s) and read back by GET
 /nba/live-scores (this same Lambda, see handler.py).
 
-NBA's data source and live-scores source are both ESPN (see project
-memory's 2026-08-13 source-switch note), so refresh() looks up a candidate
-directly by event id in that day's ESPN scoreboard response -- the same
-direct-lookup shape NFL's/NCAAFB's own modules use, no abbreviation+date
-join fallback needed.
+NBA's data source and live-scores source are both ESPN, so refresh()
+looks up a candidate directly by event id in that day's ESPN scoreboard
+response, no abbreviation+date join fallback needed.
 """
 import json
 import logging
@@ -29,26 +25,20 @@ LIVE_SCORES_CACHE_KEY = "nba/cache/live-scores/latest.json"
 
 # Same compound-key shape as aws-lambdas/nba/normalize/handler.py's own
 # _COMPOUND_KEY_SPLITS -- duplicated here rather than imported across
-# Lambda package boundaries, same convention every other sport's
-# live-scores module already follows. Must stay in sync with normalize's
-# copy (confirmed identical at both team and player level for NBA, unlike
-# NFL's two separate maps -- see normalize/handler.py's own comment).
+# Lambda package boundaries. Must stay in sync with normalize's copy.
 _COMPOUND_KEY_SPLITS: dict[str, tuple[str, str]] = {
     "fieldGoalsMade-fieldGoalsAttempted": ("field_goals_made", "field_goal_attempts"),
     "threePointFieldGoalsMade-threePointFieldGoalsAttempted": ("three_pointers_made", "three_point_attempts"),
     "freeThrowsMade-freeThrowsAttempted": ("free_throws_made", "free_throw_attempts"),
 }
 
-# NBA can have more concurrent live games on a given night than an NFL
-# Sunday window (10-15 tip-offs clustered around 7-10pm ET) -- same
-# reasoning/value as NCAAFB's own module.
+# NBA can have 10-15 tip-offs clustered around 7-10pm ET on a given night.
 BOXSCORE_MAX_WORKERS = 10
 
-# Same values as NFL's/NCAAFB's own modules -- see those files' own
-# comments for the reasoning (15 minutes catches an early tip-off without
-# waiting on the scheduled time; 7 hours is a generous safety cap no real
-# game approaches; 5 minutes is how stale a cached read is allowed to look
-# before a reader should treat it as unknown).
+# 15 minutes catches an early tip-off without waiting on the scheduled
+# time; 7 hours is a generous safety cap no real game approaches; 5
+# minutes is how stale a cached read is allowed to look before a reader
+# should treat it as unknown.
 POLL_START_BEFORE_KICKOFF = timedelta(minutes=15)
 POLL_SAFETY_CAP_AFTER_KICKOFF = timedelta(hours=7)
 STALE_AFTER = timedelta(minutes=5)
@@ -74,8 +64,7 @@ def _parse_kickoff(kickoff_time: str) -> datetime:
 
 
 def _candidate_events(storage, sport: str, now: datetime, already_completed: set[str]) -> list[dict]:
-    """Same shape and reasoning as NFL's/NCAAFB's own _candidate_events --
-    events worth checking against ESPN's live scoreboard this cycle."""
+    """Events worth checking against ESPN's live scoreboard this cycle."""
     candidates = []
     for event in storage.get_all_events(sport, status="scheduled"):
         event_id = event["event_id"]
@@ -104,11 +93,10 @@ def _extract_live_state(espn_event: dict) -> dict:
 
 
 def _live_player_stats(client, sport: str, event_id: str) -> dict[str, dict]:
-    """Same reasoning as NFL's/NCAAFB's own modules -- best-effort
-    entity_id -> stat_line for one currently-live event, from ESPN's own
-    boxscore/summary endpoint. Empty on any fetch/parse failure rather
-    than raising -- one bad event shouldn't cost every other live event
-    its own score/stat refresh this tick."""
+    """Best-effort entity_id -> stat_line for one currently-live event,
+    from ESPN's own boxscore/summary endpoint. Empty on any fetch/parse
+    failure rather than raising -- one bad event shouldn't cost every
+    other live event its own score/stat refresh this tick."""
     try:
         summary = client.get_summary(event_id)
         stats_items, _ = boxscore_to_player_game_stats(summary, sport, _COMPOUND_KEY_SPLITS)
@@ -120,10 +108,9 @@ def _live_player_stats(client, sport: str, event_id: str) -> dict[str, dict]:
 
 def refresh(storage, s3, bucket: str, client, sport: str) -> dict:
     """Called on every LiveScoreRefresh tick -- see scheduler-nba-live-
-    scores.tf. Cheap on every tick where nothing is in its live window,
-    same as NFL's/NCAAFB's own refresh: reads already-ingested events
-    from DynamoDB and only reaches out to ESPN once _candidate_events
-    finds something worth checking."""
+    scores.tf. Cheap on every tick where nothing is in its live window:
+    reads already-ingested events from DynamoDB and only reaches out to
+    ESPN once _candidate_events finds something worth checking."""
     now = datetime.now(timezone.utc)
 
     previous = _get_cache(s3, bucket) or {}
@@ -169,8 +156,8 @@ def refresh(storage, s3, bucket: str, client, sport: str) -> dict:
 
 
 def get_live_scores(s3, bucket: str) -> dict:
-    """Called by GET /nba/live-scores (handler.py). Same empty-not-error/
-    staleness contract as NFL's/NCAAFB's own get_live_scores."""
+    """Called by GET /nba/live-scores (handler.py). Returns an empty
+    events dict rather than an error on a cache miss or stale cache."""
     cache = _get_cache(s3, bucket)
     if cache is None:
         return {"events": {}}

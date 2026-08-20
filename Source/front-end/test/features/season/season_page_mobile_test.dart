@@ -23,8 +23,7 @@ TeamStanding _standing(String teamId, String division, {int wins = 6, int losses
 
 /// Realistic-length names/divisions -- long enough to actually stress the
 /// standings table's flexed columns and the leaderboard cards' name +
-/// current->projected row, not just short placeholder strings that would
-/// pass trivially regardless of whether the layout is actually safe.
+/// current->projected row.
 final _season = SeasonProjection(
   sport: 'nfl',
   season: 2026,
@@ -46,10 +45,8 @@ final _season = SeasonProjection(
 );
 
 // Full 2-conference Cup knockout bracket (Semifinals -> Conference Final
-// -> Championship) -- the NBA Cup group-standings tab is gone (see
-// season_page.dart's own comment), so the Cup's own overflow risk now
-// lives entirely in its bracket tab, same shared _BracketSection/
-// _BracketTree code path the main Playoff Bracket test below exercises.
+// -> Championship), same shared _BracketSection/_BracketTree code path
+// the main Playoff Bracket test below exercises.
 final _nbaCupBracketSeason = SeasonProjection(
   sport: 'nba',
   season: 2026,
@@ -92,8 +89,7 @@ final _nbaCupBracketSeason = SeasonProjection(
 
 // Full 3-round conference-split bracket plus a championship card -- the
 // widest content this page has (multiple horizontally-scrolling round
-// columns stacked per conference), same "realistic, not a trivial
-// placeholder" philosophy as _season/_nbaCupSeason above.
+// columns stacked per conference).
 final _bracketSeason = SeasonProjection(
   sport: 'nfl',
   season: 2026,
@@ -143,6 +139,64 @@ final _bracketSeason = SeasonProjection(
   ),
 );
 
+// Exercises a best-of-7 series matchup card. Every matchup below is
+// deliberately near the longest realistic status string (a 3-digit
+// probability, a 4-3 predicted record, a real team abbreviation) so a
+// too-small _cardHeight/_verticalUnit shows up here, not just in a single
+// hand-picked test case.
+final _nbaSeriesBracketSeason = SeasonProjection(
+  sport: 'nba',
+  season: 2026,
+  standings: [],
+  leaderboards: null,
+  bracket: const BracketProjection(
+    conferences: {
+      'Eastern': [
+        BracketRound(round: 'Play-In', matchups: [
+          BracketMatchup(teamA: '1', teamB: '14', seedA: 7, seedB: 8, status: 'projected', predictedWinner: '1', winProbability: 0.59),
+        ]),
+        BracketRound(round: 'Conference Quarterfinals', matchups: [
+          BracketMatchup(
+            teamA: '18', teamB: '28', seedA: 1, seedB: 8, status: 'projected',
+            predictedWinner: '18', winProbability: 0.995, winsA: 0, winsB: 0,
+            predictedWinsA: 4, predictedWinsB: 3,
+          ),
+          BracketMatchup(
+            teamA: '2', teamB: '5', seedA: 4, seedB: 5, status: 'scheduled',
+            predictedWinner: '2', winProbability: 0.813, winsA: 3, winsB: 3,
+            predictedWinsA: 4, predictedWinsB: 3,
+          ),
+        ]),
+        BracketRound(round: 'Conference Semifinals', matchups: [
+          BracketMatchup(
+            teamA: '18', teamB: '2', seedA: 1, seedB: 4, status: 'final',
+            winsA: 4, winsB: 3, actualWinner: '18',
+          ),
+        ]),
+      ],
+      'Western': [
+        BracketRound(round: 'Play-In', matchups: [
+          BracketMatchup(teamA: '21', teamB: '3', seedA: 7, seedB: 8, status: 'projected', predictedWinner: '21', winProbability: 0.51),
+        ]),
+        BracketRound(round: 'Conference Quarterfinals', matchups: [
+          BracketMatchup(
+            teamA: '24', teamB: '12', seedA: 1, seedB: 8, status: 'projected',
+            predictedWinner: '24', winProbability: 0.812, winsA: 0, winsB: 0,
+            predictedWinsA: 4, predictedWinsB: 1,
+          ),
+        ]),
+      ],
+    },
+    rounds: null,
+    teamNames: {
+      '18': BracketTeamName(name: 'Boston Celtics', abbreviation: 'BOS'),
+      '28': BracketTeamName(name: 'Toronto Raptors', abbreviation: 'TOR'),
+    },
+    finalMatchup: BracketMatchup(teamA: '18', teamB: '24', status: 'projected', predictedWinner: '18', winProbability: 0.5),
+    champion: '18',
+  ),
+);
+
 void main() {
   for (final width in mobileViewportWidths) {
     testWidgets('standings tab renders with no overflow at ${width}px wide', (tester) async {
@@ -168,9 +222,8 @@ void main() {
         ),
       );
 
-      // The toggle row scrolls horizontally on a narrow viewport (see
-      // season_page.dart) -- ensureVisible scrolls it into reach first,
-      // same as a real user would have to.
+      // The toggle row scrolls horizontally on a narrow viewport --
+      // ensureVisible scrolls it into reach first.
       await tester.ensureVisible(find.text('Player Prop Leaders'));
       await tester.tap(find.text('Player Prop Leaders'));
       await tester.pumpAndSettle();
@@ -202,6 +255,24 @@ void main() {
         ProviderScope(
           overrides: [seasonProjectionProvider.overrideWith((ref, sport) async => _bracketSeason)],
           child: const MaterialApp(home: Scaffold(body: SeasonPage(sportId: 'nfl'))),
+        ),
+      );
+
+      await tester.ensureVisible(find.text('Playoff Bracket'));
+      await tester.tap(find.text('Playoff Bracket'));
+      await tester.pumpAndSettle();
+
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('Playoff Bracket tab renders NBA series matchups (long status lines) with no overflow at ${width}px wide',
+        (tester) async {
+      await pumpAtWidth(
+        tester,
+        width,
+        ProviderScope(
+          overrides: [seasonProjectionProvider.overrideWith((ref, sport) async => _nbaSeriesBracketSeason)],
+          child: const MaterialApp(home: Scaffold(body: SeasonPage(sportId: 'nba'))),
         ),
       );
 

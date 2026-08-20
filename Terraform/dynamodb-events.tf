@@ -9,15 +9,9 @@
 # range_key=event_date returns results in the order get_all_events wants
 # (most recent first, scan_index_forward=False) with no separate sort.
 #
-# The entity_id GSI from docs/DATA_SCHEMA.md ("this team's full event
-# history" frontend view) stays deferred -- no route needs it yet.
-#
-# Every item written here MUST have a non-empty event_date -- DynamoDB
+# Every item written here must have a non-empty event_date -- DynamoDB
 # silently omits an item from a GSI projection if it's missing the GSI's
-# range key attribute. normalize.py's scoreboard_event_to_event_item
-# always sets event_date from the raw ESPN payload, so this isn't a
-# concern in practice, just worth knowing if a future write path ever
-# skips it.
+# range key attribute.
 resource "aws_dynamodb_table" "events" {
   name         = local.events_table
   billing_mode = "PAY_PER_REQUEST"

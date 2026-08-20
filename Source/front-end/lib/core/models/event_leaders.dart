@@ -1,11 +1,7 @@
 /// Mirrors the `leaders` block on GET /{sport}/predictions/events/{event_id}
-/// (see Source/aws-lambdas/nfl/predict/event_prediction.py's
-/// predict_event_leaders/LEADER_CATEGORY_STATS) -- optional/nullable
-/// throughout since it's a best-effort field that can come back null if the
-/// backend couldn't compute it for a given event. `name` is likewise
-/// optional -- a raw ESPN id is meaningless in the UI, so this model
-/// prefers `name` when the backend includes it and falls back to the id
-/// otherwise.
+/// -- optional/nullable throughout since it's a best-effort field that can
+/// come back null. `name` falls back to the raw entity id when the backend
+/// omits it.
 class PlayerStatLine {
   const PlayerStatLine({required this.entityId, required this.name, required this.stats});
 
@@ -31,17 +27,15 @@ class PlayerStatLine {
 
 /// Category keys are sport-specific (NFL/NCAAFB: passing/receiving/rushing/
 /// sacks; NBA/NCAA MBB: scoring/rebounding/assists -- see
-/// team_leaders_panel.dart's own per-sport category config, the only place
-/// that needs to know what a given sport's categories actually are). This
-/// model itself stays category-agnostic, just a map of category key ->
+/// team_leaders_panel.dart's own per-sport category config). This model
+/// itself stays category-agnostic, just a map of category key ->
 /// candidates.
 ///
 /// Every category normalizes to a list here even though NFL's/NCAAFB's own
-/// `passing` category is sent as a single object-or-null, not a list (see
-/// event_prediction.py's own `team_leaders`) -- a team only ever has one
-/// starting-QB candidate, so a 0-or-1-element list is lossless and lets
-/// every category render through the same list-based widget code, no
-/// singular-vs-list special case needed above this parsing step.
+/// `passing` category is sent as a single object-or-null, not a list -- a
+/// team only ever has one starting-QB candidate, so a 0-or-1-element list
+/// is lossless and lets every category render through the same
+/// list-based widget code.
 class TeamLeaders {
   const TeamLeaders(this.categories);
 
@@ -73,14 +67,10 @@ class EventLeaders {
 
 /// Builds an EventLeadersComparison entirely client-side, from the
 /// predicted `leaders` block plus GET /{sport}/live-scores' own
-/// `player_stats` (LiveEventState.playerStats) -- no separate backend
-/// endpoint for this: the predicted side never changes mid-game, and the
-/// "actual" side is just whatever the same live-scores poll this page
-/// already runs every 30s (event_detail_page.dart) most recently fetched.
-/// Reuses PlayerStatLineComparison/TeamLeadersComparison/
-/// EventLeadersComparison verbatim -- an in-progress player's live totals
-/// are exactly as much an "actual" value as a completed game's final ones,
-/// just not yet final.
+/// `player_stats` (LiveEventState.playerStats). Reuses
+/// PlayerStatLineComparison/TeamLeadersComparison/EventLeadersComparison
+/// verbatim -- an in-progress player's live totals are exactly as much an
+/// "actual" value as a completed game's final ones, just not yet final.
 extension EventLeadersLiveComparison on EventLeaders {
   EventLeadersComparison toLiveComparison(Map<String, Map<String, double>> playerStats) => EventLeadersComparison(
         home: home.toLiveComparison(playerStats),
@@ -107,15 +97,11 @@ extension PlayerStatLineLiveComparison on PlayerStatLine {
 }
 
 /// Mirrors the `leaders_comparison` block on a completed event from
-/// GET /{sport}/events?status=completed (see
-/// Source/library/serving/nfl_reads.py's _leaders_comparison) --
-/// predicted-vs-actual player-prop stats for whichever leader candidates
-/// had a prediction recorded before the game. Same shape as
-/// TeamLeaders/EventLeaders above (category map, all-list once parsed),
-/// just with `predicted`/`actual` sub-maps per player instead of flat stat
-/// values -- null throughout under the same "nobody recorded one before
-/// the game" condition PredictionComparison already documents at the
-/// team level (see event.dart).
+/// GET /{sport}/events?status=completed -- predicted-vs-actual player-prop
+/// stats for whichever leader candidates had a prediction recorded before
+/// the game. Same shape as TeamLeaders/EventLeaders above (category map,
+/// all-list once parsed), just with `predicted`/`actual` sub-maps per
+/// player instead of flat stat values.
 class PlayerStatLineComparison {
   const PlayerStatLineComparison({
     required this.entityId, required this.name, required this.predicted, required this.actual,

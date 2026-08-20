@@ -1,7 +1,5 @@
-# Cost allocation tags must be Active before any tag-scoped budget or Cost
-# Explorer report shows data for them. AWS rejects activation for a tag key
-# that has never appeared in cost and usage data, so activate_cost_allocation_tags
-# defaults to false until tagged resources exist. See docs/TAGGING_STRATEGY.md.
+# Tags must be Active before any tag-scoped budget/Cost Explorer report shows
+# data; AWS rejects activation for a tag key with no cost/usage history yet.
 resource "aws_ce_cost_allocation_tag" "tags" {
   for_each = var.activate_cost_allocation_tags ? toset(["Project", "Sport", "Component", "Environment"]) : []
 
@@ -9,8 +7,7 @@ resource "aws_ce_cost_allocation_tag" "tags" {
   status  = "Active"
 }
 
-# Comprehensive project budget -- Scoped to the Project tag so it tracks this project's
-# spend specifically, not anything else sharing the AWS account.
+# Scoped to the Project tag so it tracks only this project's spend.
 resource "aws_budgets_budget" "project" {
   name         = "${var.project}-monthly"
   budget_type  = "COST"
@@ -53,9 +50,7 @@ resource "aws_budgets_budget" "project" {
   }
 }
 
-# Per-sport budgets -- disabled by default (empty map, see variables.tf).
-# Populate per_sport_budget_limits once a sport has enough real cost history
-# to set a sane threshold against
+# Per-sport budgets, disabled by default via an empty map.
 resource "aws_budgets_budget" "per_sport" {
   for_each = var.per_sport_limits
 

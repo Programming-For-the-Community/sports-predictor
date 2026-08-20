@@ -1,20 +1,16 @@
 """
 Pure NFL feature-computation functions, shared between the batch Fargate
 feature-engineering task (building a training dataset from full history)
-and, later, the inference Lambda (building a live feature vector for one
-upcoming matchup) -- see design/CLAUDE.md's adapter interface, which names
-this step build_features(). No AWS calls live here; every function takes
-already-fetched rows (from FeatureStorage) and returns numbers. Keeping
-train-time and serve-time feature computation as the same functions is
-what prevents train/serve skew -- if this logic were duplicated instead of
-shared, the model could end up trained on features computed slightly
-differently than what it sees at prediction time.
+and the inference Lambda (building a live feature vector for one upcoming
+matchup). No AWS calls live here; every function takes already-fetched
+rows (from FeatureStorage) and returns numbers. Keeping train-time and
+serve-time feature computation as the same functions prevents train/serve
+skew.
 
 Not covered here: season win totals, Super Bowl winner, and playoff game
-winners. Those aren't separate feature sets -- they're produced by
-simulating a season/bracket using the per-game outcome model's win
-probabilities repeatedly (a model/predict.py concern), built entirely on
-top of the event-level features below.
+winners. Those are produced by simulating a season/bracket using the
+per-game outcome model's win probabilities repeatedly, built on top of
+the event-level features below.
 """
 import logging
 
@@ -133,12 +129,9 @@ def build_event_features(
     home_win_streak = current_streak(home_team_events, home_id)
     away_win_streak = current_streak(away_team_events, away_id)
 
-    # Injury status is scoped to the presumptive QB specifically, not
-    # every position -- keeps the initial feature set small and tied to
-    # the position that most affects win probability, worth revisiting
-    # once this has real signal behind it. home_qb_games/away_qb_games'
-    # rows all belong to the same identified player (see this function's
-    # own docstring), so the first row's entity_id is that player's id.
+    # Injury status is scoped to the presumptive QB specifically. home_qb_games/
+    # away_qb_games' rows all belong to the same identified player, so the
+    # first row's entity_id is that player's id.
     home_qb_entity_id = home_qb_games[0].get("entity_id") if home_qb_games else None
     away_qb_entity_id = away_qb_games[0].get("entity_id") if away_qb_games else None
     home_injuries = event.get("home_injuries")
@@ -146,11 +139,9 @@ def build_event_features(
 
     venue_city = event.get("venue_city")
     # Every domestic US venue address has a state; international ones
-    # never do (see library.features.nfl_teams). A venue with no state
-    # AND no entry in INTERNATIONAL_VENUES means either a new
-    # international host city needs adding there, or this is a data
-    # quirk worth a look -- either way, travel_distances_km is silently
-    # falling back to the ordinary-game assumption for this event.
+    # never do. A venue with no state and no entry in INTERNATIONAL_VENUES
+    # means travel_distances_km is silently falling back to the
+    # ordinary-game assumption for this event.
     if venue_city and event.get("venue_state") is None and venue_city not in INTERNATIONAL_VENUES:
         logger.warning(
             "Event %s has venue_city=%r with no US state and no entry in "
@@ -165,22 +156,15 @@ def build_event_features(
         "event_date": event["event_date"],
         "home_entity_id": home_id,
         "away_entity_id": away_id,
-        # Both already land in DynamoDB via scoreboard_event_to_event_item
-        # (library/normalize/espn.py) -- no new data source needed, these
-        # just weren't being surfaced as model inputs. Unlike event_date,
-        # these two ARE meant to be real features: week captures how far
-        # into the season a game falls, and season_type distinguishes
-        # regular-season from postseason games, which plausibly behave
-        # differently even at the same week number.
+        # week captures how far into the season a game falls; season_type
+        # distinguishes regular-season from postseason games.
         "week": event.get("week"),
         "season_type": event.get("season_type"),
         "kickoff_hour_utc": kickoff_hour_utc(event.get("kickoff_time")),
         # venue_indoor and weather_temperature are real feature inputs (a
-        # dome neutralizes weather entirely, and cold/heat plausibly
-        # affects passing/kicking games); venue_city/venue_state are
+        # dome neutralizes weather entirely); venue_city/venue_state are
         # carried through for reference only -- raw strings aren't
-        # model-consumable without encoding, so train_win_probability_model.py excludes
-        # them from its feature columns (see DATA_SCHEMA.md).
+        # model-consumable without encoding.
         "venue_indoor": event.get("venue_indoor"),
         "venue_city": event.get("venue_city"),
         "venue_state": event.get("venue_state"),
@@ -227,12 +211,6 @@ def build_event_features(
         "home_avg_turnovers": home_box_stats.get("avg_turnovers"),
         "home_avg_total_yards": home_box_stats.get("avg_total_yards"),
         "home_avg_possession_time_seconds": home_box_stats.get("avg_possession_time_seconds"),
-        # penalties/penalty_yards have been in team_game_stats.stat_line
-        # since normalize.py's _TEAM_COMPOUND_KEY_SPLITS was written (see
-        # "totalPenaltiesYards"), for the full historical backfill --
-        # rolling_player_stat_averages already averages them generically
-        # like every other stat_line key, they just weren't read into this
-        # return dict until now.
         "home_avg_penalties": home_box_stats.get("avg_penalties"),
         "home_avg_penalty_yards": home_box_stats.get("avg_penalty_yards"),
         "home_third_down_pct": home_third_down_pct,
@@ -252,21 +230,13 @@ def build_event_features(
         "away_travel_km": away_travel_km,
         "home_win_streak": home_win_streak,
         "away_win_streak": away_win_streak,
-        # Coach/injury fields all land on `event` via ingest's
-        # _enrich_events + scoreboard_event_to_event_item (see
-        # library/normalize/espn.py) -- absent (None) if that enrichment
-        # didn't run, same sparse-optional convention weather_temperature
-        # uses. experience/season_win_pct/career_playoff_win_pct are
-        # ESPN's own numbers, used directly -- no derivation, and raw
-        # coach identity is never a feature here, same rule as team/player
-        # ids. season_win_pct and career_playoff_win_pct are deliberately
-        # BOTH included, not one instead of the other -- season_win_pct is
-        # a full, stable 17-game regular-season sample but says nothing
-        # about big-game performance; career_playoff_win_pct captures that
-        # specifically, and (unlike a single season's own postseason
-        # record, which would be null for every non-playoff-team game
-        # league-wide and a 1-3 game sample even when present) stays a
-        # meaningful, non-null figure for any coach with career tenure.
+        # Coach/injury fields are absent (None) if ingest enrichment
+        # didn't run. Raw coach identity is never a feature here, only
+        # experience/season_win_pct/career_playoff_win_pct, used directly
+        # with no derivation. season_win_pct and career_playoff_win_pct
+        # are both included: season_win_pct is a full, stable
+        # regular-season sample but says nothing about big-game
+        # performance, which career_playoff_win_pct captures.
         "home_coach_experience": event.get("home_coach_experience"),
         "away_coach_experience": event.get("away_coach_experience"),
         "home_coach_season_win_pct": event.get("home_coach_season_win_pct"),
@@ -302,12 +272,10 @@ def build_player_features(
 
     event is the full event record player_game belongs to (see
     FeatureStorage.get_all_events), elo_ratings is compute_elo_ratings'
-    full output, and own_previous_event_date is this player's OWN TEAM's
+    full output, and own_previous_event_date is this player's own team's
     (not the player's own) most recent prior event date, for rest_days --
-    the same context build_event_features uses for the win-probability
-    model, reoriented to one player's perspective (own/opponent rather
-    than home/away) since a player-prop row has no "home team" of its
-    own."""
+    reoriented to one player's perspective (own/opponent rather than
+    home/away) since a player-prop row has no "home team" of its own."""
     participants = event["participants"]
     home = next(p for p in participants if p.get("role") == "home")
     away = next(p for p in participants if p.get("role") == "away")
@@ -322,10 +290,9 @@ def build_player_features(
     own_elo = home_elo if is_home else away_elo
     opponent_elo = away_elo if is_home else home_elo
 
-    # No unrecognized-venue warning here, unlike build_event_features --
-    # build_event_dataset already logs it once per event; every player in
-    # that game routing through here too would repeat the same warning
-    # once per roster spot.
+    # No unrecognized-venue warning here -- build_event_dataset already
+    # logs it once per event; repeating it per player would spam once per
+    # roster spot.
     venue_city = event.get("venue_city")
     home_travel_km, away_travel_km = travel_distances_km(away_id, home_id, venue_city)
     own_travel_km = home_travel_km if is_home else away_travel_km

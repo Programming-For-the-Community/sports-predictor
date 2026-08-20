@@ -4,18 +4,14 @@ import '../theme/app_colors.dart';
 import '../theme/app_text_styles.dart';
 
 /// Shared by season_page.dart's standings and event_list_page.dart's
-/// event list -- both group by the same backend-provided conference
-/// field (see static/conference_order.dart's own doc comment) and want
-/// the identical filter control.
+/// event list -- both group by the same backend-provided conference field
+/// and want the identical filter control.
 ///
 /// Owns a TextEditingController, but only ever sets its text
 /// programmatically once (the clear button) -- built once (`late final`,
 /// not re-created from `widget.value` on every rebuild), so ordinary
 /// typing is otherwise exactly as uncontrolled as a bare TextField and
-/// never fights the user's own cursor position. Without a controller at
-/// all, the clear button's `onChanged('')` call only reset the caller's
-/// own filter state, not the field's own still-visible text -- this is
-/// what actually clears the displayed text too.
+/// never fights the user's own cursor position.
 class ConferenceFilterField extends StatefulWidget {
   const ConferenceFilterField({super.key, required this.value, required this.onChanged});
 

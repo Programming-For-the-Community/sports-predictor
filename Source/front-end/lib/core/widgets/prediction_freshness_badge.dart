@@ -11,16 +11,12 @@ import '../theme/app_text_styles.dart';
 /// PredictionComputingRetry, which replaces it) -- shown when predict-read
 /// served a 203 (see EventPrediction.stale): a small "updating" indicator,
 /// plus the mechanism that actually resolves it. Schedules a silent
-/// background eventPredictionProvider invalidate after retryAfterSeconds
-/// -- no loading state, the existing (stale-but-still-good) prediction
-/// just stays on screen until the next fetch lands, at which point the
-/// normal AsyncData rebuild swaps in the fresh numbers. Reschedules
-/// itself (didUpdateWidget) if that next fetch is still stale, same
-/// self-rescheduling shape as PredictionComputingRetry and for the same
-/// reason -- Riverpod's default skipLoadingOnRefresh keeps rendering this
-/// same widget instance in place across a refetch, so a one-shot initState
-/// timer would only ever fire once. Renders (and schedules) nothing at
-/// all when not stale.
+/// background eventPredictionProvider invalidate after retryAfterSeconds;
+/// the existing (stale-but-still-good) prediction stays on screen until
+/// the next fetch lands. Reschedules itself (didUpdateWidget) if that next
+/// fetch is still stale, since Riverpod's default skipLoadingOnRefresh
+/// keeps rendering this same widget instance across a refetch. Renders
+/// (and schedules) nothing at all when not stale.
 class PredictionFreshnessBadge extends ConsumerStatefulWidget {
   const PredictionFreshnessBadge({
     super.key,

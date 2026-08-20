@@ -1,8 +1,7 @@
 """
 NCAAFB normalize Lambda. Triggered by S3 PutObject events on the raw data
-lake, filtered to the ncaafb/ prefix (see
-Terraform/s3-raw-data-lake-notifications.tf). Reads raw CFBD JSON written
-by ncaafb-ingest/ncaafb-schedule-sync from S3, normalizes it into the
+lake, filtered to the ncaafb/ prefix. Reads raw CFBD JSON written by
+ncaafb-ingest/ncaafb-schedule-sync from S3, normalizes it into the
 project schema, and upserts the results into DynamoDB. Never calls CFBD
 directly.
 
@@ -11,23 +10,17 @@ are batched. Each record is processed independently so a failure in one
 doesn't block the others.
 
 Key routing (based on S3 key pattern) -- every CFBD raw object here is a
-JSON list (one entry per game), unlike NFL's own scoreboard/boxscore
-objects which are each a single dict, since CFBD's box score endpoints
-are bulk-per-week rather than per-game:
+JSON list (one entry per game), since CFBD's box score endpoints are
+bulk-per-week rather than per-game:
     ncaafb/games/{season}/{season_type}/{week}.json     -> event records
     ncaafb/boxscore/{season}/{season_type}/{week}.json  -> player stats, player entities
     ncaafb/teamstats/{season}/{season_type}/{week}.json -> team stats
     ncaafb/roster/{season}.json                         -> player entities (position)
                                                             -- a {"fetched_at", "data"}
-                                                            envelope, not a bare list,
-                                                            unlike the three above (see
-                                                            ingest/handler.py's
-                                                            _fetch_roster_if_stale)
+                                                            envelope, not a bare list
 
 Also runs _cancel_stale_scheduled_events unconditionally on every
-invocation, regardless of which key(s) triggered it -- see that
-function's own docstring for why this lives here rather than in
-ingest/handler.py (which never touches DynamoDB directly).
+invocation, regardless of which key(s) triggered it.
 """
 import concurrent.futures
 import json
@@ -68,16 +61,12 @@ STALE_UNPLAYED_MAX_AGE_DAYS = 365
 def _cancel_stale_scheduled_events(storage: PipelineStorage) -> int:
     """Corrects any event still "scheduled" more than a year past its own
     event_date to "canceled". CFBD's bulk /games endpoint has no
-    structured cancellation signal of its own (unlike ESPN's
-    status.type.name -- see library/normalize/espn.py's _event_status),
-    so a genuinely canceled/postponed NCAAFB game just sits at
-    "scheduled" forever without this; a year is long enough that no real
-    delayed/rescheduled game could still be legitimately upcoming. Run
-    once per invocation (not per S3 record) -- idempotent and cheap (one
-    status-index Query, see PipelineStorage.get_events_by_status), same
-    "safe to run unconditionally and often" reasoning ingest's own teams/
-    coaches cache refresh already relies on. Returns how many rows were
-    corrected, purely for logging."""
+    structured cancellation signal of its own, so a genuinely
+    canceled/postponed NCAAFB game just sits at "scheduled" forever
+    without this; a year is long enough that no real delayed/rescheduled
+    game could still be legitimately upcoming. Run once per invocation
+    (not per S3 record) -- idempotent and cheap (one status-index Query).
+    Returns how many rows were corrected, purely for logging."""
     cutoff = (datetime.now(timezone.utc).date() - timedelta(days=STALE_UNPLAYED_MAX_AGE_DAYS)).isoformat()
     stale = [e for e in storage.get_events_by_status(SPORT, "scheduled") if e.get("event_date", "") < cutoff]
     for event in stale:
@@ -94,17 +83,16 @@ def _process_games(payload: list, key: str) -> None:
 
 
 def _preserve_roster_position(storage: PipelineStorage, entity: dict) -> None:
-    """CFBD's box-score athletes carry no position (see
-    game_player_stats_to_player_game_stats' own docstring) -- every entity
-    item that function produces has metadata.position=None. Without this,
-    upsert_player_entity's full-item PutItem would blank out whatever
-    position roster sync (_process_roster below) already set, every
-    single week that player's box score line gets reprocessed, since a
-    box score's own team_id_as_of (that week's game date) is always newer
-    than the last roster sync's -- exactly the condition
-    upsert_player_entity's staleness guard lets win. Best-effort: a lookup
-    failure just leaves position None for this write, same as before this
-    existed."""
+    """CFBD's box-score athletes carry no position -- every entity item
+    game_player_stats_to_player_game_stats produces has
+    metadata.position=None. Without this, upsert_player_entity's
+    full-item PutItem would blank out whatever position roster sync
+    (_process_roster below) already set, every time that player's box
+    score line gets reprocessed, since a box score's own team_id_as_of
+    (that week's game date) is always newer than the last roster sync's
+    -- exactly the condition upsert_player_entity's staleness guard lets
+    win. Best-effort: a lookup failure just leaves position None for
+    this write."""
     if entity["metadata"]["position"] is not None:
         return
     try:
@@ -116,15 +104,12 @@ def _preserve_roster_position(storage: PipelineStorage, entity: dict) -> None:
         entity["metadata"]["position"] = existing["metadata"]["position"]
 
 
-# Both player-entity write paths below fan writes out across threads rather
-# than looping serially like every other processor in this file. Each write
-# is one (sometimes two, see _write_boxscore_entity) synchronous DynamoDB
-# round-trip, and at CFBD's real scale that serial cost blows Lambda's own
-# timeout: a single week's box score (1122 entities) measured at 47.97s of
-# the 60s timeout, and the full-season roster (~16k rows) measured at a
-# full 60s timeout TWICE (S3's async-invoke retry) with zero application
-# log output either time, since the "Wrote N..." line only fires after the
-# whole loop finishes. I/O-bound work, so GIL contention isn't a concern.
+# Both player-entity write paths below fan writes out across threads
+# rather than looping serially. Each write is one (sometimes two, see
+# _write_boxscore_entity) synchronous DynamoDB round-trip; at CFBD's real
+# scale (a week's box score can be 1000+ entities, a full-season roster
+# ~16k rows) serial writes would blow Lambda's timeout. I/O-bound work,
+# so GIL contention isn't a concern.
 WRITE_WORKERS = 20
 
 
@@ -151,13 +136,12 @@ def _process_boxscore(payload: list, key: str) -> None:
 
 def _process_roster(payload: dict, key: str) -> None:
     # Split written vs. rejected -- roster's own team_id_as_of is always
-    # today's fetch date, so a rejection here means something ELSE
+    # today's fetch date, so a rejection here means something else
     # already wrote a same-day-or-newer team_id_as_of for that same
-    # entity_id first (see upsert_player_entity's own docstring for the
-    # staleness guard this is watching). A candidate count of 0 written
-    # entities means roster_to_player_entities itself found nothing to
-    # write (e.g. every entry missing "id"/"teamId") -- a different
-    # failure mode than a nonzero rejected count.
+    # entity_id first. A candidate count of 0 written entities means
+    # roster_to_player_entities itself found nothing to write (e.g.
+    # every entry missing "id"/"teamId") -- a different failure mode
+    # than a nonzero rejected count.
     storage = _get_storage()
     as_of_date = payload["fetched_at"][:10]
     entities = roster_to_player_entities(payload.get("data", []), SPORT, as_of_date)

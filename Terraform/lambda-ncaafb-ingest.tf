@@ -1,22 +1,19 @@
 # NCAAFB ingest Lambda. Triggered daily by the shared
 # sfn-ingest-orchestrator.tf, which invokes every active sport's own
-# "${var.project}-<sport>-ingest" function by naming convention -- no
-# per-sport scheduler-ncaafb-ingest.tf is needed (unlike schedule-sync/
-# live-scores below, which ARE invoked directly by their own scheduler).
+# "${var.project}-<sport>-ingest" function by naming convention.
 # Fetches CFBD's per-week games/box-score data and writes raw JSON to S3,
 # plus coach/ranking enrichment (see
-# Source/aws-lambdas/ncaafb/ingest/enrichment.py) -- the normalize Lambda
-# picks up from S3 the same way lambda-nfl-normalize.tf's does.
+# Source/aws-lambdas/ncaafb/ingest/enrichment.py); the normalize Lambda
+# picks up from S3.
 #
 # Code is deployed by the ncaafb_data_pipeline GitHub Actions workflow (via
-# `aws lambda update-function-code`) -- NOT by Terraform. Same placeholder-
-# ZIP + lifecycle.ignore_changes pattern as lambda-nfl-ingest.tf.
+# `aws lambda update-function-code`), not by Terraform, using a
+# placeholder ZIP with lifecycle.ignore_changes.
 #
-# CFBD requires an API key, unlike NFL's keyless ESPN source --
 # CFBD_API_KEY_SECRET_ARN + CFBD_API_KEY_SECRET_FIELD resolve the ingest key
-# specifically (not the backfill key) from the shared secret at cold start.
-# Reuses aws_iam_role.lambda_pipeline (iam-lambda-pipeline.tf), which
-# already grants secretsmanager:GetSecretValue on that secret.
+# from the shared secret at cold start. Reuses aws_iam_role.lambda_pipeline
+# (iam-lambda-pipeline.tf), which already grants
+# secretsmanager:GetSecretValue on that secret.
 
 resource "aws_cloudwatch_log_group" "ncaafb_ingest" {
   name              = "/aws/lambda/${var.project}-ncaafb-ingest"

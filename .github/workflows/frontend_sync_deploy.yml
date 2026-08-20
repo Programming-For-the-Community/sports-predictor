@@ -1,8 +1,7 @@
-# Syncs an already-built frontend to S3 and invalidates CloudFront. Split
-# out of frontend_hosting.yml for the same reason nfl_predict_deploy.yml is
-# split from nfl_ai_hosting.yml: building has no infra dependency and runs
-# before `terraform apply`, but this step needs the S3 bucket/CloudFront
-# distribution (Terraform/s3-frontend.tf, cloudfront.tf) to already exist.
+# Syncs an already-built frontend to S3 and invalidates CloudFront.
+# Building has no infra dependency and runs before `terraform apply`, but
+# this step needs the S3 bucket/CloudFront distribution
+# (Terraform/s3-frontend.tf, cloudfront.tf) to already exist.
 #
 # Runs standalone (workflow_dispatch, downloading a previously-uploaded
 # frontend-build artifact by run ID -- useful for redeploying without a
@@ -52,9 +51,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       # Needed for Terraform/ to exist when resolving bucket/distribution
-      # below -- this job never needed repo source before (it only
-      # downloaded a build artifact and ran AWS CLI commands), so a
-      # checkout was never part of it until that Terraform read was added.
+      # below.
       - name: Checkout code
         uses: actions/checkout@v4
 
@@ -78,13 +75,10 @@ jobs:
         with:
           cli_config_credentials_token: ${{ secrets.TF_API_TOKEN }}
 
-      # Reads Terraform state directly by default -- frontend_deploy.yml
-      # deliberately does NOT pass bucket_name/distribution_id anymore
-      # (see frontend_hosting.yml's comment for why: relaying a value
-      # through nested reusable-workflow-call outputs proved unreliable
-      # across several real runs). The inputs stay as an explicit manual
-      # override for a standalone workflow_dispatch redeploy against a
-      # non-default bucket/distribution, not as the normal path.
+      # Reads Terraform state directly by default. The inputs stay as an
+      # explicit manual override for a standalone workflow_dispatch
+      # redeploy against a non-default bucket/distribution, not as the
+      # normal path.
       - name: Resolve bucket/distribution
         id: resolve
         env:
@@ -105,19 +99,13 @@ jobs:
           echo "bucket_name=$BUCKET_NAME" >> "$GITHUB_OUTPUT"
           echo "distribution_id=$DISTRIBUTION_ID" >> "$GITHUB_OUTPUT"
 
-      # `flutter build web` doesn't content-hash any filename (unlike e.g.
-      # a CRA/webpack build) -- main.dart.js, index.html, and every other
-      # output file keep the exact same URL from one deploy to the next,
-      # only the bytes behind it change. `aws s3 sync` with no
-      # --cache-control sends no Cache-Control header at all, so browsers
-      # (mobile Safari/Chrome especially) fell back to long heuristic
-      # freshness and kept serving a build from days ago -- the
-      # CloudFront invalidation below clears the *edge* cache, but never
-      # reaches a browser that never asks CloudFront again. no-cache
-      # (distinct from no-store) still lets the browser/CloudFront cache
-      # the bytes, it just forces a conditional GET/ETag revalidation on
-      # every load, so a real new deploy is always seen without a manual
-      # hard refresh.
+      # `flutter build web` doesn't content-hash any filename --
+      # main.dart.js, index.html, and every other output file keep the
+      # exact same URL from one deploy to the next, only the bytes behind
+      # it change. no-cache (distinct from no-store) still lets the
+      # browser/CloudFront cache the bytes, it just forces a conditional
+      # GET/ETag revalidation on every load, so a new deploy is always
+      # seen without a manual hard refresh.
       - name: Sync to S3
         env:
           BUCKET_NAME: ${{ steps.resolve.outputs.bucket_name }}

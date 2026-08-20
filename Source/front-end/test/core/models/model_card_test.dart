@@ -21,7 +21,7 @@ void main() {
     expect(card.rmse, isNull);
     expect(card.naiveBaselineAccuracy, isNull);
     expect(card.topFeatures.single.feature, 'elo_diff');
-    // This card predates the backtesting harness -- null, not an empty list.
+    // No backtest recorded -- null, not an empty list.
     expect(card.candidates, isNull);
     expect(card.candidatesRankedBy, isNull);
   });
@@ -88,12 +88,9 @@ void main() {
     expect(card.candidatesRankedBy, 'log_loss');
     expect(card.candidates, hasLength(2));
     expect(card.candidates![0].algorithm, 'xgboost');
-    // "score" is deliberately accuracy/mae, not the raw log_loss/rmse
-    // used to rank -- see backtest.py's own reasoning.
+    // "score" is accuracy/mae; "rankScore" is the raw log_loss/rmse that
+    // actually decided the ranking -- the two can disagree in direction.
     expect(card.candidates![0].score, 0.63);
-    // "rankScore" IS the raw log_loss/rmse -- the value that actually
-    // decided the ranking, kept alongside "score" specifically so the two
-    // being different (and sometimes disagreeing in direction) is visible.
     expect(card.candidates![0].rankScore, 0.65);
     expect(card.candidates![1].algorithm, 'logistic_regression');
   });

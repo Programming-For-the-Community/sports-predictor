@@ -1,26 +1,8 @@
-# Builds, packages, and deploys the NFL historical backfill job
-# (Source/data-backfills/nfl). Runs standalone (workflow_dispatch) or
-# called from nfl_deploy.yml (workflow_call) -- either way the work is
-# identical: run tests, then build and push an image only if they pass.
+# Runs tests, then builds and pushes the NFL historical backfill image
+# (Source/data-backfills/nfl) only if they pass. Tests hit ESPN's real API.
 #
-# IMAGE_VERSION lives here, once, as a plain constant -- bump it by
-# editing this line, never by typing a version into a manual dispatch
-# input. GitHub Actions doesn't let a `uses:` job read workflow-level
-# `env:` directly in its `with:`, so `set-version` below exists purely to
-# expose that constant as a job output the build job(s) can reference.
-#
-# The test suite (Source/tests/data-backfills/nfl/) hits ESPN's real API
-# rather than mocking it -- there's no offline fixture layer yet, so this
-# gate depends on ESPN being reachable and not rate-limiting the runner.
-# Worth knowing if this job ever fails for reasons unrelated to an actual
-# code regression.
-#
-# Only one image today. If this stage grows a second component (e.g. a
-# separate Lambda), add another job below following the same shape as
-# `build-backfill-image`: `needs: [set-version, test]`, `uses:
-# ./.github/workflows/docker_build_push.yml`, a distinct `image_name`,
-# and the same `needs.set-version.outputs.version` -- every image built
-# in the same run of this workflow shares one version.
+# `set-version` exposes the IMAGE_VERSION env constant as a job output since
+# a `uses:` job cannot read workflow-level `env:` directly in its `with:`.
 
 name: NFL Backfill
 
@@ -36,11 +18,6 @@ permissions:
   contents: read
 
 jobs:
-  # Only one artifact here (nfl-backfill), so there's no cross-artifact
-  # coupling to fix -- using run_python_tests.yml anyway for the same
-  # reason every other workflow does: one shared place for "install the
-  # library, install extra requirements, run pytest" instead of
-  # duplicating those steps inline in every workflow file.
   test:
     name: Run tests
     uses: ./.github/workflows/run_python_tests.yml

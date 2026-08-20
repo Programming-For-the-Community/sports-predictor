@@ -1,16 +1,12 @@
-# NBA live-score cache Lambda -- mirrors lambda-nfl-live-scores.tf's
-# two-trigger shape (scheduler refresh + API Gateway read), calling ESPN's
-# basketball/nba scoreboard/summary endpoints directly by event_id -- no
-# team-abbreviation+date join fallback needed, since NBA's data source and
-# live-scores source are now both ESPN (see project memory's 2026-08-13
-# source-switch note; this was the plan's former highest-risk item).
+# NBA live-score cache Lambda, triggered by both a scheduler refresh and
+# API Gateway reads, calling ESPN's basketball/nba scoreboard/summary
+# endpoints directly by event_id.
 #
-# Uses its own per-sport role (iam-nba-live-scores.tf), not NFL's or
-# NCAAFB's, since those are scoped to their own raw-bucket cache prefixes.
+# Uses its own per-sport role (iam-nba-live-scores.tf), scoped to NBA's
+# own raw-bucket cache prefix.
 #
-# Zip-packaged, not VPC-attached -- same reasoning as
-# lambda-nfl-live-scores.tf. Code is deployed by the
-# nba_live_scores_deploy workflow -- NOT by Terraform.
+# Zip-packaged, not VPC-attached. Code is deployed by the
+# nba_live_scores_deploy workflow, not by Terraform.
 
 resource "aws_cloudwatch_log_group" "nba_live_scores" {
   name              = "/aws/lambda/${var.project}-nba-live-scores"
@@ -37,11 +33,9 @@ resource "aws_lambda_function" "nba_live_scores" {
   role          = aws_iam_role.nba_live_scores.arn
   runtime       = "python3.12"
   handler       = "handler.lambda_handler"
-  # Same LiveScoreRefresh worst case as lambda-nfl-live-scores.tf/
-  # lambda-ncaafb-live-scores.tf (per-event boxscore fetch for every
-  # currently-live event, parallelized) -- NBA can have more concurrent
-  # live games on a given night than an NFL Sunday window, closer to
-  # NCAAFB's own headroom.
+  # 45s accounts for LiveScoreRefresh's worst case: a per-event boxscore
+  # fetch for every currently-live event, parallelized. NBA can have many
+  # concurrent live games on a given night.
   timeout     = 45
   memory_size = 256
 
@@ -54,8 +48,8 @@ resource "aws_lambda_function" "nba_live_scores" {
       ESPN_API_ROOT_URL = var.espn_api_root_url
       ESPN_USER_AGENT   = var.espn_user_agent
       # FeatureStorage's constructor requires all four of these regardless
-      # of which methods actually get called -- live_scores.py only ever
-      # queries the events table, same as lambda-nfl-live-scores.tf.
+      # of which methods actually get called; live_scores.py only ever
+      # queries the events table.
       ENTITIES_TABLE_NAME          = aws_dynamodb_table.entities.name
       EVENTS_TABLE_NAME            = aws_dynamodb_table.events.name
       PLAYER_GAME_STATS_TABLE_NAME = aws_dynamodb_table.player_game_stats.name

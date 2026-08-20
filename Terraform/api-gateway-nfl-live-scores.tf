@@ -1,7 +1,4 @@
 # GET /nfl/live-scores -> nfl_live_scores (lambda-nfl-live-scores.tf).
-# Split out of api-gateway-nfl-predict.tf since it targets a third,
-# separate Lambda -- CORS/deployment/stage resources stay centralized
-# there (this route is added to that file's own triggers/cors_resources).
 resource "aws_api_gateway_resource" "nfl_live_scores" {
   rest_api_id = aws_api_gateway_rest_api.main.id
   parent_id   = aws_api_gateway_resource.nfl.id

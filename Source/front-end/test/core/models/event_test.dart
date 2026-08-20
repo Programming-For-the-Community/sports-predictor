@@ -26,12 +26,9 @@ void main() {
   });
 
   test('a non-null result with a null score/won (NCAAFB scheduled event) parses instead of throwing', () {
-    // NCAAFB's own normalize (game_to_event_item) always attaches a
-    // `result` object, even pre-game -- score/won are left null rather
-    // than omitted (CFBD genuinely has no score to report yet), unlike
-    // NFL's ESPN-sourced "0"/false placeholder. This exact shape once
-    // threw a cast error (`(json['score'] as num)` rejects null) --
-    // regression coverage for that.
+    // NCAAFB always attaches a `result` object, even pre-game, with
+    // score/won left null rather than omitted -- fromJson must handle a
+    // null score without a cast error.
     final event = SportEvent.fromJson({
       'event_id': '401872926',
       'event_date': '2026-08-30',

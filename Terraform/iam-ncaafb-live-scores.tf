@@ -1,9 +1,7 @@
-# Mirrors iam-lambda-live-scores.tf (NFL's) -- a dedicated per-sport role
-# rather than widening that one, since its own permissions are scoped to
-# NFL's raw-bucket cache prefix specifically. NCAAFB's live-scores Lambda
-# calls ESPN's supplemental scoreboard client (zero CFBD quota, per
-# design/DATA_SOURCES.md), so this role needs no secretsmanager access --
-# unlike iam-ncaafb-backfill.tf, there's no keyed API in this Lambda's path.
+# Dedicated per-sport role scoped to NCAAFB's own raw-bucket cache
+# prefix. NCAAFB's live-scores Lambda calls ESPN's supplemental
+# scoreboard client (zero CFBD quota), so this role needs no
+# secretsmanager access.
 data "aws_iam_policy_document" "ncaafb_live_scores_assume" {
   statement {
     actions = ["sts:AssumeRole"]
@@ -30,9 +28,7 @@ resource "aws_iam_role_policy_attachment" "ncaafb_live_scores_logs" {
 }
 
 data "aws_iam_policy_document" "ncaafb_live_scores_permissions" {
-  # Same FeatureStorage-constructor rationale as iam-lambda-live-scores.tf's
-  # own comment -- only the events table + its status-index GSI are
-  # actually queried.
+  # Only the events table and its status-index GSI are queried.
   statement {
     sid     = "ReadEvents"
     actions = ["dynamodb:Query"]

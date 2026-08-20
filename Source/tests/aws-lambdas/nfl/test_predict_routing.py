@@ -1,10 +1,8 @@
 """
-Unit tests for nfl/predict/handler.py -- a pure background compute
-worker (see that module's own docstring), dispatching on `detail-type`
-only. No API-Gateway-shaped routing lives here anymore -- GET
-/nfl/predictions/events/{event_id} and .../players/{entity_id} moved to
-predict-read/handler.py (see test_predict_read.py's own
-TestPredictionRoutes); ScheduledSeasonProjection is covered separately in
+Unit tests for nfl/predict/handler.py -- a background compute worker,
+dispatching on `detail-type` only. GET /nfl/predictions/events/{event_id}
+and .../players/{entity_id} are covered separately in test_predict_read.py;
+ScheduledSeasonProjection is covered separately in
 test_predict_season_simulation.py.
 
 The nfl_predict module is registered in sys.modules by conftest.py, whose

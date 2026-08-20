@@ -26,8 +26,7 @@ def _make_s3():
     read anything back. attach_depth_charts's own cache read/write DOES
     round-trip through get_object/put_object though, so the one test that
     exercises it (test_attaches_depth_charts_to_seeded_events) needs a
-    real 404-until-written mock, same pattern as
-    tests/library/storage/test_depth_chart_cache.py's own _make_s3."""
+    real 404-until-written mock."""
     mock_s3 = MagicMock()
     mock_s3.get_object.side_effect = ClientError({"Error": {"Code": "404", "Message": "Not Found"}}, "GetObject")
     return mock_s3
@@ -47,8 +46,7 @@ class TestLambdaHandler:
         assert result == {"season": 2026, "synced": 23, "failed": 0}
 
     def test_uses_one_shared_client_for_the_whole_run(self):
-        # The whole point of this Lambda over the old per-week fan-out --
-        # one NFLClient means one RateLimiter pacing every request in the
+        # One NFLClient means one RateLimiter pacing every request in the
         # run, not 23 independent ones with no cross-invocation
         # coordination.
         mock_s3 = MagicMock()

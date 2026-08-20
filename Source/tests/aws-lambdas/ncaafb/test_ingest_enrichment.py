@@ -2,8 +2,7 @@
 Unit tests for aws-lambdas/ncaafb/ingest/enrichment.py -- enrich_games'
 overall best-effort wiring only. The coach/rank school-name lookup
 builders and coach cache it delegates to are covered by
-tests/library/storage/test_ncaafb_coach_cache.py (see that module's own
-docstring for why they moved out of this Lambda); venue_indoor itself is
+tests/library/storage/test_ncaafb_coach_cache.py; venue_indoor itself is
 covered by tests/library/storage/test_ncaafb_team_cache.py.
 
 The ncaafb_ingest module (which pulls in its sibling enrichment.py via a

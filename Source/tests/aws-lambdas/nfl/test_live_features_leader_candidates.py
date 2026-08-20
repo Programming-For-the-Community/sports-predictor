@@ -4,9 +4,7 @@ round-robin candidate-pool identification (passing/receiving/rushing/
 sacks) event_prediction.py's leaders block scores and ranks (see
 test_predict_leaders.py/test_predict_receiving_props.py/
 test_predict_rushing_props.py for the scoring/ranking/capping side of
-that same feature). FeatureStorage is mocked. Split out of what used to
-be one large test_live_features.py -- see test_live_features_event.py's
-own history note.
+that same feature). FeatureStorage is mocked.
 """
 from datetime import date
 from unittest.mock import MagicMock
@@ -181,26 +179,18 @@ class TestBuildLiveEventLeaderCandidates:
         assert "wr1" in {row["entity_id"] for row in candidates["home"]["receiving"]}
 
     def test_computes_elo_ratings_once_regardless_of_candidate_count(self):
-        """Regression test for a real production timeout: before this fix,
-        every candidate's own _build_player_feature_row call independently
-        recomputed Elo from the full completed-events history (see
-        _live_elo_ratings' docstring) -- with up to ~15 candidates per
-        event (QB + 3 receivers + 2 rushers + 3 pass-rushers, per team),
-        that meant get_all_events + a full Elo walk up to 15 times in one
-        request. Confirmed live via CloudWatch that this was hitting the
-        29s Lambda timeout on /nfl/predictions/events/{id}. Threading
-        current_ratings through every candidate (same fix already applied
-        to handler.py's season leaderboards) means exactly one call
-        regardless of how many candidates get identified."""
+        """current_ratings is computed once and threaded through every
+        candidate's own _build_player_feature_row call, rather than each
+        candidate independently recomputing Elo from the full
+        completed-events history -- confirmed here via get_all_events'
+        own call count staying at 1 regardless of candidate count."""
         storage = MagicMock()
         target = _event("E3", "2025-09-21", "KC", "LAC")
         storage.get_event.return_value = target
         storage.get_all_events.return_value = []
         storage.get_team_game_stats_for_team.return_value = []
         storage.get_team_events.return_value = []
-        # Four distinct candidates (QB, 2 receivers, 1 rusher) is already
-        # enough to prove the fix: pre-fix, each one would have separately
-        # triggered its own get_all_events + Elo recompute.
+        # Four distinct candidates (QB, 2 receivers, 1 rusher).
         storage.get_team_entities.side_effect = lambda sport, team_id: (
             [
                 _roster_entry("qb1", "QB"), _roster_entry("wr1", "WR"),

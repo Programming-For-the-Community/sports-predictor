@@ -1,11 +1,8 @@
-# GET /ncaafb/live-scores -> ncaafb_live_scores (lambda-ncaafb-live-scores.tf).
-# Split out of api-gateway-ncaafb-predict.tf since it targets a third,
-# separate Lambda -- same split api-gateway-nfl-live-scores.tf makes from
-# api-gateway-nfl-predict.tf. CORS for this route is added to
-# api-gateway-ncaafb-predict.tf's own local.ncaafb_cors_resources map, and
-# this resource/method/integration are added to api-gateway-nfl-predict.tf's
-# shared aws_api_gateway_deployment trigger list (one REST API, one
-# deployment -- see that file's own comment).
+# GET /ncaafb/live-scores -> ncaafb_live_scores (lambda-ncaafb-live-scores.tf),
+# in its own file since it targets a separate Lambda. CORS is added to
+# api-gateway-ncaafb-predict.tf's local.ncaafb_cors_resources map, and this
+# resource/method/integration are added to api-gateway-nfl-predict.tf's
+# shared aws_api_gateway_deployment trigger list.
 resource "aws_api_gateway_resource" "ncaafb_live_scores" {
   rest_api_id = aws_api_gateway_rest_api.main.id
   parent_id   = aws_api_gateway_resource.ncaafb.id

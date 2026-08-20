@@ -1,19 +1,13 @@
 """
-NCAAFB win-probability model training -- the CFBD-sourced equivalent of
-Source/model-training/nfl/train_win_probability_model.py. Reads
-event_features.parquet (written by
-Source/feature-engineering/ncaafb/build_dataset.py) from S3, then runs
-the same multi-algorithm candidate tournament via
-library.ml.backtest.run_backtest and promotes whichever wins on log_loss
--- see the NFL script's own docstring for the tournament mechanics, which
-this mirrors exactly (same harness, same candidate roster, different
-sport's data).
+NCAAFB win-probability model training. Reads event_features.parquet
+(written by Source/feature-engineering/ncaafb/build_dataset.py) from S3,
+then runs a multi-algorithm candidate tournament via
+library.ml.backtest.run_backtest and promotes whichever wins on log_loss.
 
 Scheduled -- see Terraform/ecs-task-ncaafb-train-win-probability-model.tf
 and the registry-driven training orchestrator (sfn-training-orchestrator.tf,
-dynamodb-sport-registry.tf's ncaafb_registry item) -- but every bit as
-runnable manually via `aws ecs run-task`, same as
-Source/feature-engineering/ncaafb.
+dynamodb-sport-registry.tf's ncaafb_registry item) -- but also runnable
+manually via `aws ecs run-task`.
 
 Required environment variables:
     MODEL_ARTIFACTS_BUCKET_NAME
@@ -26,8 +20,7 @@ import logging
 import os
 
 try:
-    # See NFL's own train_win_probability_model.py comment -- must run
-    # before any sklearn import (including the one directly below).
+    # Must run before any sklearn import (including the one directly below).
     from sklearnex import patch_sklearn
     patch_sklearn()
 except ImportError:
@@ -49,9 +42,7 @@ SPORT = "ncaafb"
 MODEL_NAME = "win-probability"
 EVENT_FEATURES_KEY = "ncaafb/training-data/event_features.parquet"
 
-# Identifiers, never model inputs. Unlike NFL's own NON_FEATURE_COLUMNS,
-# there's no venue_city/venue_state here -- library/features/ncaafb.py's
-# build_event_features never surfaces raw venue strings as a column.
+# Identifiers, never model inputs.
 NON_FEATURE_COLUMNS = {"event_key", "event_date", "home_entity_id", "away_entity_id"}
 LABEL_COLUMN = "label_home_won"
 SUMMARY_METRICS = ["accuracy", "log_loss", "naive_baseline_accuracy"]

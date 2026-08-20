@@ -1,12 +1,9 @@
 """
 Unit tests for the season tab's playoff-bracket reconciliation
-(season_projection._resolve_matchup/_bracket_payload) -- the 3-state
-design from the approved plan (no real game yet -> projected; real
-scheduled game -> live prediction, computed on the spot if nobody's
-logged one yet; real completed game -> actual result + whatever was
-originally predicted). Split out from test_predict_season_simulation.py,
-same precedent that file's own docstring already established for keeping
-each concern in its own file.
+(season_projection._resolve_matchup/_bracket_payload) -- three states:
+no real game yet -> projected; real scheduled game -> live prediction,
+computed on the spot if nobody's logged one yet; real completed game ->
+actual result + whatever was originally predicted.
 """
 from unittest.mock import MagicMock, patch
 

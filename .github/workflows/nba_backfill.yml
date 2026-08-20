@@ -1,9 +1,7 @@
 # Builds, packages, and deploys the NBA historical backfill job
 # (Source/data-backfills/nba). Runs standalone (workflow_dispatch) or
-# called from nba_deploy.yml (workflow_call, once that file exists --
-# Sub-phase 3A step 9) -- either way the work is identical: run tests,
-# then build and push an image only if they pass. Mirrors nfl_backfill.yml
-# exactly (NBA is ESPN-sourced like NFL, not CFBD-keyed like NCAAFB).
+# called from nba_deploy.yml (workflow_call) -- either way the work is
+# identical: run tests, then build and push an image only if they pass.
 #
 # IMAGE_VERSION lives here, once, as a plain constant -- bump it by
 # editing this line, never by typing a version into a manual dispatch

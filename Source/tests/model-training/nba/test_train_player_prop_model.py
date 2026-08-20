@@ -4,13 +4,9 @@ Unit tests for the NBA player-prop training entrypoint.
 library.ml.backtest.run_backtest is mocked here -- these tests verify
 train_player_prop_model.py's own orchestration (target-stat filtering,
 column selection, naive baseline computation, what gets handed to
-run_backtest), not the tournament itself (see Source/tests/library/ml/
-test_backtest.py) or any real algorithm fitting (see Source/tests/
-library/ml/test_model_types.py). No TestStatCategory/
-TestOpposingSideCategories/TestFeatureColumns-side-of-the-ball sections
--- unlike NFL's own version, NBA's stat_line has no category-prefixed
-keys at all (see train_player_prop_model.py's own module docstring), so
-there's no opposing-side machinery to test here.
+run_backtest), not the tournament itself or any real algorithm fitting.
+NBA's stat_line has no category-prefixed keys, so there's no
+opposing-side machinery to test here.
 """
 import json
 from unittest.mock import MagicMock, patch
@@ -26,8 +22,9 @@ def _make_df(n=10, target_stat="points", missing_stat_rows=0, games_with_stat=No
     entirely -- must be filtered out rather than crashing or contributing
     a bogus label.
 
-    games_with_stat/avg_stat: same purpose as NFL's own _make_df -- see
-    that file's docstring, identical reasoning here.
+    games_with_stat/avg_stat: per-row values defaulting to comfortably
+    clear MIN_PRIOR_GAMES_WITH_STAT/MIN_AVG_FRACTION_OF_MEDIAN so tests
+    not exercising those filters don't need to think about them.
     """
     if games_with_stat is None:
         games_with_stat = [5] * n
@@ -182,9 +179,8 @@ class TestFeatureColumns:
         assert "avg_assists" in columns
 
     def test_no_opposing_side_exclusion_a_column_common_to_every_position_survives(self):
-        # NBA has no offense/defense category split (see this module's
-        # own docstring) -- a column that would've been excluded outright
-        # by NFL's rule survives here purely on MIN_NON_NULL_FRACTION.
+        # NBA has no offense/defense category split, so a column survives
+        # here purely on MIN_NON_NULL_FRACTION.
         df = _make_df(100, target_stat="points")
         df["avg_rebounds"] = [None] * 80 + [8.0] * 20
 

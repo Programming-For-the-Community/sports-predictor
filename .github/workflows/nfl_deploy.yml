@@ -1,37 +1,11 @@
-# Top-level NFL deploy pipeline. Runs on every push to an nfl* branch, but
-# pauses for manual approval (via the environment's required reviewers --
-# configure this in Settings > Environments, it can't be set from this
-# file) before doing anything.
+# Top-level NFL deploy pipeline. Runs on every push to an nfl* branch,
+# pausing for manual approval (via the environment's required reviewers,
+# configured in Settings > Environments) before doing anything.
 #
-# Once approved, every build (backfill, ai_training, ai_hosting) runs
-# BEFORE infra, in parallel -- none of them read anything Terraform
-# manages, they only need the ECR repo URL and AWS push credentials,
-# both plain GitHub variables/secrets. tf_install then applies infra
-# (including the ECS task definitions' env vars -- see
-# Terraform/ecs-task-nfl-backfill.tf -- and, for the container-image
-# nfl-predict Lambda specifically, its CreateFunction call, which
-# validates the referenced image tag already exists in ECR -- something
-# an ECS task definition never checks, so this ordering matters for
-# Lambda in a way it doesn't for the ECS-based jobs). Only after infra do
-# the steps that need a Terraform-created resource to already exist run:
-# pointing nfl-predict at the image ai_hosting just pushed, and deploying
-# the zip-based ingest/normalize Lambda code.
-#
-# Both this job's `approval` step AND tf_install.yml's own terraform job
-# gate on the `development`/`production` environment, so a run through
-# this pipeline prompts for approval twice. That's intentional -- keeping
-# tf_install.yml's environment always attached (needed so its
-# environment-scoped secrets/variables, like the subnet CIDRs, actually
-# resolve) is more important than avoiding a second click, and doing both
-# without a special-case flag is simpler than the alternative.
-#
-# Note: tf_install.yml also runs standalone (it triggers directly on
-# pushes to tf/* branches), bypassing this ordering entirely. A first-ever
-# apply reached that way, on an account where nfl-predict-latest has never
-# been pushed, would still fail at CreateFunction -- run nfl_ai_hosting by
-# hand once first if that ever comes up. Not worth solving here: it would
-# mean teaching an infra-only workflow about the predict Lambda's Docker
-# build, more coupling than a one-time edge case justifies.
+# Build jobs (backfill, ai_training, ai_hosting) run before infra since
+# they don't depend on Terraform-managed resources; infra's CreateFunction
+# call for the nfl-predict Lambda requires the image to already exist in
+# ECR. Deploy steps that need a Terraform-created resource run after infra.
 
 name: NFL Deploy
 
@@ -42,9 +16,8 @@ on:
       - 'nfl*'
   workflow_call:
 
-# See app_deploy.yml's own comment -- shared group across every workflow
-# that can reach tf_install.yml's terraform apply, since
-# Terraform/main.tf's S3 backend has no state locking configured.
+# Shared group across all workflows that reach tf_install.yml's terraform
+# apply, since Terraform state is shared across sports.
 concurrency:
   group: terraform-deploy-pipeline
   cancel-in-progress: false
@@ -63,10 +36,6 @@ jobs:
       - name: Approved
         run: echo "Deployment approved -- proceeding."
 
-  # approval is intentionally skipped (not failed) when called via
-  # workflow_call -- without this, a skipped `needs` job would cause
-  # everything downstream to be skipped too. Each build job below repeats
-  # this same tolerant check against `approval` directly.
   backfill:
     name: Historical backfill (build)
     needs: approval
@@ -122,13 +91,6 @@ jobs:
       function_name: ${{ needs.infra.outputs.nfl_predict_function_name }}
       image_uri: ${{ needs.ai_hosting.outputs.predict_image_uri }}
 
-  # nfl-predict-read -- the light GET /nfl/events + GET /nfl/models Lambda
-  # split out of nfl-predict for cold start (see
-  # Terraform/lambda-nfl-predict-read.tf). A reusable workflow
-  # (nfl_predict_read_deploy.yml), not inline jobs here -- app_deploy.yml
-  # (the actual main-branch deploy path) needs to run this exact same
-  # test+deploy pair too, and this file alone isn't what production
-  # deploys actually run through.
   predict_read_deploy:
     name: NFL predict-read (test + deploy)
     needs: [approval, infra]
@@ -140,9 +102,6 @@ jobs:
     with:
       function_name: ${{ needs.infra.outputs.nfl_predict_read_function_name }}
 
-  # nfl-live-scores -- GET /nfl/live-scores plus the EventBridge-triggered
-  # cache refresh (Terraform/lambda-nfl-live-scores.tf). Same reusable-
-  # workflow reasoning as predict_read_deploy above.
   live_scores_deploy:
     name: NFL live-scores (test + deploy)
     needs: [approval, infra]

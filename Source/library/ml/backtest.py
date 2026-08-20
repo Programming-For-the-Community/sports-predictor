@@ -2,9 +2,7 @@
 Runs several candidate algorithms (library.ml.model_types.ModelAdapter
 instances) against the same train/holdout split for one prediction
 target, promoting incrementally as each one finishes rather than only at
-the end -- the shared backtesting harness design/PROJECT_PLAN.md's
-Phase 4 calls for, generalized to run for any sport/target/task rather
-than being written once per model script.
+the end.
 
 Every target-specific concern (which columns are features, how the label
 is derived, what a trivial/naive baseline looks like for this target) is
@@ -12,8 +10,7 @@ the caller's job -- a train_*.py script builds X_train/y_train/X_test/
 y_test and its own naive_baseline_metrics, then hands them here with a
 list of candidates to try. This module only knows how to run a fair
 tournament among whatever candidates it's given and hand each one to
-training_common's promotion helpers as it finishes -- it has no sport- or
-target-specific knowledge at all.
+training_common's promotion helpers as it finishes.
 """
 import logging
 import time
@@ -27,15 +24,11 @@ logger = logging.getLogger("model-training")
 
 def _is_worse_than_baseline(metadata: dict, naive_baseline_metrics: dict, promotion_metric: str) -> bool | None:
     """None if there's no baseline value comparable to promotion_metric at
-    all -- win-probability's own naive_baseline_metrics only ever computes
-    naive_baseline_accuracy, never a baseline log_loss (see
-    train_win_probability_model.py's own SUMMARY_METRICS) -- True/False
-    otherwise. A lower-is-better metric (rmse/log_loss) compares directly
-    against its own naive_baseline_<metric> counterpart when one exists;
-    log_loss falls back to accuracy vs. naive_baseline_accuracy (the only
-    baseline signal a classification target actually has) when its own
-    baseline isn't available. Warn-only, never blocks promotion -- see
-    run_backtest's own docstring for why."""
+    all, True/False otherwise. A lower-is-better metric (rmse/log_loss)
+    compares directly against its own naive_baseline_<metric> counterpart
+    when one exists; log_loss falls back to accuracy vs.
+    naive_baseline_accuracy when its own baseline isn't available.
+    Warn-only, never blocks promotion."""
     baseline_key = f"naive_baseline_{promotion_metric}"
     if baseline_key in naive_baseline_metrics:
         return metadata[promotion_metric] > naive_baseline_metrics[baseline_key]
@@ -62,59 +55,37 @@ def run_backtest(
     evaluate_regression_holdout (rmse/mae). naive_baseline_metrics: the
     target's own trivial-baseline numbers (e.g. {"naive_baseline_accuracy":
     0.57} for a classifier, {"naive_baseline_rmse": ..., "naive_baseline_mae":
-    ...} for a regressor) -- computed once by the caller since what
-    "naive" means is entirely target-specific (always predict home wins;
-    predict this player's own rolling average; ...), then merged onto
-    every candidate's model card identically so they're all compared
-    against the same baseline. run_id: see training_common.resolve_run_id
-    -- identifies this run's own resumable-progress breadcrumb, so a task
-    that gets interrupted mid-tournament and relaunched with the SAME
-    run_id picks up where it left off instead of redoing already-decided
-    candidates.
+    ...} for a regressor), computed once by the caller then merged onto
+    every candidate's model card identically. run_id: see
+    training_common.resolve_run_id -- identifies this run's own
+    resumable-progress breadcrumb, so a task that gets interrupted
+    mid-tournament and relaunched with the same run_id picks up where it
+    left off instead of redoing already-decided candidates.
 
     Every candidate gets tuned and fit on the identical holdout split, and
-    every candidate -- including the first -- is compared against
-    whatever's CURRENTLY HOSTED right now (training_common.
-    would_beat_current/promote_if_better both read the live current.json
-    pointer fresh, never a cached value from earlier in this run) the
-    moment it finishes, in candidate list order. Only replaces what's
-    live if it's genuinely at least as good (no percentage tolerance --
-    see promote_if_better's own docstring for why an earlier version of
-    this rule that allowed a slightly worse candidate through effectively
-    let whichever algorithm ran LAST in CANDIDATES list order win by
-    default). An earlier candidate's own win in THIS SAME run is a real
-    comparison target for a later one, same as a previous month's
-    production version would be.
+    every candidate is compared against whatever's currently hosted right
+    now (training_common.would_beat_current/promote_if_better both read
+    the live current.json pointer fresh, never a cached value from
+    earlier in this run) the moment it finishes, in candidate list order.
+    Only replaces what's live if it's genuinely at least as good (no
+    percentage tolerance). An earlier candidate's own win in this same
+    run is a real comparison target for a later one, same as a previous
+    month's production version would be.
 
-    No candidate is ever force-promoted unconditionally, including the
-    run's first -- a Fargate Spot reclaim right after the first candidate
-    finishes just means that candidate is versioned (if it won) or
-    skipped (if it lost) like any other; resumability itself comes from
-    the run-progress breadcrumb below, not from guaranteeing something
-    new goes live regardless of quality.
-
-    A candidate that doesn't win is never persisted to S3 at all -- with
-    4-5 candidates per target and 11+ targets, versioning every losing
-    candidate would mean dozens of S3 objects nothing ever reads again.
-    Every promoted card carries a `candidates` summary of the COMPLETE
+    A candidate that doesn't win is never persisted to S3 at all. Every
+    promoted card carries a `candidates` summary of the complete
     tournament -- every algorithm this run evaluated, win or lose
     (including ones evaluated in an earlier, interrupted attempt of the
-    same run_id), ranked best-first by promotion_metric (the correct
-    scoring rule) but DISPLAYING accuracy (classification) or mae
-    (regression) instead -- human-readable, unlike log_loss/rmse. The
-    card written at the MOMENT a candidate is promoted only has whatever
-    was evaluated so far (candidates later in the list haven't run yet);
+    same run_id), ranked best-first by promotion_metric but displaying
+    accuracy (classification) or mae (regression) instead, which is
+    human-readable unlike log_loss/rmse. The card written at the moment a
+    candidate is promoted only has whatever was evaluated so far;
     training_common.update_promoted_candidates backfills whichever
     version this run ultimately leaves live with the full list once every
-    candidate is done, right before this function returns -- see that
-    backfill's own comment below for why it's safe to only ever touch the
-    LAST promotion. A winning candidate whose promotion_metric is
-    worse than the naive baseline gets a loud warning logged (see
-    _is_worse_than_baseline) -- not blocked, since a genuinely hard-to-
-    beat target (e.g. a very sparse player-prop stat) can leave every
-    real candidate worse than a trivial baseline, and refusing to
-    promote anything at all would be a worse outcome than a visibly-
-    flagged weak model.
+    candidate is done, right before this function returns. A winning
+    candidate whose promotion_metric is worse than the naive baseline
+    gets a loud warning logged (see _is_worse_than_baseline) but is not
+    blocked.
 
     Progress (which candidates have been evaluated and their scores) is
     written to S3 after every single candidate -- win or lose -- via
@@ -122,19 +93,14 @@ def run_backtest(
     two candidates resumes without redoing either the tuning/fitting or
     the promotion decision for candidates already settled. The breadcrumb
     is deleted (training_common.clear_run_progress) once every candidate
-    in the list has been evaluated -- nothing left to resume.
-
-    Every evaluated entry (and every promoted card's metadata) carries a
-    training_seconds field -- wall-clock tune_and_fit time for that
-    candidate alone, see the field's own comment below for why.
+    in the list has been evaluated.
 
     Returns {"promotions": [model_card, ...], "candidates": [summary, ...]}
-    -- promotions lists, in the order they happened across the WHOLE run
-    (including any earlier, interrupted attempt of the same run_id, not
-    just this attempt), every card that actually went live (usually 0 or
-    1; occasionally more, if a later candidate beats an earlier one that
-    itself just won); top-level candidates is the full score summary of
-    every algorithm tried this run (across every attempt), win or lose.
+    -- promotions lists, in the order they happened across the whole run,
+    every card that actually went live (usually 0 or 1; occasionally
+    more, if a later candidate beats an earlier one that itself just
+    won); top-level candidates is the full score summary of every
+    algorithm tried this run, win or lose.
     """
     display_metric = "accuracy" if task == "classification" else "mae"
 
@@ -175,19 +141,12 @@ def run_backtest(
             "%s/%s candidate %s: %s (training_seconds=%.1f)", sport, model_name, adapter.algorithm,
             " ".join(f"{k}={v:.4f}" for k, v in metrics.items()), training_seconds,
         )
-        # "score" is the display metric, NOT promotion_metric -- see the
-        # docstring above for why. rank_score carries promotion_metric's
-        # own value alongside it so a candidate with the best "score" not
-        # winning doesn't look like a bug (candidates_ranked_by, alongside
-        # the list, names which metric rank_score is). training_seconds is
-        # wall-clock time for tune_and_fit alone (the search+refit cost
-        # that scales with row count/candidate space) -- not predict/
-        # evaluate, which are comparatively instant for every candidate
-        # here. Exists so a real per-candidate cost/accuracy tradeoff can
-        # be read off past runs' model cards instead of guessed -- see
-        # design/PROJECT_PLAN.md Phase 3's model-selection section (this
-        # is the basis for trimming a target's CANDIDATES list once real
-        # numbers exist, not a decision made from this field alone).
+        # "score" is the display metric, not promotion_metric. rank_score
+        # carries promotion_metric's own value alongside it so a
+        # candidate with the best "score" not winning doesn't look like a
+        # bug (candidates_ranked_by, alongside the list, names which
+        # metric rank_score is). training_seconds is wall-clock time for
+        # tune_and_fit alone, not predict/evaluate.
         evaluated.append({
             "algorithm": adapter.algorithm,
             "score": metrics[display_metric],
@@ -202,10 +161,8 @@ def run_backtest(
             "training_seconds": training_seconds,
             **naive_baseline_metrics,
             # The exact column order/selection model_loader.predict()
-            # (serving side) needs to build a live feature_row into what
-            # the estimator was actually trained on. X_train is identical
-            # across every candidate, so this covers every target
-            # regardless of which candidate ends up promoted.
+            # needs to build a live feature_row into what the estimator
+            # was actually trained on.
             "feature_columns": list(X_train.columns),
             "feature_importances": adapter.feature_importances(estimator, list(X_train.columns)),
             "hyperparameters": best_params,
@@ -241,18 +198,12 @@ def run_backtest(
         logger.info("%s/%s: %s (v%d) is now live.", sport, model_name, adapter.algorithm, card["version"])
 
     # The winning candidate was promoted as soon as it beat current
-    # production -- possibly before every candidate in this run had even
-    # been tried (see this function's own docstring) -- so its model card
-    # was written with only a PARTIAL "candidates" summary at that point.
-    # Now that the whole run is done, backfill it with the complete list.
-    # promotions[-1] is guaranteed to be whichever version this run
-    # leaves live: promote_if_better only ever replaces the currently-live
-    # version with something strictly better, so nothing evaluated after
-    # the last promotion could have beaten it without becoming a new,
-    # later entry in promotions itself. Skipped entirely if this run
-    # promoted nothing -- current production then belongs to some earlier
-    # run, whose own card correctly still only summarizes ITS OWN
-    # tournament, not this one's failed candidates.
+    # production, so its model card was written with only a partial
+    # "candidates" summary at that point. Now that the whole run is done,
+    # backfill it with the complete list. promotions[-1] is guaranteed to
+    # be whichever version this run leaves live: promote_if_better only
+    # ever replaces the currently-live version with something strictly
+    # better. Skipped entirely if this run promoted nothing.
     final_candidates = sorted(evaluated, key=lambda e: e["rank_score"])
     if promotions:
         final_card = promotions[-1]

@@ -1,11 +1,9 @@
-# Shared by every sport's ingest and normalize Lambdas. These two steps run
-# sequentially in the same pipeline with no security-meaningful boundary
-# between them, so one role for both keeps the role count down without
-# giving up anything for a single-user project. Not split per-sport either:
-# DynamoDB's LeadingKeys condition only supports exact partition-key
-# matches, not the SPORT#<sport># prefix this schema uses, so per-sport IAM
-# scoping isn't enforceable here -- per-sport cost visibility already comes
-# from the Sport tag (see docs/TAGGING_STRATEGY.md), not from IAM.
+# Shared by every sport's ingest and normalize Lambdas -- they run
+# sequentially with no security-meaningful boundary between them, so one
+# role covers both. Not split per-sport either: DynamoDB's LeadingKeys
+# condition only supports exact partition-key matches, not the
+# SPORT#<sport># prefix this schema uses, so per-sport IAM scoping isn't
+# enforceable here.
 data "aws_iam_policy_document" "lambda_pipeline_assume" {
   statement {
     actions = ["sts:AssumeRole"]
@@ -48,23 +46,16 @@ data "aws_iam_policy_document" "lambda_pipeline_permissions" {
       "arn:aws:dynamodb:${var.region}:${var.account_id}:table/${local.team_game_stats_table}",
       # A table's GSI is a distinct IAM resource from the table itself --
       # needed for PipelineStorage.get_events_by_status's status-index
-      # Query (aws-lambdas/ncaafb/normalize/handler.py's stale-scheduled-
-      # event cleanup), same convention as ecs-pipeline/lambda-inference's
-      # own /index/* entries.
+      # Query.
       "arn:aws:dynamodb:${var.region}:${var.account_id}:table/${local.events_table}/index/*",
     ]
   }
 
-  # Read access to the one shared third-party-API-key secret (see
-  # variables.tf's third_party_api_key_secret_arn) -- only NCAAFB's ingest
-  # and schedule-sync Lambdas actually call a keyed API (CFBD) today;
-  # normalize never does (it only transforms raw JSON already in S3), and
-  # NFL's ESPN endpoints are keyless. Granted at this shared role level
-  # rather than split out because DynamoDB's own per-sport IAM scoping
-  # already isn't enforceable here (see this file's top comment) -- the
-  # secret's per-field access boundary is application-level only (each
-  # task reads CFBD_API_KEY_SECRET_FIELD), same accepted tradeoff as the
-  # secret's own design.
+  # Read access to the shared third-party-API-key secret -- only NCAAFB's
+  # ingest and schedule-sync Lambdas call a keyed API (CFBD); normalize
+  # never does, and NFL's ESPN endpoints are keyless. The secret's
+  # per-field access boundary (CFBD_API_KEY_SECRET_FIELD) is
+  # application-level only.
   statement {
     sid       = "ReadThirdPartyApiKeySecret"
     actions   = ["secretsmanager:GetSecretValue"]

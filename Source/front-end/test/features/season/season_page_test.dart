@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -8,8 +9,7 @@ import 'package:front_end/features/season/season_page.dart';
 
 /// Functional (not just overflow) coverage for the season page's 3-way
 /// tab logic (standings/player-prop-leaders/NBA-Cup) and NBA's own
-/// standings column set -- season_page_mobile_test.dart only asserts "no
-/// overflow", not which content actually renders.
+/// standings column set.
 TeamStanding _nbaStanding(String teamId, {double playInProbability = 0.1}) => TeamStanding(
       teamId: teamId,
       division: 'Eastern Atlantic',
@@ -69,10 +69,6 @@ void main() {
   });
 
   testWidgets('nba standings group by conference only, not the 3 divisions within each', (tester) async {
-    // Real NBA standings convention (unlike NFL's by-division grouping) --
-    // 2 teams from different divisions in the same conference collapse
-    // into one "EASTERN" group, not two ("EASTERN ATLANTIC"/"EASTERN
-    // CENTRAL") -- see _standingsGroupKey's own docstring.
     final projection = SeasonProjection(
       sport: 'nba',
       season: 2026,
@@ -122,9 +118,6 @@ void main() {
       season: 2026,
       standings: [_nbaStanding('2')],
       leaderboards: null,
-      // `cup` (group standings) still exists on the payload -- see
-      // season_page.dart's own comment on why -- but must not surface a
-      // tab of its own anymore, even when present.
       cup: const CupProjection(groups: {
         'Eastern B': [
           CupTeamStanding(
@@ -150,7 +143,6 @@ void main() {
 
     expect(find.text('NBA Cup'), findsNothing);
     expect(find.text('NBA Cup Bracket'), findsOneWidget);
-    // Standings tab is the default -- the Cup bracket isn't visible yet.
     expect(find.text('SEMIFINALS'), findsNothing);
 
     await tester.tap(find.text('NBA Cup Bracket'));
@@ -158,9 +150,6 @@ void main() {
 
     expect(find.text('SEMIFINALS'), findsOneWidget);
     expect(find.text('BOS'), findsOneWidget);
-    // The group-standings-only content (record/ADV%/CHAMP% columns) must
-    // not appear anywhere -- confirms _CupSection is truly gone, not just
-    // unreachable via the toggle.
     expect(find.text('ADV%'), findsNothing);
   });
 
@@ -199,7 +188,6 @@ void main() {
     await pumpSeasonPage(tester, 'nfl', projection);
 
     expect(find.text('Playoff Bracket'), findsOneWidget);
-    // Standings tab is the default -- bracket content isn't visible yet.
     expect(find.text('AFC'), findsNothing);
 
     await tester.tap(find.text('Playoff Bracket'));
@@ -208,10 +196,8 @@ void main() {
     expect(find.text('AFC'), findsOneWidget);
     expect(find.text('NFC'), findsOneWidget);
     expect(find.text('SUPER BOWL'), findsOneWidget);
-    // Both conferences now share one combined tree (see _BracketSection's
-    // own docstring) -- "Wild Card" is one round column holding both
-    // conferences' matchups, not two separate trees with their own
-    // independent round headers, so the label itself appears once.
+    // Both conferences share one combined tree -- "Wild Card" is one round
+    // column holding both conferences' matchups, so the label appears once.
     expect(find.text('WILD CARD'), findsOneWidget);
   });
 
@@ -242,9 +228,7 @@ void main() {
 
     expect(find.text('ROUND OF 12'), findsOneWidget);
     expect(find.text('NATIONAL CHAMPIONSHIP'), findsOneWidget);
-    expect(find.text('CHAMPIONSHIP'), findsNothing); // that label is only the conference-split final's own header
-    // No skip connection exists in this bracket -- the legend explaining
-    // one shouldn't show up for a sport that never has one.
+    expect(find.text('CHAMPIONSHIP'), findsNothing); // only the conference-split final's own header
     expect(find.textContaining('skipping the Elimination Game'), findsNothing);
   });
 
@@ -291,7 +275,7 @@ void main() {
           'Eastern': [
             BracketRound(round: 'Conference Quarterfinals', matchups: [
               BracketMatchup(
-                teamA: '2', teamB: '8', seedA: 1, seedB: 8, status: 'scheduled',
+                teamA: '2', teamB: '8', seedA: 3, seedB: 6, status: 'scheduled',
                 predictedWinner: '2', winProbability: 0.81, winsA: 2, winsB: 1,
               ),
             ]),
@@ -309,8 +293,9 @@ void main() {
     await tester.tap(find.text('Playoff Bracket'));
     await tester.pumpAndSettle();
 
-    // The series record (2-1), not a raw box score.
-    expect(find.textContaining('2-1'), findsOneWidget);
+    // The series record (2, 1) shown big per-team, not a raw box score.
+    expect(find.text('2'), findsOneWidget);
+    expect(find.text('1'), findsOneWidget);
     expect(find.text('BOS'), findsOneWidget);
     expect(find.text('DET'), findsOneWidget);
   });
@@ -344,12 +329,14 @@ void main() {
     await tester.tap(find.text('Playoff Bracket'));
     await tester.pumpAndSettle();
 
-    expect(find.textContaining('BOS WINS SERIES 4-2'), findsOneWidget);
+    // The record (4-2) isn't repeated on the status line -- it's already
+    // the big score digits in the team rows above.
+    expect(find.textContaining('BOS WINS SERIES'), findsOneWidget);
   });
 
   testWidgets(
-      "a not-yet-real NBA series matchup's status line still shows its 0-0 record -- regression "
-      'for the PROJECTED case dropping it while scheduled/final both showed it', (tester) async {
+      "a not-yet-real NBA series matchup's status line shows PROJECTED + the predicted final record, "
+      'without repeating the live 0-0 record the team rows already show', (tester) async {
     final projection = SeasonProjection(
       sport: 'nba',
       season: 2026,
@@ -379,11 +366,19 @@ void main() {
     await tester.tap(find.text('Playoff Bracket'));
     await tester.pumpAndSettle();
 
-    expect(find.textContaining('0-0'), findsOneWidget);
+    // The live 0-0 record is not repeated on the status line -- it's
+    // already the big "0"/"0" score digits in the team rows.
+    expect(find.text('0'), findsNWidgets(2));
     expect(find.textContaining('PROJECTED'), findsOneWidget);
-    // The predicted FINAL record (4-2, BOS the predicted winner), distinct
-    // from the 0-0 current record above.
+    // The predicted final record (4-2, BOS the predicted winner) is the
+    // one record that belongs on the status line.
     expect(find.textContaining('predicted 4-2'), findsOneWidget);
+
+    // find.textContaining only checks the Text widget's own `data` string,
+    // unaffected by paint-time ellipsis clipping -- checking the real
+    // RenderParagraph is the only way to catch text actually being cut.
+    final paragraph = tester.renderObject<RenderParagraph>(find.textContaining('PROJECTED'));
+    expect(paragraph.didExceedMaxLines, isFalse, reason: 'status line text is being clipped, not just wrapped');
   });
 
   testWidgets(
@@ -399,7 +394,7 @@ void main() {
           'Eastern': [
             BracketRound(round: 'Conference Quarterfinals', matchups: [
               BracketMatchup(
-                teamA: '2', teamB: '8', seedA: 1, seedB: 8, status: 'scheduled',
+                teamA: '2', teamB: '8', seedA: 3, seedB: 6, status: 'scheduled',
                 predictedWinner: '2', winProbability: 0.81, winsA: 2, winsB: 1,
                 predictedWinsA: 4, predictedWinsB: 1,
               ),
@@ -418,22 +413,19 @@ void main() {
     await tester.tap(find.text('Playoff Bracket'));
     await tester.pumpAndSettle();
 
-    // The live 2-1 record and the predicted 4-1 final are both shown --
-    // distinct pieces of information, not conflated into one number.
-    expect(find.textContaining('2-1'), findsOneWidget);
+    // The live 2-1 record is the big per-team score digits (not repeated
+    // on the status line); the predicted 4-1 final only appears there.
+    expect(find.text('2'), findsOneWidget);
+    expect(find.text('1'), findsOneWidget);
     expect(find.textContaining('predicted 4-1'), findsOneWidget);
   });
 
   testWidgets(
       'NBA Play-In feeding Conference Quarterfinals lays out every card at a distinct '
       'vertical slot -- regression for a real overlapping-card bug', (tester) async {
-    // Reproduces the exact shape that overlapped: Play-In's 3 games feed
-    // a 4-matchup Conference Quarterfinals round where 2 matchups (seeds
-    // 4v5, 3v6) are byes with no traceable Play-In winner. The old
-    // fallback positioned '203 vs 206' at the same slot as '201 vs 208'
-    // (both landed on slot 2) because the naive index fallback didn't
-    // account for a slot a traced matchup elsewhere in the round had
-    // already claimed.
+    // Play-In's 3 games feed a 4-matchup Conference Quarterfinals round
+    // where 2 matchups (seeds 4v5, 3v6) are byes with no traceable
+    // Play-In winner.
     final projection = SeasonProjection(
       sport: 'nba',
       season: 2026,
@@ -465,10 +457,8 @@ void main() {
     await tester.pumpAndSettle();
 
     // Every Conference Quarterfinals card's own team-id text (no
-    // teamNames map supplied, so teamDisplayFor falls back to the raw
-    // id) should sit at a unique vertical position -- the specific pair
-    // that used to collide is '201'/'203', asserted explicitly, plus a
-    // blanket uniqueness check across the whole round for good measure.
+    // teamNames map supplied, so teamDisplayFor falls back to the raw id)
+    // should sit at a unique vertical position.
     final quarterfinalIds = ['201', '204', '203', '202'];
     final tops = {for (final id in quarterfinalIds) id: tester.getTopLeft(find.text(id)).dy};
 
@@ -480,13 +470,10 @@ void main() {
       'adjacent Quarterfinal cards stay a full card-height apart even when one lands on a '
       'fractional slot -- regression for a real visual overlap distinct-value checks missed',
       (tester) async {
-    // The Play-In-split shape (see the test below) puts the (1v8)
-    // Quarterfinal at slot 0.5 (the average of Play-In Elimination's own
-    // 2-source trace) right next to (4v5)'s bye fallback at slot 1.0 --
-    // two DISTINCT slot values, so the earlier "isNot(equals(...))"-style
-    // checks passed, but only half a row apart, and a card is taller
-    // than half a row: the cards physically overlapped in production
-    // despite never computing the same slot.
+    // The Play-In-split shape puts the (1v8) Quarterfinal at slot 0.5
+    // (the average of Play-In Elimination's own 2-source trace) right
+    // next to (4v5)'s bye fallback at slot 1.0 -- distinct slot values but
+    // only half a row apart, less than one card height.
     final projection = SeasonProjection(
       sport: 'nba',
       season: 2026,
@@ -517,24 +504,19 @@ void main() {
     await tester.tap(find.text('Playoff Bracket'));
     await tester.pumpAndSettle();
 
-    // Card height is 108px (_BracketTree's own _cardHeight) -- two
+    // Card height is 140px (_BracketTree's own _cardHeight) -- two
     // vertically-stacked cards must be at least that far apart or they
-    // overlap, regardless of whether their slot VALUES happen to differ.
+    // overlap, regardless of whether their slot values differ.
     final topGap = tester.getTopLeft(find.text('204')).dy - tester.getTopLeft(find.text('201')).dy;
-    expect(topGap, greaterThanOrEqualTo(108));
+    expect(topGap, greaterThanOrEqualTo(140));
   });
 
   testWidgets(
       'NBA Conference Semifinals also lay out at distinct vertical slots -- regression for a '
       'real overlapping-card bug the Quarterfinals-only fix did not cover', (tester) async {
     // Same Play-In/Quarterfinals shape as the regression test above, one
-    // round further. The Quarterfinals fix only dedups a slot AGAINST an
-    // already-traced one -- it never revisits a slot once assigned. Here
-    // QF2 (203v206, a bye) gets nudged from its natural slot 2 to 3 to
-    // avoid QF0's traced slot 2, which makes SF1's average ((QF2=3 +
-    // QF3=0) / 2 = 1.5) coincidentally equal SF0's average ((QF0=2 +
-    // QF1=1) / 2 = 1.5) -- two different Semifinal matchups, neither of
-    // them a bye, landing on the same slot.
+    // round further, where two different Semifinal matchups (neither a
+    // bye) can average out to the same slot.
     final projection = SeasonProjection(
       sport: 'nba',
       season: 2026,
@@ -570,7 +552,7 @@ void main() {
     await tester.pumpAndSettle();
 
     // '201' and '203' each appear twice (Quarterfinals, then Semifinals as
-    // the advancing winner) -- the second occurrence is the Semifinal card.
+    // the advancing winner); the second occurrence is the Semifinal card.
     final sf0Top = tester.getTopLeft(find.text('201').at(1)).dy;
     final sf1Top = tester.getTopLeft(find.text('203').at(1)).dy;
     expect(sf0Top, isNot(equals(sf1Top)));
@@ -581,12 +563,8 @@ void main() {
       "when the other conference's bye fallback numerically collides with it -- regression for a "
       'real cross-conference slot-stealing bug', (tester) async {
     // Both conferences use the exact same shape (byes at local round
-    // positions 1 and 2), which is exactly what let Western's bye
-    // fallback land on the same slot Eastern's own traced matchup used
-    // when everything was laid out on one shared, concatenated round --
-    // silently swapping Western's own last two Quarterfinal cards.
-    // game3 first, game1 last -- matches project_play_in's own backend
-    // ordering (see season_simulation.py), not the raw game-number order.
+    // positions 1 and 2). game3 first, game1 last -- matches the backend's
+    // own Play-In ordering, not the raw game-number order.
     BracketRound playIn(String p) => BracketRound(round: 'Play-In', matchups: [
           BracketMatchup(teamA: '${p}08', teamB: '${p}09', status: 'projected', predictedWinner: '${p}08', winProbability: 0.6),
           BracketMatchup(teamA: '${p}09', teamB: '${p}10', status: 'projected', predictedWinner: '${p}09', winProbability: 0.6),
@@ -619,13 +597,10 @@ void main() {
     await tester.tap(find.text('Playoff Bracket'));
     await tester.pumpAndSettle();
 
-    // Western's own Quarterfinals must read top-to-bottom in the same
-    // canonical (1v8)/(4v5)/(3v6)/(2v7) order Eastern's already-passing
-    // regression test above confirms -- '303' (3v6) must sit above '302'
-    // (2v7), never swapped by Eastern's own layout.
-    // '301' also appears again in the Championship card (it's
-    // finalMatchup's teamA) -- .first grabs its earlier Quarterfinals
-    // occurrence, matching document order (rounds render left to right).
+    // Western's own Quarterfinals must read top-to-bottom in canonical
+    // (1v8)/(4v5)/(3v6)/(2v7) order -- '303' (3v6) must sit above '302'
+    // (2v7). '301' also appears again in the Championship card; .first
+    // grabs its earlier Quarterfinals occurrence.
     final westernIds = ['301', '304', '303', '302'];
     final tops = {for (final id in westernIds) id: tester.getTopLeft(find.text(id).first).dy};
     expect(tops['303'], lessThan(tops['302']!));
@@ -637,12 +612,10 @@ void main() {
       "results) and Conference Quarterfinals still lands in canonical (1v8)/(4v5)/(3v6)/(2v7) order "
       '-- regression for a real "all 3 Play-In games look like the same round" complaint', (tester) async {
     // Game 1 (207v208) and Game 2 (209v210) are independent -- Game 3
-    // (208v209) is built FROM their results (game1's loser vs game2's
+    // (208v209) is built from their results (game1's loser vs game2's
     // winner) and belongs one round later. Game 1's own winner ('207')
-    // skips the Elimination round entirely and reappears two rounds
-    // later, directly in the Quarterfinals' own (2v7) pairing -- the
-    // exact shape that used to scramble Quarterfinal order when a
-    // further-back source was allowed to drive vertical position.
+    // skips the Elimination round entirely and reappears two rounds later,
+    // directly in the Quarterfinals' own (2v7) pairing.
     final projection = SeasonProjection(
       sport: 'nba',
       season: 2026,
@@ -675,28 +648,23 @@ void main() {
     await tester.tap(find.text('Playoff Bracket'));
     await tester.pumpAndSettle();
 
-    // Play-In Elimination must be its own COLUMN (a later round), not
-    // just visually offset -- the user's actual complaint was seeing all
-    // 3 Play-In games at the same horizontal level. Compare the two
-    // round headers' own x position directly.
+    // Play-In Elimination must be its own column (a later round), not
+    // just visually offset. Compare the two round headers' own x position.
     final playInHeaderLeft = tester.getTopLeft(find.text('PLAY-IN')).dx;
     final eliminationHeaderLeft = tester.getTopLeft(find.text('PLAY-IN ELIMINATION')).dx;
     expect(eliminationHeaderLeft, greaterThan(playInHeaderLeft));
 
-    // Quarterfinals must read top-to-bottom in seed order -- '208'
-    // (fed by the Elimination Game, one round back) and '207' (skips the
+    // Quarterfinals must read top-to-bottom in seed order -- '208' (fed by
+    // the Elimination Game, one round back) and '207' (skips the
     // Elimination round, sourced two rounds back) both drive real
-    // Quarterfinal positions; the two byes ('204v205', '203v206') sit
-    // between them, matching (1v8)/(4v5)/(3v6)/(2v7).
+    // Quarterfinal positions; the two byes sit between them, matching
+    // (1v8)/(4v5)/(3v6)/(2v7).
     final quarterfinalIds = ['201', '204', '203', '202'];
     final tops = {for (final id in quarterfinalIds) id: tester.getTopLeft(find.text(id).last).dy};
     expect(tops['201'], lessThan(tops['204']!));
     expect(tops['204'], lessThan(tops['203']!));
     expect(tops['203'], lessThan(tops['202']!));
 
-    // A dashed-line legend explains what the skip connection (207's own
-    // winner, bypassing Play-In Elimination) means -- this fixture is
-    // exactly the shape that produces one.
     expect(find.textContaining('skipping the Elimination Game'), findsOneWidget);
   });
 

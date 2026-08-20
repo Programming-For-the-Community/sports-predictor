@@ -7,27 +7,14 @@ recorded TARGET_STAT in the game being labeled AND has an established
 history of it (see _filter_to_target_stat), and trains a regressor
 predicting that value from their own rolling stat history (see
 build_player_features and rolling_player_stat_averages in
-library/features/nba.py and library/features/common.py). Same shape as
-Source/model-training/nfl/train_player_prop_model.py -- see its own
-docstring for the harness-level reasoning; run a given stat via the
-TARGET_STAT environment variable at `aws ecs run-task` time (see
-Terraform/ecs-task-nba-train-player-prop-model.tf).
+library/features/nba.py and library/features/common.py). Run a given
+stat via the TARGET_STAT environment variable at `aws ecs run-task` time.
 
-Genuinely simpler than NFL's own version: NBA's box score has no
-category-prefixed stat_line keys at all (confirmed live -- see
-library/normalize/espn.py's boxscore_to_player_game_stats and
-project-nba-onboarding memory, NBA's single stat block has no "name"
-field, so nothing gets a category prefix the way NFL's "passing_"/
-"rushing_"/"receiving_" keys do). NFL's OFFENSIVE_CATEGORIES/
-DEFENSIVE_CATEGORIES "opposing side of the ball" exclusion in
-_feature_columns has no NBA equivalent to exclude -- every NBA player's
-stat_line carries the same flat key set (points, rebounds, assists,
-steals, blocks, turnovers, field_goals_made/field_goal_attempts, etc.),
-regardless of position, so MIN_NON_NULL_FRACTION alone is sufficient
-here.
-
-CANDIDATES includes LightGBMRegressorAdapter -- see
-train_win_probability_model.py's own comment for why.
+Every NBA player's stat_line carries the same flat key set (points,
+rebounds, assists, steals, blocks, turnovers,
+field_goals_made/field_goal_attempts, etc.) regardless of position, so
+MIN_NON_NULL_FRACTION alone is sufficient in _feature_columns -- there's
+no side-of-the-ball exclusion to apply.
 
 Required environment variables:
     MODEL_ARTIFACTS_BUCKET_NAME
@@ -42,8 +29,7 @@ import logging
 import os
 
 try:
-    # See train_win_probability_model.py's own comment -- must run before
-    # any sklearn import (including the one directly below).
+    # Must run before any sklearn import (including the one directly below).
     from sklearnex import patch_sklearn
     patch_sklearn()
 except ImportError:
@@ -82,19 +68,16 @@ CANDIDATES = [
 ]
 
 # A player must have recorded TARGET_STAT in at least this many of their
-# own windowed prior games, not just the game being labeled -- same
-# reasoning as NFL's own train_player_prop_model.py, guards against a
-# one-off garbage-time stat line whose rolling avg_<stat> would otherwise
-# be undefined/NaN.
+# own windowed prior games, not just the game being labeled -- guards
+# against a one-off garbage-time stat line whose rolling avg_<stat> would
+# otherwise be undefined/NaN.
 MIN_PRIOR_GAMES_WITH_STAT = 2
 
 # Excludes a bench player who clears the games_with_<stat> bar above at
-# trivial volume (e.g. 2 minutes a night) rather than one-off -- same
-# reasoning and same threshold as NFL's own train_player_prop_model.py.
+# trivial volume (e.g. 2 minutes a night) rather than one-off.
 MIN_AVG_FRACTION_OF_MEDIAN = 0.35
 
-# Same reasoning as NFL's own train_player_prop_model.py -- a column
-# surviving an all-null check with even one real value isn't enough.
+# A column surviving an all-null check with even one real value isn't enough.
 MIN_NON_NULL_FRACTION = 0.05
 
 
@@ -103,12 +86,11 @@ def _model_name(target_stat: str) -> str:
 
 
 def _filter_to_target_stat(df: pd.DataFrame, target_stat: str) -> pd.DataFrame:
-    """Not every player-game recorded target_stat at meaningful volume --
-    label_stat_line is JSON-encoded (see build_player_features in
-    library/features/nba.py), so it has to be parsed before it can be
-    filtered on or turned into a label. Same MIN_PRIOR_GAMES_WITH_STAT/
-    MIN_AVG_FRACTION_OF_MEDIAN filters as NFL's own version -- see that
-    file's own docstring for the full reasoning, identical here."""
+    """Filters to rows where the player recorded target_stat at
+    meaningful volume. label_stat_line is JSON-encoded, so it's parsed
+    here before filtering on it or turning it into a label; also applies
+    the MIN_PRIOR_GAMES_WITH_STAT and MIN_AVG_FRACTION_OF_MEDIAN
+    thresholds."""
     stat_lines = df["label_stat_line"].apply(json.loads)
     has_stat = stat_lines.apply(lambda stat_line: target_stat in stat_line)
     filtered = df[has_stat].copy()
@@ -125,10 +107,8 @@ def _filter_to_target_stat(df: pd.DataFrame, target_stat: str) -> pd.DataFrame:
 
 
 def _feature_columns(df: pd.DataFrame) -> list[str]:
-    """No opposing-side-of-the-ball exclusion here -- see this module's
-    own docstring for why NBA's flat stat_line makes NFL's
-    OFFENSIVE_CATEGORIES/DEFENSIVE_CATEGORIES machinery inapplicable.
-    MIN_NON_NULL_FRACTION alone is the filter."""
+    """MIN_NON_NULL_FRACTION alone is the filter; NBA's flat stat_line
+    has no side-of-the-ball distinction to exclude."""
     candidates = training_common.feature_columns(df, NON_FEATURE_COLUMNS)
     minimum_non_null = len(df) * MIN_NON_NULL_FRACTION
     return [col for col in candidates if df[col].notna().sum() >= minimum_non_null]
@@ -152,9 +132,8 @@ def train(s3: S3Manager, df: pd.DataFrame, target_stat: str) -> dict:
     X_test = training_common.numeric_frame(test_df, feature_columns)
     y_test = test_df[LABEL_COLUMN]
 
-    # A trivial baseline -- predict this player's own rolling average
-    # directly, no model at all -- same reasoning as NFL's own
-    # train_player_prop_model.py.
+    # A trivial baseline: predict this player's own rolling average
+    # directly, no model.
     naive_predictions = test_df[f"avg_{target_stat}"]
     naive_baseline_metrics = {
         "naive_baseline_rmse": float(root_mean_squared_error(y_test, naive_predictions)),

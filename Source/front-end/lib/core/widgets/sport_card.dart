@@ -7,8 +7,7 @@ import '../theme/app_text_styles.dart';
 
 /// design/FRONTEND_STYLE.md's "Sport card" component. Inactive (not yet
 /// live on the backend) sport cards are non-interactive with a muted
-/// "VIEW-ONLY"/"SOON" treatment -- this is what makes the six-sport future
-/// visible from day one without any sport-specific code existing yet.
+/// "VIEW-ONLY"/"SOON" treatment.
 class SportCard extends StatelessWidget {
   const SportCard({super.key, required this.sport});
 
@@ -56,10 +55,9 @@ class SportCard extends StatelessWidget {
                           ),
                         ),
                         const SizedBox(width: 10),
-                        // Expanded, not Spacer -- on a narrow (mobile)
-                        // card it's the display name that needs to give
-                        // ground and ellipsize, not just consume
-                        // otherwise-empty space between it and the pill.
+                        // Expanded so the display name gives ground and
+                        // ellipsizes on a narrow (mobile) card instead of
+                        // overflowing past the status pill.
                         Expanded(
                           child: Text(
                             sport.displayName,

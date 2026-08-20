@@ -98,20 +98,8 @@ data "aws_iam_policy_document" "lambda_inference_permissions" {
     resources = ["arn:aws:s3:::${local.model_artifacts_bucket}/predictions-cache/*"]
   }
 
-  # predict-read's async invoke of predict on a prediction-cache miss (library.aws.lambda_invoker).
-  #
-  # nba_predict was missing here from step 6 (2026-08-14) until this was
-  # caught 2026-08-16 while wiring step 8 -- every one of nba-predict-
-  # read's async compute triggers (event AND player-prop predictions, not
-  # just season projection) would have hit AccessDeniedException on
-  # boto3's own invoke() call (permission is checked synchronously before
-  # an "Event" invocation is accepted, not after), caught by
-  # lambda_handler's outer try/except and surfaced as a 500 on every
-  # cache-miss/stale request -- a real, visible-in-production gap, not a
-  # silent one. Caught by cross-checking this statement against step 2's
-  # own S3 ListBucket-widening precedent, not by a failing test -- there
-  # was no test exercising the real IAM policy, only the Python call
-  # shape.
+  # predict-read's async invoke of predict on a prediction-cache miss
+  # (library.aws.lambda_invoker).
   statement {
     sid       = "InvokePredictLambda"
     actions   = ["lambda:InvokeFunction"]

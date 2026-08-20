@@ -5,24 +5,11 @@ every CANDIDATES adapter as a competing candidate against the same
 chronological holdout split via library.ml.backtest.run_backtest, and
 promotes whichever wins on log_loss. See library/ml/backtest.py for the
 tournament mechanics and library/ml/model_types.py for what each
-candidate actually is. Same shape as
-Source/model-training/nfl/train_win_probability_model.py -- see its own
-docstring for the harness-level reasoning, identical here.
-
-CANDIDATES includes LightGBMClassifierAdapter alongside the four NFL/
-NCAAFB already use -- see library/ml/model_types.py's own docstring and
-design/PROJECT_PLAN.md's Phase 3 model-selection section for why (NBA's
-first real training run is also what produces the training_seconds data
-that decides whether/how to trim a target's candidate list going
-forward -- see library/ml/backtest.py's own comment on that field. No
-trimming here yet, since there's no real duration data to trim from
-until this runs for real).
+candidate actually is.
 
 Scheduled -- see the training orchestrator (sfn-training-orchestrator.tf,
-driven by dynamodb-sport-registry.tf's nba_registry item) -- but every
-bit as runnable manually via `aws ecs run-task`, same as
-Source/feature-engineering/nba (see
-Terraform/ecs-task-nba-train-win-probability-model.tf).
+driven by dynamodb-sport-registry.tf's nba_registry item) -- but also
+runnable manually via `aws ecs run-task`.
 
 Required environment variables:
     MODEL_ARTIFACTS_BUCKET_NAME
@@ -35,10 +22,9 @@ import logging
 import os
 
 try:
-    # See NFL's own train_win_probability_model.py comment -- must run
-    # before any sklearn import (including the one directly below).
-    # XGBoost and LightGBM both have their own native optimization and
-    # aren't affected either way.
+    # Must run before any sklearn import (including the one directly
+    # below). XGBoost and LightGBM both have their own native
+    # optimization and aren't affected either way.
     from sklearnex import patch_sklearn
     patch_sklearn()
 except ImportError:
@@ -97,9 +83,8 @@ def train(s3: S3Manager, df) -> dict:
     X_test = training_common.numeric_frame(test_df, feature_columns)
     y_test = test_df[LABEL_COLUMN]
 
-    # A trivial baseline -- always predict the home team wins, no model at
-    # all. Its accuracy is just the fraction of home wins in the holdout
-    # set. Computed once and shared across every candidate this run.
+    # A trivial baseline: always predict the home team wins, no model.
+    # Accuracy is the fraction of home wins in the holdout set.
     naive_baseline_metrics = {"naive_baseline_accuracy": float(y_test.mean())}
 
     return backtest.run_backtest(

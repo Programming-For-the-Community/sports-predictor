@@ -42,13 +42,10 @@ data "aws_iam_policy_document" "eventbridge_invoke_permissions" {
   # ncaafb_predict: scheduler-ncaafb-season-projection.tf's own target.
   # ncaafb_live_scores: scheduler-ncaafb-live-scores.tf's own target,
   # same every-60s reasoning as nfl_live_scores.
-  #
-  # nba_predict/nba_live_scores/nba_schedule_sync were missing from this
-  # list even though scheduler-nba-season-projection.tf, scheduler-nba-
-  # live-scores.tf, and scheduler-nba-schedule-sync.tf all target this same
-  # role -- every scheduled NBA invocation (season projection, 60s live-
-  # score refresh, weekly schedule sync) has been failing AccessDenied
-  # since those files were added. Found 2026-08-18, fixed here.
+  # nba_predict: scheduler-nba-season-projection.tf's own target.
+  # nba_live_scores: scheduler-nba-live-scores.tf's own target, same
+  # every-60s reasoning. nba_schedule_sync: scheduler-nba-schedule-sync.tf's
+  # own target.
   #
   # The 3 predict-read functions: scheduler-predict-read-warmup.tf's own
   # 5-minute warmup ping.

@@ -1,11 +1,13 @@
 # Installed with --no-deps (see Dockerfile) specifically to skip
 # xgboost's unconditional Linux/x86_64 nvidia-nccl-cu12 dependency
-# (~300MB, GPU-only distributed training support). Verified against the
-# real public.ecr.aws/lambda/python:3.12 image that a plain CPU
-# train/save_raw/load_model/predict round trip works fine without it
-# installed -- xgboost only touches NCCL on a CUDA device path this
-# Lambda never takes. Its own genuine runtime deps (numpy, scipy) are
-# still satisfied -- requirements.txt installs them normally, and it
-# doesn't matter which install step puts a package on disk, only that
-# it's there by the time xgboost is imported.
-xgboost>=2.0,<3.0
+# (~300MB, GPU-only distributed training support). xgboost only touches
+# NCCL on a CUDA device path this Lambda never takes. Its own genuine
+# runtime deps (numpy, scipy) are still satisfied by requirements.txt.
+#
+# Pinned to the EXACT version Source/model-training/nfl/requirements.txt
+# also pins -- xgboost's raw model format is not guaranteed compatible
+# across major versions, and a real production bug confirmed this: a
+# model trained under xgboost 3.x, loaded here by a 2.x reader, predicted
+# silently wrong (not an error) values roughly half the real ones or
+# worse. Keep both requirements.txt files' xgboost pin identical.
+xgboost==3.3.0

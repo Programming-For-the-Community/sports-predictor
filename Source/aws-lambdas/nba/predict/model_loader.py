@@ -7,22 +7,13 @@ write -- library.storage.model_artifacts is the shared, sport-agnostic
 key-naming module both sides already depend on, so no duplicated key
 convention exists between training and serving.
 
-Byte-for-byte identical to Source/aws-lambdas/ncaafb/predict/model_loader.py
-(and NFL's own) -- every function here already takes `sport` as a
-parameter, so there was nothing NBA-specific to change. Duplicated rather
-than shared, same per-Lambda-deployment-package convention this project
-already uses throughout (each Lambda is its own zip/image -- see
-aws-lambdas/ncaafb/schedule-sync/handler.py's own docstring for why a
-shared module has to live under library/ instead).
-
 Dispatches on model_card["algorithm"] through library.ml.model_types.
-ADAPTERS -- deliberately NOT hardcoded to XGBoost, since run_backtest lets
+ADAPTERS -- not hardcoded to one algorithm, since run_backtest lets
 several algorithms compete for the same target and promotes whichever
 wins, so the currently-promoted algorithm for any given model_name can
-change from one retrain to the next. NBA's own CANDIDATES lists include
-LightGBM alongside the other four families (see library/ml/model_types.py),
-so this Lambda's requirements.txt needs to cover whatever any of them
-might have won with.
+change from one retrain to the next. This Lambda's requirements.txt needs
+to cover whatever any of the candidate families might have won with (see
+library/ml/model_types.py).
 """
 import time
 

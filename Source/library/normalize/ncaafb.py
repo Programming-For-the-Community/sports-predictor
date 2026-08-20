@@ -1,31 +1,28 @@
 """
-CFBD-response-to-project-schema normalizers -- the NCAAFB equivalent of
-library/normalize/espn.py. Kept as its own module (not folded into
-espn.py) since CFBD's response shapes share almost nothing structurally
-with ESPN's, despite both eventually producing the same project schema.
+CFBD-response-to-project-schema normalizers. Kept as its own module since
+CFBD's response shapes share almost nothing structurally with ESPN's,
+despite both eventually producing the same project schema.
 
-Each function is a pure transform (no S3/DynamoDB/HTTP calls of its own),
-same convention as espn.py -- the aws-lambdas/ncaafb/{ingest,normalize}
-Lambdas own all the I/O and enrichment, this module only ever maps one
-already-fetched dict/list into project schema items.
+Each function is a pure transform (no S3/DynamoDB/HTTP calls of its own)
+-- the aws-lambdas/ncaafb/{ingest,normalize} Lambdas own all the I/O and
+enrichment, this module only ever maps one already-fetched dict/list into
+project schema items.
 """
 from library.parsing import parse_clock_to_seconds, parse_number, snake_case
 from library.schema.keys import entity_key, entity_team_key, event_key, player_key, team_key
 
 # CFBD's box-score stat "types" are terse, already-uppercase abbreviations
-# (confirmed live against real 2025 data: passing types AVG/C/ATT/INT/
-# QBR/TD/YDS, defensive types PD/QB HUR/SACKS/SOLO/TD/TFL/TOT) -- snake_case
-# (built for camelCase JSON keys) would shred an abbreviation like "CAR"
-# into "c_a_r" one letter at a time, and even a clean lowercase wouldn't
-# produce the TARGET_STAT names Terraform/dynamodb-sport-registry.tf's
-# ncaafb_player_prop_stats already commits to (e.g. "YDS" -> "yds", not
-# "yards"), so each targeted abbreviation is mapped explicitly. CAR/REC map
-# to "attempts"/"receptions" (not a literal transliteration) so the
-# resulting field names (rushing_attempts, receiving_receptions) match
-# library/features/ncaafb.py's leader-identification volume stats -- the
-# same names library/features/nfl.py's identify_lead_rusher/
-# identify_lead_receiver already use for ESPN's own equivalent fields.
-# Types not listed here fall back to a plain lowercase in _stat_field_name
+# (passing types AVG/C/ATT/INT/QBR/TD/YDS, defensive types PD/QB HUR/
+# SACKS/SOLO/TD/TFL/TOT) -- snake_case (built for camelCase JSON keys)
+# would shred an abbreviation like "CAR" into "c_a_r" one letter at a
+# time, and even a clean lowercase wouldn't produce the TARGET_STAT names
+# Terraform/dynamodb-sport-registry.tf's ncaafb_player_prop_stats already
+# commits to (e.g. "YDS" -> "yds", not "yards"), so each targeted
+# abbreviation is mapped explicitly. CAR/REC map to "attempts"/
+# "receptions" (not a literal transliteration) so the resulting field
+# names (rushing_attempts, receiving_receptions) match
+# library/features/ncaafb.py's leader-identification volume stats. Types
+# not listed here fall back to a plain lowercase in _stat_field_name
 # below instead. "C/ATT" is deliberately absent -- it's a compound value,
 # handled by _PLAYER_STAT_COMPOUND_SPLITS below before this map is ever
 # consulted.
@@ -41,13 +38,9 @@ _STAT_TYPE_NAMES = {
 
 # CFBD packs some player-level stats as one slash-separated string, same
 # compound-value pattern as its team-level stats (_TEAM_STAT_COMPOUND_SPLITS
-# below) -- confirmed live against real 2025 data ("C/ATT": "24/38", "FG":
-# "1/2", "XP": "3/3"). Keyed by the raw type name, checked before
-# _stat_field_name/_STAT_TYPE_NAMES ever see it -- a real gap in the
-# original implementation, which stored these as unparsed strings
-# (rolling_player_stat_averages silently skips non-numeric stat_line
-# values, so passing attempts/completions and kicking makes/attempts were
-# being dropped entirely, not just mis-typed).
+# below) -- e.g. "C/ATT": "24/38", "FG": "1/2", "XP": "3/3". Keyed by the
+# raw type name, checked before _stat_field_name/_STAT_TYPE_NAMES ever
+# see it.
 _PLAYER_STAT_COMPOUND_SPLITS: dict[str, tuple[str, str]] = {
     "C/ATT": ("completions", "attempts"),
     "FG": ("field_goals_made", "field_goals_attempted"),
@@ -90,14 +83,13 @@ def _team_won(game: dict, home: bool) -> bool | None:
 
 
 def team_to_entity(team: dict, sport: str) -> dict:
-    """One CFBD /teams entry -> one team entity item -- the NCAAFB
-    equivalent of espn.py's team_to_entity. Only ever called from
-    data-backfills/ncaafb/backfill.py's seed_teams, using the most recent
-    backfilled season's /teams response, not once per season -- CFBD's
-    /teams is season-scoped (conference realignment), and a team entity
-    row isn't a dated snapshot, so seeding from every season would let
-    whichever season's fetch happens to write last win the race for a
-    given team's conference value (see backfill.py's own docstring)."""
+    """One CFBD /teams entry -> one team entity item. Only ever called
+    from data-backfills/ncaafb/backfill.py's seed_teams, using the most
+    recent backfilled season's /teams response, not once per season --
+    CFBD's /teams is season-scoped (conference realignment), and a team
+    entity row isn't a dated snapshot, so seeding from every season would
+    let whichever season's fetch happens to write last win the race for
+    a given team's conference value."""
     team_id = str(team["id"])
     location = team.get("location") or {}
     return {
@@ -111,14 +103,11 @@ def team_to_entity(team: dict, sport: str) -> dict:
             "mascot": team.get("mascot"),
             "conference": team.get("conference"),
             "venue_indoor": location.get("dome"),
-            # Home-stadium coordinates -- confirmed live that CFBD's own
-            # /teams response carries these directly on `location`, unlike
-            # NFL/ESPN which has no coordinate field at all (library/
-            # features/nfl_teams.py hand-maintains a static TEAM_COORDINATES
-            # table instead). library/features/ncaafb.py's build_event_
-            # features reads these back out per team via FeatureStorage.
-            # get_entity to compute travel distance, rather than a second
-            # hardcoded table that would drift as FBS realignment happens.
+            # Home-stadium coordinates -- CFBD's own /teams response
+            # carries these directly on `location`. library/features/
+            # ncaafb.py's build_event_features reads these back out per
+            # team via FeatureStorage.get_entity to compute travel
+            # distance.
             "latitude": location.get("latitude"),
             "longitude": location.get("longitude"),
         },
@@ -126,30 +115,23 @@ def team_to_entity(team: dict, sport: str) -> dict:
 
 
 def game_to_event_item(game: dict, sport: str) -> dict:
-    """One CFBD /games entry -> one event item -- the NCAAFB equivalent
-    of scoreboard_event_to_event_item. home_id/away_id come straight from
-    CFBD's own homeId/awayId (confirmed live, Phase 1), unlike ESPN's
-    nested competitions[0].competitors[] shape.
+    """One CFBD /games entry -> one event item. home_id/away_id come
+    straight from CFBD's own homeId/awayId.
 
-    score/won are left as None for a game that hasn't been played yet
-    (CFBD's homePoints/awayPoints are genuinely absent pre-game), rather
-    than ESPN's own "0" placeholder -- same "missing, not fabricated"
-    discipline this project already applies to injuries.
+    score/won are left as None for a game that hasn't been played yet --
+    CFBD's homePoints/awayPoints are genuinely absent pre-game.
 
     home_conference/away_conference/conference_game are CFBD's own
     per-game values, passed through as-is -- library/features/ncaafb.py
-    (a later phase) derives the actual is_conference_game feature from
-    these, falling back to a season-scoped /teams lookup for games CFBD
-    hasn't computed conference_game for yet (see project plan).
+    derives the actual is_conference_game feature from these, falling
+    back to a season-scoped /teams lookup for games CFBD hasn't computed
+    conference_game for yet.
 
     is_playoff_game is derived (not passed through) from CFBD's own
-    `playoff` field -- confirmed live it's a populated object
-    ({"competition": "cfp", "round": ...}) for real 12-team CFP games and
-    None for every other game, including ordinary bowls -- a cleaner,
-    directly-verified signal than string-matching the `notes` bowl-name
-    field the project plan originally proposed. Always set (never
-    sparse), unlike the coach/rank fields below -- it needs no enrichment
-    step, only this function's own raw `game` argument.
+    `playoff` field: a populated object ({"competition": "cfp", "round":
+    ...}) for real 12-team CFP games, None for every other game,
+    including ordinary bowls. Always set (never sparse) -- it needs no
+    enrichment step, only this function's own raw `game` argument.
     library/features/ncaafb.py derives is_bowl_game from this plus
     season_type ("postseason" and NOT a playoff game).
 
@@ -158,9 +140,7 @@ def game_to_event_item(game: dict, sport: str) -> dict:
     aws-lambdas/ncaafb/ingest/enrichment.py (or schedule-sync's own
     attach_venue_indoor call, for the venue_* fields specifically)
     successfully attached them before this game was written to S3 --
-    omitted here (not written as None) when absent, same convention
-    scoreboard_event_to_event_item already uses for NFL's coach/injury/
-    depth-chart fields.
+    omitted here (not written as None) when absent.
     """
     event_id = str(game["id"])
     home_id, away_id = str(game["homeId"]), str(game["awayId"])
@@ -216,11 +196,9 @@ def game_to_event_item(game: dict, sport: str) -> dict:
 
 def game_player_stats_to_player_game_stats(game_box_score: dict, sport: str) -> tuple[list[dict], list[dict]]:
     """Returns (player_game_stats items, player entity items) for one
-    game's CFBD /games/players entry -- the NCAAFB equivalent of
-    boxscore_to_player_game_stats. Requires home_id/away_id/event_date
+    game's CFBD /games/players entry. Requires home_id/away_id/event_date
     already injected onto game_box_score by aws-lambdas/ncaafb/ingest/
-    handler.py's _annotate_box_scores (see that function's own docstring
-    for why the join to /games has to happen at ingest time, not here).
+    handler.py's _annotate_box_scores.
 
     Most athlete stat values are single scalars ("stat": "250"); three
     (passing C/ATT, kicking FG, kicking XP) are slash-separated compound
@@ -228,9 +206,8 @@ def game_player_stats_to_player_game_stats(game_box_score: dict, sport: str) -> 
     _TEAM_STAT_COMPOUND_SPLITS below handles CFBD's team-level compounds.
 
     metadata.position is always None -- CFBD's box-score athletes carry
-    no position field (unlike ESPN's); position would come from the
-    roster feed instead, which isn't wired into ingest yet (see project
-    memory)."""
+    no position field; position comes from the roster feed instead (see
+    roster_to_player_entities)."""
     event_id = str(game_box_score["id"])
     event_date = game_box_score.get("event_date")
 
@@ -297,31 +274,25 @@ def game_player_stats_to_player_game_stats(game_box_score: dict, sport: str) -> 
 
 def roster_to_player_entities(roster: list[dict], sport: str, as_of_date: str) -> list[dict]:
     """Every player entity item from one CFBD /roster response (see
-    CFBDClient.get_roster) -- the NCAAFB equivalent of espn.py's
-    roster_to_player_entities, and the fix for
-    game_player_stats_to_player_game_stats' own documented gap
-    (metadata.position always None from a box score alone).
+    CFBDClient.get_roster) -- the fix for
+    game_player_stats_to_player_game_stats' own gap (metadata.position
+    always None from a box score alone).
 
-    Confirmed live against CFBD's real /roster schema: a flat list of
-    {"id", "team", "firstName", "lastName", "position", "jersey", ...}
-    objects, one per player, no grouping by team the way ESPN's roster
-    nests athletes under position groups. Note there's no "teamId" here --
+    A flat list of {"id", "team", "firstName", "lastName", "position",
+    "jersey", ...} objects, one per player. There's no "teamId" here --
     only "team", a school name string -- so "teamId" is expected to
     already be injected by ingest/handler.py's own _annotate_roster
     before this ever runs; a roster payload that skipped that step will
     have every player dropped (see the "id"/"teamId" guard below), same
     as one whose school wasn't found in that season's teams cache. "id"
     is assumed to be the SAME id space CFBD's own box scores assign
-    (library/normalize/ncaafb.py's game_player_stats_to_player_game_stats
-    reads athlete["id"] from /games/players) -- CFBD has one player
-    database backing both endpoints, so this should hold, but this half
-    is still unconfirmed against real data.
+    (game_player_stats_to_player_game_stats reads athlete["id"] from
+    /games/players) -- CFBD has one player database backing both
+    endpoints.
 
-    as_of_date is the ingest fetch's own timestamp (there's no per-payload
-    "as of" field on this endpoint the way ESPN's roster has "timestamp"),
-    truncated to a date by the caller -- same team_id_as_of role
-    espn.py's roster_to_player_entities docstring describes, used by
-    PipelineStorage.upsert_player_entity's staleness guard.
+    as_of_date is the ingest fetch's own timestamp, truncated to a date
+    by the caller -- used by PipelineStorage.upsert_player_entity's
+    staleness guard.
 
     A player missing "id" or "teamId" is skipped -- CFBD's roster is known
     to include walk-ons and practice-squad-equivalent entries some seasons
@@ -352,10 +323,9 @@ def roster_to_player_entities(roster: list[dict], sport: str, as_of_date: str) -
     return entities
 
 
-# CFBD's team box score packs some stats as one dash-separated string,
-# same pattern as ESPN's own team-stat compound values -- confirmed live
-# against real 2025 data. A separate map from _STAT_TYPE_NAMES above since
-# these are category names (team-level), not types (player-level).
+# CFBD's team box score packs some stats as one dash-separated string.
+# A separate map from _STAT_TYPE_NAMES above since these are category
+# names (team-level), not types (player-level).
 _TEAM_STAT_COMPOUND_SPLITS: dict[str, tuple[str, str]] = {
     "thirdDownEff": ("third_down_conversions", "third_down_attempts"),
     "fourthDownEff": ("fourth_down_conversions", "fourth_down_attempts"),
@@ -366,18 +336,16 @@ _TEAM_STAT_COMPOUND_SPLITS: dict[str, tuple[str, str]] = {
 
 def game_team_stats_to_team_game_stats(game_team_box_score: dict, sport: str) -> list[dict]:
     """Returns one team_game_stats item per team from a single game's
-    CFBD /games/teams entry -- the NCAAFB equivalent of
-    boxscore_to_team_game_stats. Confirmed live against real 2025 data:
-    [{"id": game_id, "teams": [{"teamId", "team": school_name,
-    "conference", "homeAway", "points", "stats": [{"category", "stat"}]}]}].
+    CFBD /games/teams entry: [{"id": game_id, "teams": [{"teamId",
+    "team": school_name, "conference", "homeAway", "points", "stats":
+    [{"category", "stat"}]}]}].
 
-    Unlike get_game_player_stats, each team block DOES carry its own
-    numeric teamId directly -- team_id is read from there, not resolved
-    via homeAway (falls back to _resolve_team_id, using ingest's injected
-    home_id/away_id, only if teamId is ever absent). event_date still has
-    to come from ingest's _annotate_box_scores -- confirmed live that this
-    endpoint's own game entries carry no date of their own, only "id" and
-    "teams"."""
+    Each team block carries its own numeric teamId directly -- team_id
+    is read from there, not resolved via homeAway (falls back to
+    _resolve_team_id, using ingest's injected home_id/away_id, only if
+    teamId is ever absent). event_date still has to come from ingest's
+    _annotate_box_scores -- this endpoint's own game entries carry no
+    date of their own, only "id" and "teams"."""
     event_id = str(game_team_box_score["id"])
     event_date = game_team_box_score.get("event_date")
 

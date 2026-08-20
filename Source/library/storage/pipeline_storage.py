@@ -1,11 +1,5 @@
 """
-Shared S3 + DynamoDB wiring for a sport's ingest/backfill pipeline. Every
-sport reads and writes the same shared tables (see
-design/DATA_SCHEMA.md) -- entities, events, player_game_stats, and one
-raw data lake bucket, all partitioned by a `sport` key rather than
-duplicated per sport. That means this wiring is identical regardless of
-which sport instantiates it; only the env vars' actual values differ per
-deployment, not the code.
+Shared S3 + DynamoDB wiring for a sport's ingest/backfill pipeline.
 """
 import os
 
@@ -25,9 +19,8 @@ def _require_env(name: str) -> str:
 
 class PipelineStorage:
     """Reads RAW_BUCKET_NAME/ENTITIES_TABLE_NAME/EVENTS_TABLE_NAME/
-    PLAYER_GAME_STATS_TABLE_NAME/AWS_REGION from the environment. Same
-    variable names every sport's task definition sets (see
-    Terraform/ecs-task-nfl-backfill.tf for the pattern)."""
+    PLAYER_GAME_STATS_TABLE_NAME/TEAM_GAME_STATS_TABLE_NAME/AWS_REGION
+    from the environment."""
 
     def __init__(self):
         self.raw_bucket = _require_env("RAW_BUCKET_NAME")
@@ -50,14 +43,8 @@ class PipelineStorage:
 
     def upsert_player_entity(self, item: dict) -> bool:
         """Same as upsert_entity, but only overwrites metadata.team_id if
-        item's own metadata.team_id_as_of (see boxscore_to_player_game_stats)
-        is the same age or newer than what's already stored. Skips the
-        write otherwise -- no retry, nothing else for the caller to do.
-        Returns whether the write actually happened (see DynamoDBTable.
-        put_item), so a caller that wants to know how many of its writes
-        were rejected by the staleness guard (rather than just fire-and-
-        forget) can count them -- see aws-lambdas/ncaafb/normalize/
-        handler.py's _process_roster."""
+        item's own metadata.team_id_as_of is the same age or newer than
+        what's already stored. Returns whether the write happened."""
         as_of = item["metadata"]["team_id_as_of"]
         condition = Attr("metadata.team_id_as_of").not_exists() | Attr("metadata.team_id_as_of").lte(as_of)
         return self._entities_table.put_item(item, condition_expression=condition)
@@ -66,25 +53,14 @@ class PipelineStorage:
         self._events_table.put_item(item)
 
     def get_events_by_status(self, sport: str, status: str) -> list[dict]:
-        """Every event for a sport currently at `status` -- same status-
-        index GSI pattern as FeatureStorage.get_all_events (Terraform/
-        dynamodb-events.tf). Needed on the write side too (not just
-        FeatureStorage's read-only copy) for normalize's own stale-event
-        cleanup -- see aws-lambdas/ncaafb/normalize/handler.py's
-        _cancel_stale_scheduled_events."""
+        """Every event for a sport currently at `status`, via the
+        status-index GSI."""
         items = self._events_table.query(Key("status").eq(status), index_name="status-index")
         return [item for item in items if item.get("sport") == sport]
 
     def get_entity(self, sport: str, entity_id: str, entity_type: str) -> dict | None:
-        """One entity by id -- a direct GetItem. entity_type ("team" or
-        "player") is required, not inferred -- see entity_key's own
-        docstring for why a type-less key can't disambiguate two different
-        entities. Read-side counterpart to upsert_entity/upsert_player_entity,
-        needed by normalize itself (not just downstream feature
-        engineering/serving, which already has this same lookup via
-        FeatureStorage.get_entity) whenever a write needs to see the entity
-        it's about to overwrite first -- see aws-lambdas/ncaafb/normalize/
-        handler.py's _preserve_roster_position for the motivating case."""
+        """One entity by id, via a direct GetItem. entity_type ("team" or
+        "player") is required to build the key."""
         return self._entities_table.get_item({"entity_key": entity_key(sport, entity_id, entity_type)})
 
     def write_player_game_stats(self, items: list[dict]) -> None:

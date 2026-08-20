@@ -2,8 +2,7 @@
 Regular-season Monte Carlo simulation (win totals, bowl eligibility,
 conference championship, CFP field, and national championship
 probabilities) for the NCAAFB Season tab -- team outcomes only, no
-player-prop leaderboard (unlike NFL's own season_simulation.py). Pure
-functions -- no AWS/storage access.
+player-prop leaderboard. Pure functions -- no AWS/storage access.
 
 Game outcomes use Elo win probability (library.features.common.
 expected_score). CFP field selection needs a rank-like score per team,
@@ -105,11 +104,7 @@ def project_matchup(
     campus-site convention); if either is None, or home_advantage is
     passed as 0.0 (every round from the Quarterfinals on is neutral-site,
     see project_cfp_bracket), team_a/team_b keep their given order and
-    home_advantage itself decides the framing. Identical shape/role to
-    NFL's own season_simulation.project_matchup -- see that module's
-    docstring; duplicated here rather than shared, same "each sport's
-    season_simulation.py is self-contained" convention project_leaderboard
-    already follows across sports.
+    home_advantage itself decides the framing.
 
     Returns {"team_a", "team_b", "seed_a", "seed_b", "predicted_winner",
     "win_probability"} -- win_probability is always the WINNER's own
@@ -132,14 +127,10 @@ def project_matchup(
 
 
 def project_cfp_bracket(seeds: list[str], ratings: dict[str, float], home_advantage: float = DEFAULT_HOME_ADVANTAGE) -> dict:
-    """Deterministic sibling of _simulate_cfp_bracket -- same 12-team
-    topology (seeds 1-4 bye; Round of 12 campus-site 5v12/6v11/7v10/8v9;
-    Quarterfinals/Semifinals/Championship all neutral-site, fixed, no
-    reseeding), but picks the higher-win-probability side every matchup
-    and returns the full round-by-round path instead of just the national
-    champion -- used to render a single "most likely" bracket on the
-    season tab. See season_projection.py's own _bracket_payload for how
-    this gets reconciled against real CFP results as they happen.
+    """Deterministic 12-team CFP bracket: seeds 1-4 get a bye; Round of
+    12 is campus-site (5v12/6v11/7v10/8v9); later rounds are neutral-site
+    and fixed (no reseeding). Picks the higher-win-probability side each
+    matchup and returns the full round-by-round path.
 
     Returns {"rounds": [{"round": "Round of 12", "matchups": [...]},
     ...], "champion": team_id}.

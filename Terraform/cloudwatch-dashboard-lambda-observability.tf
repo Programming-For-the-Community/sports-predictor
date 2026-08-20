@@ -1,47 +1,20 @@
-# Lambda observability dashboard (invocations/errors/duration/concurrency/
-# throttles across every Lambda in this project), added 2026-08-16 per a
-# direct user ask -- distinct from cloudwatch-dashboard-viewer-analytics.tf's
-# Logs Insights-based request/visitor breakdown, this one is plain AWS/Lambda
-# namespace metrics.
+# Lambda observability dashboard: invocations/errors/duration/concurrency/
+# throttles across every Lambda, built from AWS/Lambda namespace metrics
+# (distinct from cloudwatch-dashboard-viewer-analytics.tf's Logs
+# Insights-based breakdown).
 #
-# Built entirely with CloudWatch metric-math SEARCH() expressions, not
-# explicit per-function metric references -- there's no `depends_on`/
-# resource reference to any of the 19 aws_lambda_function resources at all.
-# Each function name already follows "${var.project}-<sport>-<component>"
-# (or "${var.project}-season-gate" for the one shared, non-per-sport
-# function), so a SEARCH scoped to a literal substring term is enough to
-# group by sport, and one scoped to just the project prefix covers every
-# function for the by-function views. This also means a newly onboarded
-# sport's Lambdas (e.g. Sub-phase 3B's ncaambb-*) show up in the by-sport
-# rollups automatically the moment this file adds its own search term --
-# and in the by-function views with ZERO changes here at all.
+# Uses CloudWatch metric-math SEARCH() expressions scoped by function-name
+# prefix ("${var.project}-<sport>-") rather than explicit per-function
+# metric references, so it covers every function without referencing each
+# aws_lambda_function resource. "By sport" widgets aggregate via
+# SUM/AVG(SEARCH(...)); "by function" widgets use a raw SEARCH so each
+# function renders as its own series. Concurrency's by-sport rollup sums
+# each function's own period Maximum, an approximate upper bound since
+# summed maxima don't necessarily co-occur at the same instant.
 #
-# "By sport" widgets aggregate each sport's own N functions into one line
-# via SUM(SEARCH(...))/AVG(SEARCH(...)) metric math -- a single combined
-# trend per sport. "By function" widgets use a raw (unwrapped) SEARCH so
-# each of the 19 functions renders as its own series, for spotting which
-# specific Lambda is actually driving a spike. Concurrency's by-sport
-# rollup is a SUM of each function's own period Maximum -- an approximate
-# upper bound (summed maxima don't necessarily co-occur at the exact same
-# instant), same simplification any SUM-of-SEARCH concurrency rollup makes;
-# fine for spotting real single-sport concurrency pressure, not exact.
-#
-# Each SEARCH's metric name is a bare term (e.g. `Invocations prefix`),
-# NOT `MetricName="Invocations" "prefix"` -- live-verified 2026-08-16 via
-# GetMetricData that mixing a MetricName= property clause with a plain
-# quoted term silently matches zero series, which is why this dashboard
-# originally showed no data at all despite the underlying Lambda metrics
-# being populated.
-#
-# The prefix term itself must ALSO stay unquoted -- live-verified
-# 2026-08-18 via GetMetricData that `Invocations "sports-predictor-nfl-"`
-# (quoted, trailing hyphen) still matches zero series even after the fix
-# above; CloudWatch's SEARCH full-text tokenizer can't phrase-match a
-# quoted string ending in a hyphen against "sports-predictor-nfl-predict".
-# Dropping the quotes entirely (`Invocations sports-predictor-nfl-`) is
-# what actually returns data -- confirmed to still scope correctly per
-# sport (no cross-contamination between nfl/ncaafb/nba) and to return one
-# distinct series per function for the by-function panels.
+# SEARCH terms (metric name and prefix) must stay unquoted -- a quoted
+# term, or mixing a MetricName= clause with a plain term, matches zero
+# series.
 locals {
   lambda_dashboard_sports = ["nfl", "ncaafb", "nba"]
 }
@@ -238,12 +211,8 @@ resource "aws_cloudwatch_dashboard" "lambda_observability" {
         }
       },
 
-      # --- Row 5: Throttles -- a concurrency-limit symptom, not one of the
-      # user's 4 named metrics, but directly related to "concurrent
-      # invocations" and cheap to add alongside it (same SEARCH pattern,
-      # zero new infrastructure) -- see project-api-gateway-429-thundering-
-      # herd-fix memory for why concurrency pressure is a real, previously-
-      # hit failure mode in this project, not a hypothetical one.
+      # --- Row 5: Throttles -- a concurrency-limit symptom, related to
+      # concurrent invocations. ---
       {
         type   = "metric"
         x      = 0

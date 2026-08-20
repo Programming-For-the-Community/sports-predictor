@@ -2,15 +2,13 @@
 Unit tests for the `leaders` block -- the shared scoring/recording/
 error-resilience mechanism event_prediction.predict_event_leaders uses
 for every category (passing/receiving/rushing/sacks) alike, exercised
-here via passing candidates since only one is ever scored (no ranking/
-capping behavior to worry about, unlike the other three categories --
-see test_predict_receiving_props.py/test_predict_rushing_props.py for
-THAT category-specific behavior). Split out of what used to be one large
-test_predict.py -- see test_predict_event_outcome.py's own history note.
+here via passing candidates since only one is ever scored (no
+ranking/capping behavior to worry about, unlike the other three
+categories -- see test_predict_receiving_props.py/
+test_predict_rushing_props.py for that category-specific behavior).
 
 Calls event_prediction.predict_event directly, not through nfl_predict.
-lambda_handler -- see test_predict_event_outcome.py's own docstring for
-why.
+lambda_handler.
 """
 from unittest.mock import MagicMock, patch
 
@@ -49,11 +47,8 @@ class TestEventOutcomeRouteLeaders:
         assert passing["passing_yards"] == 267.0
 
     def test_leader_predictions_are_recorded_same_as_a_manual_player_prop_query(self):
-        # Same model_key shape _predict_player_prop already writes -- what
-        # lets nfl_reads._leaders_comparison read either kind back later
-        # for a completed event, see test_predict_event_outcome.py's own
-        # audits-one-write-per-model test for the core-prediction
-        # counterpart of this.
+        # Same model_key shape predict_player_prop already writes -- lets
+        # either kind be read back the same way for a completed event.
         storage, s3, predictions_table = MagicMock(), MagicMock(), MagicMock()
         storage.get_entity.return_value = {"entity_id": "qb1", "name": "Patrick Mahomes"}
 

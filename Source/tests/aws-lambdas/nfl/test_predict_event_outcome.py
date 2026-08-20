@@ -2,22 +2,15 @@
 Unit tests for event_prediction.predict_event's core event-outcome
 quartet (win_probability/margin/home_score/away_score) and
 event_prediction.reconcile_scores, the pure function that keeps those
-four independently-trained predictions internally consistent. Split out
-of what used to be one large test_predict.py -- see
-test_predict_player_props.py, test_predict_leaders.py,
-test_predict_receiving_props.py, test_predict_rushing_props.py, and
-test_predict_season_simulation.py for this file's siblings.
+four independently-trained predictions internally consistent.
 
 Calls event_prediction.predict_event directly, not through nfl_predict.
 lambda_handler -- predict/handler.py no longer serves this route
-synchronously at all (see its own docstring); GET /nfl/predictions/
-events/{event_id} is now a read-through cache in predict-read/handler.py
-that fires this same event_prediction.predict_event asynchronously on a
-miss (event_prediction.compute_and_cache_event) -- see
-test_predict_compute_and_cache.py for that wrapper's own coverage. This
-file's own job is unchanged: verify predict_event's actual prediction
-logic, just invoked directly now instead of through a Lambda-shaped
-detour that added nothing this file's tests needed.
+synchronously; GET /nfl/predictions/events/{event_id} is a read-through
+cache in predict-read/handler.py that fires this same
+event_prediction.predict_event asynchronously on a miss
+(event_prediction.compute_and_cache_event, covered separately in
+test_predict_compute_and_cache.py).
 
 live_features and model_loader are the real modules -- storage/s3/
 predictions_table are plain MagicMocks.

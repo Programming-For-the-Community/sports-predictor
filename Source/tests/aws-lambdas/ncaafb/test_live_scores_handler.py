@@ -3,8 +3,7 @@ Unit tests for the live-scores Lambda's own lambda_handler -- dispatch
 between its two trigger shapes (EventBridge's LiveScoreRefresh detail-type
 vs. API Gateway's GET /ncaafb/live-scores) and response shaping/error
 handling. live_scores.py's own logic is covered directly in
-test_live_scores.py -- this file only verifies routing. Mirrors NFL's own
-test_live_scores_handler.py exactly.
+test_live_scores.py -- this file only verifies routing.
 
 The ncaafb_live_scores module is registered in sys.modules by conftest.py.
 """

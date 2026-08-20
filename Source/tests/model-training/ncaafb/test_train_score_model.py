@@ -1,6 +1,5 @@
 """
-Unit tests for the NCAAFB score training entrypoint -- mirrors
-tests/model-training/nfl/test_train_score_model.py.
+Unit tests for the NCAAFB score training entrypoint.
 """
 from unittest.mock import MagicMock, patch
 

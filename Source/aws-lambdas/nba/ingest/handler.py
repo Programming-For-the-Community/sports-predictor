@@ -3,54 +3,41 @@ NBA ingest Lambda. Triggered daily by the shared ingest-orchestrator Step
 Function (Terraform/sfn-ingest-orchestrator.tf), which invokes every
 active sport's own "${project}-<sport>-ingest" Lambda by naming
 convention -- no separate per-sport EventBridge Scheduler is needed for
-this Lambda (same pattern as NCAAFB's own ingest -- see that module's own
-docstring). Fetches yesterday's completed games' box scores plus that
+this Lambda. Fetches yesterday's completed games' box scores plus that
 same date's scoreboard, the full 30-team league list (nba/teams.json --
 what normalize's team_to_entity derives team display name/abbreviation/
 color from), and every team's roster, and writes it all as raw JSON to
 S3; the normalize Lambda is triggered automatically by the resulting S3
 PutObject events, so this function never touches DynamoDB directly.
 
-ESPN's NBA scoreboard is date-based, not week-based like NFL/NCAAFB (see
+ESPN's NBA scoreboard is date-based, not week-based (see
 NBAClient.get_scoreboard_for_date) -- there is no "most recent Sunday"
 equivalent to resolve, since games happen most nights during the season.
-Defaults to YESTERDAY (not today): games mostly tip off in the evening
+Defaults to yesterday (not today): games mostly tip off in the evening
 and finish after this Lambda's own early-morning scheduled run would see
 them, so "yesterday" is the date most likely to have final scores/box
-scores ready, the same role "most recent Sunday" plays for NFL's own
-auto-detection. Today's/future dates are seeded ahead of time by
+scores ready. Today's/future dates are seeded ahead of time by
 Terraform/scheduler-nba-schedule-sync.tf's dedicated nba-schedule-sync
-Lambda, same division of responsibility as NFL's.
-NOT yet verified against a real overnight run for a game that tips off
-close to the UTC day boundary -- revisit if a late-slate game's box score
-is ever missing the morning after (see project-nba-onboarding memory).
+Lambda.
 
 EventBridge can override the target date via the orchestrator's input
 payload: { "date": "20260114" } (YYYYMMDD, matching NBAClient's own
 param shape) -- for reprocessing one specific past date.
 
 Also refreshes every one of the league's 30 teams' current full roster on
-every run, unconditionally, uncached -- same reasoning as NFL's own
-ingest (aws-lambdas/nfl/ingest/handler.py's own docstring): this exists
-specifically to catch a roster move as soon as possible, so caching it
-across days would defeat its own purpose. No depth-chart or coach
-enrichment here, unlike NFL's ingest -- basketball has no depth-chart
-concept, and coach-tenure features are out of this phase's approved scope
-(deferred, not silently built -- see project-nba-onboarding memory).
-NBA's own roster response already embeds each athlete's current injury
-status and the team's head coach directly (confirmed live, 2026-08-14),
-so unlike NFL there's no separate injury-report or coach-lookup call
-needed at all. Injuries ARE wired in (_fetch_rosters/_attach_injuries
-below, attached onto each scoreboard event before it's written to S3 --
-see _attach_injuries' own docstring); coach-tenure features remain
-deferred, out of this phase's approved scope.
+every run, unconditionally, uncached -- this exists specifically to catch
+a roster move as soon as possible, so caching it across days would defeat
+its own purpose. No depth-chart concept in basketball, and coach-tenure
+features aren't built. NBA's own roster response already embeds each
+athlete's current injury status and the team's head coach directly, so
+there's no separate injury-report or coach-lookup call needed. Injuries
+are wired in (_fetch_rosters/_attach_injuries below, attached onto each
+scoreboard event before it's written to S3 -- see _attach_injuries).
 
 Preseason (season type 1) is never ingested, whether auto-detected or
-passed explicitly -- confirmed live, 2026-08-14, that NBA's season.type
-uses the identical 1=preseason/2=regular/3=postseason convention NFL's
-PRESEASON_TYPE constant already relies on. Backup-heavy preseason
-rosters/results aren't representative of regular-season performance and
-would skew training data, same reasoning as NFL/NCAAFB.
+passed explicitly. Backup-heavy preseason rosters/results aren't
+representative of regular-season performance and would skew training
+data.
 """
 import json
 import logging
@@ -101,15 +88,13 @@ def _team_ids(teams_response: dict) -> list[str]:
 def _fetch_rosters(client: NBAClient, team_ids: list[str]) -> tuple[int, int, dict[str, list[dict]]]:
     """Fetches and writes every NBA team's current roster -- one S3
     object per team, always fresh, never TTL-cached (see this module's own
-    docstring for why). Best-effort per team, same convention as NFL's
-    own _fetch_rosters -- one team's fetch failing shouldn't lose the
-    others'.
+    docstring for why). Best-effort per team -- one team's fetch failing
+    shouldn't lose the others'.
 
     Also returns injuries_by_team, keyed by team id -- extracted from the
-    SAME roster responses being written to S3 here, no extra API call
-    (see roster_to_team_injuries's own docstring for the unverified-shape
-    caveat). A team whose own fetch failed simply has no entry, same
-    best-effort handling _attach_injuries below applies."""
+    same roster responses being written to S3 here, no extra API call. A
+    team whose own fetch failed simply has no entry, same best-effort
+    handling _attach_injuries below applies."""
     fetched = failed = 0
     injuries_by_team: dict[str, list[dict]] = {}
     for team_id in team_ids:
@@ -126,18 +111,15 @@ def _fetch_rosters(client: NBAClient, team_ids: list[str]) -> tuple[int, int, di
 
 def _attach_injuries(events: list[dict], injuries_by_team: dict[str, list[dict]]) -> None:
     """Attaches home_injuries/away_injuries onto each scoreboard event
-    dict in place, from the SAME run's roster fetch above -- mirrors
-    NFL's own aws-lambdas/nfl/ingest/enrichment.py enrich_events,
-    simplified since NBA's roster fetch already carries injuries with no
-    separate API call needed. library.normalize.espn.
-    scoreboard_event_to_event_item already reads home_injuries/
-    away_injuries off the event dict generically (shared across every
-    sport), so no normalize-side change is needed once this is set.
+    dict in place, from the same run's roster fetch above.
+    library.normalize.espn.scoreboard_event_to_event_item already reads
+    home_injuries/away_injuries off the event dict generically (shared
+    across every sport), so no normalize-side change is needed once this
+    is set.
 
-    Forward-only, same as NFL's: only events processed by an ingest run
-    from here forward carry this field -- historical backfilled events
-    never had a same-day roster fetch to attach, same as every other
-    enrichment field this project adds after the fact.
+    Forward-only: only events processed by an ingest run from here
+    forward carry this field -- historical backfilled events never had a
+    same-day roster fetch to attach.
 
     Best-effort: a team missing from injuries_by_team (its own roster
     fetch failed above) simply leaves that side's field unset rather than

@@ -3,15 +3,10 @@ Unit tests for the NCAAFB inference Lambda's scheduled season-projection
 path: season_projection._season_standings_inputs (wins/losses/ties/point
 differential/conference/Elo derivation from stored events) and the
 EventBridge-triggered ScheduledSeasonProjection handler branch that runs
-season_simulation.simulate_season and writes the result to S3. Mirrors
-tests/aws-lambdas/nfl/test_predict_season_simulation.py's own shape --
-NOT a port of it, since _season_standings_inputs here also derives each
-team's conference (no static division table -- see season_simulation.
-py's own docstring) and the ScheduledSeasonProjection branch has an
-extra step NFL's never needed: loading the real national-ranking model
-before simulate_season can even be called (see season_projection.py's
-own docstring for why this needs the real model rather than a cheap
-proxy).
+season_simulation.simulate_season and writes the result to S3.
+_season_standings_inputs also derives each team's conference (no static
+division table), and the ScheduledSeasonProjection branch loads the real
+national-ranking model before simulate_season can even be called.
 
 The ncaafb_predict module is registered in sys.modules by conftest.py,
 whose reset_ncaafb_predict_singletons fixture (autouse) resets
@@ -113,10 +108,9 @@ class TestSeasonStandingsInputs:
         assert inputs["team_conference"]["24"] == "SEC"
 
     def test_remaining_games_excludes_a_pairing_missing_a_conference(self):
-        # "7" (away) has no conference -- an FCS buy game, see this
-        # module's own docstring for why it's excluded from the walk-
-        # forward simulation entirely rather than simulated against a
-        # meaningless default rating.
+        # "7" (away) has no conference -- an FCS buy game, excluded from
+        # the walk-forward simulation entirely rather than simulated
+        # against a meaningless default rating.
         storage = MagicMock()
         storage.get_all_events.side_effect = lambda sport, status: {
             "completed": [],
@@ -163,8 +157,7 @@ class TestScheduledSeasonProjection:
     """GET /ncaafb/season is served from predict-read/handler.py, not
     here -- this Lambda instead computes the projection on Terraform/
     scheduler-ncaafb-season-projection.tf's weekly direct EventBridge
-    Scheduler invoke and writes it to S3, same split as NFL's own
-    predict/season_projection.py."""
+    Scheduler invoke and writes it to S3."""
 
     # 12 teams across 3 conferences -- season_simulation.simulate_season
     # requires >= CFP_FIELD_SIZE (12) tracked teams before it'll even
@@ -195,9 +188,7 @@ class TestScheduledSeasonProjection:
         assert body["season"] == 2025
         assert body["standings"][0]["wins"] == 1
         assert body["standings"][0]["conference"] == "Big Ten"
-        # Team outcomes only -- see this module's own docstring for why
-        # NCAAFB's season projection has no player-prop leaderboard,
-        # unlike NFL's.
+        # Team outcomes only -- no player-prop leaderboard.
         assert "leaderboards" not in body
 
     def test_fewer_than_twelve_tracked_teams_skips_simulation_but_still_writes_standings(self):
