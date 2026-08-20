@@ -27,7 +27,7 @@ resource "aws_iam_role_policy_attachment" "nba_live_scores_logs" {
 }
 
 data "aws_iam_policy_document" "nba_live_scores_permissions" {
-  # Only the events table and its status-index GSI are queried.
+  # Only the events table and its sport-status-index GSI are queried.
   statement {
     sid     = "ReadEvents"
     actions = ["dynamodb:Query"]

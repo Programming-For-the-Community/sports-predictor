@@ -27,7 +27,7 @@ resource "aws_iam_role_policy_attachment" "lambda_live_scores_logs" {
 
 data "aws_iam_policy_document" "lambda_live_scores_permissions" {
   # live_scores.py only ever calls get_all_events, so only the events
-  # table + its status-index GSI need a grant here.
+  # table + its sport-status-index GSI need a grant here.
   statement {
     sid     = "ReadEvents"
     actions = ["dynamodb:Query"]

@@ -45,7 +45,7 @@ data "aws_iam_policy_document" "lambda_pipeline_permissions" {
       "arn:aws:dynamodb:${var.region}:${var.account_id}:table/${local.player_game_stats_table}",
       "arn:aws:dynamodb:${var.region}:${var.account_id}:table/${local.team_game_stats_table}",
       # A table's GSI is a distinct IAM resource from the table itself --
-      # needed for PipelineStorage.get_events_by_status's status-index
+      # needed for PipelineStorage.get_events_by_status's sport-status-index
       # Query.
       "arn:aws:dynamodb:${var.region}:${var.account_id}:table/${local.events_table}/index/*",
     ]
