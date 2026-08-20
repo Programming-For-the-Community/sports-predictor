@@ -132,6 +132,41 @@ class TestPredictEventLeaders:
         assert home_scoring[0]["points"] == 27.0
         assert predictions_table.put_item.call_count == 2  # 2 candidates x 1 stat each (scoring only has 1)
 
+    def test_reorders_candidates_by_their_own_predicted_value_not_arrival_order(self):
+        # Candidates arrive ordered by recent volume (101 first), which can
+        # genuinely disagree with this game's own predicted value -- the
+        # output order must follow the prediction, not the input order.
+        storage, s3, predictions_table = MagicMock(), MagicMock(), MagicMock()
+        candidates = {
+            "home": {**_EMPTY_TEAM_CANDIDATES, "scoring": [{"entity_id": "101"}, {"entity_id": "102"}]},
+            "away": _EMPTY_TEAM_CANDIDATES,
+        }
+        storage.get_entity.return_value = None
+
+        with patch.object(event_prediction.live_features, "build_live_event_leader_candidates", return_value=candidates), \
+             patch.object(event_prediction.model_loader, "load_current_model", return_value=(MagicMock(), {"version": 1})), \
+             patch.object(event_prediction.model_loader, "predict", side_effect=[14.0, 26.0]):
+            result = event_prediction.predict_event_leaders(storage, s3, predictions_table, "SPORT#NBA#EVENT#1")
+
+        assert [row["entity_id"] for row in result["home"]["scoring"]] == ["102", "101"]
+
+    def test_a_candidate_missing_its_stat_sorts_last_rather_than_erroring(self):
+        storage, s3, predictions_table = MagicMock(), MagicMock(), MagicMock()
+        candidates = {
+            "home": {**_EMPTY_TEAM_CANDIDATES, "scoring": [{"entity_id": "101"}, {"entity_id": "102"}]},
+            "away": _EMPTY_TEAM_CANDIDATES,
+        }
+        storage.get_entity.return_value = None
+
+        with patch.object(event_prediction.live_features, "build_live_event_leader_candidates", return_value=candidates), \
+             patch.object(event_prediction.model_loader, "load_current_model", side_effect=[
+                 model_loader.NoPromotedModelError("none"), (MagicMock(), {"version": 1}),
+             ]), \
+             patch.object(event_prediction.model_loader, "predict", return_value=18.0):
+            result = event_prediction.predict_event_leaders(storage, s3, predictions_table, "SPORT#NBA#EVENT#1")
+
+        assert [row["entity_id"] for row in result["home"]["scoring"]] == ["102", "101"]
+
     def test_skips_a_stat_whose_model_has_no_promoted_version(self):
         storage, s3, predictions_table = MagicMock(), MagicMock(), MagicMock()
         candidates = {

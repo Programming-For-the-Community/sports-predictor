@@ -171,6 +171,42 @@ class TestPredictEventLeaders:
         assert "passing_touchdowns" not in home_passing
         predictions_table.put_item.assert_not_called()
 
+    def test_reorders_a_list_category_by_its_own_predicted_primary_stat(self):
+        # Candidates arrive ordered by recent volume (101 first), which can
+        # genuinely disagree with this game's own predicted value -- the
+        # output order must follow the prediction (rushing_yards, the
+        # category's primary stat), not the input order.
+        storage, s3, predictions_table = MagicMock(), MagicMock(), MagicMock()
+        candidates = {
+            "home": {**_EMPTY_TEAM_CANDIDATES, "rushing": [{"entity_id": "101"}, {"entity_id": "102"}]},
+            "away": _EMPTY_TEAM_CANDIDATES,
+        }
+        storage.get_entity.return_value = None
+
+        with patch.object(event_prediction.live_features, "build_live_event_leader_candidates", return_value=candidates), \
+             patch.object(event_prediction.model_loader, "load_current_model", return_value=(MagicMock(), {"version": 1})), \
+             patch.object(event_prediction.model_loader, "predict", side_effect=[40.0, 1.0, 120.0, 2.0]):
+            result = event_prediction.predict_event_leaders(storage, s3, predictions_table, "SPORT#NCAAFB#EVENT#1")
+
+        assert [row["entity_id"] for row in result["home"]["rushing"]] == ["102", "101"]
+
+    def test_a_candidate_missing_its_stat_sorts_last_rather_than_erroring(self):
+        storage, s3, predictions_table = MagicMock(), MagicMock(), MagicMock()
+        candidates = {
+            "home": {**_EMPTY_TEAM_CANDIDATES, "sacks": [{"entity_id": "101"}, {"entity_id": "102"}]},
+            "away": _EMPTY_TEAM_CANDIDATES,
+        }
+        storage.get_entity.return_value = None
+
+        with patch.object(event_prediction.live_features, "build_live_event_leader_candidates", return_value=candidates), \
+             patch.object(event_prediction.model_loader, "load_current_model", side_effect=[
+                 model_loader.NoPromotedModelError("none"), (MagicMock(), {"version": 1}),
+             ]), \
+             patch.object(event_prediction.model_loader, "predict", return_value=2.0):
+            result = event_prediction.predict_event_leaders(storage, s3, predictions_table, "SPORT#NCAAFB#EVENT#1")
+
+        assert [row["entity_id"] for row in result["home"]["sacks"]] == ["102", "101"]
+
 
 class TestComputeAndCacheEvent:
     """compute_and_cache_event -- the ComputeAndCachePrediction background

@@ -103,13 +103,25 @@ def predict_event_leaders(storage, s3, predictions_table, event_key_value: str, 
     def score(feature_row: dict, stats: list[str]) -> dict:
         return _score_and_record_leader(storage, s3, predictions_table, model_cache, event_key_value, feature_row, stats)
 
+    def ranked(team_candidates: dict, category: str) -> list[dict]:
+        """Every candidate in this category, scored, sorted by its own
+        predicted primary stat -- candidates arrive ordered by recent
+        volume (how build_live_event_leader_candidates picked who to
+        score at all), which can genuinely disagree with this game's own
+        predicted value. A candidate missing its primary stat entirely
+        (model not promoted) sorts last rather than crashing."""
+        primary_stat = LEADER_CATEGORY_STATS[category][0]
+        scored = [score(row, LEADER_CATEGORY_STATS[category]) for row in team_candidates[category]]
+        scored.sort(key=lambda result: result.get(primary_stat, float("-inf")), reverse=True)
+        return scored
+
     def team_leaders(team_candidates: dict) -> dict:
         passing_rows = team_candidates["passing"]
         return {
             "passing": score(passing_rows[0], LEADER_CATEGORY_STATS["passing"]) if passing_rows else None,
-            "rushing": [score(row, LEADER_CATEGORY_STATS["rushing"]) for row in team_candidates["rushing"]],
-            "receiving": [score(row, LEADER_CATEGORY_STATS["receiving"]) for row in team_candidates["receiving"]],
-            "sacks": [score(row, LEADER_CATEGORY_STATS["sacks"]) for row in team_candidates["sacks"]],
+            "rushing": ranked(team_candidates, "rushing"),
+            "receiving": ranked(team_candidates, "receiving"),
+            "sacks": ranked(team_candidates, "sacks"),
         }
 
     return {"home": team_leaders(candidates["home"]), "away": team_leaders(candidates["away"])}

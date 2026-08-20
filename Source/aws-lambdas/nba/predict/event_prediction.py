@@ -105,10 +105,20 @@ def predict_event_leaders(storage, s3, predictions_table, event_key_value: str, 
         return _score_and_record_leader(storage, s3, predictions_table, model_cache, event_key_value, feature_row, stats)
 
     def team_leaders(team_candidates: dict) -> dict:
-        return {
-            category: [score(row, LEADER_CATEGORY_STATS[category]) for row in team_candidates[category]]
-            for category in LEADER_CATEGORY_STATS
-        }
+        # Candidates arrive ordered by recent volume (that's how
+        # build_live_event_leader_candidates picks who to score at all),
+        # not by this game's own predicted value -- the two can genuinely
+        # disagree (e.g. a cold matchup for an otherwise-hot scorer), so
+        # each category is re-sorted by its own scored stat before
+        # returning, descending, missing-stat rows (no promoted model)
+        # last rather than crashing.
+        result = {}
+        for category in LEADER_CATEGORY_STATS:
+            primary_stat = LEADER_CATEGORY_STATS[category][0]
+            scored = [score(row, LEADER_CATEGORY_STATS[category]) for row in team_candidates[category]]
+            scored.sort(key=lambda row: row.get(primary_stat, float("-inf")), reverse=True)
+            result[category] = scored
+        return result
 
     return {"home": team_leaders(candidates["home"]), "away": team_leaders(candidates["away"])}
 

@@ -32,6 +32,14 @@
 
   <title>Sports Predictor</title>
   <link rel="manifest" href="manifest.json">
+
+  <!-- Paints the app's own dark background immediately, before Flutter's
+       JS engine finishes booting and renders its first frame -- without
+       this the browser's default white shows through for that entire
+       window instead. Matches AppColors.bg (app_colors.dart) exactly. -->
+  <style>
+    html, body { background: #0a0e17; height: 100%; margin: 0; }
+  </style>
 </head>
 <body>
   <script src="flutter_bootstrap.js" async></script>
