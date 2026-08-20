@@ -371,8 +371,9 @@ void main() {
     expect(find.text('0'), findsNWidgets(2));
     expect(find.textContaining('PROJECTED'), findsOneWidget);
     // The predicted final record (4-2, BOS the predicted winner) is the
-    // one record that belongs on the status line.
-    expect(find.textContaining('predicted 4-2'), findsOneWidget);
+    // one record that belongs on the status line, formatted as
+    // "PROJECTED — TEAM RECORD PERCENT".
+    expect(find.text('PROJECTED — BOS 4-2 70%'), findsOneWidget);
 
     // find.textContaining only checks the Text widget's own `data` string,
     // unaffected by paint-time ellipsis clipping -- checking the real
@@ -417,7 +418,7 @@ void main() {
     // on the status line); the predicted 4-1 final only appears there.
     expect(find.text('2'), findsOneWidget);
     expect(find.text('1'), findsOneWidget);
-    expect(find.textContaining('predicted 4-1'), findsOneWidget);
+    expect(find.text('BOS 4-1 81%'), findsOneWidget);
   });
 
   testWidgets(
@@ -504,11 +505,11 @@ void main() {
     await tester.tap(find.text('Playoff Bracket'));
     await tester.pumpAndSettle();
 
-    // Card height is 140px (_BracketTree's own _cardHeight) -- two
+    // Card height is 108px (_BracketTree's own _cardHeight) -- two
     // vertically-stacked cards must be at least that far apart or they
     // overlap, regardless of whether their slot values differ.
     final topGap = tester.getTopLeft(find.text('204')).dy - tester.getTopLeft(find.text('201')).dy;
-    expect(topGap, greaterThanOrEqualTo(140));
+    expect(topGap, greaterThanOrEqualTo(108));
   });
 
   testWidgets(

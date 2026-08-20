@@ -51,6 +51,16 @@ def _get_predictions_table() -> DynamoDBTable:
 
 
 def lambda_handler(event, context):
+    # EventBridge Scheduler warmup ping (scheduler-predict-warmup.tf) --
+    # keeps a container past its own (slow, xgboost/pandas/sklearn-heavy)
+    # cold-start import chain so a real request lands on an
+    # already-initialized environment instead of paying that cost itself.
+    if event.get("warmup"):
+        _get_storage()
+        _get_model_bucket()
+        _get_predictions_table()
+        return {"status": "warm"}
+
     if event.get("detail-type") == "ScheduledSeasonProjection":
         return season_projection.run_scheduled(_get_storage(), _get_model_bucket(), _get_predictions_table())
 

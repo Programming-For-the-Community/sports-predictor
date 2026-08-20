@@ -104,8 +104,10 @@ jobs:
       # exact same URL from one deploy to the next, only the bytes behind
       # it change. no-cache (distinct from no-store) still lets the
       # browser/CloudFront cache the bytes, it just forces a conditional
-      # GET/ETag revalidation on every load, so a new deploy is always
-      # seen without a manual hard refresh.
+      # GET/ETag revalidation on every load. Relies on frontend_hosting.yml's
+      # build step passing --pwa-strategy=none -- a service worker would
+      # cache-first-serve these same files from its own store, ahead of and
+      # bypassing this HTTP-level revalidation entirely.
       - name: Sync to S3
         env:
           BUCKET_NAME: ${{ steps.resolve.outputs.bucket_name }}

@@ -116,9 +116,20 @@ jobs:
           COGNITO_CLIENT_ID: ${{ steps.tf_config.outputs.cognito_client_id }}
         run: bash scripts/render_frontend_config.sh
 
+      # --pwa-strategy=none skips generating flutter_service_worker.js.
+      # Flutter's default service worker cache-first-serves every RESOURCE
+      # file including flutter_bootstrap.js itself -- the file that carries
+      # the new serviceWorkerVersion each build uses to detect an update --
+      # so once a service worker is installed, a normal reload keeps
+      # re-serving its own stale cached flutter_bootstrap.js and never sees
+      # the new version to trigger an update. Only a hard refresh (which
+      # bypasses the service worker for that navigation) broke the loop.
+      # No service worker means every request goes through the S3/CloudFront
+      # no-cache + 0-TTL edge cache policy instead, which does update on a
+      # normal reload.
       - name: Build web
         working-directory: Source/front-end
-        run: flutter build web --release --dart-define-from-file=config/prod.json
+        run: flutter build web --release --pwa-strategy=none --dart-define-from-file=config/prod.json
 
       - name: Upload build artifact
         uses: actions/upload-artifact@v4

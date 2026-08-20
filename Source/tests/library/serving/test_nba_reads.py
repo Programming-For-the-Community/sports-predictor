@@ -192,24 +192,24 @@ class TestLeadersComparison:
         assert result["home"]["scoring"][0]["actual"] == {"points": 24}
         assert result["away"]["scoring"] == []
 
-    def test_scoring_is_capped_at_top_2_by_predicted_points(self):
-        # Guards against an event whose audit trail holds more than 2
+    def test_scoring_is_capped_at_top_5_by_predicted_points(self):
+        # Guards against an event whose audit trail holds more than 5
         # recorded scoring predictions -- the comparison should still only
-        # ever show the top 2, same as the pre-game leaders block did.
+        # ever show the top 5, same as the pre-game leaders block did.
         storage = MagicMock()
         storage.get_entity.side_effect = lambda sport, entity_id, entity_type: {"metadata": {"team_id": "13"}, "name": entity_id}
         storage.get_player_game_stats_for_event.return_value = []
         predictions_table = MagicMock()
         predictions_table.query.return_value = [
             {"model_key": f"MODEL#player-prop-points#v1#PLAYER#p{i}", "predicted_value": {"value": float(i)}}
-            for i in range(1, 5)
+            for i in range(1, 7)
         ]
         event = _event("e1", "2025-11-11", "13", "2")
 
         result = nba_reads._leaders_comparison(storage, predictions_table.query.return_value, "nba", event)
 
-        assert len(result["home"]["scoring"]) == 2
-        assert [r["entity_id"] for r in result["home"]["scoring"]] == ["p4", "p3"]
+        assert len(result["home"]["scoring"]) == 5
+        assert [r["entity_id"] for r in result["home"]["scoring"]] == ["p6", "p5", "p4", "p3", "p2"]
 
     def test_skips_a_player_who_has_since_left_both_teams(self):
         storage = MagicMock()

@@ -38,7 +38,7 @@ _STAT_CATEGORY = {"points": "scoring", "rebounds": "rebounding", "assists": "ass
 # Mirrors predict/event_prediction.py's own LEADER_CATEGORY_STATS primary
 # stat per category. Every category is a list here -- no singular
 # category the way NCAAFB's "passing" is.
-_LEADER_CATEGORY_LIMITS = {"scoring": 2, "rebounding": 2, "assists": 2}
+_LEADER_CATEGORY_LIMITS = {"scoring": 5, "rebounding": 5, "assists": 5}
 _CATEGORY_PRIMARY_STAT = {"scoring": "points", "rebounding": "rebounds", "assists": "assists"}
 
 
@@ -191,7 +191,9 @@ def list_events(storage, predictions_table, sport: str, status: str) -> dict:
     """GET /nba/events?status=scheduled|completed -- scoped to exactly one
     calendar date, not the whole matching history. Each participant also
     carries `name`/`abbreviation` off its own team entity -- see
-    enrich_participants."""
+    enrich_participants. Also carries `venue_name`/`venue_city`/
+    `venue_state` straight off the stored event, `null` on any of the
+    three the venue lacked."""
     events = storage.get_all_events(sport, status=status)
 
     if status == "completed":
@@ -208,6 +210,8 @@ def list_events(storage, predictions_table, sport: str, status: str) -> dict:
             "season": e.get("season"),
             "participants": enrich_participants(storage, sport, e.get("participants")),
             "venue_name": e.get("venue_name"),
+            "venue_city": e.get("venue_city"),
+            "venue_state": e.get("venue_state"),
         }
         if status == "completed":
             # One query shared by _prediction_comparison and

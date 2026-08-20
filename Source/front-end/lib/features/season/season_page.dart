@@ -799,9 +799,9 @@ class _BracketTree extends StatelessWidget {
   final _BracketSlotLayout? precomputedLayout;
 
   static const double _cardWidth = 220;
-  static const double _cardHeight = 140;
+  static const double _cardHeight = 108;
   static const double _roundGap = 40;
-  static const double _verticalUnit = 156;
+  static const double _verticalUnit = 124;
   static const double _headerHeight = 20;
 
   @override
@@ -1045,14 +1045,12 @@ class _BracketMatchupCard extends StatelessWidget {
         case 'scheduled':
           if (matchup.winProbability == null || winnerLabel == null) return 'PREDICTION PENDING';
           final probability = '${(matchup.winProbability! * 100).round()}%';
-          return predictedRecord != null
-              ? '$probability $winnerLabel (predicted $predictedRecord)'
-              : '$probability $winnerLabel';
+          return predictedRecord != null ? '$winnerLabel $predictedRecord $probability' : '$probability $winnerLabel';
         default:
           if (matchup.winProbability == null || winnerLabel == null) return 'PROJECTED';
           final probability = '${(matchup.winProbability! * 100).round()}%';
           return predictedRecord != null
-              ? 'PROJECTED — $probability $winnerLabel (predicted $predictedRecord)'
+              ? 'PROJECTED — $winnerLabel $predictedRecord $probability'
               : 'PROJECTED — $probability $winnerLabel';
       }
     }

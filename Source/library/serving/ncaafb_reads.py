@@ -236,7 +236,9 @@ def list_events(storage, predictions_table, sport: str, status: str) -> dict:
     one week, not the whole matching history. No exhibition-game filter --
     NCAAFB has no equivalent contamination to exclude. Each participant
     also carries `name`/`abbreviation` off its own team entity -- see
-    enrich_participants."""
+    enrich_participants. Also carries `venue_name`/`venue_city`/
+    `venue_state` straight off the stored event, `null` on any of the
+    three the venue lacked."""
     events = storage.get_all_events(sport, status=status)
 
     if status == "completed":
@@ -256,6 +258,8 @@ def list_events(storage, predictions_table, sport: str, status: str) -> dict:
             "round": _round_label(e),
             "participants": enrich_participants(storage, sport, e.get("participants")),
             "venue_name": e.get("venue_name"),
+            "venue_city": e.get("venue_city"),
+            "venue_state": e.get("venue_state"),
         }
         if status == "completed":
             # One query shared by _prediction_comparison and

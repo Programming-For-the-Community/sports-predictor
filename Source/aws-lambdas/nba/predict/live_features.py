@@ -34,7 +34,7 @@ SEASON_LOOKBACK = 1
 # Leaders-panel candidate generation -- box-score volume stat per category.
 # Matches library.serving.nba_reads' own _CATEGORY_PRIMARY_STAT.
 LEADER_VOLUME_STATS = {"scoring": "points", "rebounding": "rebounds", "assists": "assists"}
-LEADER_CANDIDATE_LIMITS = {"scoring": 2, "rebounding": 2, "assists": 2}
+LEADER_CANDIDATE_LIMITS = {"scoring": 5, "rebounding": 5, "assists": 5}
 
 
 class EventNotFoundError(Exception):

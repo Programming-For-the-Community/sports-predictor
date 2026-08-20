@@ -13,6 +13,19 @@ import event_prediction
 import nba_predict
 
 
+class TestWarmup:
+    def test_warmup_ping_touches_singletons_and_skips_routing(self):
+        with patch.object(nba_predict, "_get_storage") as mock_storage, \
+             patch.object(nba_predict, "_get_model_bucket") as mock_bucket, \
+             patch.object(nba_predict, "_get_predictions_table") as mock_table:
+            response = nba_predict.lambda_handler({"warmup": True}, None)
+
+        assert response == {"status": "warm"}
+        mock_storage.assert_called_once()
+        mock_bucket.assert_called_once()
+        mock_table.assert_called_once()
+
+
 class TestComputeAndCacheDispatch:
     def test_event_route_calls_compute_and_cache_event(self):
         with patch.object(nba_predict, "_get_storage"), \

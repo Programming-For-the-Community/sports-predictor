@@ -227,17 +227,20 @@ class TestBuildLiveEventLeaderCandidates:
             _player_game("101", "13", past_game["event_key"], "2025-11-09", {"points": 8}),
             _player_game("102", "13", past_game["event_key"], "2025-11-09", {"points": 30}),
             _player_game("103", "13", past_game["event_key"], "2025-11-09", {"points": 18}),
+            _player_game("104", "13", past_game["event_key"], "2025-11-09", {"points": 22}),
+            _player_game("105", "13", past_game["event_key"], "2025-11-09", {"points": 15}),
+            _player_game("106", "13", past_game["event_key"], "2025-11-09", {"points": 4}),
         ]
         storage.get_entity.return_value = _entity("13")
 
         def _player_history(entity_id, before_date=None, limit=None):
-            volumes = {"101": 8, "102": 30, "103": 18}
+            volumes = {"101": 8, "102": 30, "103": 18, "104": 22, "105": 15, "106": 4}
             return [{"entity_id": entity_id, "stat_line": {"points": volumes[entity_id]}}]
 
         storage.get_player_game_stats.side_effect = _player_history
 
         result = live_features.build_live_event_leader_candidates(storage, "nba", event["event_key"])
 
-        # LEADER_CANDIDATE_LIMITS caps scoring at 2 -- the top 2 by volume (102, 103), not 101.
-        assert [row["entity_id"] for row in result["home"]["scoring"]] == ["102", "103"]
+        # LEADER_CANDIDATE_LIMITS caps scoring at 5 -- the top 5 by volume, not 106 (lowest).
+        assert [row["entity_id"] for row in result["home"]["scoring"]] == ["102", "104", "103", "105", "101"]
         assert result["away"]["scoring"] == []
