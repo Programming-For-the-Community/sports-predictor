@@ -64,26 +64,16 @@ class TestGetPlayerGameStats:
 
 
 class TestGetAllEvents:
-    def test_queries_status_index_most_recent_first(self, storage_env):
+    def test_queries_sport_status_index_most_recent_first(self, storage_env):
         storage, _, mock_events, _, _ = _make_storage(storage_env)
         mock_events.query.return_value = [_event("1", "KC")]
 
         storage.get_all_events("nfl", status="completed")
 
         call = mock_events.query.call_args
-        assert call.kwargs["index_name"] == "status-index"
+        assert call.kwargs["index_name"] == "sport-status-index"
         assert call.kwargs["scan_index_forward"] is False
-
-    def test_filters_to_the_requested_sport(self, storage_env):
-        storage, _, mock_events, _, _ = _make_storage(storage_env)
-        mock_events.query.return_value = [
-            _event("1", "KC", sport="nfl"),
-            _event("2", "KC", sport="nba"),
-        ]
-
-        result = storage.get_all_events("nfl")
-
-        assert [e["event_id"] for e in result] == ["1"]
+        assert call.args[0] == Key("sport_status").eq("nfl#completed")
 
     def test_defaults_to_completed_status(self, storage_env):
         storage, _, mock_events, _, _ = _make_storage(storage_env)
@@ -92,21 +82,19 @@ class TestGetAllEvents:
         storage.get_all_events("nfl")
 
         condition = mock_events.query.call_args.args[0]
-        assert condition == Key("status").eq("completed")
+        assert condition == Key("sport_status").eq("nfl#completed")
 
 
 class TestGetTeamEvents:
-    def test_filters_by_sport_status_and_participant(self, storage_env):
+    def test_filters_by_participant(self, storage_env):
         storage, _, mock_events, _, _ = _make_storage(storage_env)
-        # get_all_events now Queries the status-index GSI (status is
-        # already an exact match via the index, unlike sport/participant,
-        # which still need filtering in Python) -- see the "different
-        # sport" row below, which a real status-index Query would never
-        # even return since it's a different status.
+        # get_all_events now Queries the sport-status-index GSI, which is
+        # already scoped to one sport -- a real query never returns a
+        # different sport's row, so get_team_events only needs to filter
+        # by participant itself.
         mock_events.query.return_value = [
             _event("1", "KC"),
             _event("2", "LAC"),  # different team
-            _event("3", "KC", sport="nba"),  # different sport
         ]
 
         result = storage.get_team_events("nfl", "KC")
@@ -115,8 +103,8 @@ class TestGetTeamEvents:
 
     def test_relies_on_the_index_for_most_recent_first_ordering(self, storage_env):
         # get_all_events no longer sorts in Python -- it trusts the
-        # status-index GSI's own scan_index_forward=False guarantee, so
-        # this mock reflects what a real query already returns: most
+        # sport-status-index GSI's own scan_index_forward=False guarantee,
+        # so this mock reflects what a real query already returns: most
         # recent first. get_team_events just filters/truncates that order,
         # it doesn't re-sort.
         storage, _, mock_events, _, _ = _make_storage(storage_env)

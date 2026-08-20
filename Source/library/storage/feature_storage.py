@@ -57,12 +57,14 @@ class FeatureStorage:
         return team_events[:limit] if limit is not None else team_events
 
     def get_all_events(self, sport: str, status: str = "completed") -> list[dict]:
-        """Every event for a sport, most recent first, via the status-index
-        GSI (range key is event_date, so no separate sort is needed)."""
-        items = self._events_table.query(
-            Key("status").eq(status), index_name="status-index", scan_index_forward=False,
+        """Every event for a sport, most recent first, via the
+        sport-status-index GSI (range key is event_date, so no separate
+        sort is needed) -- Queries the sport directly instead of pulling
+        every sport at `status` off status-index and discarding the rest
+        in Python."""
+        return self._events_table.query(
+            Key("sport_status").eq(f"{sport}#{status}"), index_name="sport-status-index", scan_index_forward=False,
         )
-        return [item for item in items if item.get("sport") == sport]
 
     def get_all_player_game_stats(self, sport: str) -> list[dict]:
         """Every player_game_stats row for one sport, unsorted, via the

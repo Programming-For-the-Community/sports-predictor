@@ -50,13 +50,18 @@ class PipelineStorage:
         return self._entities_table.put_item(item, condition_expression=condition)
 
     def upsert_event(self, item: dict) -> None:
+        # sport_status backs the sport-status-index GSI (dynamodb-events.tf)
+        # -- lets get_events_by_status/FeatureStorage.get_all_events Query
+        # one sport directly instead of pulling every sport at that status
+        # off status-index and discarding most of it in Python.
+        if "sport" in item and "status" in item:
+            item = {**item, "sport_status": f"{item['sport']}#{item['status']}"}
         self._events_table.put_item(item)
 
     def get_events_by_status(self, sport: str, status: str) -> list[dict]:
         """Every event for a sport currently at `status`, via the
-        status-index GSI."""
-        items = self._events_table.query(Key("status").eq(status), index_name="status-index")
-        return [item for item in items if item.get("sport") == sport]
+        sport-status-index GSI."""
+        return self._events_table.query(Key("sport_status").eq(f"{sport}#{status}"), index_name="sport-status-index")
 
     def get_entity(self, sport: str, entity_id: str, entity_type: str) -> dict | None:
         """One entity by id, via a direct GetItem. entity_type ("team" or

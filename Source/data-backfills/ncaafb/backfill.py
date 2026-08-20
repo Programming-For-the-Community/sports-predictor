@@ -111,8 +111,9 @@ def _attach_enrichment(
     coach_by_school: dict[str, dict],
     rank_by_school: dict[str, int],
 ) -> None:
-    """Attaches venue_indoor, home/away coach, and home/away current rank
-    to each game dict in place, joined by school name via `by_id`."""
+    """Attaches venue_indoor/venue_city/venue_state, home/away coach, and
+    home/away current rank to each game dict in place, joined by school
+    name via `by_id`."""
     for game in games:
         home_id = str(game["homeId"]) if game.get("homeId") is not None else None
         away_id = str(game["awayId"]) if game.get("awayId") is not None else None
@@ -120,7 +121,10 @@ def _attach_enrichment(
         home_school = (home_team or {}).get("school")
         away_school = by_id.get(away_id, {}).get("school") if away_id else None
 
-        game["venue_indoor"] = (home_team or {}).get("location", {}).get("dome")
+        location = (home_team or {}).get("location") or {}
+        game["venue_indoor"] = location.get("dome")
+        game["venue_city"] = location.get("city")
+        game["venue_state"] = location.get("state")
         game["home_coach"] = coach_by_school.get(home_school)
         game["away_coach"] = coach_by_school.get(away_school)
         game["home_current_rank"] = rank_by_school.get(home_school)

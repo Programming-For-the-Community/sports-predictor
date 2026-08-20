@@ -188,6 +188,25 @@ void main() {
     expect(prefs.getString('cognito_tokens'), isNull);
   });
 
+  test('getValidIdToken called before restore finishes waits for it instead of throwing', () async {
+    SharedPreferences.setMockInitialValues({
+      'cognito_tokens': jsonEncode(CognitoTokens(
+        accessToken: 'a', idToken: 'persisted-id', refreshToken: 'r',
+        expiresAt: DateTime.now().add(const Duration(hours: 1)),
+      ).toJson()),
+      'last_activity_at': DateTime.now().toIso8601String(),
+    });
+    final repo = AuthRepository(authClient: CognitoAuthClient(httpClient: MockClient((r) async => _tokenResponse())));
+
+    // No await on _firstRealState here -- mirrors a page that builds and
+    // fetches immediately on a browser refresh, before _restoreSession's
+    // SharedPreferences read has had a chance to run.
+    final token = await repo.getValidIdToken();
+
+    expect(token, 'persisted-id');
+    expect(repo.state, isA<AuthAuthenticated>());
+  });
+
   test('logout clears state and persisted storage', () async {
     final repo = AuthRepository(authClient: CognitoAuthClient(httpClient: MockClient((r) async => _tokenResponse())));
     await _firstRealState(repo);

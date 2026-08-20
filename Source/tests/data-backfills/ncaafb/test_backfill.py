@@ -97,14 +97,20 @@ class TestSeasonRankLookup:
 class TestAttachEnrichment:
     def _by_id(self):
         return {
-            "2": {"school": "Georgia", "location": {"dome": False}},
-            "52": {"school": "Alabama", "location": {"dome": True}},
+            "2": {"school": "Georgia", "location": {"dome": False, "city": "Athens", "state": "GA"}},
+            "52": {"school": "Alabama", "location": {"dome": True, "city": "Tuscaloosa", "state": "AL"}},
         }
 
     def test_attaches_venue_indoor_from_home_team(self):
         games = [_game(home_id="52")]
         backfill._attach_enrichment(games, self._by_id(), {}, {})
         assert games[0]["venue_indoor"] is True
+
+    def test_attaches_venue_city_and_state_from_home_team(self):
+        games = [_game(home_id="52")]
+        backfill._attach_enrichment(games, self._by_id(), {}, {})
+        assert games[0]["venue_city"] == "Tuscaloosa"
+        assert games[0]["venue_state"] == "AL"
 
     def test_attaches_coach_and_rank_by_resolved_school(self):
         games = [_game(home_id="2", away_id="52")]
@@ -122,6 +128,8 @@ class TestAttachEnrichment:
         games = [_game(home_id="999")]
         backfill._attach_enrichment(games, self._by_id(), {}, {})
         assert games[0]["venue_indoor"] is None
+        assert games[0]["venue_city"] is None
+        assert games[0]["venue_state"] is None
         assert games[0]["home_coach"] is None
         assert games[0]["home_current_rank"] is None
 

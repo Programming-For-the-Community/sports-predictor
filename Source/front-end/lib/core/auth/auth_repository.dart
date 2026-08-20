@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter_riverpod/legacy.dart';
@@ -48,6 +49,15 @@ class AuthRepository extends StateNotifier<AuthState> {
   final CognitoAuthClient _authClient;
   SharedPreferences? _prefs;
 
+  // Resolves once _restoreSession's very first pass finishes (regardless of
+  // outcome). getValidIdToken awaits this before ever reading `state` --
+  // without it, a page that builds and fetches immediately on a browser
+  // refresh (go_router stays on the already-deep-linked URL while state is
+  // AuthInitial, it doesn't wait) would call getValidIdToken while restore
+  // is still reading SharedPreferences/refreshing a token, throwing "No
+  // authenticated session" even for a genuinely still-valid session.
+  final Completer<void> _restored = Completer<void>();
+
   Future<SharedPreferences> get _prefsInstance async => _prefs ??= await SharedPreferences.getInstance();
 
   Future<void> _restoreSession() async {
@@ -55,6 +65,7 @@ class AuthRepository extends StateNotifier<AuthState> {
     final raw = prefs.getString(_prefsKey);
     if (raw == null) {
       state = AuthUnauthenticated();
+      _restored.complete();
       return;
     }
 
@@ -63,6 +74,7 @@ class AuthRepository extends StateNotifier<AuthState> {
     if (await _isInactive()) {
       await _clear();
       state = AuthUnauthenticated();
+      _restored.complete();
       return;
     }
 
@@ -74,11 +86,13 @@ class AuthRepository extends StateNotifier<AuthState> {
       } catch (_) {
         await _clear();
         state = AuthUnauthenticated();
+        _restored.complete();
         return;
       }
     }
     await _touchActivity();
     state = AuthAuthenticated(tokens);
+    _restored.complete();
   }
 
   Future<void> login({required String username, required String password}) async {
@@ -125,6 +139,7 @@ class AuthRepository extends StateNotifier<AuthState> {
   /// path needs this: a token can be rejected server-side while still
   /// looking fresh by its own local expiresAt.
   Future<String> getValidIdToken({bool forceRefresh = false}) async {
+    await _restored.future;
     final current = state;
     if (current is! AuthAuthenticated) {
       throw StateError('No authenticated session');

@@ -90,26 +90,45 @@ class TestUpsertPlayerEntityReturnValue:
 
 
 class TestGetEventsByStatus:
-    def test_queries_the_status_index(self, storage_env):
+    def test_queries_the_sport_status_index(self, storage_env):
         storage, mock_events = _make_storage_with_events(storage_env)
         mock_events.query.return_value = []
 
         storage.get_events_by_status("ncaafb", "scheduled")
 
         call = mock_events.query.call_args
-        assert call.args[0] == Key("status").eq("scheduled")
-        assert call.kwargs["index_name"] == "status-index"
+        assert call.args[0] == Key("sport_status").eq("ncaafb#scheduled")
+        assert call.kwargs["index_name"] == "sport-status-index"
 
-    def test_filters_to_the_requested_sport(self, storage_env):
+    def test_returns_whatever_the_index_query_returns(self, storage_env):
         storage, mock_events = _make_storage_with_events(storage_env)
-        mock_events.query.return_value = [
-            {"event_id": "1", "sport": "ncaafb"},
-            {"event_id": "2", "sport": "nfl"},
-        ]
+        mock_events.query.return_value = [{"event_id": "1", "sport": "ncaafb"}]
 
         result = storage.get_events_by_status("ncaafb", "scheduled")
 
         assert [e["event_id"] for e in result] == ["1"]
+
+
+class TestUpsertEvent:
+    def test_derives_sport_status_from_sport_and_status(self, storage_env):
+        storage, mock_events = _make_storage_with_events(storage_env)
+        event = {"event_key": "SPORT#NCAAFB#EVENT#1", "sport": "ncaafb", "status": "scheduled"}
+
+        storage.upsert_event(event)
+
+        written = mock_events.put_item.call_args.args[0]
+        assert written["sport_status"] == "ncaafb#scheduled"
+        # The caller's own dict is left untouched -- upsert_event writes a
+        # copy, not a mutated version of what it was handed.
+        assert "sport_status" not in event
+
+    def test_leaves_sport_status_off_when_sport_or_status_is_missing(self, storage_env):
+        storage, mock_events = _make_storage_with_events(storage_env)
+
+        storage.upsert_event({"event_key": "SPORT#NCAAFB#EVENT#1", "status": "scheduled"})
+
+        written = mock_events.put_item.call_args.args[0]
+        assert "sport_status" not in written
 
 
 class TestGetEntity:

@@ -65,8 +65,8 @@ def _cancel_stale_scheduled_events(storage: PipelineStorage) -> int:
     canceled/postponed NCAAFB game just sits at "scheduled" forever
     without this; a year is long enough that no real delayed/rescheduled
     game could still be legitimately upcoming. Run once per invocation
-    (not per S3 record) -- idempotent and cheap (one status-index Query).
-    Returns how many rows were corrected, purely for logging."""
+    (not per S3 record) -- idempotent and cheap (one sport-status-index
+    Query). Returns how many rows were corrected, purely for logging."""
     cutoff = (datetime.now(timezone.utc).date() - timedelta(days=STALE_UNPLAYED_MAX_AGE_DAYS)).isoformat()
     stale = [e for e in storage.get_events_by_status(SPORT, "scheduled") if e.get("event_date", "") < cutoff]
     for event in stale:
