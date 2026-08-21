@@ -147,6 +147,7 @@ env:
   TF_VAR_ecr_repo_url: ${{ secrets.ECR_URI }}
   TF_VAR_espn_api_root_url: ${{ vars.ESPN_API_ROOT_URL }}
   TF_VAR_espn_core_api_root_url: ${{ vars.ESPN_CORE_API_ROOT_URL }}
+  TF_VAR_ncaambb_espn_core_api_root_url: ${{ vars.NCAAMBB_ESPN_CORE_API_ROOT_URL }}
   TF_VAR_cfbd_api_root_url: ${{ vars.CFBD_API_ROOT_URL }}
   TF_VAR_third_party_api_key_secret_arn: ${{ secrets.THIRD_PARTY_API_KEYS_SECRET_ARN }}
   TF_VAR_fargate_account_vcpu_limit: ${{ vars.FARGATE_VCPU_LIMIT }}
@@ -210,6 +211,10 @@ jobs:
         fi
         if [ -z "$TF_VAR_espn_core_api_root_url" ]; then
           echo "::error::ESPN_CORE_API_ROOT_URL is not set. Create it under Settings > Secrets and variables > Actions > Variables (value: https://sports.core.api.espn.com/v2/sports/football/leagues/nfl)."
+          exit 1
+        fi
+        if [ -z "$TF_VAR_ncaambb_espn_core_api_root_url" ]; then
+          echo "::error::NCAAMBB_ESPN_CORE_API_ROOT_URL is not set. Create it under Settings > Secrets and variables > Actions > Variables (value: https://sports.core.api.espn.com/v2/sports/basketball/leagues/mens-college-basketball)."
           exit 1
         fi
         if [ -z "$TF_VAR_cfbd_api_root_url" ]; then

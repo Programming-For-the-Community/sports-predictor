@@ -51,6 +51,11 @@ resource "aws_ecs_task_definition" "ncaambb_backfill" {
         { name = "AWS_REGION", value = var.region },
         { name = "ESPN_API_ROOT_URL", value = var.espn_api_root_url },
         { name = "ESPN_USER_AGENT", value = var.espn_user_agent },
+        # library/http/ncaambb_core.py's own env var, read directly (not
+        # via EspnBaseClient) -- see that module's docstring for why it's
+        # not var.espn_core_api_root_url (that variable's default is
+        # hardcoded to NFL's league path).
+        { name = "NCAAMBB_ESPN_CORE_API_ROOT_URL", value = var.ncaambb_espn_core_api_root_url },
         { name = "START_SEASON", value = "2016" },
         { name = "END_SEASON", value = "2026" },
         { name = "BATCH_SIZE", value = "2" },
