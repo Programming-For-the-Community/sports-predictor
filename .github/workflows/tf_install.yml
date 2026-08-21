@@ -98,6 +98,15 @@ on:
       nba_live_scores_function_name:
         description: 'NBA live-scores Lambda function name'
         value: ${{ jobs.terraform.outputs.nba_live_scores_function_name }}
+      ncaambb_ingest_function_name:
+        description: 'NCAA MBB ingest Lambda function name'
+        value: ${{ jobs.terraform.outputs.ncaambb_ingest_function_name }}
+      ncaambb_normalize_function_name:
+        description: 'NCAA MBB normalize Lambda function name'
+        value: ${{ jobs.terraform.outputs.ncaambb_normalize_function_name }}
+      ncaambb_schedule_sync_function_name:
+        description: 'NCAA MBB schedule-sync Lambda function name'
+        value: ${{ jobs.terraform.outputs.ncaambb_schedule_sync_function_name }}
       cognito_user_pool_id:
         description: 'Cognito User Pool ID'
         value: ${{ jobs.terraform.outputs.cognito_user_pool_id }}
@@ -169,6 +178,9 @@ jobs:
       nba_predict_function_name: ${{ steps.tf_outputs.outputs.nba_predict_function_name }}
       nba_predict_read_function_name: ${{ steps.tf_outputs.outputs.nba_predict_read_function_name }}
       nba_live_scores_function_name: ${{ steps.tf_outputs.outputs.nba_live_scores_function_name }}
+      ncaambb_ingest_function_name: ${{ steps.tf_outputs.outputs.ncaambb_ingest_function_name }}
+      ncaambb_normalize_function_name: ${{ steps.tf_outputs.outputs.ncaambb_normalize_function_name }}
+      ncaambb_schedule_sync_function_name: ${{ steps.tf_outputs.outputs.ncaambb_schedule_sync_function_name }}
       cognito_user_pool_id: ${{ steps.tf_outputs.outputs.cognito_user_pool_id }}
       cognito_client_id: ${{ steps.tf_outputs.outputs.cognito_client_id }}
       api_endpoint: ${{ steps.tf_outputs.outputs.api_endpoint }}
@@ -284,6 +296,9 @@ jobs:
         capture_output nba_predict_function_name
         capture_output nba_predict_read_function_name
         capture_output nba_live_scores_function_name
+        capture_output ncaambb_ingest_function_name
+        capture_output ncaambb_normalize_function_name
+        capture_output ncaambb_schedule_sync_function_name
         capture_output cognito_user_pool_id
         capture_output cognito_client_id
         capture_output api_endpoint

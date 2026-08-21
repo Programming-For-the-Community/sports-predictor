@@ -1,0 +1,89 @@
+# Top-level NCAA MBB deploy pipeline. Runs on every push to an
+# ncaambb*/ncaa_mbb* branch, but pauses for manual approval (via the
+# environment's required reviewers -- configure this in Settings >
+# Environments, it can't be set from this file) before doing anything.
+#
+# Onboarding in progress (see project-ncaambb-onboarding memory) -- this
+# is a real, working "first stub version" covering only the pieces that
+# exist so far (backfill, data pipeline), not a placeholder. It grows the
+# same way app_deploy.yml already has: ai_training/ai_hosting jobs join
+# the pre-infra build list and infra's own `needs`/`if:` gate in the same
+# step that creates each of those workflow files, then
+# deploy_predict_lambda/predict_read_deploy/live_scores_deploy join after
+# infra once their own Lambdas exist. Once ai_hosting exists,
+# aws_lambda_function.ncaambb_predict (a container-image Lambda, same
+# reasoning as nba_predict -- CreateFunction validates its image tag
+# already exists in ECR, and Terraform can't fabricate a placeholder image
+# the way it does a placeholder ZIP) will need `infra` to depend on
+# `ai_hosting` completing first, mirrored from nba_deploy.yml's own
+# pattern -- wired in from that job's first appearance here, not patched
+# on later (a real gap NBA's own history had).
+#
+# Both this job's `approval` step AND tf_install.yml's own terraform job
+# gate on the `development`/`production` environment, so a run through
+# this pipeline prompts for approval twice.
+
+name: NCAA MBB Deploy
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - 'ncaambb*'
+      - 'ncaambb/*'
+      - 'ncaa_mbb*'
+      - 'ncaa_mbb/*'
+  workflow_call:
+
+# Shared group across every workflow that can reach tf_install.yml's
+# terraform apply, since Terraform/main.tf's S3 backend has no state
+# locking configured.
+concurrency:
+  group: terraform-deploy-pipeline
+  cancel-in-progress: false
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  approval:
+    name: Await deployment approval
+    if: github.event_name != 'workflow_call'
+    runs-on: ubuntu-latest
+    environment: development
+    steps:
+      - name: Approved
+        run: echo "Deployment approved -- proceeding."
+
+  # approval is intentionally skipped (not failed) when called via
+  # workflow_call -- without this, a skipped `needs` job would cause
+  # everything downstream to be skipped too. Each build job below repeats
+  # this same tolerant check against `approval` directly.
+  backfill:
+    name: Historical backfill (build)
+    needs: approval
+    if: |
+      always() &&
+      (needs.approval.result == 'success' || needs.approval.result == 'skipped')
+    uses: ./.github/workflows/ncaambb_backfill.yml
+    secrets: inherit
+
+  infra:
+    name: Apply shared infrastructure
+    needs: backfill
+    if: |
+      always() &&
+      (needs.backfill.result == 'success' || needs.backfill.result == 'skipped')
+    uses: ./.github/workflows/tf_install.yml
+    secrets: inherit
+
+  data_pipeline:
+    name: Data pipeline
+    needs: infra
+    uses: ./.github/workflows/ncaambb_data_pipeline.yml
+    secrets: inherit
+    with:
+      ingest_function_name: ${{ needs.infra.outputs.ncaambb_ingest_function_name }}
+      normalize_function_name: ${{ needs.infra.outputs.ncaambb_normalize_function_name }}
+      schedule_sync_function_name: ${{ needs.infra.outputs.ncaambb_schedule_sync_function_name }}

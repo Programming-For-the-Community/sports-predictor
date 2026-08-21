@@ -264,3 +264,90 @@ resource "aws_dynamodb_table_item" "nba_registry" {
     }
   })
 }
+
+# Same 6 player-prop stats as NBA (turnovers/free_throws_made kept as
+# feature inputs only, not trained targets -- same call NBA made). Plus a
+# national-ranking target, same shape as NCAAFB's, used for March
+# Madness/conference-tournament field seeding rather than a CFP-style poll.
+locals {
+  ncaambb_score_targets = {
+    "margin"     = true
+    "home_score" = true
+    "away_score" = true
+  }
+  ncaambb_player_prop_stats = {
+    "points"              = true
+    "rebounds"            = true
+    "assists"             = true
+    "steals"              = true
+    "blocks"              = true
+    "three_pointers_made" = true
+  }
+}
+
+# NCAA MBB's registry row -- same shape as nba_registry plus NCAAFB's
+# national-ranking target (used by season_simulation.py's field selection
+# for March Madness/conference brackets, not an in-season poll). Regular
+# season starts the first Monday of November (2025-26 confirmed live:
+# 2025-11-03); season_end pads past the National Championship, which falls
+# on the first Monday of April (2026 confirmed live: 2026-04-06).
+resource "aws_dynamodb_table_item" "ncaambb_registry" {
+  table_name = aws_dynamodb_table.sport_registry.name
+  hash_key   = aws_dynamodb_table.sport_registry.hash_key
+
+  item = jsonencode({
+    sport_key       = { S = "SPORT#NCAAMBB" }
+    sport           = { S = "ncaambb" }
+    event_type      = { S = "head_to_head" }
+    polling_cadence = { S = "daily" }
+    season_start    = { S = "11-01" } # regular season starts first Monday of November
+    season_end      = { S = "05-01" } # padding past the early-April championship
+
+    training_targets = {
+      L = concat(
+        [
+          {
+            M = {
+              model_name             = { S = "win-probability" }
+              task_definition_suffix = { S = "train-win-probability-model" }
+              container_name         = { S = "ncaambb-train-win-probability-model" }
+              env_name               = { S = "AWS_REGION" }
+              env_value              = { S = var.region }
+            }
+          },
+          {
+            M = {
+              model_name             = { S = "national-ranking" }
+              task_definition_suffix = { S = "train-ranking-model" }
+              container_name         = { S = "ncaambb-train-ranking-model" }
+              env_name               = { S = "AWS_REGION" }
+              env_value              = { S = var.region }
+            }
+          },
+        ],
+        [
+          for target, _ in local.ncaambb_score_targets : {
+            M = {
+              model_name             = { S = "score-${replace(target, "_", "-")}" }
+              task_definition_suffix = { S = "train-score-model" }
+              container_name         = { S = "ncaambb-train-score-model" }
+              env_name               = { S = "SCORE_TARGET" }
+              env_value              = { S = target }
+            }
+          }
+        ],
+        [
+          for stat, _ in local.ncaambb_player_prop_stats : {
+            M = {
+              model_name             = { S = "player-prop-${replace(stat, "_", "-")}" }
+              task_definition_suffix = { S = "train-player-prop-model" }
+              container_name         = { S = "ncaambb-train-player-prop-model" }
+              env_name               = { S = "TARGET_STAT" }
+              env_value              = { S = stat }
+            }
+          }
+        ],
+      )
+    }
+  })
+}

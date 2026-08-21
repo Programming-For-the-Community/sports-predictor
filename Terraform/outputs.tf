@@ -1,6 +1,6 @@
 # Values produced after apply that downstream resources and the frontend
 # build need but can't know ahead of time. Split by sport into
-# outputs-nfl.tf/outputs-ncaafb.tf/outputs-nba.tf; this file holds the
+# outputs-nfl.tf/outputs-ncaafb.tf/outputs-nba.tf/outputs-ncaambb.tf; this file holds the
 # shared/core outputs common to all sports.
 
 output "cognito_user_pool_id" {

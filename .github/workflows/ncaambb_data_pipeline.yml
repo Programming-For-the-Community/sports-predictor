@@ -1,0 +1,99 @@
+# Builds and deploys the NCAA MBB recurring data pipeline Lambdas:
+# ncaambb-ingest (EventBridge-triggered, writes raw JSON to S3),
+# ncaambb-normalize (S3-triggered, writes to DynamoDB), and
+# ncaambb-schedule-sync (EventBridge-triggered, writes raw JSON to S3 for
+# the rest of the season -- see Terraform/lambda-ncaambb-schedule-sync.tf).
+# All three are deployed in parallel since they are independent -- a
+# failure in one does not block the others.
+#
+# Lambda function names are supplied by the caller (ncaambb_deploy.yml)
+# from Terraform outputs so this workflow never hard-codes names that
+# Terraform owns. Defaults are provided so workflow_dispatch (manual,
+# standalone run) still works without needing the Terraform output values.
+#
+# Terraform (tf_install.yml) creates each Lambda function with a placeholder
+# ZIP and lifecycle { ignore_changes } so it never overwrites what this
+# workflow deploys. This workflow owns all subsequent code updates.
+
+name: NCAA MBB Data Pipeline
+
+on:
+  workflow_dispatch:
+  workflow_call:
+    inputs:
+      ingest_function_name:
+        description: 'NCAA MBB ingest Lambda function name (from Terraform output ncaambb_ingest_function_name)'
+        required: false
+        type: string
+        default: 'sports-predictor-ncaambb-ingest'
+      normalize_function_name:
+        description: 'NCAA MBB normalize Lambda function name (from Terraform output ncaambb_normalize_function_name)'
+        required: false
+        type: string
+        default: 'sports-predictor-ncaambb-normalize'
+      schedule_sync_function_name:
+        description: 'NCAA MBB schedule-sync Lambda function name (from Terraform output ncaambb_schedule_sync_function_name)'
+        required: false
+        type: string
+        default: 'sports-predictor-ncaambb-schedule-sync'
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  # Each Lambda gets its own upstream test job, pointed at its own
+  # specific test file -- not the whole Source/tests/aws-lambdas/ncaambb/
+  # directory. A failing normalize test shouldn't fail the ingest deploy,
+  # or vice versa, purely because both deploys pointed at the same shared
+  # directory.
+  test-ingest:
+    name: Run ncaambb-ingest tests
+    uses: ./.github/workflows/run_python_tests.yml
+    with:
+      test_path: 'Source/tests/aws-lambdas/ncaambb/test_ingest.py'
+      requirements_files: 'Source/aws-lambdas/ncaambb/ingest/requirements.txt'
+
+  test-normalize:
+    name: Run ncaambb-normalize tests
+    uses: ./.github/workflows/run_python_tests.yml
+    with:
+      test_path: 'Source/tests/aws-lambdas/ncaambb/test_normalize.py'
+      requirements_files: 'Source/aws-lambdas/ncaambb/normalize/requirements.txt'
+
+  deploy-ingest:
+    name: Deploy ncaambb-ingest Lambda
+    needs: test-ingest
+    uses: ./.github/workflows/python_lambda_build.yml
+    secrets: inherit
+    with:
+      function_name: ${{ inputs.ingest_function_name || 'sports-predictor-ncaambb-ingest' }}
+      handler_dir: 'Source/aws-lambdas/ncaambb/ingest'
+      library_path: 'Source/library'
+
+  deploy-normalize:
+    name: Deploy ncaambb-normalize Lambda
+    needs: test-normalize
+    uses: ./.github/workflows/python_lambda_build.yml
+    secrets: inherit
+    with:
+      function_name: ${{ inputs.normalize_function_name || 'sports-predictor-ncaambb-normalize' }}
+      handler_dir: 'Source/aws-lambdas/ncaambb/normalize'
+      library_path: 'Source/library'
+
+  test-schedule-sync:
+    name: Run ncaambb-schedule-sync tests
+    uses: ./.github/workflows/run_python_tests.yml
+    with:
+      test_path: 'Source/tests/aws-lambdas/ncaambb/test_schedule_sync.py'
+      requirements_files: 'Source/aws-lambdas/ncaambb/schedule-sync/requirements.txt'
+
+  deploy-schedule-sync:
+    name: Deploy ncaambb-schedule-sync Lambda
+    needs: test-schedule-sync
+    uses: ./.github/workflows/python_lambda_build.yml
+    secrets: inherit
+    with:
+      function_name: ${{ inputs.schedule_sync_function_name || 'sports-predictor-ncaambb-schedule-sync' }}
+      handler_dir: 'Source/aws-lambdas/ncaambb/schedule-sync'
+      library_path: 'Source/library'
