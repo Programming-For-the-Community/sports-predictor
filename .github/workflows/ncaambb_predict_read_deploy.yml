@@ -1,0 +1,38 @@
+# Tests and deploys the NCAA MBB predict-read Lambda -- GET /ncaambb/events
+# and GET /ncaambb/models, split out of ncaambb-predict for cold start (see
+# Terraform/lambda-ncaambb-predict-read.tf). Zip-packaged like
+# ingest/normalize, not a container image.
+
+name: NCAA MBB Predict Read Deploy
+
+on:
+  workflow_dispatch:
+  workflow_call:
+    inputs:
+      function_name:
+        description: 'NCAA MBB predict-read Lambda function name (from Terraform output ncaambb_predict_read_function_name)'
+        required: false
+        type: string
+        default: 'sports-predictor-ncaambb-predict-read'
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  test:
+    name: Run ncaambb-predict-read tests
+    uses: ./.github/workflows/run_python_tests.yml
+    with:
+      test_path: 'Source/tests/aws-lambdas/ncaambb/test_predict_read_handler.py Source/tests/library/serving/test_ncaambb_reads.py Source/tests/library/storage/test_prediction_cache.py Source/tests/library/storage/test_model_artifacts.py Source/tests/library/aws/test_lambda_invoker.py'
+      requirements_files: 'Source/aws-lambdas/ncaambb/predict-read/requirements.txt'
+
+  deploy:
+    name: Deploy ncaambb-predict-read Lambda
+    needs: test
+    uses: ./.github/workflows/python_lambda_build.yml
+    secrets: inherit
+    with:
+      function_name: ${{ inputs.function_name || 'sports-predictor-ncaambb-predict-read' }}
+      handler_dir: 'Source/aws-lambdas/ncaambb/predict-read'
+      library_path: 'Source/library'

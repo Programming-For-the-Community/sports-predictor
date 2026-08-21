@@ -21,3 +21,13 @@ output "ncaambb_schedule_sync_function_name" {
   description = "NCAA MBB schedule-sync Lambda function name -- passed to ncaambb_data_pipeline workflow for `aws lambda update-function-code`"
   value       = aws_lambda_function.ncaambb_schedule_sync.function_name
 }
+
+output "ncaambb_predict_function_name" {
+  description = "NCAA MBB predict Lambda function name -- passed to ncaambb_deploy workflow's deploy_predict_lambda job for `aws lambda update-function-code`"
+  value       = aws_lambda_function.ncaambb_predict.function_name
+}
+
+output "ncaambb_predict_read_function_name" {
+  description = "NCAA MBB predict-read Lambda function name -- passed to ncaambb_deploy workflow's predict_read_deploy job for `aws lambda update-function-code`"
+  value       = aws_lambda_function.ncaambb_predict_read.function_name
+}

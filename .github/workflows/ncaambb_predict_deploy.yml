@@ -1,0 +1,69 @@
+# Points the ncaambb-predict Lambda at an already-pushed image. Split out
+# of ncaambb_ai_hosting.yml so build (no infra dependency) and deploy
+# (needs the Lambda function to already exist) can run on opposite sides
+# of `terraform apply` in ncaambb_deploy.yml.
+#
+# Runs standalone (workflow_dispatch, defaulting to whatever is currently
+# tagged ncaambb-predict-latest) or called from ncaambb_deploy.yml with
+# the exact versioned tag ncaambb_ai_hosting.yml just pushed.
+
+name: NCAA MBB Predict Deploy
+
+on:
+  workflow_dispatch:
+    inputs:
+      function_name:
+        description: 'NCAA MBB predict Lambda function name'
+        required: false
+        type: string
+        default: 'sports-predictor-ncaambb-predict'
+      image_uri:
+        description: 'Image URI to deploy (leave blank to use the current ncaambb-predict-latest tag)'
+        required: false
+        type: string
+  workflow_call:
+    inputs:
+      function_name:
+        description: 'NCAA MBB predict Lambda function name (from Terraform output ncaambb_predict_function_name)'
+        required: false
+        type: string
+        default: 'sports-predictor-ncaambb-predict'
+      image_uri:
+        description: 'Image URI to deploy (leave blank to use the current ncaambb-predict-latest tag)'
+        required: false
+        type: string
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  deploy:
+    name: Point ncaambb-predict Lambda at the image
+    runs-on: ubuntu-latest
+    steps:
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_DEPLOY_SVC_ACCT_ARN }}
+          aws-region: ${{ vars.AWS_RESOURCE_REGION }}
+          role-session-name: GitHubActions-${{ github.run_id }}
+
+      - name: Update function code
+        env:
+          FUNCTION_NAME: ${{ inputs.function_name || 'sports-predictor-ncaambb-predict' }}
+          IMAGE_URI: ${{ inputs.image_uri }}
+          ECR_URI: ${{ secrets.ECR_URI }}
+        run: |
+          if [ -z "$IMAGE_URI" ]; then
+            IMAGE_URI="$ECR_URI:ncaambb-predict-latest"
+          fi
+
+          aws lambda update-function-code \
+            --function-name "$FUNCTION_NAME" \
+            --image-uri "$IMAGE_URI"
+
+          aws lambda wait function-updated \
+            --function-name "$FUNCTION_NAME"
+
+          echo "Deployed $FUNCTION_NAME -> $IMAGE_URI"

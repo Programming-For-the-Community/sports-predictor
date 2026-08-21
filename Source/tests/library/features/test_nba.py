@@ -1,38 +1,18 @@
 """
-Unit tests for library.features.nba -- estimate_possessions/
-_efficiency_per_100, build_event_features, and build_player_features. No
-AWS involved. Uses real NBA team ids from library.features.nba_teams
-(BOS=2, LAL=13) for the travel/division-adjacent assertions, same
-convention test_ncaafb_event_features.py uses for CFBD ids.
+Unit tests for library.features.nba -- build_event_features and
+build_player_features. No AWS involved. Uses real NBA team ids from
+library.features.nba_teams (BOS=2, LAL=13) for the travel/division-adjacent
+assertions, same convention test_ncaafb_event_features.py uses for CFBD ids.
+
+estimate_possessions/_efficiency_per_100 (the Dean Oliver math nba.py
+re-exports from library.features.common) have their own dedicated tests
+in test_common_basketball.py now, not duplicated here.
 """
 import pytest
 
-from library.features.nba import _efficiency_per_100, build_event_features, build_player_features, estimate_possessions
+from library.features.nba import build_event_features, build_player_features
 
 from _nba_test_helpers import event as _event
-
-
-class TestEstimatePossessions:
-    def test_dean_oliver_formula(self):
-        # FGA - OREB + TOV + 0.44*FTA = 90 - 10 + 14 + 0.44*20 = 102.8
-        assert estimate_possessions(90, 10, 14, 20) == 102.8
-
-    def test_none_if_any_input_missing(self):
-        assert estimate_possessions(None, 10, 14, 20) is None
-        assert estimate_possessions(90, None, 14, 20) is None
-        assert estimate_possessions(90, 10, None, 20) is None
-        assert estimate_possessions(90, 10, 14, None) is None
-
-
-class TestEfficiencyPer100:
-    def test_points_per_100_possessions(self):
-        assert _efficiency_per_100(110.0, 100.0) == pytest.approx(110.0)
-        assert _efficiency_per_100(55.0, 100.0) == pytest.approx(55.0)
-
-    def test_none_when_points_or_possessions_missing_or_zero(self):
-        assert _efficiency_per_100(None, 100.0) is None
-        assert _efficiency_per_100(110.0, None) is None
-        assert _efficiency_per_100(110.0, 0) is None
 
 
 class TestBuildEventFeaturesCore:

@@ -41,6 +41,14 @@ scoreboard has zero events before the real regular-season start date
 carry season.type=2/"regular-season". No PRESEASON_TYPE filtering exists
 in this module for that reason, not because it was overlooked.
 
+Also fetches this week's AP Top 25 poll on every run (see
+_fetch_current_ap_poll) -- keeps the national-ranking model's training
+data (see project-ncaambb-onboarding memory) current going forward, since
+data-backfills/ncaambb/backfill.py's own seed_rankings only ever covers
+polls up through whenever it last ran. Best-effort and fully isolated
+from the rest of this run -- a ranking-fetch failure never blocks or
+fails box-score/roster ingest, a genuinely secondary data source.
+
 VOLUME: unlike NBA's ~30 teams/~15 games-a-night, D1 has ~362 teams (every
 one of which gets its roster re-fetched every run) and a single busy
 Saturday can carry ~150-155 games (confirmed live, 2026-08-19) -- exactly
@@ -68,6 +76,7 @@ import boto3
 from botocore.exceptions import ClientError
 
 from library.http.ncaambb import NCAAMBBClient
+from library.http.ncaambb_core import NCAAMBBCoreClient, current_ap_poll_pointer
 from library.normalize.espn import roster_to_team_injuries
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s", force=True)  # AWS Lambda pre-attaches a root handler, so basicConfig() is otherwise a silent no-op
@@ -176,6 +185,29 @@ def _attach_injuries(events: list[dict], injuries_by_team: dict[str, list[dict]]
             evt[f"{role}_injuries"] = injuries_by_team[team_id]
 
 
+def _fetch_current_ap_poll(client: NCAAMBBClient, core_client: NCAAMBBCoreClient) -> bool:
+    """Fetches and writes this week's AP Top 25 poll to S3, under the
+    exact same ncaambb/rankings/{season}/{season_type}/{week}.json key
+    shape data-backfills/ncaambb/backfill.py's own seed_rankings uses --
+    keeps the national-ranking model's training data current going
+    forward, since backfill only ever covers polls up through whenever it
+    last ran. Best-effort: no current poll (off-season, or ESPN hasn't
+    released one yet) is a normal, logged no-op, not a failure -- this
+    must never take down the rest of ingest over a genuinely secondary,
+    non-critical data source."""
+    pointer = current_ap_poll_pointer(client.get_current_rankings_pointer())
+    if pointer is None:
+        logger.info("No current AP poll pointer available -- skipping")
+        return False
+    season, season_type, week = pointer
+    poll = core_client.get_ap_poll(season, season_type, week)
+    if poll is None:
+        logger.info("No AP poll found for season=%s type=%s week=%s -- skipping", season, season_type, week)
+        return False
+    _put_json(f"ncaambb/rankings/{season}/{season_type}/{week}.json", poll)
+    return True
+
+
 def lambda_handler(event: dict, context) -> dict:
     target_date = event.get("date") or _yesterday()
     client = NCAAMBBClient()
@@ -193,6 +225,15 @@ def lambda_handler(event: dict, context) -> dict:
     # regardless of whether the target date has any games at all.
     rosters_fetched, rosters_failed, injuries_by_team = _fetch_rosters(client, team_ids)
     logger.info("Rosters: %d fetched, %d failed", rosters_fetched, rosters_failed)
+
+    # Best-effort, isolated from the rest of this run's own error
+    # handling -- see _fetch_current_ap_poll's own docstring for why a
+    # ranking-fetch failure must never take down box-score/roster ingest.
+    try:
+        rankings_fetched = _fetch_current_ap_poll(client, NCAAMBBCoreClient())
+    except Exception:
+        logger.exception("Failed fetching current AP poll")
+        rankings_fetched = False
 
     scoreboard = client.get_scoreboard_for_date(target_date)
     events = scoreboard.get("events", [])
@@ -242,4 +283,5 @@ def lambda_handler(event: dict, context) -> dict:
     return {
         "processed": processed, "skipped": skipped, "failed": failed,
         "rosters_fetched": rosters_fetched, "rosters_failed": rosters_failed,
+        "rankings_fetched": rankings_fetched,
     }

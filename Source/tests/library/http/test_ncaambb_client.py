@@ -69,3 +69,12 @@ class TestNCAAMBBClient:
 
         client._get.assert_called_once_with("teams/150/roster", params={})
         assert result == {"athletes": []}
+
+    def test_get_current_rankings_pointer_passes_no_params(self):
+        client = NCAAMBBClient.__new__(NCAAMBBClient)
+        client._get = MagicMock(return_value={"rankings": []})
+
+        result = client.get_current_rankings_pointer()
+
+        client._get.assert_called_once_with("rankings", params={})
+        assert result == {"rankings": []}

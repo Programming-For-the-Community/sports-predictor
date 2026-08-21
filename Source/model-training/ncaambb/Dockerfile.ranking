@@ -1,0 +1,36 @@
+# Separate image for train_ranking_model.py -- see
+# Terraform/ecs-task-ncaambb-train-ranking-model.tf's own comment for why
+# the National Ranking model doesn't share Dockerfile's image (a distinct,
+# smaller team-poll feature dataset rather than event_features.parquet).
+# Same requirements.txt and multi-stage shape as Dockerfile in this
+# directory, just a different single entrypoint script.
+#
+# Build with: docker build -f Source/model-training/ncaambb/Dockerfile.ranking Source
+
+FROM python:3.12-slim AS builder
+
+WORKDIR /build
+
+COPY library/ ./library/
+COPY model-training/ncaambb/requirements.txt ./requirements.txt
+
+RUN pip install --no-cache-dir --target=/install ./library && \
+    pip install --no-cache-dir --target=/install -r requirements.txt
+
+# --- Runtime: installed packages + application source, nothing else ---
+FROM python:3.12-slim AS runtime
+
+RUN useradd --no-create-home --uid 10001 train-model
+
+WORKDIR /app
+
+ENV PYTHONPATH=/app/deps \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1
+
+COPY --from=builder /install /app/deps
+COPY model-training/ncaambb/train_ranking_model.py ./
+
+USER train-model
+
+ENTRYPOINT ["python", "train_ranking_model.py"]

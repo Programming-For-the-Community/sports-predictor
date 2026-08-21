@@ -73,6 +73,18 @@ def season_type_week_from_ref(ref_url: str | None) -> tuple[int, int, int] | Non
     return int(match.group(1)), int(match.group(2)), int(match.group(3))
 
 
+def current_ap_poll_pointer(rankings_response: dict) -> tuple[int, int, int] | None:
+    """Picks the AP entry out of NCAAMBBClient.get_current_rankings_pointer's
+    response (matched by its own `type` field, not position -- confirmed
+    live the AP entry is always first but that's not a contract worth
+    depending on) and resolves it to (season, season_type, week) via
+    season_type_week_from_ref. None if no AP entry is present at all."""
+    for entry in rankings_response.get("rankings", []):
+        if entry.get("type") == "ap":
+            return season_type_week_from_ref(entry.get("$ref"))
+    return None
+
+
 def ap_poll_to_rank_by_team(poll: dict) -> dict[str, int]:
     """{team_id: rank} from a raw AP poll response's own `ranks` list --
     team_id is parsed out of each entry's team.$ref (same trailing-id

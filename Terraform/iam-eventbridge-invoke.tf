@@ -70,6 +70,8 @@ data "aws_iam_policy_document" "eventbridge_invoke_permissions" {
       aws_lambda_function.nba_schedule_sync.arn,
       aws_lambda_function.nba_predict_read.arn,
       aws_lambda_function.ncaambb_schedule_sync.arn,
+      aws_lambda_function.ncaambb_predict.arn,
+      aws_lambda_function.ncaambb_predict_read.arn,
     ]
   }
 }

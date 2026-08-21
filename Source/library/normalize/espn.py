@@ -83,6 +83,16 @@ def scoreboard_event_to_event_item(event: dict, sport: str) -> dict:
         "venue_city": venue_address.get("city"),
         "venue_state": venue_address.get("state"),
         "weather_temperature": weather.get("temperature"),
+        # Sport-agnostic passthrough of ESPN's own per-competition flag --
+        # always set (may be None on a sport/competition that doesn't
+        # carry it), same "native ESPN field" treatment as venue_indoor
+        # above, not the "omit if absent" treatment notes/coach/injuries
+        # below get. First real consumer is NCAA MBB's is_conference_game
+        # (library/features/ncaambb.py) -- true for both a regular-season
+        # conference game AND a conference-tournament game, false for a
+        # non-conference or NCAA-tournament game (confirmed live,
+        # 2026-08-20 -- see project-ncaambb-onboarding memory).
+        "conference_competition": competition.get("conferenceCompetition"),
     }
 
     # Sport-agnostic passthrough of ESPN's event-level "notes" (a sibling

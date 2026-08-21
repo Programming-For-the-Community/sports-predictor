@@ -1,0 +1,52 @@
+# Build context is Source/ (not this directory) -- same reasoning as
+# Source/aws-lambdas/nba/predict/Dockerfile: this image needs both this
+# function's code and the sibling library/ package, and Docker can't COPY
+# anything from outside its build context. See
+# .github/workflows/ncaambb_ai_hosting.yml for the `docker build -f
+# Source/aws-lambdas/ncaambb/predict/Dockerfile Source` invocation.
+#
+# Container image, not the zip packaging every other Lambda in this repo
+# uses -- same xgboost/numpy/scipy size reasoning as NFL's/NCAAFB's/NBA's
+# own predict Dockerfiles (see their own comments). requirements-nodeps.txt/
+# requirements.txt split for the identical reason too (dodging xgboost's
+# unconditional nvidia-nccl-cu12 GPU dependency on Linux).
+#
+# boto3 is intentionally excluded from requirements.txt -- the Lambda
+# Python base image ships it preinstalled, same as the managed (zip)
+# runtime does.
+#
+# COPY list below is season_projection.py/season_simulation.py-free for
+# now -- neither exists until step 8 (season simulation + conference/
+# March Madness brackets). NBA's own predict Lambda broke cold-start
+# twice from a new same-directory module never reaching this list (see
+# project-nba-onboarding memory) -- when step 8 adds those two files,
+# they go in here in the SAME commit.
+
+FROM public.ecr.aws/lambda/python:3.12 AS builder
+
+WORKDIR /build
+
+COPY library/ ./library/
+COPY aws-lambdas/ncaambb/predict/requirements.txt ./requirements.txt
+COPY aws-lambdas/ncaambb/predict/requirements-nodeps.txt ./requirements-nodeps.txt
+
+RUN pip install --no-cache-dir --target=/install --no-deps ./library && \
+    pip install --no-cache-dir --target=/install --no-deps -r requirements-nodeps.txt && \
+    pip install --no-cache-dir --target=/install -r requirements.txt
+
+# --- Runtime: installed packages + application source, nothing else ---
+FROM public.ecr.aws/lambda/python:3.12 AS runtime
+
+# lightgbm's prebuilt wheel dynamically links libgomp.so.1 (OpenMP) at
+# import time -- python base images don't ship it. NCAA MBB's own
+# CANDIDATES lists include LightGBM (see library/ml/model_types.py), so
+# whichever target promoted it needs this at inference time too, not just
+# training (see Source/model-training/ncaambb/Dockerfile's identical fix).
+RUN dnf install -y libgomp && dnf clean all
+
+COPY --from=builder /install ${LAMBDA_TASK_ROOT}
+COPY aws-lambdas/ncaambb/predict/handler.py aws-lambdas/ncaambb/predict/live_features.py \
+     aws-lambdas/ncaambb/predict/model_loader.py aws-lambdas/ncaambb/predict/event_prediction.py \
+     ${LAMBDA_TASK_ROOT}/
+
+CMD ["handler.lambda_handler"]

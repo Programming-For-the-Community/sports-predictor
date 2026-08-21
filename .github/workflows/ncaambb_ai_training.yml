@@ -1,0 +1,111 @@
+# Builds, packages, and deploys the NCAA MBB AI training code. Runs
+# standalone (workflow_dispatch) or called from ncaambb_deploy.yml
+# (workflow_call) -- either way the work is identical: build and push
+# image(s).
+#
+# This stage builds three images: Feature Engineering, Train
+# Win-Probability Model (also serves the score and player-prop Fargate
+# tasks -- ecs-task-ncaambb-train-score-model.tf and
+# ecs-task-ncaambb-train-player-prop-model.tf both point at this same
+# image tag and override `command` to run train_score_model.py /
+# train_player_prop_model.py instead), and Train Ranking Model (its own
+# image -- a distinct, smaller team-poll feature pipeline, same reasoning
+# as NCAAFB's own ranking model task).
+#
+# Each image gets its OWN version constant below, bumped independently --
+# these are unrelated Fargate tasks with unrelated code, so a change to
+# one has no reason to force a version bump (and a new image tag/deploy)
+# of the others. Bump only the constant for whichever image actually
+# changed, never all three just to keep them in sync.
+
+name: NCAA MBB AI Training
+
+on:
+  workflow_dispatch:
+  workflow_call:
+
+env:
+  FEATURE_ENGINEERING_IMAGE_VERSION: '1.0.0'
+  TRAIN_WIN_PROBABILITY_MODEL_IMAGE_VERSION: '1.0.0'
+  TRAIN_RANKING_MODEL_IMAGE_VERSION: '1.0.0'
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  # Two independent test jobs, not one shared one -- a failing
+  # model-training test shouldn't fail feature engineering's deployment
+  # too, even though both re-run Source/tests/library/ redundantly (no
+  # clean partition exists, since e.g. library.aws.dynamodb_table is used
+  # by both).
+  #
+  # feature-engineering's own requirements.txt has no reason to carry
+  # xgboost/scikit-learn/pandas/lightgbm's ML-training extras (it only
+  # writes Parquet) -- library/tests/ml/ needs those and is excluded here.
+  # train-win-probability-model's own job below already has all of them,
+  # so it needs no such exclusion.
+  test-feature-engineering:
+    name: Run feature engineering tests
+    uses: ./.github/workflows/run_python_tests.yml
+    with:
+      test_path: 'Source/tests/library/ Source/tests/feature-engineering/ncaambb/ --ignore=Source/tests/library/ml'
+      requirements_files: 'Source/feature-engineering/ncaambb/requirements.txt'
+
+  # Covers every model-training/ncaambb/*.py script, including
+  # train_ranking_model.py -- one test job feeds both image builds below,
+  # same as NCAAFB's own ai_training.yml.
+  test-train-models:
+    name: Run training model tests
+    uses: ./.github/workflows/run_python_tests.yml
+    with:
+      test_path: 'Source/tests/library/ Source/tests/model-training/ncaambb/'
+      requirements_files: 'Source/model-training/ncaambb/requirements.txt'
+
+  set-versions:
+    name: Resolve image versions
+    runs-on: ubuntu-latest
+    outputs:
+      feature_engineering_version: ${{ steps.out.outputs.feature_engineering_version }}
+      train_win_probability_model_version: ${{ steps.out.outputs.train_win_probability_model_version }}
+      train_ranking_model_version: ${{ steps.out.outputs.train_ranking_model_version }}
+    steps:
+      - id: out
+        run: |
+          echo "feature_engineering_version=${{ env.FEATURE_ENGINEERING_IMAGE_VERSION }}" >> "$GITHUB_OUTPUT"
+          echo "train_win_probability_model_version=${{ env.TRAIN_WIN_PROBABILITY_MODEL_IMAGE_VERSION }}" >> "$GITHUB_OUTPUT"
+          echo "train_ranking_model_version=${{ env.TRAIN_RANKING_MODEL_IMAGE_VERSION }}" >> "$GITHUB_OUTPUT"
+
+  build-feature-engineering-image:
+    name: Build and push feature engineering image
+    needs: [set-versions, test-feature-engineering]
+    uses: ./.github/workflows/docker_build_push.yml
+    secrets: inherit
+    with:
+      dockerfile_path: 'Source/feature-engineering/ncaambb/Dockerfile'
+      docker_context: 'Source'
+      image_name: 'ncaambb-feature-engineering'
+      image_version: ${{ needs.set-versions.outputs.feature_engineering_version }}
+
+  # Also used by train_score_model.py/train_player_prop_model.py via a container command override.
+  build-train-win-probability-model-image:
+    name: Build and push train win-probability/score/player-prop model image
+    needs: [set-versions, test-train-models]
+    uses: ./.github/workflows/docker_build_push.yml
+    secrets: inherit
+    with:
+      dockerfile_path: 'Source/model-training/ncaambb/Dockerfile'
+      docker_context: 'Source'
+      image_name: 'ncaambb-train-win-probability-model'
+      image_version: ${{ needs.set-versions.outputs.train_win_probability_model_version }}
+
+  build-train-ranking-model-image:
+    name: Build and push train ranking model image
+    needs: [set-versions, test-train-models]
+    uses: ./.github/workflows/docker_build_push.yml
+    secrets: inherit
+    with:
+      dockerfile_path: 'Source/model-training/ncaambb/Dockerfile.ranking'
+      docker_context: 'Source'
+      image_name: 'ncaambb-train-ranking-model'
+      image_version: ${{ needs.set-versions.outputs.train_ranking_model_version }}

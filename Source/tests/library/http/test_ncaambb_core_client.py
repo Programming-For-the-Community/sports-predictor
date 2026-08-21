@@ -9,6 +9,7 @@ from unittest.mock import MagicMock
 from library.http.ncaambb_core import (
     NCAAMBBCoreClient,
     ap_poll_to_rank_by_team,
+    current_ap_poll_pointer,
     season_type_week_from_ref,
 )
 
@@ -113,3 +114,23 @@ class TestApPollToRankByTeam:
 
     def test_missing_ranks_key_returns_empty_dict(self):
         assert ap_poll_to_rank_by_team({}) == {}
+
+
+class TestCurrentApPollPointer:
+    def test_picks_the_ap_entry_by_type_not_position(self):
+        response = {
+            "rankings": [
+                {"id": "2", "type": "usa", "$ref": "http://x/.../seasons/2026/types/3/weeks/1/rankings/2"},
+                {"id": "1", "type": "ap", "$ref": "http://x/.../seasons/2026/types/3/weeks/3/rankings/1"},
+            ]
+        }
+
+        assert current_ap_poll_pointer(response) == (2026, 3, 3)
+
+    def test_none_when_no_ap_entry_present(self):
+        response = {"rankings": [{"id": "2", "type": "usa", "$ref": "http://x/.../seasons/2026/types/3/weeks/1/rankings/2"}]}
+
+        assert current_ap_poll_pointer(response) is None
+
+    def test_none_for_empty_rankings(self):
+        assert current_ap_poll_pointer({"rankings": []}) is None

@@ -1,10 +1,12 @@
-# Keeps the 3 heavy (container-image, xgboost/pandas/sklearn) predict
+# Keeps the 4 heavy (container-image, xgboost/pandas/sklearn) predict
 # Lambdas warm. Unlike the predict-read Lambdas (scheduler-predict-read-
 # warmup.tf, zip-packaged, sub-second cold start), these have a large
 # enough import chain that a genuinely cold start regularly exceeds
 # Lambda's fixed 10-second INIT-phase budget and gets retried by the
 # platform -- confirmed live via CloudWatch Logs (repeated
-# "INIT_REPORT ... Status: timeout" entries on all 3 sports). A ping every
+# "INIT_REPORT ... Status: timeout" entries on nfl/ncaafb/nba; ncaambb
+# wired in from day one per its own onboarding plan, not retrofitted
+# after a live complaint the way the first 3 sports were). A ping every
 # 5 minutes, comfortably inside Lambda's idle-reclaim window, keeps at
 # least one already-initialized container ready so a real request doesn't
 # pay that cost itself.
@@ -19,9 +21,10 @@
 # projection trigger).
 locals {
   predict_functions = {
-    nfl    = aws_lambda_function.nfl_predict.arn
-    ncaafb = aws_lambda_function.ncaafb_predict.arn
-    nba    = aws_lambda_function.nba_predict.arn
+    nfl     = aws_lambda_function.nfl_predict.arn
+    ncaafb  = aws_lambda_function.ncaafb_predict.arn
+    nba     = aws_lambda_function.nba_predict.arn
+    ncaambb = aws_lambda_function.ncaambb_predict.arn
   }
 }
 
