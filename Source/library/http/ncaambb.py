@@ -6,6 +6,14 @@ Same shape as NBAClient -- no depth-chart method (basketball has no
 position-ranked depth-chart concept), and no bulk box-score-by-date
 endpoint exists (confirmed live, 2026-08-19, see project-ncaambb-onboarding
 memory) -- get_summary is strictly per-game, same as every other sport.
+
+UNLIKE NBA's client, both get_teams and get_scoreboard_for_date need an
+explicit extra param -- confirmed live, 2026-08-20 (a real bug caught by
+running the live-ESPN integration suite on a real network, not caught in
+this sandbox's own earlier verification, which happened to only exercise
+dates/endpoints small enough to hide it): with 30 teams and NBA's own
+game-per-night volume, NBA's client never needed either fix, so this
+class is NOT a blind copy of NBAClient's shape despite looking similar.
 """
 from library.http.espn import EspnBaseClient
 
@@ -15,7 +23,14 @@ class NCAAMBBClient(EspnBaseClient):
         super().__init__(sport_path="basketball/mens-college-basketball", min_interval_seconds=min_interval_seconds)
 
     def get_teams(self) -> dict:
-        return self._get("teams", params={})
+        """Every D1 team -- ESPN's default page size is 50 with no `limit`
+        param, silently truncating D1's real ~362 teams to the first 50
+        (confirmed live, 2026-08-20). No pagination metadata (count/
+        pageIndex/pageSize/pageCount) is present anywhere in this response
+        shape to detect truncation or drive real paging, so 1000 is a
+        fixed, generously-padded ceiling rather than a computed value --
+        confirmed live to return the full 362 with room to spare."""
+        return self._get("teams", params={"limit": 1000})
 
     def get_scoreboard_for_date(self, date: str) -> dict:
         """Fetch the day's full scoreboard (YYYYMMDD) -- ESPN infers
@@ -23,8 +38,25 @@ class NCAAMBBClient(EspnBaseClient):
         NBAClient.get_scoreboard_for_date. Confirmed live: no preseason
         games appear on this scoreboard at all (first games of a season
         are already season.type=2/regular-season), unlike NFL/NBA -- so
-        callers here have no preseason-type filter to apply."""
-        return self._get("scoreboard", params={"dates": date})
+        callers here have no preseason-type filter to apply.
+
+        groups=50 (ESPN's id for "NCAA Division I", confirmed live via the
+        core API's groups/children listing -- see
+        project-ncaambb-onboarding memory) is required, not optional: a
+        bare `dates`-only call silently returns some unscoped/"featured"
+        subset of the day's games (confirmed live, 2026-08-20 -- as few as
+        ~10% of a full slate on a busy date, e.g. 19 of 169 games on
+        2025-11-03), not the full D1 schedule. NBA's own client never
+        needed this because NBA's single-league scoreboard has no
+        equivalent scoping ambiguity.
+
+        limit=400 is defensive padding, not itself confirmed necessary --
+        groups=50 alone already returned the correct full count (up to
+        169 events) in every live sample checked, unlike get_teams' own
+        confirmed-real 50-item default cap. Given how costly that silent
+        truncation just proved to be, this stays in rather than being
+        trimmed as unnecessary."""
+        return self._get("scoreboard", params={"dates": date, "groups": 50, "limit": 400})
 
     def get_summary(self, event_id: str) -> dict:
         return self._get("summary", params={"event": event_id})
@@ -33,5 +65,7 @@ class NCAAMBBClient(EspnBaseClient):
         """One team's full current roster -- confirmed live, 2026-08-19.
         Same flat (ungrouped) athletes list as NBAClient.get_roster, each
         athlete carrying its own `position`/`injuries`; the response also
-        carries a top-level `coach` field."""
+        carries a top-level `coach` field. No pagination concern here --
+        a team's roster is at most ~15-20 players, far under ESPN's
+        default page size."""
         return self._get(f"teams/{team_id}/roster", params={})
