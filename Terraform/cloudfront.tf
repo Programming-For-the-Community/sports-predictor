@@ -5,7 +5,7 @@
 # One entry per active sport's API prefix; a path not listed falls through
 # to the frontend's S3 origin instead of reaching API Gateway.
 locals {
-  api_path_prefixes = ["nfl", "ncaafb", "nba"]
+  api_path_prefixes = ["nfl", "ncaafb", "nba", "ncaambb"]
 }
 
 # Managed-CachingOptimized only respects an origin's Cache-Control when it

@@ -1,0 +1,68 @@
+# Builds, packages, and deploys the NCAA MBB historical backfill job
+# (Source/data-backfills/ncaambb). Runs standalone (workflow_dispatch) or
+# called from app_deploy.yml (workflow_call) -- either way the work is
+# identical: run tests, then build and push an image only if they pass.
+#
+# IMAGE_VERSION lives here, once, as a plain constant -- bump it by
+# editing this line, never by typing a version into a manual dispatch
+# input. GitHub Actions doesn't let a `uses:` job read workflow-level
+# `env:` directly in its `with:`, so `set-version` below exists purely to
+# expose that constant as a job output the build job(s) can reference.
+#
+# The test suite (Source/tests/data-backfills/ncaambb/) hits ESPN's real
+# API rather than mocking it -- there's no offline fixture layer yet, so
+# this gate depends on ESPN being reachable and not rate-limiting the
+# runner. Worth knowing if this job ever fails for reasons unrelated to
+# an actual code regression.
+#
+# Only one image today. If this stage grows a second component, add
+# another job below following the same shape as `build-backfill-image`:
+# `needs: [set-version, test]`, `uses: ./.github/workflows/docker_build_push.yml`,
+# a distinct `image_name`, and the same `needs.set-version.outputs.version`
+# -- every image built in the same run of this workflow shares one version.
+
+name: NCAA MBB Backfill
+
+on:
+  workflow_dispatch:
+  workflow_call:
+
+env:
+  IMAGE_VERSION: '1.0.0'
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  # Only one artifact here (ncaambb-backfill), so there's no cross-artifact
+  # coupling to fix -- using run_python_tests.yml anyway for the same
+  # reason every other workflow does: one shared place for "install the
+  # library, install extra requirements, run pytest" instead of
+  # duplicating those steps inline in every workflow file.
+  test:
+    name: Run tests
+    uses: ./.github/workflows/run_python_tests.yml
+    with:
+      test_path: 'Source/tests/data-backfills/ncaambb/'
+      requirements_files: 'Source/data-backfills/ncaambb/requirements-dev.txt'
+
+  set-version:
+    name: Resolve image version
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.out.outputs.version }}
+    steps:
+      - id: out
+        run: echo "version=${{ env.IMAGE_VERSION }}" >> "$GITHUB_OUTPUT"
+
+  build-backfill-image:
+    name: Build and push backfill image
+    needs: [set-version, test]
+    uses: ./.github/workflows/docker_build_push.yml
+    secrets: inherit
+    with:
+      dockerfile_path: 'Source/data-backfills/ncaambb/Dockerfile'
+      docker_context: 'Source'
+      image_name: 'ncaambb-backfill'
+      image_version: ${{ needs.set-version.outputs.version }}

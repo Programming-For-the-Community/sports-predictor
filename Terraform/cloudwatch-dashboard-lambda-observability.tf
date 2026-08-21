@@ -16,7 +16,7 @@
 # term, or mixing a MetricName= clause with a plain term, matches zero
 # series.
 locals {
-  lambda_dashboard_sports = ["nfl", "ncaafb", "nba"]
+  lambda_dashboard_sports = ["nfl", "ncaafb", "nba", "ncaambb"]
 }
 
 resource "aws_cloudwatch_dashboard" "lambda_observability" {

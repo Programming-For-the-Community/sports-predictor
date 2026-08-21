@@ -47,6 +47,11 @@ data "aws_iam_policy_document" "eventbridge_invoke_permissions" {
   # every-60s reasoning. nba_schedule_sync: scheduler-nba-schedule-sync.tf's
   # own target.
   #
+  # ncaambb_schedule_sync: scheduler-ncaambb-schedule-sync.tf's own
+  # target. ncaambb_predict/ncaambb_live_scores/ncaambb_predict_read are
+  # added here in the same step that creates each of those Lambdas, not
+  # batched now -- see project-ncaambb-onboarding memory.
+  #
   # The 3 predict-read functions: scheduler-predict-read-warmup.tf's own
   # 5-minute warmup ping.
   statement {
@@ -64,6 +69,7 @@ data "aws_iam_policy_document" "eventbridge_invoke_permissions" {
       aws_lambda_function.nba_live_scores.arn,
       aws_lambda_function.nba_schedule_sync.arn,
       aws_lambda_function.nba_predict_read.arn,
+      aws_lambda_function.ncaambb_schedule_sync.arn,
     ]
   }
 }
