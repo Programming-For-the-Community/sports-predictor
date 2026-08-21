@@ -239,13 +239,13 @@ variable "feature_engineering_task_cpu" {
 }
 
 variable "feature_engineering_task_memory_per_vcpu_mib" {
-  description = "Fargate memory (MiB) provisioned per feature_engineering_task_cpu vCPU, keyed by sport -- local.feature_engineering_task_memory (locals-feature-engineering-compute.tf) multiplies this by each sport's own vCPU count, same derive-from-vCPU pattern training_task_memory_per_vcpu_mib uses. ncaafb's real 10-season FBS backfill was OOM-killed at 2048 total (Reason: OutOfMemoryError), so it's raised to 8192 -- the max memory Fargate allows at 1 vCPU -- rather than raising cpu, since nothing pointed at CPU being the problem (see feature_engineering_task_cpu's own description). nfl is left unchanged since it has never shown a memory problem. ncaambb starts at 8192 (NCAAFB's own OOM-informed ceiling) preemptively rather than waiting for a real OOM-kill -- same reasoning as its own feature_engineering_task_cpu entry: the ~4x-NBA volume is already-known evidence, not a guess this project's usual 'wait for a real signal' discipline would normally allow skipping"
+  description = "Fargate memory (MiB) provisioned per feature_engineering_task_cpu vCPU, keyed by sport -- local.feature_engineering_task_memory (locals-feature-engineering-compute.tf) multiplies this by each sport's own vCPU count, same derive-from-vCPU pattern training_task_memory_per_vcpu_mib uses. ncaafb's real 10-season FBS backfill was OOM-killed at 2048 total (Reason: OutOfMemoryError), so it's raised to 8192 -- the max memory Fargate allows at 1 vCPU -- rather than raising cpu, since nothing pointed at CPU being the problem (see feature_engineering_task_cpu's own description). nfl is left unchanged since it has never shown a memory problem. ncaambb starts at 7680 -- the highest per-vCPU value Fargate allows at 8 vCPU (total memory is capped at 61440 MiB there, unlike the 1-vCPU 8192 ceiling ncaafb/nba's own multiplier is keyed against), preemptively rather than waiting for a real OOM-kill -- same reasoning as its own feature_engineering_task_cpu entry: the ~4x-NBA volume is already-known evidence, not a guess this project's usual 'wait for a real signal' discipline would normally allow skipping"
   type        = map(number)
   default = {
     nfl     = 4096
     ncaafb  = 4096
     nba     = 4096
-    ncaambb = 8192
+    ncaambb = 7680
   }
   nullable = false
 }
