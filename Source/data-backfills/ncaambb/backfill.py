@@ -41,6 +41,18 @@ season-batch thread. This does not increase the request rate against
 ESPN -- the shared RateLimiter still caps that regardless of how many
 threads are waiting on it.
 
+AP RANKINGS: also seeds the national-ranking model's training label --
+one AP Top 25 poll per (season, season_type, week), fetched via
+NCAAMBBCoreClient (a different host/client than the site-API one above --
+see library/http/ncaambb_core.py). This is a genuinely separate, much
+smaller data source (~500 poll-weeks total across a full 2016-2026 run,
+confirmed live 2026-08-20) folded into this SAME script rather than a
+standalone one, per an explicit request while a first backfill run was
+already in flight -- see project-ncaambb-onboarding memory for why it
+wasn't scoped in from the start. seed_rankings runs once per season
+(season-level, not date-level), sequentially -- the volume here never
+approaches the box-score/scoreboard concurrency's own justification.
+
 Required environment variables:
     RAW_BUCKET_NAME
     ENTITIES_TABLE_NAME
@@ -67,6 +79,7 @@ import time
 from datetime import date, datetime, timedelta, timezone
 
 from library.http.ncaambb import NCAAMBBClient
+from library.http.ncaambb_core import NCAAMBBCoreClient
 import normalize
 from library.storage.pipeline_storage import PipelineStorage
 
@@ -80,6 +93,20 @@ logger = logging.getLogger("ncaambb-backfill")
 # module's own VOLUME docstring section for why this exists at all (NBA's
 # equivalent loop stays sequential; its volume never justified this).
 _DATE_MAX_WORKERS = 8
+
+# ESPN's own season.type convention (same 2=regular/3=postseason values
+# scoreboard events carry). Week ranges are generous ceilings, not exact
+# counts -- confirmed live, 2026-08-20: a real season's regular-type weeks
+# run 1 (preseason poll, mid-October) through ~20 (mid-March, covering
+# through conference-tournament week); postseason-type weeks only ever
+# had ONE real poll in every season checked (the final poll, the week
+# after the National Championship), at week ~4. Every out-of-range week
+# is a clean, expected 404 (see NCAAMBBCoreClient.get_ap_poll), not an
+# error -- same "walk a generous ceiling, skip what's empty" pattern as
+# aws-lambdas/ncaambb/schedule-sync/handler.py.
+REGULAR_SEASON_TYPE = 2
+POSTSEASON_TYPE = 3
+_RANKING_WEEKS_BY_TYPE = {REGULAR_SEASON_TYPE: range(1, 23), POSTSEASON_TYPE: range(1, 7)}
 
 
 def chunk_seasons(start: int, end: int, batch_size: int) -> list[list[int]]:
@@ -104,6 +131,29 @@ def seed_teams(client: NCAAMBBClient, storage: PipelineStorage) -> None:
     for team_entry in league["teams"]:
         storage.upsert_entity(normalize.team_to_entity(team_entry["team"]))
     logger.info("Seeded %d teams", len(league["teams"]))
+
+
+def seed_rankings(core_client: NCAAMBBCoreClient, storage: PipelineStorage, season: int) -> tuple[int, int]:
+    """Fetches and writes every AP Top 25 poll for `season` -- one S3
+    object per (season_type, week) that actually had a poll released.
+    Idempotent (skips a week already in S3, same as process_game's own
+    box-score check) and tolerant of the many out-of-range weeks this
+    walk necessarily probes (see _RANKING_WEEKS_BY_TYPE's own comment).
+    Returns (weeks_written, weeks_with_no_poll)."""
+    written = skipped = 0
+    for season_type, weeks in _RANKING_WEEKS_BY_TYPE.items():
+        for week in weeks:
+            raw_key = f"ncaambb/rankings/{season}/{season_type}/{week}.json"
+            if storage.raw_object_exists(raw_key):
+                written += 1  # already seeded by a prior run -- counts as present, not skipped
+                continue
+            poll = core_client.get_ap_poll(season, season_type, week)
+            if poll is None:
+                skipped += 1
+                continue
+            storage.put_raw_json(raw_key, poll)
+            written += 1
+    return written, skipped
 
 
 def process_game(client: NCAAMBBClient, storage: PipelineStorage, season: int, event_id: str) -> None:
@@ -174,14 +224,18 @@ def process_season(client: NCAAMBBClient, storage: PipelineStorage, season: int)
     }
 
 
-def process_batch(client: NCAAMBBClient, storage: PipelineStorage, seasons: list[int]) -> list[dict]:
+def process_batch(
+    client: NCAAMBBClient, core_client: NCAAMBBCoreClient, storage: PipelineStorage, seasons: list[int]
+) -> list[dict]:
     results = []
     for season in seasons:
         logger.info("Starting season %s", season)
         result = process_season(client, storage, season)
+        rankings_written, rankings_absent = seed_rankings(core_client, storage, season)
+        result["rankings_written"] = rankings_written
         logger.info(
-            "Finished season %s: %d games processed, %d failed",
-            season, result["games_processed"], result["games_failed"],
+            "Finished season %s: %d games processed, %d failed, %d ranking weeks written (%d had no poll)",
+            season, result["games_processed"], result["games_failed"], rankings_written, rankings_absent,
         )
         results.append(result)
     return results
@@ -208,13 +262,20 @@ def main() -> None:
     )
 
     client = NCAAMBBClient(min_interval_seconds=args.request_delay)
+    # A separate client -- different host (sports.core.api.espn.com) and
+    # response shape than the site-API client above, so it needs its own
+    # RateLimiter instance too; the two hosts' rate limits are independent
+    # real-world constraints, not one shared budget.
+    core_client = NCAAMBBCoreClient(min_interval_seconds=args.request_delay)
     storage = PipelineStorage()
     seed_teams(client, storage)
 
     all_results = []
     start_time = time.monotonic()
     with concurrent.futures.ThreadPoolExecutor(max_workers=len(batches), thread_name_prefix="batch") as executor:
-        futures = {executor.submit(process_batch, client, storage, batch): batch for batch in batches}
+        futures = {
+            executor.submit(process_batch, client, core_client, storage, batch): batch for batch in batches
+        }
         for future in concurrent.futures.as_completed(futures):
             batch = futures[future]
             try:

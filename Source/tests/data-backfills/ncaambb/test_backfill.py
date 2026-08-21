@@ -154,6 +154,60 @@ class TestProcessDate:
         assert storage.upsert_event.call_count == 150
 
 
+class TestSeedRankings:
+    def test_writes_a_poll_for_every_week_that_has_one(self):
+        core_client = MagicMock()
+        storage = MagicMock()
+        storage.raw_object_exists.return_value = False
+        core_client.get_ap_poll.return_value = {"ranks": []}
+
+        written, absent = backfill.seed_rankings(core_client, storage, 2026)
+
+        # Every probed week "has" a poll in this test (mock always returns
+        # non-None) -- written should equal the full probed range, absent 0.
+        total_weeks = sum(len(weeks) for weeks in backfill._RANKING_WEEKS_BY_TYPE.values())
+        assert written == total_weeks
+        assert absent == 0
+        assert storage.put_raw_json.call_count == total_weeks
+
+    def test_a_week_with_no_released_poll_is_not_written(self):
+        core_client = MagicMock()
+        storage = MagicMock()
+        storage.raw_object_exists.return_value = False
+        core_client.get_ap_poll.return_value = None  # every week 404s
+
+        written, absent = backfill.seed_rankings(core_client, storage, 2026)
+
+        total_weeks = sum(len(weeks) for weeks in backfill._RANKING_WEEKS_BY_TYPE.values())
+        assert written == 0
+        assert absent == total_weeks
+        storage.put_raw_json.assert_not_called()
+
+    def test_already_seeded_week_is_not_refetched(self):
+        core_client = MagicMock()
+        storage = MagicMock()
+        storage.raw_object_exists.return_value = True  # every week "already in S3"
+
+        written, absent = backfill.seed_rankings(core_client, storage, 2026)
+
+        total_weeks = sum(len(weeks) for weeks in backfill._RANKING_WEEKS_BY_TYPE.values())
+        assert written == total_weeks
+        assert absent == 0
+        core_client.get_ap_poll.assert_not_called()
+
+    def test_writes_under_the_expected_key_shape(self):
+        core_client = MagicMock()
+        storage = MagicMock()
+        storage.raw_object_exists.return_value = False
+        core_client.get_ap_poll.return_value = {"ranks": []}
+
+        backfill.seed_rankings(core_client, storage, 2026)
+
+        written_keys = {c.args[0] for c in storage.put_raw_json.call_args_list}
+        assert "ncaambb/rankings/2026/2/1.json" in written_keys
+        assert "ncaambb/rankings/2026/3/1.json" in written_keys
+
+
 class TestProcessGame:
     def test_skips_fetch_when_box_score_already_exists(self):
         client = MagicMock()
@@ -175,3 +229,19 @@ class TestProcessGame:
             backfill.process_game(client, storage, 2026, "401705127")
 
         storage.put_raw_json.assert_called_once_with("ncaambb/boxscore/2026/401705127.json", client.get_summary.return_value)
+
+
+class TestProcessBatch:
+    def test_calls_seed_rankings_once_per_season_alongside_process_season(self):
+        client = MagicMock()
+        core_client = MagicMock()
+        storage = MagicMock()
+        client.get_scoreboard_for_date.return_value = {"events": []}
+
+        with patch.object(backfill, "seed_rankings", return_value=(5, 1)) as mock_seed_rankings:
+            results = backfill.process_batch(client, core_client, storage, [2025, 2026])
+
+        assert mock_seed_rankings.call_count == 2
+        mock_seed_rankings.assert_any_call(core_client, storage, 2025)
+        mock_seed_rankings.assert_any_call(core_client, storage, 2026)
+        assert all(r["rankings_written"] == 5 for r in results)

@@ -132,6 +132,18 @@ variable "espn_core_api_root_url" {
   nullable    = false
 }
 
+# Same core API/host as espn_core_api_root_url above, but basketball's own
+# league path -- that variable's default is hardcoded to NFL's path
+# (despite the generic name), so NCAA MBB's AP-poll client
+# (library/http/ncaambb_core.py) needs its own sport-scoped variable
+# rather than sharing it.
+variable "ncaambb_espn_core_api_root_url" {
+  description = "Root URL of ESPN's 'core' API (sports.core.api.espn.com), scoped to men's college basketball -- used for AP Top 25 poll history (see library/http/ncaambb_core.py). Override via TF_VAR_ncaambb_espn_core_api_root_url if ESPN's domain changes."
+  type        = string
+  default     = "https://sports.core.api.espn.com/v2/sports/basketball/leagues/mens-college-basketball"
+  nullable    = false
+}
+
 variable "espn_user_agent" {
   description = "User-Agent sent on every ESPN request. site.api.espn.com started 403ing plain scoreboard requests; site.web.api.espn.com + a non-browser UA is the confirmed-working combo."
   type        = string
