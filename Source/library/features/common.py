@@ -312,6 +312,98 @@ def rank_by_average_stat(histories: dict[str, list[dict]], stat: str, n: int) ->
     return [entity_id for entity_id, _ in averages[:n]]
 
 
+def estimate_possessions(
+    field_goal_attempts: float | None,
+    offensive_rebounds: float | None,
+    turnovers: float | None,
+    free_throw_attempts: float | None,
+) -> float | None:
+    """Dean Oliver's standard possessions-per-game estimate:
+    FGA - OREB + TOV + 0.44*FTA. Sport-agnostic basketball math -- the
+    same formula applies to any basketball box score, not just NBA's
+    (promoted here from library/features/nba.py, 2026-08-20, when NCAA
+    MBB's own feature module needed the identical formula -- see
+    project-ncaambb-onboarding memory). None if any input is missing
+    (e.g. a team with no rolling box-score history yet) -- same "missing,
+    not fabricated" rule as every other None-propagating helper in this
+    module, rather than silently treating a missing input as 0 (which
+    would understate every possessions estimate that hits this path, not
+    just flag it as unknown).
+
+    Takes plain numbers, not a stat_line/averages dict, so the same
+    formula works whether the caller has a single game's raw stat_line or
+    an already-rolling-averaged avg_field_goal_attempts-style figure --
+    the arithmetic is identical either way, only the caller's own field
+    naming differs.
+    """
+    if None in (field_goal_attempts, offensive_rebounds, turnovers, free_throw_attempts):
+        return None
+    return field_goal_attempts - offensive_rebounds + turnovers + 0.44 * free_throw_attempts
+
+
+def _efficiency_per_100(points: float | None, possessions: float | None) -> float | None:
+    """Points per 100 possessions -- basketball-generic (promoted here
+    2026-08-20 alongside estimate_possessions, same reasoning). None if
+    points or possessions is missing, or possessions is 0 (a team with no
+    rolling history at all still resolves its own rolling averages to
+    None, not 0, but this guard is cheap insurance against a literal
+    0-possession estimate ever dividing by zero)."""
+    if points is None or not possessions:
+        return None
+    return (points / possessions) * 100
+
+
+def _season_record(team_events: list[dict], team_id: str) -> tuple[int, int]:
+    """(wins, losses) from a team's own completed events -- ties count
+    toward neither, same tie-handling current_streak already uses.
+    Sport-agnostic (promoted here from library.features.ncaafb 2026-08-20
+    when NCAA MBB's own national-ranking feature builder needed the
+    identical record-tallying logic -- see project-ncaambb-onboarding
+    memory)."""
+    wins = losses = 0
+    for event in team_events:
+        participants = event.get("participants", [])
+        own = next((p for p in participants if p.get("entity_id") == team_id), None)
+        opponent = next((p for p in participants if p.get("entity_id") != team_id), None)
+        if own is None or opponent is None:
+            continue
+        own_score = own.get("result", {}).get("score")
+        opp_score = opponent.get("result", {}).get("score")
+        if own_score is None or opp_score is None or own_score == opp_score:
+            continue
+        if own_score > opp_score:
+            wins += 1
+        else:
+            losses += 1
+    return wins, losses
+
+
+def average_opponent_elo(
+    team_events: list[dict], team_id: str, elo_ratings: dict[str, dict[str, float]]
+) -> float | None:
+    """Strength of schedule -- average pre-game Elo each opponent carried
+    into their game against team_id, over team_id's season-to-date games.
+    None if no opponent rating is resolvable yet. Sport-agnostic (promoted
+    here alongside _season_record, same reasoning)."""
+    values = []
+    for event in team_events:
+        participants = event.get("participants", [])
+        home = next((p for p in participants if p.get("role") == "home"), None)
+        away = next((p for p in participants if p.get("role") == "away"), None)
+        if home is None or away is None:
+            continue
+        ratings = elo_ratings.get(event["event_key"], {})
+        if home["entity_id"] == team_id:
+            opponent_elo = ratings.get("away_pre_rating")
+        elif away["entity_id"] == team_id:
+            opponent_elo = ratings.get("home_pre_rating")
+        else:
+            continue
+        if opponent_elo is not None:
+            values.append(opponent_elo)
+    return sum(values) / len(values) if values else None
+
+
 def _rate(averages: dict, numerator_key: str, denominator_key: str) -> float | None:
     denominator = averages.get(denominator_key)
     if not denominator:

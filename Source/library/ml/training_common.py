@@ -76,8 +76,16 @@ def feature_columns(df: pd.DataFrame, non_feature_columns: set[str]) -> list[str
     return [col for col in df.columns if col not in non_feature_columns and not col.startswith("label_")]
 
 
-def chronological_split(df: pd.DataFrame, test_fraction: float) -> tuple[pd.DataFrame, pd.DataFrame]:
-    ordered = df.sort_values("event_date")
+def chronological_split(
+    df: pd.DataFrame, test_fraction: float, date_column: str = "event_date",
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """date_column defaults to "event_date" -- every sport's event/player
+    dataset carries that column. NCAA MBB's national-ranking dataset is
+    poll-centric, not event-centric (see
+    library.features.ncaambb.build_team_week_features's own docstring),
+    so it has no real "event" to name a date column after -- its own
+    train_ranking_model.py passes date_column="as_of_date" instead."""
+    ordered = df.sort_values(date_column)
     split_index = int(len(ordered) * (1 - test_fraction))
     return ordered.iloc[:split_index], ordered.iloc[split_index:]
 

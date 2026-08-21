@@ -79,12 +79,19 @@ jobs:
     uses: ./.github/workflows/nba_ai_hosting.yml
     secrets: inherit
 
-  # NCAA MBB has no ai_training/ai_hosting build yet -- onboarding in
-  # progress (see project-ncaambb-onboarding memory), added here in the
-  # same step that creates each of those workflow files, not batched now.
   ncaambb_backfill_build:
     name: NCAA MBB backfill (build)
     uses: ./.github/workflows/ncaambb_backfill.yml
+    secrets: inherit
+
+  ncaambb_ai_training_build:
+    name: NCAA MBB AI training (build)
+    uses: ./.github/workflows/ncaambb_ai_training.yml
+    secrets: inherit
+
+  ncaambb_ai_hosting_build:
+    name: NCAA MBB AI hosting (build)
+    uses: ./.github/workflows/ncaambb_ai_hosting.yml
     secrets: inherit
 
   # --- Infra: applies once, gated on every "before" job tolerating
@@ -95,7 +102,7 @@ jobs:
       nfl_backfill_build, nfl_ai_training_build, nfl_ai_hosting_build,
       ncaafb_backfill_build, ncaafb_ai_training_build, ncaafb_ai_hosting_build,
       nba_backfill_build, nba_ai_training_build, nba_ai_hosting_build,
-      ncaambb_backfill_build,
+      ncaambb_backfill_build, ncaambb_ai_training_build, ncaambb_ai_hosting_build,
     ]
     if: |
       always() &&
@@ -108,7 +115,9 @@ jobs:
       (needs.nba_backfill_build.result == 'success' || needs.nba_backfill_build.result == 'skipped') &&
       (needs.nba_ai_training_build.result == 'success' || needs.nba_ai_training_build.result == 'skipped') &&
       (needs.nba_ai_hosting_build.result == 'success' || needs.nba_ai_hosting_build.result == 'skipped') &&
-      (needs.ncaambb_backfill_build.result == 'success' || needs.ncaambb_backfill_build.result == 'skipped')
+      (needs.ncaambb_backfill_build.result == 'success' || needs.ncaambb_backfill_build.result == 'skipped') &&
+      (needs.ncaambb_ai_training_build.result == 'success' || needs.ncaambb_ai_training_build.result == 'skipped') &&
+      (needs.ncaambb_ai_hosting_build.result == 'success' || needs.ncaambb_ai_hosting_build.result == 'skipped')
     uses: ./.github/workflows/tf_install.yml
     secrets: inherit
 
@@ -226,10 +235,26 @@ jobs:
     with:
       function_name: ${{ needs.infra.outputs.nba_live_scores_function_name }}
 
-  # NCAA MBB has no backfill/ai_training/ai_hosting/predict/predict_read/
-  # live_scores jobs yet -- onboarding in progress (see
+  # NCAA MBB has no live_scores job yet -- onboarding in progress (see
   # project-ncaambb-onboarding memory), added in the same step that builds
-  # each of those pieces, not batched here ahead of time.
+  # it (step 7), not batched here ahead of time.
+  ncaambb_predict_deploy:
+    name: NCAA MBB AI hosting (deploy)
+    needs: [infra, ncaambb_ai_hosting_build]
+    uses: ./.github/workflows/ncaambb_predict_deploy.yml
+    secrets: inherit
+    with:
+      function_name: ${{ needs.infra.outputs.ncaambb_predict_function_name }}
+      image_uri: ${{ needs.ncaambb_ai_hosting_build.outputs.predict_image_uri }}
+
+  ncaambb_predict_read_deploy:
+    name: NCAA MBB predict-read (deploy)
+    needs: infra
+    uses: ./.github/workflows/ncaambb_predict_read_deploy.yml
+    secrets: inherit
+    with:
+      function_name: ${{ needs.infra.outputs.ncaambb_predict_read_function_name }}
+
   ncaambb_data_pipeline:
     name: NCAA MBB data pipeline (deploy)
     needs: infra

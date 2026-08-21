@@ -11,8 +11,36 @@ longer coupled to any one script.
 from unittest.mock import MagicMock
 
 import numpy as np
+import pandas as pd
 
 from library.ml import training_common
+
+
+class TestChronologicalSplit:
+    def test_splits_by_event_date_by_default(self):
+        df = pd.DataFrame({
+            "event_date": ["2025-12-03", "2025-12-01", "2025-12-02"],
+            "value": [3, 1, 2],
+        })
+
+        train_df, test_df = training_common.chronological_split(df, test_fraction=1 / 3)
+
+        assert list(train_df["value"]) == [1, 2]
+        assert list(test_df["value"]) == [3]
+
+    def test_date_column_is_configurable_for_a_non_event_centric_dataset(self):
+        # NCAA MBB's national-ranking dataset is poll-centric, not
+        # event-centric -- no "event_date" column exists at all, only
+        # "as_of_date" (see model-training/ncaambb/train_ranking_model.py).
+        df = pd.DataFrame({
+            "as_of_date": ["2026-03-01", "2026-01-01", "2026-02-01"],
+            "value": [3, 1, 2],
+        })
+
+        train_df, test_df = training_common.chronological_split(df, test_fraction=1 / 3, date_column="as_of_date")
+
+        assert list(train_df["value"]) == [1, 2]
+        assert list(test_df["value"]) == [3]
 
 
 class TestEvaluateHoldout:

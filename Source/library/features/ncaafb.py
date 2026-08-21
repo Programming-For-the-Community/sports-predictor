@@ -27,6 +27,8 @@ from library.features.common import (
     DEFAULT_ROLLING_WINDOW,
     _identify_leader,
     _rate,
+    _season_record,
+    average_opponent_elo,
     current_streak,
     kickoff_hour_utc,
     rest_days,
@@ -271,52 +273,6 @@ def build_player_features(
         "label_stat_line": player_game.get("stat_line", {}),
         "label_started": player_game.get("started"),
     }
-
-
-def _season_record(team_events: list[dict], team_id: str) -> tuple[int, int]:
-    """(wins, losses) from a team's own completed events -- ties count
-    toward neither, same tie-handling current_streak already uses."""
-    wins = losses = 0
-    for event in team_events:
-        participants = event.get("participants", [])
-        own = next((p for p in participants if p.get("entity_id") == team_id), None)
-        opponent = next((p for p in participants if p.get("entity_id") != team_id), None)
-        if own is None or opponent is None:
-            continue
-        own_score = own.get("result", {}).get("score")
-        opp_score = opponent.get("result", {}).get("score")
-        if own_score is None or opp_score is None or own_score == opp_score:
-            continue
-        if own_score > opp_score:
-            wins += 1
-        else:
-            losses += 1
-    return wins, losses
-
-
-def average_opponent_elo(
-    team_events: list[dict], team_id: str, elo_ratings: dict[str, dict[str, float]]
-) -> float | None:
-    """Strength of schedule -- average pre-game Elo each opponent carried into their game
-    against team_id, over team_id's season-to-date games. None if no opponent rating is
-    resolvable yet."""
-    values = []
-    for event in team_events:
-        participants = event.get("participants", [])
-        home = next((p for p in participants if p.get("role") == "home"), None)
-        away = next((p for p in participants if p.get("role") == "away"), None)
-        if home is None or away is None:
-            continue
-        ratings = elo_ratings.get(event["event_key"], {})
-        if home["entity_id"] == team_id:
-            opponent_elo = ratings.get("away_pre_rating")
-        elif away["entity_id"] == team_id:
-            opponent_elo = ratings.get("home_pre_rating")
-        else:
-            continue
-        if opponent_elo is not None:
-            values.append(opponent_elo)
-    return sum(values) / len(values) if values else None
 
 
 def build_team_week_features(

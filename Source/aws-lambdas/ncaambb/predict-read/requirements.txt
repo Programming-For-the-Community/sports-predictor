@@ -1,0 +1,8 @@
+# boto3 is pre-installed in the Lambda Python runtime -- not bundled here.
+# The shared library (Source/library) is installed separately by the build
+# workflow via `pip install --no-deps Source/library -t package/`.
+#
+# Deliberately empty otherwise -- same reasoning as
+# Source/aws-lambdas/nba/predict-read/requirements.txt: this Lambda's
+# whole reason for existing is to need NOTHING beyond boto3 + the library
+# package (see handler.py's own docstring).

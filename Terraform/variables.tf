@@ -222,12 +222,13 @@ variable "training_task_memory_per_vcpu_mib" {
 # fails the apply instead of silently under-provisioning a new sport's task.
 
 variable "feature_engineering_task_cpu" {
-  description = "Fargate CPU units (1024 per vCPU) for each sport's feature-engineering task, keyed by sport -- left at NFL's original size since nothing has ever indicated NFL's task is CPU-bound; only bump a sport's entry here if evidence (throttling, a run that's slow rather than OOM-killed) actually points at CPU, not just because memory needed raising"
+  description = "Fargate CPU units (1024 per vCPU) for each sport's feature-engineering task, keyed by sport -- left at NFL's original size since nothing has ever indicated NFL's task is CPU-bound; only bump a sport's entry here if evidence (throttling, a run that's slow rather than OOM-killed) actually points at CPU, not just because memory needed raising. ncaambb starts at NBA's own 8192 (the max) -- D1's real per-season game volume is confirmed ~4x NBA's (see project-ncaambb-onboarding memory), so starting anywhere lower would just be guessing against already-known evidence, not the usual absence of it"
   type        = map(number)
   default = {
-    nfl    = 1024
-    ncaafb = 8192
-    nba    = 8192
+    nfl     = 1024
+    ncaafb  = 8192
+    nba     = 8192
+    ncaambb = 8192
   }
   nullable = false
 
@@ -238,12 +239,13 @@ variable "feature_engineering_task_cpu" {
 }
 
 variable "feature_engineering_task_memory_per_vcpu_mib" {
-  description = "Fargate memory (MiB) provisioned per feature_engineering_task_cpu vCPU, keyed by sport -- local.feature_engineering_task_memory (locals-feature-engineering-compute.tf) multiplies this by each sport's own vCPU count, same derive-from-vCPU pattern training_task_memory_per_vcpu_mib uses. ncaafb's real 10-season FBS backfill was OOM-killed at 2048 total (Reason: OutOfMemoryError), so it's raised to 8192 -- the max memory Fargate allows at 1 vCPU -- rather than raising cpu, since nothing pointed at CPU being the problem (see feature_engineering_task_cpu's own description). nfl is left unchanged since it has never shown a memory problem"
+  description = "Fargate memory (MiB) provisioned per feature_engineering_task_cpu vCPU, keyed by sport -- local.feature_engineering_task_memory (locals-feature-engineering-compute.tf) multiplies this by each sport's own vCPU count, same derive-from-vCPU pattern training_task_memory_per_vcpu_mib uses. ncaafb's real 10-season FBS backfill was OOM-killed at 2048 total (Reason: OutOfMemoryError), so it's raised to 8192 -- the max memory Fargate allows at 1 vCPU -- rather than raising cpu, since nothing pointed at CPU being the problem (see feature_engineering_task_cpu's own description). nfl is left unchanged since it has never shown a memory problem. ncaambb starts at 8192 (NCAAFB's own OOM-informed ceiling) preemptively rather than waiting for a real OOM-kill -- same reasoning as its own feature_engineering_task_cpu entry: the ~4x-NBA volume is already-known evidence, not a guess this project's usual 'wait for a real signal' discipline would normally allow skipping"
   type        = map(number)
   default = {
-    nfl    = 4096
-    ncaafb = 4096
-    nba    = 4096
+    nfl     = 4096
+    ncaafb  = 4096
+    nba     = 4096
+    ncaambb = 8192
   }
   nullable = false
 }

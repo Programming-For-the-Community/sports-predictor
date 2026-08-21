@@ -34,11 +34,14 @@ Genuinely different from NFL/NCAAFB, not just renamed:
 - No coach-tenure features -- explicitly deferred, out of Sub-phase 3A's
   scope (see project-nba-onboarding memory); NBA has no coach data source
   wired in the way NFL's separate "core" API client provides one.
-- estimate_possessions/offensive_efficiency/defensive_efficiency are new:
-  basketball has no NFL/NCAAFB analog to a possessions-per-100 pace
-  metric. Derived (not raw) from a team's own rolling shot-volume/
-  turnover/rebound averages -- see estimate_possessions' own docstring
-  for the formula.
+- offensive_efficiency/defensive_efficiency are new: basketball has no
+  NFL/NCAAFB analog to a possessions-per-100 pace metric. Derived (not
+  raw) from a team's own rolling shot-volume/turnover/rebound averages.
+  estimate_possessions/_efficiency_per_100 (the Dean Oliver math itself)
+  moved to library.features.common 2026-08-20 -- sport-agnostic
+  basketball formulas, not an NBA-only concept (NCAA MBB's own feature
+  module needs the identical formula) -- imported from there now rather
+  than defined here.
 - is_divisional_game/is_international_game/travel_distances_km come from
   library.features.nba_teams' own static tables (NBA is a fixed 30
   franchises, low realignment risk -- closer to NFL's hardcoded-table
@@ -61,39 +64,16 @@ Genuinely different from NFL/NCAAFB, not just renamed:
 from library.features import nba_teams
 from library.features.common import (
     DEFAULT_ROLLING_WINDOW,
+    _efficiency_per_100,
     _rate,
     _team_injury_count,
     current_streak,
+    estimate_possessions,
     kickoff_hour_utc,
     rest_days,
     rolling_player_stat_averages,
     rolling_team_scoring_averages,
 )
-
-
-def estimate_possessions(
-    field_goal_attempts: float | None,
-    offensive_rebounds: float | None,
-    turnovers: float | None,
-    free_throw_attempts: float | None,
-) -> float | None:
-    """Dean Oliver's standard possessions-per-game estimate:
-    FGA - OREB + TOV + 0.44*FTA. None if any input is missing (e.g. a team
-    with no rolling box-score history yet) -- same "missing, not
-    fabricated" rule as every other None-propagating helper in
-    library.features.common, rather than silently treating a missing
-    input as 0 (which would understate every possessions estimate that
-    hits this path, not just flag it as unknown).
-
-    Takes plain numbers, not a stat_line/averages dict, so the same
-    formula works whether the caller has a single game's raw stat_line or
-    (as build_event_features does) an already-rolling-averaged
-    avg_field_goal_attempts-style figure -- the arithmetic is identical
-    either way, only the caller's own field naming differs.
-    """
-    if None in (field_goal_attempts, offensive_rebounds, turnovers, free_throw_attempts):
-        return None
-    return field_goal_attempts - offensive_rebounds + turnovers + 0.44 * free_throw_attempts
 
 
 def _total_rebounds(box_stats: dict) -> float | None:
@@ -108,17 +88,6 @@ def _total_rebounds(box_stats: dict) -> float | None:
     if offensive is None or defensive is None:
         return None
     return offensive + defensive
-
-
-def _efficiency_per_100(points: float | None, possessions: float | None) -> float | None:
-    """Points per 100 possessions -- None if points or possessions is
-    missing, or possessions is 0 (a team with no rolling history at all
-    still resolves avg_field_goal_attempts etc. to None, not 0, via
-    rolling_player_stat_averages, but this guard is cheap insurance
-    against a literal 0-possession estimate ever dividing by zero)."""
-    if points is None or not possessions:
-        return None
-    return (points / possessions) * 100
 
 
 def build_event_features(

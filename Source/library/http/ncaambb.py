@@ -61,6 +61,19 @@ class NCAAMBBClient(EspnBaseClient):
     def get_summary(self, event_id: str) -> dict:
         return self._get("summary", params={"event": event_id})
 
+    def get_current_rankings_pointer(self) -> dict:
+        """The site API's own /rankings response -- current-only, no
+        historical season/week query support (confirmed live, 2026-08-20:
+        season/week params are silently ignored). Shaped
+        {"rankings": [{"id", "name", "type", "$ref", "occurrence"}, ...]},
+        one entry per poll (AP, Coaches, ...) -- callers use
+        library.http.ncaambb_core.current_ap_poll_pointer to pick the AP
+        one and resolve it into a (season, season_type, week) tuple for
+        NCAAMBBCoreClient.get_ap_poll, since this response's own `$ref`
+        points at an internal-only hostname that doesn't resolve
+        publicly (see that module's own docstring)."""
+        return self._get("rankings", params={})
+
     def get_roster(self, team_id: str) -> dict:
         """One team's full current roster -- confirmed live, 2026-08-19.
         Same flat (ungrouped) athletes list as NBAClient.get_roster, each

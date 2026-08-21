@@ -308,6 +308,89 @@ class TestLambdaHandlerBoxScores:
         assert all(f"ncaambb/boxscore/2026/{i}.json" in written_keys for i in range(150))
 
 
+class TestFetchCurrentApPoll:
+    def _pointer_response(self, ref="http://sports.core.api.espn.pvt/.../seasons/2026/types/2/weeks/12/rankings/1?lang=en"):
+        return {"rankings": [{"id": "1", "type": "ap", "$ref": ref}, {"id": "2", "type": "usa", "$ref": "..."}]}
+
+    def test_fetches_and_writes_the_current_poll(self):
+        client = MagicMock()
+        client.get_current_rankings_pointer.return_value = self._pointer_response()
+        core_client = MagicMock()
+        core_client.get_ap_poll.return_value = {"ranks": []}
+
+        with patch.object(ncaambb_ingest, "_s3", MagicMock()):
+            result = ncaambb_ingest._fetch_current_ap_poll(client, core_client)
+
+        assert result is True
+        core_client.get_ap_poll.assert_called_once_with(2026, 2, 12)
+
+    def test_writes_under_the_same_key_shape_backfill_uses(self):
+        client = MagicMock()
+        client.get_current_rankings_pointer.return_value = self._pointer_response()
+        core_client = MagicMock()
+        core_client.get_ap_poll.return_value = {"ranks": []}
+        mock_s3 = MagicMock()
+
+        with patch.object(ncaambb_ingest, "_s3", mock_s3):
+            ncaambb_ingest._fetch_current_ap_poll(client, core_client)
+
+        written_keys = [c.kwargs["Key"] for c in mock_s3.put_object.call_args_list]
+        assert "ncaambb/rankings/2026/2/12.json" in written_keys
+
+    def test_no_ap_pointer_is_a_no_op_not_an_error(self):
+        client = MagicMock()
+        client.get_current_rankings_pointer.return_value = {"rankings": []}
+        core_client = MagicMock()
+
+        result = ncaambb_ingest._fetch_current_ap_poll(client, core_client)
+
+        assert result is False
+        core_client.get_ap_poll.assert_not_called()
+
+    def test_no_poll_for_the_resolved_week_is_a_no_op_not_an_error(self):
+        client = MagicMock()
+        client.get_current_rankings_pointer.return_value = self._pointer_response()
+        core_client = MagicMock()
+        core_client.get_ap_poll.return_value = None  # 404 -- no poll released this week
+
+        with patch.object(ncaambb_ingest, "_s3", MagicMock()):
+            result = ncaambb_ingest._fetch_current_ap_poll(client, core_client)
+
+        assert result is False
+
+
+class TestLambdaHandlerRankings:
+    def test_a_ranking_fetch_failure_does_not_break_the_rest_of_ingest(self):
+        mock_client = MagicMock()
+        mock_client.get_teams.return_value = _teams_response(team_ids=())
+        mock_client.get_scoreboard_for_date.return_value = _scoreboard([])
+        mock_client.get_current_rankings_pointer.side_effect = Exception("ESPN timeout")
+
+        with patch.object(ncaambb_ingest, "NCAAMBBClient", return_value=mock_client), \
+             patch.object(ncaambb_ingest, "_s3", MagicMock()):
+            result = ncaambb_ingest.lambda_handler({"date": "20260114"}, None)
+
+        assert result["rankings_fetched"] is False
+        assert result["processed"] == 0  # the rest of the run still completed normally
+
+    def test_rankings_fetched_flows_into_the_result(self):
+        mock_client = MagicMock()
+        mock_client.get_teams.return_value = _teams_response(team_ids=())
+        mock_client.get_scoreboard_for_date.return_value = _scoreboard([])
+        mock_client.get_current_rankings_pointer.return_value = {
+            "rankings": [{"type": "ap", "$ref": "http://x/.../seasons/2026/types/2/weeks/12/rankings/1"}]
+        }
+        mock_core_client = MagicMock()
+        mock_core_client.get_ap_poll.return_value = {"ranks": []}
+
+        with patch.object(ncaambb_ingest, "NCAAMBBClient", return_value=mock_client), \
+             patch.object(ncaambb_ingest, "NCAAMBBCoreClient", return_value=mock_core_client), \
+             patch.object(ncaambb_ingest, "_s3", MagicMock()):
+            result = ncaambb_ingest.lambda_handler({"date": "20260114"}, None)
+
+        assert result["rankings_fetched"] is True
+
+
 class TestYesterday:
     def test_returns_the_day_before_today(self):
         assert ncaambb_ingest._yesterday(date(2026, 1, 15)) == "20260114"

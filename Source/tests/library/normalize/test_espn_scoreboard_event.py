@@ -49,6 +49,22 @@ class TestScoreboardEventToEventItem:
         assert item["venue_city"] == "Kansas City"
         assert item["venue_state"] == "MO"
 
+    def test_conference_competition_is_passed_through_when_present(self):
+        raw = _scoreboard_event()
+        raw["competitions"][0]["conferenceCompetition"] = True
+
+        item = scoreboard_event_to_event_item(raw, "ncaambb")
+
+        assert item["conference_competition"] is True
+
+    def test_conference_competition_is_none_when_absent(self):
+        # Native-ESPN-field treatment (same as venue_indoor) -- always a
+        # present key, None rather than omitted when the source event
+        # doesn't carry it at all.
+        item = scoreboard_event_to_event_item(_scoreboard_event(), "nfl")
+
+        assert item["conference_competition"] is None
+
     def test_venue_fields_are_none_when_venue_is_absent(self):
         item = scoreboard_event_to_event_item(_scoreboard_event(), "nfl")
         assert item["venue_name"] is None
