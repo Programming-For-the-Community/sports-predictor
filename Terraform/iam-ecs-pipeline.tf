@@ -55,6 +55,30 @@ data "aws_iam_policy_document" "ecs_pipeline_permissions" {
     resources = ["arn:aws:s3:::${local.model_artifacts_bucket}/*"]
   }
 
+  # NCAA MBB's build_dataset.py is the only feature-engineering script that
+  # reads the raw data lake directly (raw AP-poll payloads, for the
+  # ranking-model dataset) -- NBA/NCAAFB have no equivalent raw-bucket
+  # read. Scoped to that one prefix, not the whole raw bucket, same
+  # least-privilege discipline as ReadWriteModelArtifacts's own sport
+  # prefixes below.
+  statement {
+    sid       = "ReadRawRankingPolls"
+    actions   = ["s3:GetObject"]
+    resources = ["arn:aws:s3:::${local.raw_bucket_name}/ncaambb/rankings/*"]
+  }
+
+  statement {
+    sid       = "ListRawRankingPolls"
+    actions   = ["s3:ListBucket"]
+    resources = ["arn:aws:s3:::${local.raw_bucket_name}"]
+
+    condition {
+      test     = "StringLike"
+      variable = "s3:prefix"
+      values   = ["ncaambb/rankings/*"]
+    }
+  }
+
   # ListBucket (scoped to each sport's own prefix) is what lets a training
   # task discover the next version number for whichever model it's
   # training -- it lists <sport>/<model-name>/v*/ and picks max(existing) + 1

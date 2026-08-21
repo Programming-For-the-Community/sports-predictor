@@ -10,9 +10,14 @@ resource "aws_cloudwatch_log_group" "ncaambb_feature_engineering" {
 }
 
 # Standalone Fargate task. Reads the full events/player_game_stats history
-# and writes training Parquet files to the model artifacts bucket. Uses
-# the shared aws_iam_role.ecs_pipeline, whose ListBucket condition
-# includes the ncaambb/* prefix.
+# and writes training Parquet files to the model artifacts bucket. Also
+# reads raw AP-poll data directly from the raw data lake (RAW_BUCKET_NAME,
+# ncaambb/rankings/* prefix) for the ranking-model dataset -- this is the
+# one feature-engineering task that reads the raw bucket at all, since
+# NBA/NCAAFB's own build_dataset.py have no such source. Uses the shared
+# aws_iam_role.ecs_pipeline, whose ListBucket condition includes the
+# ncaambb/* prefix (model artifacts) and ReadRawRankingPolls statement
+# (raw bucket, iam-ecs-pipeline.tf).
 resource "aws_ecs_task_definition" "ncaambb_feature_engineering" {
   family                   = "${var.project}-ncaambb-feature-engineering"
   requires_compatibilities = ["FARGATE"]
@@ -35,6 +40,7 @@ resource "aws_ecs_task_definition" "ncaambb_feature_engineering" {
         { name = "PLAYER_GAME_STATS_TABLE_NAME", value = aws_dynamodb_table.player_game_stats.name },
         { name = "TEAM_GAME_STATS_TABLE_NAME", value = aws_dynamodb_table.team_game_stats.name },
         { name = "MODEL_ARTIFACTS_BUCKET_NAME", value = aws_s3_bucket.model_artifacts.bucket },
+        { name = "RAW_BUCKET_NAME", value = aws_s3_bucket.raw_data_lake.bucket },
         { name = "AWS_REGION", value = var.region },
       ]
       logConfiguration = {
