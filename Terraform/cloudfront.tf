@@ -92,11 +92,15 @@ resource "aws_cloudfront_distribution" "main" {
   }
 
   origin {
-    origin_id   = "api"
-    domain_name = "${aws_api_gateway_rest_api.main.id}.execute-api.${var.region}.amazonaws.com"
-    # Prefixes forwarded requests with the deployed stage, so a request to
-    # /nfl/... reaches the API at /<stage>/nfl/....
-    origin_path = "/${aws_api_gateway_stage.main.stage_name}"
+    origin_id = "api"
+    # api-gateway-domain.tf's custom domain, not the raw
+    # execute-api.<region>.amazonaws.com hostname -- that default endpoint
+    # is disabled entirely (disable_execute_api_endpoint in api-gateway.tf)
+    # since it can't be restricted below TLS 1.0. No origin_path stage
+    # prefix needed here anymore either -- the custom domain's own base
+    # path mapping (aws_api_gateway_base_path_mapping.main) already routes
+    # its root straight to the deployed stage.
+    domain_name = aws_api_gateway_domain_name.main.domain_name
 
     custom_origin_config {
       origin_protocol_policy = "https-only"

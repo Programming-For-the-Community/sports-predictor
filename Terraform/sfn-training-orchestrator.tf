@@ -139,6 +139,8 @@ resource "aws_sfn_state_machine" "training_orchestrator" {
             "Type": "Map",
             "ItemsPath": "$.training_targets.L",
             "MaxConcurrency": ${local.training_max_concurrency},
+            "ToleratedFailurePercentage": 100,
+            "Comment": "Distributed Map defaults ToleratedFailurePercentage to 0 -- undocumented here until a real run showed it -- meaning any single target's unhandled failure aborted every other in-flight/pending target in the same sport's cycle, directly contradicting TrainingTaskFailed's own stated design (one target's failure shouldn't block the rest, each target versions independently). Set to 100 so only RunTrainingTaskOnDemand's own Catch (TrainingTaskFailed) governs a genuinely-exhausted target; the Map itself never gates on iteration failures.",
             "ItemSelector": {
               "sport.$": "$.sport.S",
               "target.$": "$$.Map.Item.Value"
@@ -201,6 +203,8 @@ resource "aws_sfn_state_machine" "training_orchestrator" {
                   "Catch": [
                     {
                       "ErrorEquals": ["States.ALL"],
+                      "Comment": "ResultPath matters here -- omitting it (the original bug, found live 2026-08-22 via a real ncaambb run: player-prop-assists OOM'd on Spot, then its fallback below crashed on 'JsonPath argument for the field $.sport could not be found') defaults to $, replacing the whole state input with just {Error, Cause} and losing $.sport/$.target that RunTrainingTaskOnDemand's own State.Format(...) calls need. Scoping the error under $.spot_failure keeps the original input intact alongside it.",
+                      "ResultPath": "$.spot_failure",
                       "Next": "RunTrainingTaskOnDemand"
                     }
                   ],

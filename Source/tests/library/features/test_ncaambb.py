@@ -96,16 +96,21 @@ class TestBuildEventFeaturesInjuries:
 class TestBuildEventFeaturesRollingBoxStats:
     def test_avg_rebounds_is_read_directly_not_derived(self):
         # Unlike NBA's own _total_rebounds workaround, NCAA MBB's box
-        # score has a real raw "rebounds" stat_line key (confirmed live,
-        # 2026-08-19) -- home_avg_rebounds should read it directly, not
-        # sum offensive+defensive.
+        # score has a real raw combined-rebounds stat_line key -- but its
+        # actual label is "total_rebounds", not "rebounds" (confirmed
+        # against a real stored team_game_stats row, 2026-08-21, after a
+        # bare "rebounds" key -- unverified against real data -- silently
+        # matched nothing and left home_avg_rebounds/away_avg_rebounds
+        # None in every row; see project-ncaambb-onboarding memory).
+        # home_avg_rebounds should read total_rebounds directly, not sum
+        # offensive+defensive.
         event = _event("E2", "2025-12-08", "150", "153")
         home_box_history = [
             {"event_date": "2025-12-01", "stat_line": {
                 "field_goals_made": 25, "field_goal_attempts": 55,
                 "three_pointers_made": 8, "three_point_attempts": 20,
                 "free_throws_made": 12, "free_throw_attempts": 15,
-                "rebounds": 38, "offensive_rebounds": 9, "defensive_rebounds": 29,
+                "total_rebounds": 38, "offensive_rebounds": 9, "defensive_rebounds": 29,
                 "assists": 14, "steals": 6, "blocks": 3, "turnovers": 11, "fouls": 16,
             }},
         ]

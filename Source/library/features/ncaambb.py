@@ -8,14 +8,17 @@ feature computation share these same functions once inference lands
 (step 6).
 
 Genuinely different from NBA, not just renamed:
-- avg_rebounds is read DIRECTLY off box_stats, not derived from
+- avg_total_rebounds is read DIRECTLY off box_stats, not derived from
   offensive+defensive the way NBA's own _total_rebounds works around a
-  real data gap -- confirmed live, 2026-08-19 (see
-  project-ncaambb-onboarding memory): ESPN's NCAA MBB box score DOES
-  carry a raw combined "rebounds" stat alongside offensiveRebounds/
-  defensiveRebounds, unlike NBA's, where "avg_rebounds" came back null.
-  Trusting the raw stat here rather than porting NBA's derivation
-  workaround into a sport that doesn't need it.
+  real data gap. ESPN's NCAA MBB box score DOES carry a raw combined
+  rebounds stat alongside offensiveRebounds/defensiveRebounds, unlike
+  NBA's, where "avg_rebounds" came back null -- but its own raw label is
+  "Total Rebounds", snake-cased to total_rebounds, not "rebounds"
+  (confirmed against a real stored team_game_stats row, 2026-08-21, after
+  home_avg_rebounds/away_avg_rebounds turned out to be silently None in
+  every row -- see project-ncaambb-onboarding memory). Trusting the raw
+  stat here rather than porting NBA's derivation workaround into a sport
+  that doesn't need it.
 - is_conference_game replaces NBA's is_divisional_game -- ESPN's own
   conferenceCompetition flag (library/normalize/espn.py's
   scoreboard_event_to_event_item, confirmed live 2026-08-20), true for
@@ -161,7 +164,7 @@ def build_event_features(
         "away_avg_points_scored": away_scoring["avg_points_scored"],
         "away_avg_points_allowed": away_scoring["avg_points_allowed"],
         "away_games_played": away_scoring["games_played"],
-        "home_avg_rebounds": home_box_stats.get("avg_rebounds"),
+        "home_avg_rebounds": home_box_stats.get("avg_total_rebounds"),
         "home_avg_offensive_rebounds": home_box_stats.get("avg_offensive_rebounds"),
         "home_avg_defensive_rebounds": home_box_stats.get("avg_defensive_rebounds"),
         "home_avg_assists": home_box_stats.get("avg_assists"),
@@ -175,7 +178,7 @@ def build_event_features(
         "home_offensive_efficiency": home_offensive_efficiency,
         "home_defensive_efficiency": home_defensive_efficiency,
         "home_box_games_played": home_box_stats["games_played"],
-        "away_avg_rebounds": away_box_stats.get("avg_rebounds"),
+        "away_avg_rebounds": away_box_stats.get("avg_total_rebounds"),
         "away_avg_offensive_rebounds": away_box_stats.get("avg_offensive_rebounds"),
         "away_avg_defensive_rebounds": away_box_stats.get("avg_defensive_rebounds"),
         "away_avg_assists": away_box_stats.get("avg_assists"),
