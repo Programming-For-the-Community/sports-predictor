@@ -107,13 +107,15 @@ class TestBuildEventDataset:
         e7 = next(row for row in rows if row["event_key"] == "E7")
         assert e7["home_games_played"] == 3
 
-    def _team_box_row(self, event_key, team_id, rebounds=38, turnovers=13, offensive_rebounds=9, defensive_rebounds=29):
-        # A real raw "rebounds" stat -- unlike NBA's box score, no
-        # derivation-from-offense+defense workaround needed here.
+    def _team_box_row(self, event_key, team_id, total_rebounds=38, turnovers=13, offensive_rebounds=9, defensive_rebounds=29):
+        # A real raw combined-rebounds stat -- unlike NBA's box score, no
+        # derivation-from-offense+defense workaround needed here. Its raw
+        # ESPN label snake_cases to "total_rebounds", not "rebounds" (see
+        # library/features/ncaambb.py's own module docstring).
         return {
             "event_key": event_key, "team_key": f"ncaambb:team:{team_id}", "team_id": team_id,
             "event_date": "2025-12-01", "stat_line": {
-                "rebounds": rebounds, "turnovers": turnovers,
+                "total_rebounds": total_rebounds, "turnovers": turnovers,
                 "offensive_rebounds": offensive_rebounds, "defensive_rebounds": defensive_rebounds,
             },
         }
@@ -124,10 +126,10 @@ class TestBuildEventDataset:
             _event("E2", "2025-12-08", "150", "160"),
         ]
         team_game_stats = [
-            self._team_box_row("E1", "150", rebounds=40, turnovers=10),
-            self._team_box_row("E1", "153", rebounds=35, turnovers=14),
-            self._team_box_row("E2", "150", rebounds=38, turnovers=8),
-            self._team_box_row("E2", "160", rebounds=33, turnovers=12),
+            self._team_box_row("E1", "150", total_rebounds=40, turnovers=10),
+            self._team_box_row("E1", "153", total_rebounds=35, turnovers=14),
+            self._team_box_row("E2", "150", total_rebounds=38, turnovers=8),
+            self._team_box_row("E2", "160", total_rebounds=33, turnovers=12),
         ]
         storage = self._storage(events, team_game_stats=team_game_stats)
 
