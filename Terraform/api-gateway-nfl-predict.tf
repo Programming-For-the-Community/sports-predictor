@@ -366,6 +366,15 @@ resource "aws_api_gateway_stage" "main" {
   rest_api_id   = aws_api_gateway_rest_api.main.id
   deployment_id = aws_api_gateway_deployment.main.id
   stage_name    = var.environment
+  # aws_api_gateway_documentation_version (api-gateway-documentation.tf)
+  # publishes a snapshot at the API level, but the console's own
+  # Documentation view and stage-scoped "Export" are both scoped to
+  # whatever version the deployed STAGE itself references -- without
+  # this, that snapshot exists (confirmed live: 39 documentation parts +
+  # the 1.0.0 version both present via the API) but shows as empty from
+  # the stage's own perspective, since nothing ever pointed this stage at
+  # it.
+  documentation_version = aws_api_gateway_documentation_version.main.version
 
   tags = merge(local.common_tags, {
     Sport     = "shared"
