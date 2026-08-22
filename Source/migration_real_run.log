@@ -1,0 +1,5 @@
+2026-08-21 19:36:43,872 [INFO]: Found credentials in shared credentials file: ~/.aws/credentials
+2026-08-21 19:36:44,636 [INFO]: Found 1571 scoreboard objects under ncaambb/scoreboard/
+2026-08-22 09:04:07,963 [INFO]: Patched 66833 events across 1571 scoreboard objects
+2026-08-22 09:04:07,964 [INFO]: 6 event(s) newly resolved from scheduled -> canceled by the STATUS_UNCONTESTED fix: ['SPORT#NCAAMBB#EVENT#401301253', 'SPORT#NCAAMBB#EVENT#401301255', 'SPORT#NCAAMBB#EVENT#401296173', 'SPORT#NCAAMBB#EVENT#401301736', 'SPORT#NCAAMBB#EVENT#401310924', 'SPORT#NCAAMBB#EVENT#401422728']
+2026-08-22 09:04:10,002 [INFO]: Found 0 event(s) stuck at status=scheduled older than 2026-07-23

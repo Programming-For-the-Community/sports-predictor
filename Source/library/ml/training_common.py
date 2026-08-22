@@ -178,13 +178,12 @@ def update_promoted_candidates(
     s3: S3Manager, sport: str, model_name: str, version: int, candidates: list[dict], candidates_ranked_by: str,
 ) -> None:
     """Rewrites an already-saved model card's own `candidates`/
-    `candidates_ranked_by` fields in place. Called once, at the very end
-    of library.ml.backtest.run_backtest, on whichever version that run
-    ends up leaving live -- run_backtest promotes a winning candidate the
-    moment it beats current production, which can be before the rest of
-    that run's candidates have even been tried, so the card written at
-    promotion time only carries a partial "candidates" summary. This
-    fills it in with the complete tournament once the whole run is known.
+    `candidates_ranked_by` fields in place. Called by
+    library.ml.backtest.run_backtest after every candidate that doesn't
+    win (once per loss, not just once at the end) so whichever version is
+    currently live stays fully up to date with every result rolling in
+    from the rest of its run, including ones it can't itself have known
+    about at promotion time.
 
     Every other field on the card is left untouched."""
     key = model_artifact_key(sport, model_name, version, MODEL_CARD_FILENAME)

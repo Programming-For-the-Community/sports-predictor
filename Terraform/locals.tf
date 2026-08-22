@@ -18,6 +18,15 @@ locals {
   # (path-routed to API Gateway).
   domain = "${var.project}.${var.domain_name}"
 
+  # API Gateway's own custom domain (acm-api-gateway.tf,
+  # api-gateway-domain.tf) -- CloudFront's origin, not user-facing traffic
+  # (that stays on `domain` above). Project-name-first, not
+  # "api.${domain}" (which would put "api" as the leftmost label) --
+  # var.domain_name is shared across other projects on the same root
+  # domain, so scoping "api" under this project's own name first avoids
+  # colliding with another project's own api subdomain.
+  api_domain = "${var.project}.api.${var.domain_name}"
+
   common_tags = {
     Owner       = var.owner
     Project     = var.project

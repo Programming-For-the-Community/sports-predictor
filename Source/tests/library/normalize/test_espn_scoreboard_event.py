@@ -103,6 +103,15 @@ class TestEventStatus:
         raw = _scoreboard_event(status={"type": {"completed": False, "name": "STATUS_SUSPENDED"}})
         assert scoreboard_event_to_event_item(raw, "nfl")["status"] == "canceled"
 
+    def test_canceled_for_an_uncontested_game(self):
+        # Regression case: 6 real NCAA MBB conference/NCAA-tournament games
+        # from March 2021-2022 (COVID withdrawals), confirmed live
+        # 2026-08-21 -- see project-ncaambb-onboarding memory. ESPN's
+        # status name for a game vacated because one side couldn't field a
+        # team, distinct from STATUS_FORFEIT.
+        raw = _scoreboard_event(status={"type": {"completed": False, "name": "STATUS_UNCONTESTED"}})
+        assert scoreboard_event_to_event_item(raw, "ncaambb")["status"] == "canceled"
+
 
 class TestScoreboardEventToEventItemCoachInjuryDepthChart:
     """Coach/injuries/depth-chart are attached by ingest's _enrich_events

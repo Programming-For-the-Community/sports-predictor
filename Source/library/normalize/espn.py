@@ -33,7 +33,16 @@ def team_to_entity(team: dict, sport: str) -> dict:
 # resume) under this event_id -- status.type.completed is False for all
 # of these, same as a genuinely upcoming game, so without this a canceled/
 # postponed game defaults to "scheduled" and sits there permanently.
-_NON_PLAYED_STATUS_NAMES = {"STATUS_CANCELED", "STATUS_POSTPONED", "STATUS_SUSPENDED", "STATUS_FORFEIT"}
+# STATUS_UNCONTESTED confirmed live 2026-08-21 on 6 real NCAA MBB
+# conference/NCAA-tournament games from March 2021-2022 (COVID
+# withdrawals) that were otherwise stuck at "scheduled" -- ESPN's status
+# name for a game vacated because one side couldn't field a team, distinct
+# from a genuine forfeit. NCAAFB's own historical data has no games stuck
+# on this (checked directly, not assumed), likely because its status
+# comes from CFBD rather than this ESPN normalizer.
+_NON_PLAYED_STATUS_NAMES = {
+    "STATUS_CANCELED", "STATUS_POSTPONED", "STATUS_SUSPENDED", "STATUS_FORFEIT", "STATUS_UNCONTESTED",
+}
 
 
 def _event_status(status: dict) -> str:

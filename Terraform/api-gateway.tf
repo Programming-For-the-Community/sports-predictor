@@ -2,6 +2,13 @@
 resource "aws_api_gateway_rest_api" "main" {
   name = "${var.project}-api"
 
+  # The default execute-api.<region>.amazonaws.com endpoint can't be
+  # restricted below TLS 1.0 and has no security_policy control at all --
+  # disabled once api-gateway-domain.tf's custom domain (TLS_1_2) takes
+  # over as CloudFront's origin, so the weak default endpoint doesn't stay
+  # reachable in parallel for no reason.
+  disable_execute_api_endpoint = true
+
   endpoint_configuration {
     types = ["REGIONAL"]
   }

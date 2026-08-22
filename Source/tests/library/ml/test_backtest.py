@@ -323,11 +323,13 @@ class TestBackfillsPromotedCardWithFullTournament:
     the rest of the tournament had even been tried) ended up with a
     model card whose own "candidates" field only listed whatever had run
     so far -- permanently, since save_model_artifact writes a card once
-    and nothing ever revisited it. run_backtest now backfills the
-    eventual winner's card with the complete list once the whole run is
-    known."""
+    and nothing ever revisited it. run_backtest now refreshes whichever
+    card is currently live after every single later candidate's result
+    (win or lose), not just once at the very end -- see
+    test_card_written_at_promotion_time_already_lists_not_yet_run_candidates
+    for why waiting until the end isn't good enough on its own."""
 
-    def test_first_candidate_winning_still_gets_the_full_candidate_list_backfilled(self):
+    def test_first_candidate_winning_gets_updated_after_each_later_loss(self):
         first = _FakeAdapter("xgboost", np.array([0.9, 0.1, 0.9, 0.1]))  # wins immediately
         second = _FakeAdapter("logistic_regression", np.array([0.4, 0.6, 0.4, 0.6]))  # never persisted
         third = _FakeAdapter("random_forest_regressor", np.array([0.6, 0.4, 0.6, 0.4]))  # never persisted
@@ -338,17 +340,23 @@ class TestBackfillsPromotedCardWithFullTournament:
              patch.object(backtest.training_common, "update_promoted_candidates") as mock_update:
             result = _run([first, second, third])
 
-        # Only xgboost was ever persisted (the other two lost), but the
-        # backfill call still names all three -- that's the whole point.
-        mock_update.assert_called_once_with(ANY, "nfl", "win-probability", 7, ANY, "log_loss")
-        backfilled = mock_update.call_args.args[4]
-        assert {c["algorithm"] for c in backfilled} == {"xgboost", "logistic_regression", "random_forest_regressor"}
+        # Only xgboost was ever persisted (the other two lost), but its
+        # live card is refreshed once per loss -- once after second,
+        # again after third -- not just once at the end.
+        assert mock_update.call_count == 2
+        for call in mock_update.call_args_list:
+            assert call.args[1:4] == ("nfl", "win-probability", 7)
+        # The LAST refresh (after third) names all three.
+        final_call_candidates = mock_update.call_args_list[-1].args[4]
+        assert {c["algorithm"] for c in final_call_candidates} == {
+            "xgboost", "logistic_regression", "random_forest_regressor",
+        }
         # The in-memory return value is kept consistent with what S3 now has.
         assert {c["algorithm"] for c in result["promotions"][0]["candidates"]} == {
             "xgboost", "logistic_regression", "random_forest_regressor",
         }
 
-    def test_backfills_whichever_candidate_ends_up_actually_live_not_the_first_promotion(self):
+    def test_a_later_winner_never_needs_a_separate_update_call(self):
         first = _FakeAdapter("xgboost", np.array([0.9, 0.1, 0.9, 0.1]))
         better = _FakeAdapter("random_forest_regressor", np.array([0.95, 0.05, 0.95, 0.05]))
 
@@ -356,12 +364,17 @@ class TestBackfillsPromotedCardWithFullTournament:
              patch.object(backtest.training_common, "would_beat_current", side_effect=[True, True]), \
              patch.object(backtest.training_common, "promote_if_better"), \
              patch.object(backtest.training_common, "update_promoted_candidates") as mock_update:
-            _run([first, better])
+            result = _run([first, better])
 
-        # Both won their own comparison and were persisted -- only the
-        # LAST one (whatever's actually live at the end) gets backfilled.
-        mock_update.assert_called_once()
-        assert mock_update.call_args.args[3] == 7  # _fake_save always returns version=7
+        # Both won their own comparison -- neither ever hit the "lose"
+        # branch, so there's nothing for update_promoted_candidates to do:
+        # `better`, being the last candidate evaluated, was already saved
+        # with the complete two-algorithm summary baked into its own
+        # save_model_artifact call.
+        mock_update.assert_not_called()
+        assert {c["algorithm"] for c in result["promotions"][-1]["candidates"]} == {
+            "xgboost", "random_forest_regressor",
+        }
 
     def test_no_promotions_means_no_backfill_and_no_touching_a_prior_runs_card(self):
         loses = _FakeAdapter("xgboost", np.array([0.4, 0.6, 0.4, 0.6]))
@@ -374,6 +387,43 @@ class TestBackfillsPromotedCardWithFullTournament:
         mock_save.assert_not_called()
         mock_update.assert_not_called()
         assert result["promotions"] == []
+
+    def test_card_written_at_promotion_time_already_lists_not_yet_run_candidates(self):
+        """Explicit user requirement (called out repeatedly, first during
+        NCAAFB/NBA training, then again for NCAA MBB): the card written
+        the MOMENT a candidate is promoted -- not just the end-of-run
+        backfill -- must already name every candidate being considered,
+        with a None/"not_evaluated" placeholder for ones this run hasn't
+        reached yet. Matters because update_promoted_candidates's backfill
+        never runs at all if the task is killed or times out before the
+        loop finishes -- a real risk this project already sizes Fargate
+        vCPU and XGBoost's iteration cap around, not a hypothetical."""
+        first = _FakeAdapter("xgboost", np.array([0.9, 0.1, 0.9, 0.1]))  # wins immediately
+        second = _FakeAdapter("logistic_regression", np.array([0.4, 0.6, 0.4, 0.6]))
+        third = _FakeAdapter("random_forest_regressor", np.array([0.6, 0.4, 0.6, 0.4]))
+        saved_candidates_by_call = []
+
+        def _capture_save(s3, sport, model_name, algorithm, model_bytes, artifact_filename, metadata, summary_metrics):
+            saved_candidates_by_call.append(metadata["candidates"])
+            return {"model_name": model_name, "algorithm": algorithm, "version": 7, **metadata}
+
+        with patch.object(backtest.training_common, "save_model_artifact", side_effect=_capture_save), \
+             patch.object(backtest.training_common, "would_beat_current", side_effect=[True, False, False]), \
+             patch.object(backtest.training_common, "promote_if_better"):
+            _run([first, second, third])
+
+        # The FIRST card written (at the moment xgboost was promoted, before
+        # second/third had even run yet) already names all three.
+        first_write = saved_candidates_by_call[0]
+        by_algorithm = {c["algorithm"]: c for c in first_write}
+        assert set(by_algorithm) == {"xgboost", "logistic_regression", "random_forest_regressor"}
+        assert by_algorithm["xgboost"]["score"] is not None
+        assert by_algorithm["logistic_regression"]["status"] == "not_evaluated"
+        assert by_algorithm["logistic_regression"]["score"] is None
+        assert by_algorithm["random_forest_regressor"]["status"] == "not_evaluated"
+        # Not-yet-evaluated placeholders (rank_score=None) never crash the
+        # best-first sort, and sort after every real result.
+        assert [c["algorithm"] for c in first_write][0] == "xgboost"
 
 
 class TestResumability:

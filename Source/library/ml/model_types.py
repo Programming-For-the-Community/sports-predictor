@@ -311,7 +311,15 @@ class ElasticNetAdapter(_JoblibSerializedAdapter):
 # is pure cost with no variance-reduction benefit.
 _RF_PARAM_DISTRIBUTIONS = {
     "model__n_estimators": [100, 200, 300, 400, 500, 600],
-    "model__max_depth": [4, 6, 8, 10, 15, 20, None],
+    # No None option -- same reasoning as max_features just below already
+    # states and already applies there (an uncapped draw is pure cost with
+    # no variance-reduction benefit), just not previously carried through
+    # to max_depth too. Confirmed a real cost, not just a theoretical one:
+    # a live run (2026-08-22, NCAA MBB player-prop-assists) drew
+    # max_depth=None + n_estimators=600 on TimeSeriesSplit's largest fold
+    # and took 17.6 minutes for that ONE fold alone, and was the direct
+    # trigger of a genuine Fargate OOM kill at 64GB.
+    "model__max_depth": [4, 6, 8, 10, 15, 20, 30],
     "model__min_samples_leaf": [1, 2, 4, 8],
     "model__max_features": ["sqrt", "log2"],
     "model__max_samples": [0.4, 0.5, 0.6, 0.7, 0.85],
@@ -319,6 +327,15 @@ _RF_PARAM_DISTRIBUTIONS = {
 _RF_SEARCH_ITERATIONS = 70
 _RF_CV_SPLITS = 8
 _RF_RANDOM_STATE = 42
+# One worker per CV fold, not n_jobs=-1 (every vCPU on the task, 16 by
+# default -- variables.tf's training_task_vcpu). This is still the most
+# memory-hungry candidate in the tournament even with max_depth's None
+# option gone above, so it alone gets a narrower cap than the other
+# adapters' own n_jobs=-1 (their per-fit cost doesn't carry the same risk)
+# -- bounds how many full-depth-tree fits can peak in memory at once
+# without limiting useful parallelism (a search can't usefully exceed one
+# concurrent fit per fold regardless of vCPU headroom).
+_RF_SEARCH_N_JOBS = _RF_CV_SPLITS
 
 
 class _RandomForestAdapterBase(_JoblibSerializedAdapter):
@@ -344,7 +361,7 @@ class _RandomForestAdapterBase(_JoblibSerializedAdapter):
             cv=TimeSeriesSplit(n_splits=_RF_CV_SPLITS),
             random_state=_RF_RANDOM_STATE,
             verbose=10,
-            n_jobs=-1,
+            n_jobs=_RF_SEARCH_N_JOBS,
         )
         search.fit(X_train, y_train)
         _log_search_convergence(self.algorithm, search)
