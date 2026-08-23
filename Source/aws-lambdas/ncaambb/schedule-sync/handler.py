@@ -114,7 +114,14 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(me
 logger = logging.getLogger("ncaambb-schedule-sync")
 
 RAW_BUCKET = os.environ["RAW_BUCKET_NAME"]
-_entities = DynamoDBTable(os.environ["ENTITIES_TABLE_NAME"])
+_entities: DynamoDBTable | None = None
+
+
+def _get_entities() -> DynamoDBTable:
+    global _entities
+    if _entities is None:
+        _entities = DynamoDBTable(os.environ["ENTITIES_TABLE_NAME"], region=os.environ.get("AWS_REGION"))
+    return _entities
 
 # Generous fixed ceiling covering the whole regular season plus
 # conference/NCAA tournaments with real padding on both ends -- not a real
@@ -154,13 +161,14 @@ def _current_ncaambb_season(today: date) -> int:
 
 def _sync_team_conference_metadata(team_conference: dict[str, str]) -> int:
     updated = 0
+    entities = _get_entities()
     for team_id, conference in team_conference.items():
-        entity = _entities.get_item({"entity_key": entity_key("ncaambb", team_id, "team")})
+        entity = entities.get_item({"entity_key": entity_key("ncaambb", team_id, "team")})
         if entity is None:
             continue
         if entity.get("metadata", {}).get("conference") == conference:
             continue
-        _entities.put_item({**entity, "metadata": {**entity.get("metadata", {}), "conference": conference}})
+        entities.put_item({**entity, "metadata": {**entity.get("metadata", {}), "conference": conference}})
         updated += 1
     return updated
 
