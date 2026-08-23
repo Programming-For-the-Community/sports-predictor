@@ -1,6 +1,6 @@
 ﻿# Multi-Sport Prediction Platform — Project Context
 
-This file gives Claude Code (or any future contributor) the context needed to work on this repository without re-deriving prior decisions. Read this first, then the relevant doc in `/docs` for the area you're touching.
+This file gives Claude Code (or any future contributor) the context needed to work on this repository without re-deriving prior decisions. Read this first, then the relevant doc in this same `/design` directory (planning/architecture/schema) or `/docs` (as-built API contract and per-sport feature-engineering references) for the area you're touching.
 
 ## What this is
 
@@ -23,11 +23,14 @@ See `docs/PROJECT_PLAN.md` for the full checklist. Short version: get NFL workin
 
 ## Where to look for what
 
-- `docs/ARCHITECTURE.md` — system diagrams (single-sport and multi-sport), access control design, service rationale
-- `docs/PROJECT_PLAN.md` — phased implementation checklist
-- `docs/DATA_SOURCES.md` — free data sources per sport, update cadence, auth requirements
-- `docs/DATA_SCHEMA.md` — entity/event schema, DynamoDB table design, sport registry shape
-- `docs/TAGGING_STRATEGY.md` — AWS resource tagging convention for cost tracking in Billing/Cost Explorer
+- `design/ARCHITECTURE.md` — system diagrams (single-sport and multi-sport), the no-NAT-Gateway networking constraint and its S3-relay workaround, access control design, service rationale
+- `design/PROJECT_PLAN.md` — phased implementation checklist
+- `design/DATA_SOURCES.md` — free data sources per sport, update cadence, auth requirements
+- `design/DATA_SCHEMA.md` — entity/event schema, DynamoDB table design, sport registry shape, S3 key conventions
+- `design/TAGGING_STRATEGY.md` — AWS resource tagging convention for cost tracking in Billing/Cost Explorer
+- `docs/SPORT_PREDICTOR_API.md` — the live API Gateway route contract, per sport
+- `docs/{NFL,NCAAFB,NBA,NCAAMBB}_FEATURE_ENGINEERING.md` — what each sport's trained-model features actually are and where they come from
+- `docs/AWS_ARCHITECTURE.md` — as-built AWS architecture diagrams, scoped to the NFL/Phase 1 adapter specifically (not kept current for every sport)
 
 ## Conventions
 

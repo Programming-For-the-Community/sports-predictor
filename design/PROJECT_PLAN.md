@@ -43,10 +43,13 @@ A phased checklist in implementation order. Each phase assumes the previous one 
 
 ## Phase 3 — NBA + NCAA MBB adapters (stress-test volume)
 
-- [ ] Write the NBA adapter (nba_api or balldontlie)
-- [ ] Write the NCAA MBB adapter (ESPN endpoints or hoopR)
-- [ ] Confirm the ingestion schedule and DynamoDB throughput hold up under a much higher game density than NFL (back-to-backs, dozens of games per day in-season)
-- [ ] Backfill, train, and add both to the frontend
+- [x] Write the NBA adapter (ESPN's public endpoints, not nba_api — nba_api/stats.nba.com is blocked by bot protection from datacenter IPs, a real deployment risk; see `design/DATA_SOURCES.md`)
+- [x] Write the NCAA MBB adapter (ESPN endpoints)
+- [x] Confirm the ingestion schedule and DynamoDB throughput hold up under a much higher game density than NFL (back-to-backs, dozens of games per day in-season) — both sports' ingest uses `ThreadPoolExecutor` concurrency (unlike NFL's sequential loops) specifically for this; confirmed live against D1's real ~362-team/~150-game-Saturday volume for NCAA MBB
+- [x] Backfill, train, and add NBA to the frontend — fully live end to end (see the `project-nba-onboarding` memory)
+- [x] Backfill and train NCAA MBB (through season simulation + both postseason brackets) — backend fully live; frontend activation (flipping `sport_config.dart`'s `active: true` and fixing its `id` from `ncaa_mbb` to `ncaambb`) is the one step still outstanding, see the `project-ncaambb-onboarding` memory
+
+**Beyond the original checklist**, both adapters grew a postseason simulation feature not originally scoped this early (see this file's own note on why NBA's bracket work got pulled forward rather than deferred to a later hardening pass, and `project-ncaambb-onboarding`/the `soft-moseying-lemur` plan for NCAA MBB's): NBA's play-in-aware playoff bracket plus a real in-season NBA Cup knockout bracket; NCAA MBB's is a genuinely different shape again — one full single-elimination bracket per conference tournament (not NBA's or NFL's single unified bracket) feeding a 68-team March Madness bracket (First Four, S-curve-seeded regions, Final Four), both real-vs-projected reconciled. Both sports also picked up a `LightGBMClassifierAdapter`/`LightGBMRegressorAdapter` candidate family (`library/ml/model_types.py`) not present for NFL/NCAAFB, added specifically for basketball's larger data volume.
 
 ## Phase 4 — Generalize orchestration
 

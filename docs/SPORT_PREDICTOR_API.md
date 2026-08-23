@@ -1,6 +1,6 @@
 # Sport Predictor API
 
-This documents every route live on the shared API Gateway REST API (`Terraform/api-gateway.tf`, `Terraform/api-gateway-{nfl,ncaafb,nba}-predict.tf`, `Terraform/api-gateway-{nfl,ncaafb,nba}-live-scores.tf`), fronted by CloudFront at the app's single public domain -- see `design/ARCHITECTURE.md`'s serving-layer diagram. Per `design/CLAUDE.md`'s registry-driven onboarding principle, every head-to-head sport gets the identical `/{sport}/events`, `/{sport}/models`, `/{sport}/season`, `/{sport}/live-scores`, `/{sport}/predictions/...` route shape -- nothing about this contract is sport-specific except the path prefix and each sport's own player-prop stat names. **NFL and NCAAFB are fully live**; **NBA's routes exist in Terraform but are not yet functional** -- see the NBA section below.
+This documents every route live on the shared API Gateway REST API (`Terraform/api-gateway.tf`, `Terraform/api-gateway-{nfl,ncaafb,nba,ncaambb}-predict.tf`, `Terraform/api-gateway-{nfl,ncaafb,nba,ncaambb}-live-scores.tf`), fronted by CloudFront at the app's single public domain -- see `design/ARCHITECTURE.md`'s serving-layer diagram. Per `design/CLAUDE.md`'s registry-driven onboarding principle, every head-to-head sport gets the identical `/{sport}/events`, `/{sport}/models`, `/{sport}/season`, `/{sport}/live-scores`, `/{sport}/predictions/...` route shape -- nothing about this contract is sport-specific except the path prefix and each sport's own player-prop stat names. **NFL, NCAAFB, and NBA are fully live** (backend and frontend); **NCAAMBB's backend is fully live but its frontend isn't activated yet** -- see the NCAAMBB section below.
 
 Formerly `NFL_API.md` -- renamed and expanded to cover every onboarded sport under one doc, since the contract genuinely is shared (this file documents the contract once, then calls out each sport's own concrete values).
 
@@ -298,11 +298,139 @@ Identical contract to `/nfl/live-scores`.
 
 Identical contract and `leaders` shape to NFL's own (`passing`/`receiving`/`rushing`/`sacks`, same candidate-count limits). Player-prop `stat` values (`Terraform/dynamodb-sport-registry.tf`'s `ncaafb_player_prop_stats`): `passing_yards`, `passing_touchdowns`, `rushing_yards`, `rushing_touchdowns`, `receiving_yards`, `receiving_touchdowns`, `defensive_sacks` -- same 7 names as NFL, verified against CFBD's own field names independently (not assumed identical just because the names match).
 
-## NBA routes (`/nba/*`) -- **not yet live**
+## NBA routes (`/nba/*`) -- live
 
-`Terraform/api-gateway-nba-predict.tf` and `Terraform/api-gateway-nba-live-scores.tf` already wire up the identical route shape (`/nba/events`, `/nba/models`, `/nba/season`, `/nba/live-scores`, `/nba/predictions/events/{event_id}`, `.../players/{entity_id}`) pointing at `aws_lambda_function.nba_predict_read` -- but that Lambda is currently a placeholder stub (`Terraform/lambda-nba-predict-read.tf`'s own inline-fabricated ZIP), not real serving code. **Every route above returns a non-functional placeholder response today, not real data.** This is expected, deliberate scaffolding-ahead-of-schedule (see the `project-nba-onboarding` memory's note on why the container-image `nba-predict` Lambda needed a placeholder image from day one) -- not a bug to file.
+Identical route shape to NFL, with these sport-specific differences.
 
-Feature engineering and training (Sub-phase 3A step 5) are done -- see `NBA_FEATURE_ENGINEERING.md` -- but no model has been trained against real data yet, and `Source/aws-lambdas/nba/predict-read/` doesn't exist as real code at all (step 6). Once step 6 lands, this section gets filled in with real routes, response examples, and NBA's own player-prop `stat` values (intended: `points`, `rebounds`, `assists`, `steals`, `blocks`, `three_pointers_made`, per `Terraform/dynamodb-sport-registry.tf`'s `nba_player_prop_stats`) -- the contract is expected to be structurally identical to NFL's/NCAAFB's `predictions/events/{event_id}` shape, minus the position-based `leaders` categories (NBA has no QB/RB/WR-equivalent leader concept -- see `NBA_FEATURE_ENGINEERING.md`'s "No position-leader tracking" section; the eventual leaders panel groups by scoring/rebounding/assists instead). Step 7 (live-scores) and step 8 (season simulation, play-in-aware) are also still pending -- `/nba/live-scores` and `/nba/season` have no real backing logic yet either.
+### `GET /nba/events`
+
+Same week-scoping-equivalent (day-grouped, not week-grouped -- NBA has no week numbering) and caching-audit-trail contract as NFL's own `/nfl/events`. Each event carries predicted winner/margin/score plus its **top-5** predicted leaders across `scoring`/`rebounding`/`assists` (bumped from an original top-2, see the `playoff-bracket-feature` memory), and, for a playoff-series game, live series-record awareness (e.g. "2-1") alongside the predicted final series score (e.g. "predicted 4-2"). No `venue_city`/`venue_state` gap -- both are served (a real bug, fixed 2026-08-19/20).
+
+### `GET /nba/models`
+
+Same shape as NFL's, but every target's `candidates` list has **5** entries, not 4 -- `LightGBMClassifierAdapter`/`LightGBMRegressorAdapter` (`library/ml/model_types.py`) were added specifically for NBA's onboarding (basketball's larger data volume). No `national-ranking` model -- NBA has no in-season poll.
+
+### `GET /nba/season`
+
+Recomputed weekly, served from S3, same as NFL. **Genuinely different shape** -- no division/wild-card structure, and standings are grouped by division for display only (no seeding benefit, see `NBA_FEATURE_ENGINEERING.md`).
+
+```json
+{
+  "sport": "nba",
+  "season": 2027,
+  "standings": [
+    {
+      "team_id": "25",
+      "division": "Northwest",
+      "wins": 41,
+      "losses": 12,
+      "projected_wins": 58.3,
+      "projected_losses": 23.7,
+      "division_winner_probability": 0.88,
+      "play_in_probability": 0.02,
+      "playoff_probability": 0.97,
+      "championship_probability": 0.19,
+      "name": "Oklahoma City Thunder",
+      "abbreviation": "OKC"
+    }
+  ],
+  "cup": { "...": "NBA Cup in-season-tournament group standings, per Terraform-maintained CUP_GROUPS[season]; null if the current season has no cup groups configured yet" },
+  "cup_bracket": { "rounds": [ "..." ], "champion": null },
+  "leaderboards": { "points": [ "..." ], "rebounds": [], "assists": [], "steals": [], "blocks": [], "three_pointers_made": [] },
+  "bracket": {
+    "rounds": [
+      { "round": "Play-In", "matchups": [ "..." ] },
+      { "round": "First Round", "matchups": [ "..." ] },
+      { "round": "Conference Semifinals", "matchups": [ "..." ] },
+      { "round": "Conference Finals", "matchups": [ "..." ] },
+      { "round": "NBA Finals", "matchups": [ "..." ] }
+    ],
+    "champion": null
+  },
+  "generated_at": "2026-08-22T00:00:00Z"
+}
+```
+
+`bracket` is play-in-aware (2 play-in games per conference feed the conference's 7/8 seed before the main 8-team-per-conference bracket starts, no reseeding between rounds) and best-of-7-series-aware end to end (prediction + live record), real-vs-projected reconciled as postseason games complete -- same 3-state design (`projected`/`scheduled`/`final`) as every other bracket in this project. `cup_bracket` is projected-only (no reconciliation) -- see `playoff-bracket-feature` memory for the still-unresolved NBA Cup knockout field-size discrepancy. `cup`/`cup_bracket` are both `null` outside a season with NBA Cup groups configured.
+
+### `GET /nba/live-scores`
+
+Identical contract to `/nfl/live-scores` -- `player_stats` keys are `points`/`rebounds`/`assists`/etc. instead of NFL's passing/rushing categories.
+
+### `GET /nba/predictions/events/{event_id}` and `.../players/{entity_id}`
+
+Same contract as NFL's own. `leaders` has **no** position-based categories (`passing`/`rushing`/etc.) -- basketball has no single-player-dominates concept the way a QB does, so the three categories are `scoring`/`rebounding`/`assists`, each always a list (up to 5 candidates, re-sorted by this game's own predicted value, not recent-volume order). Player-prop `stat` values (`Terraform/dynamodb-sport-registry.tf`'s `nba_player_prop_stats`): `points`, `rebounds`, `assists`, `steals`, `blocks`, `three_pointers_made`.
+
+## NCAAMBB routes (`/ncaambb/*`) -- **backend live, frontend not yet activated**
+
+Every route below is real, deployed, and returns real data today -- `ncaambb-predict`/`ncaambb-predict-read`/`ncaambb-live-scores` are not placeholder stubs (unlike NBA's own routes before its step 6). What's still pending is Sub-phase 3B step 9: the Flutter frontend's `sport_config.dart` entry is still `id: 'ncaa_mbb'` (a real id-mismatch bug that would 404 every call once flipped on, not yet fixed) and `active: false`, so this sport doesn't appear in the app UI yet even though its API is fully callable directly. Identical route shape to NBA otherwise, with these differences.
+
+### `GET /ncaambb/events`
+
+Day-grouped, same as NBA. Each event additionally carries a conference-game flag; predicted leaders use the same `scoring`/`rebounding`/`assists` categories as NBA (basketball's leader categories port near-exact, confirmed to match).
+
+### `GET /ncaambb/models`
+
+Same shape as NBA's, **plus** a `national-ranking` model (predicts AP Top 25 rank, poll-labeled -- see `NCAAMBB_FEATURE_ENGINEERING.md`) feeding March Madness/conference-tournament field seeding, same role NCAAFB's own `national-ranking` model plays for the CFP.
+
+### `GET /ncaambb/season`
+
+Recomputed **daily** (not weekly, like every other sport) -- NCAA MBB's much higher game volume (dozens of games most nights) means a week-old projection would be meaningfully stale much faster than for NFL/NCAAFB/NBA. Genuinely different shape again -- one bracket per conference tournament, plus the March Madness bracket, instead of one unified league bracket.
+
+```json
+{
+  "sport": "ncaambb",
+  "season": 2027,
+  "standings": [
+    {
+      "team_id": "150",
+      "conference": "ACC",
+      "wins": 24,
+      "losses": 6,
+      "current_rank": 8,
+      "projected_wins": 26.1,
+      "projected_losses": 6.9,
+      "conference_tournament_champion_probability": 0.31,
+      "ncaa_tournament_probability": 0.94,
+      "first_four_probability": 0.02,
+      "round_of_64_probability": 0.92,
+      "sweet_16_probability": 0.41,
+      "elite_eight_probability": 0.18,
+      "final_four_probability": 0.07,
+      "championship_game_probability": 0.03,
+      "national_champion_probability": 0.01,
+      "name": "Duke Blue Devils",
+      "abbreviation": "DUKE"
+    }
+  ],
+  "conference_brackets": [
+    { "conference": "ACC", "bracket": { "rounds": [ "..." ], "champion": null } }
+  ],
+  "march_madness_bracket": {
+    "rounds": [
+      { "round": "First Four", "matchups": [ "..." ] },
+      { "round": "Round of 64", "matchups": [ "..." ] },
+      { "round": "Round of 32", "matchups": [ "..." ] },
+      { "round": "Sweet 16", "matchups": [ "..." ] },
+      { "round": "Elite Eight", "matchups": [ "..." ] },
+      { "round": "Final Four", "matchups": [ "..." ] },
+      { "round": "Championship", "matchups": [ "..." ] }
+    ],
+    "champion": null
+  },
+  "generated_at": "2026-08-22T00:00:00Z"
+}
+```
+
+`conference_brackets` has one entry per conference with at least 2 tracked members, seeded by conference-only record + point differential (no real head-to-head/RPI tiebreakers, same honest simplification NCAAFB's own conference-champion picking accepts). Each conference bracket's champion becomes that conference's automatic March Madness bid -- the one place the two brackets connect, so an auto-bid updates from "the model's pick" to "the real winner" the moment that conference's tournament finishes. `march_madness_bracket` is the 68-team field (one auto-bid per conference, at-large teams filled by the national-ranking model) flattened into one bracket -- First Four winners splice into their Round-of-64 slots (the same skip-connector UI pattern as NBA's Play-In), then 4 S-curve-seeded 16-team regions feed a neutral-site Final Four and Championship. Both bracket types are real-vs-projected reconciled the same 3-state way as every other bracket in this project. `standings`/`conference_brackets`/`march_madness_bracket` all omit their probability/bracket data (rather than erroring) on a day the conference-membership cache hasn't been refreshed yet or no `national-ranking` model is promoted -- see `NCAAMBB_FEATURE_ENGINEERING.md`'s "Conference membership" section.
+
+### `GET /ncaambb/live-scores`
+
+Identical contract to `/nfl/live-scores` -- `player_stats` keys match NBA's (`points`/`rebounds`/etc.).
+
+### `GET /ncaambb/predictions/events/{event_id}` and `.../players/{entity_id}`
+
+Identical contract to NBA's own, including the `scoring`/`rebounding`/`assists` `leaders` shape. Player-prop `stat` values (`Terraform/dynamodb-sport-registry.tf`'s `ncaambb_player_prop_stats`) -- same 6 names as NBA: `points`, `rebounds`, `assists`, `steals`, `blocks`, `three_pointers_made`.
 
 ## Error responses
 

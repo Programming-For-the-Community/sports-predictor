@@ -263,4 +263,15 @@ resource "aws_api_gateway_documentation_version" "main" {
     aws_api_gateway_documentation_part.predict_player_stat_query_param,
     aws_api_gateway_documentation_part.cognito_authorizer,
   ]
+
+  # version is part of this resource's identity (ForceNew) -- bumping it
+  # replaces the resource. Default destroy-then-create order deletes the
+  # old version while api-gateway-nfl-predict.tf's aws_api_gateway_stage
+  # is still pointing at it in AWS, which AWS rejects
+  # (DeleteDocumentationVersion: "API Stages associated with it") --
+  # confirmed live 2026-08-22. create_before_destroy makes the new version
+  # exist (and the stage repoint to it) before the old one is ever deleted.
+  lifecycle {
+    create_before_destroy = true
+  }
 }

@@ -135,4 +135,20 @@ Drives both orchestrator state machines' Map states (`Terraform/sfn-ingest-orche
 
 The `SPORT#<sport>#...` prefix on every partition key means a query for "all NFL events" or "all NFL entities" is a single partition query, not a table scan — this matters once six sports share the same tables. Add a global secondary index on `event_date` (scoped within the sport prefix) once you need date-range queries like "this week's games," and an index on `entity_id` once the frontend needs "show me this team's full history" — don't add either speculatively before a feature actually needs it, since each GSI roughly doubles the write cost for that table.
 
+## S3 key conventions
+
+Every S3 prefix used by more than one sport follows `<sport>/<purpose>/...`, the same partitioning discipline the DynamoDB tables use, so a bucket serving all six sports never has one sport's keys collide with another's. Established prefixes, all under the model-artifacts or raw-data-lake bucket as noted:
+
+| Prefix | Bucket | Written by | Read by |
+|---|---|---|---|
+| `<sport>/training-data/*.parquet` | model artifacts | feature-engineering Fargate task | training Fargate tasks |
+| `<sport>/<model-name>/...` (versioned artifacts + model cards) | model artifacts | training Fargate tasks | `predict`/`predict-read` Lambdas |
+| `predictions-cache/<sport>/events/<event_key>[.json \| /players/<entity_id>/<stat>.json]` | model artifacts | `predict` (populate-on-miss) | `predict-read` (read-through cache) |
+| `season-projections/<sport>/latest.json` | model artifacts | `predict`'s scheduled season-projection run | `predict-read`'s `/{sport}/season` route. Deliberately **not** nested under `<sport>/` the same way trained models are — `list_models` treats every top-level segment under `<sport>/` as a model name, so nesting it there would surface a bogus "season-projection" model |
+| `ncaambb/rankings/{season}/{season_type}/{week}.json` | raw data lake | NCAA MBB backfill + daily ingest (one raw AP poll snapshot per key) | feature-engineering's poll-centric ranking-dataset builder (see `NCAAMBB_FEATURE_ENGINEERING.md`) |
+| `ncaafb/rankings/{season}.json` | raw data lake | NCAA FB backfill (one raw ranking snapshot per season) | NCAA FB's ranking data is otherwise attached directly to each event at ingest time (`home_current_rank`/`away_current_rank`), unlike NCAA MBB's poll-centric join -- this key is a backfill-time cache, not read by feature engineering the way NCAA MBB's per-poll keys are |
+| `<sport>/conference-membership/{season}.json` | raw data lake | `ncaambb-schedule-sync` (the one Lambda in this prefix's sport with internet egress) | `ncaambb-predict` (VPC-isolated, reads the cache instead of calling out itself) |
+
+The last row is the general shape for the S3-relay pattern described in `design/ARCHITECTURE.md`'s "Networking: no NAT Gateway, anywhere" section — a future sport needing something similar should follow the same `<sport>/<purpose>/...` prefix convention and grant the reading Lambda a scoped `s3:GetObject` statement on just that prefix, not bucket-wide access.
+
 `player_game_stats` needs its own `entity_id` GSI sooner rather than later, even under the same "don't add speculatively" rule — its primary key is event-first (`PK = SPORT#...#EVENT#...`), so "this player's last N games" (the core input to most player-prop features, e.g. rolling averages) isn't answerable from the base table at all, unlike team history which can at least be brute-forced from `events`.
