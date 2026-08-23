@@ -76,6 +76,115 @@ class TestXGBoostAdapterFeatureImportances:
         assert list(importances.keys()) == ["a", "b", "c"]
 
 
+class TestRunRandomizedSearchWithEarlyStopping:
+    """_run_randomized_search_with_early_stopping batches RandomizedSearchCV
+    instead of one big n_iter call -- these tests drive it directly via a
+    scripted sequence of mocked RandomizedSearchCV instances (one per
+    expected batch), rather than through a real adapter, so the batch/
+    patience/threshold logic itself is exercised in isolation."""
+
+    def _mock_search(self, best_score, best_params, scores=None):
+        search = MagicMock()
+        search.best_score_ = best_score
+        search.best_params_ = best_params
+        search.cv_results_ = {"mean_test_score": scores or [best_score], "params": [best_params]}
+        return search
+
+    def test_stops_after_patience_batches_of_no_improvement(self):
+        # max_iter=100, batch_size=10 (10% of 100) -> batch 1 improves to
+        # -1.0, batches 2-5 all repeat -1.0 (no improvement) -- with
+        # patience=4, the 4th consecutive stale batch (batch 5) should
+        # trigger the stop, leaving batches 6-10 never run.
+        searches = [self._mock_search(-1.0, {"x": 1})] + [self._mock_search(-1.0, {"x": 1}) for _ in range(9)]
+
+        with patch.object(model_types, "RandomizedSearchCV", side_effect=searches) as mock_search_cls:
+            result = model_types._run_randomized_search_with_early_stopping(
+                MagicMock(), {"x": [1]}, _df(), pd.Series([1.0, 2.0, 3.0, 4.0]),
+                "neg_root_mean_squared_error", MagicMock(), max_iter=100, random_state=0, n_jobs=1, verbose=0, label="test",
+            )
+
+        assert mock_search_cls.call_count == 1 + model_types._EARLY_STOP_PATIENCE_BATCHES
+        assert result.best_params_ == {"x": 1}
+        assert result.best_score_ == -1.0
+
+    def test_does_not_stop_while_still_improving(self):
+        # Every batch improves by a lot -- should run the full max_iter's
+        # worth of batches (10 batches of 10 for max_iter=100), never
+        # triggering the patience stop.
+        searches = [self._mock_search(-10.0 + i, {"x": i}) for i in range(10)]
+
+        with patch.object(model_types, "RandomizedSearchCV", side_effect=searches) as mock_search_cls:
+            result = model_types._run_randomized_search_with_early_stopping(
+                MagicMock(), {"x": [1]}, _df(), pd.Series([1.0, 2.0, 3.0, 4.0]),
+                "neg_root_mean_squared_error", MagicMock(), max_iter=100, random_state=0, n_jobs=1, verbose=0, label="test",
+            )
+
+        assert mock_search_cls.call_count == 10
+        assert result.best_params_ == {"x": 9}
+
+    def test_a_tiny_relative_improvement_does_not_reset_patience(self):
+        # -1.0 -> -0.9999 is a ~0.01% relative change, below the 0.05%
+        # threshold -- should NOT count as real improvement.
+        searches = [self._mock_search(-1.0, {"x": 1})] + [self._mock_search(-0.9999, {"x": 2}) for _ in range(9)]
+
+        with patch.object(model_types, "RandomizedSearchCV", side_effect=searches) as mock_search_cls:
+            result = model_types._run_randomized_search_with_early_stopping(
+                MagicMock(), {"x": [1]}, _df(), pd.Series([1.0, 2.0, 3.0, 4.0]),
+                "neg_root_mean_squared_error", MagicMock(), max_iter=100, random_state=0, n_jobs=1, verbose=0, label="test",
+            )
+
+        assert mock_search_cls.call_count == 1 + model_types._EARLY_STOP_PATIENCE_BATCHES
+        assert result.best_params_ == {"x": 1}  # the tiny "improvement" never won
+
+    def test_a_meaningful_relative_improvement_resets_patience(self):
+        # -1.0 -> -0.5 is a real (50%) relative improvement -- patience
+        # resets, so the search keeps going instead of stopping at batch 5.
+        searches = (
+            [self._mock_search(-1.0, {"x": 1})]
+            + [self._mock_search(-1.0, {"x": 1}) for _ in range(3)]  # 3 stale batches, not yet at patience=4
+            + [self._mock_search(-0.5, {"x": 2})]  # real improvement resets the counter
+            + [self._mock_search(-0.5, {"x": 2}) for _ in range(9)]
+        )
+
+        with patch.object(model_types, "RandomizedSearchCV", side_effect=searches):
+            result = model_types._run_randomized_search_with_early_stopping(
+                MagicMock(), {"x": [1]}, _df(), pd.Series([1.0, 2.0, 3.0, 4.0]),
+                "neg_root_mean_squared_error", MagicMock(), max_iter=200, random_state=0, n_jobs=1, verbose=0, label="test",
+            )
+
+        assert result.best_params_ == {"x": 2}
+
+    def test_each_batch_uses_a_distinct_random_state(self):
+        searches = [self._mock_search(-1.0, {"x": 1}) for _ in range(5)]
+
+        with patch.object(model_types, "RandomizedSearchCV", side_effect=searches) as mock_search_cls:
+            model_types._run_randomized_search_with_early_stopping(
+                MagicMock(), {"x": [1]}, _df(), pd.Series([1.0, 2.0, 3.0, 4.0]),
+                "neg_root_mean_squared_error", MagicMock(), max_iter=100, random_state=42, n_jobs=1, verbose=0, label="test",
+            )
+
+        random_states = [call.kwargs["random_state"] for call in mock_search_cls.call_args_list]
+        assert random_states == [42, 43, 44, 45, 46]
+
+    def test_cv_results_are_merged_across_every_batch_that_ran(self):
+        searches = [
+            self._mock_search(-1.0, {"x": 1}, scores=[-2.0, -1.0]),
+            self._mock_search(-1.0, {"x": 1}, scores=[-1.5, -1.0]),
+        ] + [self._mock_search(-1.0, {"x": 1}, scores=[-1.0]) for _ in range(8)]
+
+        with patch.object(model_types, "RandomizedSearchCV", side_effect=searches):
+            result = model_types._run_randomized_search_with_early_stopping(
+                MagicMock(), {"x": [1]}, _df(), pd.Series([1.0, 2.0, 3.0, 4.0]),
+                "neg_root_mean_squared_error", MagicMock(), max_iter=100, random_state=0, n_jobs=1, verbose=0, label="test",
+            )
+
+        # Batch 1 (2 scores, establishes the best) + batch 2 (2 scores,
+        # 1st stale batch) + _EARLY_STOP_PATIENCE_BATCHES - 1 further
+        # single-score stale batches before the patience threshold stops it.
+        assert result.cv_results_["mean_test_score"][:4] == [-2.0, -1.0, -1.5, -1.0]
+        assert len(result.cv_results_["mean_test_score"]) == 4 + (model_types._EARLY_STOP_PATIENCE_BATCHES - 1)
+
+
 class TestLogSearchConvergence:
     def _search(self, scores):
         search = MagicMock()
@@ -109,6 +218,8 @@ class TestXGBoostClassifierAdapter:
         adapter = model_types.XGBoostClassifierAdapter()
         mock_search = MagicMock()
         mock_search.best_params_ = {"max_depth": 3}
+        mock_search.best_score_ = -0.5
+        mock_search.cv_results_ = {"mean_test_score": [-0.5], "params": [{"max_depth": 3}]}
         mock_fitted = MagicMock()
         mock_fitted.get_booster.return_value = "the-booster"
 
@@ -130,6 +241,8 @@ class TestXGBoostRegressorAdapter:
         adapter = model_types.XGBoostRegressorAdapter()
         mock_search = MagicMock()
         mock_search.best_params_ = {"max_depth": 4}
+        mock_search.best_score_ = -1.5
+        mock_search.cv_results_ = {"mean_test_score": [-1.5], "params": [{"max_depth": 4}]}
         mock_fitted = MagicMock()
         mock_fitted.get_booster.return_value = "the-booster"
 
@@ -273,6 +386,8 @@ class TestRandomForestAdapters:
         adapter = model_types.RandomForestClassifierAdapter()
         mock_search = MagicMock()
         mock_search.best_params_ = {"model__n_estimators": 200}
+        mock_search.best_score_ = -0.5
+        mock_search.cv_results_ = {"mean_test_score": [-0.5], "params": [{"model__n_estimators": 200}]}
         mock_pipeline = self._mock_pipeline()
 
         with patch.object(model_types, "RandomizedSearchCV", return_value=mock_search) as mock_search_cls, \
@@ -287,6 +402,8 @@ class TestRandomForestAdapters:
         adapter = model_types.RandomForestRegressorAdapter()
         mock_search = MagicMock()
         mock_search.best_params_ = {"model__n_estimators": 300}
+        mock_search.best_score_ = -1.5
+        mock_search.cv_results_ = {"mean_test_score": [-1.5], "params": [{"model__n_estimators": 300}]}
         mock_pipeline = self._mock_pipeline()
 
         with patch.object(model_types, "RandomizedSearchCV", return_value=mock_search) as mock_search_cls, \
@@ -348,6 +465,8 @@ class TestMLPAdapters:
         adapter = model_types.MLPClassifierAdapter()
         mock_search = MagicMock()
         mock_search.best_params_ = {"model__alpha": 0.01}
+        mock_search.best_score_ = -0.5
+        mock_search.cv_results_ = {"mean_test_score": [-0.5], "params": [{"model__alpha": 0.01}]}
         mock_pipeline = self._mock_pipeline()
 
         with patch.object(model_types, "RandomizedSearchCV", return_value=mock_search) as mock_search_cls, \
@@ -397,6 +516,8 @@ class TestLightGBMAdapters:
         adapter = model_types.LightGBMClassifierAdapter()
         mock_search = MagicMock()
         mock_search.best_params_ = {"num_leaves": 31}
+        mock_search.best_score_ = -0.5
+        mock_search.cv_results_ = {"mean_test_score": [-0.5], "params": [{"num_leaves": 31}]}
         mock_fitted = MagicMock()
         mock_classifier_cls = MagicMock(return_value=mock_fitted)
         mock_regressor_cls = MagicMock()
@@ -416,6 +537,8 @@ class TestLightGBMAdapters:
         adapter = model_types.LightGBMRegressorAdapter()
         mock_search = MagicMock()
         mock_search.best_params_ = {"num_leaves": 63}
+        mock_search.best_score_ = -1.5
+        mock_search.cv_results_ = {"mean_test_score": [-1.5], "params": [{"num_leaves": 63}]}
         mock_fitted = MagicMock()
         mock_classifier_cls = MagicMock()
         mock_regressor_cls = MagicMock(return_value=mock_fitted)

@@ -8,11 +8,10 @@ day-based event grouping are identical for both sports); see that
 module's own docstring for the reasoning this one inherits unchanged.
 
 get_season_projection reads the standings + bracket projection written by
-the scheduled compute path -- not yet populated (season_simulation.py is
-step 8, not built here in step 6), so this always 503s for now. Included
-anyway rather than deferred, since the function itself doesn't depend on
-season_simulation.py existing and adding the route now avoids a second
-Terraform/predict-read wiring pass later.
+Terraform/scheduler-ncaambb-season-projection.tf's daily scheduled
+compute path (aws-lambdas/ncaambb/predict/season_projection.py, step 8).
+Still returns None (mapped to a 503 by predict-read/handler.py) until
+that schedule's first real invoke actually writes the S3 object.
 
 Callers own their own storage/s3/predictions_table objects and Lambda-
 lifecycle concerns.

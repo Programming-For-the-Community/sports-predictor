@@ -1,0 +1,41 @@
+# Tests and deploys the NCAA MBB live-scores Lambda -- GET
+# /ncaambb/live-scores plus the EventBridge-triggered cache refresh.
+#
+# Function name is supplied by the caller from a Terraform output, with a
+# default so workflow_dispatch (manual, standalone run) still works
+# without needing that wiring.
+
+name: NCAA MBB Live Scores Deploy
+
+on:
+  workflow_dispatch:
+  workflow_call:
+    inputs:
+      function_name:
+        description: 'NCAA MBB live-scores Lambda function name (from Terraform output ncaambb_live_scores_function_name)'
+        required: false
+        type: string
+        default: 'sports-predictor-ncaambb-live-scores'
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  test:
+    name: Run ncaambb-live-scores tests
+    uses: ./.github/workflows/run_python_tests.yml
+    with:
+      test_path: 'Source/tests/aws-lambdas/ncaambb/test_live_scores.py Source/tests/aws-lambdas/ncaambb/test_live_scores_handler.py'
+      requirements_files: 'Source/aws-lambdas/ncaambb/live-scores/requirements.txt'
+
+  deploy:
+    name: Deploy ncaambb-live-scores Lambda
+    needs: test
+    uses: ./.github/workflows/python_lambda_build.yml
+    secrets: inherit
+    with:
+      function_name: ${{ inputs.function_name || 'sports-predictor-ncaambb-live-scores' }}
+      handler_dir: 'Source/aws-lambdas/ncaambb/live-scores'
+      library_path: 'Source/library'
+      extra_source_files: 'Source/aws-lambdas/ncaambb/live-scores/live_scores.py'

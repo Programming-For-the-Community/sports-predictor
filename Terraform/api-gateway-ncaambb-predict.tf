@@ -6,10 +6,7 @@
 #   GET /ncaambb/season                                              -> ncaambb_predict_read
 #   GET /ncaambb/predictions/events/{event_id}                       -> ncaambb_predict_read (cache), async-computed by ncaambb_predict
 #   GET /ncaambb/predictions/events/{event_id}/players/{entity_id}   -> ncaambb_predict_read (cache), async-computed by ncaambb_predict
-#
-# No live-scores resource yet -- that's step 7, not built here. The CORS
-# locals map below grows a live_scores entry then, same as
-# api-gateway-nba-predict.tf's own.
+#   GET /ncaambb/live-scores                                         -> ncaambb_live_scores (api-gateway-ncaambb-live-scores.tf)
 
 resource "aws_api_gateway_resource" "ncaambb" {
   rest_api_id = aws_api_gateway_rest_api.main.id
@@ -172,7 +169,7 @@ locals {
     season         = aws_api_gateway_resource.ncaambb_season.id
     predict_event  = aws_api_gateway_resource.ncaambb_predictions_event.id
     predict_player = aws_api_gateway_resource.ncaambb_predictions_event_player.id
-    # live-scores resource joins here in step 7, once it exists.
+    live_scores    = aws_api_gateway_resource.ncaambb_live_scores.id
   }
 }
 

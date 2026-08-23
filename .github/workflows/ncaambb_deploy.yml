@@ -6,7 +6,7 @@
 # Onboarding in progress (see project-ncaambb-onboarding memory) -- this
 # is a real, working, incrementally-growing pipeline, not a placeholder.
 # ai_hosting/deploy_predict_lambda/predict_read_deploy joined in step 6
-# (inference); live_scores_deploy joins in step 7 once that Lambda exists.
+# (inference); live_scores_deploy joined in step 7.
 #
 # aws_lambda_function.ncaambb_predict is a container-image Lambda (same
 # reasoning as nba_predict -- CreateFunction validates its image tag
@@ -129,3 +129,16 @@ jobs:
       ingest_function_name: ${{ needs.infra.outputs.ncaambb_ingest_function_name }}
       normalize_function_name: ${{ needs.infra.outputs.ncaambb_normalize_function_name }}
       schedule_sync_function_name: ${{ needs.infra.outputs.ncaambb_schedule_sync_function_name }}
+
+  # ncaambb-live-scores -- GET /ncaambb/live-scores + the EventBridge-
+  # triggered cache refresh (see Terraform/lambda-ncaambb-live-scores.tf).
+  live_scores_deploy:
+    name: NCAA MBB live-scores (test + deploy)
+    needs: [approval, infra]
+    if: |
+      always() &&
+      (needs.approval.result == 'success' || needs.approval.result == 'skipped')
+    uses: ./.github/workflows/ncaambb_live_scores_deploy.yml
+    secrets: inherit
+    with:
+      function_name: ${{ needs.infra.outputs.ncaambb_live_scores_function_name }}

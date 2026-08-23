@@ -24,6 +24,7 @@ registry for both classifier and regressor model cards.
 """
 import io
 import logging
+import types
 from typing import Any, Protocol
 
 import joblib
@@ -34,13 +35,117 @@ from sklearn.ensemble import RandomForestClassifier, RandomForestRegressor
 from sklearn.impute import SimpleImputer
 from sklearn.linear_model import ElasticNet, LogisticRegression
 from sklearn.model_selection import GridSearchCV, RandomizedSearchCV, TimeSeriesSplit
+from sklearn.neural_network import MLPClassifier, MLPRegressor
+from sklearn.pipeline import Pipeline
+from sklearn.preprocessing import StandardScaler
 
 logger = logging.getLogger("model-training")
 
+# Every RandomizedSearchCV-based adapter below batches its search in
+# roughly this fraction of its own max_iter -- the same 10% granularity
+# _log_search_convergence's own first checkpoint already uses, so
+# "converged by the first checkpoint" (the common case, confirmed across
+# a full day of real NCAA MBB training runs -- see project-... memory)
+# also means "stopped after the first batch" here.
+_EARLY_STOP_BATCH_FRACTION = 0.1
+_EARLY_STOP_MIN_BATCH_SIZE = 5
 
-def _log_search_convergence(label: str, search: RandomizedSearchCV) -> None:
-    """Logs the best score RandomizedSearchCV had found so far at several
-    checkpoints through its trial order, from search.cv_results_.
+# How many consecutive batches may pass with no meaningful improvement
+# before the search gives up early. Deliberately generous, not tuned to
+# the common case: one real run that day (an xgboost_classifier win-
+# probability target) found a further improvement only in its very last
+# batch, after well over 100 iterations with no improvement -- see
+# _run_randomized_search_with_early_stopping's own docstring for the
+# full reasoning. A smaller patience would save more compute but risks
+# repeating exactly that miss.
+_EARLY_STOP_PATIENCE_BATCHES = 4
+
+# Relative, not absolute -- scoring scale varies wildly by target
+# (log-loss scores sit around -0.5, RMSE scores for some score/prop
+# targets sit around -10 to -20), so a single fixed absolute threshold
+# would be meaningless for one scale or the other. 0.05% mirrors the
+# smallest genuine improvement seen in a real run that day (a log-loss
+# delta from -0.51512 to -0.51486, a ~0.05% relative change) -- small
+# enough to still count that as real, not just floating-point/CV noise.
+_EARLY_STOP_MIN_RELATIVE_IMPROVEMENT = 0.0005
+
+
+def _run_randomized_search_with_early_stopping(
+    estimator, param_distributions: dict, X: pd.DataFrame, y: pd.Series,
+    scoring: str, cv, max_iter: int, random_state: int, n_jobs: int, verbose: int, label: str,
+) -> types.SimpleNamespace:
+    """Runs RandomizedSearchCV in batches of roughly _EARLY_STOP_BATCH_
+    FRACTION * max_iter iterations, instead of one n_iter=max_iter call,
+    stopping once _EARLY_STOP_PATIENCE_BATCHES consecutive batches fail
+    to beat the best score seen so far by more than
+    _EARLY_STOP_MIN_RELATIVE_IMPROVEMENT.
+
+    scikit-learn has no native "stop once converged" mode for
+    RandomizedSearchCV -- unlike epoch-based training, each candidate
+    draw is an independent random sample, not a step along a
+    monotonically improving trajectory, so "no improvement in the last N
+    draws" is a real but IMPERFECT signal: the next random draw is
+    exactly as likely to be the lucky one as the first was, regardless of
+    how many unlucky draws came before it. Confirmed both sides of that
+    tradeoff directly from a full day of real NCAA MBB training runs (see
+    project-... memory): every regressor target plateaued within the
+    first 1-2 batches (10-20% of its own budget), but one classifier
+    target found a further (small, ~0.05% relative) improvement only in
+    its very last batch -- exactly the failure mode too-small a patience
+    would hit. The patience/relative-improvement thresholds above are set
+    to still catch that case, not just the common one.
+
+    Each batch uses a different random_state (offset by its own batch
+    index) so batches don't repeat the same draw sequence. Returns a
+    RandomizedSearchCV-shaped object (best_params_/best_score_/
+    cv_results_) so every existing call site (the final refit,
+    _log_search_convergence) works unchanged."""
+    batch_size = max(_EARLY_STOP_MIN_BATCH_SIZE, round(max_iter * _EARLY_STOP_BATCH_FRACTION))
+    best_score = None
+    best_params: dict | None = None
+    all_scores: list[float] = []
+    all_params: list[dict] = []
+    stale_batches = 0
+    iterations_run = 0
+
+    for batch_index, start in enumerate(range(0, max_iter, batch_size)):
+        n_iter_this_batch = min(batch_size, max_iter - start)
+        search = RandomizedSearchCV(
+            estimator, param_distributions=param_distributions, n_iter=n_iter_this_batch,
+            scoring=scoring, cv=cv, random_state=random_state + batch_index,
+            verbose=verbose, n_jobs=n_jobs,
+        )
+        search.fit(X, y)
+        iterations_run += n_iter_this_batch
+        all_scores.extend(search.cv_results_["mean_test_score"])
+        all_params.extend(search.cv_results_["params"])
+
+        threshold = best_score + abs(best_score) * _EARLY_STOP_MIN_RELATIVE_IMPROVEMENT if best_score is not None else float("-inf")
+        if search.best_score_ > threshold:
+            best_score = search.best_score_
+            best_params = search.best_params_
+            stale_batches = 0
+        else:
+            stale_batches += 1
+
+        if stale_batches >= _EARLY_STOP_PATIENCE_BATCHES:
+            logger.info(
+                "%s search stopped early: %d/%d iterations run, no meaningful improvement over the last %d batches",
+                label, iterations_run, max_iter, stale_batches,
+            )
+            break
+
+    return types.SimpleNamespace(
+        best_params_=best_params, best_score_=best_score,
+        cv_results_={"mean_test_score": all_scores, "params": all_params},
+    )
+
+
+def _log_search_convergence(label: str, search) -> None:
+    """Logs the best score the search had found so far at several
+    checkpoints through its trial order, from search.cv_results_. Works
+    on both a real RandomizedSearchCV and
+    _run_randomized_search_with_early_stopping's own return shape.
     Assumes a "neg_*" scoring metric (neg_log_loss/
     neg_root_mean_squared_error), so higher (less negative) is always
     better.
@@ -55,9 +160,6 @@ def _log_search_convergence(label: str, search: RandomizedSearchCV) -> None:
         logger.info("%s search convergence (best score so far, at iteration/total): %s", label, summary)
     except Exception:
         logger.debug("Couldn't summarize search convergence for %s", label, exc_info=True)
-from sklearn.neural_network import MLPClassifier, MLPRegressor
-from sklearn.pipeline import Pipeline
-from sklearn.preprocessing import StandardScaler
 
 
 class ModelAdapter(Protocol):
@@ -137,17 +239,18 @@ class XGBoostClassifierAdapter(XGBoostAdapter):
         super().__init__(task="classification")
 
     def tune_and_fit(self, X_train: pd.DataFrame, y_train: pd.Series) -> tuple[xgb.Booster, dict]:
-        search = RandomizedSearchCV(
+        search = _run_randomized_search_with_early_stopping(
             xgb.XGBClassifier(objective="binary:logistic", eval_metric="logloss", n_jobs=1),
             param_distributions=_XGB_PARAM_DISTRIBUTIONS,
-            n_iter=_XGB_SEARCH_ITERATIONS,
+            X=X_train, y=y_train,
             scoring="neg_log_loss",
             cv=TimeSeriesSplit(n_splits=_XGB_CV_SPLITS),
+            max_iter=_XGB_SEARCH_ITERATIONS,
             random_state=_XGB_RANDOM_STATE,
             verbose=10,
             n_jobs=-1,
+            label="xgboost_classifier",
         )
-        search.fit(X_train, y_train)
         _log_search_convergence("xgboost_classifier", search)
         model = xgb.XGBClassifier(objective="binary:logistic", eval_metric="logloss", **search.best_params_)
         model.fit(X_train, y_train)
@@ -159,17 +262,18 @@ class XGBoostRegressorAdapter(XGBoostAdapter):
         super().__init__(task="regression")
 
     def tune_and_fit(self, X_train: pd.DataFrame, y_train: pd.Series) -> tuple[xgb.Booster, dict]:
-        search = RandomizedSearchCV(
+        search = _run_randomized_search_with_early_stopping(
             xgb.XGBRegressor(objective="reg:squarederror", n_jobs=1),
             param_distributions=_XGB_PARAM_DISTRIBUTIONS,
-            n_iter=_XGB_SEARCH_ITERATIONS,
+            X=X_train, y=y_train,
             scoring="neg_root_mean_squared_error",
             cv=TimeSeriesSplit(n_splits=_XGB_CV_SPLITS),
+            max_iter=_XGB_SEARCH_ITERATIONS,
             random_state=_XGB_RANDOM_STATE,
             verbose=10,
             n_jobs=-1,
+            label="xgboost_regressor",
         )
-        search.fit(X_train, y_train)
         _log_search_convergence("xgboost_regressor", search)
         model = xgb.XGBRegressor(objective="reg:squarederror", **search.best_params_)
         model.fit(X_train, y_train)
@@ -324,7 +428,15 @@ _RF_PARAM_DISTRIBUTIONS = {
     "model__max_features": ["sqrt", "log2"],
     "model__max_samples": [0.4, 0.5, 0.6, 0.7, 0.85],
 }
-_RF_SEARCH_ITERATIONS = 70
+# Doubled from 70, 2026-08-22 -- now that
+# _run_randomized_search_with_early_stopping exists, a higher ceiling is
+# nearly free for the many targets that already converge well before 70
+# (they still stop just as early), while giving real headroom to the
+# ones that don't: a live run that day (NCAA MBB ranking-model) was still
+# finding improvements as late as iteration 52/70 (74% of the old
+# budget) before flattening out, and this space (1,680 combinations) is
+# only ~4% sampled even at the new ceiling.
+_RF_SEARCH_ITERATIONS = 140
 _RF_CV_SPLITS = 8
 _RF_RANDOM_STATE = 42
 # One worker per CV fold, not n_jobs=-1 (every vCPU on the task, 16 by
@@ -353,17 +465,18 @@ class _RandomForestAdapterBase(_JoblibSerializedAdapter):
         ])
 
     def tune_and_fit(self, X_train: pd.DataFrame, y_train: pd.Series) -> tuple[Pipeline, dict]:
-        search = RandomizedSearchCV(
+        search = _run_randomized_search_with_early_stopping(
             self._build_pipeline(),
             param_distributions=_RF_PARAM_DISTRIBUTIONS,
-            n_iter=_RF_SEARCH_ITERATIONS,
+            X=X_train, y=y_train,
             scoring=self._scoring,
             cv=TimeSeriesSplit(n_splits=_RF_CV_SPLITS),
+            max_iter=_RF_SEARCH_ITERATIONS,
             random_state=_RF_RANDOM_STATE,
             verbose=10,
             n_jobs=_RF_SEARCH_N_JOBS,
+            label=self.algorithm,
         )
-        search.fit(X_train, y_train)
         _log_search_convergence(self.algorithm, search)
         best_params = {key.removeprefix("model__"): value for key, value in search.best_params_.items()}
         model = self._build_pipeline().set_params(**{f"model__{k}": v for k, v in best_params.items()})
@@ -424,17 +537,18 @@ class _MLPAdapterBase(_JoblibSerializedAdapter):
         ])
 
     def tune_and_fit(self, X_train: pd.DataFrame, y_train: pd.Series) -> tuple[Pipeline, dict]:
-        search = RandomizedSearchCV(
+        search = _run_randomized_search_with_early_stopping(
             self._build_pipeline(),
             param_distributions=_MLP_PARAM_DISTRIBUTIONS,
-            n_iter=_MLP_SEARCH_ITERATIONS,
+            X=X_train, y=y_train,
             scoring=self._scoring,
             cv=TimeSeriesSplit(n_splits=_MLP_CV_SPLITS),
+            max_iter=_MLP_SEARCH_ITERATIONS,
             random_state=_MLP_RANDOM_STATE,
             verbose=10,
             n_jobs=-1,
+            label=self.algorithm,
         )
-        search.fit(X_train, y_train)
         _log_search_convergence(self.algorithm, search)
         best_params = {key.removeprefix("model__"): value for key, value in search.best_params_.items()}
         model = self._build_pipeline().set_params(**{f"model__{k}": v for k, v in best_params.items()})
@@ -483,7 +597,15 @@ _LGBM_PARAM_DISTRIBUTIONS = {
     "subsample": [0.5, 0.6, 0.7, 0.8, 0.9, 1.0],
     "colsample_bytree": [0.5, 0.6, 0.7, 0.8, 0.9, 1.0],
 }
-_LGBM_SEARCH_ITERATIONS = 200
+# Doubled from 200, 2026-08-22 -- same reasoning as _RF_SEARCH_
+# ITERATIONS just above: early stopping makes a higher ceiling nearly
+# free for the many targets that already converge early. This space is
+# especially large (207,360 combinations -- even the new 400-iteration
+# ceiling covers under 0.2% of it), and a live run that day (NCAA MBB
+# score-model) only found its best score at the very last checkpoint of
+# the old 200-iteration budget, with another run still improving at the
+# 100/200 (50%) checkpoint.
+_LGBM_SEARCH_ITERATIONS = 400
 _LGBM_CV_SPLITS = 8
 _LGBM_RANDOM_STATE = 42
 
@@ -494,17 +616,18 @@ class LightGBMClassifierAdapter(_JoblibSerializedAdapter):
 
     def tune_and_fit(self, X_train: pd.DataFrame, y_train: pd.Series) -> tuple[Any, dict]:
         LGBMClassifier, _ = _lgbm_estimator_classes()
-        search = RandomizedSearchCV(
+        search = _run_randomized_search_with_early_stopping(
             LGBMClassifier(objective="binary", n_jobs=1, verbosity=-1, random_state=_LGBM_RANDOM_STATE),
             param_distributions=_LGBM_PARAM_DISTRIBUTIONS,
-            n_iter=_LGBM_SEARCH_ITERATIONS,
+            X=X_train, y=y_train,
             scoring="neg_log_loss",
             cv=TimeSeriesSplit(n_splits=_LGBM_CV_SPLITS),
+            max_iter=_LGBM_SEARCH_ITERATIONS,
             random_state=_LGBM_RANDOM_STATE,
             verbose=10,
             n_jobs=-1,
+            label="lightgbm_classifier",
         )
-        search.fit(X_train, y_train)
         _log_search_convergence("lightgbm_classifier", search)
         model = LGBMClassifier(objective="binary", verbosity=-1, random_state=_LGBM_RANDOM_STATE, **search.best_params_)
         model.fit(X_train, y_train)
@@ -527,17 +650,18 @@ class LightGBMRegressorAdapter(_JoblibSerializedAdapter):
 
     def tune_and_fit(self, X_train: pd.DataFrame, y_train: pd.Series) -> tuple[Any, dict]:
         _, LGBMRegressor = _lgbm_estimator_classes()
-        search = RandomizedSearchCV(
+        search = _run_randomized_search_with_early_stopping(
             LGBMRegressor(objective="regression", n_jobs=1, verbosity=-1, random_state=_LGBM_RANDOM_STATE),
             param_distributions=_LGBM_PARAM_DISTRIBUTIONS,
-            n_iter=_LGBM_SEARCH_ITERATIONS,
+            X=X_train, y=y_train,
             scoring="neg_root_mean_squared_error",
             cv=TimeSeriesSplit(n_splits=_LGBM_CV_SPLITS),
+            max_iter=_LGBM_SEARCH_ITERATIONS,
             random_state=_LGBM_RANDOM_STATE,
             verbose=10,
             n_jobs=-1,
+            label="lightgbm_regressor",
         )
-        search.fit(X_train, y_train)
         _log_search_convergence("lightgbm_regressor", search)
         model = LGBMRegressor(objective="regression", verbosity=-1, random_state=_LGBM_RANDOM_STATE, **search.best_params_)
         model.fit(X_train, y_train)

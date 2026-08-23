@@ -33,10 +33,19 @@ Confirmed live, 2026-08-20 (see project-ncaambb-onboarding memory):
   that ref's path instead of following it, and re-requested against this
   client's own public host.
 """
+import logging
 import os
 import re
+from concurrent.futures import ThreadPoolExecutor
 
 from library.http.client import HttpClient, REQUEST_TIMEOUT_SECONDS
+
+logger = logging.getLogger(__name__)
+
+# One call per conference (31 as of the 2026 season, see
+# get_conference_group_refs) to fetch its own teams ref -- small enough
+# that ingest's own _INGEST_MAX_WORKERS=8 convention is plenty here too.
+_CONFERENCE_MEMBERSHIP_MAX_WORKERS = 8
 
 DEFAULT_ESPN_CORE_API_ROOT_URL = "https://sports.core.api.espn.com/v2/sports/basketball/leagues/mens-college-basketball"
 
@@ -98,6 +107,18 @@ def ap_poll_to_rank_by_team(poll: dict) -> dict[str, int]:
     return result
 
 
+# NCAA Division I's own group id, one level below the (unused here)
+# all-divisions root -- confirmed live, 2026-08-22, the same id
+# NCAAMBBClient.get_scoreboard_for_date's own groups=50 param already
+# relies on. Stable across seasons (it's ESPN's id for the division
+# itself, not for any one year's membership of it).
+DIVISION_I_GROUP_ID = "50"
+
+
+def _refs(listing: dict) -> list[str]:
+    return [item["$ref"] for item in listing.get("items", [])]
+
+
 class NCAAMBBCoreClient(HttpClient):
     def __init__(self, min_interval_seconds: float = 0.3):
         super().__init__(base_url=_espn_core_root_url(), min_interval_seconds=min_interval_seconds)
@@ -114,3 +135,96 @@ class NCAAMBBCoreClient(HttpClient):
             return None
         response.raise_for_status()
         return response.json()
+
+    def get_conference_group_refs(self, season: int, season_type: int = 2) -> list[str]:
+        """$ref URLs for every group directly under Division I this season
+        -- confirmed live, 2026-08-22: 31 items for season 2026/type 2,
+        each one a real conference (isConference=true; see
+        get_group_detail). season_type=2 (regular season) is the default
+        since conference membership doesn't change mid-season the way a
+        team's own postseason `groups` pointer sometimes reads (a Duke
+        team lookup returned a types/3 ref despite this being fetched
+        pre-tournament) -- type doesn't affect which conferences exist,
+        only which snapshot of the hierarchy answers the query, and 2 is
+        always in season.
+        No caller should hardcode DIVISION_I_GROUP_ID's children count or
+        identities -- real D1 realignment changes both across seasons,
+        which is the whole reason this is resolved live instead of via a
+        static table (see project-ncaambb-onboarding memory)."""
+        url = f"{self.base_url}/seasons/{season}/types/{season_type}/groups/{DIVISION_I_GROUP_ID}/children"
+        response = self._session.get(url, params={"lang": "en", "region": "us", "limit": 200}, timeout=REQUEST_TIMEOUT_SECONDS)
+        response.raise_for_status()
+        return _refs(response.json())
+
+    def get_group_detail(self, group_ref: str) -> dict:
+        """Resolves one conference group ref (from get_conference_group_refs)
+        to its name/shortName/isConference and its own `teams` ref -- the
+        raw dict is returned as-is rather than picking fields, callers
+        (resolve_conference_membership) know what they need."""
+        self._rate_limiter.wait()
+        response = self._session.get(group_ref, params={"lang": "en", "region": "us"}, timeout=REQUEST_TIMEOUT_SECONDS)
+        response.raise_for_status()
+        return response.json()
+
+    def get_group_team_refs(self, teams_ref: str) -> list[str]:
+        """$ref URLs for every team in one conference this season, from a
+        group detail's own `teams.$ref` (get_group_detail). Confirmed
+        live, 2026-08-22: the ACC's own ref returns exactly its 18 current
+        members (post-realignment), team ids parsed by the same trailing-
+        id convention as _id_from_ref."""
+        self._rate_limiter.wait()
+        response = self._session.get(teams_ref, params={"lang": "en", "region": "us", "limit": 50}, timeout=REQUEST_TIMEOUT_SECONDS)
+        response.raise_for_status()
+        return _refs(response.json())
+
+
+def resolve_conference_membership(client: NCAAMBBCoreClient, season: int) -> dict[str, str]:
+    """{team_id: conference_shortName} for every current D1 conference
+    member this season -- derived live from ESPN's own group hierarchy
+    (get_conference_group_refs -> get_group_detail -> get_group_team_refs),
+    NOT a static table. Real D1 realignment (conferences gaining/losing
+    members, or folding entirely) is picked up automatically the next time
+    this runs, same spirit as NCAAFB's own home_conference/away_conference
+    fields -- see project-ncaambb-onboarding memory for why a static table
+    (NBA's own pattern) was rejected here.
+
+    A team belonging to no conference this season (shouldn't happen for a
+    real D1 member, but ESPN data has surprised this project before) is
+    simply absent from the result rather than raising -- callers already
+    treat "no known conference" as exclusion (see NCAAFB's own
+    remaining_games filter in season_projection.py's
+    _season_standings_inputs).
+
+    One conference's fetch failing (a transient ESPN hiccup) logs and
+    skips that conference rather than failing the whole resolution --
+    partial membership data for one run is a better failure mode than
+    losing every conference because of one bad response."""
+    conference_refs = client.get_conference_group_refs(season)
+
+    def _members(conference_ref: str) -> tuple[str, list[str]] | None:
+        try:
+            detail = client.get_group_detail(conference_ref)
+            if not detail.get("isConference"):
+                return None
+            name = detail.get("shortName") or detail.get("name")
+            teams_ref = detail.get("teams", {}).get("$ref")
+            if name is None or teams_ref is None:
+                return None
+            team_refs = client.get_group_team_refs(teams_ref)
+            team_ids = [team_id for team_id in (_id_from_ref(ref) for ref in team_refs) if team_id is not None]
+            return name, team_ids
+        except Exception:
+            logger.exception("Failed resolving conference membership for group %s -- skipping", conference_ref)
+            return None
+
+    with ThreadPoolExecutor(max_workers=_CONFERENCE_MEMBERSHIP_MAX_WORKERS) as executor:
+        results = list(executor.map(_members, conference_refs))
+
+    team_conference: dict[str, str] = {}
+    for result in results:
+        if result is None:
+            continue
+        name, team_ids = result
+        for team_id in team_ids:
+            team_conference[team_id] = name
+    return team_conference

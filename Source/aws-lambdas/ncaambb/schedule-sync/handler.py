@@ -66,6 +66,28 @@ ingest's own "yesterday" fetch always writes that day's real
 scoreboard/box score unconditionally, regardless of what schedule-sync
 already wrote for it -- the refresh window just makes that correction
 happen days/weeks earlier, before the game, not only after.
+
+CONFERENCE MEMBERSHIP: also resolves and caches ESPN's live conference-
+group hierarchy (library.http.ncaambb_core.resolve_conference_membership)
+to ncaambb/conference-membership/{season}.json every run. This lives here
+-- not in predict/season_projection.py, which actually consumes it --
+because predict/'s own Lambda is VPC-attached with no route to the public
+internet at all (no NAT Gateway, see docs/ARCHITECTURE.md; its security
+group only opens 443 to the S3/DynamoDB VPC Gateway Endpoints' own prefix
+lists), while this Lambda is NOT VPC-attached and already has ordinary
+internet egress -- same reasoning ingest/handler.py's own ESPN calls
+already rely on. season_projection.py reads this cached object via
+FeatureStorage's underlying S3 read access (scoped to this one prefix, see
+iam-lambda-inference.tf) instead of calling ESPN itself.
+
+The season number used for the cache key is a simple calendar heuristic
+(August or later -> next calendar year, matching ESPN's own "the season
+is labeled by the year its second half falls in" convention), not
+authoritative -- season_projection.py cross-checks against the real season
+number on actual ingested events and simply treats a season-number
+mismatch (or a missing cache object) as a transient miss, self-correcting
+on the next scheduled run, the same resilience story every other
+eventually-consistent piece of this pipeline already has.
 """
 import json
 import logging
@@ -76,6 +98,7 @@ import boto3
 from botocore.exceptions import ClientError
 
 from library.http.ncaambb import NCAAMBBClient
+from library.http.ncaambb_core import NCAAMBBCoreClient, resolve_conference_membership
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s", force=True)  # AWS Lambda pre-attaches a root handler, so basicConfig() is otherwise a silent no-op
 logger = logging.getLogger("ncaambb-schedule-sync")
@@ -112,9 +135,32 @@ def _put_json(key: str, payload: dict) -> None:
     _s3.put_object(Bucket=RAW_BUCKET, Key=key, Body=json.dumps(payload).encode("utf-8"), ContentType="application/json")
 
 
+def _current_ncaambb_season(today: date) -> int:
+    """Calendar heuristic, not authoritative -- see this module's own
+    CONFERENCE MEMBERSHIP docstring section."""
+    return today.year + 1 if today.month >= 8 else today.year
+
+
+def _sync_conference_membership(season: int) -> None:
+    core_client = NCAAMBBCoreClient()
+    team_conference = resolve_conference_membership(core_client, season)
+    _put_json(f"ncaambb/conference-membership/{season}.json", {"season": season, "team_conference": team_conference})
+    logger.info("Cached conference membership for season %d (%d teams)", season, len(team_conference))
+
+
 def lambda_handler(event: dict, context) -> dict:
     start = date.today()
     client = NCAAMBBClient()
+
+    try:
+        _sync_conference_membership(_current_ncaambb_season(start))
+    except Exception:
+        # A failed refresh leaves yesterday's cached object in place (or,
+        # early in a brand-new season, no object at all) -- either way
+        # season_projection.py's own read degrades gracefully, same as
+        # every other cache-miss case in this pipeline. Doesn't block the
+        # date-walk below.
+        logger.exception("Failed refreshing cached NCAA MBB conference membership")
 
     synced = refreshed = skipped = failed = 0
     for offset in range(SCHEDULE_SYNC_MAX_LOOKAHEAD_DAYS):

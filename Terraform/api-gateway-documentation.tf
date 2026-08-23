@@ -132,8 +132,11 @@ locals {
       summary     = "Single player-prop prediction"
       description = "Predicted value for one player/stat combination in one NCAA MBB event (points, rebounds, assists, steals, blocks, or three-pointers made), with the real recorded stat attached once the game completes."
     }
-    # No ncaambb_live_scores entry yet -- that endpoint doesn't exist
-    # until live-scores (the next build step) ships.
+    ncaambb_live_scores = {
+      path        = "/ncaambb/live-scores", method = "GET"
+      summary     = "Live in-progress scores"
+      description = "Cache-only current score/clock/leader live-stat snapshot for NCAA MBB games near or at tip-off. Never triggers a DynamoDB write."
+    }
   }
 
   # The two endpoints that take real inputs, documented per-parameter --
@@ -224,13 +227,33 @@ resource "aws_api_gateway_documentation_part" "predict_player_stat_query_param" 
   })
 }
 
+# The console's Documentation pane has its own "Authorizers" tab, separate
+# from "Resources and methods" above -- it was empty not because of a bug,
+# but because no AUTHORIZER-type documentation_part existed at all for the
+# one authorizer this API has (api-gateway.tf's Cognito authorizer).
+resource "aws_api_gateway_documentation_part" "cognito_authorizer" {
+  rest_api_id = aws_api_gateway_rest_api.main.id
+
+  location {
+    type = "AUTHORIZER"
+    name = aws_api_gateway_authorizer.cognito.name
+  }
+
+  properties = jsonencode({
+    description = "Validates the caller's Cognito User Pool JWT (Authorization header). Required on every route in this API except the CORS OPTIONS preflight methods."
+  })
+}
+
 resource "aws_api_gateway_documentation_version" "main" {
   # No automatic bump trigger -- this is a label, not a hash of the
-  # content above. Bump it by hand (e.g. "1.1.0") whenever the console's
-  # exported Swagger/OpenAPI snapshot needs to reflect a real
-  # documentation content change, same as every other "explicit version
-  # bump, not implicit" convention this project uses.
-  version     = "1.0.0"
+  # content above. Bump it by hand whenever the console's exported
+  # Swagger/OpenAPI snapshot needs to reflect a real documentation content
+  # change, same as every other "explicit version bump, not implicit"
+  # convention this project uses. 1.1.0: added the AUTHORIZER part above,
+  # which a bare 1.0.0 (already a cut, immutable snapshot) can't retroactively
+  # pick up -- the stage's own documentation_version has to move too, or
+  # Export keeps serving the pre-authorizer snapshot forever.
+  version     = "1.1.0"
   rest_api_id = aws_api_gateway_rest_api.main.id
 
   depends_on = [
@@ -238,5 +261,6 @@ resource "aws_api_gateway_documentation_version" "main" {
     aws_api_gateway_documentation_part.predict_event_path_params,
     aws_api_gateway_documentation_part.predict_player_path_params,
     aws_api_gateway_documentation_part.predict_player_stat_query_param,
+    aws_api_gateway_documentation_part.cognito_authorizer,
   ]
 }
