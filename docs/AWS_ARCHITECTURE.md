@@ -9,6 +9,10 @@ Regenerate an SVG after editing its source (from the repo root):
 npx @mermaid-js/mermaid-cli -i design/AWS_ARCHITECTURE.mmd -o docs/images/aws_architecture_client.svg -b white
 npx @mermaid-js/mermaid-cli -i design/AWS_ARCHITECTURE_PIPELINE.mmd -o docs/images/aws_architecture_pipeline.svg -b white
 ```
+`mermaid-cli` drives a local headless Chromium via Puppeteer — if that fails to launch (`Invalid file descriptor to ICU data received` is a known Windows-specific Puppeteer bug, confirmed on this machine 2026-08-22, unrelated to the diagram source itself), render server-side via [mermaid.ink](https://mermaid.ink) instead, which needs no local browser (swap the filename for the client diagram as needed):
+```
+curl -sS "https://mermaid.ink/svg/$(node -e "process.stdout.write(Buffer.from(require('fs').readFileSync('design/AWS_ARCHITECTURE_PIPELINE.mmd','utf8')).toString('base64url'))")?bgColor=white" -o docs/images/aws_architecture_pipeline.svg
+```
 
 **Reading either diagram:** solid arrows are data flow or invocation; dotted arrows are supporting dependencies that aren't data flow (a TLS cert backing a distribution, a container image pull, the VPC path to the Gateway Endpoints). Color is component role, not decoration, and means the same thing in both diagrams: orange is the two serving Lambdas API Gateway invokes directly, yellow is the recurring ingest pipeline, green is Fargate (backfill/training), red is storage, purple is the API/auth layer, blue is the CDN/DNS edge, gray-dashed is EventBridge scheduling, and flat gray is anything external to (or shared outside) this stack.
 

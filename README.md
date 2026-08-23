@@ -5,7 +5,14 @@ AWS hosted AI driven application to predict sports outcomes while providing up-t
 
 Deeper write-ups on specific pieces of the system live in [docs/](docs/):
 
+- [Sport Predictor API](docs/SPORT_PREDICTOR_API.md) — every live API Gateway route, request/response shapes, per sport
+- [AWS Architecture](docs/AWS_ARCHITECTURE.md) — as-built AWS architecture diagrams (NFL/Phase 1 scoped)
 - [NFL Feature Engineering](docs/NFL_FEATURE_ENGINEERING.md) — what the NFL feature-engineering pipeline computes and what it makes it possible to predict
+- [NCAAFB Feature Engineering](docs/NCAAFB_FEATURE_ENGINEERING.md) — same, for NCAA Football
+- [NBA Feature Engineering](docs/NBA_FEATURE_ENGINEERING.md) — same, for the NBA
+- [NCAAMBB Feature Engineering](docs/NCAAMBB_FEATURE_ENGINEERING.md) — same, for NCAA Men's Basketball
+
+Planning and architecture docs (build-order checklist, data schema, tagging strategy, frontend style) live in [design/](design/) — start with [design/CLAUDE.md](design/CLAUDE.md) for the full map.
 
 ## Local Development Setup
 
