@@ -57,6 +57,10 @@ resource "aws_lambda_function" "ncaambb_schedule_sync" {
       RAW_BUCKET_NAME   = aws_s3_bucket.raw_data_lake.bucket
       ESPN_API_ROOT_URL = var.espn_api_root_url
       ESPN_USER_AGENT   = var.espn_user_agent
+      # Read/updated to attach each team's resolved conference onto its own
+      # entity's metadata.conference (library.serving.common's generic
+      # participant enrichment reads it from there).
+      ENTITIES_TABLE_NAME = aws_dynamodb_table.entities.name
     }
   }
 

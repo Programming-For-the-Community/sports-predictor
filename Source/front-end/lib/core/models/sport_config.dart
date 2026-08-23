@@ -61,13 +61,13 @@ const kSports = [
     active: true,
   ),
   SportConfig(
-    id: 'ncaa_mbb',
+    // Matches the backend's own route prefix (/ncaambb/...) exactly, same
+    // reasoning as ncaafb's id above.
+    id: 'ncaambb',
     displayName: 'NCAA MBB',
     eventShape: EventShape.headToHead,
     accentColor: AppColors.cyan,
-    active: false,
-    // No /{sport}/season route exists for this sport.
-    hasSeasonProjection: false,
+    active: true,
   ),
   SportConfig(
     id: 'pga',

@@ -49,10 +49,16 @@ class TeamStanding {
   // skipped until enough teams are tracked or a model is promoted), not a
   // parse failure.
   //
-  // division_winner_probability (NFL) and conference_champion_probability
-  // (NCAAFB) are the same "won their group" concept at each sport's own
+  // division_winner_probability (NFL), conference_champion_probability
+  // (NCAAFB), and conference_tournament_champion_probability (NCAA MBB)
+  // are the same "won their group" concept at each sport's own
   // granularity, so divisionWinnerProbability reads whichever key its
-  // sport's backend sends.
+  // sport's backend sends. Same pattern for playoffProbability
+  // (ncaa_tournament_probability -- "made the elimination field") and
+  // championshipProbability (national_champion_probability). NCAA MBB's
+  // round-by-round probabilities (first_four/round_of_64/sweet_16/
+  // elite_eight/final_four/championship_game) aren't surfaced here --
+  // the March Madness bracket tab shows that progression directly.
   factory TeamStanding.fromJson(Map<String, dynamic> json) => TeamStanding(
         teamId: json['team_id'] as String,
         division: json['division'] as String? ?? json['conference'] as String?,
@@ -61,12 +67,16 @@ class TeamStanding {
         ties: json['ties'] as int? ?? 0,
         projectedWins: (json['projected_wins'] as num?)?.toDouble() ?? (json['wins'] as int).toDouble(),
         projectedLosses: (json['projected_losses'] as num?)?.toDouble() ?? 0.0,
-        divisionWinnerProbability:
-            (json['division_winner_probability'] as num? ?? json['conference_champion_probability'] as num?)
-                    ?.toDouble() ??
+        divisionWinnerProbability: (json['division_winner_probability'] as num? ??
+                    json['conference_champion_probability'] as num? ??
+                    json['conference_tournament_champion_probability'] as num?)
+                ?.toDouble() ??
+            0.0,
+        playoffProbability:
+            (json['playoff_probability'] as num? ?? json['ncaa_tournament_probability'] as num?)?.toDouble() ?? 0.0,
+        championshipProbability:
+            (json['championship_probability'] as num? ?? json['national_champion_probability'] as num?)?.toDouble() ??
                 0.0,
-        playoffProbability: (json['playoff_probability'] as num?)?.toDouble() ?? 0.0,
-        championshipProbability: (json['championship_probability'] as num?)?.toDouble() ?? 0.0,
         playInProbability: (json['play_in_probability'] as num?)?.toDouble(),
         abbreviation: json['abbreviation'] as String?,
         currentRank: json['current_rank'] as int?,
@@ -330,6 +340,20 @@ class BracketProjection {
   }
 }
 
+/// One conference tournament's own bracket. NCAA MBB only -- one entry per
+/// conference with at least 2 tracked members.
+class ConferenceBracket {
+  const ConferenceBracket({required this.conference, required this.bracket});
+
+  final String conference;
+  final BracketProjection bracket;
+
+  factory ConferenceBracket.fromJson(Map<String, dynamic> json) => ConferenceBracket(
+        conference: json['conference'] as String,
+        bracket: BracketProjection.fromJson(json['bracket'] as Map<String, dynamic>),
+      );
+}
+
 class SeasonProjection {
   const SeasonProjection({
     required this.sport,
@@ -339,6 +363,8 @@ class SeasonProjection {
     this.cup,
     this.bracket,
     this.cupBracket,
+    this.marchMadnessBracket,
+    this.conferenceBrackets,
   });
 
   final String sport;
@@ -364,6 +390,17 @@ class SeasonProjection {
   /// only -- no real-vs-actual reconciliation, unlike `bracket`.
   final BracketProjection? cupBracket;
 
+  /// NCAA MBB only -- the 68-team March Madness bracket (First Four
+  /// through Championship, flattened into one `rounds` list, same shape
+  /// NCAAFB's `bracket` uses). Null for every other sport, and for NCAA
+  /// MBB before conference-tournament champions/at-large seeding can be
+  /// resolved.
+  final BracketProjection? marchMadnessBracket;
+
+  /// NCAA MBB only -- one bracket per conference tournament. Null for
+  /// every other sport.
+  final List<ConferenceBracket>? conferenceBrackets;
+
   factory SeasonProjection.fromJson(Map<String, dynamic> json) => SeasonProjection(
         sport: json['sport'] as String,
         season: json['season'] as int?,
@@ -385,5 +422,11 @@ class SeasonProjection {
         cupBracket: json['cup_bracket'] != null
             ? BracketProjection.fromJson(json['cup_bracket'] as Map<String, dynamic>)
             : null,
+        marchMadnessBracket: json['march_madness_bracket'] != null
+            ? BracketProjection.fromJson(json['march_madness_bracket'] as Map<String, dynamic>)
+            : null,
+        conferenceBrackets: (json['conference_brackets'] as List<dynamic>?)
+            ?.map((c) => ConferenceBracket.fromJson(c as Map<String, dynamic>))
+            .toList(),
       );
 }

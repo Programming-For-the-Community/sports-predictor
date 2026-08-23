@@ -80,6 +80,14 @@ already rely on. season_projection.py reads this cached object via
 FeatureStorage's underlying S3 read access (scoped to this one prefix, see
 iam-lambda-inference.tf) instead of calling ESPN itself.
 
+The same resolved mapping is also written onto each team entity's own
+metadata.conference (library.serving.common.enrich_participants reads it
+from there, generically, the same way it already does for every other
+sport) -- a team whose entity doesn't exist yet is skipped rather than
+created as a stub; it picks up its conference the next time this Lambda
+runs, after normalize has created the entity from that team's own first
+synced game.
+
 The season number used for the cache key is a simple calendar heuristic
 (August or later -> next calendar year, matching ESPN's own "the season
 is labeled by the year its second half falls in" convention), not
@@ -97,13 +105,16 @@ from datetime import date, timedelta
 import boto3
 from botocore.exceptions import ClientError
 
+from library.aws.dynamodb_table import DynamoDBTable
 from library.http.ncaambb import NCAAMBBClient
 from library.http.ncaambb_core import NCAAMBBCoreClient, resolve_conference_membership
+from library.schema.keys import entity_key
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s", force=True)  # AWS Lambda pre-attaches a root handler, so basicConfig() is otherwise a silent no-op
 logger = logging.getLogger("ncaambb-schedule-sync")
 
 RAW_BUCKET = os.environ["RAW_BUCKET_NAME"]
+_entities = DynamoDBTable(os.environ["ENTITIES_TABLE_NAME"])
 
 # Generous fixed ceiling covering the whole regular season plus
 # conference/NCAA tournaments with real padding on both ends -- not a real
@@ -141,11 +152,28 @@ def _current_ncaambb_season(today: date) -> int:
     return today.year + 1 if today.month >= 8 else today.year
 
 
+def _sync_team_conference_metadata(team_conference: dict[str, str]) -> int:
+    updated = 0
+    for team_id, conference in team_conference.items():
+        entity = _entities.get_item({"entity_key": entity_key("ncaambb", team_id, "team")})
+        if entity is None:
+            continue
+        if entity.get("metadata", {}).get("conference") == conference:
+            continue
+        _entities.put_item({**entity, "metadata": {**entity.get("metadata", {}), "conference": conference}})
+        updated += 1
+    return updated
+
+
 def _sync_conference_membership(season: int) -> None:
     core_client = NCAAMBBCoreClient()
     team_conference = resolve_conference_membership(core_client, season)
     _put_json(f"ncaambb/conference-membership/{season}.json", {"season": season, "team_conference": team_conference})
-    logger.info("Cached conference membership for season %d (%d teams)", season, len(team_conference))
+    updated = _sync_team_conference_metadata(team_conference)
+    logger.info(
+        "Cached conference membership for season %d (%d teams, %d entities updated)",
+        season, len(team_conference), updated,
+    )
 
 
 def lambda_handler(event: dict, context) -> dict:

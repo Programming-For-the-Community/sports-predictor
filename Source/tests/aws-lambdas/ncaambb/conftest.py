@@ -4,10 +4,11 @@ import sys
 
 import pytest
 
-# RAW_BUCKET_NAME is read at module level by ingest/schedule-sync's own
-# handlers -- set it before loading either module so the import doesn't
-# raise KeyError.
+# RAW_BUCKET_NAME/ENTITIES_TABLE_NAME are read at module level by
+# ingest/schedule-sync's own handlers -- set them before loading either
+# module so the import doesn't raise KeyError.
 os.environ.setdefault("RAW_BUCKET_NAME", "test-bucket")
+os.environ.setdefault("ENTITIES_TABLE_NAME", "test-entities-table")
 
 _src = os.path.normpath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
 

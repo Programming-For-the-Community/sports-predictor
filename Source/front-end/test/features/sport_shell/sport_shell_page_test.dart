@@ -2,20 +2,41 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:go_router/go_router.dart';
 
+import 'package:front_end/core/models/sport_config.dart';
+import 'package:front_end/core/theme/app_colors.dart';
 import 'package:front_end/features/sport_shell/sport_shell_page.dart';
 
-/// SportConfig.hasSeasonProjection (sport_config.dart) gates the Season tab
-/// -- nfl has a real /nfl/season route so it stays visible; ncaa_mbb has
-/// no route at all, so it's hidden rather than linking to one that would
-/// error.
+/// SportConfig.hasSeasonProjection (sport_config.dart) gates the Season tab.
+/// Exercised directly via SportShellPage.sportConfigOverride, not by
+/// depending on which real kSports entry currently has which flag -- that
+/// coupling broke this test once already (ncaambb was the "no season
+/// route" example until it got one).
+const _configWithSeason = SportConfig(
+  id: 'test-with-season',
+  displayName: 'Test Sport',
+  eventShape: EventShape.headToHead,
+  accentColor: AppColors.cyan,
+  active: true,
+);
+
+const _configWithoutSeason = SportConfig(
+  id: 'test-without-season',
+  displayName: 'Test Sport',
+  eventShape: EventShape.headToHead,
+  accentColor: AppColors.cyan,
+  active: true,
+  hasSeasonProjection: false,
+);
+
 void main() {
-  Widget wrap(String sportId) {
+  Widget wrap(SportConfig config) {
     final router = GoRouter(
-      initialLocation: '/$sportId/events',
+      initialLocation: '/${config.id}/events',
       routes: [
         GoRoute(
-          path: '/$sportId/events',
-          builder: (context, state) => SportShellPage(sportId: sportId, child: const SizedBox()),
+          path: '/${config.id}/events',
+          builder: (context, state) =>
+              SportShellPage(sportId: config.id, sportConfigOverride: config, child: const SizedBox()),
         ),
       ],
     );
@@ -23,12 +44,12 @@ void main() {
   }
 
   testWidgets('shows the Season tab for a sport with a season projection', (tester) async {
-    await tester.pumpWidget(wrap('nfl'));
+    await tester.pumpWidget(wrap(_configWithSeason));
     expect(find.text('Season'), findsOneWidget);
   });
 
   testWidgets('hides the Season tab for a sport without one yet', (tester) async {
-    await tester.pumpWidget(wrap('ncaa_mbb'));
+    await tester.pumpWidget(wrap(_configWithoutSeason));
     expect(find.text('Season'), findsNothing);
     expect(find.text('Events'), findsOneWidget);
     expect(find.text('Models'), findsOneWidget);

@@ -14,14 +14,21 @@ import '../../core/widgets/page_glow.dart';
 enum _SportTab { events, season, models }
 
 class SportShellPage extends StatelessWidget {
-  const SportShellPage({super.key, required this.sportId, required this.child});
+  const SportShellPage({super.key, required this.sportId, required this.child, this.sportConfigOverride});
 
   final String sportId;
   final Widget child;
 
+  /// Bypasses the sportId -> kSports lookup below -- lets a widget test
+  /// exercise a specific SportConfig (e.g. hasSeasonProjection: false)
+  /// directly, instead of depending on which real sport in kSports
+  /// currently happens to have that flag.
+  @visibleForTesting
+  final SportConfig? sportConfigOverride;
+
   @override
   Widget build(BuildContext context) {
-    final sport = sportById(sportId);
+    final sport = sportConfigOverride ?? sportById(sportId);
     final location = GoRouterState.of(context).matchedLocation;
     final activeTab = location.endsWith('/models')
         ? _SportTab.models

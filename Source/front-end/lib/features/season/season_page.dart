@@ -82,7 +82,11 @@ class _SeasonPageState extends ConsumerState<SeasonPage> {
             ),
             const SizedBox(height: 20),
             // Toggle options only appear when the backend sent that block.
-            if (season.leaderboards != null || season.bracket != null || season.cupBracket != null) ...[
+            if (season.leaderboards != null ||
+                season.bracket != null ||
+                season.cupBracket != null ||
+                season.marchMadnessBracket != null ||
+                season.conferenceBrackets != null) ...[
               // Horizontal-scroll Row -- the toggle labels don't fit a
               // phone-width screen.
               SingleChildScrollView(
@@ -118,6 +122,22 @@ class _SeasonPageState extends ConsumerState<SeasonPage> {
                         onTap: () => setState(() => _tab = 'cup_bracket'),
                       ),
                     ],
+                    if (season.marchMadnessBracket != null) ...[
+                      const SizedBox(width: 8),
+                      _StatusToggle(
+                        label: 'March Madness',
+                        selected: _tab == 'march_madness',
+                        onTap: () => setState(() => _tab = 'march_madness'),
+                      ),
+                    ],
+                    if (season.conferenceBrackets != null) ...[
+                      const SizedBox(width: 8),
+                      _StatusToggle(
+                        label: 'Conference Brackets',
+                        selected: _tab == 'conference_brackets',
+                        onTap: () => setState(() => _tab = 'conference_brackets'),
+                      ),
+                    ],
                   ],
                 ),
               ),
@@ -129,6 +149,10 @@ class _SeasonPageState extends ConsumerState<SeasonPage> {
               _BracketSection(sport: season.sport, bracket: season.bracket!)
             else if (_tab == 'cup_bracket' && season.cupBracket != null)
               _BracketSection(sport: season.sport, bracket: season.cupBracket!)
+            else if (_tab == 'march_madness' && season.marchMadnessBracket != null)
+              _BracketSection(sport: season.sport, bracket: season.marchMadnessBracket!)
+            else if (_tab == 'conference_brackets' && season.conferenceBrackets != null)
+              _ConferenceBracketsSection(sport: season.sport, conferenceBrackets: season.conferenceBrackets!)
             else ...[
               // Only shown when there's more than one conference/division
               // to filter.
@@ -143,7 +167,8 @@ class _SeasonPageState extends ConsumerState<SeasonPage> {
               // fit per row on a wide screen.
               LayoutBuilder(
                 builder: (context, constraints) {
-                  final width = cardWidth(season.sport == 'ncaafb' ? 560 : 480, constraints.maxWidth);
+                  final width =
+                      cardWidth(season.sport == 'ncaafb' || season.sport == 'ncaambb' ? 560 : 480, constraints.maxWidth);
                   final divisions = _groupByDivision(season.sport, season.standings, _conferenceFilter);
                   if (divisions.isEmpty) {
                     return Text('No conferences match "$_conferenceFilter".', style: AppTextStyles.body(color: AppColors.inkSub));
@@ -221,9 +246,10 @@ class _StandingsColumn {
 List<_StandingsColumn> _standingsColumns(String sport) {
   final isNcaafb = sport == 'ncaafb';
   final isNba = sport == 'nba';
+  final isNcaambb = sport == 'ncaambb';
   return [
-    // NCAAFB only.
-    if (isNcaafb)
+    // NCAAFB/NCAA MBB only -- both have a live national-ranking model.
+    if (isNcaafb || isNcaambb)
       _StandingsColumn('RANK', 2, (context, sport, team) {
         final rank = team.currentRank;
         return Text(
@@ -265,13 +291,15 @@ List<_StandingsColumn> _standingsColumns(String sport) {
       _StandingsColumn('PLAY-IN%', 2, (context, sport, team) => _PercentText(team.playInProbability ?? 0.0))
     else
       _StandingsColumn(
-        isNcaafb ? 'CONF%' : 'DIV%', 2, (context, sport, team) => _PercentText(team.divisionWinnerProbability),
+        isNcaafb || isNcaambb ? 'CONF%' : 'DIV%', 2, (context, sport, team) => _PercentText(team.divisionWinnerProbability),
       ),
     _StandingsColumn(
-      isNba ? 'PLAYOFFS%' : (isNcaafb ? 'CFP%' : 'PO%'), 2, (context, sport, team) => _PercentText(team.playoffProbability),
+      isNba ? 'PLAYOFFS%' : (isNcaafb ? 'CFP%' : (isNcaambb ? 'NCAA%' : 'PO%')),
+      2, (context, sport, team) => _PercentText(team.playoffProbability),
     ),
     _StandingsColumn(
-      isNba ? 'CHAMP%' : (isNcaafb ? 'NC%' : 'SB%'), 2, (context, sport, team) => _PercentText(team.championshipProbability),
+      isNba || isNcaambb ? 'CHAMP%' : (isNcaafb ? 'NC%' : 'SB%'),
+      2, (context, sport, team) => _PercentText(team.championshipProbability),
     ),
   ];
 }
@@ -456,6 +484,97 @@ class _LeaderboardCard extends StatelessWidget {
                   ),
                 ],
               ),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+/// One row per conference tournament, collapsed by default -- avoids
+/// rendering every conference's bracket at once. Tapping a row reveals its
+/// own _BracketSection underneath.
+class _ConferenceBracketsSection extends StatefulWidget {
+  const _ConferenceBracketsSection({required this.sport, required this.conferenceBrackets});
+
+  final String sport;
+  final List<ConferenceBracket> conferenceBrackets;
+
+  @override
+  State<_ConferenceBracketsSection> createState() => _ConferenceBracketsSectionState();
+}
+
+class _ConferenceBracketsSectionState extends State<_ConferenceBracketsSection> {
+  final Set<String> _expanded = {};
+
+  @override
+  Widget build(BuildContext context) {
+    final sorted = [...widget.conferenceBrackets]
+      ..sort((a, b) => compareConferenceOrder(a.conference, b.conference));
+    return Column(
+      children: [
+        for (final entry in sorted) ...[
+          _ConferenceBracketRow(
+            sport: widget.sport,
+            conferenceBracket: entry,
+            expanded: _expanded.contains(entry.conference),
+            onTap: () => setState(() {
+              if (!_expanded.remove(entry.conference)) _expanded.add(entry.conference);
+            }),
+          ),
+          const SizedBox(height: 12),
+        ],
+      ],
+    );
+  }
+}
+
+class _ConferenceBracketRow extends StatelessWidget {
+  const _ConferenceBracketRow({
+    required this.sport,
+    required this.conferenceBracket,
+    required this.expanded,
+    required this.onTap,
+  });
+
+  final String sport;
+  final ConferenceBracket conferenceBracket;
+  final bool expanded;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(16),
+        gradient: LinearGradient(begin: Alignment.topLeft, end: Alignment.bottomRight, colors: AppColors.surfaceGrad),
+        border: Border.all(color: AppColors.borderRaised),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          InkWell(
+            onTap: onTap,
+            borderRadius: BorderRadius.circular(16),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      conferenceBracket.conference.toUpperCase(),
+                      style: AppTextStyles.body(color: AppColors.ink),
+                    ),
+                  ),
+                  Icon(expanded ? Icons.expand_less : Icons.expand_more, color: AppColors.inkMute),
+                ],
+              ),
+            ),
+          ),
+          if (expanded)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 0, 20, 20),
+              child: _BracketSection(sport: sport, bracket: conferenceBracket.bracket),
             ),
         ],
       ),

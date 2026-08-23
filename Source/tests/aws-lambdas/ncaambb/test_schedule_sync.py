@@ -54,10 +54,13 @@ class TestConferenceMembershipSync:
     def test_writes_the_resolved_membership_to_the_expected_key(self):
         mock_s3 = MagicMock()
         mock_core_client = MagicMock()
+        mock_entities = MagicMock()
+        mock_entities.get_item.return_value = None  # no entity to update in this test
 
         with patch.object(ncaambb_schedule_sync, "NCAAMBBCoreClient", return_value=mock_core_client), \
              patch.object(ncaambb_schedule_sync, "resolve_conference_membership", return_value={"150": "ACC"}), \
-             patch.object(ncaambb_schedule_sync, "_s3", mock_s3):
+             patch.object(ncaambb_schedule_sync, "_s3", mock_s3), \
+             patch.object(ncaambb_schedule_sync, "_entities", mock_entities):
             ncaambb_schedule_sync._sync_conference_membership(2027)
 
         mock_s3.put_object.assert_called_once()
@@ -77,6 +80,47 @@ class TestConferenceMembershipSync:
             result = ncaambb_schedule_sync.lambda_handler({}, None)
 
         assert result["synced"] == ncaambb_schedule_sync.SCHEDULE_SYNC_MAX_LOOKAHEAD_DAYS
+
+
+class TestSyncTeamConferenceMetadata:
+    def test_updates_an_existing_entitys_conference_and_preserves_other_metadata(self):
+        mock_entities = MagicMock()
+        mock_entities.get_item.return_value = {
+            "entity_key": "SPORT#NCAAMBB#ENTITY#TEAM#150",
+            "entity_id": "150",
+            "sport": "ncaambb",
+            "entity_type": "team",
+            "name": "Duke Blue Devils",
+            "metadata": {"abbreviation": "DUKE", "color": "001A57"},
+        }
+
+        with patch.object(ncaambb_schedule_sync, "_entities", mock_entities):
+            updated = ncaambb_schedule_sync._sync_team_conference_metadata({"150": "ACC"})
+
+        assert updated == 1
+        written = mock_entities.put_item.call_args.args[0]
+        assert written["metadata"]["conference"] == "ACC"
+        assert written["metadata"]["abbreviation"] == "DUKE"
+
+    def test_skips_a_team_with_no_entity_yet(self):
+        mock_entities = MagicMock()
+        mock_entities.get_item.return_value = None
+
+        with patch.object(ncaambb_schedule_sync, "_entities", mock_entities):
+            updated = ncaambb_schedule_sync._sync_team_conference_metadata({"999": "SEC"})
+
+        assert updated == 0
+        mock_entities.put_item.assert_not_called()
+
+    def test_skips_a_team_whose_conference_is_already_current(self):
+        mock_entities = MagicMock()
+        mock_entities.get_item.return_value = {"metadata": {"conference": "Big Ten"}}
+
+        with patch.object(ncaambb_schedule_sync, "_entities", mock_entities):
+            updated = ncaambb_schedule_sync._sync_team_conference_metadata({"200": "Big Ten"})
+
+        assert updated == 0
+        mock_entities.put_item.assert_not_called()
 
 
 class TestLambdaHandler:

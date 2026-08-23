@@ -428,15 +428,11 @@ _RF_PARAM_DISTRIBUTIONS = {
     "model__max_features": ["sqrt", "log2"],
     "model__max_samples": [0.4, 0.5, 0.6, 0.7, 0.85],
 }
-# Doubled from 70, 2026-08-22 -- now that
-# _run_randomized_search_with_early_stopping exists, a higher ceiling is
-# nearly free for the many targets that already converge well before 70
-# (they still stop just as early), while giving real headroom to the
-# ones that don't: a live run that day (NCAA MBB ranking-model) was still
-# finding improvements as late as iteration 52/70 (74% of the old
-# budget) before flattening out, and this space (1,680 combinations) is
-# only ~4% sampled even at the new ceiling.
-_RF_SEARCH_ITERATIONS = 140
+# _run_randomized_search_with_early_stopping's batch size scales with
+# this ceiling (max_iter * _EARLY_STOP_BATCH_FRACTION) -- raising it also
+# raises RF's early-stop patience window in absolute iterations, not just
+# the ceiling itself.
+_RF_SEARCH_ITERATIONS = 70
 _RF_CV_SPLITS = 8
 _RF_RANDOM_STATE = 42
 # One worker per CV fold, not n_jobs=-1 (every vCPU on the task, 16 by
