@@ -1,8 +1,11 @@
 """
 Unit tests for library.http.ncaambb_core -- NCAAMBBCoreClient's AP-poll
 fetch (single-attempt, 404-tolerant, see the module's own docstring for
-why it bypasses HttpClient._get's retry-with-backoff) and the pure
-parsing helpers (season_type_week_from_ref, ap_poll_to_rank_by_team).
+why it bypasses HttpClient._get's retry-with-backoff), its conference-
+membership discovery methods (group children -> group detail -> group
+teams, all confirmed live 2026-08-22), and the pure parsing/aggregation
+helpers (season_type_week_from_ref, ap_poll_to_rank_by_team,
+resolve_conference_membership).
 """
 from unittest.mock import MagicMock
 
@@ -10,6 +13,7 @@ from library.http.ncaambb_core import (
     NCAAMBBCoreClient,
     ap_poll_to_rank_by_team,
     current_ap_poll_pointer,
+    resolve_conference_membership,
     season_type_week_from_ref,
 )
 
@@ -114,6 +118,125 @@ class TestApPollToRankByTeam:
 
     def test_missing_ranks_key_returns_empty_dict(self):
         assert ap_poll_to_rank_by_team({}) == {}
+
+
+class TestConferenceGroupDiscovery:
+    def _client_with_mock_session(self):
+        client = NCAAMBBCoreClient.__new__(NCAAMBBCoreClient)
+        client.base_url = "https://sports.core.api.espn.com/v2/sports/basketball/leagues/mens-college-basketball"
+        client._session = MagicMock()
+        client._rate_limiter = MagicMock()
+        return client
+
+    def test_get_conference_group_refs_returns_item_refs(self):
+        client = self._client_with_mock_session()
+        response = MagicMock()
+        response.json.return_value = {
+            "items": [
+                {"$ref": ".../groups/2?lang=en&region=us"},
+                {"$ref": ".../groups/3?lang=en&region=us"},
+            ]
+        }
+        client._session.get.return_value = response
+
+        refs = client.get_conference_group_refs(2026)
+
+        assert refs == [".../groups/2?lang=en&region=us", ".../groups/3?lang=en&region=us"]
+        called_url = client._session.get.call_args.args[0]
+        assert called_url.endswith("/seasons/2026/types/2/groups/50/children")
+
+    def test_get_conference_group_refs_defaults_to_regular_season_type(self):
+        client = self._client_with_mock_session()
+        response = MagicMock()
+        response.json.return_value = {"items": []}
+        client._session.get.return_value = response
+
+        client.get_conference_group_refs(2026)
+
+        called_url = client._session.get.call_args.args[0]
+        assert "/types/2/" in called_url
+
+    def test_get_group_detail_returns_the_raw_dict(self):
+        client = self._client_with_mock_session()
+        response = MagicMock()
+        response.json.return_value = {"name": "Atlantic Coast Conference", "shortName": "ACC", "isConference": True}
+        client._session.get.return_value = response
+
+        detail = client.get_group_detail("https://.../groups/2")
+
+        assert detail["shortName"] == "ACC"
+        assert detail["isConference"] is True
+
+    def test_get_group_team_refs_returns_item_refs(self):
+        client = self._client_with_mock_session()
+        response = MagicMock()
+        response.json.return_value = {"items": [{"$ref": ".../teams/150"}, {"$ref": ".../teams/259"}]}
+        client._session.get.return_value = response
+
+        refs = client.get_group_team_refs("https://.../groups/2/teams")
+
+        assert refs == [".../teams/150", ".../teams/259"]
+
+
+class TestResolveConferenceMembership:
+    def _client(self, conference_refs: list[str], details: dict[str, dict], team_refs: dict[str, list[str]]):
+        client = MagicMock()
+        client.get_conference_group_refs.return_value = conference_refs
+        client.get_group_detail.side_effect = lambda ref: details[ref]
+        client.get_group_team_refs.side_effect = lambda teams_ref: team_refs[teams_ref]
+        return client
+
+    def test_builds_team_id_to_conference_name_from_the_group_hierarchy(self):
+        client = self._client(
+            conference_refs=["ref/groups/2"],
+            details={"ref/groups/2": {"isConference": True, "shortName": "ACC", "teams": {"$ref": "ref/groups/2/teams"}}},
+            team_refs={"ref/groups/2/teams": ["https://.../teams/150", "https://.../teams/259"]},
+        )
+
+        result = resolve_conference_membership(client, 2026)
+
+        assert result == {"150": "ACC", "259": "ACC"}
+
+    def test_a_group_that_is_not_a_conference_is_skipped(self):
+        client = self._client(
+            conference_refs=["ref/groups/50"],
+            details={"ref/groups/50": {"isConference": False, "shortName": "Division I", "teams": {"$ref": "ref/groups/50/teams"}}},
+            team_refs={"ref/groups/50/teams": ["https://.../teams/1"]},
+        )
+
+        result = resolve_conference_membership(client, 2026)
+
+        assert result == {}
+
+    def test_multiple_conferences_are_merged_into_one_result(self):
+        client = self._client(
+            conference_refs=["ref/groups/2", "ref/groups/3"],
+            details={
+                "ref/groups/2": {"isConference": True, "shortName": "ACC", "teams": {"$ref": "ref/groups/2/teams"}},
+                "ref/groups/3": {"isConference": True, "shortName": "Big Ten", "teams": {"$ref": "ref/groups/3/teams"}},
+            },
+            team_refs={
+                "ref/groups/2/teams": ["https://.../teams/150"],
+                "ref/groups/3/teams": ["https://.../teams/275"],
+            },
+        )
+
+        result = resolve_conference_membership(client, 2026)
+
+        assert result == {"150": "ACC", "275": "Big Ten"}
+
+    def test_one_conference_failing_does_not_lose_the_others(self):
+        client = self._client(
+            conference_refs=["ref/groups/2", "ref/groups/3"],
+            details={"ref/groups/3": {"isConference": True, "shortName": "Big Ten", "teams": {"$ref": "ref/groups/3/teams"}}},
+            team_refs={"ref/groups/3/teams": ["https://.../teams/275"]},
+        )
+        # groups/2 was never registered in `details`, so its lookup raises KeyError,
+        # simulating a real fetch failure for that one conference.
+
+        result = resolve_conference_membership(client, 2026)
+
+        assert result == {"275": "Big Ten"}
 
 
 class TestCurrentApPollPointer:

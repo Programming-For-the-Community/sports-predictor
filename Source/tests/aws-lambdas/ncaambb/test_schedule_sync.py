@@ -1,7 +1,11 @@
 """
 Unit tests for the NCAA MBB schedule-sync Lambda handler: the full-season
-lookahead loop, the idempotent already-synced skip, and per-date failure
-isolation. All AWS and ESPN calls are mocked.
+lookahead loop, the idempotent already-synced skip, per-date failure
+isolation, and the conference-membership cache refresh
+(_sync_conference_membership/_current_ncaambb_season -- see handler.py's
+own CONFERENCE MEMBERSHIP docstring section for why this Lambda, not
+predict/season_projection.py, resolves it). All AWS and ESPN calls are
+mocked.
 
 Unlike NBA's own test_schedule_sync.py, there is no preseason-skip test
 here -- confirmed live, 2026-08-19 (see handler.py's own docstring), NCAA
@@ -10,8 +14,10 @@ MBB's ESPN scoreboard has no preseason concept to skip.
 The ncaambb_schedule_sync module is registered in sys.modules by
 conftest.py.
 """
+from datetime import date
 from unittest.mock import MagicMock, patch
 
+import pytest
 from botocore.exceptions import ClientError
 
 import ncaambb_schedule_sync
@@ -33,7 +39,57 @@ def _s3_with_no_existing_objects():
     return mock_s3
 
 
+class TestCurrentNcaambbSeason:
+    def test_before_august_uses_the_current_calendar_year(self):
+        assert ncaambb_schedule_sync._current_ncaambb_season(date(2026, 3, 15)) == 2026
+
+    def test_august_or_later_uses_next_calendar_year(self):
+        assert ncaambb_schedule_sync._current_ncaambb_season(date(2026, 8, 22)) == 2027
+
+    def test_december_uses_next_calendar_year(self):
+        assert ncaambb_schedule_sync._current_ncaambb_season(date(2026, 12, 1)) == 2027
+
+
+class TestConferenceMembershipSync:
+    def test_writes_the_resolved_membership_to_the_expected_key(self):
+        mock_s3 = MagicMock()
+        mock_core_client = MagicMock()
+
+        with patch.object(ncaambb_schedule_sync, "NCAAMBBCoreClient", return_value=mock_core_client), \
+             patch.object(ncaambb_schedule_sync, "resolve_conference_membership", return_value={"150": "ACC"}), \
+             patch.object(ncaambb_schedule_sync, "_s3", mock_s3):
+            ncaambb_schedule_sync._sync_conference_membership(2027)
+
+        mock_s3.put_object.assert_called_once()
+        call = mock_s3.put_object.call_args.kwargs
+        assert call["Key"] == "ncaambb/conference-membership/2027.json"
+
+    def test_a_failure_does_not_block_the_date_walk_loop(self):
+        # lambda_handler's own try/except around this call -- a live ESPN
+        # hiccup shouldn't cost the run its own schedule-sync date-walk.
+        mock_client = MagicMock()
+        mock_client.get_scoreboard_for_date.return_value = _scoreboard([])
+        mock_s3 = _s3_with_no_existing_objects()
+
+        with patch.object(ncaambb_schedule_sync, "NCAAMBBClient", return_value=mock_client), \
+             patch.object(ncaambb_schedule_sync, "_s3", mock_s3), \
+             patch.object(ncaambb_schedule_sync, "_sync_conference_membership", side_effect=Exception("ESPN unreachable")):
+            result = ncaambb_schedule_sync.lambda_handler({}, None)
+
+        assert result["synced"] == ncaambb_schedule_sync.SCHEDULE_SYNC_MAX_LOOKAHEAD_DAYS
+
+
 class TestLambdaHandler:
+    @pytest.fixture(autouse=True)
+    def stub_conference_membership_sync(self):
+        """Every test below exercises the date-walk loop, not the
+        conference-membership refresh -- stubbed out so none of them make
+        a real NCAAMBBCoreClient call. Class-scoped (not module-level) so
+        TestConferenceMembershipSync's own direct calls to
+        _sync_conference_membership above aren't neutered by it too."""
+        with patch.object(ncaambb_schedule_sync, "_sync_conference_membership"):
+            yield
+
     def test_syncs_one_call_per_lookahead_day_when_nothing_already_synced(self):
         mock_client = MagicMock()
         mock_client.get_scoreboard_for_date.return_value = _scoreboard([])

@@ -328,8 +328,7 @@ resource "aws_api_gateway_deployment" "main" {
       sha1(jsonencode(values(aws_api_gateway_method.nba_cors)[*].id)),
       sha1(jsonencode(values(aws_api_gateway_integration.nba_cors)[*].id)),
       sha1(jsonencode(values(aws_api_gateway_integration_response.nba_cors)[*].id)),
-      # NCAA MBB routes declared in api-gateway-ncaambb-predict.tf. No
-      # live-scores resources yet -- that's step 7.
+      # NCAA MBB routes declared in api-gateway-ncaambb-predict.tf.
       aws_api_gateway_resource.ncaambb.id,
       aws_api_gateway_resource.ncaambb_events.id,
       aws_api_gateway_method.ncaambb_events.id,
@@ -351,6 +350,11 @@ resource "aws_api_gateway_deployment" "main" {
       aws_api_gateway_method.ncaambb_predict_player.id,
       aws_api_gateway_integration.ncaambb_predict_player.id,
       aws_api_gateway_integration.ncaambb_predict_player.uri,
+      # live-scores resources declared in api-gateway-ncaambb-live-scores.tf
+      aws_api_gateway_resource.ncaambb_live_scores.id,
+      aws_api_gateway_method.ncaambb_live_scores.id,
+      aws_api_gateway_integration.ncaambb_live_scores.id,
+      aws_api_gateway_integration.ncaambb_live_scores.uri,
       sha1(jsonencode(values(aws_api_gateway_method.ncaambb_cors)[*].id)),
       sha1(jsonencode(values(aws_api_gateway_integration.ncaambb_cors)[*].id)),
       sha1(jsonencode(values(aws_api_gateway_integration_response.ncaambb_cors)[*].id)),

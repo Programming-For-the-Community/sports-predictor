@@ -35,6 +35,13 @@ resource "aws_lambda_function" "ncaambb_predict" {
       EVENTS_TABLE_NAME            = aws_dynamodb_table.events.name
       PLAYER_GAME_STATS_TABLE_NAME = aws_dynamodb_table.player_game_stats.name
       TEAM_GAME_STATS_TABLE_NAME   = aws_dynamodb_table.team_game_stats.name
+      # Read-only here (see iam-lambda-inference.tf's own scoped
+      # ReadConferenceMembershipCache statement) -- season_projection.py
+      # reads schedule-sync's own daily conference-membership cache
+      # instead of calling ESPN itself, since this Lambda has no route
+      # to the public internet at all (see season_projection.py's own
+      # docstring).
+      RAW_BUCKET_NAME = aws_s3_bucket.raw_data_lake.bucket
     }
   }
 

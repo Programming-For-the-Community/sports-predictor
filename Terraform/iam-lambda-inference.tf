@@ -98,6 +98,21 @@ data "aws_iam_policy_document" "lambda_inference_permissions" {
     resources = ["arn:aws:s3:::${local.model_artifacts_bucket}/predictions-cache/*"]
   }
 
+  # ncaambb_predict's own season_projection.py reads schedule-sync's
+  # daily-refreshed conference-membership cache from the RAW bucket
+  # (a different bucket from every other statement here) instead of
+  # calling ESPN live -- this Lambda has no route to the public internet
+  # at all (no NAT Gateway; its security group only opens 443 to the
+  # S3/DynamoDB VPC Gateway Endpoints' own prefix lists, which this read
+  # still travels over since it's still S3 traffic). Scoped to that one
+  # prefix, not the whole raw bucket -- every other sport's predict
+  # Lambda shares this role but has no reason to ever read it.
+  statement {
+    sid       = "ReadConferenceMembershipCache"
+    actions   = ["s3:GetObject"]
+    resources = ["arn:aws:s3:::${local.raw_bucket_name}/ncaambb/conference-membership/*"]
+  }
+
   # predict-read's async invoke of predict on a prediction-cache miss
   # (library.aws.lambda_invoker).
   statement {

@@ -31,3 +31,8 @@ output "ncaambb_predict_read_function_name" {
   description = "NCAA MBB predict-read Lambda function name -- passed to ncaambb_deploy workflow's predict_read_deploy job for `aws lambda update-function-code`"
   value       = aws_lambda_function.ncaambb_predict_read.function_name
 }
+
+output "ncaambb_live_scores_function_name" {
+  description = "NCAA MBB live-scores Lambda function name -- passed to ncaambb_deploy workflow's live_scores_deploy job for `aws lambda update-function-code`"
+  value       = aws_lambda_function.ncaambb_live_scores.function_name
+}

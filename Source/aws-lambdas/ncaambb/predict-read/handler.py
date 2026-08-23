@@ -26,9 +26,10 @@ computation asynchronously:
     - Cached negative result (event not ingested, no model promoted): its
       own mapped status code (404/422/503).
 
-/ncaambb/season currently always 503s (season_projection.py's own
-scheduled write is step 8, not built yet) -- see library.serving.
-ncaambb_reads.get_season_projection's own docstring.
+/ncaambb/season 503s until season_projection.py's own daily scheduled
+write (Terraform/scheduler-ncaambb-season-projection.tf) has run at
+least once -- see library.serving.ncaambb_reads.get_season_projection's
+own docstring.
 
 No ML dependencies -- zip-packaged, not the predict Lambda's container image.
 """

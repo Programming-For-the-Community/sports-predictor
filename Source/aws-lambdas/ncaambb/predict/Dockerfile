@@ -14,13 +14,6 @@
 # boto3 is intentionally excluded from requirements.txt -- the Lambda
 # Python base image ships it preinstalled, same as the managed (zip)
 # runtime does.
-#
-# COPY list below is season_projection.py/season_simulation.py-free for
-# now -- neither exists until step 8 (season simulation + conference/
-# March Madness brackets). NBA's own predict Lambda broke cold-start
-# twice from a new same-directory module never reaching this list (see
-# project-nba-onboarding memory) -- when step 8 adds those two files,
-# they go in here in the SAME commit.
 
 FROM public.ecr.aws/lambda/python:3.12 AS builder
 
@@ -47,6 +40,7 @@ RUN dnf install -y libgomp && dnf clean all
 COPY --from=builder /install ${LAMBDA_TASK_ROOT}
 COPY aws-lambdas/ncaambb/predict/handler.py aws-lambdas/ncaambb/predict/live_features.py \
      aws-lambdas/ncaambb/predict/model_loader.py aws-lambdas/ncaambb/predict/event_prediction.py \
+     aws-lambdas/ncaambb/predict/season_projection.py aws-lambdas/ncaambb/predict/season_simulation.py \
      ${LAMBDA_TASK_ROOT}/
 
 CMD ["handler.lambda_handler"]

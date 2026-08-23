@@ -44,6 +44,11 @@ _load_handler("ncaambb_predict", "aws-lambdas/ncaambb/predict/handler.py")
 # sys.path insert needed, just the same unique-module-name registration.
 _load_handler("ncaambb_predict_read", "aws-lambdas/ncaambb/predict-read/handler.py")
 
+# live-scores/'s own live_scores.py has a unique name -- same split as
+# predict/'s modules above.
+sys.path.insert(0, os.path.join(_src, "aws-lambdas", "ncaambb", "live-scores"))
+_load_handler("ncaambb_live_scores", "aws-lambdas/ncaambb/live-scores/handler.py")
+
 
 @pytest.fixture(autouse=True)
 def reset_ncaambb_predict_singletons():
@@ -56,10 +61,12 @@ def reset_ncaambb_predict_singletons():
     ncaambb_predict._storage = None
     ncaambb_predict._model_bucket = None
     ncaambb_predict._predictions_table = None
+    ncaambb_predict._raw_bucket = None
     yield
     ncaambb_predict._storage = None
     ncaambb_predict._model_bucket = None
     ncaambb_predict._predictions_table = None
+    ncaambb_predict._raw_bucket = None
 
 
 @pytest.fixture(autouse=True)
