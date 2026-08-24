@@ -663,17 +663,21 @@ class _MarchMadnessSection extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final regionOrder = bracket.regions.keys.toList()..sort();
-    final canCombine = regionOrder.length == 4 && bracket.finalFour.length == 2 && bracket.championship != null;
+    final canGrid = regionOrder.length == 4 && bracket.finalFour.length == 2 && bracket.championship != null;
 
+    // The grid path below places First Four cards itself, right next to
+    // the Round of 64 slot each one feeds -- only the independent-tree
+    // fallback (no fixed grid geometry to place them in) needs its own
+    // separate, unpositioned section.
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        if (bracket.firstFour.isNotEmpty) ...[
-          _FirstFourSection(sport: sport, matchups: bracket.firstFour, teamNames: bracket.teamNames),
-          const SizedBox(height: 20),
-        ],
-        if (!canCombine)
-          // Not the shape this combined layout assumes -- fall back to
+        if (!canGrid) ...[
+          if (bracket.firstFour.isNotEmpty) ...[
+            _FirstFourSection(sport: sport, matchups: bracket.firstFour, bracket: bracket),
+            const SizedBox(height: 20),
+          ],
+          // Not the shape this grid layout assumes -- fall back to
           // independent per-region trees.
           for (final region in regionOrder) ...[
             Padding(
@@ -682,52 +686,42 @@ class _MarchMadnessSection extends StatelessWidget {
             ),
             _BracketTree(sport: sport, rounds: bracket.regions[region]!.rounds, teamNames: bracket.teamNames),
             const SizedBox(height: 20),
-          ]
-        else
-          _buildCombinedTree(regionOrder),
+          ],
+        ] else
+          _MarchMadnessGrid(sport: sport, bracket: bracket, regionOrder: regionOrder),
       ],
-    );
-  }
-
-  Widget _buildCombinedTree(List<String> regionOrder) {
-    final regionRounds = {for (final name in regionOrder) name: bracket.regions[name]!.rounds};
-    final roundCount = regionRounds[regionOrder.first]!.length;
-
-    final combinedRounds = [
-      for (var r = 0; r < roundCount; r++)
-        BracketRound(
-          round: regionRounds[regionOrder.first]![r].round,
-          matchups: [for (final name in regionOrder) ...regionRounds[name]![r].matchups],
-        ),
-      BracketRound(round: 'Final Four', matchups: bracket.finalFour),
-      BracketRound(round: 'Championship', matchups: [bracket.championship!]),
-    ];
-
-    final combined = _computeMarchMadnessLayout(regionOrder, regionRounds);
-    final regionLabels = [for (final name in regionOrder) (name: name, slot: combined.regionOffset[name]!)];
-
-    return _BracketTree(
-      sport: sport,
-      rounds: combinedRounds,
-      teamNames: bracket.teamNames,
-      conferenceLabels: regionLabels,
-      precomputedLayout: combined.layout,
     );
   }
 }
 
-/// Not connected via lines to the region tree below -- each of the 4 games
-/// draws from a different, uneven mix of regions (a First Four winner's
-/// eventual region depends on the snake-seeding pass that runs after these
-/// games resolve), so there's no single clean slot to route a connector
-/// to the way NBA's own Play-In (always exactly 2 teams per elimination
-/// slot) has.
+/// Not drawn as a connector line into the region grid below -- either
+/// there's no fixed grid geometry to place it in (the independent-tree
+/// fallback, whole regions.length != 4 shape), or (a grid IS present, but
+/// this particular game's own predicted winner couldn't be matched into
+/// any region's Round of 64 -- shouldn't happen for a self-consistent
+/// payload, see _MarchMadnessGrid's own locateFirstFourDestination) --
+/// either way this section is the fallback, unpositioned rendering; each
+/// card names its resolved destination directly since it isn't drawn.
 class _FirstFourSection extends StatelessWidget {
-  const _FirstFourSection({required this.sport, required this.matchups, required this.teamNames});
+  const _FirstFourSection({required this.sport, required this.matchups, required this.bracket});
 
   final String sport;
   final List<BracketMatchup> matchups;
-  final Map<String, BracketTeamName> teamNames;
+  final MarchMadnessBracket bracket;
+
+  /// The region whose Round of 64 the matchup's predicted winner already
+  /// occupies -- null only if the region data doesn't contain that team
+  /// (shouldn't happen for a self-consistent payload).
+  String? _destinationRegion(BracketMatchup matchup) {
+    final winner = matchup.predictedWinner;
+    if (winner == null) return null;
+    for (final entry in bracket.regions.entries) {
+      final roundOfSixtyFour = entry.value.rounds.isEmpty ? null : entry.value.rounds.first;
+      if (roundOfSixtyFour == null) continue;
+      if (roundOfSixtyFour.matchups.any((m) => m.teamA == winner || m.teamB == winner)) return entry.key;
+    }
+    return null;
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -743,8 +737,25 @@ class _FirstFourSection extends StatelessWidget {
             for (final matchup in matchups)
               SizedBox(
                 width: _BracketTree._cardWidth,
-                height: _BracketTree._cardHeight,
-                child: _BracketMatchupCard(sport: sport, matchup: matchup, teamNames: teamNames, cardWidth: _BracketTree._cardWidth),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    SizedBox(
+                      height: _BracketTree._cardHeight,
+                      child: _BracketMatchupCard(sport: sport, matchup: matchup, teamNames: bracket.teamNames, cardWidth: _BracketTree._cardWidth),
+                    ),
+                    const SizedBox(height: 4),
+                    Builder(builder: (context) {
+                      final destination = _destinationRegion(matchup);
+                      return Text(
+                        destination == null ? 'Winner advances to Round of 64' : 'Winner → ${destination.toUpperCase()} • Round of 64',
+                        style: AppTextStyles.microLabel(color: AppColors.inkSub),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      );
+                    }),
+                  ],
+                ),
               ),
           ],
         ),
@@ -753,61 +764,366 @@ class _FirstFourSection extends StatelessWidget {
   }
 }
 
-/// Stacks each of the 4 regions as its own vertical band (same principle
-/// as _computeConferenceBracketLayout, generalized from 2 bands to 4), then
-/// adds 2 more merge stages on top: each pair of adjacent regions' own
-/// champions converge onto a Final Four slot positioned at their midpoint,
-/// and the 2 Final Four winners converge onto a single Championship slot.
-({_BracketSlotLayout layout, Map<String, double> regionOffset}) _computeMarchMadnessLayout(
-  List<String> regionOrder,
-  Map<String, List<BracketRound>> regionRounds,
-) {
-  final regionLayouts = {for (final name in regionOrder) name: _computeBracketSlotLayout(regionRounds[name]!)};
-  final roundCount = regionRounds[regionOrder.first]!.length;
+/// The traditional 4-quadrant March Madness grid: regionOrder[0]/[1]
+/// converge left-to-right into a Final Four card on the left half,
+/// regionOrder[2]/[3] converge right-to-left (mirrored -- Round of 64 on
+/// the outer/right edge, converging inward) into a Final Four card on the
+/// right half, and both Final Four winners meet at a single Championship
+/// card in the middle -- the same shape a printed bracket uses, unlike
+/// _BracketTree's single left-to-right tree (which is right for every
+/// other sport's bracket, none of which have 2 sides converging toward a
+/// shared center).
+///
+/// Each half reuses _computeConferenceBracketLayout unchanged (it already
+/// computes exactly "2 sources converge to 1 final matchup" -- the same
+/// shape NFL/NBA's own conference-split bracket needs); only the mapping
+/// from round index to horizontal position differs per half.
+class _MarchMadnessGrid extends StatelessWidget {
+  const _MarchMadnessGrid({required this.sport, required this.bracket, required this.regionOrder});
 
-  final offsets = <String, double>{};
-  var nextOffset = 0.0;
-  for (final name in regionOrder) {
-    offsets[name] = nextOffset;
+  final String sport;
+  final MarchMadnessBracket bracket;
+  final List<String> regionOrder;
+
+  static const double _cardWidth = _BracketTree._cardWidth;
+  static const double _cardHeight = _BracketTree._cardHeight;
+  static const double _roundGap = _BracketTree._roundGap;
+  static const double _verticalUnit = _BracketTree._verticalUnit;
+  static const double _headerHeight = _BracketTree._headerHeight;
+  static const double _columnWidth = _cardWidth + _roundGap;
+
+  // The Championship card is rendered larger than every other card in the
+  // grid -- it's the one slot every other card on the page ultimately
+  // feeds, and the mirrored grid shape (new for NCAA MBB) puts it in the
+  // visual middle rather than the far right edge _BracketTree's other
+  // sports end their bracket on, so it needs to read as the destination
+  // at a glance rather than just another card in the row.
+  static const double _championshipScale = 1.2;
+  static const double _championshipCardWidth = _cardWidth * _championshipScale;
+  static const double _championshipCardHeight = _cardHeight * _championshipScale;
+
+  @override
+  Widget build(BuildContext context) {
+    final leftRegionRounds = [bracket.regions[regionOrder[0]]!.rounds, bracket.regions[regionOrder[1]]!.rounds];
+    final rightRegionRounds = [bracket.regions[regionOrder[2]]!.rounds, bracket.regions[regionOrder[3]]!.rounds];
+
+    final left = _computeConferenceBracketLayout(leftRegionRounds[0], leftRegionRounds[1], bracket.finalFour[0]);
+    final right = _computeConferenceBracketLayout(rightRegionRounds[0], rightRegionRounds[1], bracket.finalFour[1]);
+
+    // Region rounds (Round of 64 .. Elite Eight) plus the Final Four round
+    // _computeConferenceBracketLayout appends -- both halves share this
+    // shape since every region is a fixed 16-team, no-bye field.
+    final halfColumns = leftRegionRounds[0].length + 1;
+    // First Four cards get their own outer column on whichever side they
+    // feed (see _firstFourPlacements) -- reserved on both sides whenever
+    // any First Four game exists, rather than computed per side, so the
+    // grid's own column math doesn't depend on which specific regions
+    // happen to draw a First Four game this run.
+    final hasFirstFour = bracket.firstFour.isNotEmpty;
+    final columnOffset = hasFirstFour ? 1 : 0;
+    final championshipColumn = halfColumns + columnOffset;
+    final firstFourLeftColumn = 0.0;
+    final firstFourRightColumn = (halfColumns * 2 + columnOffset + 1).toDouble();
+    double leftColumn(int round) => (round + columnOffset).toDouble();
+    double rightColumn(int round) => (halfColumns * 2 - round + columnOffset).toDouble();
+    double x(double column) => column * _columnWidth;
+    double y(double slot) => slot * _verticalUnit;
+    double yCenter(double slot) => y(slot) + _cardHeight / 2;
+
     var maxSlot = 0.0;
-    for (final roundSlots in regionLayouts[name]!.slots) {
-      for (final slot in roundSlots) {
-        if (slot > maxSlot) maxSlot = slot;
+    for (final layout in [left.layout, right.layout]) {
+      for (final roundSlots in layout.slots) {
+        for (final slot in roundSlots) {
+          if (slot > maxSlot) maxSlot = slot;
+        }
       }
     }
-    nextOffset += maxSlot + 1;
+
+    final leftFinalFourSlot = left.layout.slots[halfColumns - 1][0];
+    final rightFinalFourSlot = right.layout.slots[halfColumns - 1][0];
+    final championshipSlot = (leftFinalFourSlot + rightFinalFourSlot) / 2;
+
+    // Round r's matchups, in the same left-then-right-region concatenation
+    // order _computeConferenceBracketLayout used to build left/right.layout
+    // -- index i into a round's slots always lines up with index i here.
+    // Round halfColumns - 1 is the appended Final Four round, a single
+    // matchup outside either region's own rounds.
+    List<BracketMatchup> leftRoundMatchups(int r) =>
+        r < halfColumns - 1 ? [...leftRegionRounds[0][r].matchups, ...leftRegionRounds[1][r].matchups] : [bracket.finalFour[0]];
+    List<BracketMatchup> rightRoundMatchups(int r) =>
+        r < halfColumns - 1 ? [...rightRegionRounds[0][r].matchups, ...rightRegionRounds[1][r].matchups] : [bracket.finalFour[1]];
+    String roundLabel(List<BracketRound> regionRounds, int r) => r < halfColumns - 1 ? regionRounds[r].round : 'Final Four';
+
+    // Each First Four game's predicted winner already holds a fixed,
+    // known Round-of-64 slot (see season_projection.py's own
+    // _march_madness_bracket_payload docstring -- region assignment is
+    // seeded off that same predicted winner) -- find which side's
+    // Round-of-64 list contains it and at what index, so the card can be
+    // drawn at that row instead of in an unpositioned list. Null (should
+    // not happen for a self-consistent payload) means this game is
+    // skipped from the grid rather than crashing on a missing match.
+    ({bool isLeft, int index})? locateFirstFourDestination(BracketMatchup matchup) {
+      final winner = matchup.predictedWinner;
+      if (winner == null) return null;
+      final leftIndex = leftRoundMatchups(0).indexWhere((m) => m.teamA == winner || m.teamB == winner);
+      if (leftIndex != -1) return (isLeft: true, index: leftIndex);
+      final rightIndex = rightRoundMatchups(0).indexWhere((m) => m.teamA == winner || m.teamB == winner);
+      if (rightIndex != -1) return (isLeft: false, index: rightIndex);
+      return null;
+    }
+
+    final firstFourPlacements = [
+      for (final matchup in bracket.firstFour)
+        if (locateFirstFourDestination(matchup) case final destination?) (matchup: matchup, destination: destination),
+    ];
+    final hasLeftFirstFour = firstFourPlacements.any((p) => p.destination.isLeft);
+    final hasRightFirstFour = firstFourPlacements.any((p) => !p.destination.isLeft);
+    final unresolvedFirstFour = [
+      for (final matchup in bracket.firstFour)
+        if (locateFirstFourDestination(matchup) == null) matchup,
+    ];
+
+    final segments = <_GridSegment>[
+      ..._sideSegments(left.layout.connections, leftColumn, yCenter, mirrored: false),
+      ..._sideSegments(right.layout.connections, rightColumn, yCenter, mirrored: true),
+      ..._elbow(
+        Offset(x(leftColumn(halfColumns - 1)) + _cardWidth, yCenter(leftFinalFourSlot)),
+        Offset(x(championshipColumn.toDouble()), yCenter(championshipSlot)),
+        dashed: false,
+      ),
+      ..._elbow(
+        Offset(x(rightColumn(halfColumns - 1)), yCenter(rightFinalFourSlot)),
+        Offset(x(championshipColumn.toDouble()) + _cardWidth, yCenter(championshipSlot)),
+        dashed: false,
+      ),
+      for (final placement in firstFourPlacements)
+        ..._elbow(
+          placement.destination.isLeft
+              ? Offset(x(firstFourLeftColumn) + _cardWidth, yCenter(left.layout.slots[0][placement.destination.index]))
+              : Offset(x(firstFourRightColumn), yCenter(right.layout.slots[0][placement.destination.index])),
+          placement.destination.isLeft
+              ? Offset(x(leftColumn(0)), yCenter(left.layout.slots[0][placement.destination.index]))
+              : Offset(x(rightColumn(0)) + _cardWidth, yCenter(right.layout.slots[0][placement.destination.index])),
+          dashed: false,
+        ),
+    ];
+
+    final rightmostColumn = hasFirstFour ? firstFourRightColumn : rightColumn(0);
+    final totalWidth = (rightmostColumn + 1) * _columnWidth - _roundGap;
+    final totalHeight = maxSlot * _verticalUnit + _cardHeight;
+
+    Widget regionLabel(String name, double column, double slot) => Positioned(
+          left: x(column),
+          top: y(slot) - _headerHeight,
+          width: _cardWidth,
+          child: Text(name.toUpperCase(), style: AppTextStyles.microLabel(color: AppColors.cyan), maxLines: 1, overflow: TextOverflow.ellipsis),
+        );
+
+    Widget roundHeader(String label, double column, {double width = _cardWidth}) => Positioned(
+          left: x(column),
+          width: width,
+          child: Text(label.toUpperCase(), style: AppTextStyles.microLabel(), maxLines: 1, overflow: TextOverflow.ellipsis),
+        );
+
+    Widget card(BracketMatchup matchup, double column, double slot) => Positioned(
+          left: x(column),
+          top: y(slot),
+          width: _cardWidth,
+          height: _cardHeight,
+          child: _BracketMatchupCard(sport: sport, matchup: matchup, teamNames: bracket.teamNames, cardWidth: _cardWidth),
+        );
+
+    // Centered on the same column/slot a same-size card would use, just
+    // scaled up around that center point -- keeps it aligned with the
+    // connector lines converging on it from both Final Four cards.
+    final championshipLeft = x(championshipColumn.toDouble()) - (_championshipCardWidth - _cardWidth) / 2;
+    final championshipTop = y(championshipSlot) - (_championshipCardHeight - _cardHeight) / 2;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        if (unresolvedFirstFour.isNotEmpty) ...[
+          _FirstFourSection(sport: sport, matchups: unresolvedFirstFour, bracket: bracket),
+          const SizedBox(height: 20),
+        ],
+        _HorizontalScrollableBracket(
+          width: totalWidth,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              SizedBox(
+                height: _headerHeight,
+                child: Stack(
+                  clipBehavior: Clip.none,
+                  children: [
+                    if (hasLeftFirstFour) roundHeader('First Four', firstFourLeftColumn),
+                    for (var r = 0; r < halfColumns; r++) roundHeader(roundLabel(leftRegionRounds[0], r), leftColumn(r)),
+                    for (var r = 0; r < halfColumns; r++) roundHeader(roundLabel(rightRegionRounds[0], r), rightColumn(r)),
+                    if (hasRightFirstFour) roundHeader('First Four', firstFourRightColumn),
+                    roundHeader('Championship', championshipColumn.toDouble(), width: _championshipCardWidth),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 10 + _headerHeight),
+              SizedBox(
+                width: totalWidth,
+                height: totalHeight,
+                child: Stack(
+                  clipBehavior: Clip.none,
+                  children: [
+                    regionLabel(regionOrder[0], leftColumn(0), 0),
+                    regionLabel(regionOrder[1], leftColumn(0), left.conferenceBOffset),
+                    regionLabel(regionOrder[2], rightColumn(0), 0),
+                    regionLabel(regionOrder[3], rightColumn(0), right.conferenceBOffset),
+                    Positioned.fill(child: CustomPaint(painter: _GridConnectorPainter(segments: segments, color: AppColors.inkSub))),
+                    for (var r = 0; r < halfColumns; r++)
+                      for (var i = 0; i < left.layout.slots[r].length; i++)
+                        card(leftRoundMatchups(r)[i], leftColumn(r), left.layout.slots[r][i]),
+                    for (var r = 0; r < halfColumns; r++)
+                      for (var i = 0; i < right.layout.slots[r].length; i++)
+                        card(rightRoundMatchups(r)[i], rightColumn(r), right.layout.slots[r][i]),
+                    for (final placement in firstFourPlacements)
+                      card(
+                        placement.matchup,
+                        placement.destination.isLeft ? firstFourLeftColumn : firstFourRightColumn,
+                        placement.destination.isLeft
+                            ? left.layout.slots[0][placement.destination.index]
+                            : right.layout.slots[0][placement.destination.index],
+                      ),
+                    Positioned(
+                      left: championshipLeft,
+                      top: championshipTop,
+                      width: _championshipCardWidth,
+                      height: _championshipCardHeight,
+                      child: _ChampionshipCard(sport: sport, matchup: bracket.championship!, teamNames: bracket.teamNames),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+/// The Championship card's own gradient border + glow -- see
+/// _MarchMadnessGrid's own _championshipScale docstring for why this
+/// slot specifically gets emphasis every other bracket card doesn't.
+class _ChampionshipCard extends StatelessWidget {
+  const _ChampionshipCard({required this.sport, required this.matchup, required this.teamNames});
+
+  final String sport;
+  final BracketMatchup matchup;
+  final Map<String, BracketTeamName> teamNames;
+
+  @override
+  Widget build(BuildContext context) {
+    // The outer box is unfilled -- only its boxShadow (the glow) and the
+    // 2px gradient ring below it are visible. That ring is the "border":
+    // _BracketMatchupCard's own card fully covers everything inside it
+    // with its normal (same-as-every-other-card) background, leaving only
+    // this thin band showing the gradient underneath.
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(16),
+        boxShadow: [BoxShadow(color: AppColors.cyan.withValues(alpha: 0.25), blurRadius: 24, spreadRadius: 2)],
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(2),
+        child: DecoratedBox(
+          decoration: BoxDecoration(borderRadius: BorderRadius.circular(14), gradient: AppColors.brandMark),
+          child: Padding(
+            padding: const EdgeInsets.all(1.5),
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(13),
+              child: _BracketMatchupCard(sport: sport, matchup: matchup, teamNames: teamNames, cardWidth: _MarchMadnessGrid._championshipCardWidth),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// A resolved straight-line piece of a connector, in absolute pixel
+/// coordinates -- unlike _BracketConnection (round/slot, resolved by
+/// _BracketConnectorPainter using a single left-to-right mapping),
+/// _MarchMadnessGrid's two halves use different round-to-column mappings
+/// (one mirrored), so its segments are resolved to coordinates upfront
+/// instead.
+class _GridSegment {
+  const _GridSegment(this.from, this.to, this.dashed);
+  final Offset from;
+  final Offset to;
+  final bool dashed;
+}
+
+List<_GridSegment> _elbow(Offset from, Offset to, {required bool dashed}) {
+  final midX = (from.dx + to.dx) / 2;
+  return [
+    _GridSegment(from, Offset(midX, from.dy), dashed),
+    _GridSegment(Offset(midX, from.dy), Offset(midX, to.dy), dashed),
+    _GridSegment(Offset(midX, to.dy), to, dashed),
+  ];
+}
+
+/// Resolves one half's own _BracketConnection list (round/slot, as
+/// _computeConferenceBracketLayout produced it) into absolute-coordinate
+/// elbow segments. `mirrored: false` exits a source card's right edge and
+/// enters a destination card's left edge (round index increases
+/// left-to-right, same as _BracketConnectorPainter); `mirrored: true`
+/// exits the source's left edge and enters the destination's right edge
+/// (round index increases right-to-left, since the source round sits to
+/// the destination round's right in the mirrored half).
+List<_GridSegment> _sideSegments(
+  List<_BracketConnection> connections,
+  double Function(int round) column,
+  double Function(double slot) yCenter, {
+  required bool mirrored,
+}) {
+  final segments = <_GridSegment>[];
+  for (final c in connections) {
+    final fromX = column(c.fromRound) * _MarchMadnessGrid._columnWidth + (mirrored ? 0 : _MarchMadnessGrid._cardWidth);
+    final toX = column(c.toRound) * _MarchMadnessGrid._columnWidth + (mirrored ? _MarchMadnessGrid._cardWidth : 0);
+    segments.addAll(_elbow(Offset(fromX, yCenter(c.fromSlot)), Offset(toX, yCenter(c.toSlot)), dashed: c.isSkip));
+  }
+  return segments;
+}
+
+class _GridConnectorPainter extends CustomPainter {
+  const _GridConnectorPainter({required this.segments, required this.color});
+  final List<_GridSegment> segments;
+  final Color color;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final paint = Paint()
+      ..color = color
+      ..strokeWidth = 1.5
+      ..style = PaintingStyle.stroke;
+    for (final segment in segments) {
+      if (!segment.dashed) {
+        canvas.drawLine(segment.from, segment.to, paint);
+        continue;
+      }
+      const dashLength = 5.0;
+      const gapLength = 4.0;
+      final total = (segment.to - segment.from).distance;
+      if (total == 0) continue;
+      final direction = (segment.to - segment.from) / total;
+      var walked = 0.0;
+      while (walked < total) {
+        final segmentEnd = (walked + dashLength).clamp(0.0, total);
+        canvas.drawLine(segment.from + direction * walked, segment.from + direction * segmentEnd, paint);
+        walked += dashLength + gapLength;
+      }
+    }
   }
 
-  final connections = <_BracketConnection>[
-    for (final name in regionOrder)
-      for (final c in regionLayouts[name]!.connections)
-        _BracketConnection(c.fromRound, c.fromSlot + offsets[name]!, c.toRound, c.toSlot + offsets[name]!),
-  ];
-
-  final slots = <List<double>>[
-    for (var r = 0; r < roundCount; r++)
-      [for (final name in regionOrder) for (final slot in regionLayouts[name]!.slots[r]) slot + offsets[name]!],
-  ];
-
-  // Each region's own last round (Elite Eight) resolves to exactly one
-  // matchup -- its own slot is that region champion's position.
-  double regionChampionSlot(String name) => regionLayouts[name]!.slots[roundCount - 1][0] + offsets[name]!;
-  final finalFourSlots = [
-    (regionChampionSlot(regionOrder[0]) + regionChampionSlot(regionOrder[1])) / 2,
-    (regionChampionSlot(regionOrder[2]) + regionChampionSlot(regionOrder[3])) / 2,
-  ];
-  connections.add(_BracketConnection(roundCount - 1, regionChampionSlot(regionOrder[0]), roundCount, finalFourSlots[0]));
-  connections.add(_BracketConnection(roundCount - 1, regionChampionSlot(regionOrder[1]), roundCount, finalFourSlots[0]));
-  connections.add(_BracketConnection(roundCount - 1, regionChampionSlot(regionOrder[2]), roundCount, finalFourSlots[1]));
-  connections.add(_BracketConnection(roundCount - 1, regionChampionSlot(regionOrder[3]), roundCount, finalFourSlots[1]));
-  slots.add(finalFourSlots);
-
-  final championshipSlot = (finalFourSlots[0] + finalFourSlots[1]) / 2;
-  connections.add(_BracketConnection(roundCount, finalFourSlots[0], roundCount + 1, championshipSlot));
-  connections.add(_BracketConnection(roundCount, finalFourSlots[1], roundCount + 1, championshipSlot));
-  slots.add([championshipSlot]);
-
-  return (layout: _BracketSlotLayout(slots, connections), regionOffset: offsets);
+  @override
+  bool shouldRepaint(covariant _GridConnectorPainter oldDelegate) => oldDelegate.segments != segments;
 }
 
 /// One resolved bracket slot's position, in "slot units" (1 unit = one
@@ -1125,88 +1441,125 @@ class _BracketTree extends StatelessWidget {
           ),
           const SizedBox(height: 12),
         ],
-        SingleChildScrollView(
-          scrollDirection: Axis.horizontal,
-          child: SizedBox(
-            width: totalWidth,
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                SizedBox(
-                  height: _headerHeight,
-                  child: Stack(
-                    children: [
-                      for (var r = 0; r < rounds.length; r++)
-                        Positioned(
-                      left: r * (_cardWidth + _roundGap),
-                      width: _cardWidth,
-                      child: Text(
-                        rounds[r].round.toUpperCase(),
-                        style: AppTextStyles.microLabel(),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ),
-                ],
-              ),
-            ),
-            SizedBox(height: conferenceLabels.isEmpty ? 10 : 10 + _headerHeight),
-            SizedBox(
-              width: totalWidth,
-              height: totalHeight,
-              child: Stack(
-                // conferenceLabels can sit above the first card's top (a
-                // negative `top`); Stack clips by default, which would
-                // silently drop that label.
-                clipBehavior: Clip.none,
-                children: [
-                  for (final label in conferenceLabels)
-                    Positioned(
-                      left: 0,
-                      top: label.slot * _verticalUnit - _headerHeight,
-                      width: _cardWidth,
-                      child: Text(
-                        label.name.toUpperCase(),
-                        style: AppTextStyles.microLabel(color: AppColors.cyan),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ),
-                  Positioned.fill(
-                    child: CustomPaint(
-                      painter: _BracketConnectorPainter(
-                        connections: layout.connections,
-                        color: AppColors.inkSub,
-                        skipColor: AppColors.violet,
-                        cardWidth: _cardWidth,
-                        cardHeight: _cardHeight,
-                        roundGap: _roundGap,
-                        verticalUnit: _verticalUnit,
-                      ),
-                    ),
-                  ),
-                  for (var r = 0; r < rounds.length; r++)
-                    for (var i = 0; i < rounds[r].matchups.length; i++)
+        _HorizontalScrollableBracket(
+          width: totalWidth,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              SizedBox(
+                height: _headerHeight,
+                child: Stack(
+                  children: [
+                    for (var r = 0; r < rounds.length; r++)
                       Positioned(
                         left: r * (_cardWidth + _roundGap),
-                        top: layout.slots[r][i] * _verticalUnit,
                         width: _cardWidth,
-                        height: _cardHeight,
-                        child: _BracketMatchupCard(
-                          sport: sport,
-                          matchup: rounds[r].matchups[i],
-                          teamNames: teamNames,
-                          cardWidth: _cardWidth,
+                        child: Text(
+                          rounds[r].round.toUpperCase(),
+                          style: AppTextStyles.microLabel(),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
                         ),
                       ),
-                ],
+                  ],
+                ),
               ),
-            ),
-          ],
-        ),
-      ),
+              SizedBox(height: conferenceLabels.isEmpty ? 10 : 10 + _headerHeight),
+              SizedBox(
+                width: totalWidth,
+                height: totalHeight,
+                child: Stack(
+                  // conferenceLabels can sit above the first card's top (a
+                  // negative `top`); Stack clips by default, which would
+                  // silently drop that label.
+                  clipBehavior: Clip.none,
+                  children: [
+                    for (final label in conferenceLabels)
+                      Positioned(
+                        left: 0,
+                        top: label.slot * _verticalUnit - _headerHeight,
+                        width: _cardWidth,
+                        child: Text(
+                          label.name.toUpperCase(),
+                          style: AppTextStyles.microLabel(color: AppColors.cyan),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                    Positioned.fill(
+                      child: CustomPaint(
+                        painter: _BracketConnectorPainter(
+                          connections: layout.connections,
+                          color: AppColors.inkSub,
+                          skipColor: AppColors.violet,
+                          cardWidth: _cardWidth,
+                          cardHeight: _cardHeight,
+                          roundGap: _roundGap,
+                          verticalUnit: _verticalUnit,
+                        ),
+                      ),
+                    ),
+                    for (var r = 0; r < rounds.length; r++)
+                      for (var i = 0; i < rounds[r].matchups.length; i++)
+                        Positioned(
+                          left: r * (_cardWidth + _roundGap),
+                          top: layout.slots[r][i] * _verticalUnit,
+                          width: _cardWidth,
+                          height: _cardHeight,
+                          child: _BracketMatchupCard(
+                            sport: sport,
+                            matchup: rounds[r].matchups[i],
+                            teamNames: teamNames,
+                            cardWidth: _cardWidth,
+                          ),
+                        ),
+                  ],
+                ),
+              ),
+            ],
+          ),
         ),
       ],
+    );
+  }
+}
+
+/// A horizontally-scrollable region with a permanently visible, draggable
+/// Scrollbar -- shares _BracketTreeState's own reasoning (Scrollbar.
+/// thumbVisibility needs an explicit ScrollController, and desktop web
+/// doesn't click-drag a plain SingleChildScrollView by default) without
+/// needing _MarchMadnessGrid itself to become a StatefulWidget just to
+/// own one -- its own build() already reads a lot of local fields that
+/// would all need a `widget.` prefix for no other reason.
+class _HorizontalScrollableBracket extends StatefulWidget {
+  const _HorizontalScrollableBracket({required this.width, required this.child});
+
+  final double width;
+  final Widget child;
+
+  @override
+  State<_HorizontalScrollableBracket> createState() => _HorizontalScrollableBracketState();
+}
+
+class _HorizontalScrollableBracketState extends State<_HorizontalScrollableBracket> {
+  final _scrollController = ScrollController();
+
+  @override
+  void dispose() {
+    _scrollController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scrollbar(
+      controller: _scrollController,
+      thumbVisibility: true,
+      child: SingleChildScrollView(
+        controller: _scrollController,
+        scrollDirection: Axis.horizontal,
+        child: SizedBox(width: widget.width, child: widget.child),
+      ),
     );
   }
 }

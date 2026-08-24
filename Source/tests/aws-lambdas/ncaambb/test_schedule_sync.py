@@ -14,7 +14,7 @@ MBB's ESPN scoreboard has no preseason concept to skip.
 The ncaambb_schedule_sync module is registered in sys.modules by
 conftest.py.
 """
-from datetime import date
+from datetime import date, datetime, timedelta, timezone
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -150,7 +150,9 @@ class TestLambdaHandler:
         mock_client = MagicMock()
         mock_client.get_scoreboard_for_date.return_value = _scoreboard([])
         mock_s3 = MagicMock()
-        mock_s3.head_object.return_value = {}  # every date "already exists"
+        # every date "already exists" and was synced recently enough to
+        # not be stale either
+        mock_s3.head_object.return_value = {"LastModified": datetime.now(timezone.utc)}
 
         with patch.object(ncaambb_schedule_sync, "NCAAMBBClient", return_value=mock_client), \
              patch.object(ncaambb_schedule_sync, "_s3", mock_s3):
@@ -169,7 +171,7 @@ class TestLambdaHandler:
         mock_client = MagicMock()
         mock_client.get_scoreboard_for_date.return_value = _scoreboard([_event(season_type=2)])
         mock_s3 = MagicMock()
-        mock_s3.head_object.return_value = {}  # every date "already exists"
+        mock_s3.head_object.return_value = {"LastModified": datetime.now(timezone.utc)}  # every date "already exists"
 
         with patch.object(ncaambb_schedule_sync, "NCAAMBBClient", return_value=mock_client), \
              patch.object(ncaambb_schedule_sync, "_s3", mock_s3):
@@ -177,6 +179,40 @@ class TestLambdaHandler:
 
         assert result["refreshed"] == ncaambb_schedule_sync.SCHEDULE_SYNC_REFRESH_WINDOW_DAYS
         assert mock_s3.put_object.call_count == ncaambb_schedule_sync.SCHEDULE_SYNC_REFRESH_WINDOW_DAYS
+
+    def test_a_date_synced_beyond_the_refresh_window_but_stale_is_refetched(self):
+        mock_client = MagicMock()
+        mock_client.get_scoreboard_for_date.return_value = _scoreboard([])
+        mock_s3 = MagicMock()
+        stale_cutoff = timedelta(days=ncaambb_schedule_sync.SCHEDULE_SYNC_REVALIDATION_DAYS)
+        mock_s3.head_object.return_value = {"LastModified": datetime.now(timezone.utc) - stale_cutoff - timedelta(days=1)}
+
+        with patch.object(ncaambb_schedule_sync, "NCAAMBBClient", return_value=mock_client), \
+             patch.object(ncaambb_schedule_sync, "_s3", mock_s3):
+            result = ncaambb_schedule_sync.lambda_handler({}, None)
+
+        # Every date is beyond the refresh window here, but also stale --
+        # a conference that only published its schedule after this
+        # Lambda's first walk needs a chance to be picked up.
+        assert mock_client.get_scoreboard_for_date.call_count == ncaambb_schedule_sync.SCHEDULE_SYNC_MAX_LOOKAHEAD_DAYS
+        assert result["refreshed"] == ncaambb_schedule_sync.SCHEDULE_SYNC_MAX_LOOKAHEAD_DAYS
+        assert result["skipped"] == 0
+
+    def test_a_date_synced_beyond_the_refresh_window_and_within_the_revalidation_cadence_is_skipped(self):
+        mock_client = MagicMock()
+        mock_client.get_scoreboard_for_date.return_value = _scoreboard([])
+        mock_s3 = MagicMock()
+        fresh_cutoff = timedelta(days=ncaambb_schedule_sync.SCHEDULE_SYNC_REVALIDATION_DAYS)
+        mock_s3.head_object.return_value = {"LastModified": datetime.now(timezone.utc) - fresh_cutoff + timedelta(days=1)}
+
+        with patch.object(ncaambb_schedule_sync, "NCAAMBBClient", return_value=mock_client), \
+             patch.object(ncaambb_schedule_sync, "_s3", mock_s3):
+            result = ncaambb_schedule_sync.lambda_handler({}, None)
+
+        assert mock_client.get_scoreboard_for_date.call_count == ncaambb_schedule_sync.SCHEDULE_SYNC_REFRESH_WINDOW_DAYS
+        assert result["skipped"] == (
+            ncaambb_schedule_sync.SCHEDULE_SYNC_MAX_LOOKAHEAD_DAYS - ncaambb_schedule_sync.SCHEDULE_SYNC_REFRESH_WINDOW_DAYS
+        )
 
     def test_one_dates_failure_does_not_block_the_rest(self):
         mock_client = MagicMock()

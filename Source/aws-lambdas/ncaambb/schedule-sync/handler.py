@@ -67,6 +67,13 @@ scoreboard/box score unconditionally, regardless of what schedule-sync
 already wrote for it -- the refresh window just makes that correction
 happen days/weeks earlier, before the game, not only after.
 
+SCHEDULE_SYNC_REVALIDATION_DAYS handles a separate class of change this
+window doesn't: a date that wasn't wrong, just incomplete, when this
+Lambda first walked it (see that constant's own docstring) -- a
+conference publishing games it hadn't announced yet, not an existing
+game moving. That gap is re-checked periodically for the whole season,
+not just the near-term window.
+
 CONFERENCE MEMBERSHIP: also resolves and caches ESPN's live conference-
 group hierarchy (library.http.ncaambb_core.resolve_conference_membership)
 to ncaambb/conference-membership/{season}.json every run. This lives here
@@ -100,7 +107,7 @@ eventually-consistent piece of this pipeline already has.
 import json
 import logging
 import os
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
 
 import boto3
 from botocore.exceptions import ClientError
@@ -138,15 +145,30 @@ SCHEDULE_SYNC_MAX_LOOKAHEAD_DAYS = 270
 # notice before the game, not just after it's already happened.
 SCHEDULE_SYNC_REFRESH_WINDOW_DAYS = 14
 
+# Beyond the refresh window, a date already synced once still gets
+# periodically re-fetched at this cadence until it's actually played --
+# a different problem than RESCHEDULE HANDLING above (a real game moving
+# dates). Confirmed live, 2026-08-24: many NCAA MBB conferences don't
+# publish their conference schedule until well after this Lambda's first
+# full-season walk already marked that date's object "already written" --
+# a date fetched back when only a handful of conferences (e.g. the SEC)
+# had released their schedule stays stuck at that same handful of games
+# forever otherwise, since it's outside the 14-day refresh window for
+# months. Re-fetching every already-synced date this often (270 days /
+# 21 = ~13 extra ESPN calls/run) is cheap and keeps season_projection.py's
+# own remaining_games input converging toward complete as conferences
+# publish their schedules, instead of only catching up in the same
+# 2-week pre-game window a reschedule would.
+SCHEDULE_SYNC_REVALIDATION_DAYS = 21
+
 _s3 = boto3.client("s3")
 
 
-def _object_exists(key: str) -> bool:
+def _object_last_synced(key: str) -> datetime | None:
     try:
-        _s3.head_object(Bucket=RAW_BUCKET, Key=key)
-        return True
+        return _s3.head_object(Bucket=RAW_BUCKET, Key=key)["LastModified"]
     except ClientError:
-        return False
+        return None
 
 
 def _put_json(key: str, payload: dict) -> None:
@@ -203,9 +225,11 @@ def lambda_handler(event: dict, context) -> dict:
         target_date = (start + timedelta(days=offset)).strftime("%Y%m%d")
         scoreboard_key = f"ncaambb/scoreboard/{target_date}.json"
 
-        already_written = _object_exists(scoreboard_key)
+        last_synced = _object_last_synced(scoreboard_key)
+        already_written = last_synced is not None
         in_refresh_window = offset < SCHEDULE_SYNC_REFRESH_WINDOW_DAYS
-        if already_written and not in_refresh_window:
+        stale = already_written and datetime.now(timezone.utc) - last_synced > timedelta(days=SCHEDULE_SYNC_REVALIDATION_DAYS)
+        if already_written and not in_refresh_window and not stale:
             skipped += 1
             continue
 

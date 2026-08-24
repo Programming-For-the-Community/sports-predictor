@@ -36,9 +36,17 @@ zero new frontend code). The 64-team field is then S-curve/snake-seeded
 into 4 regions of 16 (no byes needed there); each region is its own
 project_single_elim_bracket (home_advantage=0.0 -- every NCAA tournament
 game is neutral-site); region champions meet at a Final Four, then a
-Championship, both neutral-site. Region names are generic ("Region A"..
-"Region D") -- this project doesn't have real geographic region-name
-data, and the model doesn't need it to pick winners.
+Championship, both neutral-site. Region names use the tournament's own
+traditional 4-name set (REGION_NAMES) -- which SPECIFIC teams land in
+which named region isn't real committee data (unknown before Selection
+Sunday, and this project doesn't try to predict it), but the 4 names
+themselves are fixed and known well in advance, unlike a placeholder
+label. REGION_NAMES is kept in alphabetical order deliberately --
+season_page.dart derives its own left/right grid pairing by sorting
+these same names, so this order is what determines which 2 regions
+converge into which Final Four game (see project_march_madness_bracket's
+own region_champions pairing below); reordering this list changes that
+pairing on both ends at once.
 
 Monte Carlo (simulate_season): DEFAULT_SIMULATIONS is deliberately lower
 than every other sport's 1000 (see this module's own constant) --
@@ -58,7 +66,8 @@ DEFAULT_SIMULATIONS = 200
 MARCH_MADNESS_FIELD_SIZE = 68
 FIRST_FOUR_CONTESTED_PER_POOL = 4
 REGION_COUNT = 4
-REGION_NAMES = ["Region A", "Region B", "Region C", "Region D"]
+# Alphabetical, deliberately -- see this module's own docstring.
+REGION_NAMES = ["East", "Midwest", "South", "West"]
 MARCH_MADNESS_REGION_ROUND_NAMES = ["Round of 64", "Round of 32", "Sweet 16", "Elite Eight"]
 
 

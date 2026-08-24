@@ -268,8 +268,26 @@ void main() {
   });
 
   testWidgets('a full 4-region March Madness bracket renders First Four, all 4 region labels, and the Championship, with no overlapping cards', (tester) async {
-    RegionBracket region(String championA, String championB, String champion) => RegionBracket(
+    // Region A gets a real Round of 64 (its First Four winner, '90', is
+    // one of the 2 entrants of its own first matchup) so the grid can
+    // actually resolve and place the First Four card; the other 3
+    // regions' Round of 64 is a placeholder pair feeding the same
+    // Elite Eight champion, just to keep every region's own round count
+    // consistent (see _MarchMadnessGrid's own halfColumns docstring).
+    RegionBracket region(String championA, String championB, String champion, {String? firstFourWinner}) => RegionBracket(
           rounds: [
+            BracketRound(round: 'Round of 64', matchups: [
+              BracketMatchup(
+                teamA: firstFourWinner ?? championA,
+                teamB: '${championA}x',
+                seedA: 16,
+                seedB: 1,
+                status: 'projected',
+                predictedWinner: championA,
+                winProbability: 0.6,
+              ),
+              BracketMatchup(teamA: championB, teamB: '${championB}x', seedA: 8, seedB: 9, status: 'projected', predictedWinner: championB, winProbability: 0.6),
+            ]),
             BracketRound(round: 'Elite Eight', matchups: [
               BracketMatchup(teamA: championA, teamB: championB, seedA: 1, seedB: 2, status: 'projected', predictedWinner: champion, winProbability: 0.6),
             ]),
@@ -287,7 +305,7 @@ void main() {
           BracketMatchup(teamA: '90', teamB: '91', status: 'projected', predictedWinner: '90', winProbability: 0.55),
         ],
         regions: {
-          'Region A': region('1', '2', '1'),
+          'Region A': region('1', '2', '1', firstFourWinner: '90'),
           'Region B': region('3', '4', '3'),
           'Region C': region('5', '6', '5'),
           'Region D': region('7', '8', '7'),
@@ -307,12 +325,37 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(tester.takeException(), isNull);
+    // The First Four card itself is drawn inside the grid, next to the
+    // Round of 64 slot its winner feeds -- only its own column header
+    // reads "FIRST FOUR" (region A's side only; region B/C/D's side never
+    // draws a First Four game this run).
     expect(find.text('FIRST FOUR'), findsOneWidget);
+    // '90' appears twice -- once in the First Four card itself, once as
+    // the Round of 64 destination slot's own teamA (see the region()
+    // fixture above).
+    expect(find.text('90'), findsNWidgets(2));
     for (final region in ['REGION A', 'REGION B', 'REGION C', 'REGION D']) {
       expect(find.text(region), findsOneWidget);
     }
-    expect(find.text('FINAL FOUR'), findsOneWidget);
+    // The traditional grid renders 2 Final Four columns (left half's and
+    // right half's, converging on the single Championship column between
+    // them), not 1 -- unlike a flat round-by-round tree.
+    expect(find.text('FINAL FOUR'), findsNWidgets(2));
     expect(find.text('CHAMPIONSHIP'), findsOneWidget);
+
+    // The First Four card sits at the same row as the Round of 64 slot
+    // its winner ('90') feeds -- checked via each card's own Positioned
+    // (not the team-row text's rendered position), since a seeded row's
+    // extra leading seed-number element shifts its own text's exact
+    // baseline by a few px from an unseeded row's -- real, pre-existing,
+    // and harmless (both cards' Positioned.top below prove the cards
+    // themselves, not just their teamA text, are on the identical row).
+    final cardPositions = tester
+        .widgetList<Positioned>(find.ancestor(of: find.text('90'), matching: find.byType(Positioned)))
+        .map((p) => p.top)
+        .toList();
+    expect(cardPositions, hasLength(2));
+    expect(cardPositions[0], equals(cardPositions[1]));
 
     // Same distinct-vertical-slot pattern as the NBA Play-In regression
     // tests below -- '1' appears in its own region's Elite Eight card and
@@ -325,6 +368,13 @@ void main() {
     final regionATop = tester.getTopLeft(find.text('REGION A')).dy;
     final regionBTop = tester.getTopLeft(find.text('REGION B')).dy;
     expect(regionATop, isNot(equals(regionBTop)));
+
+    // The grid is far wider than any phone/desktop viewport -- a visible,
+    // permanently-shown (not just on-hover) Scrollbar is the only
+    // affordance a user has that the right half exists at all, since
+    // desktop web doesn't click-drag a plain SingleChildScrollView.
+    final scrollbar = tester.widget<Scrollbar>(find.byType(Scrollbar).last);
+    expect(scrollbar.thumbVisibility, isTrue);
   });
 
   testWidgets('a completed bracket matchup shows the real score, not a probability', (tester) async {

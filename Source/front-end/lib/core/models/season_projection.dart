@@ -377,9 +377,10 @@ class MarchMadnessBracket {
   final List<BracketMatchup> firstFour;
 
   /// Region name -> that region's own bracket. Always 4 entries in
-  /// practice (see season_simulation.py's own REGION_NAMES), generic
-  /// names ("Region A"/etc) since the NCAA committee doesn't assign real
-  /// region names (East/West/etc) until Selection Sunday.
+  /// practice, keyed by the tournament's own traditional 4-name set (see
+  /// season_simulation.py's own REGION_NAMES) -- which specific teams
+  /// land in which named region isn't real committee data (unknown before
+  /// Selection Sunday), but the 4 names themselves are fixed.
   final Map<String, RegionBracket> regions;
 
   /// The 2 Final Four matchups (region champion vs region champion).

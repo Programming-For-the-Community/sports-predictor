@@ -228,14 +228,14 @@ class TestAssignRegions:
 
         assert len(regions) == ss.REGION_COUNT
         assert all(len(teams) == 16 for teams in regions.values())
-        # Seed line 1 (t1-t4) goes to regions A-D in order.
-        assert regions["Region A"][0] == "t1"
-        assert regions["Region B"][0] == "t2"
-        assert regions["Region C"][0] == "t3"
-        assert regions["Region D"][0] == "t4"
+        # Seed line 1 (t1-t4) goes to REGION_NAMES in order (East, Midwest, South, West).
+        assert regions["East"][0] == "t1"
+        assert regions["Midwest"][0] == "t2"
+        assert regions["South"][0] == "t3"
+        assert regions["West"][0] == "t4"
         # Seed line 2 (t5-t8) reverses direction (snake).
-        assert regions["Region D"][1] == "t5"
-        assert regions["Region A"][1] == "t8"
+        assert regions["West"][1] == "t5"
+        assert regions["East"][1] == "t8"
 
     def test_every_team_appears_exactly_once(self):
         field = [f"t{i}" for i in range(1, 65)]
