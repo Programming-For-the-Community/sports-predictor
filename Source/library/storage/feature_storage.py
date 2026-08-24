@@ -56,14 +56,23 @@ class FeatureStorage:
         ]
         return team_events[:limit] if limit is not None else team_events
 
-    def get_all_events(self, sport: str, status: str = "completed") -> list[dict]:
-        """Every event for a sport, most recent first, via the
-        sport-status-index GSI (range key is event_date, so no separate
-        sort is needed) -- Queries the sport directly instead of pulling
-        every sport at `status` off status-index and discarding the rest
-        in Python."""
+    def get_all_events(
+        self, sport: str, status: str = "completed", scan_index_forward: bool = False, limit: int | None = None,
+    ) -> list[dict]:
+        """Every event for a sport, most recent first (or soonest first,
+        scan_index_forward=True), via the sport-status-index GSI (range key
+        is event_date, so no separate sort is needed) -- Queries the sport
+        directly instead of pulling every sport at `status` off
+        status-index and discarding the rest in Python. limit bounds the
+        query to that many of the most-recent-or-soonest rows instead of
+        the whole history -- a caller that only needs the most recent/
+        soonest date's events (not full-season history, e.g. ELO) should
+        pass this; sorted by event_date, so a coarse limit still reliably
+        includes every event on that one date regardless of how long ago
+        or far ahead it falls."""
+        condition = Key("sport_status").eq(f"{sport}#{status}")
         return self._events_table.query(
-            Key("sport_status").eq(f"{sport}#{status}"), index_name="sport-status-index", scan_index_forward=False,
+            condition, index_name="sport-status-index", scan_index_forward=scan_index_forward, limit=limit,
         )
 
     def get_all_player_game_stats(self, sport: str) -> list[dict]:
@@ -71,10 +80,15 @@ class FeatureStorage:
         sport-index GSI."""
         return self._player_game_stats_table.query(Key("sport").eq(sport), index_name="sport-index")
 
-    def get_all_team_game_stats(self, sport: str) -> list[dict]:
+    def get_all_team_game_stats(self, sport: str, since_date: str | None = None) -> list[dict]:
         """Every team_game_stats row for one sport, unsorted, via the
-        sport-index GSI."""
-        return self._team_game_stats_table.query(Key("sport").eq(sport), index_name="sport-index")
+        sport-index GSI. since_date (inclusive, ISO 8601) bounds the query
+        to a recent window -- a caller that only needs each team's most
+        recent few games (not full-season history) should pass this."""
+        condition = Key("sport").eq(sport)
+        if since_date is not None:
+            condition = condition & Key("event_date").gte(since_date)
+        return self._team_game_stats_table.query(condition, index_name="sport-index")
 
     def get_team_game_stats_for_team(
         self, sport: str, entity_id: str, before_date: str | None = None, limit: int | None = None,

@@ -161,6 +161,27 @@ class TestBuildLiveEventFeatures:
         assert row["home_games_played"] == 0
         assert row["home_avg_rebounds"] is None
 
+    def test_bounds_the_team_game_stats_query_to_a_recent_window(self):
+        # Regression: get_all_team_game_stats used to be called with no
+        # date bound at all, reading a sport's whole season of rows (every
+        # team, every game) just to keep each team's last 5 -- throttled
+        # DynamoDB once NCAA MBB's real season volume made that partition
+        # large. See TEAM_GAME_STATS_LOOKBACK_DAYS's own comment.
+        storage = MagicMock()
+        event = _event("SPORT#NCAAMBB#EVENT#1", "2026-01-11", "13", "2")
+        storage.get_event.return_value = event
+        storage.get_team_events.return_value = []
+        storage.get_team_game_stats_for_team.return_value = []
+        storage.get_all_events.return_value = []
+        storage.get_all_team_game_stats.return_value = []
+
+        live_features.build_live_event_features(storage, "ncaambb", event["event_key"])
+
+        call = storage.get_all_team_game_stats.call_args
+        assert call.args[0] == "ncaambb"
+        assert call.kwargs["since_date"] < event["event_date"]
+        assert call.kwargs["since_date"] >= "2025-01-01"  # sane lower bound, not the whole history
+
 
 class TestBuildLivePlayerFeatures:
     def test_raises_when_event_not_found(self):

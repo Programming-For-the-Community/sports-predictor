@@ -87,11 +87,16 @@ class DynamoDBTable:
     ) -> list[dict]:
         """key_condition is a boto3.dynamodb.conditions expression built by
         the caller. Paginates until every matching item is collected or
-        `limit` is reached; `limit` caps the returned count, not the
-        internal page size."""
+        `limit` is reached. `limit` is also passed to DynamoDB as its own
+        per-page Limit, so a bounded call reads less data server-side too,
+        not just fewer round trips -- without it, a single page can still
+        read up to DynamoDB's own ~1MB page cap regardless of how small a
+        `limit` the caller passed."""
         kwargs = {"KeyConditionExpression": key_condition, "ScanIndexForward": scan_index_forward}
         if index_name is not None:
             kwargs["IndexName"] = index_name
+        if limit is not None:
+            kwargs["Limit"] = limit
 
         items: list[dict] = []
         response = self._table.query(**kwargs)

@@ -200,8 +200,12 @@ class BracketMatchup {
     this.predictedWinsB,
   });
 
-  final String teamA;
-  final String teamB;
+  // Null on the side that got a bye into this round -- see
+  // season_simulation.py's own project_single_elim_bracket docstring
+  // (conference tournaments and March Madness regions have field sizes
+  // that aren't always a power of two).
+  final String? teamA;
+  final String? teamB;
   final int? seedA;
   final int? seedB;
   final String status;
@@ -236,8 +240,8 @@ class BracketMatchup {
   bool get isSeries => winsA != null && winsB != null;
 
   factory BracketMatchup.fromJson(Map<String, dynamic> json) => BracketMatchup(
-        teamA: json['team_a'] as String,
-        teamB: json['team_b'] as String,
+        teamA: json['team_a'] as String?,
+        teamB: json['team_b'] as String?,
         status: json['status'] as String? ?? 'projected',
         seedA: json['seed_a'] as int?,
         seedB: json['seed_b'] as int?,

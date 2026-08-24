@@ -232,6 +232,32 @@ void main() {
     expect(find.textContaining('skipping the Elimination Game'), findsNothing);
   });
 
+  testWidgets('a bye matchup (null team_b) renders BYE instead of crashing', (tester) async {
+    final projection = SeasonProjection(
+      sport: 'ncaambb',
+      season: 2027,
+      standings: [],
+      leaderboards: null,
+      marchMadnessBracket: const BracketProjection(
+        conferences: {},
+        rounds: [
+          BracketRound(round: 'First Round', matchups: [
+            BracketMatchup(teamA: '9', teamB: null, seedA: 1, seedB: null, status: 'projected', predictedWinner: '9', winProbability: 1.0),
+          ]),
+        ],
+        teamNames: {},
+        champion: '9',
+      ),
+    );
+
+    await pumpSeasonPage(tester, 'ncaambb', projection);
+    await tester.tap(find.text('March Madness'));
+    await tester.pumpAndSettle();
+
+    expect(tester.takeException(), isNull);
+    expect(find.text('BYE'), findsOneWidget);
+  });
+
   testWidgets('a completed bracket matchup shows the real score, not a probability', (tester) async {
     final projection = SeasonProjection(
       sport: 'nfl',

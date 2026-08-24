@@ -37,6 +37,32 @@ def _event(event_key, event_date, home_id, away_id, status="scheduled", season=2
 
 
 class TestListEvents:
+    def test_completed_queries_get_all_events_most_recent_first_and_bounded(self):
+        # Regression: an unbounded get_all_events call here pulled a
+        # sport's entire completed-event history on every request, which
+        # throttled/timed out once NCAA MBB's real season volume made that
+        # partition large.
+        storage = MagicMock()
+        predictions_table = MagicMock()
+        storage.get_all_events.return_value = []
+
+        ncaambb_reads.list_events(storage, predictions_table, "ncaambb", "completed")
+
+        call = storage.get_all_events.call_args
+        assert call.kwargs.get("scan_index_forward", False) is False
+        assert call.kwargs["limit"] == ncaambb_reads._RECENT_EVENTS_LIMIT
+
+    def test_scheduled_queries_get_all_events_soonest_first_and_bounded(self):
+        storage = MagicMock()
+        predictions_table = MagicMock()
+        storage.get_all_events.return_value = []
+
+        ncaambb_reads.list_events(storage, predictions_table, "ncaambb", "scheduled")
+
+        call = storage.get_all_events.call_args
+        assert call.kwargs["scan_index_forward"] is True
+        assert call.kwargs["limit"] == ncaambb_reads._RECENT_EVENTS_LIMIT
+
     def test_scheduled_returns_only_the_soonest_date(self):
         storage = MagicMock()
         predictions_table = MagicMock()

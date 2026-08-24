@@ -26,6 +26,7 @@ get_team_events/_live_elo_ratings calls, so one event-prediction request
 can share a single fetch instead of each function re-querying.
 """
 from concurrent.futures import ThreadPoolExecutor
+from datetime import date, timedelta
 
 from library.features.common import DEFAULT_STARTING_RATING, compute_elo_ratings
 from library.features.ncaambb import build_event_features, build_player_features
@@ -33,6 +34,14 @@ from library.schema.keys import player_key
 
 DEFAULT_ROLLING_WINDOW = 5
 SEASON_LOOKBACK = 1
+
+# get_team_game_stats_for_team only keeps each team's DEFAULT_ROLLING_WINDOW
+# most recent games -- bounding the underlying get_all_team_game_stats
+# Query to this many days back (instead of every row ever written for the
+# sport) keeps it a recent-window Query, not a full-season partition read.
+# Generous relative to NCAA MBB's own ~2-3 games/week pace, including
+# through a holiday break.
+TEAM_GAME_STATS_LOOKBACK_DAYS = 60
 
 # Leaders-panel candidate generation -- box-score volume stat per category.
 # Matches library.serving.ncaambb_reads' own _CATEGORY_PRIMARY_STAT.
@@ -118,7 +127,8 @@ def build_live_event_features(
     home_id, away_id = _home_away_ids(event)
     before_date = event["event_date"]
     events = events if events is not None else storage.get_all_events(sport)
-    team_game_stats = storage.get_all_team_game_stats(sport)
+    since_date = (date.fromisoformat(before_date) - timedelta(days=TEAM_GAME_STATS_LOOKBACK_DAYS)).isoformat()
+    team_game_stats = storage.get_all_team_game_stats(sport, since_date=since_date)
 
     home_events = storage.get_team_events(sport, home_id, before_date=before_date, limit=window, events=events)
     away_events = storage.get_team_events(sport, away_id, before_date=before_date, limit=window, events=events)

@@ -109,6 +109,20 @@ class TestQuery:
             KeyConditionExpression=condition, ScanIndexForward=False, IndexName="entity-history",
         )
 
+    def test_passes_limit_as_dynamodbs_own_page_limit(self):
+        # Not just a client-side stop-early cap -- forwarded as DynamoDB's
+        # own Limit so a bounded call reads less data server-side too,
+        # otherwise a single page against a large partition can still cost
+        # up to DynamoDB's own ~1MB page regardless of how small `limit` is.
+        table, mock_boto_table = _make_table(query_pages=[{"Items": [{"id": "1"}]}])
+        condition = object()
+
+        table.query(condition, limit=50)
+
+        mock_boto_table.query.assert_called_once_with(
+            KeyConditionExpression=condition, ScanIndexForward=True, Limit=50,
+        )
+
     def test_paginates_until_no_last_evaluated_key(self):
         table, mock_boto_table = _make_table(query_pages=[
             {"Items": [{"id": "1"}], "LastEvaluatedKey": {"id": "1"}},

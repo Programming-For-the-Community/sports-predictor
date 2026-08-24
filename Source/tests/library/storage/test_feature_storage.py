@@ -84,6 +84,27 @@ class TestGetAllEvents:
         condition = mock_events.query.call_args.args[0]
         assert condition == Key("sport_status").eq("nfl#completed")
 
+    def test_defaults_to_no_limit(self, storage_env):
+        storage, _, mock_events, _, _ = _make_storage(storage_env)
+        mock_events.query.return_value = []
+
+        storage.get_all_events("nfl")
+
+        assert mock_events.query.call_args.kwargs["limit"] is None
+
+    def test_passes_limit_and_scan_index_forward_through(self, storage_env):
+        # list_events (ncaambb_reads.py) relies on this to cap a query to
+        # the most-recent (or, ascending, soonest) rows instead of pulling
+        # a sport's entire event history.
+        storage, _, mock_events, _, _ = _make_storage(storage_env)
+        mock_events.query.return_value = []
+
+        storage.get_all_events("ncaambb", status="scheduled", scan_index_forward=True, limit=400)
+
+        call = mock_events.query.call_args
+        assert call.kwargs["scan_index_forward"] is True
+        assert call.kwargs["limit"] == 400
+
 
 class TestGetTeamEvents:
     def test_filters_by_participant(self, storage_env):
@@ -165,6 +186,18 @@ class TestGetAllTeamGameStats:
         call = mock_team_stats.query.call_args
         assert call.args[0] == Key("sport").eq("nfl")
         assert call.kwargs["index_name"] == "sport-index"
+
+    def test_since_date_bounds_the_query(self, storage_env):
+        # live_features.py's build_live_event_features relies on this to
+        # avoid reading a whole season's rows for a query that only ever
+        # keeps each team's last few games.
+        storage, _, _, _, mock_team_stats = _make_storage(storage_env)
+        mock_team_stats.query.return_value = []
+
+        storage.get_all_team_game_stats("ncaambb", since_date="2026-12-01")
+
+        condition = mock_team_stats.query.call_args.args[0]
+        assert condition == Key("sport").eq("ncaambb") & Key("event_date").gte("2026-12-01")
 
 
 class TestGetTeamGameStatsForTeam:

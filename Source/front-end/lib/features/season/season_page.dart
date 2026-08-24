@@ -700,10 +700,14 @@ _BracketSlotLayout _computeBracketSlotLayout(List<BracketRound> rounds) {
     for (var i = 0; i < matchups.length; i++) {
       final matchup = matchups[i];
       final immediateSources = <double>[];
+      final currentSides = {matchup.teamA, matchup.teamB}..removeWhere((side) => side == null);
       for (var j = 0; j < previousMatchups.length; j++) {
         final previous = previousMatchups[j];
-        if (previous.teamA == matchup.teamA || previous.teamA == matchup.teamB ||
-            previous.teamB == matchup.teamA || previous.teamB == matchup.teamB) {
+        final previousSides = {previous.teamA, previous.teamB}..removeWhere((side) => side == null);
+        // A bye's own null side is never a "shared side" with another
+        // bye's null side -- both were removed above, so this only
+        // matches on a real team id appearing in both matchups.
+        if (previousSides.intersection(currentSides).isNotEmpty) {
           immediateSources.add(previousSlots[j]);
         }
       }
@@ -741,6 +745,7 @@ _BracketSlotLayout _computeBracketSlotLayout(List<BracketRound> rounds) {
     for (var i = 0; i < matchups.length; i++) {
       final matchup = matchups[i];
       for (final side in [matchup.teamA, matchup.teamB]) {
+        if (side == null) continue; // A bye side has no earlier-round game to trace a connector back to.
         for (var back = r - 1; back >= 0; back--) {
           final foundIndex = rounds[back].matchups.indexWhere((m) => m.teamA == side || m.teamB == side);
           if (foundIndex != -1) {
@@ -1210,7 +1215,9 @@ class _BracketTeamRow extends StatelessWidget {
   });
 
   final String sport;
-  final String teamId;
+  // Null for the side that got a bye into this round -- see
+  // BracketMatchup's own doc comment.
+  final String? teamId;
   final int? seed;
   final Map<String, BracketTeamName> teamNames;
   final bool isWinner;
@@ -1218,7 +1225,19 @@ class _BracketTeamRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final info = teamDisplayFor(sport, teamId, teamNames[teamId]?.abbreviation, apiColor: teamNames[teamId]?.color);
+    final id = teamId;
+    if (id == null) {
+      return Row(
+        children: [
+          if (seed != null)
+            SizedBox(width: 20, child: Text('$seed', style: AppTextStyles.microLabel(color: AppColors.inkMute))),
+          Expanded(
+            child: Text('BYE', style: AppTextStyles.body(color: AppColors.inkMute), overflow: TextOverflow.ellipsis),
+          ),
+        ],
+      );
+    }
+    final info = teamDisplayFor(sport, id, teamNames[id]?.abbreviation, apiColor: teamNames[id]?.color);
     return Row(
       children: [
         if (seed != null)
