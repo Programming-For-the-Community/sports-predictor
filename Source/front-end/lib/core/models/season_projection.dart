@@ -344,6 +344,68 @@ class BracketProjection {
   }
 }
 
+/// One March Madness region's own single-elimination bracket (Round of 64
+/// through Elite Eight -- the region's own champion advances to the Final
+/// Four). NCAA MBB only.
+class RegionBracket {
+  const RegionBracket({required this.rounds, this.champion});
+
+  final List<BracketRound> rounds;
+  final String? champion;
+
+  factory RegionBracket.fromJson(Map<String, dynamic> json) => RegionBracket(
+        rounds: (json['rounds'] as List<dynamic>).map((r) => BracketRound.fromJson(r as Map<String, dynamic>)).toList(),
+        champion: json['champion'] as String?,
+      );
+}
+
+/// The full March Madness bracket, region-shaped like the real tournament
+/// (First Four trims the field, 4 regions each play down to their own
+/// champion, the 4 region champions meet at the Final Four, then the
+/// Championship) instead of BracketProjection's single flat round list --
+/// NCAA MBB only.
+class MarchMadnessBracket {
+  const MarchMadnessBracket({
+    required this.firstFour,
+    required this.regions,
+    required this.finalFour,
+    required this.teamNames,
+    this.championship,
+    this.champion,
+  });
+
+  final List<BracketMatchup> firstFour;
+
+  /// Region name -> that region's own bracket. Always 4 entries in
+  /// practice (see season_simulation.py's own REGION_NAMES), generic
+  /// names ("Region A"/etc) since the NCAA committee doesn't assign real
+  /// region names (East/West/etc) until Selection Sunday.
+  final Map<String, RegionBracket> regions;
+
+  /// The 2 Final Four matchups (region champion vs region champion).
+  final List<BracketMatchup> finalFour;
+
+  final BracketMatchup? championship;
+  final String? champion;
+  final Map<String, BracketTeamName> teamNames;
+
+  factory MarchMadnessBracket.fromJson(Map<String, dynamic> json) => MarchMadnessBracket(
+        firstFour: (json['first_four'] as List<dynamic>? ?? [])
+            .map((m) => BracketMatchup.fromJson(m as Map<String, dynamic>))
+            .toList(),
+        regions: (json['regions'] as Map<String, dynamic>? ?? {})
+            .map((name, r) => MapEntry(name, RegionBracket.fromJson(r as Map<String, dynamic>))),
+        finalFour: (json['final_four'] as List<dynamic>? ?? [])
+            .map((m) => BracketMatchup.fromJson(m as Map<String, dynamic>))
+            .toList(),
+        championship:
+            json['championship'] != null ? BracketMatchup.fromJson(json['championship'] as Map<String, dynamic>) : null,
+        champion: json['champion'] as String?,
+        teamNames: (json['team_names'] as Map<String, dynamic>? ?? {})
+            .map((teamId, info) => MapEntry(teamId, BracketTeamName.fromJson(info as Map<String, dynamic>))),
+      );
+}
+
 /// One conference tournament's own bracket. NCAA MBB only -- one entry per
 /// conference with at least 2 tracked members.
 class ConferenceBracket {
@@ -394,12 +456,11 @@ class SeasonProjection {
   /// only -- no real-vs-actual reconciliation, unlike `bracket`.
   final BracketProjection? cupBracket;
 
-  /// NCAA MBB only -- the 68-team March Madness bracket (First Four
-  /// through Championship, flattened into one `rounds` list, same shape
-  /// NCAAFB's `bracket` uses). Null for every other sport, and for NCAA
-  /// MBB before conference-tournament champions/at-large seeding can be
-  /// resolved.
-  final BracketProjection? marchMadnessBracket;
+  /// NCAA MBB only -- the 68-team March Madness bracket, region-shaped
+  /// (see MarchMadnessBracket's own doc comment). Null for every other
+  /// sport, and for NCAA MBB before conference-tournament champions/
+  /// at-large seeding can be resolved.
+  final MarchMadnessBracket? marchMadnessBracket;
 
   /// NCAA MBB only -- one bracket per conference tournament. Null for
   /// every other sport.
@@ -427,7 +488,7 @@ class SeasonProjection {
             ? BracketProjection.fromJson(json['cup_bracket'] as Map<String, dynamic>)
             : null,
         marchMadnessBracket: json['march_madness_bracket'] != null
-            ? BracketProjection.fromJson(json['march_madness_bracket'] as Map<String, dynamic>)
+            ? MarchMadnessBracket.fromJson(json['march_madness_bracket'] as Map<String, dynamic>)
             : null,
         conferenceBrackets: (json['conference_brackets'] as List<dynamic>?)
             ?.map((c) => ConferenceBracket.fromJson(c as Map<String, dynamic>))

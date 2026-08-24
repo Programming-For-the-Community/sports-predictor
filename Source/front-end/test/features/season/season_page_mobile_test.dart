@@ -197,6 +197,53 @@ final _nbaSeriesBracketSeason = SeasonProjection(
   ),
 );
 
+// Full 4-region March Madness bracket, First Four through Championship --
+// the region-stacked _MarchMadnessSection layout, distinct from the
+// 2-conference _BracketSection path every other test fixture above
+// exercises. Realistic-length team names, same stress-test convention as
+// _nbaSeriesBracketSeason above.
+RegionBracket _region(String championA, String championB, String champion) => RegionBracket(
+      rounds: [
+        BracketRound(round: 'Round of 64', matchups: [
+          BracketMatchup(teamA: championA, teamB: '${championA}b', seedA: 1, seedB: 16, status: 'projected', predictedWinner: championA, winProbability: 0.9),
+          BracketMatchup(teamA: championB, teamB: '${championB}b', seedA: 8, seedB: 9, status: 'projected', predictedWinner: championB, winProbability: 0.55),
+        ]),
+        BracketRound(round: 'Round of 32', matchups: [
+          BracketMatchup(teamA: championA, teamB: championB, seedA: 1, seedB: 8, status: 'projected', predictedWinner: champion, winProbability: 0.65),
+        ]),
+      ],
+      champion: champion,
+    );
+
+final _marchMadnessSeason = SeasonProjection(
+  sport: 'ncaambb',
+  season: 2027,
+  standings: [],
+  leaderboards: null,
+  marchMadnessBracket: MarchMadnessBracket(
+    firstFour: const [
+      BracketMatchup(teamA: '90', teamB: '91', status: 'projected', predictedWinner: '90', winProbability: 0.55),
+      BracketMatchup(teamA: '92', teamB: '93', status: 'projected', predictedWinner: '92', winProbability: 0.51),
+    ],
+    regions: {
+      'Region A': _region('1', '9', '1'),
+      'Region B': _region('2', '10', '2'),
+      'Region C': _region('3', '11', '3'),
+      'Region D': _region('4', '12', '4'),
+    },
+    finalFour: const [
+      BracketMatchup(teamA: '1', teamB: '2', status: 'projected', predictedWinner: '1', winProbability: 0.52),
+      BracketMatchup(teamA: '3', teamB: '4', status: 'projected', predictedWinner: '3', winProbability: 0.58),
+    ],
+    championship: const BracketMatchup(teamA: '1', teamB: '3', status: 'projected', predictedWinner: '1', winProbability: 0.51),
+    champion: '1',
+    teamNames: const {
+      '1': BracketTeamName(name: 'Duke Blue Devils', abbreviation: 'DUKE'),
+      '3': BracketTeamName(name: 'Gonzaga Bulldogs', abbreviation: 'GONZ'),
+    },
+  ),
+);
+
 void main() {
   for (final width in mobileViewportWidths) {
     testWidgets('standings tab renders with no overflow at ${width}px wide', (tester) async {
@@ -278,6 +325,24 @@ void main() {
 
       await tester.ensureVisible(find.text('Playoff Bracket'));
       await tester.tap(find.text('Playoff Bracket'));
+      await tester.pumpAndSettle();
+
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('March Madness tab renders a full 4-region bracket (First Four through Championship) with no overflow at ${width}px wide',
+        (tester) async {
+      await pumpAtWidth(
+        tester,
+        width,
+        ProviderScope(
+          overrides: [seasonProjectionProvider.overrideWith((ref, sport) async => _marchMadnessSeason)],
+          child: const MaterialApp(home: Scaffold(body: SeasonPage(sportId: 'ncaambb'))),
+        ),
+      );
+
+      await tester.ensureVisible(find.text('March Madness'));
+      await tester.tap(find.text('March Madness'));
       await tester.pumpAndSettle();
 
       expect(tester.takeException(), isNull);

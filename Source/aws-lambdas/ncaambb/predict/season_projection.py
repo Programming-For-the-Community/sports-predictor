@@ -34,7 +34,7 @@ one round/one pair at a time and doesn't care how many rounds total there
 are, or how many separate brackets call it).
 """
 import logging
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 
 import pandas as pd
 from boto3.dynamodb.conditions import Key
@@ -90,6 +90,19 @@ def _is_march_madness_game(event: dict) -> bool:
     )
 
 
+def _current_ncaambb_season(today: date) -> int:
+    """Same calendar heuristic as schedule-sync/handler.py's own
+    _current_ncaambb_season (August or later -> next calendar year,
+    matching ESPN's own "the season is labeled by the year its second
+    half falls in" convention) -- duplicated rather than imported since
+    schedule-sync and this Lambda are separately deployed packages, same
+    as every other cross-Lambda-in-one-sport duplication in this project.
+    Not authoritative; _load_cached_team_conference below already
+    degrades gracefully if this ever points past what schedule-sync's own
+    cache has actually caught up to."""
+    return today.year + 1 if today.month >= 8 else today.year
+
+
 def _conference_membership_cache_key(season: int) -> str:
     return f"ncaambb/conference-membership/{season}.json"
 
@@ -125,9 +138,16 @@ def _season_standings_inputs(storage: FeatureStorage, raw_bucket) -> dict:
     known conference."""
     scheduled = storage.get_all_events(SPORT, status="scheduled")
     all_completed = storage.get_all_events(SPORT, status="completed")
-    current_season = max(
-        (e.get("season") for e in scheduled + all_completed if e.get("season") is not None), default=None,
-    )
+    # A fixed calendar heuristic, not derived from event data -- the same
+    # one schedule-sync/handler.py's own _current_ncaambb_season uses to
+    # key its daily conference-membership cache, so this Lambda's own
+    # season resolution can never drift out of sync with which cache
+    # object _load_cached_team_conference below actually reads. Forward-
+    # looking by design: during the off-season this correctly points at
+    # the upcoming season (0 real games yet, a live Monte Carlo projection
+    # off the model's own priors + whatever of the new season is already
+    # scheduled) rather than freezing on the season that already finished.
+    current_season = _current_ncaambb_season(datetime.now(timezone.utc).date())
     scheduled = [e for e in scheduled if e.get("season") == current_season]
     completed = [e for e in all_completed if e.get("season") == current_season]
 
@@ -460,10 +480,14 @@ def _march_madness_bracket_payload(
     deterministically (no real First-Four results feed back in yet; a
     future improvement, not core to this build), then each of the 4
     regions walked through the same real-vs-projected reconciliation as
-    a conference bracket, flattened into one round list exactly like
-    season_simulation.project_march_madness_bracket's own deterministic
-    version does. None if fewer than 2 conferences produced a champion
-    (nothing to seed a field from)."""
+    a conference bracket. Unlike season_simulation.project_march_madness_
+    bracket's own deterministic version (used only inside the Monte Carlo
+    loop, never rendered), each region's own round list is kept separate
+    here -- {"first_four", "regions": {name: {"rounds", "champion"}},
+    "final_four", "championship", "champion"} -- so the frontend can draw
+    the traditional 4-region tournament layout instead of one flat list.
+    None if fewer than 2 conferences produced a champion (nothing to seed
+    a field from)."""
     if len(conference_champions) < 2:
         return None
 
@@ -486,31 +510,29 @@ def _march_madness_bracket_payload(
             logger.exception("Failed building March Madness region bracket for %s -- skipping this run", region_name)
             return None
 
-    rounds = [{"round": "First Four", "matchups": first_four["matchups"]}]
-    for round_index, round_name in enumerate(season_simulation.MARCH_MADNESS_REGION_ROUND_NAMES):
-        matchups = [
-            matchup
-            for region_name in season_simulation.REGION_NAMES
-            for matchup in region_brackets[region_name]["rounds"][round_index]["matchups"]
-        ]
-        rounds.append({"round": round_name, "matchups": matchups})
-
     region_champions = [region_brackets[name]["champion"] for name in season_simulation.REGION_NAMES]
     final_four_round, final_four_advancing = _project_bracket_round(
         "Final Four",
         [(region_champions[0], region_champions[1], None, None), (region_champions[2], region_champions[3], None, None)],
         real_matchups, storage, s3, predictions_table, ratings, 0.0,
     )
-    rounds.append(final_four_round)
 
     championship_round, championship_advancing = _project_bracket_round(
         "Championship",
         [(final_four_advancing[0][0], final_four_advancing[1][0], None, None)],
         real_matchups, storage, s3, predictions_table, ratings, 0.0,
     )
-    rounds.append(championship_round)
 
-    bracket = {"rounds": rounds, "champion": championship_advancing[0][0]}
+    bracket = {
+        "first_four": first_four["matchups"],
+        "regions": {
+            region_name: {"rounds": region_brackets[region_name]["rounds"], "champion": region_brackets[region_name]["champion"]}
+            for region_name in season_simulation.REGION_NAMES
+        },
+        "final_four": final_four_round["matchups"],
+        "championship": championship_round["matchups"][0],
+        "champion": championship_advancing[0][0],
+    }
     return enrich_bracket_team_names(storage, SPORT, bracket)
 
 

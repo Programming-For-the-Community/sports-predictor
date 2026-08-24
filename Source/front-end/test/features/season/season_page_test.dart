@@ -238,13 +238,22 @@ void main() {
       season: 2027,
       standings: [],
       leaderboards: null,
-      marchMadnessBracket: const BracketProjection(
-        conferences: {},
-        rounds: [
-          BracketRound(round: 'First Round', matchups: [
-            BracketMatchup(teamA: '9', teamB: null, seedA: 1, seedB: null, status: 'projected', predictedWinner: '9', winProbability: 1.0),
-          ]),
-        ],
+      marchMadnessBracket: const MarchMadnessBracket(
+        firstFour: [],
+        // A single region (not 4) falls back to the independent-tree path
+        // -- exercises the same _BracketTeamRow null handling without
+        // needing a full 4-region fixture for this test's purpose.
+        regions: {
+          'Region A': RegionBracket(
+            rounds: [
+              BracketRound(round: 'Round of 64', matchups: [
+                BracketMatchup(teamA: '9', teamB: null, seedA: 1, seedB: null, status: 'projected', predictedWinner: '9', winProbability: 1.0),
+              ]),
+            ],
+            champion: '9',
+          ),
+        },
+        finalFour: [],
         teamNames: {},
         champion: '9',
       ),
@@ -256,6 +265,66 @@ void main() {
 
     expect(tester.takeException(), isNull);
     expect(find.text('BYE'), findsOneWidget);
+  });
+
+  testWidgets('a full 4-region March Madness bracket renders First Four, all 4 region labels, and the Championship, with no overlapping cards', (tester) async {
+    RegionBracket region(String championA, String championB, String champion) => RegionBracket(
+          rounds: [
+            BracketRound(round: 'Elite Eight', matchups: [
+              BracketMatchup(teamA: championA, teamB: championB, seedA: 1, seedB: 2, status: 'projected', predictedWinner: champion, winProbability: 0.6),
+            ]),
+          ],
+          champion: champion,
+        );
+
+    final projection = SeasonProjection(
+      sport: 'ncaambb',
+      season: 2027,
+      standings: [],
+      leaderboards: null,
+      marchMadnessBracket: MarchMadnessBracket(
+        firstFour: const [
+          BracketMatchup(teamA: '90', teamB: '91', status: 'projected', predictedWinner: '90', winProbability: 0.55),
+        ],
+        regions: {
+          'Region A': region('1', '2', '1'),
+          'Region B': region('3', '4', '3'),
+          'Region C': region('5', '6', '5'),
+          'Region D': region('7', '8', '7'),
+        },
+        finalFour: const [
+          BracketMatchup(teamA: '1', teamB: '3', status: 'projected', predictedWinner: '1', winProbability: 0.52),
+          BracketMatchup(teamA: '5', teamB: '7', status: 'projected', predictedWinner: '5', winProbability: 0.58),
+        ],
+        championship: const BracketMatchup(teamA: '1', teamB: '5', status: 'projected', predictedWinner: '1', winProbability: 0.51),
+        champion: '1',
+        teamNames: const {},
+      ),
+    );
+
+    await pumpSeasonPage(tester, 'ncaambb', projection);
+    await tester.tap(find.text('March Madness'));
+    await tester.pumpAndSettle();
+
+    expect(tester.takeException(), isNull);
+    expect(find.text('FIRST FOUR'), findsOneWidget);
+    for (final region in ['REGION A', 'REGION B', 'REGION C', 'REGION D']) {
+      expect(find.text(region), findsOneWidget);
+    }
+    expect(find.text('FINAL FOUR'), findsOneWidget);
+    expect(find.text('CHAMPIONSHIP'), findsOneWidget);
+
+    // Same distinct-vertical-slot pattern as the NBA Play-In regression
+    // tests below -- '1' appears in its own region's Elite Eight card and
+    // again in the Final Four card it advances to; those must not land on
+    // the same row, and neither should the two region headers immediately
+    // above/below each other.
+    final regionAChampionTop = tester.getTopLeft(find.text('1').at(0)).dy;
+    final finalFourTop = tester.getTopLeft(find.text('1').at(1)).dy;
+    expect(regionAChampionTop, isNot(equals(finalFourTop)));
+    final regionATop = tester.getTopLeft(find.text('REGION A')).dy;
+    final regionBTop = tester.getTopLeft(find.text('REGION B')).dy;
+    expect(regionATop, isNot(equals(regionBTop)));
   });
 
   testWidgets('a completed bracket matchup shows the real score, not a probability', (tester) async {

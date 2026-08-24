@@ -14,7 +14,10 @@ whose reset_ncaambb_predict_singletons fixture (autouse) resets
 ncaambb_predict._storage/_model_bucket/_predictions_table/_raw_bucket
 before and after every test here.
 """
+from datetime import date
 from unittest.mock import MagicMock, patch
+
+import pytest
 
 import model_loader
 import ncaambb_predict
@@ -130,16 +133,37 @@ class TestLoadCachedTeamConference:
         assert result == {}
 
 
+class TestCurrentNcaambbSeason:
+    """Mirrors schedule-sync/handler.py's own TestCurrentNcaambbSeason --
+    both Lambdas' copies of this heuristic must stay identical (see
+    season_projection.py's own docstring on why it's duplicated, not
+    imported, plus what it'd cost these two Lambdas to drift out of
+    sync)."""
+
+    def test_before_august_uses_the_current_calendar_year(self):
+        assert season_projection._current_ncaambb_season(date(2026, 3, 15)) == 2026
+
+    def test_august_or_later_uses_next_calendar_year(self):
+        assert season_projection._current_ncaambb_season(date(2026, 8, 22)) == 2027
+
+    def test_december_uses_next_calendar_year(self):
+        assert season_projection._current_ncaambb_season(date(2026, 12, 1)) == 2027
+
+
 class TestSeasonStandingsInputs:
     def _storage(self, completed, scheduled):
         storage = MagicMock()
         storage.get_all_events.side_effect = lambda sport, status: {"completed": completed, "scheduled": scheduled}[status]
         return storage
 
+    def _patched_season(self, season):
+        return patch.object(season_projection, "_current_ncaambb_season", return_value=season)
+
     def test_derives_wins_losses_and_point_differential_from_completed_events(self):
         storage = self._storage([_completed_event("E1", 2026, "12", "24", 70, 60)], [])
 
-        inputs = season_projection._season_standings_inputs(storage, _raw_bucket({"12": "ACC", "24": "SEC"}))
+        with self._patched_season(2026):
+            inputs = season_projection._season_standings_inputs(storage, _raw_bucket({"12": "ACC", "24": "SEC"}))
 
         assert inputs["wins"]["12"] == 1
         assert inputs["losses"]["24"] == 1
@@ -155,7 +179,8 @@ class TestSeasonStandingsInputs:
             [],
         )
 
-        inputs = season_projection._season_standings_inputs(storage, _raw_bucket({"12": "ACC", "24": "ACC", "9": "Big Ten"}))
+        with self._patched_season(2026):
+            inputs = season_projection._season_standings_inputs(storage, _raw_bucket({"12": "ACC", "24": "ACC", "9": "Big Ten"}))
 
         assert inputs["wins"]["12"] == 2
         assert inputs["conference_wins"]["12"] == 1  # only the ACC game counts
@@ -164,7 +189,8 @@ class TestSeasonStandingsInputs:
         storage = self._storage([_completed_event("E1", 2026, "12", "24", 70, 60)], [])
         raw_bucket = _raw_bucket({"12": "ACC"}, season=2026)
 
-        inputs = season_projection._season_standings_inputs(storage, raw_bucket)
+        with self._patched_season(2026):
+            inputs = season_projection._season_standings_inputs(storage, raw_bucket)
 
         raw_bucket.get_json.assert_called_once_with("ncaambb/conference-membership/2026.json")
         assert inputs["team_conference"] == {"12": "ACC"}
@@ -179,17 +205,124 @@ class TestSeasonStandingsInputs:
             ],
         )
 
-        inputs = season_projection._season_standings_inputs(storage, _raw_bucket({"12": "ACC", "24": "ACC"}))
+        with self._patched_season(2026):
+            inputs = season_projection._season_standings_inputs(storage, _raw_bucket({"12": "ACC", "24": "ACC"}))
 
         assert inputs["remaining_games"] == [("12", "24", True)]
 
     def test_remaining_games_excludes_a_pairing_missing_a_known_conference(self):
         storage = self._storage([], [_scheduled_event("E1", 2026, "2026-01-21", "12", "7")])
 
-        inputs = season_projection._season_standings_inputs(storage, _raw_bucket({"12": "ACC"}))
+        with self._patched_season(2026):
+            inputs = season_projection._season_standings_inputs(storage, _raw_bucket({"12": "ACC"}))
 
         assert inputs["remaining_games"] == []
         assert inputs["team_next_event"]["12"] == "E1"
+
+    def test_current_season_is_the_calendar_heuristic_regardless_of_what_events_exist(self):
+        # Regression, two different bugs found live at different points:
+        # deriving current_season from event data at all (rather than the
+        # fixed calendar heuristic schedule-sync's own cache key already
+        # uses) either flips forward the moment next season's games start
+        # getting pre-seeded months early (every team showing 0-0), or --
+        # an earlier version of this same fix -- freezes on a season
+        # that's already over for the whole off-season instead of
+        # forward-looking to the upcoming one. Neither completed nor
+        # scheduled events drive this decision at all now.
+        storage = self._storage(
+            [_completed_event("E1", 2025, "12", "24", 70, 60)],
+            [_scheduled_event("E2", 2026, "2026-11-10", "12", "24")],
+        )
+
+        with self._patched_season(2027):
+            inputs = season_projection._season_standings_inputs(storage, _raw_bucket({"12": "ACC"}, season=2027))
+
+        assert inputs["current_season"] == 2027
+        assert inputs["wins"] == {}  # neither event above is season 2027 -- correctly 0-0, not a bug
+        assert inputs["scheduled"] == []
+        assert inputs["completed"] == []
+
+    def test_events_are_filtered_to_only_the_resolved_seasons_games(self):
+        storage = self._storage(
+            [_completed_event("E1", 2026, "12", "24", 70, 60), _completed_event("E2", 2025, "12", "24", 50, 40)],
+            [],
+        )
+
+        with self._patched_season(2026):
+            inputs = season_projection._season_standings_inputs(storage, _raw_bucket({"12": "ACC", "24": "ACC"}))
+
+        assert [e["event_key"] for e in inputs["completed"]] == ["E1"]
+
+
+class TestMarchMadnessBracketPayload:
+    """No real postseason games logged (storage.get_all_events returns
+    []), so every matchup resolves through the deterministic "projected"
+    branch -- these tests are about the payload's own shape (regions kept
+    separate, not flattened into one round list), not the reconciliation
+    logic itself (see TestResolveMatchup for that)."""
+
+    def _teams(self, n):
+        return [str(i) for i in range(1, n + 1)]
+
+    def _season_inputs(self, teams):
+        ratings = {team_id: 1500.0 for team_id in teams}
+        return {
+            "current_ratings": ratings, "wins": {}, "losses": {},
+            "avg_points_scored": {}, "avg_points_allowed": {}, "win_streak": {}, "strength_of_schedule": {},
+        }
+
+    def test_regions_are_kept_separate_not_flattened_into_one_round_list(self):
+        teams = self._teams(80)
+        conference_champions = {f"conf{i}": teams[i] for i in range(10)}
+        model_scores = {team_id: float(i) for i, team_id in enumerate(teams)}  # lower is better; "1" is the top overall seed
+        storage = MagicMock()
+        storage.get_all_events.return_value = []
+
+        with patch.object(season_projection, "_current_model_scores", return_value=model_scores):
+            bracket = season_projection._march_madness_bracket_payload(
+                storage, MagicMock(), MagicMock(), self._season_inputs(teams), 2026,
+                MagicMock(), _model_card(1), teams, conference_champions,
+            )
+
+        assert "rounds" not in bracket
+        assert set(bracket["regions"]) == set(season_simulation.REGION_NAMES)
+        for region in bracket["regions"].values():
+            assert [r["round"] for r in region["rounds"]] == season_simulation.MARCH_MADNESS_REGION_ROUND_NAMES
+            assert region["champion"] is not None
+        assert len(bracket["first_four"]) == 4
+        assert len(bracket["final_four"]) == 2
+        assert bracket["championship"]["team_a"] is not None
+        assert bracket["championship"]["team_b"] is not None
+        assert bracket["champion"] in teams
+
+    def test_champion_is_the_top_overall_seed_when_nothing_upsets(self):
+        # Every matchup resolves by Elo alone here (no real games) --
+        # rating strictly decreasing with seed (unlike _season_inputs'
+        # own all-equal default) means no game is a 50/50 coin flip, so
+        # the top overall seed should carry all the way to the champion.
+        teams = self._teams(80)
+        conference_champions = {f"conf{i}": teams[i] for i in range(10)}
+        model_scores = {team_id: float(i) for i, team_id in enumerate(teams)}
+        season_inputs = self._season_inputs(teams)
+        season_inputs["current_ratings"] = {team_id: 2000.0 - i for i, team_id in enumerate(teams)}
+        storage = MagicMock()
+        storage.get_all_events.return_value = []
+
+        with patch.object(season_projection, "_current_model_scores", return_value=model_scores):
+            bracket = season_projection._march_madness_bracket_payload(
+                storage, MagicMock(), MagicMock(), season_inputs, 2026,
+                MagicMock(), _model_card(1), teams, conference_champions,
+            )
+
+        assert bracket["champion"] == "1"  # _teams() is 1-indexed; teams[0] == "1" has the best score/rating
+
+    def test_returns_none_with_fewer_than_2_conference_champions(self):
+        result = season_projection._march_madness_bracket_payload(
+            MagicMock(), MagicMock(), MagicMock(), self._season_inputs(["1"]), 2026,
+            MagicMock(), _model_card(1), ["1"], {"conf0": "1"},
+        )
+
+        assert result is None
 
 
 class TestCurrentRankings:
@@ -243,6 +376,15 @@ class TestScheduledSeasonProjection:
     here -- this Lambda instead computes the projection on Terraform/
     scheduler-ncaambb-season-projection.tf's own direct EventBridge
     Scheduler invoke and writes it to S3."""
+
+    @pytest.fixture(autouse=True)
+    def fixed_current_season(self):
+        """Every fixture in this class hardcodes season=2026 -- pins
+        _current_ncaambb_season so these tests don't depend on (and don't
+        flake around) the real current date, same reasoning as
+        TestSeasonStandingsInputs' own _patched_season."""
+        with patch.object(season_projection, "_current_ncaambb_season", return_value=2026):
+            yield
 
     def _rig(self, completed, scheduled):
         ncaambb_predict._storage = MagicMock()

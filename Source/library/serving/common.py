@@ -50,15 +50,27 @@ def enrich_bracket_team_names(storage, sport: str, bracket: dict) -> dict:
             if matchup.get(key):
                 team_ids.add(matchup[key])
 
+    def _collect_matchups(matchups: list[dict]) -> None:
+        for matchup in matchups:
+            _collect_matchup(matchup)
+
     def _collect_rounds(rounds: list[dict]) -> None:
         for round_ in rounds:
-            for matchup in round_["matchups"]:
-                _collect_matchup(matchup)
+            _collect_matchups(round_["matchups"])
 
     for rounds in bracket.get("conferences", {}).values():
         _collect_rounds(rounds)
     if bracket.get("rounds"):
         _collect_rounds(bracket["rounds"])
+    # NCAA MBB's March Madness bracket only -- 4 separate region brackets
+    # (each its own round list) plus the First Four/Final Four's own flat
+    # matchup lists, kept apart from `rounds` so the frontend can draw the
+    # traditional region layout instead of one flat list.
+    for region in bracket.get("regions", {}).values():
+        _collect_rounds(region["rounds"])
+    for key in ("first_four", "final_four"):
+        if bracket.get(key):
+            _collect_matchups(bracket[key])
     for key in ("super_bowl", "finals", "championship"):
         if bracket.get(key):
             _collect_matchup(bracket[key])

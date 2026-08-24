@@ -169,3 +169,17 @@ class TestEnrichBracketTeamNames:
         result = enrich_bracket_team_names(self._storage(), "nfl", bracket)
 
         assert result["champion"] == "12"
+
+    def test_collects_team_ids_from_march_madness_regions_first_four_and_final_four(self):
+        bracket = {
+            "first_four": [{"team_a": "1", "team_b": "2"}],
+            "regions": {
+                "Region A": {"rounds": [{"round": "Round of 64", "matchups": [{"team_a": "12", "team_b": "24"}]}], "champion": "12"},
+            },
+            "final_four": [{"team_a": "12", "team_b": "99"}],
+            "championship": {"team_a": "12", "team_b": "1"},
+        }
+
+        result = enrich_bracket_team_names(self._storage(), "ncaambb", bracket)
+
+        assert set(result["team_names"]) == {"1", "2", "12", "24", "99"}

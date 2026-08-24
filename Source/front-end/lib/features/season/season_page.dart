@@ -150,7 +150,7 @@ class _SeasonPageState extends ConsumerState<SeasonPage> {
             else if (_tab == 'cup_bracket' && season.cupBracket != null)
               _BracketSection(sport: season.sport, bracket: season.cupBracket!)
             else if (_tab == 'march_madness' && season.marchMadnessBracket != null)
-              _BracketSection(sport: season.sport, bracket: season.marchMadnessBracket!)
+              _MarchMadnessSection(sport: season.sport, bracket: season.marchMadnessBracket!)
             else if (_tab == 'conference_brackets' && season.conferenceBrackets != null)
               _ConferenceBracketsSection(sport: season.sport, conferenceBrackets: season.conferenceBrackets!)
             else ...[
@@ -647,6 +647,167 @@ class _BracketSection extends StatelessWidget {
       precomputedLayout: combined.layout,
     );
   }
+}
+
+/// March Madness's own region-shaped layout -- 4 regions (not 2
+/// conferences) each played down to a champion, those 4 champions meeting
+/// at a Final Four (2 games), then a Championship. Generalizes
+/// _computeConferenceBracketLayout's single region-pair-to-final merge to
+/// a 2-stage merge (4 regions -> 2 Final Four winners -> 1 champion).
+class _MarchMadnessSection extends StatelessWidget {
+  const _MarchMadnessSection({required this.sport, required this.bracket});
+
+  final String sport;
+  final MarchMadnessBracket bracket;
+
+  @override
+  Widget build(BuildContext context) {
+    final regionOrder = bracket.regions.keys.toList()..sort();
+    final canCombine = regionOrder.length == 4 && bracket.finalFour.length == 2 && bracket.championship != null;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        if (bracket.firstFour.isNotEmpty) ...[
+          _FirstFourSection(sport: sport, matchups: bracket.firstFour, teamNames: bracket.teamNames),
+          const SizedBox(height: 20),
+        ],
+        if (!canCombine)
+          // Not the shape this combined layout assumes -- fall back to
+          // independent per-region trees.
+          for (final region in regionOrder) ...[
+            Padding(
+              padding: const EdgeInsets.only(bottom: 8),
+              child: Text(region.toUpperCase(), style: AppTextStyles.microLabel(color: AppColors.cyan)),
+            ),
+            _BracketTree(sport: sport, rounds: bracket.regions[region]!.rounds, teamNames: bracket.teamNames),
+            const SizedBox(height: 20),
+          ]
+        else
+          _buildCombinedTree(regionOrder),
+      ],
+    );
+  }
+
+  Widget _buildCombinedTree(List<String> regionOrder) {
+    final regionRounds = {for (final name in regionOrder) name: bracket.regions[name]!.rounds};
+    final roundCount = regionRounds[regionOrder.first]!.length;
+
+    final combinedRounds = [
+      for (var r = 0; r < roundCount; r++)
+        BracketRound(
+          round: regionRounds[regionOrder.first]![r].round,
+          matchups: [for (final name in regionOrder) ...regionRounds[name]![r].matchups],
+        ),
+      BracketRound(round: 'Final Four', matchups: bracket.finalFour),
+      BracketRound(round: 'Championship', matchups: [bracket.championship!]),
+    ];
+
+    final combined = _computeMarchMadnessLayout(regionOrder, regionRounds);
+    final regionLabels = [for (final name in regionOrder) (name: name, slot: combined.regionOffset[name]!)];
+
+    return _BracketTree(
+      sport: sport,
+      rounds: combinedRounds,
+      teamNames: bracket.teamNames,
+      conferenceLabels: regionLabels,
+      precomputedLayout: combined.layout,
+    );
+  }
+}
+
+/// Not connected via lines to the region tree below -- each of the 4 games
+/// draws from a different, uneven mix of regions (a First Four winner's
+/// eventual region depends on the snake-seeding pass that runs after these
+/// games resolve), so there's no single clean slot to route a connector
+/// to the way NBA's own Play-In (always exactly 2 teams per elimination
+/// slot) has.
+class _FirstFourSection extends StatelessWidget {
+  const _FirstFourSection({required this.sport, required this.matchups, required this.teamNames});
+
+  final String sport;
+  final List<BracketMatchup> matchups;
+  final Map<String, BracketTeamName> teamNames;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text('FIRST FOUR', style: AppTextStyles.microLabel()),
+        const SizedBox(height: 8),
+        Wrap(
+          spacing: 12,
+          runSpacing: 12,
+          children: [
+            for (final matchup in matchups)
+              SizedBox(
+                width: _BracketTree._cardWidth,
+                height: _BracketTree._cardHeight,
+                child: _BracketMatchupCard(sport: sport, matchup: matchup, teamNames: teamNames, cardWidth: _BracketTree._cardWidth),
+              ),
+          ],
+        ),
+      ],
+    );
+  }
+}
+
+/// Stacks each of the 4 regions as its own vertical band (same principle
+/// as _computeConferenceBracketLayout, generalized from 2 bands to 4), then
+/// adds 2 more merge stages on top: each pair of adjacent regions' own
+/// champions converge onto a Final Four slot positioned at their midpoint,
+/// and the 2 Final Four winners converge onto a single Championship slot.
+({_BracketSlotLayout layout, Map<String, double> regionOffset}) _computeMarchMadnessLayout(
+  List<String> regionOrder,
+  Map<String, List<BracketRound>> regionRounds,
+) {
+  final regionLayouts = {for (final name in regionOrder) name: _computeBracketSlotLayout(regionRounds[name]!)};
+  final roundCount = regionRounds[regionOrder.first]!.length;
+
+  final offsets = <String, double>{};
+  var nextOffset = 0.0;
+  for (final name in regionOrder) {
+    offsets[name] = nextOffset;
+    var maxSlot = 0.0;
+    for (final roundSlots in regionLayouts[name]!.slots) {
+      for (final slot in roundSlots) {
+        if (slot > maxSlot) maxSlot = slot;
+      }
+    }
+    nextOffset += maxSlot + 1;
+  }
+
+  final connections = <_BracketConnection>[
+    for (final name in regionOrder)
+      for (final c in regionLayouts[name]!.connections)
+        _BracketConnection(c.fromRound, c.fromSlot + offsets[name]!, c.toRound, c.toSlot + offsets[name]!),
+  ];
+
+  final slots = <List<double>>[
+    for (var r = 0; r < roundCount; r++)
+      [for (final name in regionOrder) for (final slot in regionLayouts[name]!.slots[r]) slot + offsets[name]!],
+  ];
+
+  // Each region's own last round (Elite Eight) resolves to exactly one
+  // matchup -- its own slot is that region champion's position.
+  double regionChampionSlot(String name) => regionLayouts[name]!.slots[roundCount - 1][0] + offsets[name]!;
+  final finalFourSlots = [
+    (regionChampionSlot(regionOrder[0]) + regionChampionSlot(regionOrder[1])) / 2,
+    (regionChampionSlot(regionOrder[2]) + regionChampionSlot(regionOrder[3])) / 2,
+  ];
+  connections.add(_BracketConnection(roundCount - 1, regionChampionSlot(regionOrder[0]), roundCount, finalFourSlots[0]));
+  connections.add(_BracketConnection(roundCount - 1, regionChampionSlot(regionOrder[1]), roundCount, finalFourSlots[0]));
+  connections.add(_BracketConnection(roundCount - 1, regionChampionSlot(regionOrder[2]), roundCount, finalFourSlots[1]));
+  connections.add(_BracketConnection(roundCount - 1, regionChampionSlot(regionOrder[3]), roundCount, finalFourSlots[1]));
+  slots.add(finalFourSlots);
+
+  final championshipSlot = (finalFourSlots[0] + finalFourSlots[1]) / 2;
+  connections.add(_BracketConnection(roundCount, finalFourSlots[0], roundCount + 1, championshipSlot));
+  connections.add(_BracketConnection(roundCount, finalFourSlots[1], roundCount + 1, championshipSlot));
+  slots.add([championshipSlot]);
+
+  return (layout: _BracketSlotLayout(slots, connections), regionOffset: offsets);
 }
 
 /// One resolved bracket slot's position, in "slot units" (1 unit = one
