@@ -327,6 +327,61 @@ void main() {
     // in the March Madness "no overlapping cards" test above.
   });
 
+  testWidgets(
+      "a matchup fed by one real winner and one bye draws that winner's connector as a straight "
+      'line, not an unnecessary dogleg -- regression for a real "jagged line into a bye-adjacent '
+      'card" complaint', (tester) async {
+    // Team '9' gets a Quarterfinals bye; its Semifinal opponent '2' is a
+    // real Quarterfinals winner. Only '2' gets a connector drawn at all
+    // (a bye source draws none) -- it should land exactly level with its
+    // own source row rather than being pulled off-row by averaging in
+    // the invisible bye's slot, which is what produced the dogleg.
+    final projection = SeasonProjection(
+      sport: 'ncaambb',
+      season: 2027,
+      standings: [],
+      leaderboards: null,
+      conferenceBrackets: const [
+        ConferenceBracket(
+          conference: 'SEC',
+          bracket: BracketProjection(
+            conferences: {},
+            rounds: [
+              BracketRound(round: 'Quarterfinals', matchups: [
+                BracketMatchup(teamA: '9', teamB: null, seedA: 1, seedB: null, status: 'projected', predictedWinner: '9', winProbability: 1.0),
+                BracketMatchup(teamA: '2', teamB: '7', seedA: 4, seedB: 5, status: 'projected', predictedWinner: '2', winProbability: 0.6),
+              ]),
+              BracketRound(round: 'Semifinals', matchups: [
+                BracketMatchup(teamA: '9', teamB: '2', status: 'projected', predictedWinner: '9', winProbability: 0.58),
+              ]),
+            ],
+            teamNames: {},
+            champion: '9',
+          ),
+        ),
+      ],
+    );
+
+    await pumpSeasonPage(tester, 'ncaambb', projection);
+    await tester.tap(find.text('Conference Brackets'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('SEC'));
+    await tester.pumpAndSettle();
+
+    expect(tester.takeException(), isNull);
+    final painter = tester
+        .widgetList<CustomPaint>(find.byType(CustomPaint))
+        .map((w) => w.painter)
+        .whereType<Object>()
+        .firstWhere((p) => p.runtimeType.toString() == '_BracketConnectorPainter');
+    // ignore: avoid_dynamic_calls
+    final connections = (painter as dynamic).connections as List;
+    // '9' (the bye side) draws no connector at all -- only '2's real one.
+    expect(connections.length, equals(1));
+    final theOnlyConnection = connections.first;
+    expect(theOnlyConnection.fromSlot, equals(theOnlyConnection.toSlot));
+  });
+
   testWidgets('a bye matchup (null team_b) shows no card at all -- the team just appears in its next real game', (tester) async {
     final projection = SeasonProjection(
       sport: 'ncaambb',

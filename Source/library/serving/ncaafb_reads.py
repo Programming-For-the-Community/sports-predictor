@@ -76,11 +76,15 @@ def _previous_week_events(completed: list[dict]) -> list[dict]:
 
 _STALE_SCHEDULED_GRACE_DAYS = 3  # tolerates ingest lag flipping a played game's status to completed
 
-# A real single week's own games span at most this many calendar days from
-# the earliest of them (every week checked live, 2026-08-24, fits inside
-# a 3-6 day Thu-Mon window -- see _next_week_events' own docstring for the
-# one confirmed exception this constant exists to cut off).
-_MAX_WEEK_SPAN_DAYS = 6
+# The largest calendar gap between two consecutive game-dates that still
+# counts as the same real week -- confirmed live, 2026-08-24, against the
+# full 2026 schedule: every real week's own internal date-to-date gaps are
+# at most 2 days (e.g. week 8's Oct 20 -> Oct 22), while week 1's tagged
+# games split into two clusters (Aug 29-30, then Sep 3-7) with a 3-day gap
+# between them -- see _next_week_events' own docstring for why a single
+# fixed-span-from-the-earliest-date cap (the prior approach) wasn't tight
+# enough to separate those two clusters.
+_MAX_INTRA_WEEK_GAP_DAYS = 2
 
 
 def _next_week_events(scheduled: list[dict]) -> list[dict]:
@@ -93,18 +97,21 @@ def _next_week_events(scheduled: list[dict]) -> list[dict]:
     today-or-later, since "upcoming" must never include a past-dated
     event, played or not.
 
-    Also caps results to _MAX_WEEK_SPAN_DAYS of the soonest game within
-    that week, not just its own `week` tag -- confirmed live, 2026-08-24:
-    week 1 (and only week 1; every other week checked cleanly spans one
-    3-6 day weekend) actually spanned Aug 29 - Sep 7, a real 10-day CFBD
-    quirk where a handful of true season-opener games ("Week 0" by fan
-    convention) share the same week=1 tag as the following weekend's much
-    larger main slate, rather than CFBD assigning them their own separate
-    week number. Grouping strictly by `week` before today's actual season
-    start would show both clusters as one "upcoming" list -- capping to a
-    real single-week window from the soonest game excludes the later,
-    separate cluster without needing to special-case week 1 specifically
-    (any future week with the same kind of split gets the same fix)."""
+    Also clusters results by date gap, not just the `week` tag -- confirmed
+    live, 2026-08-24: week 1's own games actually split into two clusters,
+    Aug 29-30 (a handful of true season-opener games, "Week 0" by fan
+    convention) and Sep 3-7 (the following weekend's much larger main
+    slate), both sharing CFBD's same week=1 tag rather than CFBD assigning
+    the openers their own separate week number. A first attempt capped
+    results to a fixed number of days from the soonest game's date, but
+    that's anchored to the wrong end -- Sep 3-4 are only 3-4 days after
+    Aug 29, comfortably inside any span cap wide enough to hold Aug 29-30
+    together, so it still merged the two clusters. Walking the sorted
+    distinct dates and cutting off at the first gap wider than
+    _MAX_INTRA_WEEK_GAP_DAYS (measured between *consecutive* dates, not
+    from the start) correctly isolates just the soonest cluster -- Aug 30
+    -> Sep 3 is a 3-day gap, past the 2-day threshold -- without merging
+    a normal week's own internal 1-2 day gaps between game days."""
     today = datetime.now(timezone.utc).date().isoformat()
     cutoff = (datetime.now(timezone.utc).date() - timedelta(days=_STALE_SCHEDULED_GRACE_DAYS)).isoformat()
     plausible = [e for e in scheduled if e.get("event_date", "") >= cutoff]
@@ -115,9 +122,14 @@ def _next_week_events(scheduled: list[dict]) -> list[dict]:
     same_week = [e for e in plausible if _week_key(e) == target and e.get("event_date", "") >= today]
     if not same_week:
         return []
-    soonest_date = min(e.get("event_date", "") for e in same_week)
-    span_cutoff = (date.fromisoformat(soonest_date) + timedelta(days=_MAX_WEEK_SPAN_DAYS)).isoformat()
-    return [e for e in same_week if e.get("event_date", "") <= span_cutoff]
+    distinct_dates = sorted({e.get("event_date", "") for e in same_week})
+    cluster_dates = {distinct_dates[0]}
+    for previous, current in zip(distinct_dates, distinct_dates[1:]):
+        gap = (date.fromisoformat(current) - date.fromisoformat(previous)).days
+        if gap > _MAX_INTRA_WEEK_GAP_DAYS:
+            break
+        cluster_dates.add(current)
+    return [e for e in same_week if e.get("event_date", "") in cluster_dates]
 
 
 def _actual_result(event: dict) -> dict | None:

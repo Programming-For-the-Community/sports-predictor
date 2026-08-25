@@ -107,27 +107,34 @@ class TestListEvents:
         assert {e["event_id"] for e in result["events"]} == {"e2"}
 
     def test_a_week_spanning_two_separate_clusters_only_shows_the_soonest_one(self):
-        # Regression: confirmed live, 2026-08-24 -- CFBD's own week=1 tag
-        # covered a handful of true season-opener games (real "Week 0" by
-        # fan convention) AND the following weekend's much larger main
-        # slate, a real 10-day span, unlike every other week (a single
-        # 3-6 day weekend). Grouping strictly by `week` showed both
-        # clusters -- 3 days apart here, comfortably past
-        # _MAX_WEEK_SPAN_DAYS -- as one "upcoming" list.
+        # Regression: confirmed live, 2026-08-24, against the real 2026
+        # schedule -- CFBD's own week=1 tag covered a handful of true
+        # season-opener games (real "Week 0" by fan convention, here on
+        # days 2-3) AND the following weekend's much larger main slate
+        # (here starting day 6), sharing CFBD's own week=1 tag. The two
+        # clusters are only 3 days apart (day 3 -> day 6) -- close enough
+        # that a first-attempt fixed span-from-the-soonest-date cap still
+        # merged them, since day 6 falls inside any span wide enough to
+        # hold days 2-3 together. Gap-based clustering (cut off at the
+        # first gap wider than _MAX_INTRA_WEEK_GAP_DAYS) is what actually
+        # separates them.
         storage = MagicMock()
         predictions_table = MagicMock()
         storage.get_all_events.return_value = [
             _event("opener1", _future(2), "61", "52", week=1),
             _event("opener2", _future(3), "80", "90", week=1),
-            _event("main1", _future(9), "61", "70", week=1),
-            _event("main2", _future(10), "80", "70", week=1),
+            _event("main1", _future(6), "61", "70", week=1),
+            _event("main2", _future(7), "80", "70", week=1),
         ]
 
         result = ncaafb_reads.list_events(storage, predictions_table, "ncaafb", "scheduled")
 
         assert {e["event_id"] for e in result["events"]} == {"opener1", "opener2"}
 
-    def test_a_normal_single_cluster_week_is_unaffected_by_the_span_cap(self):
+    def test_a_normal_single_cluster_week_is_unaffected_by_gap_clustering(self):
+        # A normal week's own internal gaps (here 2 days, the largest
+        # confirmed live short of the week-1 split above) must not get
+        # split apart the way the two real clusters above should be.
         storage = MagicMock()
         predictions_table = MagicMock()
         storage.get_all_events.return_value = [

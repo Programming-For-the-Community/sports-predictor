@@ -1197,7 +1197,8 @@ _BracketSlotLayout _computeBracketSlotLayout(List<BracketRound> rounds) {
     final desired = List<double>.filled(matchups.length, 0);
     for (var i = 0; i < matchups.length; i++) {
       final matchup = matchups[i];
-      final immediateSources = <double>[];
+      final realSources = <double>[];
+      final byeSources = <double>[];
       final currentSides = {matchup.teamA, matchup.teamB}..removeWhere((side) => side == null);
       for (var j = 0; j < previousMatchups.length; j++) {
         final previous = previousMatchups[j];
@@ -1206,9 +1207,17 @@ _BracketSlotLayout _computeBracketSlotLayout(List<BracketRound> rounds) {
         // bye's null side -- both were removed above, so this only
         // matches on a real team id appearing in both matchups.
         if (previousSides.intersection(currentSides).isNotEmpty) {
-          immediateSources.add(previousSlots[j]);
+          (previous.teamA != null && previous.teamB != null ? realSources : byeSources).add(previousSlots[j]);
         }
       }
+      // A bye source doesn't drive position when a real source is also
+      // present -- the bye side never gets a card or a connector (see the
+      // backward search below), so averaging its slot in would pull this
+      // matchup off the real source's row for no visible reason, forcing
+      // an otherwise-unnecessary dogleg into an already-straight
+      // single-connector line. Only fall back to the bye's own slot when
+      // it's the sole immediate source (no real game to align with).
+      final immediateSources = realSources.isNotEmpty ? realSources : byeSources;
       // No traceable source in the immediately preceding round ("bye"
       // into this round) -- its own index stands in until the dedup pass
       // below places it.
