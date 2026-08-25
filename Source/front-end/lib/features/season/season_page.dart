@@ -599,7 +599,7 @@ class _BracketSection extends StatelessWidget {
   Widget build(BuildContext context) {
     final flatRounds = bracket.rounds;
     if (flatRounds != null) {
-      return _BracketTree(sport: sport, rounds: flatRounds, teamNames: bracket.teamNames);
+      return _BracketTree(sport: sport, rounds: flatRounds, teamNames: bracket.teamNames, highlightFinalMatchup: true);
     }
 
     final conferenceNames = bracket.conferences.keys.toList()..sort();
@@ -645,6 +645,7 @@ class _BracketSection extends StatelessWidget {
       teamNames: bracket.teamNames,
       conferenceLabels: conferenceLabels,
       precomputedLayout: combined.layout,
+      highlightFinalMatchup: true,
     );
   }
 }
@@ -790,17 +791,10 @@ class _MarchMadnessGrid extends StatelessWidget {
   static const double _roundGap = _BracketTree._roundGap;
   static const double _verticalUnit = _BracketTree._verticalUnit;
   static const double _headerHeight = _BracketTree._headerHeight;
+  static const double _labelClearance = _BracketTree._labelClearance;
   static const double _columnWidth = _cardWidth + _roundGap;
-
-  // The Championship card is rendered larger than every other card in the
-  // grid -- it's the one slot every other card on the page ultimately
-  // feeds, and the mirrored grid shape (new for NCAA MBB) puts it in the
-  // visual middle rather than the far right edge _BracketTree's other
-  // sports end their bracket on, so it needs to read as the destination
-  // at a glance rather than just another card in the row.
-  static const double _championshipScale = 1.2;
-  static const double _championshipCardWidth = _cardWidth * _championshipScale;
-  static const double _championshipCardHeight = _cardHeight * _championshipScale;
+  static const double _championshipCardWidth = _BracketTree._championshipCardWidth;
+  static const double _championshipCardHeight = _BracketTree._championshipCardHeight;
 
   @override
   Widget build(BuildContext context) {
@@ -883,17 +877,26 @@ class _MarchMadnessGrid extends StatelessWidget {
         if (locateFirstFourDestination(matchup) == null) matchup,
     ];
 
+    // Centered on the same column/slot a same-size card would use, just
+    // scaled up around that center point -- computed here (not just
+    // where it's used to position the card widget below) since the
+    // connector elbows entering it below need its own actual (shifted)
+    // edges too, not the unshifted standard-card-width position the rest
+    // of this grid's columns use.
+    final championshipLeft = x(championshipColumn.toDouble()) - (_championshipCardWidth - _cardWidth) / 2;
+    final championshipTop = y(championshipSlot) - (_championshipCardHeight - _cardHeight) / 2;
+
     final segments = <_GridSegment>[
       ..._sideSegments(left.layout.connections, leftColumn, yCenter, mirrored: false),
       ..._sideSegments(right.layout.connections, rightColumn, yCenter, mirrored: true),
       ..._elbow(
         Offset(x(leftColumn(halfColumns - 1)) + _cardWidth, yCenter(leftFinalFourSlot)),
-        Offset(x(championshipColumn.toDouble()), yCenter(championshipSlot)),
+        Offset(championshipLeft, yCenter(championshipSlot)),
         dashed: false,
       ),
       ..._elbow(
         Offset(x(rightColumn(halfColumns - 1)), yCenter(rightFinalFourSlot)),
-        Offset(x(championshipColumn.toDouble()) + _cardWidth, yCenter(championshipSlot)),
+        Offset(championshipLeft + _championshipCardWidth, yCenter(championshipSlot)),
         dashed: false,
       ),
       for (final placement in firstFourPlacements)
@@ -914,7 +917,7 @@ class _MarchMadnessGrid extends StatelessWidget {
 
     Widget regionLabel(String name, double column, double slot) => Positioned(
           left: x(column),
-          top: y(slot) - _headerHeight,
+          top: y(slot) - _labelClearance,
           width: _cardWidth,
           child: Text(name.toUpperCase(), style: AppTextStyles.microLabel(color: AppColors.cyan), maxLines: 1, overflow: TextOverflow.ellipsis),
         );
@@ -933,12 +936,6 @@ class _MarchMadnessGrid extends StatelessWidget {
           child: _BracketMatchupCard(sport: sport, matchup: matchup, teamNames: bracket.teamNames, cardWidth: _cardWidth),
         );
 
-    // Centered on the same column/slot a same-size card would use, just
-    // scaled up around that center point -- keeps it aligned with the
-    // connector lines converging on it from both Final Four cards.
-    final championshipLeft = x(championshipColumn.toDouble()) - (_championshipCardWidth - _cardWidth) / 2;
-    final championshipTop = y(championshipSlot) - (_championshipCardHeight - _cardHeight) / 2;
-
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -948,6 +945,7 @@ class _MarchMadnessGrid extends StatelessWidget {
         ],
         _HorizontalScrollableBracket(
           width: totalWidth,
+          height: totalHeight + 2 * _headerHeight + 10,
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
@@ -1018,13 +1016,28 @@ class _ChampionshipCard extends StatelessWidget {
   final BracketMatchup matchup;
   final Map<String, BracketTeamName> teamNames;
 
+  // Combined outer + inner Padding below, each side -- the actual width
+  // _BracketMatchupCard renders at is _championshipCardWidth minus twice
+  // this, not the full _championshipCardWidth. Passing the outer width
+  // as its own cardWidth (as this used to) understates how much space
+  // its FittedBox status line actually has, overflowing it -- a real bug
+  // only visible in debug mode (the overflow's hazard-stripe rendering
+  // and console warning are both debug-only).
+  static const double _borderInset = 2 + 1.5;
+
   @override
   Widget build(BuildContext context) {
     // The outer box is unfilled -- only its boxShadow (the glow) and the
     // 2px gradient ring below it are visible. That ring is the "border":
-    // _BracketMatchupCard's own card fully covers everything inside it
-    // with its normal (same-as-every-other-card) background, leaving only
-    // this thin band showing the gradient underneath.
+    // _BracketMatchupCard's own card is meant to fully cover everything
+    // inside it with its normal (same-as-every-other-card) background,
+    // leaving only this thin band showing the gradient underneath -- but
+    // that background is itself a translucent (~5-13% white) overlay,
+    // designed to sit on the page's own solid dark background, not
+    // directly on a vivid opaque gradient. Without an opaque backing
+    // layer between them, the gradient showed straight through the
+    // barely-there overlay, so the whole card read as solid gradient
+    // fill instead of a normal card with a thin gradient border.
     return DecoratedBox(
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(16),
@@ -1036,9 +1049,17 @@ class _ChampionshipCard extends StatelessWidget {
           decoration: BoxDecoration(borderRadius: BorderRadius.circular(14), gradient: AppColors.brandMark),
           child: Padding(
             padding: const EdgeInsets.all(1.5),
-            child: ClipRRect(
-              borderRadius: BorderRadius.circular(13),
-              child: _BracketMatchupCard(sport: sport, matchup: matchup, teamNames: teamNames, cardWidth: _MarchMadnessGrid._championshipCardWidth),
+            child: DecoratedBox(
+              decoration: BoxDecoration(borderRadius: BorderRadius.circular(13), color: AppColors.bg),
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(13),
+                child: _BracketMatchupCard(
+                  sport: sport,
+                  matchup: matchup,
+                  teamNames: teamNames,
+                  cardWidth: _BracketTree._championshipCardWidth - 2 * _borderInset,
+                ),
+              ),
             ),
           ),
         ),
@@ -1226,7 +1247,15 @@ _BracketSlotLayout _computeBracketSlotLayout(List<BracketRound> rounds) {
         for (var back = r - 1; back >= 0; back--) {
           final foundIndex = rounds[back].matchups.indexWhere((m) => m.teamA == side || m.teamB == side);
           if (foundIndex != -1) {
-            connections.add(_BracketConnection(back, slots[back][foundIndex], r, roundSlots[i]!));
+            final source = rounds[back].matchups[foundIndex];
+            // A bye source has no card rendered for it (see the card
+            // loop below) -- nothing to draw a connector line from. The
+            // team wasn't playing yet, it was awarded the round
+            // automatically; this is where its own bracket path
+            // actually starts, so search no further back either.
+            if (source.teamA != null && source.teamB != null) {
+              connections.add(_BracketConnection(back, slots[back][foundIndex], r, roundSlots[i]!));
+            }
             break;
           }
         }
@@ -1258,7 +1287,7 @@ _BracketSlotLayout _computeBracketSlotLayout(List<BracketRound> rounds) {
       if (slot > maxSlotA) maxSlotA = slot;
     }
   }
-  final offset = maxSlotA + 1;
+  final offset = maxSlotA + 1 + _BracketTree._labelSeamGapSlots;
 
   final slots = <List<double>>[];
   final connections = <_BracketConnection>[
@@ -1313,6 +1342,9 @@ class _BracketConnectorPainter extends CustomPainter {
     required this.cardHeight,
     required this.roundGap,
     required this.verticalUnit,
+    this.championshipRound,
+    this.championshipShift = 0,
+    this.championshipExtraGap = 0,
   });
 
   final List<_BracketConnection> connections;
@@ -1323,7 +1355,25 @@ class _BracketConnectorPainter extends CustomPainter {
   final double roundGap;
   final double verticalUnit;
 
-  double _x(int round) => round * (cardWidth + roundGap);
+  /// The Championship card (see _BracketTree's own isChampionshipRound)
+  /// is wider than every other card and centered on its own slot, so its
+  /// actual left edge sits championshipShift px earlier than the
+  /// standard round-index formula below would place it -- without this,
+  /// a connection ending there stopped at the OLD (unshifted) x, which
+  /// now lands inside the card's own enlarged bounds instead of at its
+  /// edge, reading as the line just touching the card rather than
+  /// leading cleanly into it.
+  final int? championshipRound;
+  final double championshipShift;
+
+  /// _BracketTree's own _championshipEntryGap -- extra room before the
+  /// Championship column on top of championshipShift already eating into
+  /// the ordinary gap, so the connector legs leading into the card have
+  /// enough length to actually read as a line rather than a stub.
+  final double championshipExtraGap;
+
+  double _x(int round) =>
+      round * (cardWidth + roundGap) + (round == championshipRound ? championshipExtraGap - championshipShift : 0);
   double _y(double slot) => slot * verticalUnit + cardHeight / 2;
 
   void _drawSegment(Canvas canvas, Offset from, Offset to, Paint paint, {required bool dashed}) {
@@ -1359,11 +1409,20 @@ class _BracketConnectorPainter extends CustomPainter {
       final y1 = _y(connection.fromSlot);
       final x2 = _x(connection.toRound);
       final y2 = _y(connection.toSlot);
-      final midX = x1 + roundGap / 2;
       final paint = connection.isSkip ? skipPaint : normalPaint;
-      _drawSegment(canvas, Offset(x1, y1), Offset(midX, y1), paint, dashed: connection.isSkip);
-      _drawSegment(canvas, Offset(midX, y1), Offset(midX, y2), paint, dashed: connection.isSkip);
-      _drawSegment(canvas, Offset(midX, y2), Offset(x2, y2), paint, dashed: connection.isSkip);
+      // _elbow's own midpoint is (from.dx + to.dx) / 2 -- the real
+      // midpoint, not x1 + roundGap / 2 (this painter's own old formula,
+      // which assumed x2 - x1 always equals roundGap; true for every
+      // ordinary round-to-round gap but not one entering the Championship
+      // card, which sits championshipShift px closer than a standard
+      // card would, see _x above). That old formula put the midpoint
+      // PAST the card's own actual edge, collapsing the final leg
+      // leading into the card down to just a couple px -- visually
+      // indistinguishable from "the connector's vertical run just
+      // touches the card," not a clean line leading to it.
+      for (final segment in _elbow(Offset(x1, y1), Offset(x2, y2), dashed: connection.isSkip)) {
+        _drawSegment(canvas, segment.from, segment.to, paint, dashed: segment.dashed);
+      }
     }
   }
 
@@ -1383,6 +1442,7 @@ class _BracketTree extends StatelessWidget {
     required this.teamNames,
     this.conferenceLabels = const [],
     this.precomputedLayout,
+    this.highlightFinalMatchup = false,
   });
 
   final String sport;
@@ -1392,6 +1452,17 @@ class _BracketTree extends StatelessWidget {
   /// Per-conference labels for a combined conference-split tree; each names
   /// the round-0 slot where that conference's band of matchups starts.
   final List<({String name, double slot})> conferenceLabels;
+
+  /// True when `rounds`' own last round is genuinely this bracket's
+  /// overall championship (Super Bowl/NBA Finals/National Championship/
+  /// NBA Cup Championship) -- renders that one card via _ChampionshipCard
+  /// instead of _BracketMatchupCard. False for a sub-bracket whose own
+  /// last round is a real result but not THE championship (a single
+  /// conference's own path when there's no shared final to combine into,
+  /// or one March Madness region's own Elite Eight) -- set explicitly by
+  /// each caller rather than inferred from round position, since
+  /// "last round, one matchup" alone can't tell those cases apart.
+  final bool highlightFinalMatchup;
 
   /// Precomputed layout for a combined conference-split tree (see
   /// _computeConferenceBracketLayout). Null for the flat (NCAAFB) and
@@ -1404,6 +1475,48 @@ class _BracketTree extends StatelessWidget {
   static const double _roundGap = 40;
   static const double _verticalUnit = 124;
   static const double _headerHeight = 20;
+
+  // A conference/region label floats above the first card of its own
+  // band (see conferenceLabels/_MarchMadnessGrid's own regionLabel) --
+  // _headerHeight is the wrong amount to reserve for it: that constant
+  // sizes the *fixed top round-name header row*, not this floating
+  // label, and reusing it here left only (_verticalUnit - _cardHeight)
+  // - _headerHeight = 124 - 108 - 20 = -4px of clearance -- the label
+  // actually overlapped the previous row's card by 4px. This is sized to
+  // comfortably fit one line of AppTextStyles.microLabel.
+  static const double _labelClearance = 14;
+
+  // Even with _labelClearance sized correctly, the ordinary row-to-row
+  // gap (_verticalUnit - _cardHeight = 16px) only leaves ~2px of real
+  // margin once the label's own height is subtracted from it -- visually
+  // still reads as smushed against the card above. _computeConferenceBracketLayout's
+  // own conferenceBOffset (where a 2nd conference/region's whole band
+  // starts) adds this many extra slot-units on top of the normal 1-slot
+  // gap, specifically at that one seam, for real breathing room -- not a
+  // _verticalUnit change, which would space out every row in every
+  // bracket in the app, not just this one seam.
+  static const double _labelSeamGapSlots = 0.1;
+
+  // The Championship/Super Bowl/National Championship card -- the single
+  // matchup every other card in a bracket ultimately feeds -- renders
+  // larger than every other card, with a gradient border and a soft
+  // glow, so it reads as the destination at a glance. Shared by every
+  // sport's _BracketTree (gated by highlightFinalMatchup above) and by
+  // _MarchMadnessGrid's own separate Championship card, which isn't part
+  // of any `rounds` list _BracketTree walks.
+  static const double _championshipScale = 1.2;
+  static const double _championshipCardWidth = _cardWidth * _championshipScale;
+  static const double _championshipCardHeight = _cardHeight * _championshipScale;
+
+  // Extra horizontal room before the Championship column, on top of the
+  // ordinary _roundGap -- without it, the connector legs leading into
+  // the card (see _BracketConnectorPainter's own championshipShift doc
+  // comment) come out only ~9px long each: championshipShift (22px, half
+  // the card's own width increase) already eats most of the ordinary 40px
+  // gap, leaving little of it for an actually-visible line. This widens
+  // the gap itself rather than shrinking the shift, so the card keeps
+  // its own full emphasized size.
+  static const double _championshipEntryGap = 28;
 
   @override
   Widget build(BuildContext context) {
@@ -1418,8 +1531,13 @@ class _BracketTree extends StatelessWidget {
         if (slot > maxSlot) maxSlot = slot;
       }
     }
-    final totalWidth = rounds.length * _cardWidth + (rounds.length - 1) * _roundGap;
-    final totalHeight = maxSlot * _verticalUnit + _cardHeight;
+    final isChampionshipRound = highlightFinalMatchup && rounds.last.matchups.length == 1;
+    final championshipExtraWidth = isChampionshipRound ? (_championshipCardWidth - _cardWidth) / 2 : 0.0;
+    final championshipExtraHeight = isChampionshipRound ? (_championshipCardHeight - _cardHeight) / 2 : 0.0;
+    final championshipEntryGap = isChampionshipRound ? _championshipEntryGap : 0.0;
+    final totalWidth =
+        rounds.length * _cardWidth + (rounds.length - 1) * _roundGap + championshipExtraWidth + championshipEntryGap;
+    final totalHeight = maxSlot * _verticalUnit + _cardHeight + championshipExtraHeight;
     final hasSkipConnection = layout.connections.any((c) => c.isSkip);
 
     return Column(
@@ -1443,6 +1561,7 @@ class _BracketTree extends StatelessWidget {
         ],
         _HorizontalScrollableBracket(
           width: totalWidth,
+          height: totalHeight + _headerHeight + (conferenceLabels.isEmpty ? 10 : 10 + _headerHeight),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
@@ -1477,7 +1596,7 @@ class _BracketTree extends StatelessWidget {
                     for (final label in conferenceLabels)
                       Positioned(
                         left: 0,
-                        top: label.slot * _verticalUnit - _headerHeight,
+                        top: label.slot * _verticalUnit - _labelClearance,
                         width: _cardWidth,
                         child: Text(
                           label.name.toUpperCase(),
@@ -1496,23 +1615,42 @@ class _BracketTree extends StatelessWidget {
                           cardHeight: _cardHeight,
                           roundGap: _roundGap,
                           verticalUnit: _verticalUnit,
+                          championshipRound: isChampionshipRound ? rounds.length - 1 : null,
+                          championshipShift: championshipExtraWidth,
+                          championshipExtraGap: championshipEntryGap,
                         ),
                       ),
                     ),
+                    // A bye matchup (either side null -- see BracketMatchup's
+                    // own doc comment) gets no card at all: the team it
+                    // awarded simply appears already present in its own
+                    // next real game, same as _computeBracketSlotLayout's
+                    // connector search already skips drawing a line back
+                    // to a bye (nothing to connect to).
                     for (var r = 0; r < rounds.length; r++)
                       for (var i = 0; i < rounds[r].matchups.length; i++)
-                        Positioned(
-                          left: r * (_cardWidth + _roundGap),
-                          top: layout.slots[r][i] * _verticalUnit,
-                          width: _cardWidth,
-                          height: _cardHeight,
-                          child: _BracketMatchupCard(
-                            sport: sport,
-                            matchup: rounds[r].matchups[i],
-                            teamNames: teamNames,
-                            cardWidth: _cardWidth,
-                          ),
-                        ),
+                        if (rounds[r].matchups[i].teamA != null && rounds[r].matchups[i].teamB != null)
+                          if (isChampionshipRound && r == rounds.length - 1 && i == 0)
+                            Positioned(
+                              left: r * (_cardWidth + _roundGap) + championshipEntryGap - championshipExtraWidth,
+                              top: layout.slots[r][i] * _verticalUnit - championshipExtraHeight,
+                              width: _championshipCardWidth,
+                              height: _championshipCardHeight,
+                              child: _ChampionshipCard(sport: sport, matchup: rounds[r].matchups[i], teamNames: teamNames),
+                            )
+                          else
+                            Positioned(
+                              left: r * (_cardWidth + _roundGap),
+                              top: layout.slots[r][i] * _verticalUnit,
+                              width: _cardWidth,
+                              height: _cardHeight,
+                              child: _BracketMatchupCard(
+                                sport: sport,
+                                matchup: rounds[r].matchups[i],
+                                teamNames: teamNames,
+                                cardWidth: _cardWidth,
+                              ),
+                            ),
                   ],
                 ),
               ),
@@ -1524,17 +1662,27 @@ class _BracketTree extends StatelessWidget {
   }
 }
 
-/// A horizontally-scrollable region with a permanently visible, draggable
-/// Scrollbar -- shares _BracketTreeState's own reasoning (Scrollbar.
-/// thumbVisibility needs an explicit ScrollController, and desktop web
-/// doesn't click-drag a plain SingleChildScrollView by default) without
-/// needing _MarchMadnessGrid itself to become a StatefulWidget just to
-/// own one -- its own build() already reads a lot of local fields that
-/// would all need a `widget.` prefix for no other reason.
+/// One parent widget holding both the scrollable bracket and its
+/// horizontal scrollbar, with the bar genuinely pinned to this widget's
+/// own bottom edge -- fixed there regardless of how far the bracket is
+/// scrolled vertically, rather than a Scrollbar's usual behavior of
+/// sitting at the bottom edge of its own (possibly several-thousand-px-
+/// tall) content. A card can legitimately scroll behind the bar as a
+/// result (the bar is a real overlay, drawn on top, not part of the
+/// vertical scroll flow) -- accepted trade-off for keeping the bar
+/// reachable without first scrolling the whole bracket down to its own
+/// natural end.
+///
+/// Only kicks in once `height` (the bracket's real content height)
+/// actually exceeds a viewport-relative cap: a bracket that already fits
+/// in one screenful renders as a plain Column (content, then the bar
+/// right below it) with no inner scroll region or overlay at all, since
+/// there's nothing for a card to scroll behind in the first place.
 class _HorizontalScrollableBracket extends StatefulWidget {
-  const _HorizontalScrollableBracket({required this.width, required this.child});
+  const _HorizontalScrollableBracket({required this.width, required this.height, required this.child});
 
   final double width;
+  final double height;
   final Widget child;
 
   @override
@@ -1542,23 +1690,88 @@ class _HorizontalScrollableBracket extends StatefulWidget {
 }
 
 class _HorizontalScrollableBracketState extends State<_HorizontalScrollableBracket> {
-  final _scrollController = ScrollController();
+  // Real, interactive horizontal scroll of the bracket content itself.
+  final _contentController = ScrollController();
+  // The overlay bar's own horizontal scroll -- a second real Scrollable
+  // (not just a repaint of _contentController's position) so its own
+  // Scrollbar thumb is directly draggable, kept in sync with
+  // _contentController by a plain bidirectional listener (sharing one
+  // ScrollController between two simultaneously-visible Scrollables does
+  // NOT sync drag gestures on its own -- only that controller's own
+  // jumpTo/animateTo calls reach every attached position).
+  final _barController = ScrollController();
+  final _verticalController = ScrollController();
+  bool _syncingHorizontal = false;
+
+  // A cap, not a fixed size -- a bracket shorter than this (most
+  // conference tournaments, NFL/NBA's own non-March-Madness brackets)
+  // renders with no inner scroll region/overlay at all (see build()).
+  static const double _maxPaneHeightFraction = 0.65;
+  static const double _minPaneHeight = 360;
+  static const double _maxPaneHeight = 720;
+  static const double _barHeight = 14;
+  static const double _barGap = 8;
+
+  @override
+  void initState() {
+    super.initState();
+    _contentController.addListener(() => _syncHorizontal(from: _contentController, to: _barController));
+    _barController.addListener(() => _syncHorizontal(from: _barController, to: _contentController));
+  }
+
+  void _syncHorizontal({required ScrollController from, required ScrollController to}) {
+    if (_syncingHorizontal || !from.hasClients || !to.hasClients) return;
+    final target = from.offset.clamp(0.0, to.position.maxScrollExtent);
+    if (target == to.offset) return;
+    _syncingHorizontal = true;
+    to.jumpTo(target);
+    _syncingHorizontal = false;
+  }
 
   @override
   void dispose() {
-    _scrollController.dispose();
+    _contentController.dispose();
+    _barController.dispose();
+    _verticalController.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
-    return Scrollbar(
-      controller: _scrollController,
+    final content = SingleChildScrollView(
+      controller: _contentController,
+      scrollDirection: Axis.horizontal,
+      child: SizedBox(width: widget.width, height: widget.height, child: widget.child),
+    );
+
+    final bar = Scrollbar(
+      controller: _barController,
       thumbVisibility: true,
       child: SingleChildScrollView(
-        controller: _scrollController,
+        controller: _barController,
         scrollDirection: Axis.horizontal,
-        child: SizedBox(width: widget.width, child: widget.child),
+        child: SizedBox(width: widget.width, height: _barHeight),
+      ),
+    );
+
+    final viewportCap = (MediaQuery.sizeOf(context).height * _maxPaneHeightFraction).clamp(_minPaneHeight, _maxPaneHeight);
+    if (widget.height <= viewportCap) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [content, const SizedBox(height: _barGap), bar],
+      );
+    }
+
+    return SizedBox(
+      height: viewportCap,
+      child: Stack(
+        children: [
+          Positioned.fill(
+            bottom: _barHeight + _barGap,
+            child: SingleChildScrollView(controller: _verticalController, child: content),
+          ),
+          Positioned(left: 0, right: 0, bottom: 0, child: bar),
+        ],
       ),
     );
   }

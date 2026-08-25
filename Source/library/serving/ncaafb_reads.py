@@ -9,7 +9,7 @@ lifecycle concerns.
 """
 import re
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 
 from boto3.dynamodb.conditions import Key
 
@@ -76,6 +76,12 @@ def _previous_week_events(completed: list[dict]) -> list[dict]:
 
 _STALE_SCHEDULED_GRACE_DAYS = 3  # tolerates ingest lag flipping a played game's status to completed
 
+# A real single week's own games span at most this many calendar days from
+# the earliest of them (every week checked live, 2026-08-24, fits inside
+# a 3-6 day Thu-Mon window -- see _next_week_events' own docstring for the
+# one confirmed exception this constant exists to cut off).
+_MAX_WEEK_SPAN_DAYS = 6
+
 
 def _next_week_events(scheduled: list[dict]) -> list[dict]:
     """Only the soonest upcoming week's games. Events older than
@@ -85,7 +91,20 @@ def _next_week_events(scheduled: list[dict]) -> list[dict]:
     already-played Thursday game doesn't hide the rest of its own week's
     Saturday games) -- the returned list is separately filtered to
     today-or-later, since "upcoming" must never include a past-dated
-    event, played or not."""
+    event, played or not.
+
+    Also caps results to _MAX_WEEK_SPAN_DAYS of the soonest game within
+    that week, not just its own `week` tag -- confirmed live, 2026-08-24:
+    week 1 (and only week 1; every other week checked cleanly spans one
+    3-6 day weekend) actually spanned Aug 29 - Sep 7, a real 10-day CFBD
+    quirk where a handful of true season-opener games ("Week 0" by fan
+    convention) share the same week=1 tag as the following weekend's much
+    larger main slate, rather than CFBD assigning them their own separate
+    week number. Grouping strictly by `week` before today's actual season
+    start would show both clusters as one "upcoming" list -- capping to a
+    real single-week window from the soonest game excludes the later,
+    separate cluster without needing to special-case week 1 specifically
+    (any future week with the same kind of split gets the same fix)."""
     today = datetime.now(timezone.utc).date().isoformat()
     cutoff = (datetime.now(timezone.utc).date() - timedelta(days=_STALE_SCHEDULED_GRACE_DAYS)).isoformat()
     plausible = [e for e in scheduled if e.get("event_date", "") >= cutoff]
@@ -93,7 +112,12 @@ def _next_week_events(scheduled: list[dict]) -> list[dict]:
         return []
     earliest = min(plausible, key=lambda e: e.get("event_date", ""))
     target = _week_key(earliest)
-    return [e for e in plausible if _week_key(e) == target and e.get("event_date", "") >= today]
+    same_week = [e for e in plausible if _week_key(e) == target and e.get("event_date", "") >= today]
+    if not same_week:
+        return []
+    soonest_date = min(e.get("event_date", "") for e in same_week)
+    span_cutoff = (date.fromisoformat(soonest_date) + timedelta(days=_MAX_WEEK_SPAN_DAYS)).isoformat()
+    return [e for e in same_week if e.get("event_date", "") <= span_cutoff]
 
 
 def _actual_result(event: dict) -> dict | None:

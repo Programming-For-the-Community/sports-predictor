@@ -106,6 +106,39 @@ class TestListEvents:
 
         assert {e["event_id"] for e in result["events"]} == {"e2"}
 
+    def test_a_week_spanning_two_separate_clusters_only_shows_the_soonest_one(self):
+        # Regression: confirmed live, 2026-08-24 -- CFBD's own week=1 tag
+        # covered a handful of true season-opener games (real "Week 0" by
+        # fan convention) AND the following weekend's much larger main
+        # slate, a real 10-day span, unlike every other week (a single
+        # 3-6 day weekend). Grouping strictly by `week` showed both
+        # clusters -- 3 days apart here, comfortably past
+        # _MAX_WEEK_SPAN_DAYS -- as one "upcoming" list.
+        storage = MagicMock()
+        predictions_table = MagicMock()
+        storage.get_all_events.return_value = [
+            _event("opener1", _future(2), "61", "52", week=1),
+            _event("opener2", _future(3), "80", "90", week=1),
+            _event("main1", _future(9), "61", "70", week=1),
+            _event("main2", _future(10), "80", "70", week=1),
+        ]
+
+        result = ncaafb_reads.list_events(storage, predictions_table, "ncaafb", "scheduled")
+
+        assert {e["event_id"] for e in result["events"]} == {"opener1", "opener2"}
+
+    def test_a_normal_single_cluster_week_is_unaffected_by_the_span_cap(self):
+        storage = MagicMock()
+        predictions_table = MagicMock()
+        storage.get_all_events.return_value = [
+            _event("e1", _future(2), "61", "52", week=2),
+            _event("e2", _future(4), "80", "90", week=2),
+        ]
+
+        result = ncaafb_reads.list_events(storage, predictions_table, "ncaafb", "scheduled")
+
+        assert {e["event_id"] for e in result["events"]} == {"e1", "e2"}
+
     def test_completed_returns_only_the_most_recent_week(self):
         storage = MagicMock()
         predictions_table = MagicMock()

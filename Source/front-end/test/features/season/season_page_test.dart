@@ -5,6 +5,7 @@ import 'package:flutter_test/flutter_test.dart';
 
 import 'package:front_end/core/data/season_repository.dart';
 import 'package:front_end/core/models/season_projection.dart';
+import 'package:front_end/core/theme/app_colors.dart';
 import 'package:front_end/features/season/season_page.dart';
 
 /// Functional (not just overflow) coverage for the season page's 3-way
@@ -199,6 +200,25 @@ void main() {
     // Both conferences share one combined tree -- "Wild Card" is one round
     // column holding both conferences' matchups, so the label appears once.
     expect(find.text('WILD CARD'), findsOneWidget);
+
+    // The Super Bowl card gets the same emphasized-card treatment as
+    // March Madness's own Championship card (larger, gradient border,
+    // glow) -- no overflow (a real bug this treatment previously had:
+    // passing the outer card width, not the actual width left after the
+    // border/glow padding, to the inner card's own status-line sizing).
+    expect(tester.takeException(), isNull);
+    expect(find.byWidgetPredicate((w) => w is DecoratedBox && w.decoration is BoxDecoration && (w.decoration as BoxDecoration).gradient == AppColors.brandMark), findsOneWidget);
+
+    // Regression: the Championship card is wider than a standard card
+    // and centered on its own slot -- its own connector line has to
+    // enter at that shifted edge, not the standard (unshifted) round
+    // position, or the line just runs into the middle of the enlarged
+    // card instead of leading cleanly to its edge.
+    final painter = tester.widgetList<CustomPaint>(find.byType(CustomPaint)).map((w) => w.painter).whereType<Object>().firstWhere(
+          (p) => p.runtimeType.toString() == '_BracketConnectorPainter',
+        );
+    // ignore: avoid_dynamic_calls
+    expect((painter as dynamic).championshipShift, greaterThan(0));
   });
 
   testWidgets('a flat (NCAAFB-shaped) bracket renders its rounds with no conference headers', (tester) async {
@@ -232,7 +252,82 @@ void main() {
     expect(find.textContaining('skipping the Elimination Game'), findsNothing);
   });
 
-  testWidgets('a bye matchup (null team_b) renders BYE instead of crashing', (tester) async {
+  testWidgets('a conference tournament bracket connects its Championship card the same way the top-level bracket does', (tester) async {
+    // Realistic conference-tournament shape (unlike NFL/NCAAFB's own
+    // fixed power-of-2 field): 9 real teams padded to 8 slots needs a
+    // bye, chained team ids all the way to the Championship so the
+    // connector search has a real source to find, same as production
+    // data (the flat-bracket test above deliberately doesn't chain its
+    // 2 rounds' team ids together, so it can't catch this).
+    final projection = SeasonProjection(
+      sport: 'ncaambb',
+      season: 2027,
+      standings: [],
+      leaderboards: null,
+      conferenceBrackets: const [
+        ConferenceBracket(
+          conference: 'SEC',
+          bracket: BracketProjection(
+            conferences: {},
+            rounds: [
+              BracketRound(round: 'Quarterfinals', matchups: [
+                BracketMatchup(teamA: '9', teamB: null, seedA: 1, seedB: null, status: 'projected', predictedWinner: '9', winProbability: 1.0),
+                BracketMatchup(teamA: '2', teamB: '7', seedA: 4, seedB: 5, status: 'projected', predictedWinner: '2', winProbability: 0.6),
+                BracketMatchup(teamA: '3', teamB: '6', seedA: 3, seedB: 6, status: 'projected', predictedWinner: '3', winProbability: 0.55),
+                BracketMatchup(teamA: '4', teamB: '5', seedA: 2, seedB: 7, status: 'projected', predictedWinner: '4', winProbability: 0.65),
+              ]),
+              BracketRound(round: 'Semifinals', matchups: [
+                BracketMatchup(teamA: '9', teamB: '2', status: 'projected', predictedWinner: '9', winProbability: 0.58),
+                BracketMatchup(teamA: '3', teamB: '4', status: 'projected', predictedWinner: '3', winProbability: 0.52),
+              ]),
+              BracketRound(round: 'Championship', matchups: [
+                BracketMatchup(teamA: '9', teamB: '3', status: 'projected', predictedWinner: '9', winProbability: 0.51),
+              ]),
+            ],
+            teamNames: {},
+            champion: '9',
+          ),
+        ),
+      ],
+    );
+
+    await pumpSeasonPage(tester, 'ncaambb', projection);
+    await tester.tap(find.text('Conference Brackets'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('SEC'));
+    await tester.pumpAndSettle();
+
+    expect(tester.takeException(), isNull);
+    final painter = tester
+        .widgetList<CustomPaint>(find.byType(CustomPaint))
+        .map((w) => w.painter)
+        .whereType<Object>()
+        .firstWhere((p) => p.runtimeType.toString() == '_BracketConnectorPainter');
+    // ignore: avoid_dynamic_calls
+    final dynamicPainter = painter as dynamic;
+    expect(dynamicPainter.championshipShift as double, greaterThan(0));
+    // The Championship's own 2 connections (from each Semifinal winner)
+    // both actually resolved -- not silently dropped because their
+    // source was mistaken for a bye, or because the round wasn't
+    // recognized as the championship at all in this (flat, non-combined)
+    // bracket shape.
+    final connections = (dynamicPainter.connections as List).where((c) {
+      final toRound = c.toRound as int;
+      return toRound == 2; // Championship is round index 2 here
+    }).toList();
+    expect(connections.length, equals(2));
+    // The actual elbow geometry (where the midpoint falls, so the leg
+    // leading into the card isn't collapsed to a couple px -- the real
+    // bug this whole test exists for, see _BracketConnectorPainter's own
+    // championshipShift doc comment) isn't independently re-verified
+    // here: _BracketConnectorPainter.paint() now delegates to the same
+    // top-level _elbow() the March Madness grid's own (already-covered)
+    // championship connector uses, rather than its own separate midpoint
+    // formula, so a regression to that shared math would already show up
+    // in the March Madness "no overlapping cards" test above.
+  });
+
+  testWidgets('a bye matchup (null team_b) shows no card at all -- the team just appears in its next real game', (tester) async {
     final projection = SeasonProjection(
       sport: 'ncaambb',
       season: 2027,
@@ -241,13 +336,19 @@ void main() {
       marchMadnessBracket: const MarchMadnessBracket(
         firstFour: [],
         // A single region (not 4) falls back to the independent-tree path
-        // -- exercises the same _BracketTeamRow null handling without
-        // needing a full 4-region fixture for this test's purpose.
+        // -- exercises the same bye handling without needing a full
+        // 4-region fixture for this test's purpose. 2 rounds: team '9'
+        // gets a bye into the 2nd, where it plays a real game against
+        // '10' -- a conference tournament's own real shape (e.g. the
+        // Big Ten's own 1-2 lowest seeds skipping a Round of 1).
         regions: {
           'Region A': RegionBracket(
             rounds: [
-              BracketRound(round: 'Round of 64', matchups: [
+              BracketRound(round: 'Round of 32', matchups: [
                 BracketMatchup(teamA: '9', teamB: null, seedA: 1, seedB: null, status: 'projected', predictedWinner: '9', winProbability: 1.0),
+              ]),
+              BracketRound(round: 'Sweet 16', matchups: [
+                BracketMatchup(teamA: '9', teamB: '10', seedA: 1, seedB: 8, status: 'projected', predictedWinner: '9', winProbability: 0.7),
               ]),
             ],
             champion: '9',
@@ -264,7 +365,11 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(tester.takeException(), isNull);
-    expect(find.text('BYE'), findsOneWidget);
+    expect(find.text('BYE'), findsNothing);
+    // '9' appears exactly once -- in its own real Sweet 16 game, not
+    // also in a hidden Round of 32 card.
+    expect(find.text('9'), findsOneWidget);
+    expect(find.text('10'), findsOneWidget);
   });
 
   testWidgets('a full 4-region March Madness bracket renders First Four, all 4 region labels, and the Championship, with no overlapping cards', (tester) async {
@@ -350,12 +455,15 @@ void main() {
     // baseline by a few px from an unseeded row's -- real, pre-existing,
     // and harmless (both cards' Positioned.top below prove the cards
     // themselves, not just their teamA text, are on the identical row).
-    final cardPositions = tester
-        .widgetList<Positioned>(find.ancestor(of: find.text('90'), matching: find.byType(Positioned)))
-        .map((p) => p.top)
-        .toList();
-    expect(cardPositions, hasLength(2));
-    expect(cardPositions[0], equals(cardPositions[1]));
+    // .first: the grid now sits inside _HorizontalScrollableBracket's own
+    // Positioned.fill wrapper too (a farther-out ancestor than the card's
+    // own Positioned) -- find.ancestor walks upward and returns nearest
+    // first, so .first is still the card-level one this test cares about.
+    double nearestPositionedTop(Finder textFinder) =>
+        tester.widgetList<Positioned>(find.ancestor(of: textFinder, matching: find.byType(Positioned))).first.top!;
+    final firstFourCardTop = nearestPositionedTop(find.text('90').at(0));
+    final destinationCardTop = nearestPositionedTop(find.text('90').at(1));
+    expect(firstFourCardTop, equals(destinationCardTop));
 
     // Same distinct-vertical-slot pattern as the NBA Play-In regression
     // tests below -- '1' appears in its own region's Elite Eight card and
