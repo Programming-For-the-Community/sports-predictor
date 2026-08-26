@@ -66,6 +66,26 @@ class TestEnrichParticipants:
 
         assert [p["abbreviation"] for p in result] == ["KC", "LAC"]
 
+    def test_defaults_to_looking_up_a_team_entity(self):
+        storage = MagicMock()
+        storage.get_entity.return_value = {"name": "Chiefs", "metadata": {"abbreviation": "KC"}}
+
+        enrich_participants(storage, "nfl", [{"entity_id": "12", "role": "home"}])
+
+        storage.get_entity.assert_called_once_with("nfl", "12", "team")
+
+    def test_field_event_sport_looks_up_a_player_entity_instead_of_a_team(self):
+        storage = MagicMock()
+        storage.get_entity.return_value = {"name": "Scottie Scheffler", "metadata": {}}
+
+        result = enrich_participants(
+            storage, "pga", [{"entity_id": "9478", "result": {"finish_position": 1}}], entity_type="player",
+        )
+
+        storage.get_entity.assert_called_once_with("pga", "9478", "player")
+        assert result[0]["name"] == "Scottie Scheffler"
+        assert result[0]["abbreviation"] is None
+
 
 class TestEnrichTeamStandings:
     def test_attaches_name_and_abbreviation_from_the_entity(self):

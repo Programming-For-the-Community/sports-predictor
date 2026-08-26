@@ -1,0 +1,90 @@
+# Builds, packages, and deploys the PGA AI training code. Runs standalone
+# (workflow_dispatch) or called from pga_deploy.yml (workflow_call) --
+# either way the work is identical: build and push image(s).
+#
+# This stage builds two images: Feature Engineering and Train Top-10
+# Model (the latter also serves train_top5_model.py/train_score_model.py/
+# train_cutline_model.py/train_round_model.py -- Terraform/ecs-task-pga-
+# train-{top5,score,cutline,round}-model.tf all point at this same image
+# tag and override `command` to run their own script instead, same
+# shared-image/command-override pattern NBA's own train-win-probability-
+# model image uses for score/player-prop).
+#
+# Each image gets its OWN version constant below, bumped independently --
+# feature engineering and train-top10-model are unrelated Fargate tasks
+# with unrelated code, so a change to one has no reason to force a
+# version bump (and a new image tag/deploy) of the other. Bump only the
+# constant for whichever image actually changed, never both just to keep
+# them in sync.
+
+name: PGA AI Training
+
+on:
+  workflow_dispatch:
+  workflow_call:
+
+env:
+  FEATURE_ENGINEERING_IMAGE_VERSION: '1.0.0'
+  TRAIN_TOP10_MODEL_IMAGE_VERSION: '1.0.0'
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  # Two independent test jobs, not one shared one -- a failing
+  # model-training test shouldn't fail feature engineering's deployment
+  # too, even though both re-run Source/tests/library/ redundantly.
+  #
+  # feature-engineering's own requirements.txt has no reason to carry
+  # xgboost/scikit-learn/pandas/lightgbm's ML-training extras (it only
+  # writes Parquet) -- library/tests/ml/ needs those and is excluded here.
+  # train-top10-model's own job below already has all of them, so it
+  # needs no such exclusion.
+  test-feature-engineering:
+    name: Run feature engineering tests
+    uses: ./.github/workflows/run_python_tests.yml
+    with:
+      test_path: 'Source/tests/library/ Source/tests/feature-engineering/pga/ --ignore=Source/tests/library/ml'
+      requirements_files: 'Source/feature-engineering/pga/requirements.txt'
+
+  test-train-top10-model:
+    name: Run train top-10-probability model tests
+    uses: ./.github/workflows/run_python_tests.yml
+    with:
+      test_path: 'Source/tests/library/ Source/tests/model-training/pga/'
+      requirements_files: 'Source/model-training/pga/requirements.txt'
+
+  set-versions:
+    name: Resolve image versions
+    runs-on: ubuntu-latest
+    outputs:
+      feature_engineering_version: ${{ steps.out.outputs.feature_engineering_version }}
+      train_top10_model_version: ${{ steps.out.outputs.train_top10_model_version }}
+    steps:
+      - id: out
+        run: |
+          echo "feature_engineering_version=${{ env.FEATURE_ENGINEERING_IMAGE_VERSION }}" >> "$GITHUB_OUTPUT"
+          echo "train_top10_model_version=${{ env.TRAIN_TOP10_MODEL_IMAGE_VERSION }}" >> "$GITHUB_OUTPUT"
+
+  build-feature-engineering-image:
+    name: Build and push feature engineering image
+    needs: [set-versions, test-feature-engineering]
+    uses: ./.github/workflows/docker_build_push.yml
+    secrets: inherit
+    with:
+      dockerfile_path: 'Source/feature-engineering/pga/Dockerfile'
+      docker_context: 'Source'
+      image_name: 'pga-feature-engineering'
+      image_version: ${{ needs.set-versions.outputs.feature_engineering_version }}
+
+  build-train-top10-model-image:
+    name: Build and push train top-10-probability model image
+    needs: [set-versions, test-train-top10-model]
+    uses: ./.github/workflows/docker_build_push.yml
+    secrets: inherit
+    with:
+      dockerfile_path: 'Source/model-training/pga/Dockerfile'
+      docker_context: 'Source'
+      image_name: 'pga-train-top10-model'
+      image_version: ${{ needs.set-versions.outputs.train_top10_model_version }}

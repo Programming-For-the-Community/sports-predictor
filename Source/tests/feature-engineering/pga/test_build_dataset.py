@@ -1,0 +1,364 @@
+"""
+Unit tests for the PGA feature-engineering entrypoint's orchestration
+logic -- the chronological golfer-history walk and Parquet assembly, plus
+(added 2026-08-25) the season-stats raw-snapshot loader/resolver and the
+round-level/cut-line dataset builders. The actual feature math is tested
+in tests/library/features/test_pga.py; FeatureStorage/S3Manager are
+mocked here so these tests only cover build_dataset.py's own wiring.
+"""
+import io
+from unittest.mock import MagicMock
+
+import pandas as pd
+import pytest
+
+import build_dataset
+
+
+def _event(event_key, event_date, participants, course_id=None, cut_score=None, cut_count=None, rounds_by_participant=None):
+    for participant in participants:
+        rounds = (rounds_by_participant or {}).get(participant["entity_id"], [])
+        participant["result"]["rounds"] = rounds
+    return {
+        "event_key": event_key, "event_date": event_date, "purse": 10000000, "is_major": False,
+        "course_id": course_id, "cut_score": cut_score, "cut_count": cut_count, "participants": participants,
+    }
+
+
+def _participant(entity_id, finish_position=None, score_to_par=None, earnings=0.0):
+    return {
+        "entity_id": entity_id,
+        "result": {"finish_position": finish_position, "score_to_par": score_to_par, "earnings": earnings, "rounds": []},
+    }
+
+
+def _round(round_number, score_to_par=None):
+    return {"round": round_number, "score_to_par": score_to_par, "total_strokes": None}
+
+
+def _statistics_payload(categories: dict):
+    """categories: {raw_category_name: {athlete_id: value}}."""
+    return {"stats": {"categories": [
+        {"name": name, "leaders": [{"athlete": {"id": athlete_id}, "value": value} for athlete_id, value in values.items()]}
+        for name, values in categories.items()
+    ]}}
+
+
+class TestWriteParquet:
+    def test_empty_rows_returns_empty_bytes(self):
+        assert build_dataset._write_parquet([]) == b""
+
+    def test_writes_a_readable_parquet_frame(self):
+        rows = [{"a": 1, "b": 2}, {"a": 3, "b": 4}]
+
+        df = pd.read_parquet(io.BytesIO(build_dataset._write_parquet(rows)))
+
+        assert list(df.columns) == ["a", "b"]
+        assert df.iloc[1]["a"] == 3
+
+
+class TestBuildGolferDataset:
+    def _storage(self, events):
+        storage = MagicMock()
+        storage.get_all_events.return_value = events
+        return storage
+
+    def test_builds_one_row_per_participant_per_event(self):
+        events = [_event("E1", "2026-06-01", [_participant("1", finish_position=1), _participant("2", finish_position=2)])]
+        storage = self._storage(events)
+
+        rows = build_dataset.build_golfer_dataset(storage, window=5)
+
+        assert {(r["event_key"], r["entity_id"]) for r in rows} == {("E1", "1"), ("E1", "2")}
+        storage.get_all_events.assert_called_once_with(build_dataset.SPORT)
+
+    def test_second_event_sees_only_the_first_events_result_as_history(self):
+        events = [
+            _event("E1", "2026-06-01", [_participant("1", finish_position=1, score_to_par=-15, earnings=1000000)]),
+            _event("E2", "2026-06-08", [_participant("1", finish_position=5)]),
+        ]
+        storage = self._storage(events)
+
+        rows = build_dataset.build_golfer_dataset(storage, window=5)
+
+        e1_row = next(r for r in rows if r["event_key"] == "E1")
+        e2_row = next(r for r in rows if r["event_key"] == "E2")
+        assert e1_row["events_played"] == 0  # no prior tournaments yet
+        assert e2_row["events_played"] == 1
+        assert e2_row["avg_finish_position"] == 1
+
+    def test_a_golfers_own_result_this_event_does_not_leak_into_their_own_row(self):
+        # Two golfers in the SAME event -- neither should see the other's
+        # (or their own) same-event result as "history".
+        events = [_event("E1", "2026-06-01", [_participant("1", finish_position=1), _participant("2", finish_position=50)])]
+        storage = self._storage(events)
+
+        rows = build_dataset.build_golfer_dataset(storage, window=5)
+
+        for row in rows:
+            assert row["events_played"] == 0
+
+    def test_history_stays_capped_at_window_across_many_events(self):
+        events = [
+            _event(f"E{i}", f"2026-0{i}-01", [_participant("1", finish_position=i)])
+            for i in range(1, 8)
+        ]
+        storage = self._storage(events)
+
+        rows = build_dataset.build_golfer_dataset(storage, window=3)
+
+        last_row = next(r for r in rows if r["event_key"] == "E7")
+        assert last_row["events_played"] == 3
+
+    def test_field_size_reflects_this_events_own_participant_count(self):
+        participants = [_participant(str(i)) for i in range(1, 6)]
+        events = [_event("E1", "2026-06-01", participants)]
+        storage = self._storage(events)
+
+        rows = build_dataset.build_golfer_dataset(storage, window=5)
+
+        assert all(row["field_size"] == 5 for row in rows)
+
+
+class TestCourseFitHistory:
+    def _storage(self, events):
+        storage = MagicMock()
+        storage.get_all_events.return_value = events
+        return storage
+
+    def test_second_appearance_at_the_same_course_sees_course_specific_history(self):
+        events = [
+            _event("E1", "2025-08-01", [_participant("1", finish_position=1, score_to_par=-15, earnings=1000000)], course_id="65"),
+            _event("E2", "2026-08-01", [_participant("1", finish_position=5)], course_id="65"),
+        ]
+        storage = self._storage(events)
+
+        rows = build_dataset.build_golfer_dataset(storage, window=5)
+
+        e2_row = next(r for r in rows if r["event_key"] == "E2")
+        assert e2_row["course_events_played"] == 1
+        assert e2_row["course_avg_finish_position"] == 1
+
+    def test_a_different_course_does_not_contribute_to_course_specific_history(self):
+        events = [
+            _event("E1", "2025-08-01", [_participant("1", finish_position=1)], course_id="65"),
+            _event("E2", "2026-08-01", [_participant("1", finish_position=5)], course_id="99"),
+        ]
+        storage = self._storage(events)
+
+        rows = build_dataset.build_golfer_dataset(storage, window=5)
+
+        e2_row = next(r for r in rows if r["event_key"] == "E2")
+        assert e2_row["course_events_played"] == 0  # different course -- E1 doesn't count
+        # ... but the golfer's own OVERALL history still saw it.
+        assert e2_row["events_played"] == 1
+
+    def test_missing_course_id_gets_no_course_history_but_still_gets_overall_history(self):
+        events = [
+            _event("E1", "2025-08-01", [_participant("1", finish_position=1)], course_id=None),
+            _event("E2", "2026-08-01", [_participant("1", finish_position=5)], course_id=None),
+        ]
+        storage = self._storage(events)
+
+        rows = build_dataset.build_golfer_dataset(storage, window=5)
+
+        e2_row = next(r for r in rows if r["event_key"] == "E2")
+        assert e2_row["course_events_played"] == 0
+        assert e2_row["events_played"] == 1
+
+    def test_course_history_stays_capped_at_course_window_across_many_appearances(self):
+        events = [
+            _event(f"E{i}", f"202{i}-08-01", [_participant("1", finish_position=i)], course_id="65")
+            for i in range(1, 8)
+        ]
+        storage = self._storage(events)
+
+        rows = build_dataset.build_golfer_dataset(storage, window=10, course_window=3)
+
+        last_row = next(r for r in rows if r["event_key"] == "E7")
+        assert last_row["course_events_played"] == 3
+
+
+class TestSeasonStatSnapshots:
+    def _raw_s3(self, keys_and_payloads: dict):
+        raw_s3 = MagicMock()
+        raw_s3.list_keys.return_value = list(keys_and_payloads.keys())
+        raw_s3.get_json.side_effect = lambda key: keys_and_payloads[key]
+        return raw_s3
+
+    def test_parses_a_date_keyed_snapshot(self):
+        raw_s3 = self._raw_s3({
+            "pga/statistics/20260601.json": _statistics_payload({"yardsPerDrive": {"9478": 320.1}}),
+        })
+
+        snapshots = build_dataset._load_season_stat_snapshots(raw_s3)
+
+        assert len(snapshots) == 1
+        assert snapshots[0]["as_of_date"] == "2026-06-01"
+        assert snapshots[0]["value_by_category_and_athlete"]["yardsPerDrive"]["9478"] == 320.1
+
+    def test_ignores_categories_outside_the_project_supported_set(self):
+        raw_s3 = self._raw_s3({
+            "pga/statistics/20260601.json": _statistics_payload({
+                "yardsPerDrive": {"9478": 320.1}, "officialAmount": {"9478": 1000000},
+            }),
+        })
+
+        snapshots = build_dataset._load_season_stat_snapshots(raw_s3)
+
+        assert "officialAmount" not in snapshots[0]["value_by_category_and_athlete"]
+
+    def test_ignores_a_non_matching_key(self):
+        raw_s3 = self._raw_s3({"pga/statistics/notadate.json": {}})
+
+        snapshots = build_dataset._load_season_stat_snapshots(raw_s3)
+
+        assert snapshots == []
+
+    def test_returns_snapshots_sorted_oldest_first(self):
+        raw_s3 = self._raw_s3({
+            "pga/statistics/20260801.json": _statistics_payload({}),
+            "pga/statistics/20260601.json": _statistics_payload({}),
+        })
+
+        snapshots = build_dataset._load_season_stat_snapshots(raw_s3)
+
+        assert [s["as_of_date"] for s in snapshots] == ["2026-06-01", "2026-08-01"]
+
+    def test_resolve_picks_the_most_recent_snapshot_strictly_before_the_event_date(self):
+        snapshots = [
+            {"as_of_date": "2026-06-01", "value_by_category_and_athlete": {"yardsPerDrive": {"9478": 300.0}}},
+            {"as_of_date": "2026-07-01", "value_by_category_and_athlete": {"yardsPerDrive": {"9478": 310.0}}},
+        ]
+
+        resolved = build_dataset._resolve_season_stats(snapshots, "9478", "2026-08-01")
+
+        assert resolved["yardsPerDrive"] == 310.0
+
+    def test_resolve_never_uses_a_same_day_or_later_snapshot(self):
+        snapshots = [{"as_of_date": "2026-08-01", "value_by_category_and_athlete": {"yardsPerDrive": {"9478": 310.0}}}]
+
+        resolved = build_dataset._resolve_season_stats(snapshots, "9478", "2026-08-01")
+
+        assert resolved["yardsPerDrive"] is None
+
+    def test_resolve_returns_none_for_every_category_when_no_snapshot_qualifies(self):
+        resolved = build_dataset._resolve_season_stats([], "9478", "2026-08-01")
+
+        assert all(value is None for value in resolved.values())
+        assert set(resolved.keys()) == set(build_dataset.SEASON_STAT_CATEGORIES)
+
+    def test_resolve_is_none_for_a_golfer_not_in_that_categorys_top_50(self):
+        snapshots = [{"as_of_date": "2026-06-01", "value_by_category_and_athlete": {"yardsPerDrive": {"9478": 300.0}}}]
+
+        resolved = build_dataset._resolve_season_stats(snapshots, "99999", "2026-08-01")
+
+        assert resolved["yardsPerDrive"] is None
+
+
+class TestBuildGolferDatasetSeasonStats:
+    def _storage(self, events):
+        storage = MagicMock()
+        storage.get_all_events.return_value = events
+        return storage
+
+    def test_season_stats_are_resolved_per_participant_per_event(self):
+        events = [_event("E1", "2026-08-15", [_participant("1")])]
+        storage = self._storage(events)
+        snapshots = [{"as_of_date": "2026-08-01", "value_by_category_and_athlete": {"yardsPerDrive": {"1": 315.5}}}]
+
+        rows = build_dataset.build_golfer_dataset(storage, window=5, season_stat_snapshots=snapshots)
+
+        assert rows[0]["season_driving_distance"] == 315.5
+
+    def test_no_snapshots_still_produces_season_columns_as_none(self):
+        events = [_event("E1", "2026-08-15", [_participant("1")])]
+        storage = self._storage(events)
+
+        rows = build_dataset.build_golfer_dataset(storage, window=5)
+
+        assert rows[0]["season_driving_distance"] is None
+
+
+class TestBuildRoundDataset:
+    def _storage(self, events):
+        storage = MagicMock()
+        storage.get_all_events.return_value = events
+        return storage
+
+    def test_builds_one_row_per_round_actually_played(self):
+        events = [_event("E1", "2026-06-01", [_participant("1")], rounds_by_participant={
+            "1": [_round(1, -2), _round(2, 0), _round(3, -1), _round(4, -1)],
+        })]
+        storage = self._storage(events)
+
+        rows = build_dataset.build_round_dataset(storage, window=5)
+
+        assert [r["round_number"] for r in rows] == [1, 2, 3, 4]
+
+    def test_a_cut_golfer_only_produces_rounds_1_and_2(self):
+        events = [_event("E1", "2026-06-01", [_participant("1")], rounds_by_participant={
+            "1": [_round(1, 4), _round(2, 2)],
+        })]
+        storage = self._storage(events)
+
+        rows = build_dataset.build_round_dataset(storage, window=5)
+
+        assert [r["round_number"] for r in rows] == [1, 2]
+
+    def test_same_round_history_is_scoped_by_round_number_across_tournaments(self):
+        events = [
+            _event("E1", "2026-06-01", [_participant("1")], rounds_by_participant={"1": [_round(1, -5), _round(2, 1)]}),
+            _event("E2", "2026-06-08", [_participant("1")], rounds_by_participant={"1": [_round(1, -3), _round(2, -1)]}),
+        ]
+        storage = self._storage(events)
+
+        rows = build_dataset.build_round_dataset(storage, window=5)
+
+        e2_round1 = next(r for r in rows if r["event_key"] == "E2" and r["round_number"] == 1)
+        e2_round2 = next(r for r in rows if r["event_key"] == "E2" and r["round_number"] == 2)
+        assert e2_round1["same_round_avg_score_to_par"] == -5  # only E1's own round 1
+        assert e2_round2["same_round_avg_score_to_par"] == 1  # only E1's own round 2
+
+
+class TestBuildCutlineDataset:
+    def _storage(self, events):
+        storage = MagicMock()
+        storage.get_all_events.return_value = events
+        return storage
+
+    def test_builds_one_row_per_tournament_no_golfer_dimension(self):
+        events = [
+            _event("E1", "2026-06-01", [_participant("1"), _participant("2")], cut_score=-2, cut_count=71),
+            _event("E2", "2026-06-08", [_participant("1")], cut_score=0, cut_count=0),
+        ]
+        storage = self._storage(events)
+
+        rows = build_dataset.build_cutline_dataset(storage)
+
+        assert {r["event_key"] for r in rows} == {"E1", "E2"}
+
+    def test_course_cut_history_carries_forward_across_tournaments_at_the_same_course(self):
+        events = [
+            _event("E1", "2025-06-01", [_participant("1")], course_id="65", cut_score=-4, cut_count=70),
+            _event("E2", "2026-06-01", [_participant("1")], course_id="65", cut_score=-2, cut_count=71),
+        ]
+        storage = self._storage(events)
+
+        rows = build_dataset.build_cutline_dataset(storage)
+
+        e2_row = next(r for r in rows if r["event_key"] == "E2")
+        assert e2_row["course_avg_cut_score"] == -4
+
+
+class TestWriteDataset:
+    def test_raises_on_empty_rows(self):
+        s3 = MagicMock()
+        with pytest.raises(RuntimeError):
+            build_dataset._write_dataset(s3, "bucket", "some/key.parquet", [], "test")
+
+    def test_writes_a_non_empty_dataset(self):
+        s3 = MagicMock()
+        build_dataset._write_dataset(s3, "bucket", "some/key.parquet", [{"a": 1}], "test")
+        s3.put_bytes.assert_called_once()
+        assert s3.put_bytes.call_args.args[0] == "some/key.parquet"

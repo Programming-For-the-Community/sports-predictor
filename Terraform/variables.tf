@@ -229,6 +229,14 @@ variable "feature_engineering_task_cpu" {
     ncaafb  = 8192
     nba     = 8192
     ncaambb = 8192
+    # PGA's dataset is a single golfer-tournament Parquet file with no
+    # player_game_stats/team_game_stats history to hold in memory at all
+    # (design/DATA_SCHEMA.md -- a field-event sport has neither table),
+    # and roughly one season's worth of NFL's own event volume spread
+    # across ~9 backfilled seasons -- starts at NFL's own smallest size
+    # on the same "no evidence yet points at needing more" basis, not a
+    # guess.
+    pga = 1024
   }
   nullable = false
 
@@ -246,6 +254,7 @@ variable "feature_engineering_task_memory_per_vcpu_mib" {
     ncaafb  = 4096
     nba     = 4096
     ncaambb = 7680
+    pga     = 4096
   }
   nullable = false
 }

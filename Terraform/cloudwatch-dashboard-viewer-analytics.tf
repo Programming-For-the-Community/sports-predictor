@@ -13,6 +13,11 @@ locals {
       aws_cloudwatch_log_group.nfl_predict_read.name,
       aws_cloudwatch_log_group.ncaafb_predict_read.name,
       aws_cloudwatch_log_group.nba_predict_read.name,
+      # ncaambb_predict_read was missing here from this sport's own
+      # onboarding through 2026-08-25 -- its log group existed and was
+      # deployed the whole time, so every real NCAA MBB viewer request
+      # was simply invisible on this dashboard until this line was added.
+      aws_cloudwatch_log_group.ncaambb_predict_read.name,
     ] : "SOURCE '${lg}'"
   ])
 }
