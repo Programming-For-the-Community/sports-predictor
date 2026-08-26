@@ -3,15 +3,24 @@ Sport-agnostic serving helpers shared across sports' *_reads.py modules.
 """
 
 
-def enrich_participants(storage, sport: str, participants: list[dict] | None) -> list[dict] | None:
-    """Attaches each participant's own team entity name/abbreviation/
-    conference/color. One get_entity per participant."""
+def enrich_participants(
+    storage, sport: str, participants: list[dict] | None, entity_type: str = "team",
+) -> list[dict] | None:
+    """Attaches each participant's own entity name/abbreviation/conference/
+    color. One get_entity per participant.
+
+    entity_type defaults to "team" for head-to-head sports' participants;
+    field-event sports (PGA, F1) pass entity_type="player" instead, since
+    their participants are individual athlete entities with no team to look
+    up -- abbreviation/conference/color just degrade to None for those the
+    same way a missing entity already does, rather than needing a separate
+    player-shaped enrichment function."""
     if not participants:
         return participants
 
     enriched = []
     for participant in participants:
-        entity = storage.get_entity(sport, participant["entity_id"], "team")
+        entity = storage.get_entity(sport, participant["entity_id"], entity_type)
         metadata = (entity or {}).get("metadata") or {}
         enriched.append({
             **participant,

@@ -1,0 +1,99 @@
+# Top-level PGA deploy pipeline. Runs on every push to a pga* branch, but
+# pauses for manual approval (via the environment's required reviewers --
+# configure this in Settings > Environments, it can't be set from this
+# file) before doing anything.
+#
+# Deliberately smaller than nba_deploy.yml/ncaafb_deploy.yml/
+# ncaambb_deploy.yml: PGA has an ingest/normalize/schedule-sync data
+# pipeline, a backfill job, and (Phase 5 step 3) feature-engineering +
+# training -- but no predict/predict-read/live-scores Lambda yet (step
+# 4), so this workflow has no ai_hosting/deploy_predict_lambda/
+# predict_read_deploy/live_scores_deploy jobs -- add them here, following
+# nba_deploy.yml's exact shape, once step 4 actually builds the
+# corresponding Terraform/Lambda. Until then, infra's `needs` list is
+# `[backfill, ai_training]`, not NBA's three-way `[backfill, ai_training,
+# ai_hosting]`, since nothing here yet produces a container-image Lambda
+# that infra's `terraform apply` would need to find in ECR first (that's
+# specifically what ai_hosting's image is for on every sport that has one).
+#
+# Both this job's `approval` step AND tf_install.yml's own terraform job
+# gate on the `development`/`production` environment, so a run through
+# this pipeline prompts for approval twice.
+
+name: PGA Deploy
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - 'pga*'
+      - 'pga/*'
+  workflow_call:
+
+# Shared group across every workflow that can reach tf_install.yml's
+# terraform apply, since Terraform/main.tf's S3 backend has no state
+# locking configured.
+concurrency:
+  group: terraform-deploy-pipeline
+  cancel-in-progress: false
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  approval:
+    name: Await deployment approval
+    if: github.event_name != 'workflow_call'
+    runs-on: ubuntu-latest
+    environment: development
+    steps:
+      - name: Approved
+        run: echo "Deployment approved -- proceeding."
+
+  # approval is intentionally skipped (not failed) when called via
+  # workflow_call -- without this, a skipped `needs` job would cause
+  # everything downstream to be skipped too. Each build job below repeats
+  # this same tolerant check against `approval` directly.
+  backfill:
+    name: Historical backfill (build)
+    needs: approval
+    if: |
+      always() &&
+      (needs.approval.result == 'success' || needs.approval.result == 'skipped')
+    uses: ./.github/workflows/pga_backfill.yml
+    secrets: inherit
+
+  # Pushes pga-feature-engineering-latest and pga-train-top10-model-latest.
+  # infra never runs without both already in ECR -- same reasoning as
+  # NBA's own ai_training job (its images are what the training ECS task
+  # definitions' `image` field points at; RunTask fails at runtime, not
+  # at `terraform apply`, if the tag doesn't exist yet).
+  ai_training:
+    name: AI training (build)
+    needs: approval
+    if: |
+      always() &&
+      (needs.approval.result == 'success' || needs.approval.result == 'skipped')
+    uses: ./.github/workflows/pga_ai_training.yml
+    secrets: inherit
+
+  infra:
+    name: Apply shared infrastructure
+    needs: [backfill, ai_training]
+    if: |
+      always() &&
+      (needs.backfill.result == 'success' || needs.backfill.result == 'skipped') &&
+      (needs.ai_training.result == 'success' || needs.ai_training.result == 'skipped')
+    uses: ./.github/workflows/tf_install.yml
+    secrets: inherit
+
+  data_pipeline:
+    name: Data pipeline
+    needs: infra
+    uses: ./.github/workflows/pga_data_pipeline.yml
+    secrets: inherit
+    with:
+      ingest_function_name: ${{ needs.infra.outputs.pga_ingest_function_name }}
+      normalize_function_name: ${{ needs.infra.outputs.pga_normalize_function_name }}
+      schedule_sync_function_name: ${{ needs.infra.outputs.pga_schedule_sync_function_name }}

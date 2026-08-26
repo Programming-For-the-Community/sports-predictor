@@ -351,3 +351,110 @@ resource "aws_dynamodb_table_item" "ncaambb_registry" {
     }
   })
 }
+
+# PGA's registry row -- the first field-event sport (Phase 5). Unlike
+# every head-to-head sport above, season_start/season_end covers the
+# entire calendar year rather than a real window: PGA TOUR's own schedule
+# (confirmed live against ESPN's real season calendar, 2026-08-24) runs
+# nearly continuously, from The Sentry in early January through the Tour
+# Championship in late August and straight into a fall stretch (World
+# Wide Technology Championship, RSM Classic, Q-School, ...) that only
+# breaks for a few weeks in December before the next January's Sentry.
+# That gap is short and its exact dates aren't stable year to year, so
+# rather than encode a boundary that risks silently gating off ingest
+# during a real tournament week, this sport is simply never gated --
+# is_in_season(season_start, season_end) with season_start <= season_end
+# covering the whole year always returns true (library/season.py). The
+# cost of a no-op ingest/schedule-sync call during the real off weeks is
+# negligible next to that risk.
+#
+# training_targets, expanded 2026-08-25 from the original single top-10-
+# probability entry (Phase 5 step 3) to the full model set: top-10/top-5
+# finish probability (both plain binary classifiers, see docs/PGA_
+# FEATURE_ENGINEERING.md for why not a multinomial model), projected-
+# score-to-par (the "field finish order" regression basis -- serving
+# ranks a tournament's field by this model's own predictions, not a
+# separately trained artifact), projected-cut-line (tournament grain, no
+# golfer dimension), and 4 per-round score models (round-1 through
+# round-4, one shared task_definition_suffix/container_name with a
+# ROUND_NUMBER override per entry -- the exact same SCORE_TARGET-style
+# pattern nfl_score_targets above uses for margin/home_score/away_score).
+# top-10/top-5/score/cutline have no real override (there's only one
+# variant each), so their own env_name/env_value re-asserts AWS_REGION as
+# a no-op, same convention win-probability/national-ranking already use.
+locals {
+  pga_round_numbers = {
+    "1" = true
+    "2" = true
+    "3" = true
+    "4" = true
+  }
+}
+
+resource "aws_dynamodb_table_item" "pga_registry" {
+  table_name = aws_dynamodb_table.sport_registry.name
+  hash_key   = aws_dynamodb_table.sport_registry.hash_key
+
+  item = jsonencode({
+    sport_key       = { S = "SPORT#PGA" }
+    sport           = { S = "pga" }
+    event_type      = { S = "field" }
+    polling_cadence = { S = "daily" }
+    season_start    = { S = "01-01" }
+    season_end      = { S = "12-31" }
+
+    training_targets = {
+      L = concat(
+        [
+          {
+            M = {
+              model_name             = { S = "top-10-probability" }
+              task_definition_suffix = { S = "train-top10-model" }
+              container_name         = { S = "pga-train-top10-model" }
+              env_name               = { S = "AWS_REGION" }
+              env_value              = { S = var.region }
+            }
+          },
+          {
+            M = {
+              model_name             = { S = "top-5-probability" }
+              task_definition_suffix = { S = "train-top5-model" }
+              container_name         = { S = "pga-train-top5-model" }
+              env_name               = { S = "AWS_REGION" }
+              env_value              = { S = var.region }
+            }
+          },
+          {
+            M = {
+              model_name             = { S = "projected-score-to-par" }
+              task_definition_suffix = { S = "train-score-model" }
+              container_name         = { S = "pga-train-score-model" }
+              env_name               = { S = "AWS_REGION" }
+              env_value              = { S = var.region }
+            }
+          },
+          {
+            M = {
+              model_name             = { S = "projected-cut-line" }
+              task_definition_suffix = { S = "train-cutline-model" }
+              container_name         = { S = "pga-train-cutline-model" }
+              env_name               = { S = "AWS_REGION" }
+              env_value              = { S = var.region }
+            }
+          },
+        ],
+        [
+          for round_number, _ in local.pga_round_numbers : {
+            M = {
+              model_name             = { S = "round-${round_number}" }
+              task_definition_suffix = { S = "train-round-model" }
+              container_name         = { S = "pga-train-round-model" }
+              env_name               = { S = "ROUND_NUMBER" }
+              env_value              = { S = round_number }
+            }
+          }
+        ],
+      )
+    }
+  })
+}
