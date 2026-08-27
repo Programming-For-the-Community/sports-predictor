@@ -85,6 +85,19 @@ def _filter_to_round(df: pd.DataFrame, round_number: int) -> pd.DataFrame:
     return df[df["round_number"] == round_number].copy()
 
 
+def _filter_to_scored_rows(df: pd.DataFrame) -> pd.DataFrame:
+    """A round that was actually played can still have a null
+    label_round_score_to_par -- library/features/pga.py's build_round_
+    event_features runs it through _as_number(), which coerces any dirty
+    non-numeric stored value (e.g. a withdrawal mid-round) to None rather
+    than crashing feature-engineering's Parquet write. Same drop-before-
+    fit convention train_score_model.py's own _filter_to_scored_rows
+    uses -- without it a None here reaches y_train/y_test directly and
+    every non-XGBoost candidate raises on .fit() (sklearn regressors
+    reject a NaN target)."""
+    return df[df[LABEL_COLUMN].notna()].copy()
+
+
 def _feature_columns(df: pd.DataFrame) -> list[str]:
     return training_common.feature_columns(df, NON_FEATURE_COLUMNS)
 
@@ -94,6 +107,7 @@ def train(s3: S3Manager, df: pd.DataFrame, round_number: int) -> dict:
     result ({"promotions": [card, ...], "candidates": [summary, ...]})."""
     model_name = f"round-{round_number}"
     df = _filter_to_round(df, round_number)
+    df = _filter_to_scored_rows(df)
     feature_columns = _feature_columns(df)
     train_df, test_df = training_common.chronological_split(df, training_common.TEST_FRACTION)
     train_date_range = [str(train_df["event_date"].min()), str(train_df["event_date"].max())]

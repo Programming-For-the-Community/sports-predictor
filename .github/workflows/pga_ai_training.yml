@@ -38,10 +38,22 @@ env:
   # field in library/features/pga.py (purse, cut_score, cut_count,
   # finish_position, every label_*, season_stats values) now goes through
   # a new _as_number() coercion -- a normalizer fix alone can't protect
-  # against data already written before it existed. TRAIN_TOP10_MODEL not
-  # touched this pass, left at its prior version.
+  # against data already written before it existed.
+  #
+  # TRAIN_TOP10_MODEL bumped 2026-08-27, same afternoon: the _as_number()
+  # coercion above means label_round_score_to_par/label_cut_score can now
+  # be a real None for a dirty stored row, same as label_score_to_par
+  # already could be -- but unlike train_score_model.py's own
+  # _filter_to_scored_rows, train_round_model.py/train_cutline_model.py
+  # had no notna() filter before handing y_train/y_test to run_backtest,
+  # so a dirty row would reach .fit() and crash every non-XGBoost
+  # candidate (sklearn regressors reject a NaN target) instead of feature-
+  # engineering. Found by auditing every train_*.py's own label-nullity
+  # handling after the match/cup status bug below, not from a live crash
+  # -- both scripts now filter the same way train_score_model.py already
+  # did.
   FEATURE_ENGINEERING_IMAGE_VERSION: '1.1.1'
-  TRAIN_TOP10_MODEL_IMAGE_VERSION: '1.1.0'
+  TRAIN_TOP10_MODEL_IMAGE_VERSION: '1.1.1'
 
 permissions:
   id-token: write

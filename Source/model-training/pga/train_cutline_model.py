@@ -77,6 +77,18 @@ def _filter_to_real_cut_tournaments(df: pd.DataFrame) -> pd.DataFrame:
     return df[df["cut_count"] > 0].copy()
 
 
+def _filter_to_scored_rows(df: pd.DataFrame) -> pd.DataFrame:
+    """A real cut tournament (cut_count > 0) can still have a null
+    label_cut_score -- library/features/pga.py's build_cutline_event_
+    features runs it through _as_number(), which coerces a dirty
+    non-numeric stored value to None rather than crashing feature-
+    engineering's Parquet write. Same drop-before-fit convention train_
+    score_model.py's own _filter_to_scored_rows uses -- without it a None
+    here reaches y_train/y_test directly and every non-XGBoost candidate
+    raises on .fit() (sklearn regressors reject a NaN target)."""
+    return df[df[LABEL_COLUMN].notna()].copy()
+
+
 def _feature_columns(df: pd.DataFrame) -> list[str]:
     return training_common.feature_columns(df, NON_FEATURE_COLUMNS)
 
@@ -85,6 +97,7 @@ def train(s3: S3Manager, df: pd.DataFrame) -> dict:
     """Runs the full candidate tournament and returns run_backtest's
     result ({"promotions": [card, ...], "candidates": [summary, ...]})."""
     df = _filter_to_real_cut_tournaments(df)
+    df = _filter_to_scored_rows(df)
     feature_columns = _feature_columns(df)
     train_df, test_df = training_common.chronological_split(df, training_common.TEST_FRACTION)
     train_date_range = [str(train_df["event_date"].min()), str(train_df["event_date"].max())]
