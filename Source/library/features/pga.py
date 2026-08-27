@@ -60,13 +60,21 @@ def rolling_golfer_averages(golfer_results: list[dict], window: int = DEFAULT_RO
     Every value is None (not 0) when the window has no qualifying rows at
     all -- a golfer with no tournament history yet, same "missing, not
     fabricated" rule library.features.common's rolling helpers use.
-    """
+
+    Each numeric field is also type-checked (not just None-checked) before
+    being folded into a sum() -- the same isinstance(value, (int, float))
+    discipline library.features.common.rolling_player_stat_averages already
+    applies to every other sport's stat_line values, defense-in-depth here
+    against a future non-numeric displayValue library/normalize/pga.py's
+    own _parse_score doesn't already special-case (see its docstring for
+    the real "WD" crash this guards the same failure mode for, one layer
+    up)."""
     windowed = golfer_results[:window]
     starts = len(windowed)
 
-    finished = [r for r in windowed if r.get("finish_position") is not None]
-    score_to_par_values = [r["score_to_par"] for r in windowed if r.get("score_to_par") is not None]
-    earnings_values = [r["earnings"] for r in windowed if r.get("earnings") is not None]
+    finished = [r for r in windowed if isinstance(r.get("finish_position"), (int, float))]
+    score_to_par_values = [r["score_to_par"] for r in windowed if isinstance(r.get("score_to_par"), (int, float))]
+    earnings_values = [r["earnings"] for r in windowed if isinstance(r.get("earnings"), (int, float))]
     finish_positions = [r["finish_position"] for r in finished]
 
     return {
@@ -165,9 +173,10 @@ def rolling_round_averages(round_results: list[dict], window: int = DEFAULT_ROLL
     Genuinely different signal from a golfer's overall tournament rolling
     average -- some golfers are consistently fast/slow starters or
     strong/weak closers, a pattern only visible by round number, not from
-    their tournament-level average alone."""
+    their tournament-level average alone. Type-checked, not just None-
+    checked, same rolling_golfer_averages defense-in-depth reasoning."""
     windowed = round_results[:window]
-    score_to_par_values = [r["score_to_par"] for r in windowed if r.get("score_to_par") is not None]
+    score_to_par_values = [r["score_to_par"] for r in windowed if isinstance(r.get("score_to_par"), (int, float))]
     return {
         "avg_score_to_par": sum(score_to_par_values) / len(score_to_par_values) if score_to_par_values else None,
         "rounds_played": len(windowed),

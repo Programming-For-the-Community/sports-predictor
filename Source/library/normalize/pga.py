@@ -79,13 +79,26 @@ def _parse_score(score: dict) -> tuple[int | float | None, float | None]:
     sentinel for "hasn't played," not a real total). parse_number alone
     would leave "E"/"-" as unparsed strings and 0.0 as a bogus stroke
     count, so both are special-cased together here rather than treating
-    total_strokes as a plain passthrough of score.value."""
+    total_strokes as a plain passthrough of score.value.
+
+    Any OTHER non-numeric displayValue (confirmed live 2026-08-27, a real
+    crash: a withdrawn golfer's score is displayValue "WD", not "-" or a
+    signed number) falls back to the same (None, None) "no score" result
+    as "-" -- parse_number returns a raw string unparsed rather than
+    guessing, and that string reaching rolling_golfer_averages' sum()
+    crashes with a str/int TypeError. "WD" isn't special-cased by name
+    (a "DQ" or any future ESPN status-string would hit the exact same
+    shape) -- fail closed on anything parse_number couldn't turn into a
+    real number, same discipline this module's other guards use."""
     display_value = score.get("displayValue")
     if display_value == "-":
         return None, None
     if display_value == "E":
         return 0, score.get("value")
-    return parse_number(display_value), score.get("value")
+    parsed = parse_number(display_value)
+    if isinstance(parsed, str):
+        return None, None
+    return parsed, score.get("value")
 
 
 def _parse_rounds(linescores: list[dict]) -> list[dict]:
