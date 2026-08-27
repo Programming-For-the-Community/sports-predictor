@@ -14,19 +14,24 @@ import pytest
 import train_cutline_model
 
 
-def _make_df(n=10, cut_counts=None):
+def _make_df(n=10, cut_counts=None, scored=None):
     """cut_counts: per-row cut_count value -- defaults to a real cut
     (71) for every row; a caller testing the no-cut filter overrides
-    specific rows to 0."""
+    specific rows to 0. scored: which row indices have a real
+    label_cut_score -- the rest simulate a dirty stored cut_score
+    (build_cutline_event_features' _as_number() coercion), excluded from
+    training."""
     if cut_counts is None:
         cut_counts = [71] * n
+    if scored is None:
+        scored = list(range(n))
     return pd.DataFrame({
         "event_key": [f"E{i}" for i in range(n)],
         "event_date": [f"2026-0{(i % 9) + 1}-01" for i in range(n)],
         "purse": [10000000.0] * n,
         "field_size": [150] * n,
         "cut_count": cut_counts,
-        "label_cut_score": [float(-i) for i in range(n)],
+        "label_cut_score": [float(-i) if i in scored else None for i in range(n)],
     })
 
 
@@ -46,6 +51,15 @@ class TestFilterToRealCutTournaments:
         assert len(filtered) == 8
 
 
+class TestFilterToScoredRows:
+    def test_drops_rows_with_no_label(self):
+        df = _make_df(10, scored=[0, 1, 2, 3, 4, 5, 6, 7])  # last 2 have a dirty/null cut score
+
+        filtered = train_cutline_model._filter_to_scored_rows(df)
+
+        assert len(filtered) == 8
+
+
 class TestFeatureColumns:
     def test_excludes_identifiers_and_cut_count(self):
         df = _make_df()
@@ -57,6 +71,15 @@ class TestFeatureColumns:
 
 
 class TestTrain:
+    def test_drops_unscored_rows_before_splitting(self):
+        df = _make_df(10, scored=[0, 1, 2, 3, 4, 5, 6, 7])
+
+        with patch.object(train_cutline_model.backtest, "run_backtest", return_value=_fake_result()) as mock_run:
+            train_cutline_model.train(MagicMock(), df)
+
+        extra = mock_run.call_args.kwargs["extra_metadata"]
+        assert extra["train_rows"] + extra["test_rows"] == 8
+
     def test_calls_run_backtest_with_regression_task(self):
         df = _make_df(10)
 
