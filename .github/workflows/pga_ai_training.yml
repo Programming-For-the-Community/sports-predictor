@@ -25,13 +25,20 @@ on:
   workflow_call:
 
 env:
-  # FEATURE_ENGINEERING bumped again 2026-08-27: a real live crash
-  # (TypeError: int + str) in rolling_golfer_averages' sum() -- a
-  # withdrawn golfer's non-numeric score ("WD") reached it unguarded.
-  # Fixed at the source (library/normalize/pga.py's _parse_score) plus
-  # defense-in-depth here (library/features/pga.py now type-checks each
-  # value before summing, matching library/features/common.py's existing
-  # rolling_player_stat_averages discipline). TRAIN_TOP10_MODEL not
+  # FEATURE_ENGINEERING bumped again 2026-08-27, two real live crashes in
+  # one afternoon: (1) TypeError: int + str in rolling_golfer_averages'
+  # sum() -- a withdrawn golfer's non-numeric score ("WD") reached it
+  # unguarded, fixed at the source (library/normalize/pga.py's
+  # _parse_score) plus a type-check here matching library/features/
+  # common.py's existing rolling_player_stat_averages discipline; (2)
+  # pyarrow.lib.ArrowInvalid on the Parquet write itself -- a row already
+  # in DynamoDB from BEFORE fix (1) shipped (a real empty-string
+  # score_to_par) still crashed the ENTIRE dataset write (one bad value
+  # poisons the whole column, not just its row), so every raw passthrough
+  # field in library/features/pga.py (purse, cut_score, cut_count,
+  # finish_position, every label_*, season_stats values) now goes through
+  # a new _as_number() coercion -- a normalizer fix alone can't protect
+  # against data already written before it existed. TRAIN_TOP10_MODEL not
   # touched this pass, left at its prior version.
   FEATURE_ENGINEERING_IMAGE_VERSION: '1.1.1'
   TRAIN_TOP10_MODEL_IMAGE_VERSION: '1.1.0'
