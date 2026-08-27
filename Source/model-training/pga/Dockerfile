@@ -4,12 +4,13 @@
 # this with `docker build -f Source/model-training/pga/Dockerfile
 # Source`, same convention as nba_ai_training.yml.
 #
-# One image, five entrypoint scripts (train_top10_model.py,
+# One image, seven entrypoint scripts (train_top10_model.py,
 # train_top5_model.py, train_score_model.py, train_cutline_model.py,
-# train_round_model.py) -- same reasoning as NBA's own Dockerfile: all
-# five share identical dependencies (xgboost/scikit-learn/lightgbm), so
-# one image serves every PGA training target, with each target's own ECS
-# task definition overriding `command` to pick its script (and, for
+# train_round_model.py, train_match_winprob_model.py,
+# train_cup_winprob_model.py) -- same reasoning as NBA's own Dockerfile:
+# all seven share identical dependencies (xgboost/scikit-learn/lightgbm),
+# so one image serves every PGA training target, with each target's own
+# ECS task definition overriding `command` to pick its script (and, for
 # train_round_model.py, its own ROUND_NUMBER environment variable --
 # Terraform/ecs-task-pga-train-round-model.tf). CMD picks
 # train_top10_model.py by default (the original single-script image);
@@ -50,7 +51,9 @@ COPY model-training/pga/train_top10_model.py \
      model-training/pga/train_top5_model.py \
      model-training/pga/train_score_model.py \
      model-training/pga/train_cutline_model.py \
-     model-training/pga/train_round_model.py ./
+     model-training/pga/train_round_model.py \
+     model-training/pga/train_match_winprob_model.py \
+     model-training/pga/train_cup_winprob_model.py ./
 
 USER train-model
 

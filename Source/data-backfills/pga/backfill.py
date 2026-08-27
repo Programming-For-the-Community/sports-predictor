@@ -54,7 +54,8 @@ import time
 from datetime import datetime, timezone
 
 from library.http.pga import PGAClient
-from library.normalize.pga import is_medal_scoring
+from library.normalize.pga import is_flat_stroke_play
+from library.normalize.pga_matchplay import is_exhibition, is_supported_match_play
 import normalize
 from library.storage.pipeline_storage import PipelineStorage
 
@@ -81,14 +82,55 @@ def season_calendar(client: PGAClient, season: int) -> tuple[list[dict], dict]:
     return leagues[0].get("calendar") or [], scoreboard
 
 
+def _process_match_play_tournament(storage: PipelineStorage, season: int, event_id: str, event: dict) -> str:
+    """team_match_play (Ryder Cup/Presidents Cup) or individual_match_play
+    (WGC-Dell Technologies Match Play) -- writes national-team entities
+    (team_match_play only), every golfer entity appearing in any match,
+    the overall Cup team result (team_match_play only -- None for WGC),
+    and one events-table row per individual match. Returns "empty" (a
+    real ESPN gap, same treatment as the flat-stroke-play empty-
+    competitor gap below) if no individual match data exists at all --
+    not observed live as of 2026-08-26, but a Ryder Cup/Presidents Cup
+    edition being genuinely canceled (or a not-yet-populated future
+    calendar entry) is a real possible future case, handled the same
+    fail-closed way rather than assumed away."""
+    match_items = normalize.leaderboard_event_to_match_event_items(event)
+    if not match_items:
+        logger.warning(
+            "Event %s (%s, season %s) is Match scoring but has no individual match data on its leaderboard "
+            "response (status=%s) -- a real ESPN gap, not written to DynamoDB.",
+            event_id, (event.get("tournament") or {}).get("displayName"), season,
+            (event.get("status") or {}).get("type", {}).get("name"),
+        )
+        return "empty"
+
+    for entity in normalize.leaderboard_event_to_matchplay_team_entities(event):
+        storage.upsert_entity(entity)
+    for entity in normalize.leaderboard_event_to_matchplay_player_entities(event):
+        storage.upsert_entity(entity)
+
+    cup_item = normalize.leaderboard_event_to_cup_event_item(event)
+    if cup_item is not None:
+        storage.upsert_event(cup_item)
+    for match_item in match_items:
+        storage.upsert_event(match_item)
+
+    logger.info(
+        "Processed %s (%s, season %s): %d individual match(es)%s",
+        event_id, (event.get("tournament") or {}).get("displayName"), season, len(match_items),
+        " + 1 cup result" if cup_item is not None else "",
+    )
+    return "processed"
+
+
 def process_tournament(client: PGAClient, storage: PipelineStorage, season: int, event_id: str) -> str:
     """Returns "processed" (written to DynamoDB), "skipped" (a real,
-    expected reason -- already loaded, empty response, or a non-stroke-
-    play tournament), "empty" (a real ESPN data gap -- see below), never
-    raises for any of those. process_season still wraps this call in a
-    try/except -- only a genuine unexpected failure (an ESPN request
-    error, a malformed payload this function doesn't already guard
-    against) should ever reach that."""
+    expected reason -- already loaded, empty response, an exhibition, or
+    an unrecognized scoring system), "empty" (a real ESPN data gap -- see
+    below), never raises for any of those. process_season still wraps
+    this call in a try/except -- only a genuine unexpected failure (an
+    ESPN request error, a malformed payload this function doesn't already
+    guard against) should ever reach that."""
     raw_key = f"pga/leaderboard/{season}/{event_id}.json"
     if storage.raw_object_exists(raw_key):
         logger.debug("Leaderboard already loaded, skipping event %s", event_id)
@@ -102,41 +144,62 @@ def process_tournament(client: PGAClient, storage: PipelineStorage, season: int,
         return "skipped"
     event = events[0]
 
-    # Ryder Cup/Presidents Cup/WGC Match Play (team or individual match
-    # play) and Zurich Classic of New Orleans (team stroke play) are real
-    # PGA TOUR calendar entries this project's schema/normalizers don't
-    # support -- see library.normalize.pga.is_medal_scoring's own
-    # docstring for the confirmed-live crash this guards against. Raw
-    # JSON is still written above either way (preserves the record), it
-    # just never reaches DynamoDB.
-    if not is_medal_scoring(event):
+    # Ryder Cup/Presidents Cup (team_match_play) and WGC-Dell Technologies
+    # Match Play (individual_match_play) -- see library.normalize.
+    # pga_matchplay's own module docstring. Routed through its own
+    # normalizer module, not library.normalize.pga's flat-stroke-play one
+    # below.
+    if is_supported_match_play(event):
+        return _process_match_play_tournament(storage, season, event_id, event)
+
+    # The Match -- a made-for-TV exhibition sharing Ryder Cup's own
+    # team+roster shape but with no real Cup-level result and no
+    # guarantee its "athletes" are even PGA Tour golfers (see
+    # library.normalize.pga_matchplay.is_exhibition's own docstring for
+    # the confirmed-live 2022 edition, 4 NFL quarterbacks). Excluded
+    # permanently, not deferred -- raw JSON is still written above either
+    # way (preserves the record), it just never reaches DynamoDB.
+    if is_exhibition(event):
         logger.info(
-            "Skipping event %s -- not stroke-play scoring (tournament=%r, scoringSystem=%r)",
+            "Skipping event %s -- exhibition, not a real competitive tournament (tournament=%r)",
+            event_id, (event.get("tournament") or {}).get("displayName"),
+        )
+        return "skipped"
+
+    # Neither a supported flat-stroke-play format (Medal/Teamstroke) nor
+    # a supported match-play format -- an unrecognized future scoring
+    # system, or a not-yet-populated calendar entry missing `tournament`/
+    # `scoringSystem` entirely (confirmed live on a real Presidents Cup
+    # entry, 2026-08-25). Fail closed rather than guess a shape.
+    if not is_flat_stroke_play(event):
+        logger.info(
+            "Skipping event %s -- unrecognized scoring system (tournament=%r, scoringSystem=%r)",
             event_id, (event.get("tournament") or {}).get("displayName"),
             (event.get("tournament") or {}).get("scoringSystem", {}).get("name"),
         )
         return "skipped"
 
-    # A real, confirmed ESPN gap, distinct from "not stroke play" above --
-    # a Medal-scoring event whose own competition object has no
-    # "competitors" key at all. Live-swept across every 2017-2025 season
-    # calendar entry, 2026-08-26: most of these are genuinely-canceled
-    # 2020 COVID-disruption tournaments (nothing was ever played, so
-    # there's nothing to lose), but a handful of real, completed, played
-    # Fall-2020 events (Shriners Hospitals for Children Open, Sanderson
-    # Farms Championship, Corales Puntacana Championship, all STATUS_FINAL
-    # completed=true) have this exact same gap -- ESPN itself never
-    # populated competitor data for them, not a parsing issue on our end.
-    # Writing this event anyway (with participants=[]) would silently
-    # corrupt the cutline dataset's field_size feature (derived from
-    # len(participants)) to 0 for a real ~130+ player field, so this is
-    # skipped entirely rather than partially written -- the raw response
-    # above still preserves whatever ESPN did return, in case a future
-    # re-fetch (after deleting the cached S3 object) ever recovers more.
+    # A real, confirmed ESPN gap, distinct from "unrecognized scoring
+    # system" above -- a Medal/Teamstroke event whose own competition
+    # object has no "competitors" key at all. Live-swept across every
+    # 2017-2025 season calendar entry, 2026-08-26: most of these are
+    # genuinely-canceled 2020 COVID-disruption tournaments (nothing was
+    # ever played, so there's nothing to lose), but a handful of real,
+    # completed, played Fall-2020 events (Shriners Hospitals for Children
+    # Open, Sanderson Farms Championship, Corales Puntacana Championship,
+    # all STATUS_FINAL completed=true) have this exact same gap -- ESPN
+    # itself never populated competitor data for them, not a parsing
+    # issue on our end. Writing this event anyway (with participants=[])
+    # would silently corrupt the cutline dataset's field_size feature
+    # (derived from len(participants)) to 0 for a real ~130+ player
+    # field, so this is skipped entirely rather than partially written --
+    # the raw response above still preserves whatever ESPN did return, in
+    # case a future re-fetch (after deleting the cached S3 object) ever
+    # recovers more.
     competition = event["competitions"][0] if event.get("competitions") else {}
     if not competition.get("competitors"):
         logger.warning(
-            "Event %s (%s, season %s) is Medal scoring but has no competitor data on its leaderboard "
+            "Event %s (%s, season %s) is stroke-play scoring but has no competitor data on its leaderboard "
             "response (status=%s) -- a real ESPN gap, not written to DynamoDB.",
             event_id, (event.get("tournament") or {}).get("displayName"), season,
             (event.get("status") or {}).get("type", {}).get("name"),

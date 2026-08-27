@@ -222,6 +222,123 @@ def build_round_event_features(
     return row
 
 
+def _average_side(per_golfer_dicts: list[dict]) -> dict:
+    """Element-wise mean across 1+ same-shaped stat dicts (every dict here
+    is one golfer's own rolling_golfer_averages output) -- how a match-
+    play SIDE's combined skill is approximated from its 1 (singles/WGC)
+    or 2 (foursomes/fourball) golfers' individual form, the same
+    assumption Teamstroke's shared scoring already makes implicitly (see
+    library/normalize/pga.py's _competitor_to_participants docstring).
+    None for a key where every contributing golfer's own value is None,
+    same "missing, not fabricated" rule every rolling helper in this
+    module uses. Empty input (a side with no golfer history resolved at
+    all) returns {}, not a dict of Nones -- callers merge this into a
+    row via dict.update, where a genuinely absent key and an explicit
+    None both leave that column at its Parquet-write-time default, so
+    there's no real difference between the two for a caller with no
+    golfers to average at all."""
+    if not per_golfer_dicts:
+        return {}
+    keys = per_golfer_dicts[0].keys()
+    result = {}
+    for key in keys:
+        values = [d[key] for d in per_golfer_dicts if d.get(key) is not None]
+        result[key] = sum(values) / len(values) if values else None
+    return result
+
+
+def build_match_event_features(
+    match_event: dict,
+    home_prior_results_by_golfer: dict[str, list[dict]],
+    away_prior_results_by_golfer: dict[str, list[dict]],
+    window: int = DEFAULT_ROLLING_WINDOW,
+) -> dict:
+    """One training row: home-side vs. away-side rolling STROKE-PLAY form
+    for the match win-probability model -- one row per individual match
+    (event_type "match_play", library/normalize/pga_matchplay.py), covers
+    both team match play (Ryder Cup/Presidents Cup foursomes/fourball/
+    singles) and individual match play (WGC Match Play) uniformly, since
+    both share the same participants[].golfer_entity_ids shape (1 golfer
+    for singles/WGC, 2 for a foursomes/fourball pairing).
+
+    home_prior_results_by_golfer/away_prior_results_by_golfer map each
+    side's own golfer_entity_ids to that golfer's own prior REGULAR-TOUR
+    (event_type "field") results, most-recent-first, NOT including this
+    match -- match-play wins/losses themselves never feed this history
+    (they aren't stroke scores, see feature-engineering/pga/build_dataset.
+    py's own build_match_and_cup_datasets docstring for why); a golfer's
+    demonstrated stroke-play form is the skill signal being used to
+    predict a match outcome, not their match-play record itself (there
+    isn't enough match-play history per golfer for that to be a
+    meaningful separate signal at all).
+
+    label_home_won is None (excluded from training, same "filter at train
+    time" convention build_cutline_event_features' own cut_count > 0
+    filter uses) for a halved (tied) match -- neither side actually won,
+    so there's no true binary label to assign."""
+    home = next(p for p in match_event["participants"] if p.get("role") == "home")
+    away = next(p for p in match_event["participants"] if p.get("role") == "away")
+
+    home_form = _average_side([
+        rolling_golfer_averages(home_prior_results_by_golfer.get(gid, []), window)
+        for gid in home.get("golfer_entity_ids", [])
+    ])
+    away_form = _average_side([
+        rolling_golfer_averages(away_prior_results_by_golfer.get(gid, []), window)
+        for gid in away.get("golfer_entity_ids", [])
+    ])
+
+    home_result = home.get("result") or {}
+    row = {
+        "event_key": match_event["event_key"],
+        "event_date": match_event["event_date"],
+        "match_format": match_event.get("match_format"),
+        "is_singles": match_event.get("match_format") == "singles",
+        "label_home_won": None if home_result.get("halved") else bool(home_result.get("won")),
+    }
+    row.update({f"home_{key}": value for key, value in home_form.items()})
+    row.update({f"away_{key}": value for key, value in away_form.items()})
+    return row
+
+
+def build_cup_event_features(
+    cup_event: dict,
+    home_roster_prior_results: dict[str, list[dict]],
+    away_roster_prior_results: dict[str, list[dict]],
+    window: int = DEFAULT_ROLLING_WINDOW,
+) -> dict:
+    """One training row: home-team vs. away-team rolling stroke-play form
+    for the Cup (team win-probability) model -- one row per Ryder Cup/
+    Presidents Cup (event_type "cup"). Unlike build_match_event_features'
+    per-match golfer_entity_ids (only that match's own pairing/golfer),
+    home_roster_prior_results/away_roster_prior_results here cover each
+    team's FULL roster (every golfer who played ANY session of this Cup,
+    not just one match) -- see feature-engineering/pga/build_dataset.py's
+    own cup_rosters derivation for how that roster is resolved, since a
+    Cup's own participants (this function's `cup_event` argument) carry
+    only the two teams' final point totals, not a player-level roster."""
+    home = next(p for p in cup_event["participants"] if p.get("role") == "home")
+    away = next(p for p in cup_event["participants"] if p.get("role") == "away")
+
+    home_form = _average_side([rolling_golfer_averages(results, window) for results in home_roster_prior_results.values()])
+    away_form = _average_side([rolling_golfer_averages(results, window) for results in away_roster_prior_results.values()])
+
+    home_result = home.get("result") or {}
+    row = {
+        "event_key": cup_event["event_key"],
+        "event_date": cup_event["event_date"],
+        "tournament_name": cup_event.get("tournament_name"),
+        # None (excluded from training) for a halved Cup -- not observed
+        # live in this project's 2017-2026 window, but a real Presidents
+        # Cup HAS tied before (2003); see leaderboard_event_to_cup_event_
+        # item's own docstring for how "halved" is derived.
+        "label_home_won": None if home_result.get("halved") else bool(home_result.get("won")),
+    }
+    row.update({f"home_{key}": value for key, value in home_form.items()})
+    row.update({f"away_{key}": value for key, value in away_form.items()})
+    return row
+
+
 def build_cutline_event_features(
     event: dict, prior_course_cut_scores: list[float] | None = None, window: int = DEFAULT_COURSE_HISTORY_WINDOW,
 ) -> dict:

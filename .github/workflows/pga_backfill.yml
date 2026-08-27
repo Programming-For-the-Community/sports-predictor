@@ -28,7 +28,7 @@ on:
   workflow_call:
 
 env:
-  IMAGE_VERSION: '1.0.0'
+  IMAGE_VERSION: '1.1.0'  # process_tournament grew match-play dispatch (library/normalize/pga_matchplay.py)
 
 permissions:
   id-token: write

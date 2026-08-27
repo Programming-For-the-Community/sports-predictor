@@ -23,20 +23,69 @@ def _scoreboard(calendar):
     return {"leagues": [{"calendar": calendar}]}
 
 
-def _leaderboard(event_id="1", scoring_system="Medal", tournament_name="Some Championship", competitors=None, status_name="STATUS_FINAL"):
+def _leaderboard(event_id="1", scoring_system="Medal", tournament_name="Some Championship", competitors=None, status_name="STATUS_FINAL", completed=True):
     """Defaults to a real Medal (stroke-play) tournament shape, with one
     placeholder competitor -- callers testing the empty-competitor-data
     gap (see TestProcessTournament's own tests) pass competitors=[]
-    instead. Callers testing the non-Medal skip path pass
-    scoring_system="Match" (Ryder Cup/Presidents Cup/WGC Match Play) or
-    "Teamstroke" (Zurich Classic) instead."""
+    instead. Callers testing team stroke play pass
+    scoring_system="Teamstroke" (Zurich Classic) -- same flat
+    `competitions` shape, still processed normally. Match-scored events
+    (Ryder Cup/Presidents Cup/WGC Match Play/The Match) use a genuinely
+    different NESTED `competitions` shape -- see _match_leaderboard."""
     if competitors is None:
         competitors = [{"athlete": {"id": "1"}}]
     return {"events": [{
         "id": event_id,
+        "date": "2026-08-20T04:00Z",
         "tournament": {"displayName": tournament_name, "scoringSystem": {"name": scoring_system}},
-        "status": {"type": {"name": status_name}},
+        "status": {"type": {"name": status_name, "completed": completed}},
         "competitions": [{"competitors": competitors}],
+    }]}
+
+
+def _match_leaderboard(event_id="401465497", tournament_name="Presidents Cup", include_cup_summary=True, match_sessions=None):
+    """A team-match-play (Ryder Cup/Presidents Cup) or individual-match-
+    play (WGC Match Play, include_cup_summary=False) leaderboard -- the
+    NESTED `[[...], [...]]` shape confirmed live 2026-08-26 (see
+    library.normalize.pga_matchplay's own module docstring). Defaults to
+    one Cup-summary entry plus one real foursomes match, both processed
+    into DynamoDB."""
+    sessions = []
+    if include_cup_summary:
+        sessions.append([{
+            "id": "10950", "description": "tournament", "type": {"text": "tournament"},
+            "scoringSystem": {"name": "Cup"},
+            "competitors": [
+                {"id": "1", "homeAway": "home", "score": {"value": 17.5, "winner": True}, "team": {"id": "1", "displayName": "USA"}},
+                {"id": "3", "homeAway": "away", "score": {"value": 12.5, "winner": False}, "team": {"id": "3", "displayName": "INTL"}},
+            ],
+        }])
+    if match_sessions is None:
+        match_sessions = [[{
+            "id": "10951", "date": "2022-09-22T17:05Z", "description": "Thursday Foursomes",
+            "type": {"text": "foursome"}, "scoringSystem": {"name": "Match"},
+            "status": {"type": {"name": "STATUS_FINAL", "completed": True}},
+            "competitors": [
+                {
+                    "id": "1085", "homeAway": "home", "score": {"value": 6.0, "displayValue": "6 & 5", "winner": True},
+                    "team": {"id": "1", "displayName": "USA"},
+                    "roster": [{"athlete": {"id": "1085", "displayName": "Tony Finau"}}, {"athlete": {"id": "1086", "displayName": "Max Homa"}}],
+                },
+                {
+                    "id": "2001", "homeAway": "away", "score": {"value": 0.0, "displayValue": "", "winner": False},
+                    "team": {"id": "3", "displayName": "INTL"},
+                    "roster": [{"athlete": {"id": "2001", "displayName": "Hideki Matsuyama"}}, {"athlete": {"id": "2002", "displayName": "Sungjae Im"}}],
+                },
+            ],
+        }]]
+    sessions.extend(match_sessions)
+    return {"events": [{
+        "id": event_id,
+        "date": "2022-09-22T17:05Z",
+        "season": {"year": 2023},
+        "tournament": {"displayName": tournament_name, "scoringSystem": {"name": "Match"}},
+        "status": {"type": {"name": "STATUS_FINAL", "completed": True}},
+        "competitions": sessions,
     }]}
 
 
@@ -117,16 +166,18 @@ class TestProcessTournament:
         storage.upsert_event.assert_not_called()
         assert result == "skipped"
 
-    def test_match_play_tournament_is_skipped_not_normalized(self):
-        # Ryder Cup / Presidents Cup / WGC-Dell Technologies Match Play --
-        # confirmed live to crash the normalizer if not filtered here
-        # first (see library.normalize.pga.is_medal_scoring).
+    def test_the_match_exhibition_is_skipped_not_normalized(self):
+        # The Match -- team+roster shape identical to Ryder Cup's, but no
+        # Cup-level summary entry and no guarantee its "athletes" are
+        # even PGA Tour golfers (see library.normalize.pga_matchplay.
+        # is_exhibition's own docstring, a real 2022 NFL-quarterback
+        # edition). Excluded permanently, not deferred.
         client = MagicMock()
         storage = MagicMock()
         storage.raw_object_exists.return_value = False
-        client.get_leaderboard.return_value = _leaderboard("401219595", scoring_system="Match", tournament_name="Ryder Cup")
+        client.get_leaderboard.return_value = _match_leaderboard("401430881", tournament_name="The Match", include_cup_summary=False)
 
-        result = backfill.process_tournament(client, storage, 2026, "401219595")
+        result = backfill.process_tournament(client, storage, 2026, "401430881")
 
         storage.upsert_event.assert_not_called()
         storage.upsert_entity.assert_not_called()
@@ -134,9 +185,23 @@ class TestProcessTournament:
         # Raw JSON is still preserved even though it's not normalized.
         storage.put_raw_json.assert_called_once()
 
-    def test_team_stroke_play_tournament_is_skipped_not_normalized(self):
-        # Zurich Classic of New Orleans -- confirmed live to KeyError in
-        # the normalizer (team competitors have no "athlete" key).
+    def test_unrecognized_scoring_system_is_skipped_not_normalized(self):
+        client = MagicMock()
+        storage = MagicMock()
+        storage.raw_object_exists.return_value = False
+        client.get_leaderboard.return_value = _leaderboard("401219595", scoring_system="Stableford", tournament_name="Barracuda Championship")
+
+        result = backfill.process_tournament(client, storage, 2026, "401219595")
+
+        storage.upsert_event.assert_not_called()
+        storage.upsert_entity.assert_not_called()
+        assert result == "skipped"
+
+    def test_team_stroke_play_tournament_is_processed(self):
+        # Zurich Classic of New Orleans -- Teamstroke is a SUPPORTED
+        # flat-stroke-play format (see library.normalize.pga.
+        # is_flat_stroke_play), unlike Match-scored team/individual match
+        # play.
         client = MagicMock()
         storage = MagicMock()
         storage.raw_object_exists.return_value = False
@@ -144,8 +209,64 @@ class TestProcessTournament:
 
         result = backfill.process_tournament(client, storage, 2026, "401353230")
 
+        assert result == "processed"
+        storage.upsert_event.assert_called_once()
+
+    def test_team_match_play_tournament_is_processed(self):
+        # Ryder Cup / Presidents Cup.
+        client = MagicMock()
+        storage = MagicMock()
+        storage.raw_object_exists.return_value = False
+        client.get_leaderboard.return_value = _match_leaderboard()
+
+        result = backfill.process_tournament(client, storage, 2023, "401465497")
+
+        assert result == "processed"
+        # 1 cup-level event + 1 individual match event.
+        assert storage.upsert_event.call_count == 2
+        event_types = {call.args[0]["event_type"] for call in storage.upsert_event.call_args_list}
+        assert event_types == {"cup", "match_play"}
+        # 2 national team entities + 4 golfer entities (2 per side).
+        assert storage.upsert_entity.call_count == 6
+
+    def test_individual_match_play_tournament_is_processed_with_no_cup_row(self):
+        # WGC-Dell Technologies Match Play -- no team layer, no Cup
+        # summary, so no "cup" event row, only "match_play" ones.
+        client = MagicMock()
+        storage = MagicMock()
+        storage.raw_object_exists.return_value = False
+        client.get_leaderboard.return_value = _match_leaderboard(
+            "401353293", tournament_name="WGC-Dell Technologies Match Play", include_cup_summary=False,
+            match_sessions=[[{
+                "id": "1", "date": "2022-03-23T07:00Z", "description": "Wednesday Group Play",
+                "type": {"text": "singles"}, "scoringSystem": {"name": "Match"},
+                "status": {"type": {"name": "STATUS_FINAL", "completed": True}},
+                "competitors": [
+                    {"id": "3439", "homeAway": "home", "score": {"value": 3.0, "displayValue": "3 & 2", "winner": True}, "athlete": {"id": "3439", "displayName": "Scottie Scheffler"}},
+                    {"id": "3448", "homeAway": "away", "score": {"value": 0.0, "displayValue": "", "winner": False}, "athlete": {"id": "3448", "displayName": "Cameron Young"}},
+                ],
+            }]],
+        )
+
+        result = backfill.process_tournament(client, storage, 2022, "401353293")
+
+        assert result == "processed"
+        assert storage.upsert_event.call_count == 1
+        assert storage.upsert_event.call_args[0][0]["event_type"] == "match_play"
+        # 2 golfer entities, no team entities (WGC has no team layer).
+        assert storage.upsert_entity.call_count == 2
+
+    def test_match_play_event_with_no_match_data_is_treated_as_a_gap(self):
+        client = MagicMock()
+        storage = MagicMock()
+        storage.raw_object_exists.return_value = False
+        client.get_leaderboard.return_value = _match_leaderboard(match_sessions=[])
+
+        result = backfill.process_tournament(client, storage, 2023, "401465497")
+
+        assert result == "empty"
         storage.upsert_event.assert_not_called()
-        assert result == "skipped"
+        storage.upsert_entity.assert_not_called()
 
     def test_medal_event_with_no_competitor_data_is_treated_as_a_gap_not_processed(self):
         # Real, confirmed ESPN gap (Shriners Hospitals for Children Open /

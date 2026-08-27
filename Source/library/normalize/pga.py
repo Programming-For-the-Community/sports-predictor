@@ -29,7 +29,7 @@ logger = logging.getLogger(__name__)
 # before making the cut not yet seen in a real response despite that same
 # broad sweep -- ESPN likely omits a pre-cut WD/DQ golfer from
 # `competitors` entirely rather than tagging a status, though this isn't
-# confirmed either way. _map_status's fallback below handles those (and
+# confirmed either way. map_status's fallback below handles those (and
 # anything else ESPN adds) without guessing an exact string, logging so a
 # real case can be added here once actually observed.
 _STATUS_MAP = {
@@ -40,7 +40,12 @@ _STATUS_MAP = {
 }
 
 
-def _map_status(status_type: dict) -> str:
+def map_status(status_type: dict) -> str:
+    """Public (not module-private) because library/normalize/pga_matchplay.py
+    reuses this exact ESPN-status-name mapping for match-play competitor
+    statuses -- same STATUS_FINISH/STATUS_SCHEDULED vocabulary, confirmed
+    live on real Ryder Cup/Presidents Cup/WGC Match Play responses,
+    2026-08-26."""
     name = status_type.get("name", "")
     if name in _STATUS_MAP:
         return _STATUS_MAP[name]
@@ -111,60 +116,78 @@ def _parse_rounds(linescores: list[dict]) -> list[dict]:
     return rounds
 
 
-def _competitor_to_participant(competitor: dict) -> dict:
-    athlete = competitor.get("athlete", {})
+def _competitor_to_participants(competitor: dict) -> list[dict]:
+    """Almost always a single-element list (one Medal-scoring competitor
+    is one golfer, keyed by `athlete`) -- except a Teamstroke competitor
+    (Zurich Classic of New Orleans, the only non-Medal stroke-play format
+    this project supports, confirmed live 2026-08-26), which has no
+    `athlete` key at all: it's a 2-golfer pairing keyed by `roster`
+    instead ([{"playerId", "athlete": {...}}, ...]), sharing one combined
+    score/status/earnings between them. In that case this returns TWO
+    participant dicts, one per roster golfer, each carrying the identical
+    shared result plus `partner_entity_ids` (the other golfer(s) on the
+    same pairing) -- Zurich Classic is otherwise structurally identical
+    to a Medal event (same flat `competitions` shape, same STATUS_CUT/
+    STATUS_FINISH vocabulary, same score/linescores shape), so a pairing
+    naturally slots into the existing top-10/cutline/score/round models
+    unchanged: each golfer just shares their partner's result, same as
+    they'd share a real prize-money split."""
     status = competitor.get("status", {})
     score_to_par, total_strokes = _parse_score(competitor.get("score") or {})
     finish_position, is_tie = _parse_finish_position(status.get("position"))
-    return {
-        "entity_id": str(athlete["id"]),
-        "result": {
-            "finish_position": finish_position,
-            "is_tie": is_tie,
-            "status": _map_status(status.get("type", {})),
-            "score_to_par": score_to_par,
-            "total_strokes": total_strokes,
-            "earnings": competitor.get("earnings", 0.0),
-            # rounds -- added 2026-08-25 specifically for per-round score
-            # projection features/models (library/features/pga.py). See
-            # _parse_rounds' own docstring for the confirmed-live shape.
-            "rounds": _parse_rounds(competitor.get("linescores") or []),
-        },
+    shared_result = {
+        "finish_position": finish_position,
+        "is_tie": is_tie,
+        "status": map_status(status.get("type", {})),
+        "score_to_par": score_to_par,
+        "total_strokes": total_strokes,
+        "earnings": competitor.get("earnings", 0.0),
+        # rounds -- added 2026-08-25 specifically for per-round score
+        # projection features/models (library/features/pga.py). See
+        # _parse_rounds' own docstring for the confirmed-live shape.
+        "rounds": _parse_rounds(competitor.get("linescores") or []),
     }
 
+    roster = competitor.get("roster")
+    if roster:
+        golfer_ids = [str(r["athlete"]["id"]) for r in roster if r.get("athlete", {}).get("id") is not None]
+        return [
+            {
+                "entity_id": gid,
+                "partner_entity_ids": [other for other in golfer_ids if other != gid],
+                "result": shared_result,
+            }
+            for gid in golfer_ids
+        ]
 
-def _event_status(status: dict) -> str:
+    athlete = competitor.get("athlete", {})
+    return [{"entity_id": str(athlete["id"]), "result": shared_result}]
+
+
+def event_status(status: dict) -> str:
+    """Public -- reused by library/normalize/pga_matchplay.py's cup/match
+    event builders, same completed/scheduled binary either way."""
     return "completed" if status.get("type", {}).get("completed") else "scheduled"
 
 
-def _host_course(courses: list[dict]) -> dict:
+def host_course(courses: list[dict]) -> dict:
     """The `host: true` course entry -- see this project's own note on
     why golf has no single top-level `venue` object (design/
     DATA_SCHEMA.md). Falls back to the first course if none is flagged
     host (not observed live, but courses is never empty for a real
-    tournament)."""
+    tournament). Public -- reused by pga_matchplay.py, Ryder Cup/
+    Presidents Cup/WGC Match Play responses carry the same `courses`
+    shape (confirmed live, 2026-08-26)."""
     return next((c for c in courses if c.get("host")), courses[0] if courses else {})
 
 
 def is_medal_scoring(event: dict) -> bool:
     """Whether this tournament uses standard individual stroke-play
-    scoring (ESPN's tournament.scoringSystem.name == "Medal") -- the only
-    shape this project's schema/normalizers are built for. PGA TOUR's
-    real calendar also carries genuinely different formats this project
-    does NOT support: team match play (Ryder Cup, Presidents Cup,
-    WGC-Dell Technologies Match Play -- scoringSystem "Match"), team
-    stroke play (Zurich Classic of New Orleans -- "Teamstroke"), and
-    made-for-TV exhibitions (The Match). All confirmed live, 2026-08-25,
-    to use a genuinely different `event["competitions"]` shape (a list of
-    per-match/session dicts wrapped in an EXTRA list layer -- `[[{...}],
-    [{...}], ...]` instead of every Medal event's flat `[{...}]`) and/or
-    a `"team"` key in place of `"athlete"` on each competitor -- either
-    one crashes `leaderboard_event_to_event_item` (an AttributeError from
-    the extra list layer, or a KeyError from the missing `athlete` key)
-    if fed through unchanged, reproduced directly against real Ryder Cup/
-    WGC Match Play/Zurich Classic/The Match responses. Callers (ingest,
-    schedule-sync, normalize, backfill) must check this BEFORE calling
-    either normalizer function below.
+    scoring (ESPN's tournament.scoringSystem.name == "Medal"). See
+    is_flat_stroke_play's own docstring for the sibling "Teamstroke"
+    format (Zurich Classic) this normalizer ALSO supports -- most callers
+    should check is_flat_stroke_play, not this function directly, unless
+    they specifically need to distinguish Medal from Teamstroke.
 
     Missing `tournament`/`scoringSystem` entirely (e.g. a future calendar
     entry ESPN hasn't fully populated yet -- confirmed live on a
@@ -173,31 +196,64 @@ def is_medal_scoring(event: dict) -> bool:
     return (event.get("tournament") or {}).get("scoringSystem", {}).get("name") == "Medal"
 
 
+def is_team_stroke_play(event: dict) -> bool:
+    """Zurich Classic of New Orleans, ESPN's only "Teamstroke" tournament
+    -- confirmed live, 2026-08-26, structurally identical to a Medal
+    event (same FLAT `competitions` shape, same STATUS_CUT/STATUS_FINISH
+    vocabulary, same score/linescores shape), except each competitor is a
+    2-golfer pairing (`team.displayName` + `roster`) rather than a single
+    `athlete`. See _competitor_to_participants' own docstring for how
+    that pairing is expanded into two participant rows."""
+    return (event.get("tournament") or {}).get("scoringSystem", {}).get("name") == "Teamstroke"
+
+
+def is_flat_stroke_play(event: dict) -> bool:
+    """Medal or Teamstroke -- the two scoring systems this normalizer
+    supports, both sharing the exact same FLAT `event["competitions"]`
+    shape (a single-element list) and the same event/participant
+    structure below. PGA TOUR's real calendar also carries genuinely
+    different formats this normalizer does NOT support: team match play
+    (Ryder Cup, Presidents Cup, WGC-Dell Technologies Match Play --
+    scoringSystem "Match") and made-for-TV exhibitions (The Match, also
+    scored "Match") -- see library/normalize/pga_matchplay.py, which
+    handles those instead. All confirmed live, 2026-08-25/26, that a
+    "Match"-scored event uses a genuinely different `competitions` shape
+    (a list of per-session dicts wrapped in an EXTRA list layer --
+    `[[{...}], [{...}], ...]`) that would crash this module's normalizers
+    (an AttributeError from the extra list layer) if fed through
+    unchanged. Callers (ingest, schedule-sync, normalize, backfill) must
+    check this BEFORE calling either normalizer function below, and route
+    a "Match"-scored event to pga_matchplay.py instead."""
+    return is_medal_scoring(event) or is_team_stroke_play(event)
+
+
 def leaderboard_event_to_event_item(event: dict, sport: str) -> dict:
     """One PGA tournament -> one events-table item. `event` is
     get_leaderboard(event_id)["events"][0].
 
-    Raises ValueError up front for a non-Medal-scoring event (Ryder Cup/
-    Presidents Cup/WGC Match Play/Zurich Classic/etc. -- see
-    is_medal_scoring's own docstring) rather than letting the mismatched
-    shape crash confusingly further down (an AttributeError or KeyError,
-    depending on which one) -- a defense-in-depth guard, not the primary
-    one: every real caller (ingest, schedule-sync, normalize, backfill)
-    should already check is_medal_scoring(event) BEFORE calling this at
+    Raises ValueError up front for a non-flat-stroke-play event (Ryder
+    Cup/Presidents Cup/WGC Match Play/The Match -- see
+    is_flat_stroke_play's own docstring) rather than letting the
+    mismatched shape crash confusingly further down (an AttributeError)
+    -- a defense-in-depth guard, not the primary one: every real caller
+    (ingest, schedule-sync, normalize, backfill) should already check
+    is_flat_stroke_play(event) BEFORE calling this at
     all, both to avoid the wasted exception and to log a clearer
     "skipping, not stroke play" message than a bare ValueError gives."""
-    if not is_medal_scoring(event):
+    if not is_flat_stroke_play(event):
         raise ValueError(
             f"Event {event.get('id')!r} ({(event.get('tournament') or {}).get('displayName')!r}) is not "
-            f"Medal (stroke-play) scoring -- this normalizer doesn't support team/match-play events. "
-            f"Callers must check is_medal_scoring(event) first.",
+            f"Medal or Teamstroke (stroke-play) scoring -- this normalizer doesn't support team/match-play "
+            f"events. Callers must check is_flat_stroke_play(event) first.",
         )
     competition = event["competitions"][0]
-    participants = [_competitor_to_participant(c) for c in competition.get("competitors", [])]
+    participants = [
+        p for c in competition.get("competitors", []) for p in _competitor_to_participants(c)
+    ]
 
     event_id = event["id"]
-    host_course = _host_course(event.get("courses", []))
-    address = host_course.get("address") or {}
+    course = host_course(event.get("courses", []))
+    address = course.get("address") or {}
     # No season.type on the leaderboard endpoint's `season` (unlike the
     # scoreboard endpoint's) -- confirmed live, it's a bare {"year": ...}
     # here. season_type instead comes from the sibling top-level
@@ -211,13 +267,13 @@ def leaderboard_event_to_event_item(event: dict, sport: str) -> dict:
         "sport": sport,
         "event_type": "field",
         "event_date": event["date"][:10],
-        "status": _event_status(event.get("status", {})),
+        "status": event_status(event.get("status", {})),
         "participants": participants,
         "season": event.get("season", {}).get("year"),
         "season_type": event.get("seasonType", {}).get("id"),
         "week": None,
         "venue_indoor": None,
-        "venue_name": host_course.get("name"),
+        "venue_name": course.get("name"),
         "venue_city": address.get("city"),
         "venue_state": address.get("state"),
         # course_id -- ESPN's own numeric course id (e.g. "65" for
@@ -228,7 +284,7 @@ def leaderboard_event_to_event_item(event: dict, sport: str) -> dict:
         # same course_id across seasons far more reliably than by name
         # -- added specifically for library/features/pga.py's own
         # rolling per-course history.
-        "course_id": host_course.get("id"),
+        "course_id": course.get("id"),
         # purse/is_major -- field-strength context a ranking model needs
         # (design/DATA_SCHEMA.md and library/features/pga.py), not present
         # on any head-to-head sport's event item. purse comes from the
@@ -264,36 +320,41 @@ def leaderboard_event_to_player_entities(event: dict, sport: str) -> list[dict]:
     absent for some competitors -- flag is present on every real
     competitor seen so far.
 
-    Raises ValueError up front for a non-Medal-scoring event, same
+    A Teamstroke competitor (Zurich Classic) has no `athlete` key at all
+    -- its two golfers live in `roster` instead ([{"playerId", "athlete":
+    {...}}, ...]), each nested athlete dict carrying the same
+    displayName/flag/amateur fields a Medal competitor's own `athlete`
+    dict does (confirmed live, 2026-08-26), so both shapes are handled
+    below rather than only the flat one.
+
+    Raises ValueError up front for a non-flat-stroke-play event, same
     defense-in-depth guard as leaderboard_event_to_event_item -- without
-    it, a team/match-play event would either crash here too (the same
-    extra-list-layer AttributeError) or silently return an empty list
-    (Zurich Classic's team-based competitors have no `athlete` key at
-    all, so every entry's athlete_id resolves to None and gets skipped),
-    neither of which is an honest signal that this wasn't a real
-    per-golfer entity list."""
-    if not is_medal_scoring(event):
+    it, a team-match-play event would crash here too (the same
+    extra-list-layer AttributeError)."""
+    if not is_flat_stroke_play(event):
         raise ValueError(
             f"Event {event.get('id')!r} ({(event.get('tournament') or {}).get('displayName')!r}) is not "
-            f"Medal (stroke-play) scoring -- this normalizer doesn't support team/match-play events. "
-            f"Callers must check is_medal_scoring(event) first.",
+            f"Medal or Teamstroke (stroke-play) scoring -- this normalizer doesn't support team/match-play "
+            f"events. Callers must check is_flat_stroke_play(event) first.",
         )
     competition = event["competitions"][0]
     entities = []
     for competitor in competition.get("competitors", []):
-        athlete = competitor.get("athlete", {})
-        athlete_id = athlete.get("id")
-        if athlete_id is None:
-            continue
-        entities.append({
-            "entity_key": entity_key(sport, athlete_id, "player"),
-            "entity_id": str(athlete_id),
-            "sport": sport,
-            "entity_type": "player",
-            "name": athlete.get("displayName", ""),
-            "metadata": {
-                "country": (athlete.get("flag") or {}).get("alt"),
-                "amateur": bool(competitor.get("amateur", False)),
-            },
-        })
+        roster = competitor.get("roster")
+        athletes = [r.get("athlete", {}) for r in roster] if roster else [competitor.get("athlete", {})]
+        for athlete in athletes:
+            athlete_id = athlete.get("id")
+            if athlete_id is None:
+                continue
+            entities.append({
+                "entity_key": entity_key(sport, athlete_id, "player"),
+                "entity_id": str(athlete_id),
+                "sport": sport,
+                "entity_type": "player",
+                "name": athlete.get("displayName", ""),
+                "metadata": {
+                    "country": (athlete.get("flag") or {}).get("alt"),
+                    "amateur": bool(athlete.get("amateur", False)),
+                },
+            })
     return entities
