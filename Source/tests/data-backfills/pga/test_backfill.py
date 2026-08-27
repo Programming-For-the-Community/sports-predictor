@@ -130,15 +130,46 @@ class TestSeasonCalendar:
 
 
 class TestProcessTournament:
-    def test_skips_fetch_when_leaderboard_already_exists(self):
+    def test_skips_the_espn_fetch_but_still_processes_when_leaderboard_already_exists(self):
+        # Skipping the FETCH (no ESPN network call) is not the same as
+        # skipping PROCESSING -- a re-run must still classify an
+        # already-cached raw JSON through CURRENT dispatch logic, not
+        # freeze it at whatever decision an earlier code version made.
+        # Confirmed live, 2026-08-26/27: this is exactly what silently
+        # kept every match-play tournament stuck at "skipped" forever
+        # after match-play support shipped, since the raw JSON was
+        # already cached from before that code existed.
         client = MagicMock()
         storage = MagicMock()
         storage.raw_object_exists.return_value = True
+        storage.get_raw_json.return_value = _leaderboard("401811963")
 
-        result = backfill.process_tournament(client, storage, 2026, "401811963")
+        with patch.object(backfill.normalize, "leaderboard_event_to_player_entities", return_value=[{"entity_id": "1"}]), \
+             patch.object(backfill.normalize, "leaderboard_event_to_event_item", return_value={"event_id": "401811963"}):
+            result = backfill.process_tournament(client, storage, 2026, "401811963")
 
         client.get_leaderboard.assert_not_called()
-        assert result == "skipped"
+        storage.put_raw_json.assert_not_called()
+        storage.get_raw_json.assert_called_once_with("pga/leaderboard/2026/401811963.json")
+        storage.upsert_event.assert_called_once_with({"event_id": "401811963"})
+        assert result == "processed"
+
+    def test_a_cached_match_play_event_from_before_match_play_support_existed_now_processes(self):
+        # The exact real scenario: raw JSON cached by an EARLIER backfill
+        # run (before match-play normalizers existed) must still get
+        # reclassified as match-play on a re-run, not stay "skipped"
+        # forever just because the fetch itself is skipped.
+        client = MagicMock()
+        storage = MagicMock()
+        storage.raw_object_exists.return_value = True
+        storage.get_raw_json.return_value = _match_leaderboard()
+
+        result = backfill.process_tournament(client, storage, 2023, "401465497")
+
+        client.get_leaderboard.assert_not_called()
+        assert result == "processed"
+        event_types = {call.args[0]["event_type"] for call in storage.upsert_event.call_args_list}
+        assert event_types == {"cup", "match_play"}
 
     def test_fetches_writes_and_upserts_when_missing(self):
         client = MagicMock()

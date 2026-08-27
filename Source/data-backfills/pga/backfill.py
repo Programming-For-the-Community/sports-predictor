@@ -9,10 +9,15 @@ event sport's entities and results both come from the same leaderboard
 fetch (see library/normalize/pga.py's own docstring), and there's no
 per-player box score table for field events at all (design/DATA_SCHEMA.md).
 
-Safe to re-run at any time: a tournament's raw leaderboard fetch is
-skipped if its S3 object already exists, and every DynamoDB write is an
-upsert, so an interrupted or repeated run just fills in whatever is
-missing.
+Safe to re-run at any time: a tournament's raw leaderboard FETCH is
+skipped if its S3 object already exists (reused from S3 instead --
+see process_tournament's own docstring for why re-fetching from ESPN
+isn't needed), but it's still re-run through this script's CURRENT
+classification/dispatch logic every time regardless of whether it was
+already cached -- a re-run after a normalizer code change must still
+pick up that change for already-cached tournaments, not stay frozen at
+whatever an earlier version decided. Every DynamoDB write is an upsert,
+so an interrupted or repeated run just fills in whatever is missing.
 
 Unlike every head-to-head sport's backfill (which walks every individual
 calendar date within a season, since a day-by-day schedule is the only
@@ -125,18 +130,33 @@ def _process_match_play_tournament(storage: PipelineStorage, season: int, event_
 
 def process_tournament(client: PGAClient, storage: PipelineStorage, season: int, event_id: str) -> str:
     """Returns "processed" (written to DynamoDB), "skipped" (a real,
-    expected reason -- already loaded, empty response, an exhibition, or
-    an unrecognized scoring system), "empty" (a real ESPN data gap -- see
-    below), never raises for any of those. process_season still wraps
-    this call in a try/except -- only a genuine unexpected failure (an
-    ESPN request error, a malformed payload this function doesn't already
-    guard against) should ever reach that."""
+    expected reason -- empty response, an exhibition, or an unrecognized
+    scoring system), "empty" (a real ESPN data gap -- see below), never
+    raises for any of those. process_season still wraps this call in a
+    try/except -- only a genuine unexpected failure (an ESPN request
+    error, a malformed payload this function doesn't already guard
+    against) should ever reach that.
+
+    Skips the ESPN FETCH (not the processing) when the raw leaderboard is
+    already cached in S3 -- confirmed live, 2026-08-26/27, that skipping
+    BOTH used to mean a tournament already cached under old dispatch
+    logic (e.g. before match-play support existed) would stay classified
+    as "skipped" FOREVER on every future re-run, even after the code that
+    would now correctly process it had already shipped -- a re-run is
+    only safe to treat as a no-op for tournaments the CURRENT code would
+    still make the same decision about, which isn't something this
+    function can know without actually re-running the classification.
+    Re-processing an already-cached raw JSON is cheap (no ESPN network
+    call, just a local S3 GetObject + DynamoDB upserts) -- the original
+    per-tournament cache existed to avoid re-hitting ESPN's rate limit,
+    not to avoid re-running this function's own logic."""
     raw_key = f"pga/leaderboard/{season}/{event_id}.json"
     if storage.raw_object_exists(raw_key):
-        logger.debug("Leaderboard already loaded, skipping event %s", event_id)
-        return "skipped"
-    leaderboard = client.get_leaderboard(event_id)
-    storage.put_raw_json(raw_key, leaderboard)
+        logger.debug("Leaderboard already cached, reusing raw JSON for event %s", event_id)
+        leaderboard = storage.get_raw_json(raw_key)
+    else:
+        leaderboard = client.get_leaderboard(event_id)
+        storage.put_raw_json(raw_key, leaderboard)
 
     events = leaderboard.get("events", [])
     if not events:

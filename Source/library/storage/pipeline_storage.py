@@ -38,6 +38,15 @@ class PipelineStorage:
     def put_raw_json(self, key: str, payload: dict) -> None:
         self._raw_data_lake.put_json(key, payload)
 
+    def get_raw_json(self, key: str) -> dict:
+        """Reads back an already-cached raw object (see
+        data-backfills/pga/backfill.py's process_tournament -- a re-run
+        that finds the raw JSON already cached re-processes it from here
+        instead of re-fetching from ESPN, so a normalizer/dispatch code
+        change picked up between runs still applies to already-cached
+        tournaments)."""
+        return self._raw_data_lake.get_json(key)
+
     def upsert_entity(self, item: dict) -> None:
         self._entities_table.put_item(item)
 
