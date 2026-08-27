@@ -9,10 +9,14 @@ resource "aws_cloudwatch_log_group" "pga_feature_engineering" {
   })
 }
 
-# Standalone Fargate task. Reads the full events history and writes one
-# training Parquet file to the model artifacts bucket. Uses the shared
-# aws_iam_role.ecs_pipeline (iam-ecs-pipeline.tf), whose ListBucket
-# condition includes the pga/* prefix.
+# Standalone Fargate task. Reads the full events history plus raw
+# season-stats snapshots (RAW_BUCKET_NAME -- build_dataset.py's own
+# _load_season_stat_snapshots has no backfill path for that data, see its
+# docstring) and writes three training Parquet files to the model
+# artifacts bucket. Uses the shared aws_iam_role.ecs_pipeline
+# (iam-ecs-pipeline.tf), whose ReadRawRankingPolls/ListRawRankingPolls
+# statements include the pga/statistics/* raw-bucket prefix and whose
+# ListModelArtifactsSportPrefixes condition includes the pga/* prefix.
 resource "aws_ecs_task_definition" "pga_feature_engineering" {
   family                   = "${var.project}-pga-feature-engineering"
   requires_compatibilities = ["FARGATE"]
@@ -38,6 +42,7 @@ resource "aws_ecs_task_definition" "pga_feature_engineering" {
         { name = "PLAYER_GAME_STATS_TABLE_NAME", value = aws_dynamodb_table.player_game_stats.name },
         { name = "TEAM_GAME_STATS_TABLE_NAME", value = aws_dynamodb_table.team_game_stats.name },
         { name = "MODEL_ARTIFACTS_BUCKET_NAME", value = aws_s3_bucket.model_artifacts.bucket },
+        { name = "RAW_BUCKET_NAME", value = aws_s3_bucket.raw_data_lake.bucket },
         { name = "AWS_REGION", value = var.region },
       ]
       logConfiguration = {

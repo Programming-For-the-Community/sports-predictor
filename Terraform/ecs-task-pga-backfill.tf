@@ -17,11 +17,14 @@ resource "aws_cloudwatch_log_group" "pga_backfill" {
 # them by default. Runs in a public subnet with a public IP to reach
 # ESPN's public API.
 #
-# No PLAYER_GAME_STATS_TABLE_NAME/TEAM_GAME_STATS_TABLE_NAME env vars --
-# unlike every head-to-head sport's backfill task, PGA's PipelineStorage
-# usage never touches either table (see iam-pga-backfill.tf's own header
-# comment), and normalize.py's SPORT-bound wrappers don't need them
-# either.
+# PLAYER_GAME_STATS_TABLE_NAME/TEAM_GAME_STATS_TABLE_NAME ARE still set
+# below even though PGA's PipelineStorage usage never touches either
+# table (see iam-pga-backfill.tf's own header comment, which is why
+# neither table gets an IAM grant here) -- confirmed live 2026-08-26,
+# PipelineStorage.__init__ requires both env vars unconditionally just to
+# construct the (unused) DynamoDBTable wrappers, same reason
+# ecs-task-pga-feature-engineering.tf sets all four FeatureStorage table
+# vars regardless of which ones build_dataset.py actually reads.
 #
 # START_SEASON/END_SEASON/BATCH_SIZE/REQUEST_DELAY_SECONDS default to a
 # full historical run here; override them per-run via ECS "Run Task" ->
@@ -44,6 +47,8 @@ resource "aws_ecs_task_definition" "pga_backfill" {
         { name = "RAW_BUCKET_NAME", value = aws_s3_bucket.raw_data_lake.bucket },
         { name = "ENTITIES_TABLE_NAME", value = aws_dynamodb_table.entities.name },
         { name = "EVENTS_TABLE_NAME", value = aws_dynamodb_table.events.name },
+        { name = "PLAYER_GAME_STATS_TABLE_NAME", value = aws_dynamodb_table.player_game_stats.name },
+        { name = "TEAM_GAME_STATS_TABLE_NAME", value = aws_dynamodb_table.team_game_stats.name },
         { name = "AWS_REGION", value = var.region },
         { name = "ESPN_API_ROOT_URL", value = var.espn_api_root_url },
         { name = "ESPN_USER_AGENT", value = var.espn_user_agent },
