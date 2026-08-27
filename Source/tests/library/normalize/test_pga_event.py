@@ -76,7 +76,7 @@ def _team_stroke_competitor(
 
 
 def _event(
-    event_id="401811963", status_completed=True, status_name="STATUS_FINAL", competitors=None,
+    event_id="401811963", status_completed=True, status_name="STATUS_FINAL", status_state=None, competitors=None,
     purse=20000000, major=False, scoring_system="Medal", tournament_name="BMW Championship",
     cut_score=None, cut_round=None, cut_count=None,
 ):
@@ -92,7 +92,15 @@ def _event(
             "displayName": tournament_name, "major": major, "scoringSystem": {"name": scoring_system},
             "cutScore": cut_score, "cutRound": cut_round, "cutCount": cut_count,
         },
-        "status": {"type": {"name": status_name, "completed": status_completed}},
+        # state confirmed live 2026-08-27 (project-pga-onboarding memory)
+        # to be the field event_status actually keys off now -- "post"/
+        # "pre", present alongside "completed" on every real top-level
+        # tournament status observed so far, defaulted from status_completed
+        # here purely so existing callers don't need to pass both.
+        "status": {"type": {
+            "name": status_name, "completed": status_completed,
+            "state": status_state if status_state is not None else ("post" if status_completed else "pre"),
+        }},
         "courses": [{
             "id": "65", "name": "Bellerive Country Club", "host": True,
             "address": {"city": "St. Louis", "state": "MO", "country": "USA"},

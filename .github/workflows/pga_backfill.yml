@@ -28,7 +28,7 @@ on:
   workflow_call:
 
 env:
-  IMAGE_VERSION: '1.1.1'  # library/normalize/pga.py: guard against a stub athlete with no id (real crash), STATUS_WITHDRAWN mapped explicitly
+  IMAGE_VERSION: '1.1.2'  # library/normalize/pga.py: event_status now keys off state=="post" not type.completed -- a match-play session's own status object never carries "completed" (real crash: every match_play event silently stored as "scheduled", 0 ever loaded as completed)
 
 permissions:
   id-token: write
