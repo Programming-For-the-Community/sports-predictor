@@ -433,6 +433,20 @@ class TestParticipantResult:
         assert result["score_to_par"] is None
         assert result["total_strokes"] is None
 
+    def test_withdrawn_score_display_value_wd_parses_as_none_none(self):
+        # Confirmed live 2026-08-27 -- a real crash: a withdrawn golfer's
+        # score is displayValue "WD", not "-"/a signed number. parse_number
+        # alone would leave "WD" as a raw string, crashing rolling_golfer_
+        # averages' sum() downstream (TypeError: int + str) rather than
+        # failing here.
+        item = leaderboard_event_to_event_item(
+            _event(competitors=[_competitor(status_name="STATUS_WITHDRAWN", score_display="WD", score_value=0.0)]),
+            "pga",
+        )
+        result = item["participants"][0]["result"]
+        assert result["score_to_par"] is None
+        assert result["total_strokes"] is None
+
     def test_earnings_passes_through(self):
         item = leaderboard_event_to_event_item(
             _event(competitors=[_competitor(earnings=177500.0)]), "pga",

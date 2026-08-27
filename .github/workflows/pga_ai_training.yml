@@ -25,13 +25,15 @@ on:
   workflow_call:
 
 env:
-  # Both bumped together this time: build_dataset.py grew a new
-  # build_match_and_cup_datasets (feature engineering) and the train
-  # image's own Dockerfile grew two new COPY entries for
-  # train_match_winprob_model.py/train_cup_winprob_model.py (training) --
-  # a genuine coincidence of two real code changes landing in the same
-  # pass, not a departure from bumping only what changed.
-  FEATURE_ENGINEERING_IMAGE_VERSION: '1.1.0'
+  # FEATURE_ENGINEERING bumped again 2026-08-27: a real live crash
+  # (TypeError: int + str) in rolling_golfer_averages' sum() -- a
+  # withdrawn golfer's non-numeric score ("WD") reached it unguarded.
+  # Fixed at the source (library/normalize/pga.py's _parse_score) plus
+  # defense-in-depth here (library/features/pga.py now type-checks each
+  # value before summing, matching library/features/common.py's existing
+  # rolling_player_stat_averages discipline). TRAIN_TOP10_MODEL not
+  # touched this pass, left at its prior version.
+  FEATURE_ENGINEERING_IMAGE_VERSION: '1.1.1'
   TRAIN_TOP10_MODEL_IMAGE_VERSION: '1.1.0'
 
 permissions:
