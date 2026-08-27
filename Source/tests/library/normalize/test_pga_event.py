@@ -256,6 +256,30 @@ class TestIsFlatStrokePlay:
         assert is_flat_stroke_play(_event(scoring_system="Match")) is False
 
 
+class TestStubAthleteCompetitor:
+    """A Medal-scoring competitor whose `athlete` dict has no "id" at all
+    -- confirmed live, 2026-08-26/27, during the backfill re-run (a real
+    KeyError crash reproduced this exact shape). Same "stub athlete" gap
+    library/normalize/espn.py's box-score parsing already guards against
+    for a DNP player -- this competitor contributes no participant row
+    rather than crashing."""
+
+    def _stub_competitor(self):
+        competitor = _competitor()
+        competitor["athlete"] = {"displayName": "TBD"}
+        return competitor
+
+    def test_stub_athlete_competitor_contributes_no_participant(self):
+        event = _event(competitors=[self._stub_competitor(), _competitor(athlete_id="10141")])
+        item = leaderboard_event_to_event_item(event, "pga")
+        assert [p["entity_id"] for p in item["participants"]] == ["10141"]
+
+    def test_stub_athlete_competitor_does_not_crash_on_its_own(self):
+        event = _event(competitors=[self._stub_competitor()])
+        item = leaderboard_event_to_event_item(event, "pga")
+        assert item["participants"] == []
+
+
 class TestTeamStrokePlayParticipants:
     """Zurich Classic (Teamstroke) -- each 2-golfer roster pairing
     expands into two participant rows sharing the pairing's own result."""
@@ -336,12 +360,22 @@ class TestParticipantResult:
         )
         assert item["participants"][0]["result"]["status"] == "made_cut_did_not_finish"
 
+    def test_withdrawn_status_maps_to_withdrawn(self):
+        # A golfer who withdrew before making the cut -- confirmed live
+        # during the 2026-08-26/27 backfill re-run -- explicitly mapped
+        # rather than left to the generic fallback so it doesn't log a
+        # warning on every occurrence.
+        item = leaderboard_event_to_event_item(
+            _event(competitors=[_competitor(status_name="STATUS_WITHDRAWN")]), "pga",
+        )
+        assert item["participants"][0]["result"]["status"] == "withdrawn"
+
     def test_unmapped_status_falls_back_to_a_generic_transform_and_logs(self, caplog):
         with caplog.at_level(logging.WARNING):
             item = leaderboard_event_to_event_item(
-                _event(competitors=[_competitor(status_name="STATUS_WITHDRAWN")]), "pga",
+                _event(competitors=[_competitor(status_name="STATUS_DISQUALIFIED")]), "pga",
             )
-        assert item["participants"][0]["result"]["status"] == "withdrawn"
+        assert item["participants"][0]["result"]["status"] == "disqualified"
         assert "Unmapped PGA status" in caplog.text
 
     def test_tied_finish_position_parses_number_and_is_tie(self):

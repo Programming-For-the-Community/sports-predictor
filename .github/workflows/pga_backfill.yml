@@ -28,7 +28,7 @@ on:
   workflow_call:
 
 env:
-  IMAGE_VERSION: '1.1.0'  # process_tournament grew match-play dispatch (library/normalize/pga_matchplay.py)
+  IMAGE_VERSION: '1.1.1'  # library/normalize/pga.py: guard against a stub athlete with no id (real crash), STATUS_WITHDRAWN mapped explicitly
 
 permissions:
   id-token: write
