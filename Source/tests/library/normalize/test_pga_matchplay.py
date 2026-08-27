@@ -63,7 +63,14 @@ def _team_match_entry(match_id="10951", description="Thursday Foursomes", type_t
         "description": description,
         "type": {"id": "5", "text": type_text},
         "scoringSystem": {"id": "2", "name": "Match"},
-        "status": {"type": {"id": "3", "name": "STATUS_FINAL", "state": "post", "completed": True}},
+        # No "completed" key here, unlike the top-level tournament status
+        # in _cup_event/_wgc_event below -- confirmed live 2026-08-27 on a
+        # real cached Presidents Cup (401465497) that an individual
+        # match's own status object never carries "completed" at all,
+        # only "state"/"name"/"description". See event_status's own
+        # docstring (library/normalize/pga.py) for the real crash this
+        # caused (every match_play event silently stored as "scheduled").
+        "status": {"type": {"id": "3", "name": "STATUS_FINAL", "state": "post"}},
         "competitors": competitors if competitors is not None else [
             _team_competitor("home", "1", "USA", [("1085", "Tony Finau"), ("1086", "Max Homa")], won=True, margin="6 & 5", value=6.0),
             _team_competitor("away", "3", "INTL", [("2001", "Hideki Matsuyama"), ("2002", "Sungjae Im")]),
@@ -94,7 +101,8 @@ def _wgc_match_entry(match_id="1", description="Rd of 16", competitors=None):
         "description": description,
         "type": {"id": "3", "text": "singles"},
         "scoringSystem": {"id": "2", "name": "Match"},
-        "status": {"type": {"id": "3", "name": "STATUS_FINAL", "state": "post", "completed": True}},
+        # No "completed" key -- see _team_match_entry's own comment above.
+        "status": {"type": {"id": "3", "name": "STATUS_FINAL", "state": "post"}},
         "competitors": competitors if competitors is not None else [
             _golfer_competitor("home", "3439", "Scottie Scheffler", won=True, margin="3 & 2", value=3.0),
             _golfer_competitor("away", "3448", "Cameron Young"),
@@ -275,6 +283,21 @@ class TestLeaderboardEventToMatchEventItems:
     def test_raises_for_unsupported_event(self):
         with pytest.raises(ValueError):
             leaderboard_event_to_match_event_items(_the_match_event(), "pga")
+
+    def test_finished_match_status_maps_to_completed_even_with_no_completed_key(self):
+        """Real crash, 2026-08-27 (project-pga-onboarding memory): a real
+        match's own status object never carries "completed" at all (see
+        _team_match_entry's fixture comment) -- every match_play event
+        was silently written to DynamoDB as "scheduled" forever, so
+        feature-engineering's match/cup dataset build always saw 0 of
+        them. event_status now keys off "state" instead, present at this
+        nesting level too."""
+        items = leaderboard_event_to_match_event_items(_cup_event(), "pga")
+        assert items[0]["status"] == "completed"
+
+    def test_individual_match_play_status_also_maps_to_completed(self):
+        items = leaderboard_event_to_match_event_items(_wgc_event(), "pga")
+        assert items[0]["status"] == "completed"
 
 
 class TestLeaderboardEventToMatchplayTeamEntities:

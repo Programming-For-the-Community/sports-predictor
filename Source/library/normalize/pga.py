@@ -189,8 +189,25 @@ def _competitor_to_participants(competitor: dict) -> list[dict]:
 
 def event_status(status: dict) -> str:
     """Public -- reused by library/normalize/pga_matchplay.py's cup/match
-    event builders, same completed/scheduled binary either way."""
-    return "completed" if status.get("type", {}).get("completed") else "scheduled"
+    event builders, same completed/scheduled binary either way.
+
+    Checks `type.state == "post"`, not `type.completed`. Confirmed live
+    2026-08-27 on a real cached Presidents Cup leaderboard (401465497):
+    the TOP-LEVEL tournament status carries both `state: "post"` and
+    `completed: true` together, but an INDIVIDUAL match's own status
+    object (nested inside `competitions[n][m]["status"]`, the one
+    library/normalize/pga_matchplay.py's leaderboard_event_to_match_
+    event_items feeds this same function) never carries `completed` at
+    all -- only `state`/`name`/`description`. Every match_play event was
+    silently written to DynamoDB with status "scheduled" (falsy .get on
+    a missing key) forever, so FeatureStorage.get_all_events's default
+    status="completed" query found 0 of them -- feature-engineering's
+    match/cup dataset build logged "0 match-play... event(s)" and raised
+    on the resulting empty match_features.parquet write. `state` is
+    present and correct at both nesting levels (confirmed on the same
+    real tournament), so one check now covers tournament-level (Medal/
+    Teamstroke and Cup-summary) and match-level status alike."""
+    return "completed" if status.get("type", {}).get("state") == "post" else "scheduled"
 
 
 def host_course(courses: list[dict]) -> dict:
