@@ -18,6 +18,27 @@ DEFAULT_ROLLING_WINDOW = 5
 # coupled if one is ever tuned independently of the other.
 DEFAULT_COURSE_HISTORY_WINDOW = 5
 
+
+def _as_number(value):
+    """Coerces to int/float, or None for anything else. Applied to every
+    value in this module that reaches a Parquet row (a label or a raw
+    per-event field, e.g. purse/cut_score) straight from a stored
+    DynamoDB result dict, without going through a rolling_*_averages
+    helper first.
+
+    This is a genuinely separate line of defense from library/normalize/
+    pga.py's own _parse_score fix (which stops a NEW non-numeric value
+    from ever being written) -- confirmed live, 2026-08-27, that a row
+    already written to DynamoDB BEFORE that fix shipped (a real empty-
+    string score_to_par) still crashed feature-engineering days later,
+    because pyarrow's columnar Parquet write fails the ENTIRE dataset the
+    moment ONE row's column has a mixed-type value (ArrowInvalid: "Could
+    not convert '' ... tried to convert to int64"), not just that one
+    row. A normalizer fix alone can't protect against data already
+    sitting in the table from before it existed; this can, for every
+    field it's applied to."""
+    return value if isinstance(value, (int, float)) else None
+
 # Raw ESPN category name -> this project's own snake_case feature column
 # name, for the 6 season-stat categories golfer_features.parquet carries
 # (season_* columns, build_golfer_event_features below). Only the
@@ -129,13 +150,13 @@ def build_golfer_event_features(
     which pandas' later union-of-columns Parquet write would otherwise
     silently paper over instead of failing loudly."""
     result = participant.get("result") or {}
-    finish_position = result.get("finish_position")
+    finish_position = _as_number(result.get("finish_position"))
 
     row = {
         "event_key": event["event_key"],
         "entity_id": participant["entity_id"],
         "event_date": event["event_date"],
-        "purse": event.get("purse"),
+        "purse": _as_number(event.get("purse")),
         "is_major": bool(event.get("is_major", False)),
         "field_size": len(event.get("participants", [])),
         "label_top_10": 1 if finish_position is not None and finish_position <= 10 else 0,
@@ -147,12 +168,12 @@ def build_golfer_event_features(
         # with no recorded score at all (e.g. a withdrawal before playing
         # a single hole) -- filtered out at training time, same as every
         # other regression target in this project handles a null label.
-        "label_score_to_par": result.get("score_to_par"),
+        "label_score_to_par": _as_number(result.get("score_to_par")),
     }
     row.update(rolling_golfer_averages(prior_results, window))
     row.update({f"course_{key}": value for key, value in rolling_golfer_averages(course_results or [], course_window).items()})
     row.update({
-        column_name: (season_stats or {}).get(raw_category)
+        column_name: _as_number((season_stats or {}).get(raw_category))
         for raw_category, column_name in SEASON_STAT_CATEGORIES.items()
     })
     return row
@@ -221,10 +242,10 @@ def build_round_event_features(
         "entity_id": participant["entity_id"],
         "event_date": event["event_date"],
         "round_number": round_result["round"],
-        "purse": event.get("purse"),
+        "purse": _as_number(event.get("purse")),
         "is_major": bool(event.get("is_major", False)),
         "field_size": len(event.get("participants", [])),
-        "label_round_score_to_par": round_result.get("score_to_par"),
+        "label_round_score_to_par": _as_number(round_result.get("score_to_par")),
     }
     row.update({f"overall_{key}": value for key, value in rolling_golfer_averages(prior_overall_results, window).items()})
     row.update({f"same_round_{key}": value for key, value in rolling_round_averages(prior_same_round_results, window).items()})
@@ -365,15 +386,17 @@ def build_cutline_event_features(
     values, most recent first, if a course_id is known -- a course that
     plays hard or easy tends to do so consistently year to year, the one
     rolling signal this dataset carries (no golfer-level history makes
-    sense at this grain)."""
-    windowed = (prior_course_cut_scores or [])[:window]
+    sense at this grain). Type-checked (not just truthiness-checked)
+    before the sum(), same _as_number defense-in-depth every other label/
+    raw field in this module now gets."""
+    windowed = [v for v in (prior_course_cut_scores or [])[:window] if isinstance(v, (int, float))]
     return {
         "event_key": event["event_key"],
         "event_date": event["event_date"],
-        "purse": event.get("purse"),
+        "purse": _as_number(event.get("purse")),
         "is_major": bool(event.get("is_major", False)),
         "field_size": len(event.get("participants", [])),
         "course_avg_cut_score": sum(windowed) / len(windowed) if windowed else None,
-        "cut_count": event.get("cut_count"),
-        "label_cut_score": event.get("cut_score"),
+        "cut_count": _as_number(event.get("cut_count")),
+        "label_cut_score": _as_number(event.get("cut_score")),
     }

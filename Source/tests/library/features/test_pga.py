@@ -250,6 +250,27 @@ class TestBuildGolferEventFeatures:
         assert row["avg_finish_position"] == 1  # overall form
         assert row["course_avg_finish_position"] == 40  # a much worse history at this specific course
 
+    def test_dirty_non_numeric_stored_values_are_coerced_to_none_not_left_as_strings(self):
+        # Confirmed live, 2026-08-27: a row already sitting in DynamoDB
+        # from before library/normalize/pga.py's _parse_score fix shipped
+        # (a real empty-string score_to_par) crashed the ENTIRE dataset's
+        # Parquet write with pyarrow.lib.ArrowInvalid -- one row's bad
+        # value poisons the whole column, not just that row. A normalizer
+        # fix alone can't protect against data already written before it
+        # existed, so every raw passthrough field here must coerce
+        # defensively too, not just trust the normalizer stayed clean.
+        event = self._event()
+        event["purse"] = ""
+        participant = {"entity_id": "1", "result": {"finish_position": "", "score_to_par": ""}}
+        season_stats = {"yardsPerDrive": ""}
+
+        row = build_golfer_event_features(event, participant, [], season_stats=season_stats)
+
+        assert row["purse"] is None
+        assert row["label_score_to_par"] is None
+        assert row["label_top_10"] == 0  # a non-numeric finish_position is treated as no finish, not a crash
+        assert row["season_driving_distance"] is None
+
 
 class TestRollingRoundAverages:
     def test_no_history_returns_none_and_zero_rounds_played(self):
@@ -309,6 +330,16 @@ class TestBuildRoundEventFeatures:
         assert row["overall_avg_score_to_par"] == -9
         assert row["same_round_avg_score_to_par"] == -6
 
+    def test_dirty_non_numeric_stored_values_are_coerced_to_none_not_left_as_strings(self):
+        event = self._event()
+        event["purse"] = ""
+        round_result = _round(1, score_to_par="")
+
+        row = build_round_event_features(event, {"entity_id": "1"}, round_result, [], [])
+
+        assert row["purse"] is None
+        assert row["label_round_score_to_par"] is None
+
 
 class TestBuildCutlineEventFeatures:
     def _event(self, participants=None, cut_score=-2, cut_count=71, purse=9000000, major=False):
@@ -346,6 +377,16 @@ class TestBuildCutlineEventFeatures:
         event = self._event()
         row = build_cutline_event_features(event)
         assert row["course_avg_cut_score"] is None
+
+    def test_dirty_non_numeric_stored_values_are_coerced_to_none_not_left_as_strings(self):
+        event = self._event(cut_score="", cut_count="", purse="")
+
+        row = build_cutline_event_features(event, prior_course_cut_scores=[-1, "", -3])
+
+        assert row["purse"] is None
+        assert row["label_cut_score"] is None
+        assert row["cut_count"] is None
+        assert row["course_avg_cut_score"] == -2  # the dirty entry is dropped, not summed in
 
 
 def _match_event(match_format="foursome", home_ids=("1", "2"), away_ids=("3", "4"), home_won=True, halved=False):
