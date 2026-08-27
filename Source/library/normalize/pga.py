@@ -25,18 +25,19 @@ logger = logging.getLogger(__name__)
 # played yet), STATUS_MDF ("Made Cut Did Not Finish" -- a golfer who made
 # the cut but withdrew before finishing, e.g. injury mid-round-3;
 # confirmed common, not rare -- ~1 in 300 competitor-rows across a live
-# sweep of 2017-2025 seasons, 2026-08-26). Withdrawal/disqualification
-# before making the cut not yet seen in a real response despite that same
-# broad sweep -- ESPN likely omits a pre-cut WD/DQ golfer from
-# `competitors` entirely rather than tagging a status, though this isn't
-# confirmed either way. map_status's fallback below handles those (and
-# anything else ESPN adds) without guessing an exact string, logging so a
-# real case can be added here once actually observed.
+# sweep of 2017-2025 seasons, 2026-08-26), STATUS_WITHDRAWN (a golfer who
+# withdrew before making the cut -- confirmed live during the 2026-08-26/27
+# backfill re-run, so ESPN does tag these rather than omitting the
+# competitor entirely as the prior sweep had suggested). Disqualification
+# not yet seen in a real response. map_status's fallback below handles
+# that (and anything else ESPN adds) without guessing an exact string,
+# logging so a real case can be added here once actually observed.
 _STATUS_MAP = {
     "STATUS_FINISH": "finished",
     "STATUS_CUT": "cut",
     "STATUS_SCHEDULED": "scheduled",
     "STATUS_MDF": "made_cut_did_not_finish",
+    "STATUS_WITHDRAWN": "withdrawn",
 }
 
 
@@ -161,7 +162,16 @@ def _competitor_to_participants(competitor: dict) -> list[dict]:
         ]
 
     athlete = competitor.get("athlete", {})
-    return [{"entity_id": str(athlete["id"]), "result": shared_result}]
+    athlete_id = athlete.get("id")
+    if athlete_id is None:
+        # A stub athlete object with no "id" at all -- same real gap
+        # library/normalize/espn.py's box-score parsing already guards
+        # against for a DNP player, confirmed live here 2026-08-26/27 on
+        # a real Medal-scoring competitor. leaderboard_event_to_player_
+        # entities (below) already skips these silently; this competitor
+        # contributes no participant rows either, rather than crashing.
+        return []
+    return [{"entity_id": str(athlete_id), "result": shared_result}]
 
 
 def event_status(status: dict) -> str:
