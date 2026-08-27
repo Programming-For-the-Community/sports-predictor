@@ -10,7 +10,13 @@ import logging
 
 import pytest
 
-from library.normalize.pga import is_medal_scoring, leaderboard_event_to_event_item, leaderboard_event_to_player_entities
+from library.normalize.pga import (
+    is_flat_stroke_play,
+    is_medal_scoring,
+    is_team_stroke_play,
+    leaderboard_event_to_event_item,
+    leaderboard_event_to_player_entities,
+)
 
 
 def _competitor(
@@ -22,7 +28,12 @@ def _competitor(
         "id": athlete_id,
         "earnings": earnings,
         "amateur": amateur,
-        "athlete": {"id": athlete_id, "displayName": name, "flag": {"alt": country}},
+        # amateur is redundantly nested inside athlete too on a real
+        # response (confirmed live, 2026-08-26, on a real Masters
+        # competitor -- 0 mismatches across 91 real competitors), which
+        # is the copy leaderboard_event_to_player_entities actually reads
+        # (it must, to also cover Zurich Classic's roster-nested athletes).
+        "athlete": {"id": athlete_id, "displayName": name, "flag": {"alt": country}, "amateur": amateur},
         "status": {
             "type": {"id": "2", "name": status_name, "state": "post", "completed": completed},
             "position": {"id": "26", "displayName": position_display, "isTie": is_tie},
@@ -33,6 +44,33 @@ def _competitor(
             {"period": 2, "value": 70.0, "displayValue": "E"},
             {"period": 3, "value": 69.0, "displayValue": "-1"},
             {"period": 4, "value": 69.0, "displayValue": "-1"},
+        ],
+    }
+
+
+def _team_stroke_competitor(
+    golfer_ids=("125990", "125991"), names=("Chad Ramey", "Justin Suh"), status_name="STATUS_CUT",
+    completed=False, score_display="-6", score_value=138.0, team_display="C. Ramey / J. Creel",
+):
+    """A Zurich Classic (Teamstroke) competitor -- a 2-golfer pairing
+    keyed by `roster`, not `athlete`. Shape confirmed live, 2026-08-26,
+    against a real Zurich Classic leaderboard response."""
+    return {
+        "id": golfer_ids[0],
+        "earnings": 0.0,
+        "status": {
+            "type": {"id": "3", "name": status_name, "state": "post", "completed": completed},
+            "position": {"id": "46", "displayName": "-", "isTie": False},
+        },
+        "score": {"value": score_value, "displayValue": score_display},
+        "linescores": [
+            {"period": 1, "value": 68.0, "displayValue": "-4"},
+            {"period": 2, "value": 70.0, "displayValue": "-2"},
+        ],
+        "team": {"displayName": team_display},
+        "roster": [
+            {"playerId": gid, "athlete": {"id": gid, "displayName": name, "flag": {"alt": "USA"}, "amateur": False}}
+            for gid, name in zip(golfer_ids, names)
         ],
     }
 
@@ -194,6 +232,81 @@ class TestIsMedalScoring:
         assert is_medal_scoring(event) is False
 
 
+class TestIsTeamStrokePlay:
+    def test_true_for_teamstroke(self):
+        assert is_team_stroke_play(_event(scoring_system="Teamstroke")) is True
+
+    def test_false_for_medal(self):
+        assert is_team_stroke_play(_event(scoring_system="Medal")) is False
+
+    def test_false_for_match(self):
+        assert is_team_stroke_play(_event(scoring_system="Match")) is False
+
+
+class TestIsFlatStrokePlay:
+    def test_true_for_medal(self):
+        assert is_flat_stroke_play(_event(scoring_system="Medal")) is True
+
+    def test_true_for_teamstroke(self):
+        assert is_flat_stroke_play(_event(scoring_system="Teamstroke")) is True
+
+    def test_false_for_match(self):
+        # Ryder Cup/Presidents Cup/WGC Match Play/The Match -- routed to
+        # library/normalize/pga_matchplay.py instead.
+        assert is_flat_stroke_play(_event(scoring_system="Match")) is False
+
+
+class TestTeamStrokePlayParticipants:
+    """Zurich Classic (Teamstroke) -- each 2-golfer roster pairing
+    expands into two participant rows sharing the pairing's own result."""
+
+    def test_a_pairing_produces_two_participants(self):
+        event = _event(scoring_system="Teamstroke", competitors=[_team_stroke_competitor()])
+        item = leaderboard_event_to_event_item(event, "pga")
+        assert [p["entity_id"] for p in item["participants"]] == ["125990", "125991"]
+
+    def test_both_participants_share_the_pairings_result(self):
+        event = _event(scoring_system="Teamstroke", competitors=[_team_stroke_competitor()])
+        item = leaderboard_event_to_event_item(event, "pga")
+        results = [p["result"] for p in item["participants"]]
+        assert results[0] == results[1]
+        assert results[0]["score_to_par"] == -6
+        assert results[0]["status"] == "cut"
+
+    def test_each_participant_lists_the_other_as_partner(self):
+        event = _event(scoring_system="Teamstroke", competitors=[_team_stroke_competitor()])
+        item = leaderboard_event_to_event_item(event, "pga")
+        by_id = {p["entity_id"]: p for p in item["participants"]}
+        assert by_id["125990"]["partner_entity_ids"] == ["125991"]
+        assert by_id["125991"]["partner_entity_ids"] == ["125990"]
+
+    def test_multiple_pairings_all_expand(self):
+        event = _event(
+            scoring_system="Teamstroke",
+            competitors=[
+                _team_stroke_competitor(golfer_ids=("1", "2")),
+                _team_stroke_competitor(golfer_ids=("3", "4")),
+            ],
+        )
+        item = leaderboard_event_to_event_item(event, "pga")
+        assert [p["entity_id"] for p in item["participants"]] == ["1", "2", "3", "4"]
+
+    def test_entities_are_built_from_both_roster_golfers(self):
+        event = _event(scoring_system="Teamstroke", competitors=[_team_stroke_competitor()])
+        entities = leaderboard_event_to_player_entities(event, "pga")
+        assert [e["entity_id"] for e in entities] == ["125990", "125991"]
+        assert entities[0]["entity_type"] == "player"
+        assert entities[0]["name"] == "Chad Ramey"
+        assert entities[0]["metadata"]["country"] == "USA"
+
+    def test_event_item_stays_field_event_type(self):
+        # Teamstroke plugs into the existing top-10/cutline/score/round
+        # models unchanged -- it's still event_type "field", not a new type.
+        event = _event(scoring_system="Teamstroke", competitors=[_team_stroke_competitor()])
+        item = leaderboard_event_to_event_item(event, "pga")
+        assert item["event_type"] == "field"
+
+
 class TestParticipantResult:
     def test_finished_status_maps_to_finished(self):
         item = leaderboard_event_to_event_item(_event(competitors=[_competitor(status_name="STATUS_FINISH")]), "pga")
@@ -335,8 +448,12 @@ class TestParticipantRounds:
 
 class TestLeaderboardEventToPlayerEntities:
     def test_raises_on_a_non_medal_scoring_event(self):
-        event = _event(scoring_system="Teamstroke", tournament_name="Zurich Classic of New Orleans")
-        with pytest.raises(ValueError, match="Zurich Classic"):
+        # Teamstroke (Zurich Classic) is a SUPPORTED flat-stroke-play
+        # format (is_flat_stroke_play), unlike Match-scored team/
+        # individual match play -- see is_flat_stroke_play's own
+        # docstring. Match/Ryder Cup is the real "unsupported" example.
+        event = _event(scoring_system="Match", tournament_name="Ryder Cup")
+        with pytest.raises(ValueError, match="Ryder Cup"):
             leaderboard_event_to_player_entities(event, "pga")
 
     def test_entity_has_required_schema_fields(self):

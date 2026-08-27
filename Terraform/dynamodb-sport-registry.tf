@@ -442,6 +442,24 @@ resource "aws_dynamodb_table_item" "pga_registry" {
               env_value              = { S = var.region }
             }
           },
+          {
+            M = {
+              model_name             = { S = "match-win-probability" }
+              task_definition_suffix = { S = "train-match-winprob-model" }
+              container_name         = { S = "pga-train-match-winprob-model" }
+              env_name               = { S = "AWS_REGION" }
+              env_value              = { S = var.region }
+            }
+          },
+          {
+            M = {
+              model_name             = { S = "cup-win-probability" }
+              task_definition_suffix = { S = "train-cup-winprob-model" }
+              container_name         = { S = "pga-train-cup-winprob-model" }
+              env_name               = { S = "AWS_REGION" }
+              env_value              = { S = var.region }
+            }
+          },
         ],
         [
           for round_number, _ in local.pga_round_numbers : {

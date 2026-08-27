@@ -4,9 +4,10 @@
 #
 # This stage builds two images: Feature Engineering and Train Top-10
 # Model (the latter also serves train_top5_model.py/train_score_model.py/
-# train_cutline_model.py/train_round_model.py -- Terraform/ecs-task-pga-
-# train-{top5,score,cutline,round}-model.tf all point at this same image
-# tag and override `command` to run their own script instead, same
+# train_cutline_model.py/train_round_model.py/train_match_winprob_model.py/
+# train_cup_winprob_model.py -- Terraform/ecs-task-pga-train-{top5,score,
+# cutline,round,match-winprob,cup-winprob}-model.tf all point at this same
+# image tag and override `command` to run their own script instead, same
 # shared-image/command-override pattern NBA's own train-win-probability-
 # model image uses for score/player-prop).
 #
@@ -24,8 +25,14 @@ on:
   workflow_call:
 
 env:
-  FEATURE_ENGINEERING_IMAGE_VERSION: '1.0.0'
-  TRAIN_TOP10_MODEL_IMAGE_VERSION: '1.0.0'
+  # Both bumped together this time: build_dataset.py grew a new
+  # build_match_and_cup_datasets (feature engineering) and the train
+  # image's own Dockerfile grew two new COPY entries for
+  # train_match_winprob_model.py/train_cup_winprob_model.py (training) --
+  # a genuine coincidence of two real code changes landing in the same
+  # pass, not a departure from bumping only what changed.
+  FEATURE_ENGINEERING_IMAGE_VERSION: '1.1.0'
+  TRAIN_TOP10_MODEL_IMAGE_VERSION: '1.1.0'
 
 permissions:
   id-token: write

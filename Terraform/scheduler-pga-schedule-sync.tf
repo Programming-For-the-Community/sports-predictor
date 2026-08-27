@@ -3,19 +3,23 @@
 # through Step Functions. The Lambda discovers and syncs the whole
 # season's calendar internally in one invocation.
 #
-# Weekly, Monday 10:00 UTC -- PGA tournaments conclude Sunday, so a
-# Monday run picks up the just-finished tournament's final leaderboard a
-# day ahead of it aging out of schedule-sync's own refresh window
-# (though daily ingest already refreshes it sooner -- see lambda-pga-
-# ingest.tf). Year-round, not gated to a season window (PGA has none --
+# Weekly, Tuesday 10:00 UTC -- not Monday: PGA tournaments are scheduled
+# to conclude Sunday, but a weather delay can push final-round (or
+# sudden-death playoff) holes to Monday, and a Monday run risks landing
+# mid-delay and capturing the tournament still in progress rather than
+# final. Tuesday gives that Monday spillover a full day to actually
+# finish before this Lambda's own refresh-window bookkeeping treats the
+# tournament as settled (daily ingest still refreshes it sooner in the
+# normal case -- see lambda-pga-ingest.tf -- this is the backstop for the
+# delayed one). Year-round, not gated to a season window (PGA has none --
 # see dynamodb-sport-registry.tf's pga_registry row), so this always
 # runs.
 resource "aws_scheduler_schedule" "pga_schedule_sync" {
   name        = "${var.project}-pga-schedule-sync"
-  description = "Invokes the pga-schedule-sync Lambda weekly, Mon 10:00 UTC, to seed/refresh the current PGA season's tournament calendar."
+  description = "Invokes the pga-schedule-sync Lambda weekly, Tue 10:00 UTC, to seed/refresh the current PGA season's tournament calendar."
   group_name  = aws_scheduler_schedule_group.sports_predictor.name
 
-  schedule_expression          = "cron(0 10 ? * MON *)"
+  schedule_expression          = "cron(0 10 ? * TUE *)"
   schedule_expression_timezone = "UTC"
 
   flexible_time_window {

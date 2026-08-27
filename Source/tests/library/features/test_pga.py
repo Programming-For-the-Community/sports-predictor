@@ -6,8 +6,10 @@ head-to-head rolling helpers.
 """
 from library.features.pga import (
     SEASON_STAT_CATEGORIES,
+    build_cup_event_features,
     build_cutline_event_features,
     build_golfer_event_features,
+    build_match_event_features,
     build_round_event_features,
     rolling_golfer_averages,
     rolling_round_averages,
@@ -344,3 +346,92 @@ class TestBuildCutlineEventFeatures:
         event = self._event()
         row = build_cutline_event_features(event)
         assert row["course_avg_cut_score"] is None
+
+
+def _match_event(match_format="foursome", home_ids=("1", "2"), away_ids=("3", "4"), home_won=True, halved=False):
+    return {
+        "event_key": "SPORT#PGA#EVENT#401465497-match-10951", "event_date": "2022-09-22",
+        "match_format": match_format,
+        "participants": [
+            {"entity_id": "USA", "role": "home", "golfer_entity_ids": list(home_ids), "result": {"won": home_won, "halved": halved}},
+            {"entity_id": "INTL", "role": "away", "golfer_entity_ids": list(away_ids), "result": {"won": (not home_won) and not halved, "halved": halved}},
+        ],
+    }
+
+
+class TestBuildMatchEventFeatures:
+    def test_identifier_and_context_fields(self):
+        row = build_match_event_features(_match_event(), {}, {})
+        assert row["event_key"] == "SPORT#PGA#EVENT#401465497-match-10951"
+        assert row["match_format"] == "foursome"
+        assert row["is_singles"] is False
+
+    def test_singles_flag(self):
+        row = build_match_event_features(_match_event(match_format="singles"), {}, {})
+        assert row["is_singles"] is True
+
+    def test_label_home_won_true(self):
+        row = build_match_event_features(_match_event(home_won=True), {}, {})
+        assert row["label_home_won"] is True
+
+    def test_label_home_won_false(self):
+        row = build_match_event_features(_match_event(home_won=False), {}, {})
+        assert row["label_home_won"] is False
+
+    def test_halved_match_has_no_label(self):
+        row = build_match_event_features(_match_event(halved=True), {}, {})
+        assert row["label_home_won"] is None
+
+    def test_home_and_away_form_averaged_across_pairing(self):
+        home_prior = {
+            "1": [_result(finish_position=1, score_to_par=-10)],
+            "2": [_result(finish_position=5, score_to_par=-4)],
+        }
+        away_prior = {"3": [_result(finish_position=20, score_to_par=2)]}
+        row = build_match_event_features(_match_event(away_ids=("3",)), home_prior, away_prior)
+        assert row["home_avg_score_to_par"] == -7  # mean(-10, -4)
+        assert row["away_avg_score_to_par"] == 2
+
+    def test_singles_match_averages_over_a_single_golfer(self):
+        home_prior = {"1": [_result(finish_position=1, score_to_par=-10)]}
+        row = build_match_event_features(_match_event(match_format="singles", home_ids=("1",)), home_prior, {})
+        assert row["home_avg_score_to_par"] == -10
+
+    def test_no_prior_history_is_none_not_an_error(self):
+        row = build_match_event_features(_match_event(), {}, {})
+        assert row["home_avg_score_to_par"] is None
+        assert row["away_avg_score_to_par"] is None
+
+
+def _cup_event(home_won=True, halved=False):
+    return {
+        "event_key": "SPORT#PGA#EVENT#401465497", "event_date": "2022-09-22", "tournament_name": "Presidents Cup",
+        "participants": [
+            {"entity_id": "USA", "role": "home", "result": {"won": home_won, "halved": halved}},
+            {"entity_id": "INTL", "role": "away", "result": {"won": (not home_won) and not halved, "halved": halved}},
+        ],
+    }
+
+
+class TestBuildCupEventFeatures:
+    def test_identifier_and_context_fields(self):
+        row = build_cup_event_features(_cup_event(), {}, {})
+        assert row["event_key"] == "SPORT#PGA#EVENT#401465497"
+        assert row["tournament_name"] == "Presidents Cup"
+
+    def test_label_home_won(self):
+        assert build_cup_event_features(_cup_event(home_won=True), {}, {})["label_home_won"] is True
+        assert build_cup_event_features(_cup_event(home_won=False), {}, {})["label_home_won"] is False
+
+    def test_halved_cup_has_no_label(self):
+        row = build_cup_event_features(_cup_event(halved=True), {}, {})
+        assert row["label_home_won"] is None
+
+    def test_form_averaged_across_full_roster(self):
+        home_roster = {
+            "1": [_result(finish_position=1, score_to_par=-10)],
+            "2": [_result(finish_position=5, score_to_par=-4)],
+            "3": [_result(finish_position=30, score_to_par=6)],
+        }
+        row = build_cup_event_features(_cup_event(), home_roster, {})
+        assert row["home_avg_score_to_par"] == -8 / 3  # mean(-10, -4, 6)

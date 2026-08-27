@@ -2,15 +2,18 @@
 PGA feature engineering. Pulls every completed PGA tournament from
 DynamoDB (via FeatureStorage), builds each golfer's own rolling
 performance history incrementally in a single chronological pass, and
-writes THREE Parquet training datasets to S3 for the training Fargate
+writes FIVE Parquet training datasets to S3 for the training Fargate
 tasks to read: golfer_features.parquet (tournament grain -- top-10/top-5/
 projected-score-to-par), round_features.parquet (golfer-round grain --
-per-round score projection), and cutline_features.parquet (tournament
-grain, no golfer dimension -- projected cut line). Also reads raw
-season-stats snapshots directly from the raw data lake (RAW_BUCKET_NAME),
-the only one of the three datasets that needs it -- the same "read a raw
-non-DynamoDB S3 prefix at feature-engineering time" pattern NCAA MBB's
-own AP-poll-based ranking dataset already uses.
+per-round score projection), cutline_features.parquet (tournament grain,
+no golfer dimension -- projected cut line), match_features.parquet
+(individual-match grain -- match win probability, Ryder Cup/Presidents
+Cup/WGC Match Play), and cup_features.parquet (Cup grain -- team win
+probability, Ryder Cup/Presidents Cup only). Also reads raw season-stats
+snapshots directly from the raw data lake (RAW_BUCKET_NAME), the only one
+of the datasets that needs it -- the same "read a raw non-DynamoDB S3
+prefix at feature-engineering time" pattern NCAA MBB's own AP-poll-based
+ranking dataset already uses.
 
 Genuinely simpler than every head-to-head sport's own build_dataset.py:
 there's no player_game_stats table to pull from -- a golfer's own past
@@ -18,11 +21,12 @@ results already live directly in events.participants (design/
 DATA_SCHEMA.md), so this walks FeatureStorage.get_all_events("pga")
 alone, the same call every head-to-head sport's build_player_dataset
 makes to get PLAYER history, except here it doubles as the EVENT history
-too, for all three datasets.
+too, for every dataset (see build_match_and_cup_datasets' own docstring
+for how match_play/cup events read that same history without feeding it).
 
 Not scheduled -- run manually via `aws ecs run-task`. Safe to re-run at
-any time: it always rebuilds all three datasets from the current DynamoDB/
-raw-bucket contents and overwrites the same three S3 keys.
+any time: it always rebuilds all five datasets from the current DynamoDB/
+raw-bucket contents and overwrites the same five S3 keys.
 
 Required environment variables:
     EVENTS_TABLE_NAME
@@ -52,8 +56,10 @@ from library.aws.s3_manager import S3Manager
 from library.features.pga import (
     DEFAULT_COURSE_HISTORY_WINDOW,
     SEASON_STAT_CATEGORIES,
+    build_cup_event_features,
     build_cutline_event_features,
     build_golfer_event_features,
+    build_match_event_features,
     build_round_event_features,
 )
 from library.storage.feature_storage import FeatureStorage
@@ -65,6 +71,8 @@ SPORT = "pga"
 GOLFER_FEATURES_KEY = "pga/training-data/golfer_features.parquet"
 ROUND_FEATURES_KEY = "pga/training-data/round_features.parquet"
 CUTLINE_FEATURES_KEY = "pga/training-data/cutline_features.parquet"
+MATCH_FEATURES_KEY = "pga/training-data/match_features.parquet"
+CUP_FEATURES_KEY = "pga/training-data/cup_features.parquet"
 
 _STATISTICS_KEY_RE = re.compile(r"pga/statistics/(\d{8})\.json$")
 
@@ -150,7 +158,14 @@ def build_golfer_dataset(
     yet still gets every season_* column, just as an explicit missing
     value (_resolve_season_stats(None or [], ...) skipped entirely,
     same effect as an empty snapshot list)."""
-    events = storage.get_all_events(SPORT)
+    # event_type == "field" only -- get_all_events(SPORT) now also
+    # returns "match_play"/"cup" rows (library/normalize/pga_matchplay.py)
+    # once any Ryder Cup/Presidents Cup/WGC Match Play data has been
+    # normalized. Those don't carry stroke scores/cut fields/a real
+    # golfer-count participants list at all, so processing them here
+    # unfiltered would silently corrupt this dataset (e.g. a "cup" event's
+    # 2-team participants list would read as a 2-golfer field_size).
+    events = [e for e in storage.get_all_events(SPORT) if e.get("event_type") == "field"]
     events_ascending = sorted(events, key=lambda e: e.get("event_date", ""))
     logger.info("Loaded %d completed PGA tournaments", len(events_ascending))
 
@@ -202,7 +217,14 @@ def build_round_dataset(storage: FeatureStorage, window: int) -> list[dict]:
     dataset: every row for this tournament is built from history strictly
     BEFORE it, then this tournament's own rounds are folded into both
     histories only after every row is already built."""
-    events = storage.get_all_events(SPORT)
+    # event_type == "field" only -- get_all_events(SPORT) now also
+    # returns "match_play"/"cup" rows (library/normalize/pga_matchplay.py)
+    # once any Ryder Cup/Presidents Cup/WGC Match Play data has been
+    # normalized. Those don't carry stroke scores/cut fields/a real
+    # golfer-count participants list at all, so processing them here
+    # unfiltered would silently corrupt this dataset (e.g. a "cup" event's
+    # 2-team participants list would read as a 2-golfer field_size).
+    events = [e for e in storage.get_all_events(SPORT) if e.get("event_type") == "field"]
     events_ascending = sorted(events, key=lambda e: e.get("event_date", ""))
     logger.info("Loaded %d completed PGA tournaments for round-level features", len(events_ascending))
 
@@ -248,7 +270,14 @@ def build_cutline_dataset(storage: FeatureStorage, course_window: int = DEFAULT_
     build_cutline_event_features's own course_avg_cut_score) -- the one
     rolling signal that makes sense at this grain, since there's no
     golfer to build a per-golfer history from here."""
-    events = storage.get_all_events(SPORT)
+    # event_type == "field" only -- get_all_events(SPORT) now also
+    # returns "match_play"/"cup" rows (library/normalize/pga_matchplay.py)
+    # once any Ryder Cup/Presidents Cup/WGC Match Play data has been
+    # normalized. Those don't carry stroke scores/cut fields/a real
+    # golfer-count participants list at all, so processing them here
+    # unfiltered would silently corrupt this dataset (e.g. a "cup" event's
+    # 2-team participants list would read as a 2-golfer field_size).
+    events = [e for e in storage.get_all_events(SPORT) if e.get("event_type") == "field"]
     events_ascending = sorted(events, key=lambda e: e.get("event_date", ""))
     logger.info("Loaded %d completed PGA tournaments for cut-line features", len(events_ascending))
 
@@ -263,6 +292,88 @@ def build_cutline_dataset(storage: FeatureStorage, course_window: int = DEFAULT_
 
     logger.info("Built cut-line features for %d tournaments", len(rows))
     return rows
+
+
+def build_match_and_cup_datasets(storage: FeatureStorage, window: int) -> tuple[list[dict], list[dict]]:
+    """Match win-probability rows (event_type "match_play") and Cup
+    (team) win-probability rows (event_type "cup") -- built together
+    because they share one chronological history walk.
+
+    PASS 1 derives each Cup's own FULL roster (every golfer who played
+    ANY session, not just one match) by scanning every match_play event's
+    own golfer_entity_ids, grouped by (parent_event_id, role) -- a Cup
+    event's own participants only carry the two teams' final point
+    totals (library/normalize/pga_matchplay.py), not a player list, so
+    this is the only way to know who to average form over for the Cup
+    dataset. Independent of chronological order -- a roster is fixed
+    before the tournament starts regardless of which session's matches
+    get walked first.
+
+    PASS 2 is a SINGLE walk over field ("regular" stroke-play, including
+    Zurich Classic) + match_play + cup events together, sorted by
+    event_date, growing each golfer's own STROKE-PLAY history exactly
+    the way build_golfer_dataset does (only field events feed it --
+    match/Cup RESULTS are never folded in, since a won/lost/halved match
+    isn't a stroke score and there isn't enough match-play history per
+    golfer for a separate "match-play form" signal to mean anything
+    yet). A match_play or cup event READS the current history snapshot
+    for its own participants' golfers (build_match_event_features/
+    build_cup_event_features average across 1+ golfers per side) but
+    never WRITES into it.
+
+    A cup event sorts at its own tournament-level start date -- the same
+    date as its OWN Thursday session, i.e. strictly BEFORE any of that
+    Cup's own matches are walked -- which is the correct behavior for a
+    Cup-outcome prediction (pre-tournament form only, not results that
+    happened mid-tournament)."""
+    events = storage.get_all_events(SPORT)
+    field_events = [e for e in events if e.get("event_type") == "field"]
+    match_events = [e for e in events if e.get("event_type") == "match_play"]
+    cup_events = [e for e in events if e.get("event_type") == "cup"]
+    logger.info(
+        "Loaded %d field, %d match-play, and %d cup event(s) for match/cup features",
+        len(field_events), len(match_events), len(cup_events),
+    )
+
+    cup_rosters: dict[str, dict[str, set]] = defaultdict(lambda: defaultdict(set))
+    for match_event in match_events:
+        parent_id = match_event.get("parent_event_id")
+        if parent_id is None:
+            continue
+        for participant in match_event.get("participants", []):
+            role = participant.get("role")
+            if role is None:
+                continue
+            cup_rosters[parent_id][role].update(participant.get("golfer_entity_ids", []))
+
+    timeline = sorted(field_events + match_events + cup_events, key=lambda e: e.get("event_date", ""))
+    history: dict[str, list[dict]] = defaultdict(list)
+    match_rows, cup_rows = [], []
+    for event in timeline:
+        event_type = event.get("event_type")
+        if event_type == "field":
+            for participant in event.get("participants", []):
+                history[participant["entity_id"]].append(participant.get("result") or {})
+            continue
+
+        participants = event.get("participants", [])
+        home = next((p for p in participants if p.get("role") == "home"), None)
+        away = next((p for p in participants if p.get("role") == "away"), None)
+        if home is None or away is None:
+            continue
+
+        if event_type == "match_play":
+            home_prior = {gid: history[gid][-window:][::-1] for gid in home.get("golfer_entity_ids", [])}
+            away_prior = {gid: history[gid][-window:][::-1] for gid in away.get("golfer_entity_ids", [])}
+            match_rows.append(build_match_event_features(event, home_prior, away_prior, window))
+        elif event_type == "cup":
+            roster = cup_rosters.get(event["event_id"], {})
+            home_prior = {gid: history[gid][-window:][::-1] for gid in roster.get("home", set())}
+            away_prior = {gid: history[gid][-window:][::-1] for gid in roster.get("away", set())}
+            cup_rows.append(build_cup_event_features(event, home_prior, away_prior, window))
+
+    logger.info("Built %d match rows and %d cup rows", len(match_rows), len(cup_rows))
+    return match_rows, cup_rows
 
 
 def _write_parquet(rows: list[dict]) -> bytes:
@@ -309,6 +420,10 @@ def main() -> None:
 
     cutline_rows = build_cutline_dataset(storage, course_window)
     _write_dataset(s3, bucket, CUTLINE_FEATURES_KEY, cutline_rows, "cutline")
+
+    match_rows, cup_rows = build_match_and_cup_datasets(storage, window)
+    _write_dataset(s3, bucket, MATCH_FEATURES_KEY, match_rows, "match")
+    _write_dataset(s3, bucket, CUP_FEATURES_KEY, cup_rows, "cup")
 
     logger.info("Feature engineering complete.")
 

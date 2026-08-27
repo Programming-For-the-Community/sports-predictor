@@ -15,12 +15,12 @@ import pytest
 import build_dataset
 
 
-def _event(event_key, event_date, participants, course_id=None, cut_score=None, cut_count=None, rounds_by_participant=None):
+def _event(event_key, event_date, participants, course_id=None, cut_score=None, cut_count=None, rounds_by_participant=None, event_type="field"):
     for participant in participants:
         rounds = (rounds_by_participant or {}).get(participant["entity_id"], [])
         participant["result"]["rounds"] = rounds
     return {
-        "event_key": event_key, "event_date": event_date, "purse": 10000000, "is_major": False,
+        "event_key": event_key, "event_date": event_date, "event_type": event_type, "purse": 10000000, "is_major": False,
         "course_id": course_id, "cut_score": cut_score, "cut_count": cut_count, "participants": participants,
     }
 
@@ -349,6 +349,119 @@ class TestBuildCutlineDataset:
 
         e2_row = next(r for r in rows if r["event_key"] == "E2")
         assert e2_row["course_avg_cut_score"] == -4
+
+
+def _match_play_event(event_key, event_date, parent_event_id, home_golfer_ids, away_golfer_ids, match_format="foursome", home_won=True):
+    return {
+        "event_key": event_key, "event_date": event_date, "event_type": "match_play",
+        "parent_event_id": parent_event_id, "match_format": match_format,
+        "participants": [
+            {"entity_id": "1", "role": "home", "golfer_entity_ids": home_golfer_ids, "result": {"won": home_won, "halved": False}},
+            {"entity_id": "3", "role": "away", "golfer_entity_ids": away_golfer_ids, "result": {"won": not home_won, "halved": False}},
+        ],
+    }
+
+
+def _cup_event(event_key, event_date, home_won=True):
+    return {
+        "event_key": event_key, "event_id": event_key, "event_date": event_date, "event_type": "cup", "tournament_name": "Presidents Cup",
+        "participants": [
+            {"entity_id": "1", "role": "home", "result": {"won": home_won, "halved": False}},
+            {"entity_id": "3", "role": "away", "result": {"won": not home_won, "halved": False}},
+        ],
+    }
+
+
+class TestBuildMatchAndCupDatasets:
+    def _storage(self, events):
+        storage = MagicMock()
+        storage.get_all_events.return_value = events
+        return storage
+
+    def test_one_match_row_per_match_play_event(self):
+        events = [_match_play_event("E1-match-1", "2022-09-22", "E1", ["10"], ["20"])]
+        storage = self._storage(events)
+
+        match_rows, cup_rows = build_dataset.build_match_and_cup_datasets(storage, window=5)
+
+        assert [r["event_key"] for r in match_rows] == ["E1-match-1"]
+        assert cup_rows == []
+
+    def test_one_cup_row_per_cup_event(self):
+        events = [_cup_event("E1", "2022-09-22")]
+        storage = self._storage(events)
+
+        match_rows, cup_rows = build_dataset.build_match_and_cup_datasets(storage, window=5)
+
+        assert match_rows == []
+        assert [r["event_key"] for r in cup_rows] == ["E1"]
+
+    def test_match_row_sees_only_prior_field_history_not_future(self):
+        events = [
+            _event("F1", "2026-06-01", [_participant("10", finish_position=1, score_to_par=-10)]),
+            _match_play_event("E1-match-1", "2026-09-22", "E1", ["10"], ["20"]),
+            _event("F2", "2026-10-01", [_participant("10", finish_position=50, score_to_par=10)]),
+        ]
+        storage = self._storage(events)
+
+        match_rows, _ = build_dataset.build_match_and_cup_datasets(storage, window=5)
+
+        # Only F1 (before the match) contributes -- F2 (after) must not leak in.
+        assert match_rows[0]["home_avg_score_to_par"] == -10
+
+    def test_match_play_results_do_not_feed_golfer_history(self):
+        # A match win/loss isn't a stroke score -- it must never appear
+        # as history for a LATER regular-tour event's own rolling form.
+        events = [
+            _match_play_event("E1-match-1", "2026-06-01", "E1", ["10"], ["20"]),
+            _event("F1", "2026-07-01", [_participant("10", finish_position=3, score_to_par=-5)]),
+        ]
+        storage = self._storage(events)
+
+        rows = build_dataset.build_golfer_dataset(storage, window=5)
+
+        f1_row = next(r for r in rows if r["event_key"] == "F1")
+        assert f1_row["events_played"] == 0
+
+    def test_cup_roster_derived_from_union_of_its_own_matches(self):
+        events = [
+            _event("F1", "2026-05-01", [_participant("10", finish_position=1, score_to_par=-8), _participant("11", finish_position=2, score_to_par=-6)]),
+            _match_play_event("E1-match-1", "2026-09-01", "E1", ["10"], ["20"], match_format="foursome"),
+            _match_play_event("E1-match-2", "2026-09-01", "E1", ["11"], ["21"], match_format="singles"),
+            _cup_event("E1", "2026-09-01"),
+        ]
+        storage = self._storage(events)
+
+        _, cup_rows = build_dataset.build_match_and_cup_datasets(storage, window=5)
+
+        # Roster is golfer 10 AND golfer 11 (from both matches), so the
+        # home team's average blends both golfers' prior form: -8 and -6.
+        assert cup_rows[0]["home_avg_score_to_par"] == -7
+
+    def test_no_matches_for_a_cup_gives_empty_roster_not_an_error(self):
+        # _average_side([]) returns {} (no home_* keys at all), not a
+        # dict of Nones -- see its own docstring for why that's
+        # equivalent once assembled into a DataFrame alongside rows that
+        # DO have a roster.
+        events = [_cup_event("E1", "2026-09-01")]
+        storage = self._storage(events)
+
+        _, cup_rows = build_dataset.build_match_and_cup_datasets(storage, window=5)
+
+        assert cup_rows[0].get("home_avg_score_to_par") is None
+
+    def test_individual_match_play_produces_no_cup_rows(self):
+        # WGC-Dell Technologies Match Play -- match rows only, no
+        # parent-level Cup event ever written for it.
+        events = [
+            _match_play_event("W1-match-1", "2022-03-27", "W1", ["3439"], ["3448"], match_format="singles"),
+        ]
+        storage = self._storage(events)
+
+        match_rows, cup_rows = build_dataset.build_match_and_cup_datasets(storage, window=5)
+
+        assert len(match_rows) == 1
+        assert cup_rows == []
 
 
 class TestWriteDataset:
