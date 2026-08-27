@@ -22,14 +22,21 @@ logger = logging.getLogger(__name__)
 # Confirmed live so far: STATUS_FINISH (a no-cut FedEx Cup event),
 # STATUS_CUT (a real missed-cut event), STATUS_SCHEDULED (a real
 # not-yet-started tournament -- every competitor pre-listed, no round
-# played yet). Withdrawal/disqualification not yet seen in a real
-# response -- _map_status's fallback below handles those (and anything
-# else ESPN adds) without guessing an exact string, logging so a real
-# case can be added here once actually observed.
+# played yet), STATUS_MDF ("Made Cut Did Not Finish" -- a golfer who made
+# the cut but withdrew before finishing, e.g. injury mid-round-3;
+# confirmed common, not rare -- ~1 in 300 competitor-rows across a live
+# sweep of 2017-2025 seasons, 2026-08-26). Withdrawal/disqualification
+# before making the cut not yet seen in a real response despite that same
+# broad sweep -- ESPN likely omits a pre-cut WD/DQ golfer from
+# `competitors` entirely rather than tagging a status, though this isn't
+# confirmed either way. _map_status's fallback below handles those (and
+# anything else ESPN adds) without guessing an exact string, logging so a
+# real case can be added here once actually observed.
 _STATUS_MAP = {
     "STATUS_FINISH": "finished",
     "STATUS_CUT": "cut",
     "STATUS_SCHEDULED": "scheduled",
+    "STATUS_MDF": "made_cut_did_not_finish",
 }
 
 

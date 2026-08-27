@@ -84,10 +84,11 @@ def season_calendar(client: PGAClient, season: int) -> tuple[list[dict], dict]:
 def process_tournament(client: PGAClient, storage: PipelineStorage, season: int, event_id: str) -> str:
     """Returns "processed" (written to DynamoDB), "skipped" (a real,
     expected reason -- already loaded, empty response, or a non-stroke-
-    play tournament), never raises for either skip reason. process_season
-    still wraps this call in a try/except -- only a genuine unexpected
-    failure (an ESPN request error, a malformed payload this function
-    doesn't already guard against) should ever reach that."""
+    play tournament), "empty" (a real ESPN data gap -- see below), never
+    raises for any of those. process_season still wraps this call in a
+    try/except -- only a genuine unexpected failure (an ESPN request
+    error, a malformed payload this function doesn't already guard
+    against) should ever reach that."""
     raw_key = f"pga/leaderboard/{season}/{event_id}.json"
     if storage.raw_object_exists(raw_key):
         logger.debug("Leaderboard already loaded, skipping event %s", event_id)
@@ -116,6 +117,32 @@ def process_tournament(client: PGAClient, storage: PipelineStorage, season: int,
         )
         return "skipped"
 
+    # A real, confirmed ESPN gap, distinct from "not stroke play" above --
+    # a Medal-scoring event whose own competition object has no
+    # "competitors" key at all. Live-swept across every 2017-2025 season
+    # calendar entry, 2026-08-26: most of these are genuinely-canceled
+    # 2020 COVID-disruption tournaments (nothing was ever played, so
+    # there's nothing to lose), but a handful of real, completed, played
+    # Fall-2020 events (Shriners Hospitals for Children Open, Sanderson
+    # Farms Championship, Corales Puntacana Championship, all STATUS_FINAL
+    # completed=true) have this exact same gap -- ESPN itself never
+    # populated competitor data for them, not a parsing issue on our end.
+    # Writing this event anyway (with participants=[]) would silently
+    # corrupt the cutline dataset's field_size feature (derived from
+    # len(participants)) to 0 for a real ~130+ player field, so this is
+    # skipped entirely rather than partially written -- the raw response
+    # above still preserves whatever ESPN did return, in case a future
+    # re-fetch (after deleting the cached S3 object) ever recovers more.
+    competition = event["competitions"][0] if event.get("competitions") else {}
+    if not competition.get("competitors"):
+        logger.warning(
+            "Event %s (%s, season %s) is Medal scoring but has no competitor data on its leaderboard "
+            "response (status=%s) -- a real ESPN gap, not written to DynamoDB.",
+            event_id, (event.get("tournament") or {}).get("displayName"), season,
+            (event.get("status") or {}).get("type", {}).get("name"),
+        )
+        return "empty"
+
     for entity in normalize.leaderboard_event_to_player_entities(event):
         storage.upsert_entity(entity)
     storage.upsert_event(normalize.leaderboard_event_to_event_item(event))
@@ -126,7 +153,8 @@ def process_season(client: PGAClient, storage: PipelineStorage, season: int) -> 
     calendar, scoreboard = season_calendar(client, season)
     storage.put_raw_json(f"pga/scoreboard/{season}0601.json", scoreboard)
 
-    tournaments_processed = tournaments_skipped = tournaments_failed = 0
+    tournaments_processed = tournaments_skipped = tournaments_failed = tournaments_empty = 0
+    empty_events = []
     failures = []
     for entry in calendar:
         event_id = entry["id"]
@@ -134,6 +162,9 @@ def process_season(client: PGAClient, storage: PipelineStorage, season: int) -> 
             result = process_tournament(client, storage, season, event_id)
             if result == "processed":
                 tournaments_processed += 1
+            elif result == "empty":
+                tournaments_empty += 1
+                empty_events.append({"season": season, "event_id": event_id, "label": entry.get("label")})
             else:
                 tournaments_skipped += 1
         except Exception as exc:  # noqa: BLE001 -- log and continue, one bad tournament shouldn't kill the run
@@ -145,7 +176,9 @@ def process_season(client: PGAClient, storage: PipelineStorage, season: int) -> 
         "season": season,
         "tournaments_processed": tournaments_processed,
         "tournaments_skipped": tournaments_skipped,
+        "tournaments_empty": tournaments_empty,
         "tournaments_failed": tournaments_failed,
+        "empty_events": empty_events,
         "failures": failures,
     }
 
@@ -156,8 +189,9 @@ def process_batch(client: PGAClient, storage: PipelineStorage, seasons: list[int
         logger.info("Starting season %s", season)
         result = process_season(client, storage, season)
         logger.info(
-            "Finished season %s: %d tournaments processed, %d skipped, %d failed",
-            season, result["tournaments_processed"], result["tournaments_skipped"], result["tournaments_failed"],
+            "Finished season %s: %d tournaments processed, %d skipped, %d empty (ESPN gap), %d failed",
+            season, result["tournaments_processed"], result["tournaments_skipped"],
+            result["tournaments_empty"], result["tournaments_failed"],
         )
         results.append(result)
     return results
@@ -200,13 +234,24 @@ def main() -> None:
     elapsed = time.monotonic() - start_time
     total_tournaments = sum(r["tournaments_processed"] for r in all_results)
     total_skipped = sum(r["tournaments_skipped"] for r in all_results)
+    total_empty = sum(r["tournaments_empty"] for r in all_results)
     total_failed = sum(r["tournaments_failed"] for r in all_results)
     all_failures = [failure for r in all_results for failure in r["failures"]]
+    all_empty_events = [empty for r in all_results for empty in r["empty_events"]]
 
     logger.info(
-        "Backfill complete in %.1fs: %d tournaments processed, %d skipped, %d failed",
-        elapsed, total_tournaments, total_skipped, total_failed,
+        "Backfill complete in %.1fs: %d tournaments processed, %d skipped, %d empty (ESPN gap), %d failed",
+        elapsed, total_tournaments, total_skipped, total_empty, total_failed,
     )
+
+    if all_empty_events:
+        empty_key = f"pga/backfill-empty-events/{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}.json"
+        storage.put_raw_json(empty_key, {"empty_events": all_empty_events})
+        logger.warning(
+            "Wrote %d tournament(s) with no ESPN competitor data to s3://%s/%s for review -- these are real "
+            "gaps in ESPN's own data, not something re-running this script will fix.",
+            len(all_empty_events), storage.raw_bucket, empty_key,
+        )
 
     if all_failures:
         failure_key = f"pga/backfill-failures/{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}.json"

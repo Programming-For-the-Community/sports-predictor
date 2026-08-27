@@ -69,6 +69,23 @@ def _process_leaderboard(payload: dict, key: str) -> None:
         )
         return
 
+    # A real, confirmed ESPN gap distinct from the above -- a Medal-
+    # scoring event whose own competition object has no "competitors" key
+    # at all (confirmed live, 2026-08-26, on a small cluster of 2020
+    # COVID-canceled tournaments plus a few real completed ones ESPN never
+    # populated -- see data-backfills/pga/backfill.py's matching check and
+    # design/DATA_SCHEMA.md for the full writeup). Writing this event
+    # anyway would corrupt the cutline dataset's field_size feature
+    # (len(participants)) to 0 for a real full field, so it's skipped
+    # entirely -- same treatment as the no-events-in-payload case above.
+    competition = event["competitions"][0] if event.get("competitions") else {}
+    if not competition.get("competitors"):
+        logger.warning(
+            "Event %s in %s is Medal scoring but has no competitor data (status=%s) -- a real ESPN gap, not written.",
+            event.get("id"), key, (event.get("status") or {}).get("type", {}).get("name"),
+        )
+        return
+
     # Entities upserted before the event that references them, same
     # ordering every head-to-head normalizer uses -- not load-bearing
     # (DynamoDB has no foreign-key enforcement), but keeps a reader that
