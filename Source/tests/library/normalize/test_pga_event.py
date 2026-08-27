@@ -212,6 +212,17 @@ class TestParticipantResult:
         )
         assert item["participants"][0]["result"]["status"] == "scheduled"
 
+    def test_mdf_status_maps_to_made_cut_did_not_finish(self):
+        # "Made Cut Did Not Finish" -- a golfer who made the cut but
+        # withdrew before finishing (e.g. injury mid-round-3). Confirmed
+        # common (not rare) via a live sweep of 2017-2025 seasons,
+        # 2026-08-26 -- explicitly mapped rather than left to the generic
+        # fallback so it doesn't log a warning on every occurrence.
+        item = leaderboard_event_to_event_item(
+            _event(competitors=[_competitor(status_name="STATUS_MDF", completed=False, position_display="T80", is_tie=True)]), "pga",
+        )
+        assert item["participants"][0]["result"]["status"] == "made_cut_did_not_finish"
+
     def test_unmapped_status_falls_back_to_a_generic_transform_and_logs(self, caplog):
         with caplog.at_level(logging.WARNING):
             item = leaderboard_event_to_event_item(

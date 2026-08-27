@@ -35,8 +35,10 @@ def _s3_record(bucket: str, key: str) -> dict:
     return {"s3": {"bucket": {"name": bucket}, "object": {"key": key}}}
 
 
-def _medal_event(event_id="401811963", **extra):
-    return {"id": event_id, "tournament": {"scoringSystem": {"name": "Medal"}}, "competitions": [{"competitors": []}], **extra}
+def _medal_event(event_id="401811963", competitors=None, **extra):
+    if competitors is None:
+        competitors = [{"athlete": {"id": "1"}}]
+    return {"id": event_id, "tournament": {"scoringSystem": {"name": "Medal"}}, "competitions": [{"competitors": competitors}], **extra}
 
 
 class TestDispatch:
@@ -85,6 +87,24 @@ class TestDispatch:
         with patch.object(pga_normalize, "_s3", mock_s3), \
              patch("pga_normalize.PipelineStorage", return_value=mock_storage):
             pga_normalize._dispatch("test-bucket", "pga/leaderboard/2026/401219595.json")  # must not raise
+
+        mock_storage.upsert_event.assert_not_called()
+        mock_storage.upsert_entity.assert_not_called()
+
+    def test_medal_event_with_no_competitor_data_is_skipped_without_upserting(self):
+        # Real, confirmed ESPN gap (see design/DATA_SCHEMA.md and
+        # data-backfills/pga/backfill.py's matching check) -- a
+        # Medal-scoring event whose competition object has no
+        # "competitors" key at all. Must not be written (would corrupt
+        # the cutline dataset's field_size feature to 0).
+        payload = {"events": [_medal_event(competitors=[], status={"type": {"name": "STATUS_FINAL"}})]}
+        mock_s3 = MagicMock()
+        mock_s3.get_object.return_value = _s3_response(payload)
+        mock_storage = MagicMock()
+
+        with patch.object(pga_normalize, "_s3", mock_s3), \
+             patch("pga_normalize.PipelineStorage", return_value=mock_storage):
+            pga_normalize._dispatch("test-bucket", "pga/leaderboard/2026/401811963.json")  # must not raise
 
         mock_storage.upsert_event.assert_not_called()
         mock_storage.upsert_entity.assert_not_called()

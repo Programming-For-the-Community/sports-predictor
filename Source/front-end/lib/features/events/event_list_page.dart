@@ -26,9 +26,12 @@ const _monthNames = [
 String _sortKey(SportEvent event) => event.kickoffTime ?? event.eventDate;
 
 /// "Thursday, Sep 11" from an ISO date/timestamp -- falls back to the raw
-/// string for anything that doesn't parse.
+/// string for anything that doesn't parse. kickoff_time comes back from
+/// ESPN as UTC, so a late-evening US kickoff can land after midnight UTC;
+/// toLocal() (same as game_row.dart's _kickoffTimeLabel) puts the heading
+/// on the viewer's actual calendar day instead of UTC's.
 String _dateHeading(String isoDateOrTimestamp) {
-  final date = DateTime.tryParse(isoDateOrTimestamp);
+  final date = DateTime.tryParse(isoDateOrTimestamp)?.toLocal();
   if (date == null) return isoDateOrTimestamp;
   return '${_weekdayNames[date.weekday - 1]}, ${_monthNames[date.month - 1]} ${date.day}';
 }

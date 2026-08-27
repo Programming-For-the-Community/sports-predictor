@@ -23,14 +23,20 @@ def _scoreboard(calendar):
     return {"leagues": [{"calendar": calendar}]}
 
 
-def _leaderboard(event_id="1", scoring_system="Medal", tournament_name="Some Championship"):
-    """Defaults to a real Medal (stroke-play) tournament shape -- callers
-    testing the non-Medal skip path pass scoring_system="Match" (Ryder
-    Cup/Presidents Cup/WGC Match Play) or "Teamstroke" (Zurich Classic)
-    instead."""
+def _leaderboard(event_id="1", scoring_system="Medal", tournament_name="Some Championship", competitors=None, status_name="STATUS_FINAL"):
+    """Defaults to a real Medal (stroke-play) tournament shape, with one
+    placeholder competitor -- callers testing the empty-competitor-data
+    gap (see TestProcessTournament's own tests) pass competitors=[]
+    instead. Callers testing the non-Medal skip path pass
+    scoring_system="Match" (Ryder Cup/Presidents Cup/WGC Match Play) or
+    "Teamstroke" (Zurich Classic) instead."""
+    if competitors is None:
+        competitors = [{"athlete": {"id": "1"}}]
     return {"events": [{
         "id": event_id,
         "tournament": {"displayName": tournament_name, "scoringSystem": {"name": scoring_system}},
+        "status": {"type": {"name": status_name}},
+        "competitions": [{"competitors": competitors}],
     }]}
 
 
@@ -141,6 +147,41 @@ class TestProcessTournament:
         storage.upsert_event.assert_not_called()
         assert result == "skipped"
 
+    def test_medal_event_with_no_competitor_data_is_treated_as_a_gap_not_processed(self):
+        # Real, confirmed ESPN gap (Shriners Hospitals for Children Open /
+        # Sanderson Farms Championship / Corales Puntacana Championship,
+        # all Fall-2020 events, live-swept 2026-08-26) -- a completed,
+        # Medal-scoring event whose own leaderboard has no competitor
+        # data at all. Must not be written (would corrupt the cutline
+        # dataset's field_size feature to 0 for a real full field).
+        client = MagicMock()
+        storage = MagicMock()
+        storage.raw_object_exists.return_value = False
+        client.get_leaderboard.return_value = _leaderboard("401219795", competitors=[], status_name="STATUS_FINAL")
+
+        result = backfill.process_tournament(client, storage, 2021, "401219795")
+
+        storage.upsert_event.assert_not_called()
+        storage.upsert_entity.assert_not_called()
+        assert result == "empty"
+        # Raw JSON is still preserved even though it's not normalized.
+        storage.put_raw_json.assert_called_once()
+
+    def test_canceled_medal_event_with_no_competitor_data_is_also_treated_as_a_gap(self):
+        # The 2020 COVID-canceled majority case (THE PLAYERS, The Open,
+        # etc.) -- same empty-competitors shape as the completed-event
+        # gap above, just with a genuine "nothing was ever played" cause
+        # rather than an ESPN data-population miss. Handled identically.
+        client = MagicMock()
+        storage = MagicMock()
+        storage.raw_object_exists.return_value = False
+        client.get_leaderboard.return_value = _leaderboard("401155428", competitors=[], status_name="STATUS_CANCELED")
+
+        result = backfill.process_tournament(client, storage, 2020, "401155428")
+
+        storage.upsert_event.assert_not_called()
+        assert result == "empty"
+
     def test_missing_tournament_metadata_is_skipped_not_normalized(self):
         # A just-added future calendar entry ESPN hasn't fully populated
         # yet -- confirmed live (a real not-yet-configured Presidents Cup
@@ -197,3 +238,17 @@ class TestProcessSeason:
         assert result["tournaments_processed"] == 1
         assert result["tournaments_failed"] == 1
         assert len(result["failures"]) == 1
+
+    def test_counts_a_gap_tournament_separately_and_records_it(self):
+        client = MagicMock()
+        storage = MagicMock()
+        calendar = [_calendar_entry("1", "Processed Event"), _calendar_entry("2", "Gap Event")]
+
+        with patch.object(backfill, "season_calendar", return_value=(calendar, {})), \
+             patch.object(backfill, "process_tournament", side_effect=["processed", "empty"]):
+            result = backfill.process_season(client, storage, 2026)
+
+        assert result["tournaments_processed"] == 1
+        assert result["tournaments_skipped"] == 0
+        assert result["tournaments_empty"] == 1
+        assert result["empty_events"] == [{"season": 2026, "event_id": "2", "label": "Gap Event"}]
