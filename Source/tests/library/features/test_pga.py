@@ -216,21 +216,44 @@ class TestBuildGolferEventFeatures:
         assert row["course_best_finish_position"] == 2
         assert row["course_events_played"] == 1
 
-    def test_label_score_to_par_comes_from_this_participants_own_result(self):
+    def test_label_remaining_score_to_par_is_the_full_final_score_pre_tournament(self):
+        # rounds_so_far defaults to None (pre-tournament) -- nothing has
+        # happened yet, so "remaining" is the whole tournament.
         event = self._event()
         participant = {"entity_id": "1", "result": {"finish_position": 5, "score_to_par": -8}}
 
         row = build_golfer_event_features(event, participant, [])
 
-        assert row["label_score_to_par"] == -8
+        assert row["label_remaining_score_to_par"] == -8
 
-    def test_label_score_to_par_is_none_for_a_golfer_with_no_recorded_score(self):
+    def test_label_remaining_score_to_par_subtracts_this_weeks_cumulative_so_far(self):
+        event = self._event()
+        participant = {"entity_id": "1", "result": {"finish_position": 5, "score_to_par": -8}}
+        rounds_so_far = [_round(1, score_to_par=-3), _round(2, score_to_par=-1)]
+
+        row = build_golfer_event_features(event, participant, [], rounds_so_far=rounds_so_far)
+
+        assert row["label_remaining_score_to_par"] == -4  # -8 final - (-3 + -1) already shot
+
+    def test_label_remaining_score_to_par_is_zero_at_a_cut_golfers_own_final_snapshot(self):
+        # A cut golfer's stored final score_to_par IS their cumulative
+        # through the rounds they actually played -- nothing is left for
+        # them to shoot, so remaining is exactly 0, not None or negative.
+        event = self._event()
+        participant = {"entity_id": "1", "result": {"finish_position": None, "score_to_par": 4}}
+        rounds_so_far = [_round(1, score_to_par=4), _round(2, score_to_par=0)]
+
+        row = build_golfer_event_features(event, participant, [], rounds_so_far=rounds_so_far)
+
+        assert row["label_remaining_score_to_par"] == 0
+
+    def test_label_remaining_score_to_par_is_none_for_a_golfer_with_no_recorded_score(self):
         event = self._event()
         participant = {"entity_id": "1", "result": {"finish_position": None, "score_to_par": None}}
 
         row = build_golfer_event_features(event, participant, [])
 
-        assert row["label_score_to_par"] is None
+        assert row["label_remaining_score_to_par"] is None
 
     def test_rounds_so_far_defaults_to_the_pre_tournament_state(self):
         event = self._event()
@@ -313,7 +336,7 @@ class TestBuildGolferEventFeatures:
         row = build_golfer_event_features(event, participant, [], season_stats=season_stats)
 
         assert row["purse"] is None
-        assert row["label_score_to_par"] is None
+        assert row["label_remaining_score_to_par"] is None
         assert row["label_top_10"] == 0  # a non-numeric finish_position is treated as no finish, not a crash
         assert row["season_driving_distance"] is None
 

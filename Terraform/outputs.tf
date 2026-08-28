@@ -69,3 +69,8 @@ output "season_gate_function_name" {
   description = "Shared season-gate Lambda function name -- passed to shared_lambdas_deploy workflow for `aws lambda update-function-code`"
   value       = aws_lambda_function.season_gate.function_name
 }
+
+output "cloudwatch_geo_widget_function_name" {
+  description = "Shared cloudwatch-geo-widget Lambda function name -- passed to shared_lambdas_deploy workflow for `aws lambda update-function-code`"
+  value       = aws_lambda_function.cloudwatch_geo_widget.function_name
+}

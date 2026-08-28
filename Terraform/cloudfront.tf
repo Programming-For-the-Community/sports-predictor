@@ -84,6 +84,9 @@ resource "aws_cloudfront_distribution" "main" {
   enabled             = true
   default_root_object = "index.html"
   aliases             = [local.domain]
+  # Blocks known-malicious IPs via AWS's own reputation list --
+  # waf-cloudfront.tf.
+  web_acl_id = aws_wafv2_web_acl.cloudfront.arn
 
   origin {
     origin_id                = "frontend-s3"
@@ -141,14 +144,25 @@ resource "aws_cloudfront_distribution" "main" {
   # go_router's client-side routing means a deep link (e.g. /nfl/events)
   # has no matching S3 object; CloudFront remaps S3's 404 to index.html so
   # the Flutter app boots and its own router takes over.
-  #
-  # No 403 entry here -- custom_error_response is distribution-wide, and
-  # CloudFront's geo-restriction block below also returns 403, so a
-  # 403->200 rule would rewrite geo-blocked requests into a served app too.
   custom_error_response {
     error_code         = 404
     response_code      = 200
     response_page_path = "/index.html"
+  }
+
+  # Every 403 CloudFront returns to the viewer -- geo-restriction blocks
+  # and WAF blocks (waf-cloudfront.tf) alike -- rewritten to one minimal,
+  # reason-free page (front-end/web/403.html), so a probe can't
+  # distinguish geo from WAF. Stays a real 403 (response_code = 403), not
+  # remapped to 200 like the 404 entry above -- a blocked request must
+  # not be served the app. API Gateway's own 4xx family (api-gateway.tf)
+  # is normalized separately, at the origin, since it needs a different
+  # status code per response type preserved (see that file's own
+  # comments) rather than one shared 403.
+  custom_error_response {
+    error_code         = 403
+    response_code      = 403
+    response_page_path = "/403.html"
   }
 
   # US-only; no expected traffic from outside the US for this single-user

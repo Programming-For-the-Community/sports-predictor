@@ -14,9 +14,9 @@ import train_score_model
 
 
 def _make_df(n=10, scored=None):
-    """scored: which row indices have a real label_score_to_par -- the
-    rest simulate a withdrawal with no recorded score at all, excluded
-    from training."""
+    """scored: which row indices have a real label_remaining_score_to_par
+    -- the rest simulate a withdrawal with no recorded score at all,
+    excluded from training."""
     if scored is None:
         scored = list(range(n))
     return pd.DataFrame({
@@ -25,7 +25,7 @@ def _make_df(n=10, scored=None):
         "event_date": [f"2026-0{(i % 9) + 1}-01" for i in range(n)],
         "avg_finish_position": [10.0 + i for i in range(n)],
         "purse": [10000000.0] * n,
-        "label_score_to_par": [float(-i) if i in scored else None for i in range(n)],
+        "label_remaining_score_to_par": [float(-i) if i in scored else None for i in range(n)],
     })
 
 
@@ -86,7 +86,7 @@ class TestTrain:
         assert mock_run.call_args.kwargs["promotion_metric"] == "rmse"
 
     def test_naive_baseline_is_the_median_score(self):
-        df = _make_df(10)  # label_score_to_par = [0, -1, -2, ..., -9]
+        df = _make_df(10)  # label_remaining_score_to_par = [0, -1, -2, ..., -9]
 
         with patch.object(train_score_model.backtest, "run_backtest", return_value=_fake_result()) as mock_run:
             train_score_model.train(MagicMock(), df)

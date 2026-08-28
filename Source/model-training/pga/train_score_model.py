@@ -1,23 +1,35 @@
 """
 PGA projected-score-to-par model training -- a continuous regression
-target ("how many strokes relative to par will this golfer shoot this
-tournament"), the basis for "field finish order": at serving time (Phase
-5 step 4, not built yet), a tournament's whole field gets ranked by this
-model's own predictions, lowest-predicted-score first -- there is no
-separately trained "field order" artifact and no rank-loss/learning-to-
-rank objective anywhere in this project's shared training harness
-(library/ml/backtest.py), so this reuses the existing regression
-infrastructure completely unchanged, same reasoning that kept top-10/
-top-5 as plain binary classifiers instead of a genuine multinomial model
-(see docs/PGA_FEATURE_ENGINEERING.md).
+target, the basis for "field finish order": at serving time, a
+tournament's whole field gets ranked by this model's own predictions,
+lowest-predicted-score first -- there is no separately trained "field
+order" artifact and no rank-loss/learning-to-rank objective anywhere in
+this project's shared training harness (library/ml/backtest.py), so this
+reuses the existing regression infrastructure completely unchanged, same
+reasoning that kept top-10/top-5 as plain binary classifiers instead of a
+genuine multinomial model (see docs/PGA_FEATURE_ENGINEERING.md).
+
+The trained target is REMAINING score-to-par (label_remaining_score_to_par
+-- "how many more strokes relative to par will this golfer shoot over
+whatever rounds aren't reflected in score_to_par_this_week_so_far yet"),
+not the absolute final score directly. See library/features/pga.py's own
+build_golfer_event_features docstring for why: feeding the model its own
+current cumulative as a raw feature let that one feature dominate every
+other feature (confirmed live, 2026-08-28, via this model's own
+feature_importances -- score_to_par_this_week_so_far at ~2.7x the next-
+highest feature), collapsing predictions to roughly "final ≈ current
+cumulative" instead of a genuine full-tournament projection. Serving time
+(aws-lambdas/pga/predict/event_prediction.py) adds this model's remaining-
+score output back onto the golfer's own real score_to_par_this_week_so_far
+to get the field-facing projected_score_to_par value.
 
 Reads golfer_features.parquet (the same dataset train_top10_model.py/
 train_top5_model.py read) from S3, filters out rows with no recorded
-score at all (label_score_to_par.isna() -- a withdrawal before playing a
-single hole, the only case that produces a null label here), then runs
-the same 4-candidate REGRESSOR tournament every other sport's score/
-ranking model uses via library.ml.backtest.run_backtest, promoted on
-rmse.
+final score at all (label_remaining_score_to_par.isna() -- a withdrawal
+before playing a single hole, the only case that produces a null label
+here), then runs the same 4-candidate REGRESSOR tournament every other
+sport's score/ranking model uses via library.ml.backtest.run_backtest,
+promoted on rmse.
 
 Required environment variables:
     MODEL_ARTIFACTS_BUCKET_NAME
@@ -50,7 +62,7 @@ MODEL_NAME = "projected-score-to-par"
 GOLFER_FEATURES_KEY = "pga/training-data/golfer_features.parquet"
 
 NON_FEATURE_COLUMNS = {"event_key", "entity_id", "event_date"}
-LABEL_COLUMN = "label_score_to_par"
+LABEL_COLUMN = "label_remaining_score_to_par"
 SUMMARY_METRICS = ["rmse", "mae", "naive_baseline_rmse", "naive_baseline_mae"]
 PROMOTION_METRIC = "rmse"
 

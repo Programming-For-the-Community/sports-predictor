@@ -51,6 +51,12 @@ def log_viewer_analytics(logger: logging.Logger, sport: str, resource: str, meth
             "method": method,
             "country": h("CloudFront-Viewer-Country"),
             "country_name": h("CloudFront-Viewer-Country-Name"),
+            # 2-letter ISO 3166-2 subdivision code (e.g. "CA") -- distinct
+            # from region_name's full name below. Lets the geo-widget
+            # Lambda (Terraform/lambda-cloudwatch-geo-widget.tf) match a
+            # count straight onto an SVG state path's own id without a
+            # name-to-abbreviation lookup table.
+            "region": h("CloudFront-Viewer-Country-Region"),
             "region_name": h("CloudFront-Viewer-Country-Region-Name"),
             "city": h("CloudFront-Viewer-City"),
             "is_mobile": h("CloudFront-Is-Mobile-Viewer"),

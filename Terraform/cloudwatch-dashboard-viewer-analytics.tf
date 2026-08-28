@@ -242,6 +242,48 @@ resource "aws_cloudwatch_dashboard" "viewer_analytics" {
           QUERY
         }
       },
+      # Custom-widget geo panels (Terraform/lambda-cloudwatch-geo-widget.tf)
+      # -- CloudWatch dashboards have no native map widget type, so these
+      # render a schematic tile-grid cartogram instead of a geographic
+      # choropleth; see the Lambda's own handler.py docstring for why.
+      # Appended here rather than interleaved with the bar/table panels
+      # above so every existing widget's y-position stays untouched.
+      {
+        type   = "text"
+        x      = 0
+        y      = 44
+        width  = 24
+        height = 1
+        properties = {
+          markdown = "## Geo panels (schematic, not a projection)"
+        }
+      },
+      {
+        type   = "custom"
+        x      = 0
+        y      = 45
+        width  = 12
+        height = 9
+        properties = {
+          endpoint = aws_lambda_function.cloudwatch_geo_widget.arn
+          params   = { mode = "accepted" }
+          title    = "Accepted traffic by state"
+          updateOn = { refresh = true, resize = false, timeRange = true }
+        }
+      },
+      {
+        type   = "custom"
+        x      = 12
+        y      = 45
+        width  = 12
+        height = 9
+        properties = {
+          endpoint = aws_lambda_function.cloudwatch_geo_widget.arn
+          params   = { mode = "blocked" }
+          title    = "Blocked traffic by region"
+          updateOn = { refresh = true, resize = false, timeRange = true }
+        }
+      },
     ]
   })
 }

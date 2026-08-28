@@ -107,9 +107,13 @@ def build_golfer_dataset(
     Emits one IN-TOURNAMENT-PROGRESS SNAPSHOT ROW per already-played round
     boundary (0 rounds played i.e. pre-tournament, 1 round played, 2, ...
     up to however many rounds this golfer actually has -- a cut golfer
-    naturally stops at 2), all sharing the SAME final label (top-10/top-5/
-    score_to_par), not just the one pre-tournament row this dataset used
-    to emit. Without this, in_tournament_progress_features' rounds_
+    naturally stops at 2), all predicting toward the SAME real final
+    outcome -- top-10/top-5 share one literal label across every snapshot,
+    while label_remaining_score_to_par instead shrinks per snapshot
+    (final minus whatever's already been shot, see build_golfer_event_
+    features' own docstring for why it's framed that way) -- not just the
+    one pre-tournament row this dataset used to emit. Without this, in_
+    tournament_progress_features' rounds_
     completed_this_week/score_to_par_this_week_so_far columns (library.
     features.pga) would exist in every row but always read 0/None,
     since a live serving call is the only place that ever passed anything

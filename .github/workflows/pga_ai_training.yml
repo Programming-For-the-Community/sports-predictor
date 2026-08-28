@@ -42,8 +42,9 @@ env:
   #
   # TRAIN_TOP10_MODEL bumped 2026-08-27, same afternoon: the _as_number()
   # coercion above means label_round_score_to_par/label_cut_score can now
-  # be a real None for a dirty stored row, same as label_score_to_par
-  # already could be -- but unlike train_score_model.py's own
+  # be a real None for a dirty stored row, same as train_score_model.py's
+  # own label (label_remaining_score_to_par as of 2026-08-28, previously
+  # label_score_to_par) already could be -- but unlike train_score_model.py's own
   # _filter_to_scored_rows, train_round_model.py/train_cutline_model.py
   # had no notna() filter before handing y_train/y_test to run_backtest,
   # so a dirty row would reach .fit() and crash every non-XGBoost

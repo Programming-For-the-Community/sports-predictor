@@ -124,9 +124,9 @@ class TestBuildGolferDataset:
         assert len(rows) == 1
         assert rows[0]["rounds_completed_this_week"] == 0
         assert rows[0]["score_to_par_this_week_so_far"] is None
-        assert rows[0]["label_score_to_par"] == -8  # the same final label every snapshot shares
+        assert rows[0]["label_remaining_score_to_par"] == -8  # pre-tournament -- remaining is the full week
 
-    def test_emits_one_snapshot_row_per_round_boundary_all_sharing_the_same_final_label(self):
+    def test_emits_one_snapshot_row_per_round_boundary_with_a_shrinking_remaining_label(self):
         events = [_event(
             "E1", "2026-06-01", [_participant("1", finish_position=3, score_to_par=-6)],
             rounds_by_participant={"1": [_round(1, -3), _round(2, 1), _round(3, -2), _round(4, -2)]},
@@ -142,9 +142,13 @@ class TestBuildGolferDataset:
         assert by_rounds_completed[1]["score_to_par_this_week_so_far"] == -3
         assert by_rounds_completed[2]["score_to_par_this_week_so_far"] == -2  # -3 + 1
         assert by_rounds_completed[4]["score_to_par_this_week_so_far"] == -6  # the full week
-        # Every snapshot -- regardless of how many rounds it "knows about"
-        # -- predicts toward the SAME real final outcome.
-        assert all(r["label_score_to_par"] == -6 for r in rows)
+        # Each snapshot's own label is what's still LEFT to shoot toward
+        # the same real final outcome (-6), not the final outcome itself
+        # repeated -- shrinks toward 0 as more of the week is already known.
+        assert by_rounds_completed[0]["label_remaining_score_to_par"] == -6  # nothing shot yet
+        assert by_rounds_completed[1]["label_remaining_score_to_par"] == -3  # -6 - (-3)
+        assert by_rounds_completed[2]["label_remaining_score_to_par"] == -4  # -6 - (-2)
+        assert by_rounds_completed[4]["label_remaining_score_to_par"] == 0  # nothing left, week is over
 
     def test_a_cut_golfers_snapshots_stop_at_their_own_2_rounds_played(self):
         events = [_event(

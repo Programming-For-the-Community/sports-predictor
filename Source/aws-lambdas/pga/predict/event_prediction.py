@@ -75,6 +75,24 @@ def _score(model_cache: dict, s3, predictions_table, event_key_value: str, model
     return {"value": value, "model_version": model_card["version"]}
 
 
+def _field_projected_score_to_par(scored: dict, golfer_row: dict) -> dict:
+    """The "projected-score-to-par" model is trained on a REMAINING-score
+    target (label_remaining_score_to_par -- see library/features/pga.py's
+    build_golfer_event_features docstring for why), not the absolute
+    final score directly, so its raw output isn't field-facing on its own.
+    Adds the golfer's own real, already-known score_to_par_this_week_so_far
+    (0 pre-tournament, via the same feature row already built for scoring)
+    back on top to get the actual projected FINAL tournament score --
+    what predictions["projected_score_to_par"] has always meant to every
+    caller of this response (the frontend's own TO PAR column, _field_
+    sort_key's field-order ranking). Does NOT touch what _score already
+    recorded to predictions_table for this model -- that audit trail
+    stays the model's own literal (remaining) output, not this derived
+    display value."""
+    score_so_far = golfer_row.get("score_to_par_this_week_so_far") or 0
+    return {**scored, "value": scored["value"] + score_so_far}
+
+
 def _golfer_name(storage, entity_id: str) -> dict:
     entity = storage.get_entity(SPORT, entity_id, "player")
     if entity is None:
@@ -184,6 +202,8 @@ def predict_field_event(storage, s3, predictions_table, event_id: str) -> dict:
         for key, model_name in FIELD_EVENT_MODELS.items():
             scored = _score(model_cache, s3, predictions_table, event_key_value, model_name, rows["golfer"], f"GOLFER#{entity_id}")
             if scored is not None:
+                if key == "projected_score_to_par":
+                    scored = _field_projected_score_to_par(scored, rows["golfer"])
                 predictions[key] = scored
 
         round_predictions = {}

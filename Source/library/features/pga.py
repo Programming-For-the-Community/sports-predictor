@@ -191,6 +191,8 @@ def build_golfer_event_features(
     pre-tournament row, live or historical."""
     result = participant.get("result") or {}
     finish_position = _as_number(result.get("finish_position"))
+    progress = in_tournament_progress_features(rounds_so_far)
+    final_score_to_par = _as_number(result.get("score_to_par"))
 
     row = {
         "event_key": event["event_key"],
@@ -199,17 +201,41 @@ def build_golfer_event_features(
         "purse": _as_number(event.get("purse")),
         "is_major": bool(event.get("is_major", False)),
         "field_size": len(event.get("participants", [])),
-        **in_tournament_progress_features(rounds_so_far),
+        **progress,
         "label_top_10": 1 if finish_position is not None and finish_position <= 10 else 0,
         "label_top_5": 1 if finish_position is not None and finish_position <= 5 else 0,
         # Continuous label for the projected-score-to-par regression model
         # -- "field finish order" is a serving-time ranking of this
         # model's own predictions across one tournament's field, not a
-        # separately trained artifact. None (not a real target) for a row
-        # with no recorded score at all (e.g. a withdrawal before playing
-        # a single hole) -- filtered out at training time, same as every
-        # other regression target in this project handles a null label.
-        "label_score_to_par": _as_number(result.get("score_to_par")),
+        # separately trained artifact.
+        #
+        # This is the REMAINING score-to-par over whatever rounds aren't
+        # reflected in score_to_par_this_week_so_far yet, not the absolute
+        # final score directly -- confirmed live, 2026-08-28, that feeding
+        # the model the golfer's own current cumulative as a raw feature
+        # let it dominate every other feature (score_to_par_this_week_so_far
+        # had ~2.7x the next-highest feature's importance), collapsing the
+        # model to roughly "final ≈ current cumulative", which is exactly
+        # why a real user saw the field's own "projected to par" look like
+        # round 1's cumulative after round 1 and round 2's after round 2
+        # instead of a genuine full-tournament projection. Serving time
+        # (aws-lambdas/pga/predict/event_prediction.py) adds this model's
+        # remaining-score output back onto the golfer's own real, already-
+        # known score_to_par_this_week_so_far to get the field-facing
+        # projected_score_to_par value.
+        #
+        # None (not a real target) for a row with no recorded final score
+        # at all (e.g. a withdrawal before playing a single hole) --
+        # filtered out at training time, same as every other regression
+        # target in this project handles a null label. Correct at every
+        # snapshot: pre-tournament (score_to_par_this_week_so_far is None
+        # -> treated as 0, remaining = the full tournament), mid-tournament
+        # (remaining = what's actually left), and a cut golfer's own last
+        # snapshot (remaining = exactly 0, since final == cumulative there
+        # -- there IS nothing left for them to shoot).
+        "label_remaining_score_to_par": (
+            None if final_score_to_par is None else final_score_to_par - (progress["score_to_par_this_week_so_far"] or 0)
+        ),
     }
     row.update(rolling_golfer_averages(prior_results, window))
     row.update({f"course_{key}": value for key, value in rolling_golfer_averages(course_results or [], course_window).items()})

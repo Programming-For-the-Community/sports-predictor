@@ -54,6 +54,42 @@ class TestScore:
         predictions_table.put_item.assert_called_once()
 
 
+class TestFieldProjectedScoreToPar:
+    """The projected-score-to-par model is trained on a REMAINING-score
+    target, not the absolute final score -- see library/features/pga.py's
+    own build_golfer_event_features docstring. This adds the golfer's
+    real score_to_par_this_week_so_far back on top."""
+
+    def test_adds_the_real_cumulative_so_far_onto_the_models_remaining_output(self):
+        scored = {"value": -2.0, "model_version": 3}
+        golfer_row = {"score_to_par_this_week_so_far": -5}
+
+        result = event_prediction._field_projected_score_to_par(scored, golfer_row)
+
+        assert result == {"value": -7.0, "model_version": 3}
+
+    def test_pre_tournament_adds_zero_since_nothing_has_been_shot_yet(self):
+        scored = {"value": -9.0, "model_version": 3}
+        golfer_row = {"score_to_par_this_week_so_far": None}
+
+        result = event_prediction._field_projected_score_to_par(scored, golfer_row)
+
+        assert result["value"] == -9.0
+
+    def test_missing_key_entirely_is_treated_the_same_as_pre_tournament(self):
+        scored = {"value": -9.0, "model_version": 3}
+
+        result = event_prediction._field_projected_score_to_par(scored, {})
+
+        assert result["value"] == -9.0
+
+    def test_does_not_mutate_the_original_scored_dict(self):
+        scored = {"value": -2.0, "model_version": 3}
+        event_prediction._field_projected_score_to_par(scored, {"score_to_par_this_week_so_far": -5})
+
+        assert scored["value"] == -2.0
+
+
 class TestPredictFieldEvent:
     def test_scores_every_model_for_every_golfer(self):
         storage, s3, predictions_table = MagicMock(), MagicMock(), MagicMock()
@@ -71,6 +107,25 @@ class TestPredictFieldEvent:
         assert golfer["predictions"]["rounds"]["round_2"]["value"] == 0.5
         assert result["par"] == 70
         assert result["cutline"]["projected_cut_score"]["value"] == 0.5
+
+    def test_projected_score_to_par_adds_the_golfers_real_cumulative_so_far(self):
+        # model_loader.predict returns 0.5 for every model here (the raw,
+        # REMAINING-score model output) -- only projected_score_to_par
+        # should come back adjusted; top_10/top_5 must stay the model's
+        # own literal output.
+        storage, s3, predictions_table = MagicMock(), MagicMock(), MagicMock()
+        storage.get_entity.return_value = {"name": "Scottie Scheffler", "metadata": {"country": "USA"}}
+        predictions_table.query.return_value = []
+        built = _built_field_features()
+        built["golfer_rows"]["1"]["golfer"] = {"f": 1, "score_to_par_this_week_so_far": -6}
+        with patch.object(event_prediction.live_features, "build_live_field_features", return_value=built), \
+             patch.object(event_prediction.model_loader, "load_current_model", return_value=(MagicMock(), {"version": 1})), \
+             patch.object(event_prediction.model_loader, "predict", return_value=0.5):
+            result = event_prediction.predict_field_event(storage, s3, predictions_table, "999")
+
+        predictions = result["field"][0]["predictions"]
+        assert predictions["projected_score_to_par"]["value"] == -5.5  # 0.5 + (-6)
+        assert predictions["top_10_probability"]["value"] == 0.5  # untouched
 
     def test_a_model_with_no_promoted_version_is_simply_omitted(self):
         """No model is more important than another -- missing top-5

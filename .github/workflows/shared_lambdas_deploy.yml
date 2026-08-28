@@ -13,6 +13,11 @@ on:
         required: false
         type: string
         default: 'sports-predictor-season-gate'
+      cloudwatch_geo_widget_function_name:
+        description: 'cloudwatch-geo-widget Lambda function name (from Terraform output cloudwatch_geo_widget_function_name)'
+        required: false
+        type: string
+        default: 'sports-predictor-cloudwatch-geo-widget'
 
 permissions:
   id-token: write
@@ -34,3 +39,18 @@ jobs:
       function_name: ${{ inputs.season_gate_function_name || 'sports-predictor-season-gate' }}
       handler_dir: 'Source/aws-lambdas/shared/season-gate'
       library_path: 'Source/library'
+
+  test_cloudwatch_geo_widget:
+    name: Run cloudwatch-geo-widget tests
+    uses: ./.github/workflows/run_python_tests.yml
+    with:
+      test_path: 'Source/tests/aws-lambdas/shared/test_cloudwatch_geo_widget.py'
+
+  deploy_cloudwatch_geo_widget:
+    name: Deploy cloudwatch-geo-widget Lambda
+    needs: test_cloudwatch_geo_widget
+    uses: ./.github/workflows/python_lambda_build.yml
+    secrets: inherit
+    with:
+      function_name: ${{ inputs.cloudwatch_geo_widget_function_name || 'sports-predictor-cloudwatch-geo-widget' }}
+      handler_dir: 'Source/aws-lambdas/shared/cloudwatch-geo-widget'

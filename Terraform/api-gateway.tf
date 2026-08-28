@@ -49,9 +49,17 @@ resource "aws_api_gateway_gateway_response" "missing_auth_token" {
   }
 }
 
-# Adds CORS headers to every other 4xx API Gateway generates itself before
-# reaching the Lambda (e.g. Cognito UNAUTHORIZED/ACCESS_DENIED, usage-plan
-# THROTTLED), without overriding status code or body.
+# Genericizes the BODY of every other 4xx API Gateway generates itself
+# before reaching the Lambda -- covers Cognito UNAUTHORIZED (401) and
+# usage-plan THROTTLED (429) specifically, both left on this catch-all
+# rather than given their own gateway_response resource. Status code is
+# deliberately NOT overridden here: the front end's own api_client.dart
+# reactively retries on a real 401 (forced token refresh) and on a real
+# 429 (backoff), so those two codes have to keep meaning what they mean.
+# Only the AWS-default message text (which otherwise differs per
+# rejection type) is stripped -- this is the honest limit of obfuscation
+# for these two, not an oversight; ACCESS_DENIED has no such dependency
+# and gets folded all the way into "Not found" below instead.
 resource "aws_api_gateway_gateway_response" "default_4xx" {
   rest_api_id   = aws_api_gateway_rest_api.main.id
   response_type = "DEFAULT_4XX"
@@ -59,6 +67,31 @@ resource "aws_api_gateway_gateway_response" "default_4xx" {
   response_parameters = {
     "gatewayresponse.header.Access-Control-Allow-Origin"  = "'*'"
     "gatewayresponse.header.Access-Control-Allow-Headers" = "'Content-Type,Authorization'"
+  }
+
+  response_templates = {
+    "application/json" = jsonencode({ error = "Not found" })
+  }
+}
+
+# Nothing in the front end keys off ACCESS_DENIED specifically (unlike
+# UNAUTHORIZED/THROTTLED above), so it can fully disappear into the same
+# "route doesn't exist" shape missing_auth_token already returns instead
+# of just losing its distinct AWS-default body on the DEFAULT_4XX
+# catch-all -- a probe can no longer tell "wrong path" apart from
+# "real path, access denied".
+resource "aws_api_gateway_gateway_response" "access_denied" {
+  rest_api_id   = aws_api_gateway_rest_api.main.id
+  response_type = "ACCESS_DENIED"
+  status_code   = "404"
+
+  response_parameters = {
+    "gatewayresponse.header.Access-Control-Allow-Origin"  = "'*'"
+    "gatewayresponse.header.Access-Control-Allow-Headers" = "'Content-Type,Authorization'"
+  }
+
+  response_templates = {
+    "application/json" = jsonencode({ error = "Not found" })
   }
 }
 
