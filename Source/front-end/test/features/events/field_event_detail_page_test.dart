@@ -72,6 +72,31 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
+  testWidgets('a match_play event overlays live margin data onto the matchup view', (tester) async {
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          fieldEventPredictionProvider.overrideWith((ref, query) async => parsePgaEventPrediction(_twoSidedResponse())),
+          fieldLiveScoresProvider.overrideWith((ref, sport) async => const <String, FieldLiveEventState>{}),
+          pgaLiveScoresProvider.overrideWith((ref, sport) async => {
+                '401465497-match-10951': parsePgaLiveEventState({
+                  'event_type': 'match_play', 'status': 'scheduled', 'tournament_name': 'Presidents Cup',
+                  'participants': {
+                    '1': {'status': 'finished', 'won': true, 'halved': false, 'margin_display': '6 & 5', 'margin_holes': 6.0},
+                    '3': {'status': 'finished', 'won': false, 'halved': false},
+                  },
+                }),
+              }),
+        ],
+        child: const MaterialApp(home: Scaffold(body: FieldEventDetailPage(sportId: 'pga', eventId: '401465497-match-10951'))),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('6 & 5'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('polls the prediction and live scores every 60s', (tester) async {
     var predictionCalls = 0;
     var liveScoreCalls = 0;

@@ -229,6 +229,16 @@ def leaderboard_event_to_match_event_items(event: dict, sport: str) -> list[dict
             # match must not see Thursday's own match result as "future"
             # relative to the tournament, and vice versa).
             "event_date": (entry.get("date") or event.get("date") or "")[:10],
+            # match_time -- the FULL, untruncated per-match timestamp
+            # (unlike event_date). Confirmed live: unlike the event-level
+            # `date` field (a static midnight-UTC placeholder -- see
+            # library/normalize/pga.py's next_tee_time docstring), each
+            # match's own `date` is a genuine staggered tee-off-style time
+            # (e.g. two same-session matches 12 minutes apart). Needed by
+            # pga-live-scores' poll-window logic to know when this
+            # specific match starts, without a next-tee-time-style
+            # derivation trick -- the raw value already IS the real signal.
+            "match_time": entry.get("date"),
             "status": pga.event_status(entry.get("status", {})),
             "parent_event_id": tournament_event_id,
             "tournament_name": tournament.get("displayName"),
@@ -304,6 +314,11 @@ def leaderboard_event_to_cup_event_item(event: dict, sport: str) -> dict | None:
         "sport": sport,
         "event_type": "cup",
         "event_date": (event.get("date") or "")[:10],
+        # end_date -- same field/reasoning as the field-event fix
+        # (library/normalize/pga.py's leaderboard_event_to_event_item);
+        # was missing here entirely. Needed by pga-live-scores to know
+        # which calendar days this cup's own tournament spans.
+        "end_date": (event.get("endDate") or "")[:10] or None,
         "status": pga.event_status(event.get("status", {})),
         "tournament_name": tournament.get("displayName"),
         "participants": participants,

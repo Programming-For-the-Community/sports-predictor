@@ -82,6 +82,7 @@ def _cup_event(tournament_name="Presidents Cup", sessions=None):
     return {
         "id": "401465497",
         "date": "2022-09-22T17:05Z",
+        "endDate": "2022-09-25T04:00Z",
         "season": {"year": 2023},
         "seasonType": {"id": "2", "name": "Regular Season"},
         "tournament": {"id": "40", "displayName": tournament_name, "scoringSystem": {"id": "2", "name": "Match"}},
@@ -216,6 +217,16 @@ class TestLeaderboardEventToCupEventItem:
         assert item["venue_name"] == "Quail Hollow Club"
         assert item["venue_city"] == "Charlotte"
 
+    def test_end_date_is_truncated_to_the_date(self):
+        item = leaderboard_event_to_cup_event_item(_cup_event(), "pga")
+        assert item["end_date"] == "2022-09-25"
+
+    def test_end_date_is_none_when_missing(self):
+        event = _cup_event()
+        del event["endDate"]
+        item = leaderboard_event_to_cup_event_item(event, "pga")
+        assert item["end_date"] is None
+
     def test_returns_none_for_individual_match_play(self):
         assert leaderboard_event_to_cup_event_item(_wgc_event(), "pga") is None
 
@@ -236,6 +247,25 @@ class TestLeaderboardEventToMatchEventItems:
         assert items[0]["parent_event_id"] == "401465497"
         assert items[0]["session_name"] == "Thursday Foursomes"
         assert items[0]["match_format"] == "foursome"
+
+    def test_match_time_is_the_full_untruncated_per_match_timestamp(self):
+        items = leaderboard_event_to_match_event_items(_cup_event(), "pga")
+        assert items[0]["match_time"] == "2022-09-22T17:05Z"
+
+    def test_two_matches_in_the_same_session_carry_distinct_match_times(self):
+        # Confirmed live 2022-09-22: two Thursday Foursomes matches teed
+        # off 12 minutes apart -- this is a real, staggered per-match
+        # signal, not a tournament-wide placeholder.
+        second_match = _team_match_entry(match_id="10956", competitors=[
+            _team_competitor("home", "1", "USA", [("1087", "C"), ("1088", "D")]),
+            _team_competitor("away", "3", "INTL", [("2003", "E"), ("2004", "F")]),
+        ])
+        second_match["date"] = "2022-09-22T17:17Z"
+        event = _cup_event(sessions=[[_cup_summary_entry()], [_team_match_entry(), second_match]])
+        items = leaderboard_event_to_match_event_items(event, "pga")
+        match_times = {item["event_id"]: item["match_time"] for item in items}
+        assert match_times["401465497-match-10951"] == "2022-09-22T17:05Z"
+        assert match_times["401465497-match-10956"] == "2022-09-22T17:17Z"
 
     def test_team_match_participants_carry_golfer_ids_and_team_entity_id(self):
         items = leaderboard_event_to_match_event_items(_cup_event(), "pga")

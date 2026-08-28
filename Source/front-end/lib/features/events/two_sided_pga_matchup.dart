@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
 
+import '../../core/models/field_live_score.dart';
 import '../../core/models/field_prediction.dart';
 import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_text_styles.dart';
+import '../../core/widgets/live_status_pill.dart';
 import '../../core/widgets/win_probability_bar.dart';
 
 /// Renders a TwoSidedPgaPrediction (match_play or cup) -- a compact
@@ -11,16 +13,25 @@ import '../../core/widgets/win_probability_bar.dart';
 /// genuinely is 2-sided (unlike a field event). WinProbabilityBar is
 /// reused as-is -- it's already sport-agnostic, taking a bare probability
 /// double with no head-to-head-specific coupling.
+///
+/// `liveState`, when present, overlays live won/halved/margin (a match)
+/// or points (a cup) onto each side's own line -- same "table doesn't own
+/// polling, caller feeds fresher data in" split FieldLeaderboardTable
+/// already uses for its own liveResults param.
 class TwoSidedPgaMatchup extends StatelessWidget {
-  const TwoSidedPgaMatchup({super.key, required this.prediction});
+  const TwoSidedPgaMatchup({super.key, required this.prediction, this.liveState});
 
   final TwoSidedPgaPrediction prediction;
+  final TwoSidedLiveEventState? liveState;
 
   @override
   Widget build(BuildContext context) {
     final home = prediction.home;
     final away = prediction.away;
     final winProbability = prediction.winProbability?.value;
+    final homeLive = home != null ? liveState?.participants[home.entityId] : null;
+    final awayLive = away != null ? liveState?.participants[away.entityId] : null;
+    final isLive = liveState != null && liveState!.status != 'completed';
 
     return Container(
       padding: const EdgeInsets.all(20),
@@ -32,16 +43,24 @@ class TwoSidedPgaMatchup extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          if (prediction.tournamentName != null)
-            Text(prediction.tournamentName!, style: AppTextStyles.sectionTitle(color: AppColors.violet)),
+          Row(
+            children: [
+              Expanded(
+                child: prediction.tournamentName != null
+                    ? Text(prediction.tournamentName!, style: AppTextStyles.sectionTitle(color: AppColors.violet))
+                    : const SizedBox.shrink(),
+              ),
+              if (isLive) const LiveStatusPill(),
+            ],
+          ),
           if (prediction.sessionName != null) ...[
             const SizedBox(height: 4),
             Text(prediction.sessionName!, style: AppTextStyles.microLabel(color: AppColors.inkMute)),
           ],
           const SizedBox(height: 16),
-          _SideLine(side: away, isHome: false),
+          _SideLine(side: away, isHome: false, live: awayLive),
           const SizedBox(height: 8),
-          _SideLine(side: home, isHome: true),
+          _SideLine(side: home, isHome: true, live: homeLive),
           const SizedBox(height: 16),
           if (winProbability != null) ...[
             WinProbabilityBar(homeWinProbability: winProbability),
@@ -66,29 +85,49 @@ class TwoSidedPgaMatchup extends StatelessWidget {
 }
 
 class _SideLine extends StatelessWidget {
-  const _SideLine({required this.side, required this.isHome});
+  const _SideLine({required this.side, required this.isHome, this.live});
 
   final MatchPlaySide? side;
   final bool isHome;
+  final TwoSidedParticipantLiveResult? live;
 
   @override
   Widget build(BuildContext context) {
     final name = side?.name ?? (isHome ? 'Home' : 'Away');
     final golfers = side?.golfers;
-    return Column(
+    return Row(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(name, style: AppTextStyles.body(color: AppColors.ink)),
-        if (golfers != null && golfers.isNotEmpty)
-          Padding(
-            padding: const EdgeInsets.only(top: 2),
-            child: Text(
-              golfers.map((g) => g.name ?? g.entityId).join(' / '),
-              style: AppTextStyles.microLabel(color: AppColors.inkSub),
-            ),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(name, style: AppTextStyles.body(color: AppColors.ink)),
+              if (golfers != null && golfers.isNotEmpty)
+                Padding(
+                  padding: const EdgeInsets.only(top: 2),
+                  child: Text(
+                    golfers.map((g) => g.name ?? g.entityId).join(' / '),
+                    style: AppTextStyles.microLabel(color: AppColors.inkSub),
+                  ),
+                ),
+            ],
           ),
+        ),
+        if (_liveLabel(live) != null)
+          Text(_liveLabel(live)!, style: AppTextStyles.metricValue(color: AppColors.live)),
       ],
     );
+  }
+
+  // A match's own margin_display ("6 & 5", "3 Up", "Halved") takes
+  // priority when present; a cup side has no margin, just its own points
+  // total instead.
+  static String? _liveLabel(TwoSidedParticipantLiveResult? live) {
+    if (live == null) return null;
+    if (live.marginDisplay != null && live.marginDisplay!.isNotEmpty) return live.marginDisplay;
+    if (live.points != null) return '${live.points!.toStringAsFixed(1)} pts';
+    return null;
   }
 }
 

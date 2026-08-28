@@ -55,6 +55,7 @@ class _FieldEventDetailPageState extends ConsumerState<FieldEventDetailPage> {
 
   void _poll() {
     ref.invalidate(fieldLiveScoresProvider(widget.sportId));
+    ref.invalidate(pgaLiveScoresProvider(widget.sportId));
     ref.invalidate(fieldEventPredictionProvider((sport: widget.sportId, eventId: widget.eventId)));
   }
 
@@ -65,21 +66,7 @@ class _FieldEventDetailPageState extends ConsumerState<FieldEventDetailPage> {
       child: ref.watch(fieldEventPredictionProvider((sport: widget.sportId, eventId: widget.eventId))).when(
             data: (prediction) => switch (prediction) {
               PgaFieldPrediction() => _FieldPredictionView(sport: widget.sportId, eventId: widget.eventId, prediction: prediction.prediction),
-              PgaTwoSidedPrediction() => Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    TwoSidedPgaMatchup(prediction: prediction.prediction),
-                    if (prediction.prediction.stale) ...[
-                      const SizedBox(height: 12),
-                      Center(
-                        child: FieldPredictionFreshnessBadge(
-                          sport: widget.sportId, eventId: widget.eventId,
-                          stale: prediction.prediction.stale, retryAfterSeconds: prediction.prediction.staleRetryAfterSeconds,
-                        ),
-                      ),
-                    ],
-                  ],
-                ),
+              PgaTwoSidedPrediction() => _TwoSidedPredictionView(sport: widget.sportId, eventId: widget.eventId, prediction: prediction.prediction),
             },
             loading: () => const Center(child: CircularProgressIndicator()),
             error: (error, _) => error is PredictionComputingException
@@ -123,6 +110,38 @@ class _FieldPredictionView extends ConsumerWidget {
         ],
         const SizedBox(height: 16),
         FieldLeaderboardTable(field: prediction.field, liveResults: liveState?.participants ?? const {}),
+      ],
+    );
+  }
+}
+
+class _TwoSidedPredictionView extends ConsumerWidget {
+  const _TwoSidedPredictionView({required this.sport, required this.eventId, required this.prediction});
+
+  final String sport;
+  final String eventId;
+  final TwoSidedPgaPrediction prediction;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final liveScores = ref.watch(pgaLiveScoresProvider(sport)).value ?? const <String, PgaLiveEventState>{};
+    final liveState = switch (liveScores[eventId]) {
+      PgaTwoSidedLiveState(:final state) => state,
+      _ => null,
+    };
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        TwoSidedPgaMatchup(prediction: prediction, liveState: liveState),
+        if (prediction.stale) ...[
+          const SizedBox(height: 12),
+          Center(
+            child: FieldPredictionFreshnessBadge(
+              sport: sport, eventId: eventId, stale: prediction.stale, retryAfterSeconds: prediction.staleRetryAfterSeconds,
+            ),
+          ),
+        ],
       ],
     );
   }

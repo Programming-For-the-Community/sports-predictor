@@ -30,6 +30,7 @@ jobs:
         Source/tests/aws-lambdas/pga/test_live_scores.py
         Source/tests/aws-lambdas/pga/test_live_scores_handler.py
         Source/tests/library/normalize/test_pga_event.py
+        Source/tests/library/normalize/test_pga_matchplay.py
       requirements_files: 'Source/aws-lambdas/pga/live-scores/requirements.txt'
 
   deploy:
