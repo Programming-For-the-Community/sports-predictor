@@ -286,8 +286,11 @@ class _PredictionRecap extends StatelessWidget {
           mainAxisAlignment: MainAxisAlignment.spaceAround,
           children: [
             Flexible(child: _StatTrio(label: 'PREDICTED', value: '${(c.predictedHomeWinProbability * 100).round()}% HOME')),
-            if (c.predictedMargin != null)
-              Flexible(child: _StatTrio(label: 'PRED MARGIN', value: c.predictedMargin!.toStringAsFixed(1))),
+            // '--' rather than omitting the trio when unavailable -- keeps
+            // the 3-slot spaceAround layout stable instead of reflowing to
+            // 2 (same placeholder convention every other stat in this app
+            // uses for a value that's expected but not on hand).
+            Flexible(child: _StatTrio(label: 'PRED MARGIN', value: c.predictedMargin?.toStringAsFixed(1) ?? '--')),
             Flexible(child: _StatTrio(label: 'ACTUAL MARGIN', value: c.actualMargin.toStringAsFixed(1))),
           ],
         ),

@@ -18,19 +18,22 @@ class FieldStatusPill extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final (label, color) = switch (status) {
-      'scheduled' => ('SCHED', AppColors.inkMute),
-      'finished' => ('F', AppColors.inkSub),
-      'cut' => ('CUT', AppColors.neg),
-      'made_cut_did_not_finish' => ('MDF', AppColors.warn),
-      'withdrawn' => ('WD', AppColors.neg),
+      'scheduled' => ('Scheduled', AppColors.inkMute),
+      'finished' => ('Finished', AppColors.inkSub),
+      'cut' => ('Cut', AppColors.neg),
+      'made_cut_did_not_finish' => ('Made Cut, DNF', AppColors.warn),
+      'withdrawn' => ('Withdrawn', AppColors.neg),
       null => ('--', AppColors.inkMute),
-      _ => (status!.toUpperCase(), AppColors.live), // unrecognized -- treat as still playing, not silently mislabeled
+      // Unrecognized -- treat as still playing, not silently mislabeled.
+      // Title-cased from the raw status name rather than shouted
+      // uppercase, matching every recognized label's own casing above.
+      _ => (status!.replaceAll('_', ' ').split(' ').map((w) => w.isEmpty ? w : '${w[0].toUpperCase()}${w.substring(1)}').join(' '), AppColors.live),
     };
 
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
       decoration: BoxDecoration(color: color.withValues(alpha: 0.15), borderRadius: BorderRadius.circular(999)),
-      child: Text(label, style: AppTextStyles.microLabel(color: color)),
+      child: Text(label, style: AppTextStyles.microLabel(color: color), maxLines: 1, softWrap: false, overflow: TextOverflow.ellipsis),
     );
   }
 }

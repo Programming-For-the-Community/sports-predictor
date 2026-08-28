@@ -110,6 +110,42 @@ def rolling_golfer_averages(golfer_results: list[dict], window: int = DEFAULT_RO
     }
 
 
+def in_tournament_progress_features(rounds_so_far: list[dict] | None) -> dict:
+    """How THIS golfer is doing in THIS tournament, right now -- the
+    signal build_golfer_event_features was missing entirely before this
+    was added (2026-08-27): every other input to that function is a
+    rolling average over OTHER, already-finished tournaments, so a fresh
+    round-completion recompute mid-tournament (library/storage/
+    prediction_cache.py's rounds_fingerprint-triggered staleness) produced
+    an IDENTICAL feature vector, and therefore an unchanged PROJ/top-10%/
+    top-5% output, no matter how round 1 actually went -- a real user-
+    reported bug, not a caching problem.
+
+    rounds_so_far: this golfer's own participant["result"]["rounds"]
+    entries for THIS tournament, in any order, ALREADY-PLAYED rounds only
+    (a live caller passes exactly what's in the current result; a
+    training-time caller passes a truncated prefix -- see feature-
+    engineering/pga/build_dataset.py's own snapshot-row generation for why
+    a training row needs several different truncations of the same
+    tournament, not just the final one). None/[] (the pre-tournament
+    state -- also every row built before this feature existed) reports 0
+    rounds played and no score, exactly like a golfer who hasn't teed off
+    yet, so this is fully backward compatible with every existing caller
+    that doesn't pass it at all.
+
+    score_to_par_this_week_so_far sums only rounds with a real numeric
+    score (same type-checked discipline rolling_golfer_averages/
+    rolling_round_averages already use) -- a withdrawal mid-round can
+    leave a rounds entry with no score at all, which must not silently
+    zero out the running total."""
+    rounds = rounds_so_far or []
+    scored = [r["score_to_par"] for r in rounds if isinstance(r.get("score_to_par"), (int, float))]
+    return {
+        "rounds_completed_this_week": len(rounds),
+        "score_to_par_this_week_so_far": sum(scored) if scored else None,
+    }
+
+
 def build_golfer_event_features(
     event: dict,
     participant: dict,
@@ -118,6 +154,7 @@ def build_golfer_event_features(
     course_results: list[dict] | None = None,
     course_window: int = DEFAULT_COURSE_HISTORY_WINDOW,
     season_stats: dict[str, float | None] | None = None,
+    rounds_so_far: list[dict] | None = None,
 ) -> dict:
     """One training row: this golfer's rolling form (from prior_results)
     plus this event's own field-strength context (purse, is_major,
@@ -148,7 +185,10 @@ def build_golfer_event_features(
     gets every course_*/season_* column as an explicit missing value,
     rather than a row whose column SET differs from every other row's,
     which pandas' later union-of-columns Parquet write would otherwise
-    silently paper over instead of failing loudly."""
+    silently paper over instead of failing loudly. rounds_so_far
+    similarly defaults to None -- see in_tournament_progress_features'
+    own docstring for why that's also the correct default for every
+    pre-tournament row, live or historical."""
     result = participant.get("result") or {}
     finish_position = _as_number(result.get("finish_position"))
 
@@ -159,6 +199,7 @@ def build_golfer_event_features(
         "purse": _as_number(event.get("purse")),
         "is_major": bool(event.get("is_major", False)),
         "field_size": len(event.get("participants", [])),
+        **in_tournament_progress_features(rounds_so_far),
         "label_top_10": 1 if finish_position is not None and finish_position <= 10 else 0,
         "label_top_5": 1 if finish_position is not None and finish_position <= 5 else 0,
         # Continuous label for the projected-score-to-par regression model

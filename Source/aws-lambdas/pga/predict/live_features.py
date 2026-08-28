@@ -91,18 +91,21 @@ def _prior_same_round_results(field_events: list[dict], entity_id: str, round_nu
 
 
 def applicable_rounds(participant: dict) -> list[int]:
-    """The single next round (1-4) this golfer still needs a live
+    """Every remaining round (1-4) this golfer still needs a live
     projection for, or [] if eliminated (see _ELIMINATED_STATUSES) or
-    already finished round 4. Always at most one round -- once a round's
-    real result exists in participant["result"]["rounds"], there's
-    nothing left to predict for it; the model for the round AFTER that
-    is the only one still "live" for this golfer."""
+    already finished round 4. Once a round's real result exists in
+    participant["result"]["rounds"], there's nothing left to predict for
+    it -- but every round AFTER that (not just the immediate next one) is
+    still "live" for this golfer, so the frontend's full ROUND 1-4
+    breakdown has a projection for every round that hasn't happened yet,
+    not just whichever one is up next (a real user complaint -- rounds 3/4
+    used to show nothing at all until round 2 had already been played)."""
     result = participant.get("result") or {}
     if result.get("status") in _ELIMINATED_STATUSES:
         return []
     played = {r["round"] for r in result.get("rounds", [])}
     next_round = max(played, default=0) + 1
-    return [next_round] if next_round <= 4 else []
+    return [r for r in range(next_round, 5)]
 
 
 def build_live_field_features(
@@ -142,9 +145,17 @@ def build_live_field_features(
             course_results = _results_from_events(course_events, entity_id, course_window)
 
         season_stats = resolve_season_stats(snapshots, entity_id, before_date) if snapshots else None
+        # This golfer's own already-played rounds THIS tournament, live
+        # off the current stored result -- what makes a round-completion
+        # recompute (library/storage/prediction_cache.py's
+        # rounds_fingerprint) actually change PROJ/top-10%/top-5% instead
+        # of reproducing an identical pre-tournament feature vector. See
+        # library.features.pga.in_tournament_progress_features' own
+        # docstring for the bug this fixes.
+        rounds_so_far = (participant.get("result") or {}).get("rounds", [])
 
         golfer_row = build_golfer_event_features(
-            event, participant, prior_results, window, course_results, course_window, season_stats,
+            event, participant, prior_results, window, course_results, course_window, season_stats, rounds_so_far,
         )
 
         round_rows = {}

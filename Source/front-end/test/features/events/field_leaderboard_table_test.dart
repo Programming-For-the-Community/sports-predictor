@@ -74,7 +74,10 @@ void main() {
     await tester.pumpWidget(_wrap(FieldLeaderboardTable(field: field)));
 
     expect(find.text('ROUND 1'), findsNothing); // full labeled breakdown only appears expanded
-    expect(find.textContaining('proj -3'), findsOneWidget); // but the current round's own value is already visible
+    // No '(proj ...)' qualifier -- projected values are marked by color
+    // (teal/cyan) alone, matching the established actual=white/
+    // projected=teal convention, same as PROJ/TOP10%/TOP5% already did.
+    expect(find.text('-3'), findsOneWidget); // the current round's own projected value is already visible
   });
 
   testWidgets('tapping a row expands a full ROUND 1-4 breakdown, tapping again collapses it', (tester) async {
@@ -99,9 +102,9 @@ void main() {
     expect(find.text('ROUND 2'), findsOneWidget);
     expect(find.text('ROUND 3'), findsOneWidget);
     expect(find.text('ROUND 4'), findsOneWidget);
-    expect(find.textContaining('-4'), findsWidgets); // actual round 1
-    expect(find.textContaining('proj -3'), findsWidgets); // projected round 2 (also still shown at the top level)
-    expect(find.textContaining('proj --'), findsWidgets); // rounds 3/4 -- placeholder, not omitted
+    expect(find.text('-4'), findsWidgets); // actual round 1
+    expect(find.text('-3'), findsWidgets); // projected round 2 (also still shown at the top level, so 2 instances)
+    expect(find.text('--'), findsWidgets); // rounds 3/4 -- placeholder, not omitted
 
     await tester.tap(find.text('Xander Schauffele'));
     await tester.pumpAndSettle();
@@ -118,6 +121,17 @@ void main() {
 
     expect(find.text('ROUND 1'), findsOneWidget);
     expect(find.text('ROUND 4'), findsOneWidget);
-    expect(find.textContaining('proj --'), findsWidgets);
+    expect(find.text('--'), findsWidgets);
+  });
+
+  testWidgets('TO PAR combines the real standing and the projected final score into one column, no separate PROJ column', (tester) async {
+    final field = [_golfer('1', 'Xander Schauffele', projectedScoreToPar: -8, actualScoreToPar: -5)];
+
+    await tester.pumpWidget(_wrap(FieldLeaderboardTable(field: field)));
+
+    expect(find.text('PROJ'), findsNothing); // folded into TO PAR, not its own column anymore
+    expect(find.text('TO PAR'), findsOneWidget);
+    expect(find.text('-5'), findsOneWidget); // actual standing
+    expect(find.text('-8'), findsOneWidget); // projected final score-to-par, right underneath
   });
 }

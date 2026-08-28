@@ -69,6 +69,7 @@ class FieldParticipantPrediction {
     this.actualFinishPosition,
     this.actualScoreToPar,
     this.actualRounds = const {},
+    this.actualStatus,
   });
 
   final String entityId;
@@ -92,6 +93,12 @@ class FieldParticipantPrediction {
   // pairs with `rounds` (the PROJECTED per-round model output) for a
   // proj-vs-actual comparison per round.
   final Map<int, ActualRoundResult> actualRounds;
+  // This golfer's own real ESPN status (scheduled/finished/cut/
+  // made_cut_did_not_finish/withdrawn) -- NOT inferred from
+  // actualFinishPosition's presence (a real current standing exists well
+  // before this golfer's own round is actually finished). Used by
+  // FieldLeaderboardTable's STATUS column outside the live-poll window.
+  final String? actualStatus;
 
   factory FieldParticipantPrediction.fromJson(Map<String, dynamic> json) {
     final predictions = json['predictions'] as Map<String, dynamic>? ?? {};
@@ -125,6 +132,7 @@ class FieldParticipantPrediction {
       actualFinishPosition: actual?['finish_position'] as int?,
       actualScoreToPar: (actual?['score_to_par'] as num?)?.toDouble(),
       actualRounds: actualRounds,
+      actualStatus: actual?['status'] as String?,
     );
   }
 }

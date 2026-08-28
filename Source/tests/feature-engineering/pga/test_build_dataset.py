@@ -115,6 +115,66 @@ class TestBuildGolferDataset:
 
         assert all(row["field_size"] == 5 for row in rows)
 
+    def test_a_golfer_with_no_rounds_data_produces_only_the_pre_tournament_row(self):
+        events = [_event("E1", "2026-06-01", [_participant("1", finish_position=3, score_to_par=-8)])]
+        storage = self._storage(events)
+
+        rows = build_dataset.build_golfer_dataset(storage, window=5)
+
+        assert len(rows) == 1
+        assert rows[0]["rounds_completed_this_week"] == 0
+        assert rows[0]["score_to_par_this_week_so_far"] is None
+        assert rows[0]["label_score_to_par"] == -8  # the same final label every snapshot shares
+
+    def test_emits_one_snapshot_row_per_round_boundary_all_sharing_the_same_final_label(self):
+        events = [_event(
+            "E1", "2026-06-01", [_participant("1", finish_position=3, score_to_par=-6)],
+            rounds_by_participant={"1": [_round(1, -3), _round(2, 1), _round(3, -2), _round(4, -2)]},
+        )]
+        storage = self._storage(events)
+
+        rows = build_dataset.build_golfer_dataset(storage, window=5)
+
+        assert len(rows) == 5  # 0 rounds through all 4 rounds played
+        by_rounds_completed = {r["rounds_completed_this_week"]: r for r in rows}
+        assert set(by_rounds_completed) == {0, 1, 2, 3, 4}
+        assert by_rounds_completed[0]["score_to_par_this_week_so_far"] is None
+        assert by_rounds_completed[1]["score_to_par_this_week_so_far"] == -3
+        assert by_rounds_completed[2]["score_to_par_this_week_so_far"] == -2  # -3 + 1
+        assert by_rounds_completed[4]["score_to_par_this_week_so_far"] == -6  # the full week
+        # Every snapshot -- regardless of how many rounds it "knows about"
+        # -- predicts toward the SAME real final outcome.
+        assert all(r["label_score_to_par"] == -6 for r in rows)
+
+    def test_a_cut_golfers_snapshots_stop_at_their_own_2_rounds_played(self):
+        events = [_event(
+            "E1", "2026-06-01", [_participant("1", finish_position=None, score_to_par=4)],
+            rounds_by_participant={"1": [_round(1, 4), _round(2, 0)]},
+        )]
+        storage = self._storage(events)
+
+        rows = build_dataset.build_golfer_dataset(storage, window=5)
+
+        assert {r["rounds_completed_this_week"] for r in rows} == {0, 1, 2}
+
+    def test_a_snapshot_rounds_history_does_not_leak_into_a_later_tournaments_rolling_average(self):
+        # rounds_so_far is THIS tournament's own in-progress state, not
+        # part of the rolling golfer/course history fed to future events.
+        events = [
+            _event(
+                "E1", "2026-06-01", [_participant("1", finish_position=1, score_to_par=-10)],
+                rounds_by_participant={"1": [_round(1, -5), _round(2, -5)]},
+            ),
+            _event("E2", "2026-06-08", [_participant("1", finish_position=5)]),
+        ]
+        storage = self._storage(events)
+
+        rows = build_dataset.build_golfer_dataset(storage, window=5)
+
+        e2_row = next(r for r in rows if r["event_key"] == "E2")
+        assert e2_row["events_played"] == 1
+        assert e2_row["avg_score_to_par"] == -10  # E1's real FINAL score, not a mid-week snapshot value
+
 
 class TestCourseFitHistory:
     def _storage(self, events):

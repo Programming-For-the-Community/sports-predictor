@@ -51,13 +51,14 @@ All three are built by walking every completed PGA tournament in chronological o
 
 ## `golfer_features.parquet` fields
 
-One row per golfer per completed tournament.
+One row per golfer per completed tournament **per in-tournament-progress snapshot** (added 2026-08-27; see "In-tournament progress" below) -- a golfer who played all 4 rounds contributes 5 rows (0 rounds played through 4), not 1; a cut golfer contributes 3 (0 through 2). Every snapshot for the same (golfer, tournament) shares the identical `label_*` columns -- only `rounds_completed_this_week`/`score_to_par_this_week_so_far` differ between them.
 
 | Field | Description |
 |---|---|
 | `event_key`, `entity_id`, `event_date` | Identifiers -- excluded from model inputs by every training script that reads this dataset (`train_top10_model.py`, `train_top5_model.py`, `train_score_model.py`). |
 | `purse`, `is_major` | This tournament's own field-strength context -- see "Field strength" below. |
 | `field_size` | This tournament's own participant count (`len(event["participants"])`) -- a per-event feature, not a rolling average (see "Field strength"). |
+| `rounds_completed_this_week`, `score_to_par_this_week_so_far` | How this golfer is doing in THIS tournament, right now -- see "In-tournament progress" below. `0`/`None` for the pre-tournament snapshot (and for every row built before 2026-08-27, back-filled the same way on next rebuild). |
 | `avg_score_to_par` | Rolling average, over starts that have a value -- a missed-cut golfer still contributes the rounds they actually played. |
 | `avg_finish_position`, `best_finish_position` | Rolling average/min, over starts that resolved to a real finish (`finish_position is not None`) -- a missed cut, withdrawal, or disqualification contributes to `finish_rate`'s denominator (below) but not to these two. |
 | `top_10_rate`, `top_20_rate`, `finish_rate` | Rolling rate, divided by STARTS in the window, not just finishes -- missing the cut is a real outcome that counts against making top 10, not a row silently excluded from the denominator. This is the one place a naive port of `rolling_player_stat_averages`' "only average what's present" convention would have quietly been wrong: `avg_score_to_par`/`avg_finish_position` genuinely should skip absent values, but a *rate* has to include every start in its denominator or it overstates how good a golfer's recent form actually was. |
@@ -125,6 +126,16 @@ Added 2026-08-25, in response to a real user ask ("can we also add course fit fe
 `DEFAULT_COURSE_HISTORY_WINDOW` (5) means something genuinely different from `DEFAULT_ROLLING_WINDOW` (5) despite the same number: a course only recurs on tour roughly once a year, so "last 5 course appearances" spans roughly the golfer's last 5 YEARS at that course, not the last 5 weeks the overall rolling window covers. `feature-engineering/pga/build_dataset.py`'s `build_golfer_dataset` tracks this as a second, separate incremental history dict keyed by `(entity_id, course_id)`, alongside the existing per-golfer-only one -- same two-loops-per-tournament ordering discipline (build every row from the current snapshot, THEN fold this tournament's results into both histories) applies to both.
 
 An event with no `course_id` at all (should only happen for raw data captured before this shipped) contributes to no course history and gets `course_events_played=0`/every other `course_*` field `null` for its own row -- it still gets full treatment on every non-course-fit field.
+
+## In-tournament progress
+
+Added 2026-08-27, fixing a real user-reported bug: `library/storage/prediction_cache.py`'s `rounds_fingerprint`-triggered recompute correctly re-ran `projected_score_to_par`/`top_10_probability`/`top_5_probability` the moment round 1's real results landed, but the OUTPUT never changed -- every other input to `build_golfer_event_features` (rolling form, course fit, season stats) is a snapshot of history strictly BEFORE this tournament, so a recompute mid-tournament reproduced the exact same feature vector as the pre-tournament one. The model had no way to know a golfer had just shot a 65.
+
+Two new fields (`library/features/pga.py`'s `in_tournament_progress_features`) close that gap: `rounds_completed_this_week` (0-4) and `score_to_par_this_week_so_far` (sum of this golfer's own already-played rounds' `score_to_par`, `None` before any are played). At serving time (`aws-lambdas/pga/predict/live_features.py`) these come straight from the golfer's own current `participant["result"]["rounds"]` -- live, real, updates every normalize/live-scores cycle.
+
+Training this signal needed more than just adding two columns: a dataset built entirely from PRE-tournament rows (`rounds_completed_this_week` always 0) would never let the model learn to use it, no matter how predictive it might be at serving time. So `build_golfer_dataset` now emits one snapshot row PER ROUND BOUNDARY this golfer actually reached that week -- 0 rounds played (the original pre-tournament row every golfer has always had), 1, 2, and so on up to however many rounds they played -- all sharing the identical `label_top_10`/`label_top_5`/`label_score_to_par` (the real final outcome), differing only in how much of the week the snapshot "knows about." This multiplies `golfer_features.parquet`'s own row count (roughly by average rounds-played-per-golfer + 1) but needs no schema change anywhere else -- `train_score_model.py`/`train_top10_model.py`/`train_top5_model.py` pick up any new column automatically (`library/ml/training_common.py`'s `feature_columns` is dynamic, not an explicit allowlist).
+
+This is a per-golfer-per-tournament in-progress signal, not a rolling history one -- it's never folded into `history`/`course_history` (the incremental dicts `build_golfer_dataset` grows tournament-by-tournament); a later tournament's own rolling averages still only ever see this golfer's real FINAL result for this one, the same as before this feature existed.
 
 ## Why a top-10 classifier, not a win/loss classifier or a genuine multinomial model
 

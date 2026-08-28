@@ -14,7 +14,10 @@ from library.serving import pga_reads
 
 
 def _field_event(event_id="999", status="scheduled", result=None):
-    default_result = {"finish_position": 3, "score_to_par": -10, "rounds": [{"round": 1, "score_to_par": -4, "total_strokes": 68.0}]}
+    default_result = {
+        "finish_position": 3, "score_to_par": -10, "status": "finished",
+        "rounds": [{"round": 1, "score_to_par": -4, "total_strokes": 68.0}],
+    }
     return {
         "event_key": f"SPORT#PGA#EVENT#{event_id}", "event_id": event_id, "event_type": "field",
         "status": status, "tournament_name": "BMW Championship",
@@ -55,6 +58,7 @@ class TestPredictFieldEvent:
     def test_scores_every_model_for_every_golfer(self):
         storage, s3, predictions_table = MagicMock(), MagicMock(), MagicMock()
         storage.get_entity.return_value = {"name": "Scottie Scheffler", "metadata": {"country": "USA"}}
+        predictions_table.query.return_value = []  # no historical round predictions to backfill
         with patch.object(event_prediction.live_features, "build_live_field_features", return_value=_built_field_features()), \
              patch.object(event_prediction.model_loader, "load_current_model", return_value=(MagicMock(), {"version": 1})), \
              patch.object(event_prediction.model_loader, "predict", return_value=0.5):
@@ -72,6 +76,7 @@ class TestPredictFieldEvent:
         shouldn't block top-10/score/cutline from still being returned."""
         storage, s3, predictions_table = MagicMock(), MagicMock(), MagicMock()
         storage.get_entity.return_value = None
+        predictions_table.query.return_value = []  # no historical round predictions to backfill
 
         def _load(s3_arg, sport, model_name):
             if model_name == "top-5-probability":
@@ -106,19 +111,39 @@ class TestPredictFieldEvent:
         # in the response until the whole event finished.
         storage, s3, predictions_table = MagicMock(), MagicMock(), MagicMock()
         storage.get_entity.return_value = None
+        predictions_table.query.return_value = []  # no historical round predictions to backfill
         with patch.object(event_prediction.live_features, "build_live_field_features", return_value=_built_field_features(status="scheduled")), \
              patch.object(event_prediction.model_loader, "load_current_model", return_value=(MagicMock(), {"version": 1})), \
              patch.object(event_prediction.model_loader, "predict", return_value=0.5):
             result = event_prediction.predict_field_event(storage, s3, predictions_table, "999")
 
         assert result["field"][0]["actual"] == {
-            "finish_position": 3, "score_to_par": -10,
+            "finish_position": 3, "score_to_par": -10, "status": "finished",
             "rounds": [{"round": 1, "score_to_par": -4, "total_strokes": 68.0}],
         }
+
+    def test_actual_status_is_this_golfers_own_real_status_not_inferred_from_having_a_standing(self):
+        # The real bug: a golfer with a current standing mid-tournament is
+        # NOT necessarily "finished" -- their own real ESPN status (still
+        # out on the course) must come through unchanged.
+        storage, s3, predictions_table = MagicMock(), MagicMock(), MagicMock()
+        storage.get_entity.return_value = None
+        predictions_table.query.return_value = []  # no historical round predictions to backfill
+        in_progress = {
+            "finish_position": 5, "score_to_par": -3, "status": "in_progress",
+            "rounds": [{"round": 1, "score_to_par": -3, "total_strokes": 69.0}],
+        }
+        with patch.object(event_prediction.live_features, "build_live_field_features", return_value=_built_field_features(status="scheduled", result=in_progress)), \
+             patch.object(event_prediction.model_loader, "load_current_model", return_value=(MagicMock(), {"version": 1})), \
+             patch.object(event_prediction.model_loader, "predict", return_value=0.5):
+            result = event_prediction.predict_field_event(storage, s3, predictions_table, "999")
+
+        assert result["field"][0]["actual"]["status"] == "in_progress"
 
     def test_actual_block_present_for_a_completed_event(self):
         storage, s3, predictions_table = MagicMock(), MagicMock(), MagicMock()
         storage.get_entity.return_value = None
+        predictions_table.query.return_value = []  # no historical round predictions to backfill
         with patch.object(event_prediction.live_features, "build_live_field_features", return_value=_built_field_features(status="completed")), \
              patch.object(event_prediction.model_loader, "load_current_model", return_value=(MagicMock(), {"version": 1})), \
              patch.object(event_prediction.model_loader, "predict", return_value=0.5):
@@ -131,6 +156,7 @@ class TestPredictFieldEvent:
         # before the tournament-level summary refreshes.
         storage, s3, predictions_table = MagicMock(), MagicMock(), MagicMock()
         storage.get_entity.return_value = None
+        predictions_table.query.return_value = []  # no historical round predictions to backfill
         rounds_only = {"finish_position": None, "score_to_par": None, "rounds": [{"round": 1, "score_to_par": -4, "total_strokes": 68.0}]}
         with patch.object(event_prediction.live_features, "build_live_field_features", return_value=_built_field_features(status="scheduled", result=rounds_only)), \
              patch.object(event_prediction.model_loader, "load_current_model", return_value=(MagicMock(), {"version": 1})), \
@@ -138,6 +164,62 @@ class TestPredictFieldEvent:
             result = event_prediction.predict_field_event(storage, s3, predictions_table, "999")
 
         assert result["field"][0]["actual"]["rounds"] == [{"round": 1, "score_to_par": -4, "total_strokes": 68.0}]
+
+    def test_backfills_a_played_rounds_own_historical_pre_round_forecast(self):
+        # default_result has round 1 already played -- its own original
+        # forecast (recorded before round 1 started, never re-scored once
+        # played) should be recovered from predictions_table and merged
+        # in next to round 2's freshly-scored (live_features golfer_rows
+        # only has round 2 in this fixture) projection.
+        storage, s3, predictions_table = MagicMock(), MagicMock(), MagicMock()
+        storage.get_entity.return_value = None
+        predictions_table.query.return_value = [
+            {"event_key": "SPORT#PGA#EVENT#999", "model_key": "MODEL#round-1#v2#GOLFER#1", "predicted_value": {"value": -1.5}},
+            {"event_key": "SPORT#PGA#EVENT#999", "model_key": "MODEL#top-10-probability#v1#GOLFER#1", "predicted_value": {"value": 0.3}},
+        ]
+        with patch.object(event_prediction.live_features, "build_live_field_features", return_value=_built_field_features(status="scheduled")), \
+             patch.object(event_prediction.model_loader, "load_current_model", return_value=(MagicMock(), {"version": 1})), \
+             patch.object(event_prediction.model_loader, "predict", return_value=0.5):
+            result = event_prediction.predict_field_event(storage, s3, predictions_table, "999")
+
+        rounds = result["field"][0]["predictions"]["rounds"]
+        assert rounds["round_1"] == {"value": -1.5, "model_version": 2}
+        assert rounds["round_2"] == {"value": 0.5, "model_version": 1}  # freshly scored, untouched by the backfill
+
+    def test_skips_the_historical_query_entirely_when_no_round_has_been_played_yet(self):
+        storage, s3, predictions_table = MagicMock(), MagicMock(), MagicMock()
+        storage.get_entity.return_value = None
+        no_result = {"finish_position": None, "score_to_par": None, "rounds": []}
+        with patch.object(event_prediction.live_features, "build_live_field_features", return_value=_built_field_features(status="scheduled", result=no_result)), \
+             patch.object(event_prediction.model_loader, "load_current_model", return_value=(MagicMock(), {"version": 1})), \
+             patch.object(event_prediction.model_loader, "predict", return_value=0.5):
+            event_prediction.predict_field_event(storage, s3, predictions_table, "999")
+
+        predictions_table.query.assert_not_called()
+
+
+class TestHistoricalRoundPredictions:
+    def test_parses_round_and_golfer_out_of_the_model_key_ignoring_non_round_rows(self):
+        predictions_table = MagicMock()
+        predictions_table.query.return_value = [
+            {"model_key": "MODEL#round-3#v4#GOLFER#1085", "predicted_value": {"value": -2.0}},
+            {"model_key": "MODEL#round-1#v4#GOLFER#2001", "predicted_value": {"value": 1.0}},
+            {"model_key": "MODEL#top-10-probability#v4#GOLFER#1085", "predicted_value": {"value": 0.4}},
+            {"model_key": "MODEL#cutline#v2#CUTLINE", "predicted_value": {"value": -3.0}},
+        ]
+
+        result = event_prediction._historical_round_predictions(predictions_table, "SPORT#PGA#EVENT#999")
+
+        assert result == {
+            "1085": {3: {"value": -2.0, "model_version": 4}},
+            "2001": {1: {"value": 1.0, "model_version": 4}},
+        }
+
+    def test_empty_when_nothing_recorded(self):
+        predictions_table = MagicMock()
+        predictions_table.query.return_value = []
+
+        assert event_prediction._historical_round_predictions(predictions_table, "SPORT#PGA#EVENT#999") == {}
 
 
 class TestFieldSortKey:

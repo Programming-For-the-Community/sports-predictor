@@ -64,15 +64,26 @@ List<_LeaderboardColumn> _leaderboardColumns() => [
       // playing). Prefers the live overlay's status when present (fresher),
       // falls back to the prediction response's own actual-result absence
       // (no live overlay fetched yet, or this event isn't in a live window).
-      _LeaderboardColumn('STATUS', 2, (context, entry, live, rowNumber) {
-        final status = live?.status ?? (entry.actualFinishPosition != null ? 'finished' : null);
+      // live.status first (freshest, live-poll window only), else this
+      // golfer's own real stored status -- NOT inferred from
+      // actualFinishPosition's presence (a real current standing exists
+      // well before this golfer's own round is actually finished; that
+      // was a real bug -- every golfer with any standing at all showed
+      // "Finished" regardless of the tournament actually still being in
+      // progress).
+      _LeaderboardColumn('STATUS', 3, (context, entry, live, rowNumber) {
+        final status = live?.status ?? entry.actualStatus;
         return Center(child: FieldStatusPill(status: status));
       }),
-      _LeaderboardColumn('TO PAR', 2, (context, entry, live, rowNumber) {
+      // Actual (live-first, else the real cumulative standing) next to the
+      // model's own projected FINAL tournament score-to-par -- same
+      // actual/projected pairing THIS RD shows for the current round alone,
+      // now shown for the whole tournament (was two separate columns,
+      // TO PAR and PROJ, split apart from each other for no reason).
+      _LeaderboardColumn('TO PAR', 3, (context, entry, live, rowNumber) {
         final scoreToPar = live?.scoreToPar ?? entry.actualScoreToPar;
-        return Text(
-          _formatToPar(scoreToPar), style: AppTextStyles.metricValue(), textAlign: TextAlign.center,
-        );
+        final projected = entry.projectedScoreToPar?.value;
+        return Center(child: _StandingCell(actual: scoreToPar, projected: projected));
       }),
       // The current round's own proj/actual, visible without expanding
       // the row -- the full 1-4 breakdown is still only in the expanded
@@ -85,13 +96,6 @@ List<_LeaderboardColumn> _leaderboardColumns() => [
         }
         return Center(
           child: _RoundCell(round: round, projected: entry.rounds[round]?.value, actual: _actualForRound(round, entry, live)),
-        );
-      }),
-      _LeaderboardColumn('PROJ', 2, (context, entry, live, rowNumber) {
-        final projected = entry.projectedScoreToPar?.value;
-        return Text(
-          projected != null ? _formatToPar(projected) : '--',
-          style: AppTextStyles.metricValue(color: AppColors.cyan), textAlign: TextAlign.center,
         );
       }),
       _LeaderboardColumn('TOP 10%', 2, (context, entry, live, rowNumber) => _PercentText(entry.top10Probability?.value)),
@@ -311,7 +315,7 @@ class _RoundCell extends StatelessWidget {
       maxLines: 1, softWrap: false, overflow: TextOverflow.ellipsis,
     );
     final projectedText = Text(
-      projected != null ? '(proj ${_formatToPar(projected)})' : '(proj --)',
+      _formatToPar(projected),
       style: AppTextStyles.microLabel(color: AppColors.cyan),
       maxLines: 1, softWrap: false, overflow: TextOverflow.ellipsis,
     );
@@ -331,6 +335,36 @@ class _RoundCell extends StatelessWidget {
       children: [
         Text('ROUND $round', style: AppTextStyles.microLabel(color: AppColors.inkMute)),
         value,
+      ],
+    );
+  }
+}
+
+/// TO PAR column's cell -- same compact actual-over-projected stack
+/// _RoundCell uses for THIS RD (showLabel: false), just tournament-level
+/// (cumulative standing vs. projected FINAL score-to-par) instead of one
+/// round's own actual vs. that round's own projection.
+class _StandingCell extends StatelessWidget {
+  const _StandingCell({required this.actual, required this.projected});
+
+  final num? actual;
+  final double? projected;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.center,
+      children: [
+        Text(
+          _formatToPar(actual), style: AppTextStyles.metricValue(color: actual != null ? AppColors.ink : AppColors.inkMute),
+          maxLines: 1, softWrap: false, overflow: TextOverflow.ellipsis,
+        ),
+        Text(
+          _formatToPar(projected),
+          style: AppTextStyles.microLabel(color: AppColors.cyan),
+          maxLines: 1, softWrap: false, overflow: TextOverflow.ellipsis,
+        ),
       ],
     );
   }

@@ -10,7 +10,11 @@ predict_event's own event_type dispatch to predict_field_event/
 predict_match_event/predict_cup_event.
 """
 import logging
+import re
+from collections import defaultdict
 from datetime import datetime, timezone
+
+from boto3.dynamodb.conditions import Key
 
 import live_features
 import model_loader
@@ -29,6 +33,14 @@ from library.storage import prediction_cache
 logger = logging.getLogger("pga-predict")
 
 SPORT = "pga"
+
+# Matches this module's own _score-recorded model_key shape for a round
+# model (MODEL#round-2#v3#GOLFER#1085) -- same style as nfl_reads.py's
+# own _PLAYER_PROP_MODEL_KEY_RE. Captures the version too -- record_
+# prediction's own stored `predicted_value` is just {"value": ...} (no
+# model_version), unlike _score's return value, so the version has to be
+# recovered from the model_key string itself.
+_ROUND_MODEL_KEY_RE = re.compile(r"^MODEL#round-([1-4])#v(\d+)#GOLFER#(.+)$")
 
 
 def get_cached_model(model_cache: dict, s3, model_name: str):
@@ -91,7 +103,40 @@ def _actual_golfer_result(participant: dict) -> dict | None:
         "finish_position": result.get("finish_position"),
         "score_to_par": result.get("score_to_par"),
         "rounds": rounds,
+        # This golfer's own real ESPN status (scheduled/finished/cut/
+        # made_cut_did_not_finish/withdrawn -- library/normalize/pga.py's
+        # map_status), NOT derived from finish_position's presence. A real
+        # current standing (finish_position/score_to_par) exists throughout
+        # an in-progress tournament, well before this golfer's own round is
+        # actually finished -- "has a position" was never a valid proxy
+        # for "finished" (the frontend's own former fallback bug, fixed
+        # alongside this: field_leaderboard_table.dart's STATUS column now
+        # reads this field directly instead of inferring it).
+        "status": result.get("status"),
     }
+
+
+def _historical_round_predictions(predictions_table, event_key_value: str) -> dict[str, dict[int, dict]]:
+    """{entity_id: {round_number: {"value":..., "model_version":...}}} --
+    recovers a round's own PRE-round forecast even after live_features.py's
+    applicable_rounds has since moved past it. A played round is never
+    re-scored (applicable_rounds only ever returns rounds still ahead of
+    a golfer), so the predictions_table item _score originally wrote for
+    it -- before that round started -- is never overwritten; this just
+    reads it back. One Query per event (predictions_table's only key is
+    event_key/model_key, no per-golfer GSI -- same "one query, filter
+    client-side" precedent nfl_reads.py's own _leaders_comparison uses for
+    its player-prop rows), not one per golfer."""
+    by_golfer: dict[str, dict[int, dict]] = defaultdict(dict)
+    for row in predictions_table.query(Key("event_key").eq(event_key_value)):
+        match = _ROUND_MODEL_KEY_RE.match(row["model_key"])
+        if match is None:
+            continue
+        round_number, model_version, entity_id = int(match.group(1)), int(match.group(2)), match.group(3)
+        # Same {"value", "model_version"} shape _score's own return value
+        # has -- the frontend's ModelValue.fromJson requires both.
+        by_golfer[entity_id][round_number] = {"value": row["predicted_value"]["value"], "model_version": model_version}
+    return by_golfer
 
 
 def _field_sort_key(entry: dict):
@@ -116,6 +161,11 @@ def predict_field_event(storage, s3, predictions_table, event_id: str) -> dict:
     model_cache: dict = {}
     status = event.get("status")
     participants_by_id = {p["entity_id"]: p for p in event.get("participants", [])}
+    # Only queried once at all when at least one golfer has a played round
+    # -- the common pre-tournament case (nobody's played anything yet) has
+    # nothing to backfill, so skip the extra DynamoDB Query entirely then.
+    any_round_played = any((p.get("result") or {}).get("rounds") for p in participants_by_id.values())
+    historical_rounds = _historical_round_predictions(predictions_table, event_key_value) if any_round_played else {}
 
     field = []
     for entity_id, rows in built["golfer_rows"].items():
@@ -132,6 +182,18 @@ def predict_field_event(storage, s3, predictions_table, event_id: str) -> dict:
             )
             if scored is not None:
                 round_predictions[f"round_{round_number}"] = scored
+        # Backfill each already-played round's own PRE-round forecast so
+        # the frontend's ROUND 1-4 breakdown can show what was originally
+        # projected for a round next to its own real actual, not just for
+        # whichever rounds are still ahead (a real user complaint -- round
+        # 1's own projection used to vanish the moment round 1 was played,
+        # since applicable_rounds no longer scores it going forward).
+        participant = participants_by_id.get(entity_id)
+        played_rounds = {r["round"] for r in ((participant or {}).get("result") or {}).get("rounds", [])}
+        for round_number in played_rounds:
+            historical = historical_rounds.get(entity_id, {}).get(round_number)
+            if historical is not None:
+                round_predictions.setdefault(f"round_{round_number}", historical)
         if round_predictions:
             predictions["rounds"] = round_predictions
 
@@ -140,7 +202,6 @@ def predict_field_event(storage, s3, predictions_table, event_id: str) -> dict:
         # result (current standing, or a completed round) is meaningful
         # throughout the tournament, not just once it's fully over. See
         # _actual_golfer_result's own docstring.
-        participant = participants_by_id.get(entity_id)
         if participant is not None:
             actual = _actual_golfer_result(participant)
             if actual is not None:

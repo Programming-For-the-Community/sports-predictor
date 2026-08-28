@@ -78,12 +78,12 @@ def _storage(target_event, history_events):
 
 
 class TestApplicableRounds:
-    def test_no_rounds_played_yet_means_round_1_is_due(self):
-        assert live_features.applicable_rounds(_participant("1")) == [1]
+    def test_no_rounds_played_yet_means_every_round_is_due(self):
+        assert live_features.applicable_rounds(_participant("1")) == [1, 2, 3, 4]
 
-    def test_two_rounds_played_means_round_3_is_due(self):
+    def test_two_rounds_played_means_rounds_3_and_4_are_due(self):
         p = _participant("1", rounds=[_round(1, -2), _round(2, 0)])
-        assert live_features.applicable_rounds(p) == [3]
+        assert live_features.applicable_rounds(p) == [3, 4]
 
     def test_all_four_rounds_played_means_nothing_is_due(self):
         p = _participant("1", rounds=[_round(1), _round(2), _round(3), _round(4)])
@@ -181,14 +181,16 @@ class TestBuildLiveFieldFeatures:
         assert result["golfer_rows"]["1"]["golfer"]["course_events_played"] == 0
         assert result["golfer_rows"]["1"]["golfer"]["course_avg_score_to_par"] is None
 
-    def test_round_row_only_built_for_the_single_applicable_round(self):
+    def test_round_rows_built_for_every_remaining_round_not_just_the_next_one(self):
         target = _field_event("999", "2026-08-20", [_participant("1", rounds=[_round(1, -2)])])
         storage = _storage(target, [target])
 
         result = live_features.build_live_field_features(storage, "pga", "999")
 
-        assert set(result["golfer_rows"]["1"]["rounds"]) == {2}
+        assert set(result["golfer_rows"]["1"]["rounds"]) == {2, 3, 4}
         assert result["golfer_rows"]["1"]["rounds"][2]["round_number"] == 2
+        assert result["golfer_rows"]["1"]["rounds"][3]["round_number"] == 3
+        assert result["golfer_rows"]["1"]["rounds"][4]["round_number"] == 4
 
     def test_eliminated_golfer_gets_no_round_rows_at_all(self):
         target = _field_event("999", "2026-08-20", [_participant("1", status="cut", rounds=[_round(1), _round(2)])])
@@ -197,6 +199,28 @@ class TestBuildLiveFieldFeatures:
         result = live_features.build_live_field_features(storage, "pga", "999")
 
         assert result["golfer_rows"]["1"]["rounds"] == {}
+
+    def test_golfer_row_reflects_this_tournaments_own_rounds_played_so_far(self):
+        # The real bug this fixes: PROJ/top-10%/top-5% used to stay
+        # completely unchanged after round 1 finished, because nothing
+        # fed the model any signal about the CURRENT, in-progress
+        # tournament -- only rolling averages over OTHER, past ones.
+        target = _field_event("999", "2026-08-20", [_participant("1", rounds=[_round(1, -3), _round(2, 1)])])
+        storage = _storage(target, [target])
+
+        result = live_features.build_live_field_features(storage, "pga", "999")
+
+        assert result["golfer_rows"]["1"]["golfer"]["rounds_completed_this_week"] == 2
+        assert result["golfer_rows"]["1"]["golfer"]["score_to_par_this_week_so_far"] == -2
+
+    def test_golfer_row_reports_the_pre_tournament_state_when_nothing_has_been_played_yet(self):
+        target = _field_event("999", "2026-08-20", [_participant("1")])
+        storage = _storage(target, [target])
+
+        result = live_features.build_live_field_features(storage, "pga", "999")
+
+        assert result["golfer_rows"]["1"]["golfer"]["rounds_completed_this_week"] == 0
+        assert result["golfer_rows"]["1"]["golfer"]["score_to_par_this_week_so_far"] is None
 
     def test_prior_same_round_results_only_pull_matching_round_numbers(self):
         past = _field_event("998", "2026-08-01", [_participant(

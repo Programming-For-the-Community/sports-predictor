@@ -149,5 +149,40 @@ void main() {
       expect(find.textContaining('Predicted KC (67%) by 10.0'), findsOneWidget);
       expect(find.textContaining('31-17'), findsNothing);
     });
+
+    testWidgets('a completed event with no predicted score shows -- instead of hiding the parenthetical', (tester) async {
+      final event = SportEvent(
+        eventId: '401547419',
+        eventDate: '2026-09-14',
+        kickoffTime: '2026-09-14T17:00:00Z',
+        status: 'completed',
+        week: 2,
+        round: null,
+        participants: const [
+          Participant(entityId: '12', role: 'home', result: ParticipantResult(score: 31, won: true)),
+          Participant(entityId: '13', role: 'away', result: ParticipantResult(score: 17, won: false)),
+        ],
+        predictionComparison: const PredictionComparison(
+          predictedHomeWinProbability: 0.67,
+          predictedHomeWon: true,
+          actualHomeWon: true,
+          correct: true,
+          predictedMargin: null,
+          actualMargin: 14,
+          predictedHomeScore: null,
+          predictedAwayScore: null,
+          actualHomeScore: 31,
+          actualAwayScore: 17,
+        ),
+        leadersComparison: null,
+      );
+
+      await tester.pumpWidget(ProviderScope(
+        child: MaterialApp(home: Scaffold(body: GameRow(sport: 'nfl', event: event))),
+      ));
+      await tester.pumpAndSettle();
+
+      expect(find.textContaining('(--)'), findsNWidgets(2));
+    });
   });
 }

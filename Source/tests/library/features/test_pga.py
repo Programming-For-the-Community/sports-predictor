@@ -11,6 +11,7 @@ from library.features.pga import (
     build_golfer_event_features,
     build_match_event_features,
     build_round_event_features,
+    in_tournament_progress_features,
     rolling_golfer_averages,
     rolling_round_averages,
 )
@@ -87,6 +88,32 @@ class TestRollingGolferAverages:
         assert averages["avg_score_to_par"] is None
         assert averages["avg_earnings"] is None
         assert averages["events_played"] == 1  # still a real start
+
+
+class TestInTournamentProgressFeatures:
+    def test_none_reports_zero_rounds_and_no_score_pre_tournament_state(self):
+        result = in_tournament_progress_features(None)
+
+        assert result == {"rounds_completed_this_week": 0, "score_to_par_this_week_so_far": None}
+
+    def test_empty_list_reports_the_same_pre_tournament_state_as_none(self):
+        assert in_tournament_progress_features([]) == in_tournament_progress_features(None)
+
+    def test_sums_score_to_par_across_every_round_played_so_far(self):
+        rounds = [_round(1, score_to_par=-3), _round(2, score_to_par=1)]
+
+        result = in_tournament_progress_features(rounds)
+
+        assert result == {"rounds_completed_this_week": 2, "score_to_par_this_week_so_far": -2}
+
+    def test_a_round_with_no_real_score_does_not_zero_out_the_running_total(self):
+        # A withdrawal mid-round can leave a rounds entry with no score.
+        rounds = [_round(1, score_to_par=-3), _round(2, score_to_par=None)]
+
+        result = in_tournament_progress_features(rounds)
+
+        assert result["rounds_completed_this_week"] == 2
+        assert result["score_to_par_this_week_so_far"] == -3
 
 
 class TestBuildGolferEventFeatures:
@@ -204,6 +231,25 @@ class TestBuildGolferEventFeatures:
         row = build_golfer_event_features(event, participant, [])
 
         assert row["label_score_to_par"] is None
+
+    def test_rounds_so_far_defaults_to_the_pre_tournament_state(self):
+        event = self._event()
+        participant = {"entity_id": "1", "result": {"finish_position": 5}}
+
+        row = build_golfer_event_features(event, participant, [])
+
+        assert row["rounds_completed_this_week"] == 0
+        assert row["score_to_par_this_week_so_far"] is None
+
+    def test_rounds_so_far_is_folded_in_when_given(self):
+        event = self._event()
+        participant = {"entity_id": "1", "result": {"finish_position": 5}}
+        rounds_so_far = [_round(1, score_to_par=-3), _round(2, score_to_par=-1)]
+
+        row = build_golfer_event_features(event, participant, [], rounds_so_far=rounds_so_far)
+
+        assert row["rounds_completed_this_week"] == 2
+        assert row["score_to_par_this_week_so_far"] == -4
 
     def test_season_stat_columns_are_present_but_none_when_no_snapshot_given(self):
         event = self._event()
