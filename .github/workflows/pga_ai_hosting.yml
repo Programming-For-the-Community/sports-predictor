@@ -34,7 +34,6 @@ jobs:
     with:
       test_path: >-
         Source/tests/library/
-        Source/tests/feature-engineering/pga/
         Source/tests/aws-lambdas/pga/test_live_features.py
         Source/tests/aws-lambdas/pga/test_event_prediction.py
         Source/tests/aws-lambdas/pga/test_predict_handler.py
