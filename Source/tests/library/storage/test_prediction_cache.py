@@ -60,6 +60,35 @@ class TestIsFresh:
 
         assert prediction_cache.is_fresh(entry, {"win_probability": 1}) is True
 
+    def test_extra_fingerprint_defaults_to_unused(self):
+        # No caller not passing it should see any behavior change.
+        entry = {"model_versions": {"win_probability": 1}, "event_status": "scheduled", "cached_at_epoch": time.time() - 10}
+
+        assert prediction_cache.is_fresh(entry, {"win_probability": 1}) is True
+
+    def test_stale_when_extra_fingerprint_differs(self):
+        entry = {
+            "model_versions": {"top_10_probability": 1}, "event_status": "scheduled",
+            "cached_at_epoch": time.time() - 10, "extra_fingerprint": 3,
+        }
+
+        assert prediction_cache.is_fresh(entry, {"top_10_probability": 1}, extra_fingerprint=4) is False
+
+    def test_fresh_when_extra_fingerprint_matches(self):
+        entry = {
+            "model_versions": {"top_10_probability": 1}, "event_status": "scheduled",
+            "cached_at_epoch": time.time() - 10, "extra_fingerprint": 3,
+        }
+
+        assert prediction_cache.is_fresh(entry, {"top_10_probability": 1}, extra_fingerprint=3) is True
+
+    def test_stale_when_extra_fingerprint_is_missing_from_an_old_style_entry(self):
+        # An entry cached before extra_fingerprint tracking existed --
+        # forces one recompute to pick up the new tracking.
+        entry = {"model_versions": {"top_10_probability": 1}, "event_status": "scheduled", "cached_at_epoch": time.time() - 10}
+
+        assert prediction_cache.is_fresh(entry, {"top_10_probability": 1}, extra_fingerprint=0) is False
+
 
 class TestPutCached:
     def test_writes_the_expected_envelope_shape(self):
@@ -72,7 +101,16 @@ class TestPutCached:
         assert payload["result"] == {"foo": "bar"}
         assert payload["model_versions"] == {"win_probability": 1}
         assert payload["event_status"] == "scheduled"
+        assert payload["extra_fingerprint"] is None
         assert "cached_at_epoch" in payload
+
+    def test_records_a_real_extra_fingerprint_when_given_one(self):
+        s3 = MagicMock()
+
+        prediction_cache.put_cached(s3, "predictions-cache/pga/events/E1.json", {"foo": "bar"}, {"top_10_probability": 1}, "scheduled", extra_fingerprint=5)
+
+        _, payload = s3.put_json.call_args[0]
+        assert payload["extra_fingerprint"] == 5
 
 
 class TestCurrentModelVersions:

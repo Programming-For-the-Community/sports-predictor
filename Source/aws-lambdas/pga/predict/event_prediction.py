@@ -22,6 +22,7 @@ from library.serving.pga_reads import (
     MATCH_MODEL_NAME,
     ROUND_MODEL_NAMES,
     model_versions_for,
+    rounds_fingerprint,
 )
 from library.storage import prediction_cache
 
@@ -71,10 +72,26 @@ def _golfer_name(storage, entity_id: str) -> dict:
 
 
 def _actual_golfer_result(participant: dict) -> dict | None:
+    """Real, already-stored result -- position/score_to_par/rounds all
+    update at normalize time as the tournament progresses (confirmed
+    live: ESPN's own status.position/score carry real current-standing
+    values for an in-progress, not-yet-finished tournament, same as a
+    completed one), so this is meaningful mid-tournament, not just once
+    the whole event is "completed". `rounds` (each already-played round's
+    own score_to_par/total_strokes, from _parse_rounds) is included
+    whenever any exist, even if `finish_position`/`score_to_par` are both
+    still None (the tournament's own top-level status can lag a per-round
+    result by a normalize cycle) -- covers a golfer whose round is done
+    but the cumulative summary hasn't refreshed yet."""
     result = participant.get("result") or {}
-    if result.get("finish_position") is None and result.get("score_to_par") is None:
+    rounds = result.get("rounds") or []
+    if result.get("finish_position") is None and result.get("score_to_par") is None and not rounds:
         return None
-    return {"finish_position": result.get("finish_position"), "score_to_par": result.get("score_to_par")}
+    return {
+        "finish_position": result.get("finish_position"),
+        "score_to_par": result.get("score_to_par"),
+        "rounds": rounds,
+    }
 
 
 def _field_sort_key(entry: dict):
@@ -119,10 +136,15 @@ def predict_field_event(storage, s3, predictions_table, event_id: str) -> dict:
             predictions["rounds"] = round_predictions
 
         entry = {"entity_id": entity_id, **_golfer_name(storage, entity_id), "predictions": predictions}
-        if status == "completed":
-            participant = participants_by_id.get(entity_id)
-            if participant is not None:
-                entry["actual"] = _actual_golfer_result(participant)
+        # Not gated on status == "completed" -- a real, already-stored
+        # result (current standing, or a completed round) is meaningful
+        # throughout the tournament, not just once it's fully over. See
+        # _actual_golfer_result's own docstring.
+        participant = participants_by_id.get(entity_id)
+        if participant is not None:
+            actual = _actual_golfer_result(participant)
+            if actual is not None:
+                entry["actual"] = actual
         field.append(entry)
 
     field.sort(key=_field_sort_key)
@@ -249,6 +271,14 @@ def compute_and_cache_event(storage, s3, predictions_table, event_id: str) -> No
             prediction_cache.put_error_cached(s3, cache_key, type(exc).__name__, str(exc))
             return
         model_versions = prediction_cache.current_model_versions(s3, SPORT, model_versions_for(result["event_type"]))
-        prediction_cache.put_cached(s3, cache_key, result, model_versions, result.get("status"))
+        # A fresh fetch (not reused from predict_event's own internal one)
+        # -- cheap (a single DynamoDB GetItem), and guarantees the
+        # fingerprint reflects exactly the event state this prediction
+        # was computed against, same as _score's own record_prediction
+        # calls already do per-model. See pga_reads.rounds_fingerprint's
+        # own docstring for why this exists.
+        event = storage.get_event(event_key_value)
+        extra_fingerprint = rounds_fingerprint(event) if event is not None else None
+        prediction_cache.put_cached(s3, cache_key, result, model_versions, result.get("status"), extra_fingerprint)
     finally:
         prediction_cache.clear_in_progress(s3, cache_key)

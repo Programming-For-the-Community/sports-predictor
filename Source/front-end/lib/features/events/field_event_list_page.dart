@@ -39,10 +39,13 @@ class _FieldEventListPageState extends ConsumerState<FieldEventListPage> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Row(
+            // Wrap, not Row -- same overflow-avoidance reasoning as
+            // event_list_page.dart's own toggle row.
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
               children: [
-                _StatusToggle(label: 'Upcoming', selected: _status == 'scheduled', onTap: () => _setStatus('scheduled')),
-                const SizedBox(width: 8),
+                _StatusToggle(label: 'Upcoming/Current', selected: _status == 'scheduled', onTap: () => _setStatus('scheduled')),
                 _StatusToggle(label: 'Completed', selected: _status == 'completed', onTap: () => _setStatus('completed')),
               ],
             ),

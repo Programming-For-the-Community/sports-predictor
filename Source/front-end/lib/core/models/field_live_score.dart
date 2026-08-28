@@ -14,22 +14,54 @@
 /// parsePgaEventPrediction uses.
 library;
 
+/// One already-played round's real result -- kept as its own small class
+/// (not shared with field_prediction.dart's ActualRoundResult) for the
+/// same "separate endpoint/cache, independent evolution path" reason
+/// this file's own doc comment already gives for not reusing
+/// ParticipantResult.
+class LiveRoundResult {
+  const LiveRoundResult({required this.round, this.scoreToPar, this.totalStrokes});
+
+  final int round;
+  final num? scoreToPar;
+  final double? totalStrokes;
+
+  factory LiveRoundResult.fromJson(Map<String, dynamic> json) => LiveRoundResult(
+        round: json['round'] as int,
+        scoreToPar: json['score_to_par'] as num?,
+        totalStrokes: (json['total_strokes'] as num?)?.toDouble(),
+      );
+}
+
 class FieldParticipantLiveResult {
-  const FieldParticipantLiveResult({this.finishPosition, this.isTie = false, this.status, this.scoreToPar, this.totalStrokes});
+  const FieldParticipantLiveResult({
+    this.finishPosition, this.isTie = false, this.status, this.scoreToPar, this.totalStrokes, this.rounds = const {},
+  });
 
   final int? finishPosition;
   final bool isTie;
   final String? status;
   final num? scoreToPar;
   final double? totalStrokes;
+  // Real per-round results already played, keyed by round number --
+  // the freshest source during an active live-scores poll window (the
+  // underlying cache payload already carries this via _parse_rounds,
+  // just wasn't parsed here before).
+  final Map<int, LiveRoundResult> rounds;
 
-  factory FieldParticipantLiveResult.fromJson(Map<String, dynamic> json) => FieldParticipantLiveResult(
-        finishPosition: json['finish_position'] as int?,
-        isTie: json['is_tie'] as bool? ?? false,
-        status: json['status'] as String?,
-        scoreToPar: json['score_to_par'] as num?,
-        totalStrokes: (json['total_strokes'] as num?)?.toDouble(),
-      );
+  factory FieldParticipantLiveResult.fromJson(Map<String, dynamic> json) {
+    final roundsJson = json['rounds'] as List<dynamic>? ?? [];
+    return FieldParticipantLiveResult(
+      finishPosition: json['finish_position'] as int?,
+      isTie: json['is_tie'] as bool? ?? false,
+      status: json['status'] as String?,
+      scoreToPar: json['score_to_par'] as num?,
+      totalStrokes: (json['total_strokes'] as num?)?.toDouble(),
+      rounds: {
+        for (final entry in roundsJson) LiveRoundResult.fromJson(entry as Map<String, dynamic>).round: LiveRoundResult.fromJson(entry),
+      },
+    );
+  }
 }
 
 class FieldLiveEventState {

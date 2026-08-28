@@ -80,18 +80,31 @@ def get_cached(s3, cache_key: str) -> dict | None:
     return s3.get_json(cache_key)
 
 
-def is_fresh(entry: dict, current_model_versions) -> bool:
+def is_fresh(entry: dict, current_model_versions, extra_fingerprint=None) -> bool:
+    """extra_fingerprint is an optional second freshness dimension beyond
+    model_versions, compared the same way (any mismatch -> stale).
+    Defaults to None/unused, so every caller that doesn't pass it keeps
+    today's exact behavior. Added for PGA (see library.serving.pga_reads.
+    rounds_fingerprint): STALE_AFTER_SECONDS' 12h TTL matches every other
+    sport's own once-daily ingest cadence, but was silently letting a PGA
+    prediction computed before a round finished get served as "fresh" for
+    up to 12h after that round's real results landed -- a fingerprint
+    that changes exactly when new round data lands catches this without
+    touching the TTL/model-version behavior any other sport relies on."""
     if entry.get("model_versions") != current_model_versions:
+        return False
+    if extra_fingerprint is not None and entry.get("extra_fingerprint") != extra_fingerprint:
         return False
     if entry.get("event_status") == "completed":
         return True
     return (time.time() - entry.get("cached_at_epoch", 0)) < STALE_AFTER_SECONDS
 
 
-def put_cached(s3, cache_key: str, result: dict, model_versions, event_status: str | None) -> None:
+def put_cached(s3, cache_key: str, result: dict, model_versions, event_status: str | None, extra_fingerprint=None) -> None:
     s3.put_json(cache_key, {
         "model_versions": model_versions,
         "event_status": event_status,
+        "extra_fingerprint": extra_fingerprint,
         "cached_at_epoch": time.time(),
         "result": result,
     })

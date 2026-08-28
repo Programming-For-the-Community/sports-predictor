@@ -24,6 +24,35 @@ void main() {
     expect(state.participants, isEmpty);
   });
 
+  test('parses per-round live results keyed by round number', () {
+    final state = FieldLiveEventState.fromJson({
+      'status': 'scheduled',
+      'participants': {
+        '10140': {
+          'status': 'scheduled',
+          'rounds': [
+            {'round': 1, 'score_to_par': -4, 'total_strokes': 68.0},
+          ],
+        },
+      },
+    });
+
+    final rounds = state.participants['10140']!.rounds;
+    expect(rounds[1]!.scoreToPar, -4);
+    expect(rounds[1]!.totalStrokes, 68.0);
+  });
+
+  test('rounds defaults to empty when absent', () {
+    final state = FieldLiveEventState.fromJson({
+      'status': 'scheduled',
+      'participants': {
+        '10140': {'status': 'scheduled'},
+      },
+    });
+
+    expect(state.participants['10140']!.rounds, isEmpty);
+  });
+
   group('TwoSidedLiveEventState', () {
     test('parses a match_play entry with won/margin fields', () {
       final state = TwoSidedLiveEventState.fromJson({

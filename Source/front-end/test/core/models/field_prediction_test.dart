@@ -95,6 +95,27 @@ void main() {
       expect(prediction.field.single.actualScoreToPar, -4);
     });
 
+    test('actual rounds are parsed and keyed by round number, not status-gated', () {
+      final json = _fieldResponse();
+      (json['field'] as List)[0]['actual'] = {
+        'finish_position': null, 'score_to_par': null,
+        'rounds': [
+          {'round': 1, 'score_to_par': -4, 'total_strokes': 68.0},
+        ],
+      };
+
+      final prediction = FieldEventPrediction.fromJson(json);
+
+      expect(prediction.field.single.actualRounds[1]!.scoreToPar, -4);
+      expect(prediction.field.single.actualRounds[1]!.totalStrokes, 68.0);
+    });
+
+    test('actualRounds defaults to empty when actual is absent', () {
+      final prediction = FieldEventPrediction.fromJson(_fieldResponse());
+
+      expect(prediction.field.single.actualRounds, isEmpty);
+    });
+
     test('stale and retry_after_seconds default safely when absent', () {
       final prediction = FieldEventPrediction.fromJson(_fieldResponse());
 

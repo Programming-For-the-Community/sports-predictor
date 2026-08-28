@@ -99,29 +99,50 @@ class TestCorsHeaders:
         assert response["headers"]["Access-Control-Allow-Origin"] == "*"
 
 
-class TestCurrentVersionsForEvent:
-    def test_returns_empty_dict_when_the_event_does_not_exist(self):
+class TestFreshnessInputsForEvent:
+    def test_returns_empty_dict_and_no_fingerprint_when_the_event_does_not_exist(self):
         storage = MagicMock()
         storage.get_event.return_value = None
         s3 = MagicMock()
 
-        assert pga_predict_read._current_versions_for_event(s3, storage, "999") == {}
+        assert pga_predict_read._freshness_inputs_for_event(s3, storage, "999") == ({}, None)
 
     def test_returns_empty_dict_for_an_unrecognized_event_type(self):
         storage = MagicMock()
         storage.get_event.return_value = {"event_type": "something_new"}
         s3 = MagicMock()
 
-        assert pga_predict_read._current_versions_for_event(s3, storage, "999") == {}
+        assert pga_predict_read._freshness_inputs_for_event(s3, storage, "999") == ({}, None)
 
     def test_field_event_resolves_the_full_field_model_map(self):
         storage = MagicMock()
         storage.get_event.return_value = {"event_type": "field"}
         s3 = _s3_with_state(_model_version_state("pga", pga_predict_read.pga_reads.FIELD_EVENT_MODEL_VERSIONS))
 
-        versions = pga_predict_read._current_versions_for_event(s3, storage, "999")
+        versions, _ = pga_predict_read._freshness_inputs_for_event(s3, storage, "999")
 
         assert versions["top_10_probability"] == 1
+
+    def test_field_event_computes_a_real_rounds_fingerprint(self):
+        storage = MagicMock()
+        storage.get_event.return_value = {
+            "event_type": "field",
+            "participants": [{"entity_id": "1", "result": {"rounds": [{"round": 1}]}}],
+        }
+        s3 = _s3_with_state(_model_version_state("pga", pga_predict_read.pga_reads.FIELD_EVENT_MODEL_VERSIONS))
+
+        _, fingerprint = pga_predict_read._freshness_inputs_for_event(s3, storage, "999")
+
+        assert fingerprint == 1
+
+    def test_cup_event_has_no_fingerprint(self):
+        storage = MagicMock()
+        storage.get_event.return_value = {"event_type": "cup", "participants": []}
+        s3 = _s3_with_state(_model_version_state("pga", pga_predict_read.pga_reads.CUP_MODEL_VERSIONS))
+
+        _, fingerprint = pga_predict_read._freshness_inputs_for_event(s3, storage, "999")
+
+        assert fingerprint is None
 
 
 class TestPredictionRoute:
@@ -132,7 +153,10 @@ class TestPredictionRoute:
 
     def _storage(self, event_type="field"):
         storage = MagicMock()
-        storage.get_event.return_value = {"event_type": event_type}
+        # participants=[] -> rounds_fingerprint is 0 for a "field" event
+        # (not None), so cache-entry fixtures below must record a
+        # matching extra_fingerprint to be treated as fresh.
+        storage.get_event.return_value = {"event_type": event_type, "participants": []}
         return storage
 
     def test_fresh_cache_hit_returns_the_cached_result_without_triggering_compute(self):
@@ -140,7 +164,7 @@ class TestPredictionRoute:
         versions_flat = {key: 1 for key in pga_predict_read.pga_reads.FIELD_EVENT_MODEL_VERSIONS}
         state = dict(versions)
         state[self.CACHE_KEY] = {
-            "model_versions": versions_flat, "event_status": "completed",
+            "model_versions": versions_flat, "event_status": "completed", "extra_fingerprint": 0,
             "cached_at_epoch": time.time(), "result": {"ok": True},
         }
         s3 = _s3_with_state(state)

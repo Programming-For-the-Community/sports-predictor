@@ -92,26 +92,30 @@ def _trigger_refresh(s3, cache_key: str, async_payload: dict) -> None:
         _get_predict_invoker().invoke_async(async_payload)
 
 
-def _current_versions_for_event(s3, storage, event_id: str) -> dict:
-    """The right model-name map depends on the event's own event_type
-    (field/match_play/cup, see library.serving.pga_reads.model_versions_for)
-    -- unlike every head-to-head sport's own predict-read, which always
-    compares against one fixed CORE_EVENT_MODELS set. Falls back to {}
+def _freshness_inputs_for_event(s3, storage, event_id: str) -> tuple[dict, int | None]:
+    """(current_model_versions, extra_fingerprint) -- the right model-name
+    map depends on the event's own event_type (field/match_play/cup, see
+    library.serving.pga_reads.model_versions_for) -- unlike every
+    head-to-head sport's own predict-read, which always compares against
+    one fixed CORE_EVENT_MODELS set. extra_fingerprint is
+    pga_reads.rounds_fingerprint(event) -- None for match_play/cup (no
+    per-round concept, is_fresh skips that check entirely) or once the
+    event doesn't exist yet. current_model_versions falls back to {}
     (never matches a real cached entry's own model_versions, so is_fresh
     always reports stale rather than silently serving a wrong-shape
     comparison) if the event doesn't exist yet or has an event_type this
     Lambda doesn't recognize -- never raises on a read path."""
     event = storage.get_event(build_event_key(SPORT, event_id))
     if event is None:
-        return {}
+        return {}, None
     try:
         models = pga_reads.model_versions_for(event.get("event_type"))
     except KeyError:
-        return {}
-    return prediction_cache.current_model_versions(s3, SPORT, models)
+        return {}, None
+    return prediction_cache.current_model_versions(s3, SPORT, models), pga_reads.rounds_fingerprint(event)
 
 
-def _serve_or_trigger(s3, cache_key: str, current_model_versions, async_payload: dict) -> dict:
+def _serve_or_trigger(s3, cache_key: str, current_model_versions, extra_fingerprint, async_payload: dict) -> dict:
     entry = prediction_cache.get_cached(s3, cache_key)
     if entry is not None:
         if prediction_cache.is_error_entry(entry):
@@ -120,7 +124,7 @@ def _serve_or_trigger(s3, cache_key: str, current_model_versions, async_payload:
                 return _response(status_code, {"error": entry["error"]})
             # expired -- fall through, retry as a miss
         else:
-            if not prediction_cache.is_fresh(entry, current_model_versions):
+            if not prediction_cache.is_fresh(entry, current_model_versions, extra_fingerprint):
                 # 203, not 200 -- lets the frontend show a "refreshing"
                 # indicator and silently re-poll instead of treating this
                 # the same as a genuinely current result.
@@ -165,9 +169,9 @@ def lambda_handler(event, context):
             s3 = _get_model_bucket()
             storage = _get_storage()
             cache_key = prediction_cache.event_prediction_cache_key(SPORT, event_key_value)
-            current_versions = _current_versions_for_event(s3, storage, event_id)
+            current_versions, extra_fingerprint = _freshness_inputs_for_event(s3, storage, event_id)
             return _serve_or_trigger(
-                s3, cache_key, current_versions,
+                s3, cache_key, current_versions, extra_fingerprint,
                 {"detail-type": "ComputeAndCachePrediction", "route": "event", "event_id": event_id},
             )
 

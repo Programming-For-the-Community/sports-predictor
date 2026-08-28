@@ -13,17 +13,18 @@ import model_loader
 from library.serving import pga_reads
 
 
-def _field_event(event_id="999", status="scheduled"):
+def _field_event(event_id="999", status="scheduled", result=None):
+    default_result = {"finish_position": 3, "score_to_par": -10, "rounds": [{"round": 1, "score_to_par": -4, "total_strokes": 68.0}]}
     return {
         "event_key": f"SPORT#PGA#EVENT#{event_id}", "event_id": event_id, "event_type": "field",
         "status": status, "tournament_name": "BMW Championship",
-        "participants": [{"entity_id": "1", "result": {"finish_position": 3, "score_to_par": -10}}],
+        "participants": [{"entity_id": "1", "result": default_result if result is None else result}],
     }
 
 
-def _built_field_features(status="scheduled"):
+def _built_field_features(status="scheduled", result=None):
     return {
-        "event": _field_event(status=status),
+        "event": _field_event(status=status, result=result),
         "golfer_rows": {"1": {"golfer": {"f": 1}, "rounds": {2: {"f": 2}}}},
         "cutline_row": {"f": 3},
     }
@@ -86,7 +87,23 @@ class TestPredictFieldEvent:
         assert "top_5_probability" not in predictions
         assert "top_10_probability" in predictions
 
-    def test_no_actual_block_for_a_scheduled_event(self):
+    def test_no_actual_block_when_the_golfer_has_no_result_data_at_all(self):
+        # Not status-gated -- a golfer genuinely hasn't played yet,
+        # regardless of what the tournament's own overall status says.
+        storage, s3, predictions_table = MagicMock(), MagicMock(), MagicMock()
+        storage.get_entity.return_value = None
+        no_result = {"finish_position": None, "score_to_par": None, "rounds": []}
+        with patch.object(event_prediction.live_features, "build_live_field_features", return_value=_built_field_features(status="scheduled", result=no_result)), \
+             patch.object(event_prediction.model_loader, "load_current_model", return_value=(MagicMock(), {"version": 1})), \
+             patch.object(event_prediction.model_loader, "predict", return_value=0.5):
+            result = event_prediction.predict_field_event(storage, s3, predictions_table, "999")
+
+        assert "actual" not in result["field"][0]
+
+    def test_actual_block_present_mid_tournament_not_gated_on_completed_status(self):
+        # The real bug this fixes: a genuine current standing (mid-
+        # tournament, status still "scheduled") was previously invisible
+        # in the response until the whole event finished.
         storage, s3, predictions_table = MagicMock(), MagicMock(), MagicMock()
         storage.get_entity.return_value = None
         with patch.object(event_prediction.live_features, "build_live_field_features", return_value=_built_field_features(status="scheduled")), \
@@ -94,7 +111,10 @@ class TestPredictFieldEvent:
              patch.object(event_prediction.model_loader, "predict", return_value=0.5):
             result = event_prediction.predict_field_event(storage, s3, predictions_table, "999")
 
-        assert "actual" not in result["field"][0]
+        assert result["field"][0]["actual"] == {
+            "finish_position": 3, "score_to_par": -10,
+            "rounds": [{"round": 1, "score_to_par": -4, "total_strokes": 68.0}],
+        }
 
     def test_actual_block_present_for_a_completed_event(self):
         storage, s3, predictions_table = MagicMock(), MagicMock(), MagicMock()
@@ -104,7 +124,20 @@ class TestPredictFieldEvent:
              patch.object(event_prediction.model_loader, "predict", return_value=0.5):
             result = event_prediction.predict_field_event(storage, s3, predictions_table, "999")
 
-        assert result["field"][0]["actual"] == {"finish_position": 3, "score_to_par": -10}
+        assert result["field"][0]["actual"]["finish_position"] == 3
+
+    def test_actual_rounds_present_even_when_finish_position_and_score_to_par_are_still_none(self):
+        # A completed round's own result can land a normalize cycle
+        # before the tournament-level summary refreshes.
+        storage, s3, predictions_table = MagicMock(), MagicMock(), MagicMock()
+        storage.get_entity.return_value = None
+        rounds_only = {"finish_position": None, "score_to_par": None, "rounds": [{"round": 1, "score_to_par": -4, "total_strokes": 68.0}]}
+        with patch.object(event_prediction.live_features, "build_live_field_features", return_value=_built_field_features(status="scheduled", result=rounds_only)), \
+             patch.object(event_prediction.model_loader, "load_current_model", return_value=(MagicMock(), {"version": 1})), \
+             patch.object(event_prediction.model_loader, "predict", return_value=0.5):
+            result = event_prediction.predict_field_event(storage, s3, predictions_table, "999")
+
+        assert result["field"][0]["actual"]["rounds"] == [{"round": 1, "score_to_par": -4, "total_strokes": 68.0}]
 
 
 class TestFieldSortKey:
@@ -225,6 +258,21 @@ class TestComputeAndCacheEvent:
         mock_versions.assert_called_once_with(s3, "pga", pga_reads.FIELD_EVENT_MODEL_VERSIONS)
         mock_put.assert_called_once()
         mock_clear.assert_called_once()
+
+    def test_records_a_real_rounds_fingerprint_for_a_field_event(self):
+        storage, s3, predictions_table = MagicMock(), MagicMock(), MagicMock()
+        storage.get_event.return_value = {
+            "event_type": "field",
+            "participants": [{"entity_id": "1", "result": {"rounds": [{"round": 1}, {"round": 2}]}}],
+        }
+        result = {"event_type": "field", "status": "scheduled"}
+        with patch.object(event_prediction, "predict_event", return_value=result), \
+             patch.object(event_prediction.prediction_cache, "current_model_versions", return_value={"v": 1}), \
+             patch.object(event_prediction.prediction_cache, "put_cached") as mock_put, \
+             patch.object(event_prediction.prediction_cache, "clear_in_progress"):
+            event_prediction.compute_and_cache_event(storage, s3, predictions_table, "999")
+
+        assert mock_put.call_args.args[-1] == 2  # extra_fingerprint is the last positional arg
 
     def test_cup_events_use_the_cup_model_versions_map(self):
         storage, s3, predictions_table = MagicMock(), MagicMock(), MagicMock()

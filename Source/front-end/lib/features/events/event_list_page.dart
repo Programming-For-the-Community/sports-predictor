@@ -138,14 +138,19 @@ class _EventListPageState extends ConsumerState<EventListPage> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(
+          // Wrap, not Row -- 'Upcoming/Current' is long enough that a
+          // fixed unwrapping Row overflows at the narrowest supported
+          // mobile widths; Wrap lets the second pill flow to its own
+          // line instead of clipping.
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
             children: [
               _StatusToggle(
-                label: 'Upcoming',
+                label: 'Upcoming/Current',
                 selected: _status == 'scheduled',
                 onTap: () => _setStatus('scheduled'),
               ),
-              const SizedBox(width: 8),
               _StatusToggle(
                 label: 'Completed',
                 selected: _status == 'completed',

@@ -65,6 +65,23 @@ def model_versions_for(event_type: str) -> dict[str, str]:
     return {"field": FIELD_EVENT_MODEL_VERSIONS, "match_play": MATCH_MODEL_VERSIONS, "cup": CUP_MODEL_VERSIONS}[event_type]
 
 
+def rounds_fingerprint(event: dict) -> int | None:
+    """A cheap, monotonically-increasing signal that a field event's real
+    per-golfer round results have changed -- strictly increases exactly
+    when a new round's results land for any golfer. Passed as
+    prediction_cache.is_fresh/put_cached's own extra_fingerprint, so a
+    cached prediction gets recomputed once real round-1 (or later)
+    results are in, not just on STALE_AFTER_SECONDS' 12h TTL (which
+    matches every other sport's once-daily ingest, not PGA's own
+    live-scores cadence) or a model-version bump. None for match_play/cup
+    (no per-round concept) -- leaves their existing TTL/model-version-only
+    freshness behavior untouched, since is_fresh skips this check
+    entirely when passed None."""
+    if event.get("event_type") != "field":
+        return None
+    return sum(len((p.get("result") or {}).get("rounds", [])) for p in event.get("participants", []))
+
+
 def _match_play_entity_type(participant: dict) -> str:
     """A match_play participant's own entity_id is either a national
     TEAM id (foursomes/fourball/singles at Ryder Cup/Presidents Cup,

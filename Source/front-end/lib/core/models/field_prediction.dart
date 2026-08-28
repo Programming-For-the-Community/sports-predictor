@@ -40,6 +40,23 @@ class Cutline {
       );
 }
 
+/// One already-played round's real result -- Source/library/normalize/
+/// pga.py's own _parse_rounds shape, surfaced (not status-gated) via
+/// event_prediction.py's _actual_golfer_result.
+class ActualRoundResult {
+  const ActualRoundResult({required this.round, this.scoreToPar, this.totalStrokes});
+
+  final int round;
+  final num? scoreToPar;
+  final double? totalStrokes;
+
+  factory ActualRoundResult.fromJson(Map<String, dynamic> json) => ActualRoundResult(
+        round: json['round'] as int,
+        scoreToPar: json['score_to_par'] as num?,
+        totalStrokes: (json['total_strokes'] as num?)?.toDouble(),
+      );
+}
+
 class FieldParticipantPrediction {
   const FieldParticipantPrediction({
     required this.entityId,
@@ -51,6 +68,7 @@ class FieldParticipantPrediction {
     this.rounds = const {},
     this.actualFinishPosition,
     this.actualScoreToPar,
+    this.actualRounds = const {},
   });
 
   final String entityId;
@@ -63,12 +81,17 @@ class FieldParticipantPrediction {
   // practice (applicable_rounds always returns at most one round, see
   // aws-lambdas/pga/predict/live_features.py).
   final Map<int, ModelValue> rounds;
-  // Both only ever present when the EVENT's own status is 'completed' --
-  // event_prediction.py's _actual_golfer_result returns null (so `actual`
-  // itself may be present-but-null) when neither field has a value yet,
-  // treated identically to `actual` being absent entirely.
+  // Not gated on the whole EVENT's status being 'completed' -- a real
+  // current standing/completed round is meaningful throughout the
+  // tournament (event_prediction.py's _actual_golfer_result docstring).
+  // event_prediction.py returns null for a golfer with no real result
+  // data at all yet (`actual` itself absent), treated identically here.
   final int? actualFinishPosition;
   final double? actualScoreToPar;
+  // Real per-round results already played, keyed by round number --
+  // pairs with `rounds` (the PROJECTED per-round model output) for a
+  // proj-vs-actual comparison per round.
+  final Map<int, ActualRoundResult> actualRounds;
 
   factory FieldParticipantPrediction.fromJson(Map<String, dynamic> json) {
     final predictions = json['predictions'] as Map<String, dynamic>? ?? {};
@@ -81,6 +104,10 @@ class FieldParticipantPrediction {
       }
     }
     final actual = json['actual'] as Map<String, dynamic>?;
+    final actualRoundsJson = actual?['rounds'] as List<dynamic>? ?? [];
+    final actualRounds = <int, ActualRoundResult>{
+      for (final entry in actualRoundsJson) ActualRoundResult.fromJson(entry as Map<String, dynamic>).round: ActualRoundResult.fromJson(entry),
+    };
     return FieldParticipantPrediction(
       entityId: json['entity_id'] as String,
       name: json['name'] as String?,
@@ -97,6 +124,7 @@ class FieldParticipantPrediction {
       rounds: rounds,
       actualFinishPosition: actual?['finish_position'] as int?,
       actualScoreToPar: (actual?['score_to_par'] as num?)?.toDouble(),
+      actualRounds: actualRounds,
     );
   }
 }
@@ -116,8 +144,14 @@ class FieldEventPrediction {
   final String? tournamentName;
   final String? status;
   final Cutline? cutline;
-  // PRE-SORTED server-side (event_prediction.py's _field_sort_key) --
-  // never re-sort client-side.
+  // PRE-SORTED server-side (event_prediction.py's _field_sort_key), by
+  // PROJECTION -- a reasonable order before any real standing exists.
+  // Once real standings exist (live or actual), FieldLeaderboardTable
+  // itself re-sorts by real current standing first, falling back to this
+  // projected order only for golfers with no real standing yet -- server-
+  // side sorting alone can't stay correct once live data moves every 5
+  // minutes but this cached response doesn't (see field_leaderboard_table.
+  // dart's own _sortedByStanding).
   final List<FieldParticipantPrediction> field;
   final bool stale;
   final int? staleRetryAfterSeconds;
