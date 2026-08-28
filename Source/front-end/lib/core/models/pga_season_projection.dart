@@ -1,9 +1,7 @@
 /// Mirrors GET /pga/season's response shape -- aws-lambdas/pga/predict/
-/// season_projection.py's own build_season_projection. A genuinely
-/// different shape from season_projection.dart's TeamStanding/
-/// SeasonProjection (a points-standings race, no bracket, no division/
-/// conference grouping -- a golfer has neither), which is why this is
-/// its own model file rather than a variant of that one.
+/// season_projection.py's build_season_projection. A points-standings
+/// race, no bracket, no division/conference grouping -- a different
+/// shape from season_projection.dart's TeamStanding/SeasonProjection.
 class PgaFedexStanding {
   const PgaFedexStanding({
     required this.entityId,
@@ -20,25 +18,21 @@ class PgaFedexStanding {
   final String entityId;
   final String? name;
   final String? country;
-  // Real points already earned this season -- see library.features.
-  // pga_fedex_cup_points.
+  // Real points already earned this season.
   final double currentPoints;
-  // Monte Carlo mean across every simulated remaining event, ON TOP of
-  // currentPoints (already included, not added separately) -- equal to
-  // currentPoints once nothing real remains to simulate (season over).
+  // Monte Carlo mean across every simulated remaining event, on top of
+  // currentPoints -- equal to currentPoints once the season is over.
   final double projectedPoints;
-  // Probability of finishing the (real or simulated) points race inside
-  // the top 70 -> the FedEx St. Jude Championship field.
+  // Probability of finishing the points race inside the top 70 -> the
+  // FedEx St. Jude Championship field.
   final double fedexStJudeProbability;
   // Top 50 -> the BMW Championship field.
   final double bmwProbability;
-  // Top 30 -> the TOUR Championship field. Under the 2025+ format TOUR
-  // Championship itself awards no further points -- this is purely
-  // "made the season finale," not a points-race position.
+  // Top 30 -> the TOUR Championship field. Under the 2025+ format it
+  // awards no further points -- this is purely "made the season finale."
   final double tourChampionshipProbability;
   // Probability of winning TOUR Championship outright -- the sole
-  // determinant of the FedEx Cup Champion under the 2025+ format (no
-  // staggered-start scoring anymore -- confirmed live, 2026-08-28).
+  // determinant of the FedEx Cup Champion under the 2025+ format.
   final double championProbability;
 
   factory PgaFedexStanding.fromJson(Map<String, dynamic> json) => PgaFedexStanding(
@@ -60,9 +54,8 @@ class PgaSeasonProjection {
   final int season;
   final List<PgaFedexStanding> standings;
   // 0 once the season is fully over (real final standings, nothing left
-  // to simulate -- season_projection.py's own _final_standings_only) --
-  // pgaSeasonPage.dart uses this to skip showing Monte-Carlo-flavored
-  // copy ("simulated N times") when the numbers are simply real.
+  // to simulate) -- pgaSeasonPage.dart uses this to skip Monte-Carlo-
+  // flavored copy ("simulated N times") when the numbers are real.
   final int simulations;
 
   factory PgaSeasonProjection.fromJson(Map<String, dynamic> json) => PgaSeasonProjection(

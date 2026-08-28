@@ -104,25 +104,19 @@ def build_golfer_dataset(
     value (resolve_season_stats(None or [], ...) skipped entirely,
     same effect as an empty snapshot list).
 
-    Emits one IN-TOURNAMENT-PROGRESS SNAPSHOT ROW per already-played round
+    Emits one in-tournament-progress snapshot row per already-played round
     boundary (0 rounds played i.e. pre-tournament, 1 round played, 2, ...
     up to however many rounds this golfer actually has -- a cut golfer
-    naturally stops at 2), all predicting toward the SAME real final
-    outcome -- top-10/top-5 share one literal label across every snapshot,
-    while label_remaining_score_to_par instead shrinks per snapshot
-    (final minus whatever's already been shot, see build_golfer_event_
-    features' own docstring for why it's framed that way) -- not just the
-    one pre-tournament row this dataset used to emit. Without this, in_
-    tournament_progress_features' rounds_
-    completed_this_week/score_to_par_this_week_so_far columns (library.
-    features.pga) would exist in every row but always read 0/None,
-    since a live serving call is the only place that ever passed anything
-    else -- the model could never learn to use them, which is exactly why
-    a round-completion recompute used to leave PROJ/top-10%/top-5%
-    completely unchanged after round 1 (real user-reported bug, fixed
-    2026-08-27). Multiplies this dataset's own row count by roughly
-    (rounds played + 1) per golfer per tournament -- expected and
-    intentional, not a bug in this loop."""
+    stops at 2), all predicting toward the same real final outcome:
+    top-10/top-5 share one literal label across every snapshot, while
+    label_remaining_score_to_par shrinks per snapshot (final minus
+    whatever's already been shot -- see build_golfer_event_features'
+    docstring). Without this, in_tournament_progress_features' rounds_
+    completed_this_week/score_to_par_this_week_so_far columns would exist
+    in every row but always read 0/None, since a live serving call is the
+    only place that ever passed anything else. Multiplies this dataset's
+    row count by roughly (rounds played + 1) per golfer per tournament --
+    expected and intentional."""
     # event_type == "field" only -- get_all_events(SPORT) now also
     # returns "match_play"/"cup" rows (library/normalize/pga_matchplay.py)
     # once any Ryder Cup/Presidents Cup/WGC Match Play data has been
@@ -152,12 +146,9 @@ def build_golfer_dataset(
             played_rounds = sorted(
                 (participant.get("result") or {}).get("rounds", []), key=lambda r: r["round"],
             )
-            # k=0 (rounds_so_far=None, the pre-tournament state -- this
-            # dataset's own original single row per golfer/tournament)
-            # through k=len(played_rounds) (every round this golfer
-            # actually played, the same state a live call presents once
-            # the whole tournament -- or this golfer's own cut-shortened
-            # week -- is over).
+            # k=0 (rounds_so_far=None, pre-tournament) through
+            # k=len(played_rounds) (every round this golfer actually
+            # played).
             for k in range(len(played_rounds) + 1):
                 rows.append(build_golfer_event_features(
                     event, participant, prior_results, window, course_results, course_window, season_stats,

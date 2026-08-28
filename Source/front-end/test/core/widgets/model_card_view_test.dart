@@ -113,10 +113,9 @@ void main() {
   });
 
   testWidgets('a not-yet-evaluated candidate (null score) shows a real label instead of crashing', (tester) async {
-    // A previously real production crash (TypeError casting null to num)
-    // -- a model card captured mid-run can permanently carry a
+    // A model card captured mid-run can permanently carry a
     // "not_evaluated" placeholder candidate (library/ml/backtest.py's
-    // own _full_candidate_summary) if that training run never finished.
+    // _full_candidate_summary) if that training run never finished.
     await _pump(
       tester,
       _regressorCard(

@@ -49,17 +49,12 @@ resource "aws_api_gateway_gateway_response" "missing_auth_token" {
   }
 }
 
-# Genericizes the BODY of every other 4xx API Gateway generates itself
-# before reaching the Lambda -- covers Cognito UNAUTHORIZED (401) and
-# usage-plan THROTTLED (429) specifically, both left on this catch-all
-# rather than given their own gateway_response resource. Status code is
-# deliberately NOT overridden here: the front end's own api_client.dart
-# reactively retries on a real 401 (forced token refresh) and on a real
-# 429 (backoff), so those two codes have to keep meaning what they mean.
-# Only the AWS-default message text (which otherwise differs per
-# rejection type) is stripped -- this is the honest limit of obfuscation
-# for these two, not an oversight; ACCESS_DENIED has no such dependency
-# and gets folded all the way into "Not found" below instead.
+# Genericizes the BODY of every other 4xx API Gateway generates itself --
+# covers Cognito UNAUTHORIZED (401) and usage-plan THROTTLED (429), both
+# left on this catch-all. Status code is not overridden: api_client.dart
+# reactively retries on a real 401 (forced token refresh) and 429
+# (backoff), so those two codes keep their meaning. Only the AWS-default
+# message text is stripped.
 resource "aws_api_gateway_gateway_response" "default_4xx" {
   rest_api_id   = aws_api_gateway_rest_api.main.id
   response_type = "DEFAULT_4XX"
@@ -74,12 +69,9 @@ resource "aws_api_gateway_gateway_response" "default_4xx" {
   }
 }
 
-# Nothing in the front end keys off ACCESS_DENIED specifically (unlike
-# UNAUTHORIZED/THROTTLED above), so it can fully disappear into the same
-# "route doesn't exist" shape missing_auth_token already returns instead
-# of just losing its distinct AWS-default body on the DEFAULT_4XX
-# catch-all -- a probe can no longer tell "wrong path" apart from
-# "real path, access denied".
+# Nothing in the front end keys off ACCESS_DENIED (unlike UNAUTHORIZED/
+# THROTTLED above), so it disappears into the same "route doesn't exist"
+# shape missing_auth_token returns.
 resource "aws_api_gateway_gateway_response" "access_denied" {
   rest_api_id   = aws_api_gateway_rest_api.main.id
   response_type = "ACCESS_DENIED"

@@ -92,19 +92,16 @@ class FieldParticipantPrediction {
   final int? actualFinishPosition;
   final double? actualScoreToPar;
   // Real cumulative tournament strokes-so-far -- pairs with
-  // actualScoreToPar for a "N strokes (to par)" display, the same
-  // stroke-count-plus-relative-par framing every real golf leaderboard
-  // uses.
+  // actualScoreToPar for a "N strokes (to par)" display.
   final double? actualTotalStrokes;
   // Real per-round results already played, keyed by round number --
   // pairs with `rounds` (the PROJECTED per-round model output) for a
   // proj-vs-actual comparison per round.
   final Map<int, ActualRoundResult> actualRounds;
   // This golfer's own real ESPN status (scheduled/finished/cut/
-  // made_cut_did_not_finish/withdrawn) -- NOT inferred from
-  // actualFinishPosition's presence (a real current standing exists well
-  // before this golfer's own round is actually finished). Used by
-  // FieldLeaderboardTable's STATUS column outside the live-poll window.
+  // made_cut_did_not_finish/withdrawn) -- not inferred from
+  // actualFinishPosition's presence. Used by FieldLeaderboardTable's
+  // STATUS column outside the live-poll window.
   final String? actualStatus;
   // Holes completed in the CURRENT round (library/normalize/pga.py's own
   // status.thru) -- only meaningful while actualStatus == 'in_progress'.

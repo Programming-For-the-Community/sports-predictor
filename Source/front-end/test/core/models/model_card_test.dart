@@ -113,10 +113,9 @@ void main() {
   });
 
   test('a not_evaluated candidate (a card captured mid-run) has a null score without throwing', () {
-    // library/ml/backtest.py's own _full_candidate_summary writes exactly
+    // library/ml/backtest.py's _full_candidate_summary writes exactly
     // this placeholder shape for a candidate not yet tried when a model
-    // card is captured mid-run -- real, not malformed data (a previously
-    // real production crash: TypeError casting null to num).
+    // card is captured mid-run -- real, not malformed data.
     final card = ModelCard.fromJson({
       'model_name': 'projected-score-to-par',
       'algorithm': 'xgboost',

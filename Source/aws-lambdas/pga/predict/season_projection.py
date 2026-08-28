@@ -1,14 +1,11 @@
 """
-FedEx Cup season simulation -- compute Lambda side. Resolves real
-current-season standings/roster/remaining-schedule from storage, scores
-every remaining event's PROJECTED field (library.features.
-pga_field_projection) via live_features.build_projected_field_features
-plus one batched projected-score-to-par model pass per event, then hands
-everything to season_simulation.simulate_season. Mirrors NBA/NCAAFB's own
-season_projection.py shape (weekly EventBridge -> compute -> S3 cache),
-but the per-remaining-event outcome model is genuinely different -- see
-season_simulation.py's own docstring for why (no pairwise matchup to
-resolve the way a game has).
+FedEx Cup season simulation -- compute Lambda side. Resolves current-
+season standings/roster/remaining-schedule from storage, scores every
+remaining event's PROJECTED field (library.features.pga_field_projection)
+via live_features.build_projected_field_features plus one batched
+projected-score-to-par model pass per event, then hands everything to
+season_simulation.simulate_season. Mirrors NBA/NCAAFB's own
+season_projection.py shape (weekly EventBridge -> compute -> S3 cache).
 """
 import logging
 from concurrent.futures import ThreadPoolExecutor
@@ -30,14 +27,10 @@ logger = logging.getLogger("pga-predict")
 SPORT = "pga"
 SCORE_MODEL_NAME = "projected-score-to-par"
 SIMULATIONS = 750
-# TOUR Championship's own real, currently-published name (confirmed live,
-# 2026-08-28) -- used to single it out from the rest of the remaining
-# schedule (no points of its own, a fixed top-30-by-points field, decides
-# the Champion outright -- see season_simulation.py's own docstring for
-# the 2025+ format this assumes). Falls back to whichever remaining event
-# is chronologically LAST if this name is somehow missing on the real
-# event (the season finale is always last on the calendar regardless of
-# whether its own name field happens to be populated).
+# TOUR Championship's published tournament_name -- singles it out from the
+# rest of the remaining schedule (no points of its own, fixed top-30-by-
+# points field, decides the Champion outright). Falls back to whichever
+# remaining event is chronologically last if this name is missing.
 TOUR_CHAMPIONSHIP_NAME = "Tour Championship"
 
 
@@ -48,14 +41,9 @@ def _season_standings_inputs(storage) -> dict:
     [event, ...] (chronological), "current_season": int | None}.
     current_season is None only when no PGA field event has ever been
     stored at all (never true in production, guarded for completeness)."""
-    # get_all_events defaults to status="completed" (FeatureStorage's own
-    # default) -- a single unfiltered call here would silently never see a
-    # scheduled event at all, permanently emptying remaining_events and
-    # forcing _final_standings_only below even mid-Playoffs (confirmed
-    # live, 2026-08-28: this was exactly the bug behind TOUR Championship
-    # never being simulated while genuinely in progress). Fetch both
-    # statuses explicitly, same as NBA/NCAAFB/NFL's own season_projection.
-    # py already does for this same reason.
+    # get_all_events defaults to status="completed"; fetch both statuses
+    # explicitly or remaining_events stays permanently empty, same as
+    # NBA/NCAAFB/NFL's own season_projection.py.
     completed_events = [e for e in storage.get_all_events(SPORT, status="completed") if e.get("event_type") == "field"]
     scheduled_events = [e for e in storage.get_all_events(SPORT, status="scheduled") if e.get("event_type") == "field"]
     field_events = completed_events + scheduled_events
@@ -97,13 +85,11 @@ def _season_standings_inputs(storage) -> dict:
 
 
 def _split_remaining_events(remaining_events: list[dict], current_season: int) -> dict:
-    """Partitions this season's own remaining scheduled field events into
-    the 4 groups season_simulation.simulate_season needs: everything
-    walked chronologically BEFORE the Playoffs (regular/elevated/major
-    tier points), the FedEx St. Jude Championship event itself, the BMW
-    Championship event itself, and the TOUR Championship event itself
-    (see this module's own TOUR_CHAMPIONSHIP_NAME). Any of the 3 special
-    slots is None if that event hasn't been scheduled/ingested yet."""
+    """Partitions this season's remaining scheduled field events into the
+    4 groups season_simulation.simulate_season needs: everything before
+    the Playoffs, the FedEx St. Jude Championship, the BMW Championship,
+    and the TOUR Championship. Any of the 3 special slots is None if not
+    yet scheduled/ingested."""
     tour_championship = next(
         (e for e in remaining_events if e.get("tournament_name") == TOUR_CHAMPIONSHIP_NAME), None,
     )
@@ -125,11 +111,9 @@ def _split_remaining_events(remaining_events: list[dict], current_season: int) -
 
 
 def _batch_score_golfers(estimator, model_card: dict, golfer_rows: dict[str, dict]) -> dict[str, float]:
-    """Scores every golfer in one batched adapter.predict call, not one
-    call per golfer -- same ADAPTERS-direct pattern aws-lambdas/ncaafb/
-    predict/season_projection.py's own _batch_score_teams uses, bypassing
-    model_loader.predict's single-row wrapper. Missing/non-numeric values
-    become NaN, the same coercion model_loader.predict itself applies."""
+    """Scores every golfer in one batched adapter.predict call, same
+    ADAPTERS-direct pattern as ncaafb/predict/season_projection.py's
+    _batch_score_teams. Missing/non-numeric values become NaN."""
     feature_columns = model_card["feature_columns"]
     entity_ids = list(golfer_rows)
     rows = [
@@ -150,9 +134,8 @@ def _score_one_remaining_event(
     all_events: list[dict], estimator, model_card: dict, current_season: int,
 ) -> dict:
     """{"tier": str, "field": [entity_id, ...], "mu": {entity_id: float}}
-    for one remaining event -- the field is PROJECTED (library.features.
-    pga_field_projection), not read off the event's own sparse/empty
-    stored participants."""
+    for one remaining event -- the field is PROJECTED, not read off the
+    event's own sparse/empty stored participants."""
     field = project_remaining_field(event, prior_season_events, tracked_roster)
     golfer_rows = live_features.build_projected_field_features(
         storage, SPORT, event, field, history_events=all_events,
@@ -167,10 +150,7 @@ def _score_remaining_events(
     all_events: list[dict], estimator, model_card: dict, current_season: int,
 ) -> dict[str, dict]:
     """{event_key: scored} for every event in `events`, in parallel --
-    each is an independent DynamoDB-read-plus-batched-inference pass, the
-    same "independent per item, worth parallelizing" reasoning nfl_reads.
-    py's own list_events applies to its own per-event predictions_table
-    query."""
+    each is an independent DynamoDB-read-plus-batched-inference pass."""
     if not events:
         return {}
     with ThreadPoolExecutor(max_workers=min(len(events), 8)) as executor:
@@ -187,12 +167,10 @@ def _score_remaining_events(
 
 
 def _final_standings_only(storage, inputs: dict) -> dict:
-    """Nothing left on the calendar to simulate at all (the season is
-    fully over -- TOUR Championship has been played and no future
-    season's schedule has been ingested yet). Real current_points stand
-    as projected_points outright; the 3 Playoffs-field probabilities and
-    champion_probability are read off real outcomes (1.0/0.0) rather than
-    simulated, since there's nothing left uncertain about them."""
+    """Nothing left on the calendar to simulate (season fully over).
+    current_points stand as projected_points outright; the 3 Playoffs-
+    field probabilities and champion_probability are read off real
+    outcomes (1.0/0.0) rather than simulated."""
     current_season = inputs["current_season"]
     all_completed_this_season = [
         e for e in storage.get_all_events(SPORT, status="completed")
@@ -245,14 +223,10 @@ def _final_standings_only(storage, inputs: dict) -> dict:
 
 
 def build_season_projection(storage, s3, predictions_table) -> dict | None:
-    """The full FedEx Cup season projection, or None if there's no real
-    season to project at all yet (no PGA field event ever stored -- see
-    _season_standings_inputs). Never raises for a missing promoted score
-    model -- that's a real "not ready yet" state (model_loader.
-    NoPromotedModelError), not something a caller should treat as this
-    sport simply having no season concept; propagates up to whatever
-    calls this (run_scheduled below), same as every other predict-side
-    model-load failure in this Lambda."""
+    """The full FedEx Cup season projection, or None if there's no season
+    to project yet (no PGA field event ever stored). A missing promoted
+    score model raises model_loader.NoPromotedModelError, propagated to
+    the caller like any other predict-side model-load failure."""
     inputs = _season_standings_inputs(storage)
     if inputs["current_season"] is None or not inputs["tracked_roster"]:
         return None
@@ -265,9 +239,8 @@ def build_season_projection(storage, s3, predictions_table) -> dict | None:
         return _final_standings_only(storage, inputs)
 
     estimator, model_card = model_loader.load_current_model(s3, SPORT, SCORE_MODEL_NAME)
-    # Completed-only, deliberately -- feeds prior_results/course_results
-    # for the projected field's own feature building, which wants real
-    # history, not the still-scheduled events this function is projecting.
+    # Completed-only: feeds prior_results/course_results for the
+    # projected field's feature building.
     all_events = storage.get_all_events(SPORT, status="completed")
     rmse = model_card["rmse"]
 
@@ -301,10 +274,9 @@ def build_season_projection(storage, s3, predictions_table) -> dict | None:
 
 
 def run_scheduled(storage, s3, predictions_table) -> dict:
-    """Entry point for handler.py's own ScheduledSeasonProjection
-    dispatch (weekly EventBridge trigger). Writes the result to S3 only
-    when there's a real season to project -- see build_season_projection's
-    own None case."""
+    """Entry point for handler.py's ScheduledSeasonProjection dispatch
+    (weekly EventBridge trigger). Writes the result to S3 only when
+    there's a season to project."""
     result = build_season_projection(storage, s3, predictions_table)
     if result is not None:
         s3.put_json(season_projection_key(SPORT), result)

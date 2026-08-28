@@ -387,10 +387,6 @@ class _TeamLine extends StatelessWidget {
         TeamColorDot(color: color),
         const SizedBox(width: 6),
         Flexible(child: Text(abbr, style: AppTextStyles.body(color: AppColors.ink), maxLines: 1, overflow: TextOverflow.ellipsis)),
-        // Score only renders once the game exists in a state where one is
-        // possible at all (live or completed) -- a plain pre-kickoff
-        // scheduled row has no score slot to placeholder, same reasoning
-        // as _kickoffTimeLabel's own '' fallback above.
         if (score != null) ...[
           const SizedBox(width: 6),
           Flexible(
@@ -402,13 +398,9 @@ class _TeamLine extends StatelessWidget {
             ),
           ),
         ],
-        // Predicted score renders alone pre-kickoff (no actual score
-        // exists yet to sit next to), or alongside a real score once one
-        // exists -- either way, once there's SOME score context on this
-        // line at all, a missing predicted value shows '--' rather than
-        // silently dropping the parenthetical (same convention
-        // team_leaders_panel.dart's actual-vs-predicted line uses). Both
-        // null (nothing has loaded yet) renders nothing, same as before.
+        // Once there's SOME score context on this line, a missing
+        // predicted value shows '--' rather than dropping the
+        // parenthetical. Both null renders nothing.
         if (score != null || predictedScore != null) ...[
           const SizedBox(width: 4),
           Flexible(

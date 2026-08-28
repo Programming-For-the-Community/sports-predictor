@@ -8,51 +8,29 @@ section), not from a team-vs-team result.
 """
 
 DEFAULT_ROLLING_WINDOW = 5
-# Course-fit history is capped by COUNT of past appearances, not recency
-# in calendar time, the same as the overall rolling window -- but since a
-# given course only recurs roughly once a year (PGA Tour events are
-# annual), 5 here means "this golfer's last 5 YEARS at this course," a
-# genuinely longer real time span than DEFAULT_ROLLING_WINDOW's "last 5
-# STARTS" (a few weeks). Kept as its own named constant rather than
-# reusing DEFAULT_ROLLING_WINDOW directly so the two aren't accidentally
-# coupled if one is ever tuned independently of the other.
+# Course-fit history is capped by count of past appearances, not calendar
+# recency -- since a course recurs roughly once a year, 5 here means "last
+# 5 years at this course," a longer span than DEFAULT_ROLLING_WINDOW's
+# "last 5 starts." Kept as its own constant so the two can be tuned
+# independently.
 DEFAULT_COURSE_HISTORY_WINDOW = 5
 
 
 def _as_number(value):
     """Coerces to int/float, or None for anything else. Applied to every
-    value in this module that reaches a Parquet row (a label or a raw
-    per-event field, e.g. purse/cut_score) straight from a stored
-    DynamoDB result dict, without going through a rolling_*_averages
-    helper first.
-
-    This is a genuinely separate line of defense from library/normalize/
-    pga.py's own _parse_score fix (which stops a NEW non-numeric value
-    from ever being written) -- confirmed live, 2026-08-27, that a row
-    already written to DynamoDB BEFORE that fix shipped (a real empty-
-    string score_to_par) still crashed feature-engineering days later,
-    because pyarrow's columnar Parquet write fails the ENTIRE dataset the
-    moment ONE row's column has a mixed-type value (ArrowInvalid: "Could
-    not convert '' ... tried to convert to int64"), not just that one
-    row. A normalizer fix alone can't protect against data already
-    sitting in the table from before it existed; this can, for every
-    field it's applied to."""
+    value in this module that reaches a Parquet row straight from a
+    stored DynamoDB result dict, without going through a
+    rolling_*_averages helper first -- one mixed-type column fails
+    pyarrow's entire dataset write, not just that one row."""
     return value if isinstance(value, (int, float)) else None
 
-# Raw ESPN category name -> this project's own snake_case feature column
+# Raw ESPN category name -> this project's snake_case feature column
 # name, for the 6 season-stat categories golfer_features.parquet carries
-# (season_* columns, build_golfer_event_features below). Only the
-# categories with no other way for this project to ever compute them
-# itself -- driving distance/accuracy, GIR%, putts per hole, birdies per
-# round, scoring average -- confirmed live, 2026-08-25, that no
-# per-golfer-per-event breakdown of these exists anywhere in ESPN's golf
-# API (docs/PGA_FEATURE_ENGINEERING.md), so a season-to-date snapshot
-# (aws-lambdas/pga/ingest/handler.py, feature-engineering/pga/
-# build_dataset.py) is the only source. officialAmount/cupPoints/wins/
-# topTenFinishes/cutsMade are deliberately excluded -- this project
-# already computes its own close equivalents from event history
-# (avg_earnings, top_10_rate, finish_rate), so ESPN's own season-long
-# versions of those would be redundant, not new signal.
+# (season_* columns, build_golfer_event_features below). Only categories
+# with no other way to compute them (no per-golfer-per-event breakdown in
+# ESPN's API, so a season-to-date snapshot is the only source).
+# officialAmount/cupPoints/wins/topTenFinishes/cutsMade are excluded --
+# this project already computes close equivalents from event history.
 SEASON_STAT_CATEGORIES = {
     "yardsPerDrive": "season_driving_distance",
     "driveAccuracyPct": "season_driving_accuracy_pct",
@@ -65,31 +43,16 @@ SEASON_STAT_CATEGORIES = {
 
 def rolling_golfer_averages(golfer_results: list[dict], window: int = DEFAULT_ROLLING_WINDOW) -> dict:
     """golfer_results: a golfer's own past participants[].result dicts,
-    most recent first, NOT including the tournament being scored. Each
-    dict has the shape leaderboard_event_to_event_item produces
-    (finish_position, status, score_to_par, total_strokes, earnings).
+    most recent first, not including the tournament being scored.
 
-    top_10_rate/top_20_rate/finish_rate are all divided by the number of
-    STARTS in the window (windowed's own length), not just the finishes --
-    missing the cut is a real outcome that counts against making top 10,
-    not a row to silently exclude from the rate's denominator. avg_
-    score_to_par/avg_finish_position/avg_earnings instead average only
-    over the rows that actually have a value (a missed cut still reports
-    score_to_par for its rounds played, but has no finish_position -- see
-    library/normalize/pga.py's own _parse_score/_parse_finish_position).
+    top_10_rate/top_20_rate/finish_rate are divided by the number of
+    starts in the window, not just the finishes -- missing the cut counts
+    against making top 10, not excluded from the denominator. avg_
+    score_to_par/avg_finish_position/avg_earnings average only over rows
+    that have a value.
 
-    Every value is None (not 0) when the window has no qualifying rows at
-    all -- a golfer with no tournament history yet, same "missing, not
-    fabricated" rule library.features.common's rolling helpers use.
-
-    Each numeric field is also type-checked (not just None-checked) before
-    being folded into a sum() -- the same isinstance(value, (int, float))
-    discipline library.features.common.rolling_player_stat_averages already
-    applies to every other sport's stat_line values, defense-in-depth here
-    against a future non-numeric displayValue library/normalize/pga.py's
-    own _parse_score doesn't already special-case (see its docstring for
-    the real "WD" crash this guards the same failure mode for, one layer
-    up)."""
+    Every value is None (not 0) when the window has no qualifying rows.
+    Each numeric field is type-checked before being folded into a sum()."""
     windowed = golfer_results[:window]
     starts = len(windowed)
 
@@ -111,33 +74,20 @@ def rolling_golfer_averages(golfer_results: list[dict], window: int = DEFAULT_RO
 
 
 def in_tournament_progress_features(rounds_so_far: list[dict] | None) -> dict:
-    """How THIS golfer is doing in THIS tournament, right now -- the
-    signal build_golfer_event_features was missing entirely before this
-    was added (2026-08-27): every other input to that function is a
-    rolling average over OTHER, already-finished tournaments, so a fresh
-    round-completion recompute mid-tournament (library/storage/
-    prediction_cache.py's rounds_fingerprint-triggered staleness) produced
-    an IDENTICAL feature vector, and therefore an unchanged PROJ/top-10%/
-    top-5% output, no matter how round 1 actually went -- a real user-
-    reported bug, not a caching problem.
+    """How this golfer is doing in this tournament, right now. Every
+    other input to build_golfer_event_features is a rolling average over
+    other, already-finished tournaments; this is the in-tournament signal.
 
     rounds_so_far: this golfer's own participant["result"]["rounds"]
-    entries for THIS tournament, in any order, ALREADY-PLAYED rounds only
-    (a live caller passes exactly what's in the current result; a
-    training-time caller passes a truncated prefix -- see feature-
-    engineering/pga/build_dataset.py's own snapshot-row generation for why
-    a training row needs several different truncations of the same
-    tournament, not just the final one). None/[] (the pre-tournament
-    state -- also every row built before this feature existed) reports 0
-    rounds played and no score, exactly like a golfer who hasn't teed off
-    yet, so this is fully backward compatible with every existing caller
-    that doesn't pass it at all.
+    entries for this tournament, already-played rounds only (a live
+    caller passes the current result; a training-time caller passes a
+    truncated prefix -- see feature-engineering/pga/build_dataset.py's
+    snapshot-row generation). None/[] reports 0 rounds played and no
+    score, same as a golfer who hasn't teed off yet.
 
     score_to_par_this_week_so_far sums only rounds with a real numeric
-    score (same type-checked discipline rolling_golfer_averages/
-    rolling_round_averages already use) -- a withdrawal mid-round can
-    leave a rounds entry with no score at all, which must not silently
-    zero out the running total."""
+    score -- a withdrawal mid-round can leave a rounds entry with no
+    score, which must not silently zero out the running total."""
     rounds = rounds_so_far or []
     scored = [r["score_to_par"] for r in rounds if isinstance(r.get("score_to_par"), (int, float))]
     return {
@@ -157,38 +107,24 @@ def build_golfer_event_features(
     rounds_so_far: list[dict] | None = None,
 ) -> dict:
     """One training row: this golfer's rolling form (from prior_results)
-    plus this event's own field-strength context (purse, is_major,
-    field_size -- all known ahead of the tournament, so equally available
-    at live-prediction time, not just training time), a course-fit block
-    (from course_results, this golfer's own past results specifically at
-    THIS event's course_id -- see rolling_golfer_averages' own docstring
-    for why the exact same averaging function works unchanged for either
-    input), a season-stats block (from season_stats, this golfer's own
-    driving/GIR/putting/scoring numbers as of the most recent snapshot
-    before this event -- see SEASON_STAT_CATEGORIES' own docstring), and
-    every label this one shared dataset trains toward (top-10, top-5, and
-    the continuous score_to_par a "field finish order" prediction ranks
-    golfers by at serving time -- library/ml/backtest.py has no rank-loss
-    or multi-class support, see docs/PGA_FEATURE_ENGINEERING.md, so none
-    of these need a second dataset build or a new task type).
+    plus this event's field-strength context (purse, is_major,
+    field_size), a course-fit block (from course_results, this golfer's
+    past results at this event's course_id), a season-stats block (from
+    season_stats, this golfer's driving/GIR/putting/scoring numbers as of
+    the most recent snapshot before this event), and every label this
+    shared dataset trains toward (top-10, top-5, and the continuous
+    score_to_par a "field finish order" prediction ranks golfers by at
+    serving time).
 
     field_size is this event's own participant count, not a rolling
     average -- a bigger field mechanically lowers everyone's odds of a
-    top-10 finish regardless of who's in it, so it's a per-event feature
-    like purse/is_major, not something to smooth across a golfer's history.
+    top-10 finish, so it's a per-event feature like purse/is_major.
 
     course_results/season_stats both default to None (not [] / {}) so a
-    caller that hasn't resolved that history yet (e.g. an older call
-    site, a course_id genuinely absent on the event, or -- true for every
-    single backfilled historical row, since there is no historical source
-    for season stats at all -- no qualifying snapshot exists yet) still
-    gets every course_*/season_* column as an explicit missing value,
-    rather than a row whose column SET differs from every other row's,
-    which pandas' later union-of-columns Parquet write would otherwise
-    silently paper over instead of failing loudly. rounds_so_far
-    similarly defaults to None -- see in_tournament_progress_features'
-    own docstring for why that's also the correct default for every
-    pre-tournament row, live or historical."""
+    caller that hasn't resolved that history yet still gets every
+    course_*/season_* column as an explicit missing value, rather than a
+    row whose column set differs from every other row's. rounds_so_far
+    similarly defaults to None."""
     result = participant.get("result") or {}
     finish_position = _as_number(result.get("finish_position"))
     progress = in_tournament_progress_features(rounds_so_far)
@@ -204,35 +140,21 @@ def build_golfer_event_features(
         **progress,
         "label_top_10": 1 if finish_position is not None and finish_position <= 10 else 0,
         "label_top_5": 1 if finish_position is not None and finish_position <= 5 else 0,
-        # Continuous label for the projected-score-to-par regression model
-        # -- "field finish order" is a serving-time ranking of this
-        # model's own predictions across one tournament's field, not a
-        # separately trained artifact.
-        #
-        # This is the REMAINING score-to-par over whatever rounds aren't
-        # reflected in score_to_par_this_week_so_far yet, not the absolute
-        # final score directly -- confirmed live, 2026-08-28, that feeding
-        # the model the golfer's own current cumulative as a raw feature
-        # let it dominate every other feature (score_to_par_this_week_so_far
-        # had ~2.7x the next-highest feature's importance), collapsing the
-        # model to roughly "final ≈ current cumulative", which is exactly
-        # why a real user saw the field's own "projected to par" look like
-        # round 1's cumulative after round 1 and round 2's after round 2
-        # instead of a genuine full-tournament projection. Serving time
+        # Continuous label for the projected-score-to-par regression
+        # model. This is the REMAINING score-to-par over whatever rounds
+        # aren't reflected in score_to_par_this_week_so_far yet, not the
+        # absolute final score -- the raw cumulative-as-feature version
+        # let that one feature dominate every other, collapsing the model
+        # to roughly "final ≈ current cumulative." Serving time
         # (aws-lambdas/pga/predict/event_prediction.py) adds this model's
-        # remaining-score output back onto the golfer's own real, already-
-        # known score_to_par_this_week_so_far to get the field-facing
-        # projected_score_to_par value.
+        # remaining-score output back onto score_to_par_this_week_so_far
+        # to get the field-facing projected_score_to_par value.
         #
-        # None (not a real target) for a row with no recorded final score
-        # at all (e.g. a withdrawal before playing a single hole) --
-        # filtered out at training time, same as every other regression
-        # target in this project handles a null label. Correct at every
-        # snapshot: pre-tournament (score_to_par_this_week_so_far is None
-        # -> treated as 0, remaining = the full tournament), mid-tournament
-        # (remaining = what's actually left), and a cut golfer's own last
-        # snapshot (remaining = exactly 0, since final == cumulative there
-        # -- there IS nothing left for them to shoot).
+        # None for a row with no recorded final score (e.g. a withdrawal
+        # before playing a hole) -- filtered out at training time.
+        # Correct at every snapshot: pre-tournament (remaining = the full
+        # tournament), mid-tournament (remaining = what's actually left),
+        # and a cut golfer's last snapshot (remaining = 0).
         "label_remaining_score_to_par": (
             None if final_score_to_par is None else final_score_to_par - (progress["score_to_par_this_week_so_far"] or 0)
         ),
@@ -247,22 +169,12 @@ def build_golfer_event_features(
 
 
 def rolling_round_averages(round_results: list[dict], window: int = DEFAULT_ROLLING_WINDOW) -> dict:
-    """round_results: this golfer's own past rounds SPECIFICALLY at the
-    SAME round number being scored (e.g. every past "round 1" they've
-    played across tournaments), most recent first, NOT including the
-    round being scored. Each dict has the shape library/normalize/pga.py's
-    _parse_rounds produces (round, score_to_par, total_strokes) -- a
-    genuinely different, smaller shape than a tournament-level result
-    dict (no finish_position/earnings at the round grain), which is why
-    this is its own function rather than a reuse of rolling_golfer_
-    averages against round dicts (those two fields would just always
-    resolve to None, silently).
-
-    Genuinely different signal from a golfer's overall tournament rolling
-    average -- some golfers are consistently fast/slow starters or
-    strong/weak closers, a pattern only visible by round number, not from
-    their tournament-level average alone. Type-checked, not just None-
-    checked, same rolling_golfer_averages defense-in-depth reasoning."""
+    """round_results: this golfer's own past rounds specifically at the
+    same round number being scored, most recent first, not including the
+    round being scored. Each dict has the shape library/normalize/
+    pga.py's _parse_rounds produces (round, score_to_par, total_strokes)
+    -- no finish_position/earnings at the round grain, which is why this
+    is its own function rather than reusing rolling_golfer_averages."""
     windowed = round_results[:window]
     score_to_par_values = [r["score_to_par"] for r in windowed if isinstance(r.get("score_to_par"), (int, float))]
     return {
@@ -279,31 +191,20 @@ def build_round_event_features(
     prior_same_round_results: list[dict],
     window: int = DEFAULT_ROLLING_WINDOW,
 ) -> dict:
-    """One row per (golfer, tournament, round actually played) -- the
-    per-round-score-projection models' own grain, genuinely finer than
-    build_golfer_event_features' one-row-per-tournament. round_result is
-    one entry from participant["result"]["rounds"] (library/normalize/
-    pga.py's _parse_rounds).
+    """One row per (golfer, tournament, round actually played) -- finer
+    grain than build_golfer_event_features' one-row-per-tournament.
+    round_result is one entry from participant["result"]["rounds"]
+    (library/normalize/pga.py's _parse_rounds).
 
-    A cut golfer's own `rounds` list naturally has only 2 entries, not 4
-    (confirmed live -- see _parse_rounds' own docstring), so this
-    function is simply never called for a round 3/4 that didn't happen --
-    no conditional cut-checking logic needed here or in the caller that
-    walks each participant's rounds list. The "don't project rounds 3-4
-    for a golfer projected to miss the cut" behavior the user asked for
-    is a SERVING-time concern (which rounds to even bother calling this
-    model for on a live, in-progress tournament), not a training-time one
-    -- there is no predict Lambda yet (Phase 5 step 4) to implement that
-    in.
+    A cut golfer's `rounds` list naturally has only 2 entries, not 4, so
+    this function is simply never called for a round 3/4 that didn't
+    happen.
 
     prior_overall_results feeds the golfer's usual tournament-level
     rolling averages (rolling_golfer_averages, `overall_`-prefixed);
     prior_same_round_results feeds their round-number-specific history
-    (rolling_round_averages, `same_round_`-prefixed) -- deliberately no
-    course-fit or season-stats block here, unlike build_golfer_event_
-    features, to keep this first version of round-level modeling scoped;
-    add them later the same way course fit was added to the tournament-
-    level dataset if round-level modeling proves out."""
+    (rolling_round_averages, `same_round_`-prefixed). No course-fit or
+    season-stats block here, unlike build_golfer_event_features."""
     row = {
         "event_key": event["event_key"],
         "entity_id": participant["entity_id"],
@@ -320,20 +221,12 @@ def build_round_event_features(
 
 
 def _average_side(per_golfer_dicts: list[dict]) -> dict:
-    """Element-wise mean across 1+ same-shaped stat dicts (every dict here
-    is one golfer's own rolling_golfer_averages output) -- how a match-
-    play SIDE's combined skill is approximated from its 1 (singles/WGC)
-    or 2 (foursomes/fourball) golfers' individual form, the same
-    assumption Teamstroke's shared scoring already makes implicitly (see
-    library/normalize/pga.py's _competitor_to_participants docstring).
-    None for a key where every contributing golfer's own value is None,
-    same "missing, not fabricated" rule every rolling helper in this
-    module uses. Empty input (a side with no golfer history resolved at
-    all) returns {}, not a dict of Nones -- callers merge this into a
-    row via dict.update, where a genuinely absent key and an explicit
-    None both leave that column at its Parquet-write-time default, so
-    there's no real difference between the two for a caller with no
-    golfers to average at all."""
+    """Element-wise mean across 1+ same-shaped stat dicts (each one
+    golfer's own rolling_golfer_averages output) -- how a match-play
+    side's combined skill is approximated from its 1 (singles/WGC) or 2
+    (foursomes/fourball) golfers' individual form. None for a key where
+    every contributing golfer's value is None. Empty input returns {},
+    not a dict of Nones."""
     if not per_golfer_dicts:
         return {}
     keys = per_golfer_dicts[0].keys()
@@ -350,29 +243,20 @@ def build_match_event_features(
     away_prior_results_by_golfer: dict[str, list[dict]],
     window: int = DEFAULT_ROLLING_WINDOW,
 ) -> dict:
-    """One training row: home-side vs. away-side rolling STROKE-PLAY form
+    """One training row: home-side vs. away-side rolling stroke-play form
     for the match win-probability model -- one row per individual match
-    (event_type "match_play", library/normalize/pga_matchplay.py), covers
-    both team match play (Ryder Cup/Presidents Cup foursomes/fourball/
-    singles) and individual match play (WGC Match Play) uniformly, since
-    both share the same participants[].golfer_entity_ids shape (1 golfer
-    for singles/WGC, 2 for a foursomes/fourball pairing).
+    (event_type "match_play"), covers both team match play (Ryder Cup/
+    Presidents Cup foursomes/fourball/singles) and individual match play
+    (WGC Match Play) uniformly, since both share the same
+    participants[].golfer_entity_ids shape.
 
     home_prior_results_by_golfer/away_prior_results_by_golfer map each
-    side's own golfer_entity_ids to that golfer's own prior REGULAR-TOUR
-    (event_type "field") results, most-recent-first, NOT including this
-    match -- match-play wins/losses themselves never feed this history
-    (they aren't stroke scores, see feature-engineering/pga/build_dataset.
-    py's own build_match_and_cup_datasets docstring for why); a golfer's
-    demonstrated stroke-play form is the skill signal being used to
-    predict a match outcome, not their match-play record itself (there
-    isn't enough match-play history per golfer for that to be a
-    meaningful separate signal at all).
+    side's golfer_entity_ids to that golfer's prior regular-tour
+    (event_type "field") results, most-recent-first, not including this
+    match -- match-play wins/losses never feed this history.
 
-    label_home_won is None (excluded from training, same "filter at train
-    time" convention build_cutline_event_features' own cut_count > 0
-    filter uses) for a halved (tied) match -- neither side actually won,
-    so there's no true binary label to assign."""
+    label_home_won is None (excluded from training) for a halved (tied)
+    match."""
     home = next(p for p in match_event["participants"] if p.get("role") == "home")
     away = next(p for p in match_event["participants"] if p.get("role") == "away")
 
@@ -407,13 +291,10 @@ def build_cup_event_features(
     """One training row: home-team vs. away-team rolling stroke-play form
     for the Cup (team win-probability) model -- one row per Ryder Cup/
     Presidents Cup (event_type "cup"). Unlike build_match_event_features'
-    per-match golfer_entity_ids (only that match's own pairing/golfer),
-    home_roster_prior_results/away_roster_prior_results here cover each
-    team's FULL roster (every golfer who played ANY session of this Cup,
-    not just one match) -- see feature-engineering/pga/build_dataset.py's
-    own cup_rosters derivation for how that roster is resolved, since a
-    Cup's own participants (this function's `cup_event` argument) carry
-    only the two teams' final point totals, not a player-level roster."""
+    per-match golfer_entity_ids, home_roster_prior_results/away_roster_
+    prior_results here cover each team's full roster (every golfer who
+    played any session of this Cup), since a Cup event's own participants
+    carry only the two teams' final point totals, not a player roster."""
     home = next(p for p in cup_event["participants"] if p.get("role") == "home")
     away = next(p for p in cup_event["participants"] if p.get("role") == "away")
 
@@ -425,10 +306,7 @@ def build_cup_event_features(
         "event_key": cup_event["event_key"],
         "event_date": cup_event["event_date"],
         "tournament_name": cup_event.get("tournament_name"),
-        # None (excluded from training) for a halved Cup -- not observed
-        # live in this project's 2017-2026 window, but a real Presidents
-        # Cup HAS tied before (2003); see leaderboard_event_to_cup_event_
-        # item's own docstring for how "halved" is derived.
+        # None (excluded from training) for a halved Cup.
         "label_home_won": None if home_result.get("halved") else bool(home_result.get("won")),
     }
     row.update({f"home_{key}": value for key, value in home_form.items()})
@@ -439,23 +317,14 @@ def build_cup_event_features(
 def build_cutline_event_features(
     event: dict, prior_course_cut_scores: list[float] | None = None, window: int = DEFAULT_COURSE_HISTORY_WINDOW,
 ) -> dict:
-    """One row per completed Medal-scoring tournament -- the projected-
-    cut-line model's own grain, TOURNAMENT-level rather than golfer-level
-    (a cut line is a property of the whole field, not any one golfer's
-    own result). Includes every tournament, cut or not -- train_cutline_
-    model.py filters to cut_count > 0 at TRAIN time (a no-cut tournament
-    genuinely reports cut_score/cut_round/cut_count all as a real 0, not
-    a missing value -- see design/DATA_SCHEMA.md), same "filter at train
-    time, keep the raw dataset complete" convention NCAAFB's own national-
-    ranking model already uses for its own not-every-row-is-ranked case.
+    """One row per completed medal-scoring tournament -- the projected-
+    cut-line model's own grain, tournament-level rather than golfer-level.
+    Includes every tournament, cut or not -- train_cutline_model.py
+    filters to cut_count > 0 at train time (a no-cut tournament reports
+    cut_score/cut_round/cut_count all as a real 0, not a missing value).
 
-    prior_course_cut_scores: this SAME course's own past cut_score
-    values, most recent first, if a course_id is known -- a course that
-    plays hard or easy tends to do so consistently year to year, the one
-    rolling signal this dataset carries (no golfer-level history makes
-    sense at this grain). Type-checked (not just truthiness-checked)
-    before the sum(), same _as_number defense-in-depth every other label/
-    raw field in this module now gets."""
+    prior_course_cut_scores: this same course's past cut_score values,
+    most recent first, if a course_id is known."""
     windowed = [v for v in (prior_course_cut_scores or [])[:window] if isinstance(v, (int, float))]
     return {
         "event_key": event["event_key"],

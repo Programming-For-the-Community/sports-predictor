@@ -146,10 +146,9 @@ void main() {
   });
 
   testWidgets('TOTAL stays bare to-par even when a real stroke count and par are both available', (tester) async {
-    // Explicit user call: THIS RD/the round breakdown show "N strokes (to
-    // par)", but the whole-tournament TOTAL column never does -- there's
-    // no unambiguous par baseline for a full tournament (2-round missed
-    // cut vs. 4-round made cut).
+    // TOTAL never shows "N strokes (to par)" -- no unambiguous par
+    // baseline for a full tournament (2-round missed cut vs. 4-round
+    // made cut).
     final field = [_golfer('1', 'Xander Schauffele', projectedScoreToPar: -8, actualScoreToPar: -5, actualTotalStrokes: 275.0)];
 
     await tester.pumpWidget(_wrap(FieldLeaderboardTable(field: field, par: 70)));

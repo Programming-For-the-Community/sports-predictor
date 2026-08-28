@@ -179,9 +179,9 @@ class TestPredictFieldEvent:
         }
 
     def test_actual_status_is_this_golfers_own_real_status_not_inferred_from_having_a_standing(self):
-        # The real bug: a golfer with a current standing mid-tournament is
-        # NOT necessarily "finished" -- their own real ESPN status (still
-        # out on the course) must come through unchanged.
+        # A golfer with a current standing mid-tournament is not
+        # necessarily "finished" -- their own real ESPN status must come
+        # through unchanged.
         storage, s3, predictions_table = MagicMock(), MagicMock(), MagicMock()
         storage.get_entity.return_value = None
         predictions_table.query.return_value = []  # no historical round predictions to backfill
@@ -259,11 +259,9 @@ class TestPredictFieldEvent:
         assert result["par"] is None
 
     def test_backfills_a_played_rounds_own_historical_pre_round_forecast(self):
-        # default_result has round 1 already played -- its own original
-        # forecast (recorded before round 1 started, never re-scored once
-        # played) should be recovered from predictions_table and merged
-        # in next to round 2's freshly-scored (live_features golfer_rows
-        # only has round 2 in this fixture) projection.
+        # default_result has round 1 already played -- its own pre-round
+        # forecast should be recovered from predictions_table and merged
+        # in next to round 2's freshly-scored projection.
         storage, s3, predictions_table = MagicMock(), MagicMock(), MagicMock()
         storage.get_entity.return_value = None
         predictions_table.query.return_value = [

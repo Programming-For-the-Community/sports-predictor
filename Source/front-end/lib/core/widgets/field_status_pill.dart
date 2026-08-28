@@ -7,17 +7,14 @@ import '../theme/app_text_styles.dart';
 /// map_status vocabulary (library/normalize/pga.py): scheduled/finished/
 /// cut/made_cut_did_not_finish/withdrawn/in_progress, plus any other
 /// unrecognized value, which falls through to the "still playing" branch
-/// below rather than being silently mislabeled.
+/// below.
 class FieldStatusPill extends StatelessWidget {
   const FieldStatusPill({super.key, required this.status, this.dotOnly = false});
 
   final String? status;
   // True on a narrow (compact) viewport -- field_leaderboard_table.dart's
-  // STATUS column has no room for a full text label there (confirmed
-  // live: a real "Made Cut, DNF" pill was one of the widest single
-  // strings in the whole table, and STATUS shares its column width with
-  // #/PLAYER/TOTAL on mobile). Collapses to just the colored dot,
-  // keeping the color-coded signal without the text.
+  // STATUS column has no room for a full text label there. Collapses to
+  // just the colored dot, keeping the color-coded signal without text.
   final bool dotOnly;
 
   @override
@@ -30,9 +27,8 @@ class FieldStatusPill extends StatelessWidget {
       'withdrawn' => ('Withdrawn', AppColors.neg),
       'in_progress' => ('In Progress', AppColors.live),
       null => ('--', AppColors.inkMute),
-      // Unrecognized -- treat as still playing, not silently mislabeled.
-      // Title-cased from the raw status name rather than shouted
-      // uppercase, matching every recognized label's own casing above.
+      // Unrecognized -- treat as still playing. Title-cased from the raw
+      // status name, matching every recognized label's own casing above.
       _ => (status!.replaceAll('_', ' ').split(' ').map((w) => w.isEmpty ? w : '${w[0].toUpperCase()}${w.substring(1)}').join(' '), AppColors.live),
     };
 

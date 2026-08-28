@@ -23,14 +23,11 @@ class ModelFeatureImportance {
 /// always mean better-calibrated probabilities. `rankScore` is nullable
 /// since older candidate lists only ever had `score`.
 ///
-/// `score`/`rankScore` are also both nullable for a real, non-error
-/// reason distinct from that: library/ml/backtest.py's own
+/// `score` is also nullable for a distinct reason: library/ml/backtest.py's
 /// _full_candidate_summary writes a "not_evaluated" placeholder entry
-/// (score/rank_score/training_seconds all null) for every candidate not
-/// yet tried when a model card is captured mid-run -- a real shape a
-/// promoted card can permanently carry if that training run never
-/// finished cleanly. `status` surfaces that ("not_evaluated" or null for
-/// an actually-evaluated candidate).
+/// (score/rank_score/training_seconds all null) for a candidate not yet
+/// tried when a model card is captured mid-run. `status` surfaces that
+/// ("not_evaluated" or null for an actually-evaluated candidate).
 class ModelCandidate {
   const ModelCandidate({required this.algorithm, required this.score, required this.rankScore, this.status});
 

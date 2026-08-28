@@ -1,28 +1,15 @@
 """
 Monte Carlo FedEx Cup season simulation -- pure functions, no AWS/model
-loading here (season_projection.py's own compute-Lambda side resolves
-real mu/rmse inputs and calls into this module). Mirrors NBA/NCAAFB's
-season_projection.py's own weekly-EventBridge -> Monte Carlo -> S3-cache
-shape, but the per-iteration outcome model is genuinely different: golf
-has no pairwise matchup for a cheap closed-form Elo resolution the way a
-game does, so each remaining event's per-golfer outcome distribution
-(mu from the projected-score-to-par model, rmse from that SAME model's
-own card -- one rmse for the whole model, not per golfer) is scored ONCE
-up front (real model inference, done by season_projection.py before this
-module ever runs), and this module just samples repeatedly from that
-already-computed distribution -- decoupling expensive inference (once
-per golfer per remaining event) from cheap sampling (thousands of times
-per iteration).
+loading here (season_projection.py resolves the real mu/rmse inputs and
+calls into this module). Each remaining event's per-golfer outcome
+distribution (mu from the projected-score-to-par model, rmse from that
+model's own card) is scored once up front by season_projection.py; this
+module samples repeatedly from that distribution.
 
-TOUR Championship, under the 2025+ format (confirmed live, 2026-08-28,
-via the real ESPN leaderboard payload carrying no handicap/stagger field
-at all, and PGA Tour's own published rule change): NO starting-strokes
-handicap by seed anymore -- "the best performer over the course of four
-rounds ... will win the FedExCup." So it's simulated with the EXACT same
-score-sampling mechanic as every other event, just with no points
-awarded (the Cup CHAMPION is simply whoever's simulated score is lowest
-in that one event) and a field fixed to the top 30 by points, not scored
-by tier at all.
+TOUR Championship (2025+ format): no starting-strokes handicap by seed --
+simulated with the same score-sampling mechanic as every other event,
+just with no points awarded (the Champion is whoever's simulated score is
+lowest) and a field fixed to the top 30 by points.
 """
 import random
 from collections import defaultdict
@@ -37,12 +24,9 @@ TOUR_CHAMPIONSHIP_FIELD_SIZE = 30
 
 
 def simulate_event_scores(field: list[str], mu_by_golfer: dict[str, float], rmse: float, rng: random.Random) -> dict[str, float]:
-    """One Monte Carlo sample of every golfer's own tournament score-to-
-    par for one event -- Normal(mu, rmse) per golfer, rounded to the
-    nearest whole stroke (a real score-to-par is always an integer). A
-    golfer in `field` with no mu at all (shouldn't happen for a properly
-    resolved field, but defends against a partial upstream resolution)
-    is skipped entirely rather than sampled from a fabricated mean."""
+    """One Monte Carlo sample of every golfer's tournament score-to-par
+    for one event -- Normal(mu, rmse) per golfer, rounded to the nearest
+    whole stroke. A golfer in `field` with no mu is skipped."""
     return {
         entity_id: round(rng.gauss(mu_by_golfer[entity_id], rmse))
         for entity_id in field
@@ -52,10 +36,8 @@ def simulate_event_scores(field: list[str], mu_by_golfer: dict[str, float], rmse
 
 def rank_field(scores: dict[str, float]) -> dict[str, int]:
     """entity_id -> 1-based finish_position, ascending score (lowest
-    wins, real golf scoring). Tied scores share the SAME position (real
-    PGA Tour rule) -- points_for_field's own tie-splitting handles paying
-    a tie correctly from there; this function only ever needs to report
-    the shared position itself."""
+    wins). Tied scores share the same position; points_for_field handles
+    tie-splitting from there."""
     ordered = sorted(scores.items(), key=lambda kv: kv[1])
     positions: dict[str, int] = {}
     for i, (entity_id, score) in enumerate(ordered):
@@ -67,11 +49,9 @@ def rank_field(scores: dict[str, float]) -> dict[str, int]:
 
 
 def _top_n_by_points(points: dict[str, float], n: int) -> list[str]:
-    """The top `n` golfers by accumulated points -- a tie AT the cutoff
-    (the nth and (n+1)th golfer tied on points) lets BOTH through rather
-    than arbitrarily excluding one; real PGA Tour Playoffs cutoffs work
-    the same way (a tie at the cutoff line advances everyone tied there).
-    Fewer than `n` golfers total simply returns all of them."""
+    """The top `n` golfers by accumulated points -- a tie at the cutoff
+    lets both through rather than arbitrarily excluding one. Fewer than
+    `n` golfers total simply returns all of them."""
     if len(points) <= n:
         return list(points)
     ordered = sorted(points.items(), key=lambda kv: -kv[1])
@@ -91,18 +71,14 @@ def simulate_one_iteration(
     """One full Monte Carlo pass through the rest of the season.
 
     remaining_events: chronological list of {"tier": str, "field": [...],
-    "mu": {...}, "rmse": float} -- every real tour event still left to
-    play BEFORE FedEx St. Jude (regular/elevated/major tier points).
+    "mu": {...}, "rmse": float} -- every event left before FedEx St. Jude.
 
     fedex_st_jude/bmw_championship: {"mu": {...}, "rmse": float} for
-    their own full ORIGINAL field (this function narrows to the real top-
-    70/top-50 cutoff itself, from `current_points` as it stands once
-    remaining_events have all been added in).
+    their own full original field (narrowed here to the real top-70/
+    top-50 cutoff by points).
 
-    Returns {"points": {...} (final, post-TOUR-Championship-eligible
-    total -- TOUR Championship itself awards none), "fedex_st_jude_field":
-    [...], "bmw_field": [...], "tour_championship_field": [...],
-    "champion": entity_id}."""
+    Returns {"points": {...}, "fedex_st_jude_field": [...], "bmw_field":
+    [...], "tour_championship_field": [...], "champion": entity_id}."""
     points = dict(current_points)
     for event in remaining_events:
         scores = simulate_event_scores(event["field"], event["mu"], event["rmse"], rng)
@@ -150,9 +126,8 @@ def simulate_season(
     seed: int | None = None,
 ) -> dict:
     """Aggregates `simulations` independent calls to simulate_one_iteration
-    into per-golfer probabilities. `seed` is for tests/reproducibility
-    only -- season_projection.py's own real scheduled run leaves it None
-    (a fresh random.Random() per invocation)."""
+    into per-golfer probabilities. `seed` is for tests only -- the real
+    scheduled run leaves it None."""
     rng = random.Random(seed)
     all_golfers = set(current_points) | {
         entity_id for event in remaining_events for entity_id in event["field"]

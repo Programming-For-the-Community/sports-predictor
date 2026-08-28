@@ -201,10 +201,9 @@ class TestBuildLiveFieldFeatures:
         assert result["golfer_rows"]["1"]["rounds"] == {}
 
     def test_golfer_row_reflects_this_tournaments_own_rounds_played_so_far(self):
-        # The real bug this fixes: PROJ/top-10%/top-5% used to stay
-        # completely unchanged after round 1 finished, because nothing
-        # fed the model any signal about the CURRENT, in-progress
-        # tournament -- only rolling averages over OTHER, past ones.
+        # PROJ/top-10%/top-5% used to stay unchanged after round 1
+        # finished, because nothing fed the model any signal about the
+        # current, in-progress tournament.
         target = _field_event("999", "2026-08-20", [_participant("1", rounds=[_round(1, -3), _round(2, 1)])])
         storage = _storage(target, [target])
 

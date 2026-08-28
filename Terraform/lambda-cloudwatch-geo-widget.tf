@@ -44,9 +44,7 @@ resource "aws_lambda_function" "cloudwatch_geo_widget" {
     variables = {
       # Plain comma-joined log group names -- passed to StartQuery's own
       # logGroupNames parameter, not embedded as SOURCE clauses in the
-      # query text (unlike the dashboard-widget queries in cloudwatch-
-      # dashboard-viewer-analytics.tf, which have no other way to name
-      # multiple sources). Every sport's predict-read log group, one query.
+      # query text.
       ACCEPTED_LOG_GROUP_NAMES = join(",", local.viewer_analytics_log_group_names)
       BLOCKED_LOG_GROUP_NAME   = aws_cloudwatch_log_group.cloudfront_edge_access_logs.name
     }

@@ -43,6 +43,35 @@ void main() {
       );
 
       expect(tester.takeException(), isNull);
+
+      // Below _compactBreakpoint, ST. JUDE%/BMW%/TOUR CH.% drop out of
+      // the top-level columns entirely -- crushing all 7 into a ~340px
+      // usable width is what made the table illegible on mobile.
+      expect(find.text('ST. JUDE%'), findsNothing);
+      expect(find.text('BMW%'), findsNothing);
+      expect(find.text('TOUR CH.%'), findsNothing);
+      // #, GOLFER, POINTS, CHAMP% stay visible.
+      expect(find.text('CHAMP%'), findsOneWidget);
+      expect(find.text('Rory McIlroy'), findsOneWidget);
+    });
+
+    testWidgets('tapping a row at ${width}px wide reveals the Playoffs-field odds', (tester) async {
+      await pumpAtWidth(
+        tester,
+        width,
+        ProviderScope(
+          overrides: [pgaSeasonProjectionProvider.overrideWith((ref) async => _projection)],
+          child: const MaterialApp(home: Scaffold(body: PgaSeasonPage())),
+        ),
+      );
+
+      expect(find.text('ST. JUDE%'), findsNothing);
+
+      await tester.tap(find.text('Rory McIlroy'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('ST. JUDE%'), findsOneWidget);
+      expect(find.text('95%'), findsOneWidget); // Rory's fedexStJudeProbability, 0.95 rounded
     });
   }
 }

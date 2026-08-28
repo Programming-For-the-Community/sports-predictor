@@ -34,18 +34,10 @@ int? _currentRoundNumber(FieldParticipantPrediction entry) {
   return null;
 }
 
-// Below this width, a real ~150-golfer field with real names/pills/
-// stroke counts genuinely doesn't fit across 7 columns -- everything
-// silently ellipsizes into illegibility rather than throwing a layout
-// exception, which is exactly why the earlier flat mobile-overflow tests
-// (checking only for a crash) didn't catch it. Same breakpoint value as
-// game_row.dart's own _stackBreakpoint, for the same "narrower than a
-// tablet" cutoff, though this table's own content is denser so it needs
-// column REDUCTION, not just stacking. THIS RD/TOP 10%/TOP 5% move into
-// the expanded per-row detail below this width -- ROUND 1-4 already
-// shows the current round's own proj/actual once expanded, so THIS RD's
-// own information isn't lost, just no longer duplicated at the top
-// level; TOP 10%/TOP 5% get a new home in _ExpandedProbabilities.
+// Below this width, a ~150-golfer field with real names/pills/stroke
+// counts doesn't fit across 7 columns. Same breakpoint as game_row.dart's
+// _stackBreakpoint. THIS RD/TOP 10%/TOP 5% move into the expanded
+// per-row detail below this width -- see _ExpandedProbabilities.
 const _compactBreakpoint = 600.0;
 
 List<_LeaderboardColumn> _leaderboardColumns(int? par, {required bool compact}) {
@@ -74,31 +66,19 @@ List<_LeaderboardColumn> _leaderboardColumns(int? par, {required bool compact}) 
           ],
         );
       }),
-      // The status pill the user asked for -- one per golfer row, showing
-      // their round status (scheduled/finished/cut/MDF/withdrawn/still
-      // playing). Prefers the live overlay's status when present (fresher),
-      // falls back to the prediction response's own actual-result absence
-      // (no live overlay fetched yet, or this event isn't in a live window).
+      // Round status (scheduled/finished/cut/MDF/withdrawn/still playing).
       // live.status first (freshest, live-poll window only), else this
-      // golfer's own real stored status -- NOT inferred from
-      // actualFinishPosition's presence (a real current standing exists
-      // well before this golfer's own round is actually finished; that
-      // was a real bug -- every golfer with any standing at all showed
-      // "Finished" regardless of the tournament actually still being in
-      // progress).
+      // golfer's own real stored status -- not inferred from
+      // actualFinishPosition's presence.
       _LeaderboardColumn('STATUS', compact ? 1 : 3, (context, entry, live, rowNumber) {
         final status = live?.status ?? entry.actualStatus;
         return Center(child: FieldStatusPill(status: status, dotOnly: compact));
       }),
-      // Actual (live-first, else the real cumulative standing) next to the
-      // model's own projected FINAL tournament score-to-par -- same
-      // actual/projected pairing THIS RD shows for the current round alone,
-      // now shown for the whole tournament (was two separate columns,
-      // TO PAR and PROJ, split apart from each other for no reason).
-      // Labeled TOTAL, not TO PAR -- same term ESPN/PGA Tour's own real
-      // leaderboards use for this exact full-tournament column, and
-      // distinguishes it from THIS RD's own to-par-for-the-round-alone
-      // value at a glance instead of both columns reading as "to par".
+      // Actual (live-first, else the real cumulative standing) next to
+      // the model's own projected FINAL tournament score-to-par. Labeled
+      // TOTAL, not TO PAR -- same term ESPN/PGA Tour's own real
+      // leaderboards use, and distinguishes it from THIS RD's own
+      // to-par-for-the-round-alone value.
       _LeaderboardColumn('TOTAL', 3, (context, entry, live, rowNumber) {
         final scoreToPar = live?.scoreToPar ?? entry.actualScoreToPar;
         final projected = entry.projectedScoreToPar?.value;
@@ -108,14 +88,10 @@ List<_LeaderboardColumn> _leaderboardColumns(int? par, {required bool compact}) 
   if (compact) return core;
   return [
     ...core,
-    // The current round's own proj/actual, visible without expanding
-    // the row -- the full 1-4 breakdown is still only in the expanded
-    // panel below (_RoundBreakdownStrip), but the round most relevant
-    // right now doesn't require a tap to see. Dropped from the
-    // COMPACT (mobile) column set below _compactBreakpoint -- ROUND
-    // 1-4 already shows the current round's own proj/actual once
-    // expanded, so this would just be the same number twice on a
-    // screen with no room to spare.
+    // The current round's own proj/actual, visible without expanding the
+    // row -- the full 1-4 breakdown is still only in the expanded panel
+    // below (_RoundBreakdownStrip). Dropped from the compact (mobile)
+    // column set below _compactBreakpoint.
     _LeaderboardColumn('THIS RD', 2, (context, entry, live, rowNumber) {
       final round = _currentRoundNumber(entry);
       if (round == null) {
@@ -140,11 +116,9 @@ String _formatToPar(num? scoreToPar) {
   return rounded > 0 ? '+$rounded' : '$rounded';
 }
 
-/// "67 (-3)" -- the stroke count first, its own to-par in parentheses,
-/// same framing every real golf leaderboard uses. Falls back to the bare
-/// to-par number alone when no stroke count is available at all (no par
-/// known for the course, or -- pre-tournament -- nothing to project a
-/// stroke count from yet).
+/// "67 (-3)" -- the stroke count first, its own to-par in parentheses.
+/// Falls back to the bare to-par number when no stroke count is
+/// available (no par known for the course, or pre-tournament).
 String _formatStrokesAndToPar(double? strokes, num? scoreToPar) {
   final toPar = _formatToPar(scoreToPar);
   if (strokes == null) return toPar;
@@ -194,7 +168,7 @@ class FieldLeaderboardTable extends StatelessWidget {
   // This tournament's own course par (FieldEventPrediction.par) -- lets
   // every actual/projected cell show "N strokes (to par)" instead of the
   // bare to-par number. Null for an older cached response predating this
-  // field; every cell falls back to the bare to-par number in that case.
+  // field.
   final int? par;
 
   @override
@@ -263,14 +237,11 @@ class _LeaderboardHeaderRow extends StatelessWidget {
   }
 }
 
-/// Tap a row to reveal its own full ROUND 1-4 proj-vs-actual strip
-/// (_RoundBreakdownStrip) below the standard columns -- on a wide
-/// viewport, the current round's own summary is already visible at the
-/// top level ('THIS RD'), so the expanded view is purely the FULL
-/// history. Below _compactBreakpoint, THIS RD/TOP 10%/TOP 5% aren't in
-/// the top-level columns at all (see _leaderboardColumns), so expanding
-/// is the ONLY way to see TOP 10%/TOP 5% on a narrow screen -- see
-/// _ExpandedProbabilities, shown only when compact.
+/// Tap a row to reveal its full ROUND 1-4 proj-vs-actual strip
+/// (_RoundBreakdownStrip) below the standard columns. Below
+/// _compactBreakpoint, THIS RD/TOP 10%/TOP 5% aren't in the top-level
+/// columns at all (see _leaderboardColumns), so expanding is the only
+/// way to see them -- see _ExpandedProbabilities, shown only when compact.
 class _LeaderboardRow extends StatefulWidget {
   const _LeaderboardRow({
     required this.entry, required this.live, required this.columns, required this.rowNumber,
@@ -336,8 +307,7 @@ class _LeaderboardRowState extends State<_LeaderboardRow> {
 }
 
 /// TOP 10%/TOP 5% dropped from the compact (mobile) top-level columns --
-/// this is their only remaining home on a narrow screen, shown above the
-/// ROUND 1-4 breakdown once a row is expanded.
+/// shown above the ROUND 1-4 breakdown once a row is expanded instead.
 class _ExpandedProbabilities extends StatelessWidget {
   const _ExpandedProbabilities({required this.entry});
 
@@ -371,12 +341,9 @@ class _ExpandedProbabilities extends StatelessWidget {
   return null;
 }
 
-/// Holes completed in the CURRENT round -- live overlay first (freshest
-/// during an active poll window), else the prediction response's own
-/// real (not status-gated) actual.thru. Only meaningful while this
-/// golfer's own status is 'in_progress' -- null otherwise so a finished/
-/// not-yet-started golfer never shows a stale "Thru N" from an earlier
-/// round.
+/// Holes completed in the current round -- live overlay first, else
+/// actual.thru. Only meaningful while this golfer's status is
+/// 'in_progress' -- null otherwise.
 int? _currentThru(FieldParticipantPrediction entry, FieldParticipantLiveResult? live) {
   final status = live?.status ?? entry.actualStatus;
   if (status != 'in_progress') return null;
@@ -419,18 +386,15 @@ class _RoundCell extends StatelessWidget {
   final int round;
   final double? projected; // the round model's own point estimate
   final ({num? scoreToPar, double? totalStrokes})? actual;
-  // This course's own single-round par -- projected * strokes is
-  // (par + projected), unlike TOTAL's own full-tournament (par * 4 +
-  // projected) conversion, since a single round has no cut-line
-  // ambiguity to worry about.
+  // This course's own single-round par -- projected strokes is
+  // (par + projected).
   final int? par;
   // false for the compact top-level 'THIS RD' column (the round number is
   // already implied by the column header); true inside the full 1-4
   // breakdown, where each cell needs its own "ROUND N" label.
   final bool showLabel;
-  // Holes completed so far in THIS round -- only ever non-null for
-  // whichever round is this golfer's own currently in-progress one (see
-  // _currentThru), never for an already-finished or not-yet-started one.
+  // Holes completed so far in this round -- non-null only for whichever
+  // round is this golfer's currently in-progress one.
   final int? thru;
 
   @override
@@ -449,13 +413,10 @@ class _RoundCell extends StatelessWidget {
     final thruCaption = thru != null
         ? Text('Thru $thru', style: AppTextStyles.microLabel(color: AppColors.inkMute), maxLines: 1, overflow: TextOverflow.ellipsis)
         : null;
-    // Inside the full breakdown (showLabel), there's room to keep actual
-    // and projected on one line next to the "ROUND N" label above them.
-    // In the compact top-level 'THIS RD' column, that column is often
-    // too narrow for both side by side -- stack them instead, the same
-    // "trade width for height" PLAYER's own name+country cell already
-    // uses. thruCaption (when present) gets its own line either way --
-    // there's never room to fit "Thru N" next to the score inline.
+    // Inside the full breakdown (showLabel), actual and projected sit on
+    // one line next to the "ROUND N" label above them. In the compact
+    // top-level 'THIS RD' column, stack them instead. thruCaption gets
+    // its own line either way.
     final value = showLabel
         ? Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
             Row(mainAxisSize: MainAxisSize.min, children: [actualText, const SizedBox(width: 6), projectedText]),
@@ -480,14 +441,10 @@ class _RoundCell extends StatelessWidget {
 
 /// TOTAL column's cell -- same compact actual-over-projected stack
 /// _RoundCell uses for THIS RD (showLabel: false), just tournament-level
-/// (cumulative standing vs. projected FINAL score-to-par) instead of one
-/// round's own actual vs. that round's own projection. Deliberately
-/// stays bare to-par (no "N strokes" prefix) even though a real stroke
-/// count is often available here too -- unlike a single round, a
+/// (cumulative standing vs. projected FINAL score-to-par). Deliberately
+/// stays bare to-par (no "N strokes" prefix) -- unlike a single round, a
 /// tournament total has no unambiguous par baseline to convert against
-/// (2-round missed-cut vs. 4-round made-cut), so THIS RD/the round
-/// breakdown get the "N strokes (to par)" treatment but this column does
-/// not -- explicit user call.
+/// (2-round missed-cut vs. 4-round made-cut).
 class _StandingCell extends StatelessWidget {
   const _StandingCell({required this.actual, required this.projected});
 

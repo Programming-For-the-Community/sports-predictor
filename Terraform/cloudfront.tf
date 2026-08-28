@@ -150,15 +150,11 @@ resource "aws_cloudfront_distribution" "main" {
     response_page_path = "/index.html"
   }
 
-  # Every 403 CloudFront returns to the viewer -- geo-restriction blocks
-  # and WAF blocks (waf-cloudfront.tf) alike -- rewritten to one minimal,
-  # reason-free page (front-end/web/403.html), so a probe can't
-  # distinguish geo from WAF. Stays a real 403 (response_code = 403), not
-  # remapped to 200 like the 404 entry above -- a blocked request must
-  # not be served the app. API Gateway's own 4xx family (api-gateway.tf)
-  # is normalized separately, at the origin, since it needs a different
-  # status code per response type preserved (see that file's own
-  # comments) rather than one shared 403.
+  # Every 403 CloudFront returns to the viewer -- geo-restriction and WAF
+  # blocks (waf-cloudfront.tf) alike -- rewritten to one minimal,
+  # reason-free page (front-end/web/403.html). Stays a real 403, not
+  # remapped to 200 like the 404 entry above. API Gateway's own 4xx
+  # family (api-gateway.tf) is normalized separately, at the origin.
   custom_error_response {
     error_code         = 403
     response_code      = 403

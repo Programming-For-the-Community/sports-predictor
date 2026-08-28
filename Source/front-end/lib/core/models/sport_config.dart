@@ -36,12 +36,9 @@ class SportConfig {
   final bool hasSeasonProjection;
 
   // True routes /{sport}/season to PgaSeasonPage (a points-standings
-  // table -- FedEx Cup, no bracket) instead of the shared bracket-based
-  // SeasonPage every EventShape.headToHead sport uses. A separate flag
-  // from eventShape deliberately -- F1 is also EventShape.field but
-  // (once active) will want its own driver-standings shape, not
-  // necessarily this one; overloading eventShape would force them to
-  // match.
+  // table, no bracket) instead of the shared bracket-based SeasonPage.
+  // Separate from eventShape since F1 is also EventShape.field but will
+  // want its own driver-standings shape, not necessarily this one.
   final bool usesFedexCupSeasonPage;
 }
 

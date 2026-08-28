@@ -156,10 +156,9 @@ class _CandidateComparison extends StatelessWidget {
     );
   }
 
-  /// "Not yet evaluated" for a candidate library/ml/backtest.py's own
+  /// "Not yet evaluated" for a candidate library/ml/backtest.py's
   /// _full_candidate_summary placeholder-recorded (score null, status
-  /// "not_evaluated") -- a real shape, not missing/malformed data, so
-  /// this shows a real label rather than crashing on a null score.
+  /// "not_evaluated") -- a real shape, not missing/malformed data.
   String _candidateValue(ModelCandidate candidate) {
     final score = candidate.score;
     if (score == null) return 'Not yet evaluated';

@@ -164,12 +164,9 @@ def list_events(storage, sport: str, status: str) -> dict:
 def get_season_projection(s3, sport: str) -> dict | None:
     """GET /pga/season -- reads the FedEx Cup standings/Playoffs-
     probability projection written weekly by the scheduled compute path
-    (aws-lambdas/pga/predict/season_projection.py's own run_scheduled),
-    never computed live here -- same pure read-through NBA/NCAAFB's own
-    get_season_projection already establishes. None if the schedule
-    hasn't fired yet -- the caller is expected to surface that as "not
-    yet available" (a 503, same as every other sport's season route)
-    rather than treat it like a real 500."""
+    (aws-lambdas/pga/predict/season_projection.py's run_scheduled), never
+    computed live here. None if the schedule hasn't fired yet -- the
+    caller surfaces that as a 503, same as every other sport."""
     key = season_projection_key(sport)
     if not s3.object_exists(key):
         return None

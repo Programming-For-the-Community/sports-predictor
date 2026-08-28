@@ -14,6 +14,14 @@ def _mock_logs_client(rows: list[dict]):
     return client
 
 
+def _mock_geo_maps_client(blob: bytes = b"fake-jpeg-bytes"):
+    client = MagicMock()
+    stream = MagicMock()
+    stream.read.return_value = blob
+    client.get_static_map.return_value = {"Blob": stream, "ContentType": "image/jpeg"}
+    return client
+
+
 class TestBucket:
     def test_zero_count_is_bucket_zero(self):
         assert handler._bucket(0, 100) == 0
@@ -35,9 +43,9 @@ class TestAcceptedCountsByState:
         counts = handler._accepted_counts_by_state(client, ["lg1", "lg2"], 0, 1000)
         assert counts == {"CA": 42, "NY": 7}
 
-    def test_a_region_code_outside_the_us_state_grid_is_dropped_not_misplaced(self):
-        # A non-US or malformed region value must never silently land on some
-        # unrelated US_STATE_GRID tile.
+    def test_a_region_code_outside_the_known_states_is_dropped_not_misplaced(self):
+        # A non-US or malformed region value must never silently land on
+        # some unrelated state's marker.
         client = _mock_logs_client([{"region": "CA", "requests": 5}, {"region": "ON", "requests": 3}])
         counts = handler._accepted_counts_by_state(client, ["lg1"], 0, 1000)
         assert counts == {"CA": 5}
@@ -82,32 +90,77 @@ class TestRunLogsInsightsQuery:
         assert handler._run_logs_insights_query(client, ["lg"], "filter true", 0, 1000) == []
 
 
-class TestRegionGrouping:
+class TestAcceptedMapOverlay:
+    def test_every_state_appears_as_a_labeled_point(self):
+        overlay = handler._accepted_map_overlay({"CA": 9})
+        for code in handler.US_STATE_CENTROIDS:
+            assert f"label={code}" in overlay
+
+    def test_is_pipe_delimited_point_terms(self):
+        overlay = handler._accepted_map_overlay({})
+        terms = overlay.split("|")
+        assert len(terms) == len(handler.US_STATE_CENTROIDS)
+        assert all(term.startswith("point:") for term in terms)
+
+    def test_highest_count_state_gets_the_top_bucket_color(self):
+        overlay = handler._accepted_map_overlay({"CA": 100, "NY": 1})
+        assert f"label=CA;color={handler._BUCKET_COLORS[4]}" in overlay
+        assert f"label=NY;color={handler._BUCKET_COLORS[1]}" in overlay
+
+
+class TestBlockedMapOverlay:
     def test_known_country_codes_group_under_their_real_region(self):
-        html = handler._render_region_grid({"RU": 10, "BR": 2})
-        assert "Europe" in html
-        assert "Americas" in html
-        assert "RU" in html and "BR" in html
+        overlay = handler._blocked_map_overlay({"RU": 10, "BR": 2})
+        assert "label=Europe" in overlay
+        assert "label=Americas" in overlay
 
-    def test_an_unmapped_country_code_falls_into_other_instead_of_being_dropped(self):
-        html = handler._render_region_grid({"XX": 4})
-        assert "Other" in html
-        assert "XX" in html
+    def test_an_unmapped_country_code_is_dropped_from_the_map_not_misplaced(self):
+        # "Other" has no real fixed location -- its own count is folded
+        # into by_region but never gets a marker.
+        overlay = handler._blocked_map_overlay({"XX": 4})
+        assert "label=Other" not in overlay
+        # Every known region still renders (at bucket 0 -- no real data).
+        for region in handler.REGION_CENTROIDS:
+            assert f"label={region}" in overlay
 
-    def test_no_blocked_traffic_at_all_renders_a_message_not_an_empty_string(self):
-        assert "No blocked traffic" in handler._render_region_grid({})
+    def test_no_blocked_traffic_at_all_still_renders_every_region_at_bucket_zero(self):
+        overlay = handler._blocked_map_overlay({})
+        for region in handler.REGION_CENTROIDS:
+            assert f"label={region};color={handler._BUCKET_COLORS[0]}" in overlay
 
 
-class TestStateGrid:
-    def test_every_state_in_the_grid_appears_in_the_rendered_svg(self):
-        svg = handler._render_state_grid({"CA": 9})
-        for code in handler.US_STATE_GRID:
-            assert f">{code}<" in svg
+class TestGetStaticMap:
+    def test_requests_a_jpeg_composited_with_the_given_bounding_box_and_overlay(self):
+        client = _mock_geo_maps_client(b"real-bytes")
+        result = handler._get_static_map(client, "-125,24,-67,49", "point:1,2;label=CA;color=#fff")
+        assert result == b"real-bytes"
+        call_kwargs = client.get_static_map.call_args.kwargs
+        assert call_kwargs["BoundingBox"] == "-125,24,-67,49"
+        assert call_kwargs["CompactOverlay"] == "point:1,2;label=CA;color=#fff"
+        assert call_kwargs["Style"] == "Standard"
+        assert call_kwargs["ColorScheme"] == "Dark"
 
-    def test_is_valid_enough_svg_to_open_and_close(self):
-        svg = handler._render_state_grid({})
-        assert svg.startswith("<svg")
-        assert svg.endswith("</svg>")
+
+class TestMapHtml:
+    def test_embeds_the_image_as_a_base64_img_tag(self):
+        client = _mock_geo_maps_client(b"real-bytes")
+        html = handler._map_html(client, "-125,24,-67,49", "overlay", {"CA": 5})
+        assert "<img src=\"data:image/jpeg;base64," in html
+        import base64
+        assert base64.b64encode(b"real-bytes").decode("ascii") in html
+
+    def test_falls_back_to_a_text_summary_instead_of_raising_when_get_static_map_fails(self):
+        client = MagicMock()
+        client.get_static_map.side_effect = RuntimeError("boom")
+        html = handler._map_html(client, "-125,24,-67,49", "overlay", {"CA": 5, "TX": 2})
+        assert "Map unavailable" in html
+        assert "CA: 5" in html
+
+    def test_falls_back_gracefully_with_no_data_either(self):
+        client = MagicMock()
+        client.get_static_map.side_effect = RuntimeError("boom")
+        html = handler._map_html(client, "-125,24,-67,49", "overlay", {})
+        assert "no data in this time range" in html
 
 
 class TestLambdaHandler:
@@ -118,34 +171,55 @@ class TestLambdaHandler:
         assert "Geo widget" in result
         called.assert_not_called()
 
-    def test_accepted_mode_queries_every_configured_log_group(self, monkeypatch):
-        client = _mock_logs_client([{"region": "TX", "requests": 3}])
-        monkeypatch.setattr(handler.boto3, "client", lambda service, **kwargs: client)
+    def test_accepted_mode_queries_every_configured_log_group_and_embeds_a_map(self, monkeypatch):
+        logs_client = _mock_logs_client([{"region": "TX", "requests": 3}])
+        geo_maps_client = _mock_geo_maps_client()
+
+        def _client(service, **kwargs):
+            return geo_maps_client if service == "geo-maps" else logs_client
+
+        monkeypatch.setattr(handler.boto3, "client", _client)
         monkeypatch.setenv("ACCEPTED_LOG_GROUP_NAMES", "lg1,lg2")
         result = handler.lambda_handler({"mode": "accepted", "widgetContext": {"timeRange": {"start": 0, "end": 1000}}}, None)
-        assert ">TX<" in result
-        assert client.start_query.call_args.kwargs["logGroupNames"] == ["lg1", "lg2"]
+        assert "<img src=\"data:image/jpeg;base64," in result
+        assert logs_client.start_query.call_args.kwargs["logGroupNames"] == ["lg1", "lg2"]
+        assert geo_maps_client.get_static_map.call_args.kwargs["BoundingBox"] == handler._CONUS_BOUNDING_BOX
 
     def test_blocked_mode_queries_the_configured_edge_log_group_in_us_east_1(self, monkeypatch):
-        client = _mock_logs_client([{"c-country": "CN", "requests": 6}])
+        logs_client = _mock_logs_client([{"c-country": "CN", "requests": 6}])
+        geo_maps_client = _mock_geo_maps_client()
         seen_kwargs = {}
 
         def _client(service, **kwargs):
+            if service == "geo-maps":
+                return geo_maps_client
             seen_kwargs.update(kwargs)
-            return client
+            return logs_client
 
         monkeypatch.setattr(handler.boto3, "client", _client)
         monkeypatch.setenv("BLOCKED_LOG_GROUP_NAME", "cf-edge-logs")
         result = handler.lambda_handler({"mode": "blocked", "widgetContext": {"timeRange": {"start": 0, "end": 1000}}}, None)
-        assert "CN" in result
+        assert "<img src=\"data:image/jpeg;base64," in result
         # The edge-access log group only ever exists in us-east-1
         # regardless of this Lambda's own region -- a client defaulting to
         # the Lambda's own region would silently find nothing.
         assert seen_kwargs.get("region_name") == "us-east-1"
+        assert geo_maps_client.get_static_map.call_args.kwargs["BoundingBox"] == handler._WORLD_BOUNDING_BOX
 
     def test_missing_mode_defaults_to_accepted(self, monkeypatch):
-        client = _mock_logs_client([])
-        monkeypatch.setattr(handler.boto3, "client", lambda service, **kwargs: client)
+        logs_client = _mock_logs_client([])
+        geo_maps_client = _mock_geo_maps_client()
+        monkeypatch.setattr(handler.boto3, "client", lambda service, **kwargs: geo_maps_client if service == "geo-maps" else logs_client)
         monkeypatch.setenv("ACCEPTED_LOG_GROUP_NAMES", "lg1")
         result = handler.lambda_handler({"widgetContext": {"timeRange": {"start": 0, "end": 1000}}}, None)
-        assert "<svg" in result
+        assert "<img src=\"data:image/jpeg;base64," in result
+        assert geo_maps_client.get_static_map.call_args.kwargs["BoundingBox"] == handler._CONUS_BOUNDING_BOX
+
+    def test_a_get_static_map_failure_still_returns_a_usable_widget_not_an_exception(self, monkeypatch):
+        logs_client = _mock_logs_client([{"region": "TX", "requests": 3}])
+        geo_maps_client = MagicMock()
+        geo_maps_client.get_static_map.side_effect = RuntimeError("boom")
+        monkeypatch.setattr(handler.boto3, "client", lambda service, **kwargs: geo_maps_client if service == "geo-maps" else logs_client)
+        monkeypatch.setenv("ACCEPTED_LOG_GROUP_NAMES", "lg1")
+        result = handler.lambda_handler({"mode": "accepted", "widgetContext": {"timeRange": {"start": 0, "end": 1000}}}, None)
+        assert "Map unavailable" in result

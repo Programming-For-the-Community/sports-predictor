@@ -94,12 +94,9 @@ class TestSeasonStandingsInputs:
         assert [e["event_id"] for e in result["remaining_events"]] == ["1", "2"]
 
     def test_a_status_blind_call_site_would_never_see_a_scheduled_event_again(self):
-        # Regression for the real production bug (confirmed live,
-        # 2026-08-28): get_all_events(SPORT) with no status kwarg defaults
-        # to status="completed" (FeatureStorage's own default), which
-        # silently emptied remaining_events forever -- TOUR Championship
-        # never simulated even while genuinely in progress, every
-        # probability but BMW's own real-outcome one showing 0%.
+        # get_all_events(SPORT) with no status kwarg defaults to
+        # status="completed", which would silently empty remaining_events
+        # forever.
         storage = MagicMock()
         storage.get_all_events.side_effect = _by_status([
             _field_event("1", "2026-08-20", season=2026, tournament_name="BMW Championship", participants=[_participant("a", 1)]),
@@ -187,8 +184,7 @@ class TestBuildSeasonProjection:
         assert season_projection.build_season_projection(storage, MagicMock(), MagicMock()) is None
 
     def test_only_tour_championship_remaining_still_produces_a_full_projection(self):
-        # The exact real situation confirmed live 2026-08-28: BMW
-        # Championship already completed, only TOUR Championship left.
+        # BMW Championship already completed, only TOUR Championship left.
         storage = MagicMock()
         estimator, model_card = self._model()
         bmw_completed = _field_event(

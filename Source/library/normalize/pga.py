@@ -19,22 +19,11 @@ from library.schema.keys import entity_key, event_key
 
 logger = logging.getLogger(__name__)
 
-# Confirmed live so far: STATUS_FINISH (a no-cut FedEx Cup event),
-# STATUS_CUT (a real missed-cut event), STATUS_SCHEDULED (a real
-# not-yet-started tournament -- every competitor pre-listed, no round
-# played yet), STATUS_MDF ("Made Cut Did Not Finish" -- a golfer who made
-# the cut but withdrew before finishing, e.g. injury mid-round-3;
-# confirmed common, not rare -- ~1 in 300 competitor-rows across a live
-# sweep of 2017-2025 seasons, 2026-08-26), STATUS_WITHDRAWN (a golfer who
-# withdrew before making the cut -- confirmed live during the 2026-08-26/27
-# backfill re-run, so ESPN does tag these rather than omitting the
-# competitor entirely as the prior sweep had suggested), STATUS_IN_PROGRESS
-# (a golfer mid-round -- confirmed live, 2026-08-28, on the real
-# in-progress TOUR Championship round 2: most of the field carries this
-# status, not a rare case). Disqualification not yet seen in a real
-# response. map_status's fallback below handles that (and anything else
-# ESPN adds) without guessing an exact string, logging so a real case can
-# be added here once actually observed.
+# STATUS_MDF = "Made Cut Did Not Finish" (made the cut but withdrew
+# before finishing, e.g. injury mid-round-3; not rare, ~1 in 300
+# competitor-rows). Disqualification not yet seen in a real response.
+# map_status's fallback below handles that (and anything else ESPN adds)
+# without guessing an exact string.
 _STATUS_MAP = {
     "STATUS_FINISH": "finished",
     "STATUS_CUT": "cut",
@@ -48,21 +37,14 @@ _STATUS_MAP = {
 def map_status(status_type: dict) -> str:
     """Public (not module-private) because library/normalize/pga_matchplay.py
     reuses this exact ESPN-status-name mapping for match-play competitor
-    statuses -- same STATUS_FINISH/STATUS_SCHEDULED vocabulary, confirmed
-    live on real Ryder Cup/Presidents Cup/WGC Match Play responses,
-    2026-08-26.
+    statuses.
 
-    STATUS_CUT is checked against its own shortDetail before the name-keyed
-    table below -- confirmed live, 2026-08-27, on a real TOUR Championship
-    withdrawal: ESPN's own status.type.name was "STATUS_CUT" while
-    type.shortDetail/description both said "WD"/"Withdrawn". TOUR
-    Championship's 30-man field has no 36-hole cut to even miss, so this
-    genuinely can't be a real cut -- ESPN reuses STATUS_CUT as a catch-all
-    "no longer in real contention" bucket in at least this one case, and
-    its own human-readable shortDetail is the more trustworthy signal here.
-    Every other status stays governed by `name` exactly as before -- this
-    doesn't change a real missed-cut's own mapping, only corrects the one
-    ambiguous case ESPN's own name field mislabels."""
+    STATUS_CUT is checked against its own shortDetail before the
+    name-keyed table below: ESPN reuses STATUS_CUT as a catch-all
+    "no longer in real contention" bucket even for a withdrawal (name
+    "STATUS_CUT" but shortDetail "WD") on an event with no cut to miss
+    (e.g. TOUR Championship's 30-man field), so shortDetail is checked
+    first for that one ambiguous case."""
     name = status_type.get("name", "")
     if name == "STATUS_CUT" and status_type.get("shortDetail") == "WD":
         return "withdrawn"
@@ -189,22 +171,14 @@ def _competitor_to_participants(competitor: dict) -> list[dict]:
     finish_position, is_tie = _parse_finish_position(status.get("position"))
     rounds = _parse_rounds(competitor.get("linescores") or [])
 
-    # ESPN's own top-level `score` object only reflects FULLY COMPLETED
-    # rounds -- confirmed live, 2026-08-28, on a real in-progress TOUR
-    # Championship round 2: linescores[1] already carried real partial
-    # strokes (score_to_par -1, 6 holes played) while the top-level
-    # `score` object still showed only round 1's own total, well behind
-    # status.position (which IS already live/correct -- ESPN computes the
-    # real current leaderboard rank from data it doesn't also expose
-    # here). A real user-reported bug: placement updated live while the
-    # to-par standing and sort order both stayed stuck on round 1. Fixed
-    # by deriving score_to_par/total_strokes from summing the already-
-    # parsed per-round rows instead -- those DO include the live partial
-    # in-progress round -- whenever at least one round has a real value.
-    # Only when `rounds` has nothing real at all (a golfer who hasn't
-    # teed off yet) does the top-level `score` object's own (correctly
-    # "-"/None) reading stand, since an empty sum (0) would misread as
-    # "even par" instead of "no score at all".
+    # ESPN's own top-level `score` object only reflects fully completed
+    # rounds, unlike status.position which is already live. Derive
+    # score_to_par/total_strokes by summing the parsed per-round rows
+    # instead, which do include the live partial in-progress round,
+    # whenever at least one round has a real value. Only when `rounds`
+    # has nothing real (a golfer who hasn't teed off yet) does the
+    # top-level `score` object's own reading stand, since an empty sum
+    # (0) would misread as "even par" instead of "no score at all".
     round_scores = [r["score_to_par"] for r in rounds if isinstance(r.get("score_to_par"), (int, float))]
     round_strokes = [r["total_strokes"] for r in rounds if isinstance(r.get("total_strokes"), (int, float))]
     if round_scores:
@@ -219,18 +193,13 @@ def _competitor_to_participants(competitor: dict) -> list[dict]:
         "score_to_par": score_to_par,
         "total_strokes": total_strokes,
         "earnings": competitor.get("earnings", 0.0),
-        # rounds -- added 2026-08-25 specifically for per-round score
-        # projection features/models (library/features/pga.py). See
-        # _parse_rounds' own docstring for the confirmed-live shape.
+        # rounds -- for per-round score projection features/models
+        # (library/features/pga.py). See _parse_rounds' own docstring.
         "rounds": rounds,
-        # thru -- holes completed in the CURRENT round, off status.thru
-        # directly (an int, confirmed live 2026-08-28 on the real
-        # in-progress TOUR Championship: 14 for a golfer 14 holes into
-        # round 2, 18/"F" once a round finishes, 0 for WD/not-yet-teed-
-        # off). Only meaningful while status is "in_progress" -- a
+        # thru -- holes completed in the current round, off status.thru
+        # directly. Only meaningful while status is "in_progress" -- a
         # finished golfer's thru is just their last-played round's final
-        # hole count, not "how far into the CURRENT round", so a reader
-        # should gate display on status rather than trusting this alone.
+        # hole count, so a reader should gate display on status.
         "thru": status.get("thru"),
     }
 
@@ -445,13 +414,9 @@ def leaderboard_event_to_event_item(event: dict, sport: str) -> dict:
         # -- added specifically for library/features/pga.py's own
         # rolling per-course history.
         "course_id": course.get("id"),
-        # par -- this course's own single-round par (e.g. 70), from the
-        # SAME host_course entry course_id already comes from
-        # (course.shotsToPar, confirmed live 2026-08-28 on a real TOUR
-        # Championship leaderboard response). Lets serving-time code
-        # convert a score-to-par value (real or model-projected) into an
-        # implied stroke count for display, without needing a dedicated
-        # strokes-prediction model.
+        # par -- this course's own single-round par (e.g. 70), from
+        # course.shotsToPar. Lets serving-time code convert a
+        # score-to-par value into an implied stroke count for display.
         "par": course.get("shotsToPar"),
         # purse/is_major -- field-strength context a ranking model needs
         # (design/DATA_SCHEMA.md and library/features/pga.py), not present

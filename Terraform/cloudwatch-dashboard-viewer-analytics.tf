@@ -12,24 +12,15 @@ locals {
     aws_cloudwatch_log_group.nfl_predict_read.name,
     aws_cloudwatch_log_group.ncaafb_predict_read.name,
     aws_cloudwatch_log_group.nba_predict_read.name,
-    # ncaambb_predict_read was missing here from this sport's own
-    # onboarding through 2026-08-25 -- its log group existed and was
-    # deployed the whole time, so every real NCAA MBB viewer request
-    # was simply invisible on this dashboard until this line was added.
     aws_cloudwatch_log_group.ncaambb_predict_read.name,
-    # pga_predict_read had the exact same gap, from PGA's own onboarding
-    # through 2026-08-28 -- confirmed live, the log group has existed
-    # and been receiving real traffic the whole time.
     aws_cloudwatch_log_group.pga_predict_read.name,
   ]
 
   # Dashboard-widget queries have no separate "log group" field for a
   # multi-source query -- SOURCE has to be embedded in the query text
-  # itself, chained with `|` (AWS's own documented cross-log-group query
-  # syntax). lambda-cloudwatch-geo-widget.tf's own StartQuery calls don't
-  # have that constraint -- they pass viewer_analytics_log_group_names
-  # directly via the API's logGroupNames parameter instead, no embedded
-  # SOURCE clause at all.
+  # itself, chained with `|`. lambda-cloudwatch-geo-widget.tf's own
+  # StartQuery calls pass viewer_analytics_log_group_names directly via
+  # the API's logGroupNames parameter instead, no embedded SOURCE clause.
   viewer_analytics_log_sources = join(" | ", [for lg in local.viewer_analytics_log_group_names : "SOURCE '${lg}'"])
 }
 
@@ -251,8 +242,9 @@ resource "aws_cloudwatch_dashboard" "viewer_analytics" {
       },
       # Custom-widget geo panels (Terraform/lambda-cloudwatch-geo-widget.tf)
       # -- CloudWatch dashboards have no native map widget type, so these
-      # render a schematic tile-grid cartogram instead of a geographic
-      # choropleth; see the Lambda's own handler.py docstring for why.
+      # call Amazon Location Service's GetStaticMap for a real composited
+      # map image; see the Lambda's own handler.py docstring for why (no
+      # client-side rendering is possible inside a custom widget at all).
       # Appended here rather than interleaved with the bar/table panels
       # above so every existing widget's y-position stays untouched.
       {
@@ -262,7 +254,7 @@ resource "aws_cloudwatch_dashboard" "viewer_analytics" {
         width  = 24
         height = 1
         properties = {
-          markdown = "## Geo panels (schematic, not a projection)"
+          markdown = "## Geo panels"
         }
       },
       {

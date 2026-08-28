@@ -24,15 +24,12 @@ resource "aws_lambda_function" "pga_predict" {
   package_type  = "Image"
   image_uri     = "${var.ecr_repo_url}:pga-predict-latest"
   architectures = ["arm64"]
-  # Not on the API Gateway request path (fired async). Bumped from 120 to
-  # match NBA/NCAAFB's own season-simulation-carrying predict Lambda --
-  # the weekly ScheduledSeasonProjection invoke (season_projection.py)
-  # scores every remaining event's own projected field (up to ~200
-  # tracked golfers each) via a batched model pass, ThreadPoolExecutor'd
-  # across events, then runs 750 Monte Carlo season simulations -- a
-  # materially longer worst case than a single event's own on-demand
-  # compute. Tune from real measured invocation duration once it exists
-  # to measure.
+  # Not on the API Gateway request path (fired async). The weekly
+  # ScheduledSeasonProjection invoke (season_projection.py) scores every
+  # remaining event's projected field via a batched model pass,
+  # ThreadPoolExecutor'd across events, then runs 750 Monte Carlo season
+  # simulations -- a materially longer worst case than a single event's
+  # on-demand compute.
   timeout = 600
 
   memory_size = 3008

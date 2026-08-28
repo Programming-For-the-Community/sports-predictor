@@ -64,14 +64,9 @@ final appRouterProvider = Provider<GoRouter>((ref) {
       final loggingIn = state.matchedLocation == '/login';
       final onSplash = state.matchedLocation == '/splash';
 
-      // Session restore (reading persisted tokens, possibly refreshing
-      // them) hasn't finished -- send EVERY route here, not just '/',
-      // so the originally-requested route's own real content (a deep
-      // link to /nfl/events, a bookmark, or just '/' itself) never
-      // builds and briefly flashes on screen before this redirect
-      // resolves and bounces to /login. A real user-reported bug: '/'
-      // used to render HomePage for that window since redirect returned
-      // null (no redirect at all) while auth was still resolving.
+      // Session restore hasn't finished -- send every route here, not
+      // just '/', so the originally-requested route's real content never
+      // builds and flashes on screen before this redirect resolves.
       if (authState is AuthInitial) return onSplash ? null : '/splash';
 
       final authenticated = authState is AuthAuthenticated;

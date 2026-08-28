@@ -1,13 +1,7 @@
 """
-Prediction logic for one PGA event (event_type "field"/"match_play"/
-"cup"), and the compute_and_cache_event background worker that populates
+Prediction logic for one PGA event (field/match_play/cup), and the
+compute_and_cache_event background worker that populates
 library.storage.prediction_cache on a cache miss.
-
-One shared compute_and_cache_event for all 3 event_types -- cache-key
-derivation, in-progress claiming, and error handling are identical
-regardless of type; only the prediction body differs, isolated behind
-predict_event's own event_type dispatch to predict_field_event/
-predict_match_event/predict_cup_event.
 """
 import logging
 import re
@@ -34,12 +28,8 @@ logger = logging.getLogger("pga-predict")
 
 SPORT = "pga"
 
-# Matches this module's own _score-recorded model_key shape for a round
-# model (MODEL#round-2#v3#GOLFER#1085) -- same style as nfl_reads.py's
-# own _PLAYER_PROP_MODEL_KEY_RE. Captures the version too -- record_
-# prediction's own stored `predicted_value` is just {"value": ...} (no
-# model_version), unlike _score's return value, so the version has to be
-# recovered from the model_key string itself.
+# Matches a round model's model_key (MODEL#round-2#v3#GOLFER#1085).
+# Captures the version since predicted_value itself doesn't store it.
 _ROUND_MODEL_KEY_RE = re.compile(r"^MODEL#round-([1-4])#v(\d+)#GOLFER#(.+)$")
 
 
@@ -60,10 +50,8 @@ def record_prediction(predictions_table, event_key_value: str, model_key: str, v
 
 
 def _score(model_cache: dict, s3, predictions_table, event_key_value: str, model_name: str, feature_row: dict, record_suffix: str) -> dict | None:
-    """{"value": ..., "model_version": ...}, or None if model_name has
-    never had a version promoted -- every caller tolerates a missing
-    model per-key (record_prediction is simply skipped for that one),
-    never all-or-nothing across a field/round/cutline/match response."""
+    """{"value": ..., "model_version": ...}, or None if model_name has no
+    promoted version. Callers tolerate a missing model per-key."""
     try:
         estimator, model_card = get_cached_model(model_cache, s3, model_name)
     except model_loader.NoPromotedModelError:
@@ -76,19 +64,10 @@ def _score(model_cache: dict, s3, predictions_table, event_key_value: str, model
 
 
 def _field_projected_score_to_par(scored: dict, golfer_row: dict) -> dict:
-    """The "projected-score-to-par" model is trained on a REMAINING-score
-    target (label_remaining_score_to_par -- see library/features/pga.py's
-    build_golfer_event_features docstring for why), not the absolute
-    final score directly, so its raw output isn't field-facing on its own.
-    Adds the golfer's own real, already-known score_to_par_this_week_so_far
-    (0 pre-tournament, via the same feature row already built for scoring)
-    back on top to get the actual projected FINAL tournament score --
-    what predictions["projected_score_to_par"] has always meant to every
-    caller of this response (the frontend's own TO PAR column, _field_
-    sort_key's field-order ranking). Does NOT touch what _score already
-    recorded to predictions_table for this model -- that audit trail
-    stays the model's own literal (remaining) output, not this derived
-    display value."""
+    """The model outputs a REMAINING-score-to-par (see build_golfer_event_
+    features' docstring). Adds the golfer's real score_to_par_this_week_
+    so_far (0 pre-tournament) to get the projected FINAL score. Does not
+    change what _score already recorded to predictions_table."""
     score_so_far = golfer_row.get("score_to_par_this_week_so_far") or 0
     return {**scored, "value": scored["value"] + score_so_far}
 
@@ -102,17 +81,9 @@ def _golfer_name(storage, entity_id: str) -> dict:
 
 
 def _actual_golfer_result(participant: dict) -> dict | None:
-    """Real, already-stored result -- position/score_to_par/rounds all
-    update at normalize time as the tournament progresses (confirmed
-    live: ESPN's own status.position/score carry real current-standing
-    values for an in-progress, not-yet-finished tournament, same as a
-    completed one), so this is meaningful mid-tournament, not just once
-    the whole event is "completed". `rounds` (each already-played round's
-    own score_to_par/total_strokes, from _parse_rounds) is included
-    whenever any exist, even if `finish_position`/`score_to_par` are both
-    still None (the tournament's own top-level status can lag a per-round
-    result by a normalize cycle) -- covers a golfer whose round is done
-    but the cumulative summary hasn't refreshed yet."""
+    """Real, already-stored result -- meaningful mid-tournament, not just
+    once "completed". `rounds` is included whenever any exist, even if
+    finish_position/score_to_par are still None."""
     result = participant.get("result") or {}
     rounds = result.get("rounds") or []
     if result.get("finish_position") is None and result.get("score_to_par") is None and not rounds:
@@ -120,60 +91,36 @@ def _actual_golfer_result(participant: dict) -> dict | None:
     return {
         "finish_position": result.get("finish_position"),
         "score_to_par": result.get("score_to_par"),
-        # Real cumulative tournament strokes-so-far (library/normalize/
-        # pga.py's _parse_score, off the competitor's own top-level
-        # `score` object) -- lets the frontend show "N strokes (to par)"
-        # for the real standing, not just the bare to-par number.
+        # Cumulative tournament strokes-so-far.
         "total_strokes": result.get("total_strokes"),
         "rounds": rounds,
-        # This golfer's own real ESPN status (scheduled/finished/cut/
-        # made_cut_did_not_finish/withdrawn -- library/normalize/pga.py's
-        # map_status), NOT derived from finish_position's presence. A real
-        # current standing (finish_position/score_to_par) exists throughout
-        # an in-progress tournament, well before this golfer's own round is
-        # actually finished -- "has a position" was never a valid proxy
-        # for "finished" (the frontend's own former fallback bug, fixed
-        # alongside this: field_leaderboard_table.dart's STATUS column now
-        # reads this field directly instead of inferring it).
+        # Golfer's own ESPN status (scheduled/finished/cut/
+        # made_cut_did_not_finish/withdrawn/in_progress).
         "status": result.get("status"),
-        # thru -- holes completed in the CURRENT round (library/normalize/
-        # pga.py's own status.thru). Only meaningful while status is
-        # "in_progress"; included unconditionally like every other field
-        # here rather than gated, same "let the reader gate on status"
-        # precedent status.thru's own docstring already establishes.
+        # Holes completed in the current round; meaningful only while
+        # status is "in_progress".
         "thru": result.get("thru"),
     }
 
 
 def _historical_round_predictions(predictions_table, event_key_value: str) -> dict[str, dict[int, dict]]:
     """{entity_id: {round_number: {"value":..., "model_version":...}}} --
-    recovers a round's own PRE-round forecast even after live_features.py's
-    applicable_rounds has since moved past it. A played round is never
-    re-scored (applicable_rounds only ever returns rounds still ahead of
-    a golfer), so the predictions_table item _score originally wrote for
-    it -- before that round started -- is never overwritten; this just
-    reads it back. One Query per event (predictions_table's only key is
-    event_key/model_key, no per-golfer GSI -- same "one query, filter
-    client-side" precedent nfl_reads.py's own _leaders_comparison uses for
-    its player-prop rows), not one per golfer."""
+    recovers each round's own pre-round forecast, since a played round is
+    never re-scored again. One Query per event, filtered client-side."""
     by_golfer: dict[str, dict[int, dict]] = defaultdict(dict)
     for row in predictions_table.query(Key("event_key").eq(event_key_value)):
         match = _ROUND_MODEL_KEY_RE.match(row["model_key"])
         if match is None:
             continue
         round_number, model_version, entity_id = int(match.group(1)), int(match.group(2)), match.group(3)
-        # Same {"value", "model_version"} shape _score's own return value
-        # has -- the frontend's ModelValue.fromJson requires both.
+        # Same {"value", "model_version"} shape as _score's return value.
         by_golfer[entity_id][round_number] = {"value": row["predicted_value"]["value"], "model_version": model_version}
     return by_golfer
 
 
 def _field_sort_key(entry: dict):
-    """Ascending by projected_score_to_par (lowest = best -- the "field
-    finish order" build_golfer_event_features' own docstring calls out as
-    a serving-time ranking of this model's predictions, not a separate
-    artifact); falls back to top_10_probability descending if the score
-    model has no promoted version yet."""
+    """Ascending by projected_score_to_par (lowest = best); falls back to
+    top_10_probability descending if no score model is promoted."""
     score = entry["predictions"].get("projected_score_to_par")
     if score is not None:
         return (0, score["value"])
@@ -190,9 +137,7 @@ def predict_field_event(storage, s3, predictions_table, event_id: str) -> dict:
     model_cache: dict = {}
     status = event.get("status")
     participants_by_id = {p["entity_id"]: p for p in event.get("participants", [])}
-    # Only queried once at all when at least one golfer has a played round
-    # -- the common pre-tournament case (nobody's played anything yet) has
-    # nothing to backfill, so skip the extra DynamoDB Query entirely then.
+    # Skip the backfill query entirely pre-tournament (nothing to backfill).
     any_round_played = any((p.get("result") or {}).get("rounds") for p in participants_by_id.values())
     historical_rounds = _historical_round_predictions(predictions_table, event_key_value) if any_round_played else {}
 
@@ -213,12 +158,8 @@ def predict_field_event(storage, s3, predictions_table, event_id: str) -> dict:
             )
             if scored is not None:
                 round_predictions[f"round_{round_number}"] = scored
-        # Backfill each already-played round's own PRE-round forecast so
-        # the frontend's ROUND 1-4 breakdown can show what was originally
-        # projected for a round next to its own real actual, not just for
-        # whichever rounds are still ahead (a real user complaint -- round
-        # 1's own projection used to vanish the moment round 1 was played,
-        # since applicable_rounds no longer scores it going forward).
+        # Backfill each played round's own pre-round forecast so the
+        # ROUND 1-4 breakdown can show it next to the real actual.
         participant = participants_by_id.get(entity_id)
         played_rounds = {r["round"] for r in ((participant or {}).get("result") or {}).get("rounds", [])}
         for round_number in played_rounds:
@@ -229,10 +170,7 @@ def predict_field_event(storage, s3, predictions_table, event_id: str) -> dict:
             predictions["rounds"] = round_predictions
 
         entry = {"entity_id": entity_id, **_golfer_name(storage, entity_id), "predictions": predictions}
-        # Not gated on status == "completed" -- a real, already-stored
-        # result (current standing, or a completed round) is meaningful
-        # throughout the tournament, not just once it's fully over. See
-        # _actual_golfer_result's own docstring.
+        # Not gated on status == "completed" -- meaningful throughout.
         if participant is not None:
             actual = _actual_golfer_result(participant)
             if actual is not None:
@@ -249,11 +187,8 @@ def predict_field_event(storage, s3, predictions_table, event_id: str) -> dict:
     return {
         "sport": SPORT, "event_key": event_key_value, "event_id": event_id, "event_type": "field",
         "tournament_name": event.get("tournament_name"), "status": status,
-        # This course's own single-round par (library/normalize/pga.py's
-        # own `par`, off the host course's real shotsToPar) -- lets the
-        # frontend convert a score-to-par value (actual OR model-
-        # projected) into an implied stroke count for display, without a
-        # dedicated strokes-prediction model.
+        # Course's single-round par, for converting a to-par value into
+        # an implied stroke count.
         "par": event.get("par"),
         "cutline": cutline,
         "field": field,
@@ -262,13 +197,9 @@ def predict_field_event(storage, s3, predictions_table, event_id: str) -> dict:
 
 
 def _match_side_entity_type(participant: dict) -> str:
-    """Same rule as library.serving.pga_reads' own _match_play_entity_type
-    (duplicated, not imported, to keep this predict-side module's own
-    dependency surface -- boto3/xgboost/pandas already -- separate from
-    library.serving's): a team match_play participant's entity_id is a
-    national team id (never in its own golfer_entity_ids); an individual/
-    WGC participant's entity_id doubles as its own single-element
-    golfer_entity_ids[0]."""
+    """A team match_play participant's entity_id is a national team id
+    (never in its own golfer_entity_ids); an individual/WGC participant's
+    entity_id doubles as its own golfer_entity_ids[0]."""
     return "player" if participant["entity_id"] in participant.get("golfer_entity_ids", []) else "team"
 
 
@@ -335,10 +266,8 @@ def predict_cup_event(storage, s3, predictions_table, event_id: str) -> dict:
 def predict_event(storage, s3, predictions_table, event_id: str) -> dict:
     """Dispatches on the stored event's own event_type. Raises
     live_features.EventNotFoundError if no such event exists;
-    live_features.MalformedEventError for an unrecognized event_type
-    (fail closed, matching every other PGA normalizer/dispatch's own
-    convention) or one of the two live_features builders' own shape
-    checks (missing home/away, no match_play session yet for a cup)."""
+    live_features.MalformedEventError for an unrecognized event_type or
+    a shape check failure (missing home/away, no match_play session)."""
     event_key_value = build_event_key(SPORT, event_id)
     event = storage.get_event(event_key_value)
     if event is None:
@@ -355,11 +284,9 @@ def predict_event(storage, s3, predictions_table, event_id: str) -> dict:
 
 
 def compute_and_cache_event(storage, s3, predictions_table, event_id: str) -> None:
-    """Background worker triggered by predict-read on a cache miss/stale-
-    refresh. A recognized, possibly-transient error (event not ingested,
-    wrong shape, no model promoted, no match_play session yet for a cup)
-    gets a short-lived negative cache entry; any other exception
-    propagates after the in-progress claim clears."""
+    """Background worker triggered by predict-read on a cache miss/stale
+    refresh. A recognized error gets a short-lived negative cache entry;
+    any other exception propagates after the in-progress claim clears."""
     event_key_value = build_event_key(SPORT, event_id)
     cache_key = prediction_cache.event_prediction_cache_key(SPORT, event_key_value)
     try:
@@ -369,12 +296,8 @@ def compute_and_cache_event(storage, s3, predictions_table, event_id: str) -> No
             prediction_cache.put_error_cached(s3, cache_key, type(exc).__name__, str(exc))
             return
         model_versions = prediction_cache.current_model_versions(s3, SPORT, model_versions_for(result["event_type"]))
-        # A fresh fetch (not reused from predict_event's own internal one)
-        # -- cheap (a single DynamoDB GetItem), and guarantees the
-        # fingerprint reflects exactly the event state this prediction
-        # was computed against, same as _score's own record_prediction
-        # calls already do per-model. See pga_reads.rounds_fingerprint's
-        # own docstring for why this exists.
+        # Fresh fetch so the fingerprint reflects the event state this
+        # prediction was actually computed against.
         event = storage.get_event(event_key_value)
         extra_fingerprint = rounds_fingerprint(event) if event is not None else None
         prediction_cache.put_cached(s3, cache_key, result, model_versions, result.get("status"), extra_fingerprint)

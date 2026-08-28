@@ -404,10 +404,9 @@ class TestParticipantResult:
         assert result["status"] == "cut"
 
     def test_cut_status_with_wd_short_detail_maps_to_withdrawn_not_cut(self):
-        # Real ESPN bug, confirmed live 2026-08-27 on a TOUR Championship
-        # withdrawal: type.name says STATUS_CUT but type.shortDetail says
-        # "WD" -- TOUR Championship's 30-man field has no cut to miss at
-        # all, so this can only be a mislabeled withdrawal.
+        # type.name says STATUS_CUT but type.shortDetail says "WD" -- an
+        # event with no cut to miss at all can only be a mislabeled
+        # withdrawal.
         item = leaderboard_event_to_event_item(
             _event(competitors=[_competitor(
                 status_name="STATUS_CUT", completed=False, position_display="-", is_tie=False,
@@ -444,20 +443,12 @@ class TestParticipantResult:
         assert item["participants"][0]["result"]["status"] == "withdrawn"
 
     def test_in_progress_status_maps_to_in_progress(self):
-        # Confirmed live, 2026-08-28, on the real in-progress TOUR
-        # Championship round 2 -- most of the field carried this status,
-        # not a rare case, so it's explicitly mapped rather than left to
-        # the generic fallback (which would otherwise log a warning on
-        # every single in-progress competitor-row, most of a live field,
-        # every poll).
         item = leaderboard_event_to_event_item(
             _event(competitors=[_competitor(status_name="STATUS_IN_PROGRESS", completed=False)]), "pga",
         )
         assert item["participants"][0]["result"]["status"] == "in_progress"
 
     def test_thru_is_parsed_off_status_for_an_in_progress_golfer(self):
-        # status.thru -- confirmed live, 2026-08-28: 14 for a golfer 14
-        # holes into round 2 of the real in-progress TOUR Championship.
         item = leaderboard_event_to_event_item(
             _event(competitors=[_competitor(status_name="STATUS_IN_PROGRESS", completed=False, thru=14)]), "pga",
         )
@@ -497,13 +488,9 @@ class TestParticipantResult:
         )
         assert item["participants"][0]["result"]["finish_position"] is None
 
-    # linescores=[] in each of these -- isolates _parse_score's own
-    # top-level-score parsing from the running-total-from-rounds
-    # override (see TestRunningTotalFromRounds below for THAT behavior);
-    # the fixture's own default linescores wouldn't match these
-    # deliberately mismatched score_display/score_value combinations,
-    # and a real golfer's top-level score/rounds are never actually this
-    # inconsistent with each other.
+    # linescores=[] in each of these -- isolates _parse_score's
+    # top-level-score parsing from the running-total-from-rounds override
+    # (see TestRunningTotalFromRounds below).
     def test_negative_score_to_par_parses_as_a_negative_int(self):
         item = leaderboard_event_to_event_item(
             _event(competitors=[_competitor(score_display="-17", score_value=267.0, linescores=[])]), "pga",
@@ -562,22 +549,16 @@ class TestParticipantResult:
 
 
 class TestRunningTotalFromRounds:
-    """Real bug, confirmed live 2026-08-28 on a real in-progress TOUR
-    Championship round 2: ESPN's own top-level `score` object only
-    reflects FULLY COMPLETED rounds -- it still showed round 1's own
-    total alone, well after round 2 had real, live partial strokes in
-    its own linescores entry, while status.position (finish_position)
-    WAS already live/correct. A user-reported bug: placement updated
-    live while the to-par standing (and the leaderboard's own sort order,
-    which reads off this same field) stayed stuck on round 1. Fixed by
-    deriving score_to_par/total_strokes from summing the parsed rounds
-    instead of trusting the stale top-level field, whenever any round
-    has a real value."""
+    """ESPN's own top-level `score` object only reflects fully completed
+    rounds, unlike status.position which is already live. score_to_par/
+    total_strokes are derived by summing the parsed rounds instead of
+    trusting the stale top-level field, whenever any round has a real
+    value."""
 
     def test_an_in_progress_rounds_partial_strokes_are_included_in_the_running_total(self):
         # Round 1 finished at -3; round 2 is 6 holes in at -1 so far.
-        # ESPN's own top-level score object (score_display/score_value
-        # below) is still just round 1's own total -- the real bug.
+        # The top-level score object (score_display/score_value below)
+        # is still just round 1's own total.
         competitor = _competitor(
             score_display="-3", score_value=67.0,
             linescores=[

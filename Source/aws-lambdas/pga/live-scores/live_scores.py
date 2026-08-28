@@ -48,16 +48,12 @@ WGC-Dell Technologies Match Play (the only individual-match-play format)
 was discontinued after 2023.
 
 "Last group/match has finished" has no direct clock signal for any event
-type -- it's read off competitor/match status. _is_active is deliberately
-written as "status is not one of the confirmed-terminal set", not an
-equality check against a guessed in-progress status string -- "in_progress"
-IS now a confirmed real status (library/normalize/pga.py's own
-_STATUS_MAP), but this still isn't written as an equality check against
-it: anything ESPN adds in the future that isn't in the confirmed-terminal
-set below should also keep polling, not just this one known value.
-A cup event's own participants carry no status field at all (their
-result is {points, won, halved}) -- _is_active branches on the cup
-item's own top-level status field instead for that event_type.
+type -- it's read off competitor/match status. _is_active is written as
+"status is not one of the confirmed-terminal set", not an equality check
+against "in_progress", so anything ESPN adds later that isn't terminal
+also keeps polling. A cup event's own participants carry no status field
+at all (their result is {points, won, halved}) -- _is_active branches on
+the cup item's own top-level status field instead for that event_type.
 """
 import json
 import logging
@@ -76,9 +72,9 @@ logger = logging.getLogger("pga-live-scores")
 
 LIVE_SCORES_CACHE_KEY = "pga/cache/live-scores/latest.json"
 
-# 3x the poll cadence (scheduler-pga-live-scores.tf, 1 minute as of
-# 2026-08-28, bumped from 5) -- tolerates a couple of missed/late ticks
-# without a reader treating a still-fresh cache as unknown.
+# 3x the poll cadence (scheduler-pga-live-scores.tf, 1 minute) -- tolerates
+# a couple of missed/late ticks without a reader treating a still-fresh
+# cache as unknown.
 STALE_AFTER = timedelta(minutes=3)
 
 # Start polling 1h before the earliest known upcoming tee time/match time;
