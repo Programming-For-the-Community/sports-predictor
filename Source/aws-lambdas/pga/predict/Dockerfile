@@ -40,6 +40,7 @@ RUN dnf install -y libgomp && dnf clean all
 COPY --from=builder /install ${LAMBDA_TASK_ROOT}
 COPY aws-lambdas/pga/predict/handler.py aws-lambdas/pga/predict/live_features.py \
      aws-lambdas/pga/predict/model_loader.py aws-lambdas/pga/predict/event_prediction.py \
+     aws-lambdas/pga/predict/season_projection.py aws-lambdas/pga/predict/season_simulation.py \
      ${LAMBDA_TASK_ROOT}/
 
 CMD ["handler.lambda_handler"]

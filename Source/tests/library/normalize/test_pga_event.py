@@ -472,9 +472,16 @@ class TestParticipantResult:
         )
         assert item["participants"][0]["result"]["finish_position"] is None
 
+    # linescores=[] in each of these -- isolates _parse_score's own
+    # top-level-score parsing from the running-total-from-rounds
+    # override (see TestRunningTotalFromRounds below for THAT behavior);
+    # the fixture's own default linescores wouldn't match these
+    # deliberately mismatched score_display/score_value combinations,
+    # and a real golfer's top-level score/rounds are never actually this
+    # inconsistent with each other.
     def test_negative_score_to_par_parses_as_a_negative_int(self):
         item = leaderboard_event_to_event_item(
-            _event(competitors=[_competitor(score_display="-17", score_value=267.0)]), "pga",
+            _event(competitors=[_competitor(score_display="-17", score_value=267.0, linescores=[])]), "pga",
         )
         result = item["participants"][0]["result"]
         assert result["score_to_par"] == -17
@@ -482,13 +489,13 @@ class TestParticipantResult:
 
     def test_positive_score_to_par_parses_as_a_positive_int(self):
         item = leaderboard_event_to_event_item(
-            _event(competitors=[_competitor(score_display="+2", score_value=282.0)]), "pga",
+            _event(competitors=[_competitor(score_display="+2", score_value=282.0, linescores=[])]), "pga",
         )
         assert item["participants"][0]["result"]["score_to_par"] == 2
 
     def test_even_par_display_value_e_parses_as_zero(self):
         item = leaderboard_event_to_event_item(
-            _event(competitors=[_competitor(score_display="E", score_value=280.0)]), "pga",
+            _event(competitors=[_competitor(score_display="E", score_value=280.0, linescores=[])]), "pga",
         )
         result = item["participants"][0]["result"]
         assert result["score_to_par"] == 0
@@ -497,9 +504,10 @@ class TestParticipantResult:
     def test_not_yet_played_score_of_dash_and_sentinel_zero_parses_as_none_none(self):
         # A not-yet-started tournament pre-lists every competitor with
         # score {"value": 0.0, "displayValue": "-"} -- confirmed live,
-        # 0.0 there is a sentinel, not a real 0-stroke round.
+        # 0.0 there is a sentinel, not a real 0-stroke round. No rounds
+        # parsed either, for the same real reason (nothing played yet).
         item = leaderboard_event_to_event_item(
-            _event(competitors=[_competitor(score_display="-", score_value=0.0)]), "pga",
+            _event(competitors=[_competitor(score_display="-", score_value=0.0, linescores=[])]), "pga",
         )
         result = item["participants"][0]["result"]
         assert result["score_to_par"] is None
@@ -512,7 +520,9 @@ class TestParticipantResult:
         # averages' sum() downstream (TypeError: int + str) rather than
         # failing here.
         item = leaderboard_event_to_event_item(
-            _event(competitors=[_competitor(status_name="STATUS_WITHDRAWN", score_display="WD", score_value=0.0)]),
+            _event(competitors=[_competitor(
+                status_name="STATUS_WITHDRAWN", score_display="WD", score_value=0.0, linescores=[],
+            )]),
             "pga",
         )
         result = item["participants"][0]["result"]
@@ -524,6 +534,75 @@ class TestParticipantResult:
             _event(competitors=[_competitor(earnings=177500.0)]), "pga",
         )
         assert item["participants"][0]["result"]["earnings"] == 177500.0
+
+
+class TestRunningTotalFromRounds:
+    """Real bug, confirmed live 2026-08-28 on a real in-progress TOUR
+    Championship round 2: ESPN's own top-level `score` object only
+    reflects FULLY COMPLETED rounds -- it still showed round 1's own
+    total alone, well after round 2 had real, live partial strokes in
+    its own linescores entry, while status.position (finish_position)
+    WAS already live/correct. A user-reported bug: placement updated
+    live while the to-par standing (and the leaderboard's own sort order,
+    which reads off this same field) stayed stuck on round 1. Fixed by
+    deriving score_to_par/total_strokes from summing the parsed rounds
+    instead of trusting the stale top-level field, whenever any round
+    has a real value."""
+
+    def test_an_in_progress_rounds_partial_strokes_are_included_in_the_running_total(self):
+        # Round 1 finished at -3; round 2 is 6 holes in at -1 so far.
+        # ESPN's own top-level score object (score_display/score_value
+        # below) is still just round 1's own total -- the real bug.
+        competitor = _competitor(
+            score_display="-3", score_value=67.0,
+            linescores=[
+                {"period": 1, "value": 67.0, "displayValue": "-3"},
+                {"period": 2, "value": 6.0, "displayValue": "-1"},
+            ],
+        )
+        item = leaderboard_event_to_event_item(_event(competitors=[competitor]), "pga")
+        result = item["participants"][0]["result"]
+        assert result["score_to_par"] == -4  # -3 + -1, not the stale -3
+        assert result["total_strokes"] == 73.0  # 67 + 6
+
+    def test_finished_rounds_alone_still_sum_correctly(self):
+        competitor = _competitor(
+            score_display="-3", score_value=67.0,  # deliberately stale/mismatched, same as the live bug
+            linescores=[
+                {"period": 1, "value": 68.0, "displayValue": "-2"},
+                {"period": 2, "value": 70.0, "displayValue": "E"},
+            ],
+        )
+        item = leaderboard_event_to_event_item(_event(competitors=[competitor]), "pga")
+        result = item["participants"][0]["result"]
+        assert result["score_to_par"] == -2  # -2 + 0
+        assert result["total_strokes"] == 138.0
+
+    def test_no_rounds_parsed_at_all_falls_back_to_the_top_level_score(self):
+        # A not-yet-started golfer -- no real rounds to sum, so the
+        # (correctly None/None) top-level reading stands. An empty sum
+        # would otherwise misread as "even par" instead of "no score".
+        competitor = _competitor(score_display="-", score_value=0.0, linescores=[])
+        item = leaderboard_event_to_event_item(_event(competitors=[competitor]), "pga")
+        result = item["participants"][0]["result"]
+        assert result["score_to_par"] is None
+        assert result["total_strokes"] is None
+
+    def test_a_future_tee_time_only_stub_round_does_not_corrupt_the_running_total(self):
+        # A round with no real score fields at all (just a published tee
+        # time) is excluded from `rounds` entirely by _parse_rounds --
+        # confirms that stub doesn't sneak a None into the sum.
+        competitor = _competitor(
+            score_display="-3", score_value=67.0,
+            linescores=[
+                {"period": 1, "value": 67.0, "displayValue": "-3"},
+                {"period": 2, "teeTime": "2026-08-28T15:00Z", "hasStream": False, "isPlayoff": False},
+            ],
+        )
+        item = leaderboard_event_to_event_item(_event(competitors=[competitor]), "pga")
+        result = item["participants"][0]["result"]
+        assert result["score_to_par"] == -3
+        assert result["total_strokes"] == 67.0
 
     def test_missed_cut_earnings_is_zero(self):
         item = leaderboard_event_to_event_item(

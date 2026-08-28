@@ -183,6 +183,31 @@ def _competitor_to_participants(competitor: dict) -> list[dict]:
     status = competitor.get("status", {})
     score_to_par, total_strokes = _parse_score(competitor.get("score") or {})
     finish_position, is_tie = _parse_finish_position(status.get("position"))
+    rounds = _parse_rounds(competitor.get("linescores") or [])
+
+    # ESPN's own top-level `score` object only reflects FULLY COMPLETED
+    # rounds -- confirmed live, 2026-08-28, on a real in-progress TOUR
+    # Championship round 2: linescores[1] already carried real partial
+    # strokes (score_to_par -1, 6 holes played) while the top-level
+    # `score` object still showed only round 1's own total, well behind
+    # status.position (which IS already live/correct -- ESPN computes the
+    # real current leaderboard rank from data it doesn't also expose
+    # here). A real user-reported bug: placement updated live while the
+    # to-par standing and sort order both stayed stuck on round 1. Fixed
+    # by deriving score_to_par/total_strokes from summing the already-
+    # parsed per-round rows instead -- those DO include the live partial
+    # in-progress round -- whenever at least one round has a real value.
+    # Only when `rounds` has nothing real at all (a golfer who hasn't
+    # teed off yet) does the top-level `score` object's own (correctly
+    # "-"/None) reading stand, since an empty sum (0) would misread as
+    # "even par" instead of "no score at all".
+    round_scores = [r["score_to_par"] for r in rounds if isinstance(r.get("score_to_par"), (int, float))]
+    round_strokes = [r["total_strokes"] for r in rounds if isinstance(r.get("total_strokes"), (int, float))]
+    if round_scores:
+        score_to_par = sum(round_scores)
+    if round_strokes:
+        total_strokes = sum(round_strokes)
+
     shared_result = {
         "finish_position": finish_position,
         "is_tie": is_tie,
@@ -193,7 +218,7 @@ def _competitor_to_participants(competitor: dict) -> list[dict]:
         # rounds -- added 2026-08-25 specifically for per-round score
         # projection features/models (library/features/pga.py). See
         # _parse_rounds' own docstring for the confirmed-live shape.
-        "rounds": _parse_rounds(competitor.get("linescores") or []),
+        "rounds": rounds,
     }
 
     roster = competitor.get("roster")

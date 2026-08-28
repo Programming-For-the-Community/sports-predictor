@@ -34,7 +34,22 @@ int? _currentRoundNumber(FieldParticipantPrediction entry) {
   return null;
 }
 
-List<_LeaderboardColumn> _leaderboardColumns(int? par) => [
+// Below this width, a real ~150-golfer field with real names/pills/
+// stroke counts genuinely doesn't fit across 7 columns -- everything
+// silently ellipsizes into illegibility rather than throwing a layout
+// exception, which is exactly why the earlier flat mobile-overflow tests
+// (checking only for a crash) didn't catch it. Same breakpoint value as
+// game_row.dart's own _stackBreakpoint, for the same "narrower than a
+// tablet" cutoff, though this table's own content is denser so it needs
+// column REDUCTION, not just stacking. THIS RD/TOP 10%/TOP 5% move into
+// the expanded per-row detail below this width -- ROUND 1-4 already
+// shows the current round's own proj/actual once expanded, so THIS RD's
+// own information isn't lost, just no longer duplicated at the top
+// level; TOP 10%/TOP 5% get a new home in _ExpandedProbabilities.
+const _compactBreakpoint = 600.0;
+
+List<_LeaderboardColumn> _leaderboardColumns(int? par, {required bool compact}) {
+  final core = [
       _LeaderboardColumn('#', 1, (context, entry, live, rowNumber) {
         final position = live?.finishPosition ?? entry.actualFinishPosition;
         final isTie = live?.isTie ?? false;
@@ -85,24 +100,33 @@ List<_LeaderboardColumn> _leaderboardColumns(int? par) => [
         final projected = entry.projectedScoreToPar?.value;
         return Center(child: _StandingCell(actual: scoreToPar, projected: projected));
       }),
-      // The current round's own proj/actual, visible without expanding
-      // the row -- the full 1-4 breakdown is still only in the expanded
-      // panel below (_RoundBreakdownStrip), but the round most relevant
-      // right now doesn't require a tap to see.
-      _LeaderboardColumn('THIS RD', 2, (context, entry, live, rowNumber) {
-        final round = _currentRoundNumber(entry);
-        if (round == null) {
-          return Text('--', style: AppTextStyles.metricValue(color: AppColors.inkMute), textAlign: TextAlign.center);
-        }
-        return Center(
-          child: _RoundCell(
-            round: round, projected: entry.rounds[round]?.value, actual: _actualForRound(round, entry, live), par: par,
-          ),
-        );
-      }),
-      _LeaderboardColumn('TOP 10%', 2, (context, entry, live, rowNumber) => _PercentText(entry.top10Probability?.value)),
-      _LeaderboardColumn('TOP 5%', 2, (context, entry, live, rowNumber) => _PercentText(entry.top5Probability?.value)),
-    ];
+  ];
+  if (compact) return core;
+  return [
+    ...core,
+    // The current round's own proj/actual, visible without expanding
+    // the row -- the full 1-4 breakdown is still only in the expanded
+    // panel below (_RoundBreakdownStrip), but the round most relevant
+    // right now doesn't require a tap to see. Dropped from the
+    // COMPACT (mobile) column set below _compactBreakpoint -- ROUND
+    // 1-4 already shows the current round's own proj/actual once
+    // expanded, so this would just be the same number twice on a
+    // screen with no room to spare.
+    _LeaderboardColumn('THIS RD', 2, (context, entry, live, rowNumber) {
+      final round = _currentRoundNumber(entry);
+      if (round == null) {
+        return Text('--', style: AppTextStyles.metricValue(color: AppColors.inkMute), textAlign: TextAlign.center);
+      }
+      return Center(
+        child: _RoundCell(
+          round: round, projected: entry.rounds[round]?.value, actual: _actualForRound(round, entry, live), par: par,
+        ),
+      );
+    }),
+    _LeaderboardColumn('TOP 10%', 2, (context, entry, live, rowNumber) => _PercentText(entry.top10Probability?.value)),
+    _LeaderboardColumn('TOP 5%', 2, (context, entry, live, rowNumber) => _PercentText(entry.top5Probability?.value)),
+  ];
+}
 
 String _formatToPar(num? scoreToPar) {
   if (scoreToPar == null) return '--';
@@ -173,24 +197,32 @@ class FieldLeaderboardTable extends StatelessWidget {
     if (field.isEmpty) {
       return Text('No field available yet.', style: AppTextStyles.body(color: AppColors.inkSub));
     }
-    final columns = _leaderboardColumns(par);
     final sorted = _sortedByStanding(field, liveResults);
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 20),
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(16),
-        gradient: LinearGradient(begin: Alignment.topLeft, end: Alignment.bottomRight, colors: AppColors.surfaceGrad),
-        border: Border.all(color: AppColors.borderRaised),
-      ),
-      child: Column(
-        children: [
-          Padding(padding: const EdgeInsets.symmetric(vertical: 10), child: _LeaderboardHeaderRow(columns: columns)),
-          for (var i = 0; i < sorted.length; i++) ...[
-            const Divider(height: 1, color: AppColors.border),
-            _LeaderboardRow(entry: sorted[i], live: liveResults[sorted[i].entityId], columns: columns, rowNumber: i + 1, par: par),
-          ],
-        ],
-      ),
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final compact = constraints.maxWidth < _compactBreakpoint;
+        final columns = _leaderboardColumns(par, compact: compact);
+        return Container(
+          padding: const EdgeInsets.symmetric(horizontal: 20),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(16),
+            gradient: LinearGradient(begin: Alignment.topLeft, end: Alignment.bottomRight, colors: AppColors.surfaceGrad),
+            border: Border.all(color: AppColors.borderRaised),
+          ),
+          child: Column(
+            children: [
+              Padding(padding: const EdgeInsets.symmetric(vertical: 10), child: _LeaderboardHeaderRow(columns: columns)),
+              for (var i = 0; i < sorted.length; i++) ...[
+                const Divider(height: 1, color: AppColors.border),
+                _LeaderboardRow(
+                  entry: sorted[i], live: liveResults[sorted[i].entityId], columns: columns, rowNumber: i + 1,
+                  par: par, compact: compact,
+                ),
+              ],
+            ],
+          ),
+        );
+      },
     );
   }
 }
@@ -227,18 +259,25 @@ class _LeaderboardHeaderRow extends StatelessWidget {
 }
 
 /// Tap a row to reveal its own full ROUND 1-4 proj-vs-actual strip
-/// (_RoundBreakdownStrip) below the standard columns -- the current
-/// round's own summary is already visible at the top level (the 'THIS RD'
-/// column), the expanded view is for the FULL history, always all 4
-/// rounds regardless of how many have real data yet.
+/// (_RoundBreakdownStrip) below the standard columns -- on a wide
+/// viewport, the current round's own summary is already visible at the
+/// top level ('THIS RD'), so the expanded view is purely the FULL
+/// history. Below _compactBreakpoint, THIS RD/TOP 10%/TOP 5% aren't in
+/// the top-level columns at all (see _leaderboardColumns), so expanding
+/// is the ONLY way to see TOP 10%/TOP 5% on a narrow screen -- see
+/// _ExpandedProbabilities, shown only when compact.
 class _LeaderboardRow extends StatefulWidget {
-  const _LeaderboardRow({required this.entry, required this.live, required this.columns, required this.rowNumber, required this.par});
+  const _LeaderboardRow({
+    required this.entry, required this.live, required this.columns, required this.rowNumber,
+    required this.par, required this.compact,
+  });
 
   final FieldParticipantPrediction entry;
   final FieldParticipantLiveResult? live;
   final List<_LeaderboardColumn> columns;
   final int rowNumber;
   final int? par;
+  final bool compact;
 
   @override
   State<_LeaderboardRow> createState() => _LeaderboardRowState();
@@ -272,12 +311,46 @@ class _LeaderboardRowState extends State<_LeaderboardRow> {
               const SizedBox(height: 4),
               Padding(
                 padding: const EdgeInsets.only(left: 20),
-                child: _RoundBreakdownStrip(entry: widget.entry, live: widget.live, par: widget.par),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    if (widget.compact) ...[
+                      _ExpandedProbabilities(entry: widget.entry),
+                      const SizedBox(height: 12),
+                    ],
+                    _RoundBreakdownStrip(entry: widget.entry, live: widget.live, par: widget.par),
+                  ],
+                ),
               ),
             ],
           ],
         ),
       ),
+    );
+  }
+}
+
+/// TOP 10%/TOP 5% dropped from the compact (mobile) top-level columns --
+/// this is their only remaining home on a narrow screen, shown above the
+/// ROUND 1-4 breakdown once a row is expanded.
+class _ExpandedProbabilities extends StatelessWidget {
+  const _ExpandedProbabilities({required this.entry});
+
+  final FieldParticipantPrediction entry;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Text('TOP 10%', style: AppTextStyles.microLabel(color: AppColors.inkMute)),
+        const SizedBox(width: 6),
+        _PercentText(entry.top10Probability?.value),
+        const SizedBox(width: 20),
+        Text('TOP 5%', style: AppTextStyles.microLabel(color: AppColors.inkMute)),
+        const SizedBox(width: 6),
+        _PercentText(entry.top5Probability?.value),
+      ],
     );
   }
 }

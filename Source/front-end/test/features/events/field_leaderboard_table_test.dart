@@ -5,6 +5,8 @@ import 'package:front_end/core/models/field_live_score.dart';
 import 'package:front_end/core/models/field_prediction.dart';
 import 'package:front_end/features/events/field_leaderboard_table.dart';
 
+import '../../support/mobile_viewport.dart';
+
 FieldParticipantPrediction _golfer(
   String id, String name, {
   double? projectedScoreToPar, double? actualScoreToPar, double? actualTotalStrokes,
@@ -183,5 +185,81 @@ void main() {
 
     expect(find.text('-3'), findsOneWidget);
     expect(find.textContaining('67'), findsNothing);
+  });
+
+  group('narrow (mobile) viewport', () {
+    testWidgets('THIS RD/TOP 10%/TOP 5% are dropped from the collapsed columns below the compact breakpoint', (tester) async {
+      final field = [
+        _golfer('1', 'Xander Schauffele', rounds: {2: const ModelValue(value: -3.0, modelVersion: 1)}),
+      ];
+
+      await pumpAtWidth(tester, 360, _wrap(FieldLeaderboardTable(field: field)));
+
+      expect(find.text('#'), findsOneWidget);
+      expect(find.text('PLAYER'), findsOneWidget);
+      expect(find.text('STATUS'), findsOneWidget);
+      expect(find.text('TO PAR'), findsOneWidget);
+      expect(find.text('THIS RD'), findsNothing);
+      expect(find.text('TOP 10%'), findsNothing);
+      expect(find.text('TOP 5%'), findsNothing);
+    });
+
+    testWidgets('every column is still present at a wide (non-compact) width', (tester) async {
+      final field = [_golfer('1', 'Xander Schauffele')];
+
+      await pumpAtWidth(tester, 800, _wrap(FieldLeaderboardTable(field: field)));
+
+      expect(find.text('THIS RD'), findsOneWidget);
+      expect(find.text('TOP 10%'), findsOneWidget);
+      expect(find.text('TOP 5%'), findsOneWidget);
+    });
+
+    testWidgets('TOP 10%/TOP 5% reappear in the expanded detail when compact', (tester) async {
+      final field = [_golfer('1', 'Xander Schauffele')];
+
+      await pumpAtWidth(tester, 360, _wrap(FieldLeaderboardTable(field: field)));
+      expect(find.text('TOP 10%'), findsNothing);
+
+      await tester.tap(find.text('Xander Schauffele'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('TOP 10%'), findsOneWidget);
+      expect(find.text('TOP 5%'), findsOneWidget);
+    });
+
+    testWidgets('the expanded probabilities row is absent at a wide width (already visible at the top level)', (tester) async {
+      final field = [_golfer('1', 'Xander Schauffele')];
+
+      await pumpAtWidth(tester, 800, _wrap(FieldLeaderboardTable(field: field)));
+      await tester.tap(find.text('Xander Schauffele'));
+      await tester.pumpAndSettle();
+
+      // Exactly one of each -- the top-level column only, not duplicated
+      // into the expanded panel too.
+      expect(find.text('TOP 10%'), findsOneWidget);
+      expect(find.text('TOP 5%'), findsOneWidget);
+    });
+
+    testWidgets('a realistic full-width field renders with no overflow at every mobile width', (tester) async {
+      for (final width in mobileViewportWidths) {
+        final field = [
+          _golfer(
+            '1', 'Cristóbal Del Solar-Hernández',
+            projectedScoreToPar: -8.4, actualScoreToPar: -6, actualTotalStrokes: 275.0,
+            rounds: {2: const ModelValue(value: -3.0, modelVersion: 1)},
+            actualRounds: {1: const ActualRoundResult(round: 1, scoreToPar: -3, totalStrokes: 68.0)},
+          ),
+        ];
+        final live = {
+          '1': const FieldParticipantLiveResult(
+            finishPosition: 123, isTie: true, status: 'made_cut_did_not_finish', scoreToPar: -6, totalStrokes: 275.0,
+          ),
+        };
+
+        await pumpAtWidth(tester, width, _wrap(FieldLeaderboardTable(field: field, liveResults: live, par: 70)));
+
+        expect(tester.takeException(), isNull);
+      }
+    });
   });
 }
