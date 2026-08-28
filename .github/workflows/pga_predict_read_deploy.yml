@@ -1,0 +1,38 @@
+# Tests and deploys the PGA predict-read Lambda -- GET /pga/events and GET
+# /pga/models, split out of pga-predict for cold start (see
+# Terraform/lambda-pga-predict-read.tf). Zip-packaged like
+# ingest/normalize, not a container image.
+
+name: PGA Predict Read Deploy
+
+on:
+  workflow_dispatch:
+  workflow_call:
+    inputs:
+      function_name:
+        description: 'PGA predict-read Lambda function name (from Terraform output pga_predict_read_function_name)'
+        required: false
+        type: string
+        default: 'sports-predictor-pga-predict-read'
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  test:
+    name: Run pga-predict-read tests
+    uses: ./.github/workflows/run_python_tests.yml
+    with:
+      test_path: 'Source/tests/aws-lambdas/pga/test_predict_read_handler.py Source/tests/library/serving/test_pga_reads.py Source/tests/library/serving/test_common.py Source/tests/library/storage/test_prediction_cache.py Source/tests/library/storage/test_model_artifacts.py Source/tests/library/aws/test_lambda_invoker.py'
+      requirements_files: 'Source/aws-lambdas/pga/predict-read/requirements.txt'
+
+  deploy:
+    name: Deploy pga-predict-read Lambda
+    needs: test
+    uses: ./.github/workflows/python_lambda_build.yml
+    secrets: inherit
+    with:
+      function_name: ${{ inputs.function_name || 'sports-predictor-pga-predict-read' }}
+      handler_dir: 'Source/aws-lambdas/pga/predict-read'
+      library_path: 'Source/library'

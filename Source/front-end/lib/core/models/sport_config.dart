@@ -75,6 +75,11 @@ const kSports = [
     eventShape: EventShape.field,
     accentColor: AppColors.violet,
     active: false,
+    // No season-long standings/odds concept for a field-event sport --
+    // set independently of `active` so SportShellPage's Season tab (which
+    // defaults to visible) never renders for PGA even before `active`
+    // flips, since GET /pga/season doesn't exist.
+    hasSeasonProjection: false,
   ),
   SportConfig(
     id: 'f1',

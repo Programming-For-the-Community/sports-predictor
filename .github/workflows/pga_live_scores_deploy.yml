@@ -1,0 +1,44 @@
+# Tests and deploys the PGA live-scores Lambda -- GET /pga/live-scores
+# plus the EventBridge-triggered cache refresh.
+#
+# Function name is supplied by the caller from a Terraform output, with a
+# default so workflow_dispatch (manual, standalone run) still works
+# without needing that wiring.
+
+name: PGA Live Scores Deploy
+
+on:
+  workflow_dispatch:
+  workflow_call:
+    inputs:
+      function_name:
+        description: 'PGA live-scores Lambda function name (from Terraform output pga_live_scores_function_name)'
+        required: false
+        type: string
+        default: 'sports-predictor-pga-live-scores'
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  test:
+    name: Run pga-live-scores tests
+    uses: ./.github/workflows/run_python_tests.yml
+    with:
+      test_path: >-
+        Source/tests/aws-lambdas/pga/test_live_scores.py
+        Source/tests/aws-lambdas/pga/test_live_scores_handler.py
+        Source/tests/library/normalize/test_pga_event.py
+      requirements_files: 'Source/aws-lambdas/pga/live-scores/requirements.txt'
+
+  deploy:
+    name: Deploy pga-live-scores Lambda
+    needs: test
+    uses: ./.github/workflows/python_lambda_build.yml
+    secrets: inherit
+    with:
+      function_name: ${{ inputs.function_name || 'sports-predictor-pga-live-scores' }}
+      handler_dir: 'Source/aws-lambdas/pga/live-scores'
+      library_path: 'Source/library'
+      extra_source_files: 'Source/aws-lambdas/pga/live-scores/live_scores.py'

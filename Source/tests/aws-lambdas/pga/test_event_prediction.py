@@ -1,0 +1,258 @@
+"""
+Unit tests for pga/predict/event_prediction.py. live_features/model_loader
+are mocked at the module boundary; storage/s3/predictions_table are plain
+MagicMocks.
+"""
+from unittest.mock import MagicMock, patch
+
+import pytest
+
+import event_prediction
+import live_features
+import model_loader
+from library.serving import pga_reads
+
+
+def _field_event(event_id="999", status="scheduled"):
+    return {
+        "event_key": f"SPORT#PGA#EVENT#{event_id}", "event_id": event_id, "event_type": "field",
+        "status": status, "tournament_name": "BMW Championship",
+        "participants": [{"entity_id": "1", "result": {"finish_position": 3, "score_to_par": -10}}],
+    }
+
+
+def _built_field_features(status="scheduled"):
+    return {
+        "event": _field_event(status=status),
+        "golfer_rows": {"1": {"golfer": {"f": 1}, "rounds": {2: {"f": 2}}}},
+        "cutline_row": {"f": 3},
+    }
+
+
+class TestScore:
+    def test_returns_none_when_no_model_promoted(self):
+        model_cache = {}
+        s3, predictions_table = MagicMock(), MagicMock()
+        with patch.object(event_prediction.model_loader, "load_current_model", side_effect=model_loader.NoPromotedModelError()):
+            result = event_prediction._score(model_cache, s3, predictions_table, "EK", "top-10-probability", {}, "SUFFIX")
+
+        assert result is None
+        predictions_table.put_item.assert_not_called()
+
+    def test_records_and_returns_the_scored_value(self):
+        model_cache = {}
+        s3, predictions_table = MagicMock(), MagicMock()
+        with patch.object(event_prediction.model_loader, "load_current_model", return_value=(MagicMock(), {"version": 2})), \
+             patch.object(event_prediction.model_loader, "predict", return_value=0.42):
+            result = event_prediction._score(model_cache, s3, predictions_table, "EK", "top-10-probability", {}, "SUFFIX")
+
+        assert result == {"value": 0.42, "model_version": 2}
+        predictions_table.put_item.assert_called_once()
+
+
+class TestPredictFieldEvent:
+    def test_scores_every_model_for_every_golfer(self):
+        storage, s3, predictions_table = MagicMock(), MagicMock(), MagicMock()
+        storage.get_entity.return_value = {"name": "Scottie Scheffler", "metadata": {"country": "USA"}}
+        with patch.object(event_prediction.live_features, "build_live_field_features", return_value=_built_field_features()), \
+             patch.object(event_prediction.model_loader, "load_current_model", return_value=(MagicMock(), {"version": 1})), \
+             patch.object(event_prediction.model_loader, "predict", return_value=0.5):
+            result = event_prediction.predict_field_event(storage, s3, predictions_table, "999")
+
+        golfer = result["field"][0]
+        assert golfer["entity_id"] == "1"
+        assert golfer["name"] == "Scottie Scheffler"
+        assert set(golfer["predictions"]) == {"top_10_probability", "top_5_probability", "projected_score_to_par", "rounds"}
+        assert golfer["predictions"]["rounds"]["round_2"]["value"] == 0.5
+        assert result["cutline"]["projected_cut_score"]["value"] == 0.5
+
+    def test_a_model_with_no_promoted_version_is_simply_omitted(self):
+        """No model is more important than another -- missing top-5
+        shouldn't block top-10/score/cutline from still being returned."""
+        storage, s3, predictions_table = MagicMock(), MagicMock(), MagicMock()
+        storage.get_entity.return_value = None
+
+        def _load(s3_arg, sport, model_name):
+            if model_name == "top-5-probability":
+                raise model_loader.NoPromotedModelError()
+            return (MagicMock(), {"version": 1})
+
+        with patch.object(event_prediction.live_features, "build_live_field_features", return_value=_built_field_features()), \
+             patch.object(event_prediction.model_loader, "load_current_model", side_effect=_load), \
+             patch.object(event_prediction.model_loader, "predict", return_value=0.5):
+            result = event_prediction.predict_field_event(storage, s3, predictions_table, "999")
+
+        predictions = result["field"][0]["predictions"]
+        assert "top_5_probability" not in predictions
+        assert "top_10_probability" in predictions
+
+    def test_no_actual_block_for_a_scheduled_event(self):
+        storage, s3, predictions_table = MagicMock(), MagicMock(), MagicMock()
+        storage.get_entity.return_value = None
+        with patch.object(event_prediction.live_features, "build_live_field_features", return_value=_built_field_features(status="scheduled")), \
+             patch.object(event_prediction.model_loader, "load_current_model", return_value=(MagicMock(), {"version": 1})), \
+             patch.object(event_prediction.model_loader, "predict", return_value=0.5):
+            result = event_prediction.predict_field_event(storage, s3, predictions_table, "999")
+
+        assert "actual" not in result["field"][0]
+
+    def test_actual_block_present_for_a_completed_event(self):
+        storage, s3, predictions_table = MagicMock(), MagicMock(), MagicMock()
+        storage.get_entity.return_value = None
+        with patch.object(event_prediction.live_features, "build_live_field_features", return_value=_built_field_features(status="completed")), \
+             patch.object(event_prediction.model_loader, "load_current_model", return_value=(MagicMock(), {"version": 1})), \
+             patch.object(event_prediction.model_loader, "predict", return_value=0.5):
+            result = event_prediction.predict_field_event(storage, s3, predictions_table, "999")
+
+        assert result["field"][0]["actual"] == {"finish_position": 3, "score_to_par": -10}
+
+
+class TestFieldSortKey:
+    def test_sorts_ascending_by_projected_score(self):
+        entries = [
+            {"predictions": {"projected_score_to_par": {"value": -2.0}}},
+            {"predictions": {"projected_score_to_par": {"value": -10.0}}},
+        ]
+        entries.sort(key=event_prediction._field_sort_key)
+        assert [e["predictions"]["projected_score_to_par"]["value"] for e in entries] == [-10.0, -2.0]
+
+    def test_falls_back_to_top_10_probability_descending_when_score_missing(self):
+        entries = [
+            {"predictions": {"top_10_probability": {"value": 0.3}}},
+            {"predictions": {"top_10_probability": {"value": 0.8}}},
+        ]
+        entries.sort(key=event_prediction._field_sort_key)
+        assert [e["predictions"]["top_10_probability"]["value"] for e in entries] == [0.8, 0.3]
+
+    def test_a_model_with_score_always_sorts_before_one_without(self):
+        entries = [
+            {"predictions": {"top_10_probability": {"value": 0.99}}},
+            {"predictions": {"projected_score_to_par": {"value": 5.0}}},
+        ]
+        entries.sort(key=event_prediction._field_sort_key)
+        assert "projected_score_to_par" in entries[0]["predictions"]
+
+
+class TestPredictMatchEvent:
+    def _match_event(self, status="scheduled"):
+        return {
+            "event_key": "SPORT#PGA#EVENT#999", "event_id": "999", "event_type": "match_play", "status": status,
+            "match_format": "Foursomes", "session_name": "Thursday Foursomes",
+            "participants": [
+                {"entity_id": "1", "role": "home", "golfer_entity_ids": ["1085", "1086"], "result": {"won": True, "halved": False}},
+                {"entity_id": "3", "role": "away", "golfer_entity_ids": ["2001"], "result": {"won": False, "halved": False}},
+            ],
+        }
+
+    def test_scores_the_match_win_probability_model(self):
+        storage, s3, predictions_table = MagicMock(), MagicMock(), MagicMock()
+        storage.get_entity.return_value = {"name": "USA", "metadata": {}}
+        built = {"event": self._match_event(), "features": {"f": 1}}
+        with patch.object(event_prediction.live_features, "build_live_match_features", return_value=built), \
+             patch.object(event_prediction.model_loader, "load_current_model", return_value=(MagicMock(), {"version": 3})), \
+             patch.object(event_prediction.model_loader, "predict", return_value=0.57):
+            result = event_prediction.predict_match_event(storage, s3, predictions_table, "999")
+
+        assert result["predictions"]["match_win_probability"] == {"value": 0.57, "model_version": 3}
+        assert result["home"]["entity_id"] == "1"
+        assert result["away"]["entity_id"] == "3"
+
+    def test_actual_block_present_only_when_completed(self):
+        storage, s3, predictions_table = MagicMock(), MagicMock(), MagicMock()
+        storage.get_entity.return_value = None
+        built = {"event": self._match_event(status="completed"), "features": {"f": 1}}
+        with patch.object(event_prediction.live_features, "build_live_match_features", return_value=built), \
+             patch.object(event_prediction.model_loader, "load_current_model", return_value=(MagicMock(), {"version": 1})), \
+             patch.object(event_prediction.model_loader, "predict", return_value=0.5):
+            result = event_prediction.predict_match_event(storage, s3, predictions_table, "999")
+
+        assert result["actual"] == {"home_won": True, "halved": False}
+
+
+class TestPredictEvent:
+    def test_raises_event_not_found(self):
+        storage, s3, predictions_table = MagicMock(), MagicMock(), MagicMock()
+        storage.get_event.return_value = None
+
+        with pytest.raises(live_features.EventNotFoundError):
+            event_prediction.predict_event(storage, s3, predictions_table, "999")
+
+    def test_dispatches_field_events_to_predict_field_event(self):
+        storage, s3, predictions_table = MagicMock(), MagicMock(), MagicMock()
+        storage.get_event.return_value = _field_event()
+        with patch.object(event_prediction, "predict_field_event", return_value={"ok": "field"}) as mock_predict:
+            result = event_prediction.predict_event(storage, s3, predictions_table, "999")
+
+        mock_predict.assert_called_once()
+        assert result == {"ok": "field"}
+
+    def test_dispatches_match_play_events_to_predict_match_event(self):
+        storage, s3, predictions_table = MagicMock(), MagicMock(), MagicMock()
+        storage.get_event.return_value = {"event_type": "match_play"}
+        with patch.object(event_prediction, "predict_match_event", return_value={"ok": "match"}) as mock_predict:
+            result = event_prediction.predict_event(storage, s3, predictions_table, "999")
+
+        mock_predict.assert_called_once()
+        assert result == {"ok": "match"}
+
+    def test_dispatches_cup_events_to_predict_cup_event(self):
+        storage, s3, predictions_table = MagicMock(), MagicMock(), MagicMock()
+        storage.get_event.return_value = {"event_type": "cup"}
+        with patch.object(event_prediction, "predict_cup_event", return_value={"ok": "cup"}) as mock_predict:
+            result = event_prediction.predict_event(storage, s3, predictions_table, "999")
+
+        mock_predict.assert_called_once()
+        assert result == {"ok": "cup"}
+
+    def test_raises_malformed_for_an_unrecognized_event_type(self):
+        storage, s3, predictions_table = MagicMock(), MagicMock(), MagicMock()
+        storage.get_event.return_value = {"event_type": "something_new"}
+
+        with pytest.raises(live_features.MalformedEventError):
+            event_prediction.predict_event(storage, s3, predictions_table, "999")
+
+
+class TestComputeAndCacheEvent:
+    def test_caches_a_successful_prediction_with_the_matching_model_versions_map(self):
+        storage, s3, predictions_table = MagicMock(), MagicMock(), MagicMock()
+        result = {"event_type": "field", "status": "scheduled"}
+        with patch.object(event_prediction, "predict_event", return_value=result), \
+             patch.object(event_prediction.prediction_cache, "current_model_versions", return_value={"v": 1}) as mock_versions, \
+             patch.object(event_prediction.prediction_cache, "put_cached") as mock_put, \
+             patch.object(event_prediction.prediction_cache, "clear_in_progress") as mock_clear:
+            event_prediction.compute_and_cache_event(storage, s3, predictions_table, "999")
+
+        mock_versions.assert_called_once_with(s3, "pga", pga_reads.FIELD_EVENT_MODEL_VERSIONS)
+        mock_put.assert_called_once()
+        mock_clear.assert_called_once()
+
+    def test_cup_events_use_the_cup_model_versions_map(self):
+        storage, s3, predictions_table = MagicMock(), MagicMock(), MagicMock()
+        result = {"event_type": "cup", "status": "scheduled"}
+        with patch.object(event_prediction, "predict_event", return_value=result), \
+             patch.object(event_prediction.prediction_cache, "current_model_versions", return_value={}) as mock_versions, \
+             patch.object(event_prediction.prediction_cache, "put_cached"), \
+             patch.object(event_prediction.prediction_cache, "clear_in_progress"):
+            event_prediction.compute_and_cache_event(storage, s3, predictions_table, "999")
+
+        mock_versions.assert_called_once_with(s3, "pga", pga_reads.CUP_MODEL_VERSIONS)
+
+    def test_a_recognized_error_is_cached_as_a_negative_entry(self):
+        storage, s3, predictions_table = MagicMock(), MagicMock(), MagicMock()
+        with patch.object(event_prediction, "predict_event", side_effect=live_features.EventNotFoundError("no such event")), \
+             patch.object(event_prediction.prediction_cache, "put_error_cached") as mock_put_error, \
+             patch.object(event_prediction.prediction_cache, "clear_in_progress") as mock_clear:
+            event_prediction.compute_and_cache_event(storage, s3, predictions_table, "999")
+
+        mock_put_error.assert_called_once()
+        assert mock_put_error.call_args.args[2] == "EventNotFoundError"
+        mock_clear.assert_called_once()
+
+    def test_an_unrecognized_exception_propagates_but_still_clears_in_progress(self):
+        storage, s3, predictions_table = MagicMock(), MagicMock(), MagicMock()
+        with patch.object(event_prediction, "predict_event", side_effect=RuntimeError("boom")), \
+             patch.object(event_prediction.prediction_cache, "clear_in_progress") as mock_clear:
+            with pytest.raises(RuntimeError):
+                event_prediction.compute_and_cache_event(storage, s3, predictions_table, "999")
+
+        mock_clear.assert_called_once()

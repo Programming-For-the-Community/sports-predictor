@@ -47,7 +47,6 @@ Usage:
 import io
 import logging
 import os
-import re
 from collections import defaultdict
 
 import pandas as pd
@@ -55,7 +54,6 @@ import pandas as pd
 from library.aws.s3_manager import S3Manager
 from library.features.pga import (
     DEFAULT_COURSE_HISTORY_WINDOW,
-    SEASON_STAT_CATEGORIES,
     build_cup_event_features,
     build_cutline_event_features,
     build_golfer_event_features,
@@ -63,6 +61,7 @@ from library.features.pga import (
     build_round_event_features,
 )
 from library.storage.feature_storage import FeatureStorage
+from library.storage.pga_season_stats import load_season_stat_snapshots, resolve_season_stats
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger("pga-feature-engineering")
@@ -73,60 +72,6 @@ ROUND_FEATURES_KEY = "pga/training-data/round_features.parquet"
 CUTLINE_FEATURES_KEY = "pga/training-data/cutline_features.parquet"
 MATCH_FEATURES_KEY = "pga/training-data/match_features.parquet"
 CUP_FEATURES_KEY = "pga/training-data/cup_features.parquet"
-
-_STATISTICS_KEY_RE = re.compile(r"pga/statistics/(\d{8})\.json$")
-
-
-def _load_season_stat_snapshots(raw_s3: S3Manager) -> list[dict]:
-    """Every season-stats snapshot pga-ingest has written
-    (pga/statistics/{date}.json) -- confirmed live, 2026-08-25, that
-    ESPN's own golf/pga/statistics endpoint is CURRENT-SNAPSHOT-ONLY (its
-    season/year query params are silently ignored), so this raw prefix is
-    the ONLY possible source of historical values for these categories;
-    there is no backfill path for it at all (design/DATA_SCHEMA.md), and
-    a fresh deploy's dataset build will see zero snapshots here for a
-    while. Returns [{"as_of_date", "value_by_category_and_athlete"}, ...],
-    oldest first -- same overall shape/reasoning as NCAA MBB's own
-    _load_rankings for its AP polls."""
-    snapshots = []
-    for key in raw_s3.list_keys("pga/statistics/"):
-        match = _STATISTICS_KEY_RE.match(key)
-        if not match:
-            continue
-        raw_date = match.group(1)
-        as_of_date = f"{raw_date[:4]}-{raw_date[4:6]}-{raw_date[6:]}"
-        payload = raw_s3.get_json(key)
-        value_by_category_and_athlete: dict[str, dict[str, float]] = {}
-        for category in payload.get("stats", {}).get("categories", []):
-            name = category.get("name")
-            if name not in SEASON_STAT_CATEGORIES:
-                continue
-            value_by_category_and_athlete[name] = {
-                leader["athlete"]["id"]: leader["value"]
-                for leader in category.get("leaders", [])
-                if leader.get("athlete", {}).get("id") is not None and leader.get("value") is not None
-            }
-        snapshots.append({"as_of_date": as_of_date, "value_by_category_and_athlete": value_by_category_and_athlete})
-    snapshots.sort(key=lambda s: s["as_of_date"])
-    return snapshots
-
-
-def _resolve_season_stats(snapshots: list[dict], entity_id: str, before_date: str) -> dict[str, float | None]:
-    """This golfer's own values from the MOST RECENT snapshot STRICTLY
-    BEFORE `before_date` -- never same-day-or-later, which would leak
-    this tournament's own in-progress state into its own features. None
-    for every category if no qualifying snapshot exists yet (true for
-    100% of backfilled historical rows -- see _load_season_stat_
-    snapshots' own docstring) or the golfer wasn't in that category's top
-    50 that day."""
-    candidates = [s for s in snapshots if s["as_of_date"] < before_date]
-    if not candidates:
-        return {category: None for category in SEASON_STAT_CATEGORIES}
-    latest = candidates[-1]  # snapshots is ascending -> the last qualifying one is the most recent
-    return {
-        category: latest["value_by_category_and_athlete"].get(category, {}).get(entity_id)
-        for category in SEASON_STAT_CATEGORIES
-    }
 
 
 def build_golfer_dataset(
@@ -156,7 +101,7 @@ def build_golfer_dataset(
     treatment, this only affects the course_* columns. season_stat_
     snapshots defaults to None (not []) so a caller with none loaded
     yet still gets every season_* column, just as an explicit missing
-    value (_resolve_season_stats(None or [], ...) skipped entirely,
+    value (resolve_season_stats(None or [], ...) skipped entirely,
     same effect as an empty snapshot list)."""
     # event_type == "field" only -- get_all_events(SPORT) now also
     # returns "match_play"/"cup" rows (library/normalize/pga_matchplay.py)
@@ -183,7 +128,7 @@ def build_golfer_dataset(
             course_results = (
                 course_history[(entity_id, course_id)][-course_window:][::-1] if course_id is not None else None
             )
-            season_stats = _resolve_season_stats(snapshots, entity_id, event["event_date"]) if snapshots else None
+            season_stats = resolve_season_stats(snapshots, entity_id, event["event_date"]) if snapshots else None
             rows.append(build_golfer_event_features(
                 event, participant, prior_results, window, course_results, course_window, season_stats,
             ))
@@ -409,7 +354,7 @@ def main() -> None:
     s3 = S3Manager(bucket, region=region)
     raw_s3 = S3Manager(raw_bucket, region=region)
 
-    snapshots = _load_season_stat_snapshots(raw_s3)
+    snapshots = load_season_stat_snapshots(raw_s3)
     logger.info("Loaded %d season-stats snapshot(s)", len(snapshots))
 
     golfer_rows = build_golfer_dataset(storage, window, course_window, snapshots)

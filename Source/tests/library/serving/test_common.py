@@ -1,15 +1,17 @@
 """
 Unit tests for library.serving.common -- enrich_participants (shared by
 nfl_reads.py and ncaafb_reads.py's own list_events), enrich_team_standings
-(shared by every sport's season_projection.py), and
-enrich_bracket_team_names (shared by every sport's own _bracket_payload,
-added 2026-08-16 for the playoff-bracket feature). See their respective
-test files for the through-list_events/through-build_season_projection
-integration.
+(shared by every sport's season_projection.py), enrich_bracket_team_names
+(shared by every sport's own _bracket_payload, added 2026-08-16 for the
+playoff-bracket feature), and list_models (added 2026-08-27 as the
+canonical home for library.serving.pga_reads -- see that module's own
+docstring for why the pre-existing per-sport nba_reads.py/etc. copies
+weren't rewired to import from here). See their respective test files
+for the through-list_events/through-build_season_projection integration.
 """
 from unittest.mock import MagicMock
 
-from library.serving.common import enrich_bracket_team_names, enrich_participants, enrich_team_standings
+from library.serving.common import enrich_bracket_team_names, enrich_participants, enrich_team_standings, list_models
 
 
 class TestEnrichParticipants:
@@ -203,3 +205,37 @@ class TestEnrichBracketTeamNames:
         result = enrich_bracket_team_names(self._storage(), "ncaambb", bracket)
 
         assert set(result["team_names"]) == {"1", "2", "12", "24", "99"}
+
+
+class TestListModels:
+    def test_empty_when_no_models_promoted(self):
+        s3 = MagicMock()
+        s3.list_keys.return_value = []
+        assert list_models(s3, "pga") == {"sport": "pga", "models": []}
+
+    def test_lists_promoted_models_with_card_summaries(self):
+        s3 = MagicMock()
+        s3.list_keys.return_value = ["pga/top-10-probability/v1/model_card.json"]
+        s3.object_exists.return_value = True
+        s3.get_json.side_effect = [
+            {"version": 1},
+            {
+                "model_name": "top-10-probability", "algorithm": "xgboost", "version": 1,
+                "trained_at": "2026-01-01T00:00:00Z", "accuracy": 0.7,
+                "feature_importances": {"avg_score_to_par": 0.3},
+            },
+        ]
+
+        result = list_models(s3, "pga")
+
+        assert len(result["models"]) == 1
+        assert result["models"][0]["model_name"] == "top-10-probability"
+
+    def test_model_never_promoted_is_excluded(self):
+        s3 = MagicMock()
+        s3.list_keys.return_value = ["pga/top-10-probability/v1/model_card.json"]
+        s3.object_exists.return_value = False
+
+        result = list_models(s3, "pga")
+
+        assert result["models"] == []

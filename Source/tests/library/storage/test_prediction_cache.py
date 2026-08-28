@@ -75,6 +75,32 @@ class TestPutCached:
         assert "cached_at_epoch" in payload
 
 
+class TestCurrentModelVersions:
+    """The generic function current_core_model_versions is now built on
+    top of -- covers a non-head-to-head model-name map (e.g. PGA's own),
+    so this module doesn't need a second hardcoded constant per sport
+    shape."""
+
+    def test_reads_a_caller_supplied_model_map(self):
+        s3 = MagicMock()
+        s3.object_exists.return_value = True
+        s3.get_json.return_value = {"version": 5}
+
+        versions = prediction_cache.current_model_versions(
+            s3, "pga", {"top_10": "top-10-probability", "score": "projected-score-to-par"},
+        )
+
+        assert versions == {"top_10": 5, "score": 5}
+
+    def test_an_unpromoted_model_in_the_map_reads_as_none(self):
+        s3 = MagicMock()
+        s3.object_exists.return_value = False
+
+        versions = prediction_cache.current_model_versions(s3, "pga", {"top_10": "top-10-probability"})
+
+        assert versions == {"top_10": None}
+
+
 class TestCurrentCoreModelVersions:
     def test_reads_all_four_pointers(self):
         s3 = MagicMock()

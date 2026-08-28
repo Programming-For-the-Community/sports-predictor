@@ -22,7 +22,7 @@ from library.normalize.pga import (
 def _competitor(
     athlete_id="10140", name="Xander Schauffele", status_name="STATUS_FINISH", completed=True,
     position_display="T26", is_tie=True, score_display="-4", score_value=276.0, earnings=177500.0,
-    country="USA", amateur=False, linescores=None,
+    country="USA", amateur=False, linescores=None, tee_time=None,
 ):
     return {
         "id": athlete_id,
@@ -37,6 +37,7 @@ def _competitor(
         "status": {
             "type": {"id": "2", "name": status_name, "state": "post", "completed": completed},
             "position": {"id": "26", "displayName": position_display, "isTie": is_tie},
+            **({"teeTime": tee_time} if tee_time else {}),
         },
         "score": {"value": score_value, "displayValue": score_display},
         "linescores": linescores if linescores is not None else [
@@ -112,7 +113,10 @@ def _event(
 class TestLeaderboardEventToEventItem:
     def test_has_required_schema_fields(self):
         item = leaderboard_event_to_event_item(_event(), "pga")
-        for field in ("event_key", "event_id", "sport", "event_type", "event_date", "status", "participants", "season"):
+        for field in (
+            "event_key", "event_id", "sport", "event_type", "event_date", "next_tee_time", "end_date",
+            "tournament_name", "status", "participants", "season",
+        ):
             assert field in item, f"Missing field: {field}"
 
     def test_event_type_is_field(self):
@@ -127,6 +131,40 @@ class TestLeaderboardEventToEventItem:
     def test_event_date_is_truncated_to_the_date(self):
         item = leaderboard_event_to_event_item(_event(), "pga")
         assert item["event_date"] == "2026-08-20"
+
+    def test_next_tee_time_is_the_earliest_tee_time_among_active_competitors(self):
+        competitors = [
+            _competitor(athlete_id="1", status_name="STATUS_SCHEDULED", completed=False, tee_time="2026-08-21T15:12Z"),
+            _competitor(athlete_id="2", status_name="STATUS_SCHEDULED", completed=False, tee_time="2026-08-21T14:00Z"),
+        ]
+        item = leaderboard_event_to_event_item(_event(competitors=competitors), "pga")
+        assert item["next_tee_time"] == "2026-08-21T14:00Z"
+
+    def test_a_cut_competitors_tee_time_is_excluded(self):
+        competitors = [
+            _competitor(athlete_id="1", status_name="STATUS_CUT", completed=False, tee_time="2026-08-20T12:00Z"),
+            _competitor(athlete_id="2", status_name="STATUS_SCHEDULED", completed=False, tee_time="2026-08-21T14:00Z"),
+        ]
+        item = leaderboard_event_to_event_item(_event(competitors=competitors), "pga")
+        assert item["next_tee_time"] == "2026-08-21T14:00Z"
+
+    def test_next_tee_time_is_none_when_nobody_has_a_known_tee_time(self):
+        item = leaderboard_event_to_event_item(_event(), "pga")
+        assert item["next_tee_time"] is None
+
+    def test_end_date_is_truncated_to_the_date(self):
+        item = leaderboard_event_to_event_item(_event(), "pga")
+        assert item["end_date"] == "2026-08-23"
+
+    def test_end_date_is_none_when_missing(self):
+        event = _event()
+        del event["endDate"]
+        item = leaderboard_event_to_event_item(event, "pga")
+        assert item["end_date"] is None
+
+    def test_tournament_name_comes_from_tournament_display_name(self):
+        item = leaderboard_event_to_event_item(_event(tournament_name="BMW Championship"), "pga")
+        assert item["tournament_name"] == "BMW Championship"
 
     def test_completed_status_maps_to_completed(self):
         item = leaderboard_event_to_event_item(_event(status_completed=True), "pga")
@@ -500,6 +538,21 @@ class TestParticipantRounds:
         no_rounds_competitor = _competitor(linescores=[])
         item = leaderboard_event_to_event_item(_event(competitors=[no_rounds_competitor]), "pga")
         assert item["participants"][0]["result"]["rounds"] == []
+
+    def test_a_future_rounds_tee_time_only_stub_is_not_counted_as_played(self):
+        # Confirmed live 2026-08-27/28 on the real in-progress TOUR
+        # Championship: once ESPN publishes a golfer's next tee time, it
+        # adds a linescores entry for that round with ONLY
+        # {period, teeTime, hasStream, isPlayoff} -- no score fields at
+        # all. Must not show up in `rounds` (see _parse_rounds' own
+        # docstring on why this previously corrupted applicable_rounds()).
+        competitor = _competitor(linescores=[
+            {"period": 1, "value": 67.0, "displayValue": "-3", "teeTime": "2026-08-27T16:54Z", "hasStream": False, "isPlayoff": False},
+            {"period": 2, "teeTime": "2026-08-28T16:18Z", "hasStream": False, "isPlayoff": False},
+        ])
+        item = leaderboard_event_to_event_item(_event(competitors=[competitor]), "pga")
+        rounds = item["participants"][0]["result"]["rounds"]
+        assert [r["round"] for r in rounds] == [1]
 
 
 class TestLeaderboardEventToPlayerEntities:

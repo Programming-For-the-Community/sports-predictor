@@ -20,6 +20,28 @@ def _df(n=4, columns=("a", "b")):
     return pd.DataFrame({col: [float(i) for i in range(n)] for col in columns})
 
 
+class TestTimeSeriesSplits:
+    """Real crash, 2026-08-27 (project-pga-onboarding memory): PGA's
+    cup-win-probability target has only 8 rows total (one Ryder/
+    Presidents Cup a year) -- 6 after the chronological train/test split
+    -- and every adapter's hardcoded TimeSeriesSplit(n_splits=8) requires
+    at least 9 samples, crashing before a single candidate could be
+    scored."""
+
+    def test_unchanged_for_a_normal_sized_dataset(self):
+        assert model_types._time_series_splits(8, 100) == 8
+
+    def test_clamps_down_for_a_small_dataset(self):
+        assert model_types._time_series_splits(8, 6) == 5  # the real cup-win-probability case
+
+    def test_floors_at_two(self):
+        assert model_types._time_series_splits(8, 3) == 2
+
+    def test_raises_when_even_the_floor_cant_be_satisfied(self):
+        with pytest.raises(ValueError, match="Not enough rows"):
+            model_types._time_series_splits(8, 2)
+
+
 class TestXGBoostAdapterPredict:
     """predict() always means "the model's raw output" -- probability for
     a classification-task booster, a continuous value for a
@@ -235,6 +257,26 @@ class TestXGBoostClassifierAdapter:
     def test_task_is_classification(self):
         assert model_types.XGBoostClassifierAdapter().task == "classification"
 
+    def test_tune_and_fit_clamps_cv_splits_for_a_small_training_set(self):
+        """Real crash, 2026-08-27: PGA's cup-win-probability target had
+        only 6 training rows, and the hardcoded n_splits=8 raised before
+        _run_randomized_search_with_early_stopping's first batch could
+        even run. tune_and_fit must pass a TimeSeriesSplit sized to what
+        this X_train can actually support, not the raw constant."""
+        adapter = model_types.XGBoostClassifierAdapter()
+        mock_search = MagicMock()
+        mock_search.best_params_ = {"max_depth": 3}
+        mock_search.best_score_ = -0.5
+        mock_search.cv_results_ = {"mean_test_score": [-0.5], "params": [{"max_depth": 3}]}
+        mock_fitted = MagicMock()
+        mock_fitted.get_booster.return_value = "the-booster"
+
+        with patch.object(model_types, "RandomizedSearchCV", return_value=mock_search) as mock_search_cls, \
+             patch.object(model_types.xgb, "XGBClassifier", return_value=mock_fitted):
+            adapter.tune_and_fit(_df(6), pd.Series([0, 1, 0, 1, 0, 1]))
+
+        assert mock_search_cls.call_args.kwargs["cv"].n_splits == 5  # min(8, 6 - 1)
+
 
 class TestXGBoostRegressorAdapter:
     def test_tune_and_fit_searches_with_squared_error_objective_and_rmse_scoring(self):
@@ -338,6 +380,22 @@ class TestElasticNetAdapter:
         assert mock_search_cls.call_args.kwargs["scoring"] == "neg_root_mean_squared_error"
         assert mock_search_cls.call_args.kwargs["param_grid"] == model_types._ELASTIC_NET_PARAM_GRID
         assert estimator is mock_pipeline
+
+    def test_tune_and_fit_clamps_cv_splits_for_a_small_training_set(self):
+        """Same real crash as TestXGBoostClassifierAdapter's own version
+        of this test -- covers the GridSearchCV/sklearn-Pipeline adapter
+        shape (ElasticNet/LogisticRegression/RandomForest/MLP all build
+        their `cv=` kwarg the same way), not just XGBoost's."""
+        adapter = model_types.ElasticNetAdapter()
+        mock_search = MagicMock()
+        mock_search.best_params_ = {"model__alpha": 0.1, "model__l1_ratio": 0.5}
+        mock_pipeline = self._mock_pipeline()
+
+        with patch.object(model_types, "GridSearchCV", return_value=mock_search) as mock_search_cls, \
+             patch.object(adapter, "_build_pipeline", return_value=mock_pipeline):
+            adapter.tune_and_fit(_df(6), pd.Series([10.0, 20.0, 30.0, 40.0, 50.0, 60.0]))
+
+        assert mock_search_cls.call_args.kwargs["cv"].n_splits == 5  # min(8, 6 - 1)
 
     def test_feature_importances_are_signed_coefficients_sorted_by_magnitude(self):
         adapter = model_types.ElasticNetAdapter()

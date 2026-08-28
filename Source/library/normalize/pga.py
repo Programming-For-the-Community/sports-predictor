@@ -115,6 +115,24 @@ def _parse_rounds(linescores: list[dict]) -> list[dict]:
     all here, with no conditional cut-logic needed in this function or
     anywhere downstream that consumes it (feature engineering, training).
 
+    Skips a round with no `displayValue`/`value` key at all -- confirmed
+    live 2026-08-27/28 on the real in-progress TOUR Championship: once
+    ESPN publishes a golfer's NEXT round's tee time (same day their
+    current round wraps up, sometimes the evening before), it adds a
+    linescores entry for that round carrying only
+    {period, teeTime, hasStream, isPlayoff}, no score fields whatsoever --
+    genuinely different from this function's own prior assumption that
+    a linescores entry only ever exists for a round already played.
+    Without this guard, that stub was parsed as a real round via
+    _parse_score's own (None, None) "no score" fallback and appended to
+    `rounds` anyway, which corrupts aws-lambdas/pga/predict/
+    live_features.py's applicable_rounds() (`played = {r["round"] for r
+    in result.get("rounds", [])}` would count the *unplayed* next round
+    as played, skipping the model for the actual next round to predict).
+    A live check of a real not-yet-started round confirms this is not a
+    rare edge case -- it's the norm once next-round tee times exist,
+    i.e. for most of the field most of the time.
+
     Each round's own score is parsed through the exact same _parse_score
     used for the tournament-level total -- an individual round can show
     "E" for even par the same way an overall score can."""
@@ -123,6 +141,8 @@ def _parse_rounds(linescores: list[dict]) -> list[dict]:
         period = linescore.get("period")
         if period is None:
             continue
+        if "displayValue" not in linescore and "value" not in linescore:
+            continue  # a future round's tee-time-only stub -- not played yet
         score_to_par, total_strokes = _parse_score(
             {"displayValue": linescore.get("displayValue"), "value": linescore.get("value")},
         )
@@ -267,6 +287,37 @@ def is_flat_stroke_play(event: dict) -> bool:
     return is_medal_scoring(event) or is_team_stroke_play(event)
 
 
+def _next_tee_time(competitors: list[dict]) -> str | None:
+    """Earliest known upcoming tee time across still-in-the-tournament
+    competitors (excludes cut/withdrawn/MDF -- they have no round left to
+    tee off for), or None if nobody has a known tee time yet.
+
+    Confirmed live 2026-08-27/28 on the real in-progress TOUR
+    Championship: each competitor's own `status.teeTime` carries their
+    NEXT (or current) round's tee time -- e.g. a golfer who just finished
+    today's round already shows tomorrow's published tee time here, often
+    the same day it's still being played. This is the one real clock
+    signal PGA data has for "when does play next start" -- see
+    aws-lambdas/pga/live-scores/live_scores.py's own docstring for why an
+    earlier attempt to use the event-level `date` field instead was wrong
+    (that field is a static midnight-UTC placeholder, not a real tee
+    time, confirmed by the same live check)."""
+    tee_times = [
+        status["teeTime"]
+        for c in competitors
+        if (status := c.get("status", {})).get("teeTime")
+        and map_status(status.get("type", {})) not in _ELIMINATED_RESULT_STATUSES
+    ]
+    return min(tee_times) if tee_times else None
+
+
+# Same vocabulary as aws-lambdas/pga/predict/live_features.py's own
+# _ELIMINATED_STATUSES -- duplicated here rather than imported across the
+# library/aws-lambdas boundary (library code doesn't import from
+# aws-lambdas/). Must stay in sync.
+_ELIMINATED_RESULT_STATUSES = {"cut", "withdrawn", "made_cut_did_not_finish"}
+
+
 def leaderboard_event_to_event_item(event: dict, sport: str) -> dict:
     """One PGA tournament -> one events-table item. `event` is
     get_leaderboard(event_id)["events"][0].
@@ -307,6 +358,23 @@ def leaderboard_event_to_event_item(event: dict, sport: str) -> dict:
         "sport": sport,
         "event_type": "field",
         "event_date": event["date"][:10],
+        # next_tee_time -- see _next_tee_time's own docstring. Needed by
+        # pga-live-scores' poll-window logic; refreshed every time this
+        # function runs (both the daily pga-normalize path and live-
+        # scores' own poll), so a day's tee times are typically already
+        # known in DynamoDB before live-scores' scheduler ever needs them
+        # that day, without a dedicated "discover tee times" call.
+        "next_tee_time": _next_tee_time(competition.get("competitors", [])),
+        # end_date -- confirmed live on the same leaderboard response
+        # (library/http/pga.py's own docstring, 2026-08-24). Needed by
+        # pga-live-scores to know which calendar days are tournament
+        # days at all.
+        "end_date": (event.get("endDate") or "")[:10] or None,
+        # tournament_name -- already read by library/serving/pga_reads.py
+        # and aws-lambdas/pga/predict/event_prediction.py, but was never
+        # set here (only pga_matchplay.py's match_play/cup normalizers
+        # set it) -- every field-event tournament_name was silently null.
+        "tournament_name": tournament.get("displayName"),
         "status": event_status(event.get("status", {})),
         "participants": participants,
         "season": event.get("season", {}).get("year"),

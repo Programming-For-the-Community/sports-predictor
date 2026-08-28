@@ -52,8 +52,22 @@ env:
   # handling after the match/cup status bug below, not from a live crash
   # -- both scripts now filter the same way train_score_model.py already
   # did.
+  #
+  # TRAIN_TOP10_MODEL bumped again 2026-08-27, real live crash:
+  # ValueError: Cannot have number of folds=9 greater than the number of
+  # samples=6, in train_cup_winprob_model -- cup-win-probability's real
+  # dataset is only 8 rows total (one Ryder/Presidents Cup a year), 6
+  # after the chronological train/test split, and library/ml/
+  # model_types.py hardcoded every adapter's TimeSeriesSplit at
+  # n_splits=8 (needs 9+ samples) with no accommodation for a target
+  # this small. Fixed with a new shared _time_series_splits() helper
+  # (clamps down to what the data can support, floored at 2) applied to
+  # all 8 cv=TimeSeriesSplit(...) call sites in that file, not just
+  # XGBoost (the one that happened to crash first in the candidate
+  # tournament) -- behaviorally a no-op for every other target/sport,
+  # since none of them have ever had fewer than 9 training rows.
   FEATURE_ENGINEERING_IMAGE_VERSION: '1.1.1'
-  TRAIN_TOP10_MODEL_IMAGE_VERSION: '1.1.1'
+  TRAIN_TOP10_MODEL_IMAGE_VERSION: '1.1.2'
 
 permissions:
   id-token: write
