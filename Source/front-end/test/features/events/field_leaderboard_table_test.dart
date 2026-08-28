@@ -134,20 +134,20 @@ void main() {
     expect(find.text('--'), findsWidgets);
   });
 
-  testWidgets('TO PAR combines the real standing and the projected final score into one column, no separate PROJ column', (tester) async {
+  testWidgets('TOTAL combines the real standing and the projected final score into one column, no separate PROJ column', (tester) async {
     final field = [_golfer('1', 'Xander Schauffele', projectedScoreToPar: -8, actualScoreToPar: -5)];
 
     await tester.pumpWidget(_wrap(FieldLeaderboardTable(field: field)));
 
-    expect(find.text('PROJ'), findsNothing); // folded into TO PAR, not its own column anymore
-    expect(find.text('TO PAR'), findsOneWidget);
+    expect(find.text('PROJ'), findsNothing); // folded into TOTAL, not its own column anymore
+    expect(find.text('TOTAL'), findsOneWidget);
     expect(find.text('-5'), findsOneWidget); // actual standing
     expect(find.text('-8'), findsOneWidget); // projected final score-to-par, right underneath
   });
 
-  testWidgets('TO PAR stays bare to-par even when a real stroke count and par are both available', (tester) async {
+  testWidgets('TOTAL stays bare to-par even when a real stroke count and par are both available', (tester) async {
     // Explicit user call: THIS RD/the round breakdown show "N strokes (to
-    // par)", but the whole-tournament TO PAR column never does -- there's
+    // par)", but the whole-tournament TOTAL column never does -- there's
     // no unambiguous par baseline for a full tournament (2-round missed
     // cut vs. 4-round made cut).
     final field = [_golfer('1', 'Xander Schauffele', projectedScoreToPar: -8, actualScoreToPar: -5, actualTotalStrokes: 275.0)];
@@ -229,7 +229,7 @@ void main() {
       expect(find.text('#'), findsOneWidget);
       expect(find.text('PLAYER'), findsOneWidget);
       expect(find.text('STATUS'), findsOneWidget);
-      expect(find.text('TO PAR'), findsOneWidget);
+      expect(find.text('TOTAL'), findsOneWidget);
       expect(find.text('THIS RD'), findsNothing);
       expect(find.text('TOP 10%'), findsNothing);
       expect(find.text('TOP 5%'), findsNothing);

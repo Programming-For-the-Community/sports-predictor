@@ -16,7 +16,7 @@ class FieldStatusPill extends StatelessWidget {
   // STATUS column has no room for a full text label there (confirmed
   // live: a real "Made Cut, DNF" pill was one of the widest single
   // strings in the whole table, and STATUS shares its column width with
-  // #/PLAYER/TO PAR on mobile). Collapses to just the colored dot,
+  // #/PLAYER/TOTAL on mobile). Collapses to just the colored dot,
   // keeping the color-coded signal without the text.
   final bool dotOnly;
 

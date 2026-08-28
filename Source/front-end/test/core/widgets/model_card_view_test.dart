@@ -112,6 +112,26 @@ void main() {
     expect(find.text('ElasticNet'), findsOneWidget);
   });
 
+  testWidgets('a not-yet-evaluated candidate (null score) shows a real label instead of crashing', (tester) async {
+    // A previously real production crash (TypeError casting null to num)
+    // -- a model card captured mid-run can permanently carry a
+    // "not_evaluated" placeholder candidate (library/ml/backtest.py's
+    // own _full_candidate_summary) if that training run never finished.
+    await _pump(
+      tester,
+      _regressorCard(
+        candidatesRankedBy: 'rmse',
+        candidates: const [
+          ModelCandidate(algorithm: 'xgboost', score: 7.4, rankScore: 9.8),
+          ModelCandidate(algorithm: 'mlp_regressor', score: null, rankScore: null, status: 'not_evaluated'),
+        ],
+      ),
+    );
+
+    expect(find.text('±7.4 PTS'), findsOneWidget);
+    expect(find.text('Not yet evaluated'), findsOneWidget);
+  });
+
   testWidgets('uses the unit matching the target stat for a player-prop model', (tester) async {
     await _pump(
       tester,

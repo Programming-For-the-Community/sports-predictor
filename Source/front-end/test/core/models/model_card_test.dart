@@ -111,4 +111,28 @@ void main() {
 
     expect(card.candidates![0].rankScore, isNull);
   });
+
+  test('a not_evaluated candidate (a card captured mid-run) has a null score without throwing', () {
+    // library/ml/backtest.py's own _full_candidate_summary writes exactly
+    // this placeholder shape for a candidate not yet tried when a model
+    // card is captured mid-run -- real, not malformed data (a previously
+    // real production crash: TypeError casting null to num).
+    final card = ModelCard.fromJson({
+      'model_name': 'projected-score-to-par',
+      'algorithm': 'xgboost',
+      'version': 1,
+      'trained_at': '2026-01-01T00:00:00Z',
+      'rmse': 4.6,
+      'mae': 3.1,
+      'top_features': [],
+      'candidates_ranked_by': 'rmse',
+      'candidates': [
+        {'algorithm': 'xgboost', 'score': 3.1, 'rank_score': 4.6},
+        {'algorithm': 'mlp_regressor', 'score': null, 'rank_score': null, 'training_seconds': null, 'status': 'not_evaluated'},
+      ],
+    });
+
+    expect(card.candidates![1].score, isNull);
+    expect(card.candidates![1].status, 'not_evaluated');
+  });
 }

@@ -32,19 +32,26 @@ class TestBucket:
 class TestAcceptedCountsByState:
     def test_parses_logs_insights_rows_into_a_state_count_map(self):
         client = _mock_logs_client([{"region": "CA", "requests": 42}, {"region": "NY", "requests": 7}])
-        counts = handler._accepted_counts_by_state(client, "SOURCE 'lg'", 0, 1000)
+        counts = handler._accepted_counts_by_state(client, ["lg1", "lg2"], 0, 1000)
         assert counts == {"CA": 42, "NY": 7}
 
     def test_a_region_code_outside_the_us_state_grid_is_dropped_not_misplaced(self):
         # A non-US or malformed region value must never silently land on some
         # unrelated US_STATE_GRID tile.
         client = _mock_logs_client([{"region": "CA", "requests": 5}, {"region": "ON", "requests": 3}])
-        counts = handler._accepted_counts_by_state(client, "SOURCE 'lg'", 0, 1000)
+        counts = handler._accepted_counts_by_state(client, ["lg1"], 0, 1000)
         assert counts == {"CA": 5}
 
     def test_empty_results_produce_an_empty_map_not_an_error(self):
         client = _mock_logs_client([])
-        assert handler._accepted_counts_by_state(client, "SOURCE 'lg'", 0, 1000) == {}
+        assert handler._accepted_counts_by_state(client, ["lg1"], 0, 1000) == {}
+
+    def test_passes_every_log_group_name_to_start_query_not_embedded_in_the_query_text(self):
+        client = _mock_logs_client([])
+        handler._accepted_counts_by_state(client, ["lg1", "lg2"], 0, 1000)
+        call_kwargs = client.start_query.call_args.kwargs
+        assert call_kwargs["logGroupNames"] == ["lg1", "lg2"]
+        assert "SOURCE" not in call_kwargs["queryString"]
 
 
 class TestBlockedCountsByCountry:
@@ -52,6 +59,11 @@ class TestBlockedCountsByCountry:
         client = _mock_logs_client([{"c-country": "RU", "requests": 12}, {"c-country": "CN", "requests": 3}])
         counts = handler._blocked_counts_by_country(client, "cf-edge-logs", 0, 1000)
         assert counts == {"RU": 12, "CN": 3}
+
+    def test_passes_the_single_log_group_name_to_start_query(self):
+        client = _mock_logs_client([])
+        handler._blocked_counts_by_country(client, "cf-edge-logs", 0, 1000)
+        assert client.start_query.call_args.kwargs["logGroupNames"] == ["cf-edge-logs"]
 
 
 class TestRunLogsInsightsQuery:
@@ -61,13 +73,13 @@ class TestRunLogsInsightsQuery:
         client.get_query_results.return_value = {"status": "Running", "results": []}
         # max_wait_seconds=0 -- the poll loop must exit immediately rather
         # than hang, and must not raise.
-        assert handler._run_logs_insights_query(client, "SOURCE 'lg'", 0, 1000, max_wait_seconds=0) == []
+        assert handler._run_logs_insights_query(client, ["lg"], "filter true", 0, 1000, max_wait_seconds=0) == []
 
     def test_returns_empty_list_on_a_failed_query_rather_than_raising(self):
         client = MagicMock()
         client.start_query.return_value = {"queryId": "q-1"}
         client.get_query_results.return_value = {"status": "Failed", "results": []}
-        assert handler._run_logs_insights_query(client, "SOURCE 'lg'", 0, 1000) == []
+        assert handler._run_logs_insights_query(client, ["lg"], "filter true", 0, 1000) == []
 
 
 class TestRegionGrouping:
@@ -106,12 +118,13 @@ class TestLambdaHandler:
         assert "Geo widget" in result
         called.assert_not_called()
 
-    def test_accepted_mode_queries_the_configured_log_sources(self, monkeypatch):
+    def test_accepted_mode_queries_every_configured_log_group(self, monkeypatch):
         client = _mock_logs_client([{"region": "TX", "requests": 3}])
         monkeypatch.setattr(handler.boto3, "client", lambda service, **kwargs: client)
-        monkeypatch.setenv("ACCEPTED_LOG_SOURCES", "SOURCE 'lg1'")
+        monkeypatch.setenv("ACCEPTED_LOG_GROUP_NAMES", "lg1,lg2")
         result = handler.lambda_handler({"mode": "accepted", "widgetContext": {"timeRange": {"start": 0, "end": 1000}}}, None)
         assert ">TX<" in result
+        assert client.start_query.call_args.kwargs["logGroupNames"] == ["lg1", "lg2"]
 
     def test_blocked_mode_queries_the_configured_edge_log_group_in_us_east_1(self, monkeypatch):
         client = _mock_logs_client([{"c-country": "CN", "requests": 6}])
@@ -133,6 +146,6 @@ class TestLambdaHandler:
     def test_missing_mode_defaults_to_accepted(self, monkeypatch):
         client = _mock_logs_client([])
         monkeypatch.setattr(handler.boto3, "client", lambda service, **kwargs: client)
-        monkeypatch.setenv("ACCEPTED_LOG_SOURCES", "SOURCE 'lg1'")
+        monkeypatch.setenv("ACCEPTED_LOG_GROUP_NAMES", "lg1")
         result = handler.lambda_handler({"widgetContext": {"timeRange": {"start": 0, "end": 1000}}}, None)
         assert "<svg" in result

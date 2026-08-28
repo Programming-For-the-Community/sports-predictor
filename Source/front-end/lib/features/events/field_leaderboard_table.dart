@@ -95,7 +95,11 @@ List<_LeaderboardColumn> _leaderboardColumns(int? par, {required bool compact}) 
       // actual/projected pairing THIS RD shows for the current round alone,
       // now shown for the whole tournament (was two separate columns,
       // TO PAR and PROJ, split apart from each other for no reason).
-      _LeaderboardColumn('TO PAR', 3, (context, entry, live, rowNumber) {
+      // Labeled TOTAL, not TO PAR -- same term ESPN/PGA Tour's own real
+      // leaderboards use for this exact full-tournament column, and
+      // distinguishes it from THIS RD's own to-par-for-the-round-alone
+      // value at a glance instead of both columns reading as "to par".
+      _LeaderboardColumn('TOTAL', 3, (context, entry, live, rowNumber) {
         final scoreToPar = live?.scoreToPar ?? entry.actualScoreToPar;
         final projected = entry.projectedScoreToPar?.value;
         return Center(child: _StandingCell(actual: scoreToPar, projected: projected));
@@ -150,7 +154,7 @@ String _formatStrokesAndToPar(double? strokes, num? scoreToPar) {
 // live overlay first (freshest during an active poll window), falling
 // back to the prediction response's own real (not gated on the whole
 // tournament being "completed") current standing -- same precedence the
-// TO PAR column already uses.
+// TOTAL column already uses.
 double? _standingScoreToPar(FieldParticipantPrediction entry, FieldParticipantLiveResult? live) {
   final liveScore = live?.scoreToPar;
   if (liveScore != null) return liveScore.toDouble();
@@ -416,7 +420,7 @@ class _RoundCell extends StatelessWidget {
   final double? projected; // the round model's own point estimate
   final ({num? scoreToPar, double? totalStrokes})? actual;
   // This course's own single-round par -- projected * strokes is
-  // (par + projected), unlike TO PAR's own full-tournament (par * 4 +
+  // (par + projected), unlike TOTAL's own full-tournament (par * 4 +
   // projected) conversion, since a single round has no cut-line
   // ambiguity to worry about.
   final int? par;
@@ -474,7 +478,7 @@ class _RoundCell extends StatelessWidget {
   }
 }
 
-/// TO PAR column's cell -- same compact actual-over-projected stack
+/// TOTAL column's cell -- same compact actual-over-projected stack
 /// _RoundCell uses for THIS RD (showLabel: false), just tournament-level
 /// (cumulative standing vs. projected FINAL score-to-par) instead of one
 /// round's own actual vs. that round's own projection. Deliberately

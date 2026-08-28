@@ -8,22 +8,29 @@
 # order. Fields that can be null for some IPs (city, region_name) are
 # excluded from that row's stats rather than mislabeled "Unknown".
 locals {
-  viewer_analytics_log_sources = join(" | ", [
-    for lg in [
-      aws_cloudwatch_log_group.nfl_predict_read.name,
-      aws_cloudwatch_log_group.ncaafb_predict_read.name,
-      aws_cloudwatch_log_group.nba_predict_read.name,
-      # ncaambb_predict_read was missing here from this sport's own
-      # onboarding through 2026-08-25 -- its log group existed and was
-      # deployed the whole time, so every real NCAA MBB viewer request
-      # was simply invisible on this dashboard until this line was added.
-      aws_cloudwatch_log_group.ncaambb_predict_read.name,
-      # pga_predict_read had the exact same gap, from PGA's own onboarding
-      # through 2026-08-28 -- confirmed live, the log group has existed
-      # and been receiving real traffic the whole time.
-      aws_cloudwatch_log_group.pga_predict_read.name,
-    ] : "SOURCE '${lg}'"
-  ])
+  viewer_analytics_log_group_names = [
+    aws_cloudwatch_log_group.nfl_predict_read.name,
+    aws_cloudwatch_log_group.ncaafb_predict_read.name,
+    aws_cloudwatch_log_group.nba_predict_read.name,
+    # ncaambb_predict_read was missing here from this sport's own
+    # onboarding through 2026-08-25 -- its log group existed and was
+    # deployed the whole time, so every real NCAA MBB viewer request
+    # was simply invisible on this dashboard until this line was added.
+    aws_cloudwatch_log_group.ncaambb_predict_read.name,
+    # pga_predict_read had the exact same gap, from PGA's own onboarding
+    # through 2026-08-28 -- confirmed live, the log group has existed
+    # and been receiving real traffic the whole time.
+    aws_cloudwatch_log_group.pga_predict_read.name,
+  ]
+
+  # Dashboard-widget queries have no separate "log group" field for a
+  # multi-source query -- SOURCE has to be embedded in the query text
+  # itself, chained with `|` (AWS's own documented cross-log-group query
+  # syntax). lambda-cloudwatch-geo-widget.tf's own StartQuery calls don't
+  # have that constraint -- they pass viewer_analytics_log_group_names
+  # directly via the API's logGroupNames parameter instead, no embedded
+  # SOURCE clause at all.
+  viewer_analytics_log_sources = join(" | ", [for lg in local.viewer_analytics_log_group_names : "SOURCE '${lg}'"])
 }
 
 resource "aws_cloudwatch_dashboard" "viewer_analytics" {

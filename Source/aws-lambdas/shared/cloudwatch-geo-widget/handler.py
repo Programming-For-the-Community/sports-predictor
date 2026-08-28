@@ -89,15 +89,23 @@ def _bucket(count: int, max_count: int) -> int:
     return 1
 
 
-def _run_logs_insights_query(logs_client, query: str, start_ms: int, end_ms: int, max_wait_seconds: float = 8.0) -> list[dict]:
+def _run_logs_insights_query(
+    logs_client, log_group_names: list[str], query: str, start_ms: int, end_ms: int, max_wait_seconds: float = 8.0,
+) -> list[dict]:
     """Synchronous StartQuery + poll GetQueryResults -- boto3 has no
-    waiter for Logs Insights. query must embed its own SOURCE clause(s)
-    (same convention cloudwatch-dashboard-viewer-analytics.tf's own
-    widget queries already use), so no separate logGroupNames argument is
-    needed here. Returns [] on a failed/cancelled/timed-out query or if
+    waiter for Logs Insights. Log groups are passed via StartQuery's own
+    logGroupNames parameter, not embedded as SOURCE clauses in the query
+    text -- unlike cloudwatch-dashboard-viewer-analytics.tf's own
+    dashboard-widget queries (which have no separate field for multiple
+    sources and so have to chain `SOURCE 'a' | SOURCE 'b'` inline), a
+    direct StartQuery call has a real parameter for this, and using it
+    avoids ever hand-building query-syntax text for log group names.
+    Returns [] on a failed/cancelled/timed-out query or if
     max_wait_seconds elapses before completion -- a render with no data
     is far better than one that raises and shows nothing at all."""
-    query_id = logs_client.start_query(queryString=query, startTime=start_ms // 1000, endTime=end_ms // 1000)["queryId"]
+    query_id = logs_client.start_query(
+        logGroupNames=log_group_names, queryString=query, startTime=start_ms // 1000, endTime=end_ms // 1000,
+    )["queryId"]
     deadline = time.monotonic() + max_wait_seconds
     while time.monotonic() < deadline:
         response = logs_client.get_query_results(queryId=query_id)
@@ -110,24 +118,22 @@ def _run_logs_insights_query(logs_client, query: str, start_ms: int, end_ms: int
     return []
 
 
-def _accepted_counts_by_state(logs_client, log_sources: str, start_ms: int, end_ms: int) -> dict[str, int]:
-    query = f"""
-        {log_sources}
-        | filter @message like /viewer_analytics/
+def _accepted_counts_by_state(logs_client, log_group_names: list[str], start_ms: int, end_ms: int) -> dict[str, int]:
+    query = """
+        filter @message like /viewer_analytics/
         | parse @message '"region": "*"' as region
         | stats count(*) as requests by region
     """
-    rows = _run_logs_insights_query(logs_client, query, start_ms, end_ms)
+    rows = _run_logs_insights_query(logs_client, log_group_names, query, start_ms, end_ms)
     return {row["region"]: int(row["requests"]) for row in rows if row.get("region") in US_STATE_GRID}
 
 
 def _blocked_counts_by_country(logs_client, log_group_name: str, start_ms: int, end_ms: int) -> dict[str, int]:
-    query = f"""
-        SOURCE '{log_group_name}'
-        | filter `sc-status` = "403"
+    query = """
+        filter `sc-status` = "403"
         | stats count(*) as requests by `c-country`
     """
-    rows = _run_logs_insights_query(logs_client, query, start_ms, end_ms)
+    rows = _run_logs_insights_query(logs_client, [log_group_name], query, start_ms, end_ms)
     return {row["c-country"]: int(row["requests"]) for row in rows if row.get("c-country")}
 
 
@@ -214,7 +220,8 @@ def lambda_handler(event, context):
         # Every predict-read log group lives in this Lambda's own region
         # -- no explicit region_name needed, defaults to it already.
         logs_client = boto3.client("logs")
-        counts = _accepted_counts_by_state(logs_client, os.environ["ACCEPTED_LOG_SOURCES"], start_ms, end_ms)
+        log_group_names = os.environ["ACCEPTED_LOG_GROUP_NAMES"].split(",")
+        counts = _accepted_counts_by_state(logs_client, log_group_names, start_ms, end_ms)
         body = _render_state_grid(counts)
 
     return f'<div style="background:#0d1420;padding:8px;border-radius:6px;">{body}</div>'

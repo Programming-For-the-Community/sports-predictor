@@ -147,15 +147,23 @@ class _CandidateComparison extends StatelessWidget {
         for (final candidate in candidates) ...[
           _CandidateRow(
             label: _algorithmLabels[candidate.algorithm] ?? candidate.algorithm,
-            value: isClassifier
-                ? '${(candidate.score * 100).toStringAsFixed(1)}%'
-                : '±${candidate.score.toStringAsFixed(1)} $unit',
+            value: _candidateValue(candidate),
             isCurrent: candidate.algorithm == currentAlgorithm,
           ),
           const SizedBox(height: 8),
         ],
       ],
     );
+  }
+
+  /// "Not yet evaluated" for a candidate library/ml/backtest.py's own
+  /// _full_candidate_summary placeholder-recorded (score null, status
+  /// "not_evaluated") -- a real shape, not missing/malformed data, so
+  /// this shows a real label rather than crashing on a null score.
+  String _candidateValue(ModelCandidate candidate) {
+    final score = candidate.score;
+    if (score == null) return 'Not yet evaluated';
+    return isClassifier ? '${(score * 100).toStringAsFixed(1)}%' : '±${score.toStringAsFixed(1)} $unit';
   }
 }
 
