@@ -18,6 +18,10 @@ locals {
       # deployed the whole time, so every real NCAA MBB viewer request
       # was simply invisible on this dashboard until this line was added.
       aws_cloudwatch_log_group.ncaambb_predict_read.name,
+      # pga_predict_read had the exact same gap, from PGA's own onboarding
+      # through 2026-08-28 -- confirmed live, the log group has existed
+      # and been receiving real traffic the whole time.
+      aws_cloudwatch_log_group.pga_predict_read.name,
     ] : "SOURCE '${lg}'"
   ])
 }

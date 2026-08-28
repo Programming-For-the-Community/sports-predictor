@@ -134,6 +134,22 @@ void main() {
       expect(prediction.field.single.actualRounds[1]!.totalStrokes, 68.0);
     });
 
+    test('actual thru is parsed alongside status', () {
+      final json = _fieldResponse();
+      (json['field'] as List)[0]['actual'] = {'finish_position': 5, 'score_to_par': -3, 'status': 'in_progress', 'thru': 14};
+
+      final prediction = FieldEventPrediction.fromJson(json);
+
+      expect(prediction.field.single.actualThru, 14);
+      expect(prediction.field.single.actualStatus, 'in_progress');
+    });
+
+    test('actualThru is null when actual is absent', () {
+      final prediction = FieldEventPrediction.fromJson(_fieldResponse());
+
+      expect(prediction.field.single.actualThru, isNull);
+    });
+
     test('actualRounds defaults to empty when actual is absent', () {
       final prediction = FieldEventPrediction.fromJson(_fieldResponse());
 

@@ -53,6 +53,28 @@ void main() {
     expect(state.participants['10140']!.rounds, isEmpty);
   });
 
+  test('parses thru alongside an in-progress status', () {
+    final state = FieldLiveEventState.fromJson({
+      'status': 'scheduled',
+      'participants': {
+        '10140': {'status': 'in_progress', 'thru': 14},
+      },
+    });
+
+    expect(state.participants['10140']!.thru, 14);
+  });
+
+  test('thru is null when absent', () {
+    final state = FieldLiveEventState.fromJson({
+      'status': 'scheduled',
+      'participants': {
+        '10140': {'status': 'scheduled'},
+      },
+    });
+
+    expect(state.participants['10140']!.thru, isNull);
+  });
+
   group('TwoSidedLiveEventState', () {
     test('parses a match_play entry with won/margin fields', () {
       final state = TwoSidedLiveEventState.fromJson({

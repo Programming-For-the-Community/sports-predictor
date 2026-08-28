@@ -5,15 +5,20 @@ import '../theme/app_text_styles.dart';
 
 /// One golfer's own round/tournament status, as a small colored pill --
 /// map_status vocabulary (library/normalize/pga.py): scheduled/finished/
-/// cut/made_cut_did_not_finish/withdrawn, plus whatever ESPN's real
-/// in-progress status name turns out to be (never confirmed live as of
-/// this writing -- see project-pga-onboarding memory) or any other
-/// unrecognized value, both of which fall through to the "still playing"
-/// branch below rather than being silently mislabeled.
+/// cut/made_cut_did_not_finish/withdrawn/in_progress, plus any other
+/// unrecognized value, which falls through to the "still playing" branch
+/// below rather than being silently mislabeled.
 class FieldStatusPill extends StatelessWidget {
-  const FieldStatusPill({super.key, required this.status});
+  const FieldStatusPill({super.key, required this.status, this.dotOnly = false});
 
   final String? status;
+  // True on a narrow (compact) viewport -- field_leaderboard_table.dart's
+  // STATUS column has no room for a full text label there (confirmed
+  // live: a real "Made Cut, DNF" pill was one of the widest single
+  // strings in the whole table, and STATUS shares its column width with
+  // #/PLAYER/TO PAR on mobile). Collapses to just the colored dot,
+  // keeping the color-coded signal without the text.
+  final bool dotOnly;
 
   @override
   Widget build(BuildContext context) {
@@ -23,12 +28,20 @@ class FieldStatusPill extends StatelessWidget {
       'cut' => ('Cut', AppColors.neg),
       'made_cut_did_not_finish' => ('Made Cut, DNF', AppColors.warn),
       'withdrawn' => ('Withdrawn', AppColors.neg),
+      'in_progress' => ('In Progress', AppColors.live),
       null => ('--', AppColors.inkMute),
       // Unrecognized -- treat as still playing, not silently mislabeled.
       // Title-cased from the raw status name rather than shouted
       // uppercase, matching every recognized label's own casing above.
       _ => (status!.replaceAll('_', ' ').split(' ').map((w) => w.isEmpty ? w : '${w[0].toUpperCase()}${w.substring(1)}').join(' '), AppColors.live),
     };
+
+    if (dotOnly) {
+      return Tooltip(
+        message: label,
+        child: Container(width: 8, height: 8, decoration: BoxDecoration(color: color, shape: BoxShape.circle)),
+      );
+    }
 
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),

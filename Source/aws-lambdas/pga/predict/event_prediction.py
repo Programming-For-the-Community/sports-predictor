@@ -118,6 +118,12 @@ def _actual_golfer_result(participant: dict) -> dict | None:
         # alongside this: field_leaderboard_table.dart's STATUS column now
         # reads this field directly instead of inferring it).
         "status": result.get("status"),
+        # thru -- holes completed in the CURRENT round (library/normalize/
+        # pga.py's own status.thru). Only meaningful while status is
+        # "in_progress"; included unconditionally like every other field
+        # here rather than gated, same "let the reader gate on status"
+        # precedent status.thru's own docstring already establishes.
+        "thru": result.get("thru"),
     }
 
 

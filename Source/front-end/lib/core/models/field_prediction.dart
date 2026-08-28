@@ -71,6 +71,7 @@ class FieldParticipantPrediction {
     this.actualTotalStrokes,
     this.actualRounds = const {},
     this.actualStatus,
+    this.actualThru,
   });
 
   final String entityId;
@@ -105,6 +106,9 @@ class FieldParticipantPrediction {
   // before this golfer's own round is actually finished). Used by
   // FieldLeaderboardTable's STATUS column outside the live-poll window.
   final String? actualStatus;
+  // Holes completed in the CURRENT round (library/normalize/pga.py's own
+  // status.thru) -- only meaningful while actualStatus == 'in_progress'.
+  final int? actualThru;
 
   factory FieldParticipantPrediction.fromJson(Map<String, dynamic> json) {
     final predictions = json['predictions'] as Map<String, dynamic>? ?? {};
@@ -140,6 +144,7 @@ class FieldParticipantPrediction {
       actualTotalStrokes: (actual?['total_strokes'] as num?)?.toDouble(),
       actualRounds: actualRounds,
       actualStatus: actual?['status'] as String?,
+      actualThru: actual?['thru'] as int?,
     );
   }
 }

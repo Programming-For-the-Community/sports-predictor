@@ -23,60 +23,90 @@ def _participant(entity_id, finish_position=None):
     return {"entity_id": entity_id, "result": {"finish_position": finish_position, "status": "finished"}}
 
 
+def _by_status(events):
+    """storage.get_all_events side_effect that actually discriminates by
+    the status kwarg, the way the real DynamoDB-backed FeatureStorage does
+    -- same precedent as tests/aws-lambdas/nba/test_predict_season_
+    simulation.py's own mocks. A single return_value=events mock (the
+    prior shape here) would silently mask a caller that forgets to pass
+    status at all, since it'd return the same full list regardless -- that
+    exact gap was real production behavior once (get_all_events(SPORT)
+    defaults to status="completed", so a status-blind call site never saw
+    a scheduled event at all)."""
+    def _get_all_events(sport, status="completed"):
+        return [e for e in events if e.get("status") == status]
+    return _get_all_events
+
+
 class TestSeasonStandingsInputs:
     def test_no_field_event_ever_stored_returns_a_null_season(self):
         storage = MagicMock()
-        storage.get_all_events.return_value = []
+        storage.get_all_events.side_effect = _by_status([])
         result = season_projection._season_standings_inputs(storage)
         assert result["current_season"] is None
         assert result["tracked_roster"] == []
 
     def test_current_season_is_the_latest_seasons_own_events(self):
         storage = MagicMock()
-        storage.get_all_events.return_value = [
+        storage.get_all_events.side_effect = _by_status([
             _field_event("1", "2025-06-01", season=2025),
             _field_event("2", "2026-06-01", season=2026, status="scheduled"),
-        ]
+        ])
         result = season_projection._season_standings_inputs(storage)
         assert result["current_season"] == 2026
 
     def test_tracked_roster_is_every_golfer_with_a_real_completed_start_this_season(self):
         storage = MagicMock()
-        storage.get_all_events.return_value = [
+        storage.get_all_events.side_effect = _by_status([
             _field_event("1", "2026-06-01", season=2026, participants=[_participant("a"), _participant("b")]),
-        ]
+        ])
         result = season_projection._season_standings_inputs(storage)
         assert result["tracked_roster"] == ["a", "b"]
 
     def test_current_points_accumulate_across_multiple_completed_events(self):
         storage = MagicMock()
-        storage.get_all_events.return_value = [
+        storage.get_all_events.side_effect = _by_status([
             _field_event("1", "2026-01-01", season=2026, tournament_name="Event A", participants=[_participant("a", 1)]),
             _field_event("2", "2026-02-01", season=2026, tournament_name="Event B", participants=[_participant("a", 2)]),
-        ]
+        ])
         result = season_projection._season_standings_inputs(storage)
         # 1st (500) + 2nd (300) at regular-tier -- both events unlisted, fail open to "regular".
         assert result["current_points"]["a"] == 800.0
 
     def test_prior_season_events_are_scoped_to_exactly_season_minus_1(self):
         storage = MagicMock()
-        storage.get_all_events.return_value = [
+        storage.get_all_events.side_effect = _by_status([
             _field_event("1", "2024-06-01", season=2024),
             _field_event("2", "2025-06-01", season=2025),
             _field_event("3", "2026-06-01", season=2026, participants=[_participant("a")]),
-        ]
+        ])
         result = season_projection._season_standings_inputs(storage)
         assert [e["event_id"] for e in result["prior_season_events"]] == ["2"]
 
     def test_remaining_events_are_this_seasons_own_not_yet_completed_ones_sorted_chronologically(self):
         storage = MagicMock()
-        storage.get_all_events.return_value = [
+        storage.get_all_events.side_effect = _by_status([
             _field_event("2", "2026-09-01", season=2026, status="scheduled"),
             _field_event("1", "2026-08-01", season=2026, status="scheduled"),
             _field_event("3", "2025-08-01", season=2025, status="scheduled"),  # wrong season
-        ]
+        ])
         result = season_projection._season_standings_inputs(storage)
         assert [e["event_id"] for e in result["remaining_events"]] == ["1", "2"]
+
+    def test_a_status_blind_call_site_would_never_see_a_scheduled_event_again(self):
+        # Regression for the real production bug (confirmed live,
+        # 2026-08-28): get_all_events(SPORT) with no status kwarg defaults
+        # to status="completed" (FeatureStorage's own default), which
+        # silently emptied remaining_events forever -- TOUR Championship
+        # never simulated even while genuinely in progress, every
+        # probability but BMW's own real-outcome one showing 0%.
+        storage = MagicMock()
+        storage.get_all_events.side_effect = _by_status([
+            _field_event("1", "2026-08-20", season=2026, tournament_name="BMW Championship", participants=[_participant("a", 1)]),
+            _field_event("2", "2026-08-27", season=2026, status="scheduled", tournament_name="Tour Championship"),
+        ])
+        result = season_projection._season_standings_inputs(storage)
+        assert [e["event_id"] for e in result["remaining_events"]] == ["2"]
 
 
 class TestSplitRemainingEvents:
@@ -153,7 +183,7 @@ class TestBuildSeasonProjection:
 
     def test_no_field_event_ever_stored_returns_none(self):
         storage = MagicMock()
-        storage.get_all_events.return_value = []
+        storage.get_all_events.side_effect = _by_status([])
         assert season_projection.build_season_projection(storage, MagicMock(), MagicMock()) is None
 
     def test_only_tour_championship_remaining_still_produces_a_full_projection(self):
@@ -168,7 +198,7 @@ class TestBuildSeasonProjection:
         tour_championship = _field_event(
             "2", "2026-08-27", season=2026, status="scheduled", tournament_name="Tour Championship",
         )
-        storage.get_all_events.return_value = [bmw_completed, tour_championship]
+        storage.get_all_events.side_effect = _by_status([bmw_completed, tour_championship])
         storage.get_entity.return_value = {"name": "Golfer", "metadata": {"country": "USA"}}
         storage.get_team_events.return_value = []
         fake_adapter = MagicMock()
@@ -191,7 +221,7 @@ class TestBuildSeasonProjection:
             "1", "2026-08-27", season=2026, tournament_name="Tour Championship",
             participants=[_participant("a", 1), _participant("b", 2)],
         )
-        storage.get_all_events.return_value = [tour_championship]
+        storage.get_all_events.side_effect = _by_status([tour_championship])
         storage.get_entity.return_value = None
 
         result = season_projection.build_season_projection(storage, MagicMock(), MagicMock())

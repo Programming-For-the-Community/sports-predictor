@@ -48,8 +48,17 @@ def _season_standings_inputs(storage) -> dict:
     [event, ...] (chronological), "current_season": int | None}.
     current_season is None only when no PGA field event has ever been
     stored at all (never true in production, guarded for completeness)."""
-    all_events = storage.get_all_events(SPORT)
-    field_events = [e for e in all_events if e.get("event_type") == "field"]
+    # get_all_events defaults to status="completed" (FeatureStorage's own
+    # default) -- a single unfiltered call here would silently never see a
+    # scheduled event at all, permanently emptying remaining_events and
+    # forcing _final_standings_only below even mid-Playoffs (confirmed
+    # live, 2026-08-28: this was exactly the bug behind TOUR Championship
+    # never being simulated while genuinely in progress). Fetch both
+    # statuses explicitly, same as NBA/NCAAFB/NFL's own season_projection.
+    # py already does for this same reason.
+    completed_events = [e for e in storage.get_all_events(SPORT, status="completed") if e.get("event_type") == "field"]
+    scheduled_events = [e for e in storage.get_all_events(SPORT, status="scheduled") if e.get("event_type") == "field"]
+    field_events = completed_events + scheduled_events
     current_season = max(
         (e.get("season") for e in field_events if e.get("season") is not None), default=None,
     )
@@ -59,11 +68,10 @@ def _season_standings_inputs(storage) -> dict:
             "remaining_events": [], "current_season": None,
         }
 
-    completed = [e for e in field_events if e.get("status") == "completed"]
-    this_season_completed = [e for e in completed if e.get("season") == current_season]
-    prior_season_events = [e for e in completed if e.get("season") == current_season - 1]
+    this_season_completed = [e for e in completed_events if e.get("season") == current_season]
+    prior_season_events = [e for e in completed_events if e.get("season") == current_season - 1]
     remaining_events = sorted(
-        (e for e in field_events if e.get("status") != "completed" and e.get("season") == current_season),
+        (e for e in scheduled_events if e.get("season") == current_season),
         key=lambda e: e.get("event_date", ""),
     )
 
@@ -187,8 +195,8 @@ def _final_standings_only(storage, inputs: dict) -> dict:
     simulated, since there's nothing left uncertain about them."""
     current_season = inputs["current_season"]
     all_completed_this_season = [
-        e for e in storage.get_all_events(SPORT)
-        if e.get("event_type") == "field" and e.get("status") == "completed" and e.get("season") == current_season
+        e for e in storage.get_all_events(SPORT, status="completed")
+        if e.get("event_type") == "field" and e.get("season") == current_season
     ]
 
     def _find(tier_name: str) -> dict | None:
@@ -257,7 +265,10 @@ def build_season_projection(storage, s3, predictions_table) -> dict | None:
         return _final_standings_only(storage, inputs)
 
     estimator, model_card = model_loader.load_current_model(s3, SPORT, SCORE_MODEL_NAME)
-    all_events = storage.get_all_events(SPORT)
+    # Completed-only, deliberately -- feeds prior_results/course_results
+    # for the projected field's own feature building, which wants real
+    # history, not the still-scheduled events this function is projecting.
+    all_events = storage.get_all_events(SPORT, status="completed")
     rmse = model_card["rmse"]
 
     scored_by_key = _score_remaining_events(

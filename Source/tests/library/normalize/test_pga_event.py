@@ -22,7 +22,7 @@ from library.normalize.pga import (
 def _competitor(
     athlete_id="10140", name="Xander Schauffele", status_name="STATUS_FINISH", completed=True,
     position_display="T26", is_tie=True, score_display="-4", score_value=276.0, earnings=177500.0,
-    country="USA", amateur=False, linescores=None, tee_time=None, status_short_detail=None,
+    country="USA", amateur=False, linescores=None, tee_time=None, status_short_detail=None, thru=None,
 ):
     return {
         "id": athlete_id,
@@ -41,6 +41,7 @@ def _competitor(
             },
             "position": {"id": "26", "displayName": position_display, "isTie": is_tie},
             **({"teeTime": tee_time} if tee_time else {}),
+            **({"thru": thru} if thru is not None else {}),
         },
         "score": {"value": score_value, "displayValue": score_display},
         "linescores": linescores if linescores is not None else [
@@ -441,6 +442,30 @@ class TestParticipantResult:
             _event(competitors=[_competitor(status_name="STATUS_WITHDRAWN")]), "pga",
         )
         assert item["participants"][0]["result"]["status"] == "withdrawn"
+
+    def test_in_progress_status_maps_to_in_progress(self):
+        # Confirmed live, 2026-08-28, on the real in-progress TOUR
+        # Championship round 2 -- most of the field carried this status,
+        # not a rare case, so it's explicitly mapped rather than left to
+        # the generic fallback (which would otherwise log a warning on
+        # every single in-progress competitor-row, most of a live field,
+        # every poll).
+        item = leaderboard_event_to_event_item(
+            _event(competitors=[_competitor(status_name="STATUS_IN_PROGRESS", completed=False)]), "pga",
+        )
+        assert item["participants"][0]["result"]["status"] == "in_progress"
+
+    def test_thru_is_parsed_off_status_for_an_in_progress_golfer(self):
+        # status.thru -- confirmed live, 2026-08-28: 14 for a golfer 14
+        # holes into round 2 of the real in-progress TOUR Championship.
+        item = leaderboard_event_to_event_item(
+            _event(competitors=[_competitor(status_name="STATUS_IN_PROGRESS", completed=False, thru=14)]), "pga",
+        )
+        assert item["participants"][0]["result"]["thru"] == 14
+
+    def test_thru_is_none_when_espn_does_not_carry_it_at_all(self):
+        item = leaderboard_event_to_event_item(_event(competitors=[_competitor()]), "pga")
+        assert item["participants"][0]["result"]["thru"] is None
 
     def test_unmapped_status_falls_back_to_a_generic_transform_and_logs(self, caplog):
         with caplog.at_level(logging.WARNING):

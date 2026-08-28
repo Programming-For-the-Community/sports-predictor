@@ -120,7 +120,7 @@ class TestPredictFieldEvent:
 
         assert result["field"][0]["actual"] == {
             "finish_position": 3, "score_to_par": -10, "total_strokes": 278.0, "status": "finished",
-            "rounds": [{"round": 1, "score_to_par": -4, "total_strokes": 68.0}],
+            "rounds": [{"round": 1, "score_to_par": -4, "total_strokes": 68.0}], "thru": None,
         }
 
     def test_actual_status_is_this_golfers_own_real_status_not_inferred_from_having_a_standing(self):
@@ -176,6 +176,21 @@ class TestPredictFieldEvent:
             result = event_prediction.predict_field_event(storage, s3, predictions_table, "999")
 
         assert result["field"][0]["actual"]["total_strokes"] == 278.0
+
+    def test_actual_block_includes_thru_for_an_in_progress_golfer(self):
+        storage, s3, predictions_table = MagicMock(), MagicMock(), MagicMock()
+        storage.get_entity.return_value = None
+        predictions_table.query.return_value = []
+        in_progress = {
+            "finish_position": 5, "score_to_par": -3, "status": "in_progress", "thru": 14,
+            "rounds": [{"round": 2, "score_to_par": -1, "total_strokes": 69.0}],
+        }
+        with patch.object(event_prediction.live_features, "build_live_field_features", return_value=_built_field_features(status="scheduled", result=in_progress)), \
+             patch.object(event_prediction.model_loader, "load_current_model", return_value=(MagicMock(), {"version": 1})), \
+             patch.object(event_prediction.model_loader, "predict", return_value=0.5):
+            result = event_prediction.predict_field_event(storage, s3, predictions_table, "999")
+
+        assert result["field"][0]["actual"]["thru"] == 14
 
     def test_par_is_none_when_the_stored_event_has_no_par_value(self):
         storage, s3, predictions_table = MagicMock(), MagicMock(), MagicMock()

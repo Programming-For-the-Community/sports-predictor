@@ -28,16 +28,20 @@ logger = logging.getLogger(__name__)
 # sweep of 2017-2025 seasons, 2026-08-26), STATUS_WITHDRAWN (a golfer who
 # withdrew before making the cut -- confirmed live during the 2026-08-26/27
 # backfill re-run, so ESPN does tag these rather than omitting the
-# competitor entirely as the prior sweep had suggested). Disqualification
-# not yet seen in a real response. map_status's fallback below handles
-# that (and anything else ESPN adds) without guessing an exact string,
-# logging so a real case can be added here once actually observed.
+# competitor entirely as the prior sweep had suggested), STATUS_IN_PROGRESS
+# (a golfer mid-round -- confirmed live, 2026-08-28, on the real
+# in-progress TOUR Championship round 2: most of the field carries this
+# status, not a rare case). Disqualification not yet seen in a real
+# response. map_status's fallback below handles that (and anything else
+# ESPN adds) without guessing an exact string, logging so a real case can
+# be added here once actually observed.
 _STATUS_MAP = {
     "STATUS_FINISH": "finished",
     "STATUS_CUT": "cut",
     "STATUS_SCHEDULED": "scheduled",
     "STATUS_MDF": "made_cut_did_not_finish",
     "STATUS_WITHDRAWN": "withdrawn",
+    "STATUS_IN_PROGRESS": "in_progress",
 }
 
 
@@ -219,6 +223,15 @@ def _competitor_to_participants(competitor: dict) -> list[dict]:
         # projection features/models (library/features/pga.py). See
         # _parse_rounds' own docstring for the confirmed-live shape.
         "rounds": rounds,
+        # thru -- holes completed in the CURRENT round, off status.thru
+        # directly (an int, confirmed live 2026-08-28 on the real
+        # in-progress TOUR Championship: 14 for a golfer 14 holes into
+        # round 2, 18/"F" once a round finishes, 0 for WD/not-yet-teed-
+        # off). Only meaningful while status is "in_progress" -- a
+        # finished golfer's thru is just their last-played round's final
+        # hole count, not "how far into the CURRENT round", so a reader
+        # should gate display on status rather than trusting this alone.
+        "thru": status.get("thru"),
     }
 
     roster = competitor.get("roster")

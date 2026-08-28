@@ -11,6 +11,7 @@ FieldParticipantPrediction _golfer(
   String id, String name, {
   double? projectedScoreToPar, double? actualScoreToPar, double? actualTotalStrokes,
   Map<int, ModelValue>? rounds, Map<int, ActualRoundResult>? actualRounds,
+  String? actualStatus, int? actualThru,
 }) {
   return FieldParticipantPrediction(
     entityId: id,
@@ -20,6 +21,8 @@ FieldParticipantPrediction _golfer(
     actualTotalStrokes: actualTotalStrokes,
     rounds: rounds ?? const {},
     actualRounds: actualRounds ?? const {},
+    actualStatus: actualStatus,
+    actualThru: actualThru,
   );
 }
 
@@ -187,6 +190,34 @@ void main() {
     expect(find.textContaining('67'), findsNothing);
   });
 
+  testWidgets('THIS RD shows how many holes are played so far when the golfer is in progress', (tester) async {
+    final field = [
+      _golfer(
+        '1', 'Xander Schauffele',
+        actualRounds: {2: const ActualRoundResult(round: 2, scoreToPar: -1, totalStrokes: 55.0)},
+        actualStatus: 'in_progress', actualThru: 14,
+      ),
+    ];
+
+    await tester.pumpWidget(_wrap(FieldLeaderboardTable(field: field)));
+
+    expect(find.text('Thru 14'), findsOneWidget);
+  });
+
+  testWidgets('THIS RD does not show a Thru count for a golfer who has finished their round', (tester) async {
+    final field = [
+      _golfer(
+        '1', 'Xander Schauffele',
+        actualRounds: {1: const ActualRoundResult(round: 1, scoreToPar: -4, totalStrokes: 68.0)},
+        actualStatus: 'finished', actualThru: 18,
+      ),
+    ];
+
+    await tester.pumpWidget(_wrap(FieldLeaderboardTable(field: field)));
+
+    expect(find.textContaining('Thru'), findsNothing);
+  });
+
   group('narrow (mobile) viewport', () {
     testWidgets('THIS RD/TOP 10%/TOP 5% are dropped from the collapsed columns below the compact breakpoint', (tester) async {
       final field = [
@@ -202,6 +233,22 @@ void main() {
       expect(find.text('THIS RD'), findsNothing);
       expect(find.text('TOP 10%'), findsNothing);
       expect(find.text('TOP 5%'), findsNothing);
+    });
+
+    testWidgets('STATUS collapses to a colored dot (no text label) below the compact breakpoint', (tester) async {
+      final field = [_golfer('1', 'Xander Schauffele', actualStatus: 'made_cut_did_not_finish')];
+
+      await pumpAtWidth(tester, 360, _wrap(FieldLeaderboardTable(field: field)));
+
+      expect(find.text('Made Cut, DNF'), findsNothing);
+    });
+
+    testWidgets('STATUS still shows the full text label at a wide (non-compact) width', (tester) async {
+      final field = [_golfer('1', 'Xander Schauffele', actualStatus: 'made_cut_did_not_finish')];
+
+      await pumpAtWidth(tester, 800, _wrap(FieldLeaderboardTable(field: field)));
+
+      expect(find.text('Made Cut, DNF'), findsOneWidget);
     });
 
     testWidgets('every column is still present at a wide (non-compact) width', (tester) async {

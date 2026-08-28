@@ -3,7 +3,8 @@ import 'package:flutter_test/flutter_test.dart';
 
 import 'package:front_end/core/widgets/field_status_pill.dart';
 
-Widget _wrap(String? status) => MaterialApp(home: Scaffold(body: FieldStatusPill(status: status)));
+Widget _wrap(String? status, {bool dotOnly = false}) =>
+    MaterialApp(home: Scaffold(body: FieldStatusPill(status: status, dotOnly: dotOnly)));
 
 void main() {
   group('FieldStatusPill', () {
@@ -13,6 +14,7 @@ void main() {
       'cut': 'Cut',
       'made_cut_did_not_finish': 'Made Cut, DNF',
       'withdrawn': 'Withdrawn',
+      'in_progress': 'In Progress',
     };
 
     for (final entry in fullWordCases.entries) {
@@ -29,11 +31,24 @@ void main() {
       expect(find.text('--'), findsOneWidget);
     });
 
-    testWidgets('title-cases an unrecognized status instead of shouting it in uppercase', (tester) async {
-      await tester.pumpWidget(_wrap('in_progress'));
+    testWidgets('title-cases a genuinely unrecognized status instead of shouting it in uppercase', (tester) async {
+      await tester.pumpWidget(_wrap('disqualified'));
 
-      expect(find.text('In Progress'), findsOneWidget);
-      expect(find.text('IN_PROGRESS'), findsNothing);
+      expect(find.text('Disqualified'), findsOneWidget);
+      expect(find.text('DISQUALIFIED'), findsNothing);
+    });
+
+    testWidgets('dotOnly renders no text label at all', (tester) async {
+      await tester.pumpWidget(_wrap('made_cut_did_not_finish', dotOnly: true));
+
+      expect(find.text('Made Cut, DNF'), findsNothing);
+      expect(find.byType(Text), findsNothing);
+    });
+
+    testWidgets('dotOnly still surfaces the full label via a tooltip', (tester) async {
+      await tester.pumpWidget(_wrap('withdrawn', dotOnly: true));
+
+      expect(find.byTooltip('Withdrawn'), findsOneWidget);
     });
   });
 }

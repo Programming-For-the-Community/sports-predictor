@@ -35,7 +35,7 @@ class LiveRoundResult {
 
 class FieldParticipantLiveResult {
   const FieldParticipantLiveResult({
-    this.finishPosition, this.isTie = false, this.status, this.scoreToPar, this.totalStrokes, this.rounds = const {},
+    this.finishPosition, this.isTie = false, this.status, this.scoreToPar, this.totalStrokes, this.rounds = const {}, this.thru,
   });
 
   final int? finishPosition;
@@ -48,6 +48,9 @@ class FieldParticipantLiveResult {
   // underlying cache payload already carries this via _parse_rounds,
   // just wasn't parsed here before).
   final Map<int, LiveRoundResult> rounds;
+  // Holes completed in the CURRENT round (library/normalize/pga.py's own
+  // status.thru) -- only meaningful while status == 'in_progress'.
+  final int? thru;
 
   factory FieldParticipantLiveResult.fromJson(Map<String, dynamic> json) {
     final roundsJson = json['rounds'] as List<dynamic>? ?? [];
@@ -60,6 +63,7 @@ class FieldParticipantLiveResult {
       rounds: {
         for (final entry in roundsJson) LiveRoundResult.fromJson(entry as Map<String, dynamic>).round: LiveRoundResult.fromJson(entry),
       },
+      thru: json['thru'] as int?,
     );
   }
 }

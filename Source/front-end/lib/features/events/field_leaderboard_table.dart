@@ -86,9 +86,9 @@ List<_LeaderboardColumn> _leaderboardColumns(int? par, {required bool compact}) 
       // was a real bug -- every golfer with any standing at all showed
       // "Finished" regardless of the tournament actually still being in
       // progress).
-      _LeaderboardColumn('STATUS', 3, (context, entry, live, rowNumber) {
+      _LeaderboardColumn('STATUS', compact ? 1 : 3, (context, entry, live, rowNumber) {
         final status = live?.status ?? entry.actualStatus;
-        return Center(child: FieldStatusPill(status: status));
+        return Center(child: FieldStatusPill(status: status, dotOnly: compact));
       }),
       // Actual (live-first, else the real cumulative standing) next to the
       // model's own projected FINAL tournament score-to-par -- same
@@ -120,6 +120,7 @@ List<_LeaderboardColumn> _leaderboardColumns(int? par, {required bool compact}) 
       return Center(
         child: _RoundCell(
           round: round, projected: entry.rounds[round]?.value, actual: _actualForRound(round, entry, live), par: par,
+          thru: _currentThru(entry, live),
         ),
       );
     }),
@@ -366,6 +367,18 @@ class _ExpandedProbabilities extends StatelessWidget {
   return null;
 }
 
+/// Holes completed in the CURRENT round -- live overlay first (freshest
+/// during an active poll window), else the prediction response's own
+/// real (not status-gated) actual.thru. Only meaningful while this
+/// golfer's own status is 'in_progress' -- null otherwise so a finished/
+/// not-yet-started golfer never shows a stale "Thru N" from an earlier
+/// round.
+int? _currentThru(FieldParticipantPrediction entry, FieldParticipantLiveResult? live) {
+  final status = live?.status ?? entry.actualStatus;
+  if (status != 'in_progress') return null;
+  return live?.thru ?? entry.actualThru;
+}
+
 class _RoundBreakdownStrip extends StatelessWidget {
   const _RoundBreakdownStrip({required this.entry, required this.live, required this.par});
 
@@ -386,6 +399,7 @@ class _RoundBreakdownStrip extends StatelessWidget {
           _RoundCell(
             round: round, projected: entry.rounds[round]?.value, actual: _actualForRound(round, entry, live),
             par: par, showLabel: true,
+            thru: round == _currentRoundNumber(entry) ? _currentThru(entry, live) : null,
           ),
       ],
     );
@@ -393,7 +407,10 @@ class _RoundBreakdownStrip extends StatelessWidget {
 }
 
 class _RoundCell extends StatelessWidget {
-  const _RoundCell({required this.round, required this.projected, required this.actual, required this.par, this.showLabel = false});
+  const _RoundCell({
+    required this.round, required this.projected, required this.actual, required this.par,
+    this.showLabel = false, this.thru,
+  });
 
   final int round;
   final double? projected; // the round model's own point estimate
@@ -407,6 +424,10 @@ class _RoundCell extends StatelessWidget {
   // already implied by the column header); true inside the full 1-4
   // breakdown, where each cell needs its own "ROUND N" label.
   final bool showLabel;
+  // Holes completed so far in THIS round -- only ever non-null for
+  // whichever round is this golfer's own currently in-progress one (see
+  // _currentThru), never for an already-finished or not-yet-started one.
+  final int? thru;
 
   @override
   Widget build(BuildContext context) {
@@ -421,15 +442,26 @@ class _RoundCell extends StatelessWidget {
       style: AppTextStyles.microLabel(color: AppColors.cyan),
       maxLines: 1, softWrap: false, overflow: TextOverflow.ellipsis,
     );
+    final thruCaption = thru != null
+        ? Text('Thru $thru', style: AppTextStyles.microLabel(color: AppColors.inkMute), maxLines: 1, overflow: TextOverflow.ellipsis)
+        : null;
     // Inside the full breakdown (showLabel), there's room to keep actual
     // and projected on one line next to the "ROUND N" label above them.
     // In the compact top-level 'THIS RD' column, that column is often
     // too narrow for both side by side -- stack them instead, the same
     // "trade width for height" PLAYER's own name+country cell already
-    // uses.
+    // uses. thruCaption (when present) gets its own line either way --
+    // there's never room to fit "Thru N" next to the score inline.
     final value = showLabel
-        ? Row(mainAxisSize: MainAxisSize.min, children: [actualText, const SizedBox(width: 6), projectedText])
-        : Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.center, children: [actualText, projectedText]);
+        ? Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Row(mainAxisSize: MainAxisSize.min, children: [actualText, const SizedBox(width: 6), projectedText]),
+            if (thruCaption != null) thruCaption,
+          ])
+        : Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.center, children: [
+            actualText,
+            if (thruCaption != null) thruCaption,
+            projectedText,
+          ]);
     if (!showLabel) return value;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,

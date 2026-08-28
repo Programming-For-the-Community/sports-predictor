@@ -3,7 +3,7 @@ Live leaderboard-snapshot cache for PGA tournaments -- field (stroke-play)
 events, and (as of this pass) match_play/cup events (Ryder Cup/Presidents
 Cup). Never writes to DynamoDB -- this is a short-lived, UI-display-only
 cache in S3, refreshed on its own schedule (scheduler-pga-live-scores.tf,
-every 5 minutes) and read back by GET /pga/live-scores (this same Lambda,
+every 1 minute) and read back by GET /pga/live-scores (this same Lambda,
 see handler.py).
 
 Deliberately NOT a port of NBA/NFL's live-scores shape. PGA has no
@@ -12,7 +12,7 @@ in this codebase (PGAClient.get_leaderboard is the only per-tournament
 data source, and it returns round-level/match-level totals, not
 sub-round/sub-match state) -- see project-pga-onboarding memory. So this
 is framed as a fresher "last-updated leaderboard snapshot", not literal
-real-time scores, and polls on a flat 5-minute cadence during a
+real-time scores, and polls on a flat 1-minute cadence during a
 tournament's active window rather than NBA/NFL's tight kickoff-relative
 one.
 
@@ -50,9 +50,11 @@ was discontinued after 2023.
 "Last group/match has finished" has no direct clock signal for any event
 type -- it's read off competitor/match status. _is_active is deliberately
 written as "status is not one of the confirmed-terminal set", not an
-equality check against a guessed in-progress status string -- an
-in-progress status has never actually been observed live in this
-codebase yet (see library/normalize/pga.py's own _STATUS_MAP docstring).
+equality check against a guessed in-progress status string -- "in_progress"
+IS now a confirmed real status (library/normalize/pga.py's own
+_STATUS_MAP), but this still isn't written as an equality check against
+it: anything ESPN adds in the future that isn't in the confirmed-terminal
+set below should also keep polling, not just this one known value.
 A cup event's own participants carry no status field at all (their
 result is {points, won, halved}) -- _is_active branches on the cup
 item's own top-level status field instead for that event_type.
@@ -74,9 +76,10 @@ logger = logging.getLogger("pga-live-scores")
 
 LIVE_SCORES_CACHE_KEY = "pga/cache/live-scores/latest.json"
 
-# 3x the 5-minute poll cadence -- tolerates one missed/late tick without
-# a reader treating a still-fresh cache as unknown.
-STALE_AFTER = timedelta(minutes=15)
+# 3x the poll cadence (scheduler-pga-live-scores.tf, 1 minute as of
+# 2026-08-28, bumped from 5) -- tolerates a couple of missed/late ticks
+# without a reader treating a still-fresh cache as unknown.
+STALE_AFTER = timedelta(minutes=3)
 
 # Start polling 1h before the earliest known upcoming tee time/match time;
 # keep polling 1h after every still-active golfer/match's status goes
@@ -242,7 +245,7 @@ def _match_cup_tournament_ids(storage, sport: str, now: datetime, last_active_at
 
 def refresh(storage, s3, bucket: str, client, sport: str) -> dict:
     """Called on every LiveScoreRefresh tick (scheduler-pga-live-scores.tf,
-    every 5 minutes, unconditional). Cheap on a tick with nothing in its
+    every 1 minute, unconditional). Cheap on a tick with nothing in its
     poll window: the DynamoDB read is local, and the candidate filters
     (using real next_tee_time/match_time signals, not a guessed clock
     window) skip the ESPN call entirely outside tournament play hours
