@@ -13,21 +13,21 @@ import model_loader
 from library.serving import pga_reads
 
 
-def _field_event(event_id="999", status="scheduled", result=None):
+def _field_event(event_id="999", status="scheduled", result=None, par=70):
     default_result = {
-        "finish_position": 3, "score_to_par": -10, "status": "finished",
+        "finish_position": 3, "score_to_par": -10, "total_strokes": 278.0, "status": "finished",
         "rounds": [{"round": 1, "score_to_par": -4, "total_strokes": 68.0}],
     }
     return {
         "event_key": f"SPORT#PGA#EVENT#{event_id}", "event_id": event_id, "event_type": "field",
-        "status": status, "tournament_name": "BMW Championship",
+        "status": status, "tournament_name": "BMW Championship", "par": par,
         "participants": [{"entity_id": "1", "result": default_result if result is None else result}],
     }
 
 
-def _built_field_features(status="scheduled", result=None):
+def _built_field_features(status="scheduled", result=None, par=70):
     return {
-        "event": _field_event(status=status, result=result),
+        "event": _field_event(status=status, result=result, par=par),
         "golfer_rows": {"1": {"golfer": {"f": 1}, "rounds": {2: {"f": 2}}}},
         "cutline_row": {"f": 3},
     }
@@ -69,6 +69,7 @@ class TestPredictFieldEvent:
         assert golfer["name"] == "Scottie Scheffler"
         assert set(golfer["predictions"]) == {"top_10_probability", "top_5_probability", "projected_score_to_par", "rounds"}
         assert golfer["predictions"]["rounds"]["round_2"]["value"] == 0.5
+        assert result["par"] == 70
         assert result["cutline"]["projected_cut_score"]["value"] == 0.5
 
     def test_a_model_with_no_promoted_version_is_simply_omitted(self):
@@ -118,7 +119,7 @@ class TestPredictFieldEvent:
             result = event_prediction.predict_field_event(storage, s3, predictions_table, "999")
 
         assert result["field"][0]["actual"] == {
-            "finish_position": 3, "score_to_par": -10, "status": "finished",
+            "finish_position": 3, "score_to_par": -10, "total_strokes": 278.0, "status": "finished",
             "rounds": [{"round": 1, "score_to_par": -4, "total_strokes": 68.0}],
         }
 
@@ -164,6 +165,28 @@ class TestPredictFieldEvent:
             result = event_prediction.predict_field_event(storage, s3, predictions_table, "999")
 
         assert result["field"][0]["actual"]["rounds"] == [{"round": 1, "score_to_par": -4, "total_strokes": 68.0}]
+
+    def test_actual_block_includes_the_real_cumulative_total_strokes(self):
+        storage, s3, predictions_table = MagicMock(), MagicMock(), MagicMock()
+        storage.get_entity.return_value = None
+        predictions_table.query.return_value = []
+        with patch.object(event_prediction.live_features, "build_live_field_features", return_value=_built_field_features(status="scheduled")), \
+             patch.object(event_prediction.model_loader, "load_current_model", return_value=(MagicMock(), {"version": 1})), \
+             patch.object(event_prediction.model_loader, "predict", return_value=0.5):
+            result = event_prediction.predict_field_event(storage, s3, predictions_table, "999")
+
+        assert result["field"][0]["actual"]["total_strokes"] == 278.0
+
+    def test_par_is_none_when_the_stored_event_has_no_par_value(self):
+        storage, s3, predictions_table = MagicMock(), MagicMock(), MagicMock()
+        storage.get_entity.return_value = None
+        predictions_table.query.return_value = []
+        with patch.object(event_prediction.live_features, "build_live_field_features", return_value=_built_field_features(par=None)), \
+             patch.object(event_prediction.model_loader, "load_current_model", return_value=(MagicMock(), {"version": 1})), \
+             patch.object(event_prediction.model_loader, "predict", return_value=0.5):
+            result = event_prediction.predict_field_event(storage, s3, predictions_table, "999")
+
+        assert result["par"] is None
 
     def test_backfills_a_played_rounds_own_historical_pre_round_forecast(self):
         # default_result has round 1 already played -- its own original

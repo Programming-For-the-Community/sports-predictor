@@ -33,6 +33,7 @@ Callers own their own storage/s3 objects and Lambda-lifecycle concerns.
 from concurrent.futures import ThreadPoolExecutor
 
 from library.serving.common import enrich_participants
+from library.storage.season_projections import season_projection_key
 
 FIELD_EVENT_MODELS = {
     "top_10_probability": "top-10-probability",
@@ -158,3 +159,18 @@ def list_events(storage, sport: str, status: str) -> dict:
         entries = list(executor.map(lambda e: _entry(storage, sport, e), events))
 
     return {"sport": sport, "events": entries}
+
+
+def get_season_projection(s3, sport: str) -> dict | None:
+    """GET /pga/season -- reads the FedEx Cup standings/Playoffs-
+    probability projection written weekly by the scheduled compute path
+    (aws-lambdas/pga/predict/season_projection.py's own run_scheduled),
+    never computed live here -- same pure read-through NBA/NCAAFB's own
+    get_season_projection already establishes. None if the schedule
+    hasn't fired yet -- the caller is expected to surface that as "not
+    yet available" (a 503, same as every other sport's season route)
+    rather than treat it like a real 500."""
+    key = season_projection_key(sport)
+    if not s3.object_exists(key):
+        return None
+    return s3.get_json(key)

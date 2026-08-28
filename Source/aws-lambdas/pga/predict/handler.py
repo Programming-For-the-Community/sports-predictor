@@ -1,7 +1,11 @@
 """
 PGA inference Lambda -- a background compute worker, never invoked by
-API Gateway directly. One invocation shape:
+API Gateway directly. Two invocation shapes:
 
+    {"detail-type": "ScheduledSeasonProjection"}
+        -> weekly EventBridge Scheduler invoke; computes the FedEx Cup
+           season simulation (standings + Playoffs-field/Champion
+           probabilities -- season_projection.py) and writes it to S3.
     {"detail-type": "ComputeAndCachePrediction", "route": "event", "event_id": ...}
         -> fire-and-forget invoke from predict-read on a prediction-cache
            miss/stale-refresh; computes one event's prediction (field/
@@ -11,14 +15,13 @@ API Gateway directly. One invocation shape:
 No "player_prop" route (unlike NBA/NFL/NCAAFB/NCAAMBB) -- PGA has no
 per-player-prop model, every golfer-level model already needs the whole
 field to produce a ranked response, so there's nothing narrower to
-compute on demand. No scheduled season-projection route either -- PGA has
-no season-long standings/odds concept the way NBA has playoff odds (see
-project-pga-onboarding memory).
+compute on demand.
 """
 import logging
 import os
 
 import event_prediction
+import season_projection
 from library.aws.dynamodb_table import DynamoDBTable
 from library.aws.s3_manager import S3Manager
 from library.storage.feature_storage import FeatureStorage
@@ -63,6 +66,9 @@ def lambda_handler(event, context):
         _get_model_bucket()
         _get_predictions_table()
         return {"status": "warm"}
+
+    if event.get("detail-type") == "ScheduledSeasonProjection":
+        return season_projection.run_scheduled(_get_storage(), _get_model_bucket(), _get_predictions_table())
 
     if event.get("detail-type") == "ComputeAndCachePrediction" and event.get("route") == "event":
         event_prediction.compute_and_cache_event(

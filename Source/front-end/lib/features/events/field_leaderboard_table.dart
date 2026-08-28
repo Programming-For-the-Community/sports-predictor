@@ -34,7 +34,7 @@ int? _currentRoundNumber(FieldParticipantPrediction entry) {
   return null;
 }
 
-List<_LeaderboardColumn> _leaderboardColumns() => [
+List<_LeaderboardColumn> _leaderboardColumns(int? par) => [
       _LeaderboardColumn('#', 1, (context, entry, live, rowNumber) {
         final position = live?.finishPosition ?? entry.actualFinishPosition;
         final isTie = live?.isTie ?? false;
@@ -95,7 +95,9 @@ List<_LeaderboardColumn> _leaderboardColumns() => [
           return Text('--', style: AppTextStyles.metricValue(color: AppColors.inkMute), textAlign: TextAlign.center);
         }
         return Center(
-          child: _RoundCell(round: round, projected: entry.rounds[round]?.value, actual: _actualForRound(round, entry, live)),
+          child: _RoundCell(
+            round: round, projected: entry.rounds[round]?.value, actual: _actualForRound(round, entry, live), par: par,
+          ),
         );
       }),
       _LeaderboardColumn('TOP 10%', 2, (context, entry, live, rowNumber) => _PercentText(entry.top10Probability?.value)),
@@ -107,6 +109,17 @@ String _formatToPar(num? scoreToPar) {
   final rounded = scoreToPar.round();
   if (rounded == 0) return 'E';
   return rounded > 0 ? '+$rounded' : '$rounded';
+}
+
+/// "67 (-3)" -- the stroke count first, its own to-par in parentheses,
+/// same framing every real golf leaderboard uses. Falls back to the bare
+/// to-par number alone when no stroke count is available at all (no par
+/// known for the course, or -- pre-tournament -- nothing to project a
+/// stroke count from yet).
+String _formatStrokesAndToPar(double? strokes, num? scoreToPar) {
+  final toPar = _formatToPar(scoreToPar);
+  if (strokes == null) return toPar;
+  return '${strokes.round()} ($toPar)';
 }
 
 // live overlay first (freshest during an active poll window), falling
@@ -142,20 +155,25 @@ List<FieldParticipantPrediction> _sortedByStanding(List<FieldParticipantPredicti
 }
 
 class FieldLeaderboardTable extends StatelessWidget {
-  const FieldLeaderboardTable({super.key, required this.field, this.liveResults = const {}});
+  const FieldLeaderboardTable({super.key, required this.field, this.liveResults = const {}, this.par});
 
   final List<FieldParticipantPrediction> field;
   // Optional overlay from fieldLiveScoresProvider -- the table itself
   // doesn't own polling, the detail page feeds fresher data in as it
   // arrives (same split GameRow uses for its own isLive/liveState params).
   final Map<String, FieldParticipantLiveResult> liveResults;
+  // This tournament's own course par (FieldEventPrediction.par) -- lets
+  // every actual/projected cell show "N strokes (to par)" instead of the
+  // bare to-par number. Null for an older cached response predating this
+  // field; every cell falls back to the bare to-par number in that case.
+  final int? par;
 
   @override
   Widget build(BuildContext context) {
     if (field.isEmpty) {
       return Text('No field available yet.', style: AppTextStyles.body(color: AppColors.inkSub));
     }
-    final columns = _leaderboardColumns();
+    final columns = _leaderboardColumns(par);
     final sorted = _sortedByStanding(field, liveResults);
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 20),
@@ -169,7 +187,7 @@ class FieldLeaderboardTable extends StatelessWidget {
           Padding(padding: const EdgeInsets.symmetric(vertical: 10), child: _LeaderboardHeaderRow(columns: columns)),
           for (var i = 0; i < sorted.length; i++) ...[
             const Divider(height: 1, color: AppColors.border),
-            _LeaderboardRow(entry: sorted[i], live: liveResults[sorted[i].entityId], columns: columns, rowNumber: i + 1),
+            _LeaderboardRow(entry: sorted[i], live: liveResults[sorted[i].entityId], columns: columns, rowNumber: i + 1, par: par),
           ],
         ],
       ),
@@ -214,12 +232,13 @@ class _LeaderboardHeaderRow extends StatelessWidget {
 /// column), the expanded view is for the FULL history, always all 4
 /// rounds regardless of how many have real data yet.
 class _LeaderboardRow extends StatefulWidget {
-  const _LeaderboardRow({required this.entry, required this.live, required this.columns, required this.rowNumber});
+  const _LeaderboardRow({required this.entry, required this.live, required this.columns, required this.rowNumber, required this.par});
 
   final FieldParticipantPrediction entry;
   final FieldParticipantLiveResult? live;
   final List<_LeaderboardColumn> columns;
   final int rowNumber;
+  final int? par;
 
   @override
   State<_LeaderboardRow> createState() => _LeaderboardRowState();
@@ -253,7 +272,7 @@ class _LeaderboardRowState extends State<_LeaderboardRow> {
               const SizedBox(height: 4),
               Padding(
                 padding: const EdgeInsets.only(left: 20),
-                child: _RoundBreakdownStrip(entry: widget.entry, live: widget.live),
+                child: _RoundBreakdownStrip(entry: widget.entry, live: widget.live, par: widget.par),
               ),
             ],
           ],
@@ -275,10 +294,11 @@ class _LeaderboardRowState extends State<_LeaderboardRow> {
 }
 
 class _RoundBreakdownStrip extends StatelessWidget {
-  const _RoundBreakdownStrip({required this.entry, required this.live});
+  const _RoundBreakdownStrip({required this.entry, required this.live, required this.par});
 
   final FieldParticipantPrediction entry;
   final FieldParticipantLiveResult? live;
+  final int? par;
 
   @override
   Widget build(BuildContext context) {
@@ -290,18 +310,26 @@ class _RoundBreakdownStrip extends StatelessWidget {
       runSpacing: 8,
       children: [
         for (var round = 1; round <= 4; round++)
-          _RoundCell(round: round, projected: entry.rounds[round]?.value, actual: _actualForRound(round, entry, live), showLabel: true),
+          _RoundCell(
+            round: round, projected: entry.rounds[round]?.value, actual: _actualForRound(round, entry, live),
+            par: par, showLabel: true,
+          ),
       ],
     );
   }
 }
 
 class _RoundCell extends StatelessWidget {
-  const _RoundCell({required this.round, required this.projected, required this.actual, this.showLabel = false});
+  const _RoundCell({required this.round, required this.projected, required this.actual, required this.par, this.showLabel = false});
 
   final int round;
   final double? projected; // the round model's own point estimate
   final ({num? scoreToPar, double? totalStrokes})? actual;
+  // This course's own single-round par -- projected * strokes is
+  // (par + projected), unlike TO PAR's own full-tournament (par * 4 +
+  // projected) conversion, since a single round has no cut-line
+  // ambiguity to worry about.
+  final int? par;
   // false for the compact top-level 'THIS RD' column (the round number is
   // already implied by the column header); true inside the full 1-4
   // breakdown, where each cell needs its own "ROUND N" label.
@@ -309,13 +337,14 @@ class _RoundCell extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final projectedStrokes = (par != null && projected != null) ? (par! + projected!) : null;
     final actualText = Text(
-      actual != null ? _formatToPar(actual!.scoreToPar) : '--',
+      actual != null ? _formatStrokesAndToPar(actual!.totalStrokes, actual!.scoreToPar) : '--',
       style: AppTextStyles.metricValue(color: actual != null ? AppColors.ink : AppColors.inkMute),
       maxLines: 1, softWrap: false, overflow: TextOverflow.ellipsis,
     );
     final projectedText = Text(
-      _formatToPar(projected),
+      _formatStrokesAndToPar(projectedStrokes, projected),
       style: AppTextStyles.microLabel(color: AppColors.cyan),
       maxLines: 1, softWrap: false, overflow: TextOverflow.ellipsis,
     );
@@ -343,7 +372,13 @@ class _RoundCell extends StatelessWidget {
 /// TO PAR column's cell -- same compact actual-over-projected stack
 /// _RoundCell uses for THIS RD (showLabel: false), just tournament-level
 /// (cumulative standing vs. projected FINAL score-to-par) instead of one
-/// round's own actual vs. that round's own projection.
+/// round's own actual vs. that round's own projection. Deliberately
+/// stays bare to-par (no "N strokes" prefix) even though a real stroke
+/// count is often available here too -- unlike a single round, a
+/// tournament total has no unambiguous par baseline to convert against
+/// (2-round missed-cut vs. 4-round made-cut), so THIS RD/the round
+/// breakdown get the "N strokes (to par)" treatment but this column does
+/// not -- explicit user call.
 class _StandingCell extends StatelessWidget {
   const _StandingCell({required this.actual, required this.projected});
 

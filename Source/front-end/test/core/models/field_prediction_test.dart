@@ -95,6 +95,30 @@ void main() {
       expect(prediction.field.single.actualScoreToPar, -4);
     });
 
+    test('par is parsed at the top level', () {
+      final json = _fieldResponse();
+      json['par'] = 70;
+
+      final prediction = FieldEventPrediction.fromJson(json);
+
+      expect(prediction.par, 70);
+    });
+
+    test('par is null when the response omits it', () {
+      final prediction = FieldEventPrediction.fromJson(_fieldResponse());
+
+      expect(prediction.par, isNull);
+    });
+
+    test('actual total strokes is parsed alongside score to par', () {
+      final json = _fieldResponse();
+      (json['field'] as List)[0]['actual'] = {'finish_position': 26, 'score_to_par': -4, 'total_strokes': 276.0};
+
+      final prediction = FieldEventPrediction.fromJson(json);
+
+      expect(prediction.field.single.actualTotalStrokes, 276.0);
+    });
+
     test('actual rounds are parsed and keyed by round number, not status-gated', () {
       final json = _fieldResponse();
       (json['field'] as List)[0]['actual'] = {

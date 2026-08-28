@@ -238,6 +238,44 @@ class TestBuildLiveFieldFeatures:
         assert result["golfer_rows"]["1"]["rounds"][3]["same_round_rounds_played"] == 1
 
 
+class TestBuildProjectedFieldFeatures:
+    def test_builds_one_row_per_golfer_id_regardless_of_stored_participants(self):
+        # A genuinely future event -- no real participants at all yet.
+        target = _field_event("999", "2026-09-10", participants=[])
+        storage = _storage(target, [target])
+
+        result = live_features.build_projected_field_features(storage, "pga", target, golfer_ids=["1", "2"])
+
+        assert set(result) == {"1", "2"}
+
+    def test_pulls_real_rolling_history_for_a_projected_golfer(self):
+        past = _field_event("998", "2026-08-01", [_participant("1", finish_position=3, score_to_par=-10)])
+        target = _field_event("999", "2026-09-10", participants=[])
+        storage = _storage(target, [target, past])
+
+        result = live_features.build_projected_field_features(storage, "pga", target, golfer_ids=["1"])
+
+        assert result["1"]["avg_finish_position"] == 3.0
+
+    def test_no_rounds_completed_this_week_for_a_projected_field_member(self):
+        target = _field_event("999", "2026-09-10", participants=[])
+        storage = _storage(target, [target])
+
+        result = live_features.build_projected_field_features(storage, "pga", target, golfer_ids=["1"])
+
+        assert result["1"]["rounds_completed_this_week"] == 0
+
+    def test_reuses_a_caller_supplied_history_events_list_instead_of_refetching(self):
+        target = _field_event("999", "2026-09-10", participants=[])
+        storage = _storage(target, [target])
+
+        live_features.build_projected_field_features(
+            storage, "pga", target, golfer_ids=["1"], history_events=[target],
+        )
+
+        storage.get_all_events.assert_not_called()
+
+
 class TestBuildLiveMatchFeatures:
     def test_raises_when_event_not_found(self):
         storage = _storage(None, [])

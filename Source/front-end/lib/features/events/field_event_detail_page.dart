@@ -109,7 +109,7 @@ class _FieldPredictionView extends ConsumerWidget {
           ),
         ],
         const SizedBox(height: 16),
-        FieldLeaderboardTable(field: prediction.field, liveResults: liveState?.participants ?? const {}),
+        FieldLeaderboardTable(field: prediction.field, liveResults: liveState?.participants ?? const {}, par: prediction.par),
       ],
     );
   }

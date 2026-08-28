@@ -9,12 +9,14 @@ import '../data/models_repository.dart';
 import '../data/season_repository.dart';
 import '../models/sport_config.dart';
 import '../../features/auth/login_page.dart';
+import '../../features/auth/splash_page.dart';
 import '../../features/home/home_page.dart';
 import '../../features/events/event_detail_page.dart';
 import '../../features/events/event_list_page.dart';
 import '../../features/events/field_event_detail_page.dart';
 import '../../features/events/field_event_list_page.dart';
 import '../../features/models/model_cards_page.dart';
+import '../../features/season/pga_season_page.dart';
 import '../../features/season/season_page.dart';
 import '../../features/sport_shell/sport_shell_page.dart';
 
@@ -60,18 +62,25 @@ final appRouterProvider = Provider<GoRouter>((ref) {
     redirect: (context, state) {
       final authState = ref.read(authRepositoryProvider);
       final loggingIn = state.matchedLocation == '/login';
+      final onSplash = state.matchedLocation == '/splash';
 
       // Session restore (reading persisted tokens, possibly refreshing
-      // them) hasn't finished -- don't make a routing decision on stale
-      // information.
-      if (authState is AuthInitial) return null;
+      // them) hasn't finished -- send EVERY route here, not just '/',
+      // so the originally-requested route's own real content (a deep
+      // link to /nfl/events, a bookmark, or just '/' itself) never
+      // builds and briefly flashes on screen before this redirect
+      // resolves and bounces to /login. A real user-reported bug: '/'
+      // used to render HomePage for that window since redirect returned
+      // null (no redirect at all) while auth was still resolving.
+      if (authState is AuthInitial) return onSplash ? null : '/splash';
 
       final authenticated = authState is AuthAuthenticated;
       if (!authenticated) return loggingIn ? null : '/login';
-      return loggingIn ? '/' : null;
+      return (loggingIn || onSplash) ? '/' : null;
     },
     routes: [
       GoRoute(path: '/login', builder: (context, state) => const LoginPage()),
+      GoRoute(path: '/splash', builder: (context, state) => const SplashPage()),
       GoRoute(path: '/', builder: (context, state) => const HomePage()),
       ShellRoute(
         builder: (context, state, child) {
@@ -111,7 +120,12 @@ final appRouterProvider = Provider<GoRouter>((ref) {
           ),
           GoRoute(
             path: '/:sport/season',
-            builder: (context, state) => SeasonPage(sportId: state.pathParameters['sport']!),
+            builder: (context, state) {
+              final sportId = state.pathParameters['sport']!;
+              return sportById(sportId).usesFedexCupSeasonPage
+                  ? const PgaSeasonPage()
+                  : SeasonPage(sportId: sportId);
+            },
           ),
         ],
       ),

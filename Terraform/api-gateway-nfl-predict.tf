@@ -358,9 +358,9 @@ resource "aws_api_gateway_deployment" "main" {
       sha1(jsonencode(values(aws_api_gateway_method.ncaambb_cors)[*].id)),
       sha1(jsonencode(values(aws_api_gateway_integration.ncaambb_cors)[*].id)),
       sha1(jsonencode(values(aws_api_gateway_integration_response.ncaambb_cors)[*].id)),
-      # PGA routes declared in api-gateway-pga-predict.tf -- no season
-      # route, no per-golfer predictions sub-route (see that file's own
-      # docstring). live-scores declared in api-gateway-pga-live-scores.tf.
+      # PGA routes declared in api-gateway-pga-predict.tf -- no per-golfer
+      # predictions sub-route (see that file's own docstring). live-scores
+      # declared in api-gateway-pga-live-scores.tf.
       aws_api_gateway_resource.pga.id,
       aws_api_gateway_resource.pga_events.id,
       aws_api_gateway_method.pga_events.id,
@@ -370,6 +370,10 @@ resource "aws_api_gateway_deployment" "main" {
       aws_api_gateway_method.pga_models.id,
       aws_api_gateway_integration.pga_models.id,
       aws_api_gateway_integration.pga_models.uri,
+      aws_api_gateway_resource.pga_season.id,
+      aws_api_gateway_method.pga_season.id,
+      aws_api_gateway_integration.pga_season.id,
+      aws_api_gateway_integration.pga_season.uri,
       aws_api_gateway_resource.pga_predictions.id,
       aws_api_gateway_resource.pga_predictions_events.id,
       aws_api_gateway_resource.pga_predictions_event.id,

@@ -5,11 +5,11 @@
 #
 #   GET /pga/events                          -> pga_predict_read
 #   GET /pga/models                          -> pga_predict_read
+#   GET /pga/season                          -> pga_predict_read (cache), async-computed weekly by pga_predict
 #   GET /pga/predictions/events/{event_id}   -> pga_predict_read (cache), async-computed by pga_predict
 #   GET /pga/live-scores                     -> pga_live_scores (api-gateway-pga-live-scores.tf, separate Lambda)
 #
-# No GET /pga/season (no season-long standings/odds concept) and no
-# per-golfer prediction sub-route (unlike NBA's .../players/{entity_id})
+# No per-golfer prediction sub-route (unlike NBA's .../players/{entity_id})
 # -- one field compute already scores every golfer, there's nothing
 # narrower to fetch. See aws-lambdas/pga/predict-read/handler.py's own
 # docstring.
@@ -66,6 +66,29 @@ resource "aws_api_gateway_integration" "pga_models" {
   uri                     = aws_lambda_function.pga_predict_read.invoke_arn
 }
 
+resource "aws_api_gateway_resource" "pga_season" {
+  rest_api_id = aws_api_gateway_rest_api.main.id
+  parent_id   = aws_api_gateway_resource.pga.id
+  path_part   = "season"
+}
+
+resource "aws_api_gateway_method" "pga_season" {
+  rest_api_id   = aws_api_gateway_rest_api.main.id
+  resource_id   = aws_api_gateway_resource.pga_season.id
+  http_method   = "GET"
+  authorization = "COGNITO_USER_POOLS"
+  authorizer_id = aws_api_gateway_authorizer.cognito.id
+}
+
+resource "aws_api_gateway_integration" "pga_season" {
+  rest_api_id             = aws_api_gateway_rest_api.main.id
+  resource_id             = aws_api_gateway_resource.pga_season.id
+  http_method             = aws_api_gateway_method.pga_season.http_method
+  type                    = "AWS_PROXY"
+  integration_http_method = "POST"
+  uri                     = aws_lambda_function.pga_predict_read.invoke_arn
+}
+
 resource "aws_api_gateway_resource" "pga_predictions" {
   rest_api_id = aws_api_gateway_rest_api.main.id
   parent_id   = aws_api_gateway_resource.pga.id
@@ -112,6 +135,7 @@ locals {
   pga_cors_resources = {
     events        = aws_api_gateway_resource.pga_events.id
     models        = aws_api_gateway_resource.pga_models.id
+    season        = aws_api_gateway_resource.pga_season.id
     predict_event = aws_api_gateway_resource.pga_predictions_event.id
     live_scores   = aws_api_gateway_resource.pga_live_scores.id
   }

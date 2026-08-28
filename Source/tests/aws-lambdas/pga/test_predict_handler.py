@@ -11,6 +11,19 @@ from unittest.mock import patch
 
 import event_prediction
 import pga_predict
+import season_projection
+
+
+class TestScheduledSeasonProjectionDispatch:
+    def test_dispatches_to_season_projections_own_run_scheduled(self):
+        with patch.object(pga_predict, "_get_storage"), \
+             patch.object(pga_predict, "_get_model_bucket"), \
+             patch.object(pga_predict, "_get_predictions_table"), \
+             patch.object(season_projection, "run_scheduled", return_value={"sport": "pga", "season": 2026}) as mock_run:
+            response = pga_predict.lambda_handler({"detail-type": "ScheduledSeasonProjection"}, None)
+
+        assert response == {"sport": "pga", "season": 2026}
+        mock_run.assert_called_once()
 
 
 class TestWarmup:

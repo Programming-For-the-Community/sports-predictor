@@ -102,6 +102,11 @@ def _actual_golfer_result(participant: dict) -> dict | None:
     return {
         "finish_position": result.get("finish_position"),
         "score_to_par": result.get("score_to_par"),
+        # Real cumulative tournament strokes-so-far (library/normalize/
+        # pga.py's _parse_score, off the competitor's own top-level
+        # `score` object) -- lets the frontend show "N strokes (to par)"
+        # for the real standing, not just the bare to-par number.
+        "total_strokes": result.get("total_strokes"),
         "rounds": rounds,
         # This golfer's own real ESPN status (scheduled/finished/cut/
         # made_cut_did_not_finish/withdrawn -- library/normalize/pga.py's
@@ -218,6 +223,12 @@ def predict_field_event(storage, s3, predictions_table, event_id: str) -> dict:
     return {
         "sport": SPORT, "event_key": event_key_value, "event_id": event_id, "event_type": "field",
         "tournament_name": event.get("tournament_name"), "status": status,
+        # This course's own single-round par (library/normalize/pga.py's
+        # own `par`, off the host course's real shotsToPar) -- lets the
+        # frontend convert a score-to-par value (actual OR model-
+        # projected) into an implied stroke count for display, without a
+        # dedicated strokes-prediction model.
+        "par": event.get("par"),
         "cutline": cutline,
         "field": field,
         "generated_at": datetime.now(timezone.utc).isoformat(),

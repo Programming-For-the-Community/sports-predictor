@@ -5,12 +5,16 @@ authorizer.
 Routes:
     GET /pga/events?status=scheduled|completed
     GET /pga/models
+    GET /pga/season
     GET /pga/predictions/events/{event_id}
 
-No GET /pga/season -- PGA has no season-long standings/odds concept the
-way NBA has playoff odds (project-pga-onboarding memory). No per-golfer
-prediction sub-route (unlike NBA's .../players/{entity_id}) -- one field
-compute already scores every golfer, there's nothing narrower to fetch.
+GET /pga/season is a pure read-through of the FedEx Cup season
+simulation the predict Lambda's own weekly EventBridge trigger writes
+(aws-lambdas/pga/predict/season_projection.py) -- never computed live
+here, same 503-when-not-yet-available contract every other sport's own
+season route uses. No per-golfer prediction sub-route (unlike NBA's
+.../players/{entity_id}) -- one field compute already scores every
+golfer, there's nothing narrower to fetch.
 
 The one prediction route is a read-through cache (library.storage.
 prediction_cache) in front of the predict Lambda, which does the actual
@@ -161,6 +165,12 @@ def lambda_handler(event, context):
 
         if resource == "/pga/models":
             body = list_models(_get_model_bucket(), SPORT)
+            return _response(200, body)
+
+        if resource == "/pga/season":
+            body = pga_reads.get_season_projection(_get_model_bucket(), SPORT)
+            if body is None:
+                return _response(503, {"error": "Season projection not yet available -- check back after the next scheduled update"})
             return _response(200, body)
 
         if resource == "/pga/predictions/events/{event_id}":

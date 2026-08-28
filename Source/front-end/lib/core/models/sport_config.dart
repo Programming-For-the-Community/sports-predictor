@@ -20,6 +20,7 @@ class SportConfig {
     required this.accentColor,
     required this.active,
     this.hasSeasonProjection = true,
+    this.usesFedexCupSeasonPage = false,
   });
 
   final String id;
@@ -33,6 +34,15 @@ class SportConfig {
   // surface a raw "couldn't load" error on every tap. Defaults true so
   // most entries below need no change.
   final bool hasSeasonProjection;
+
+  // True routes /{sport}/season to PgaSeasonPage (a points-standings
+  // table -- FedEx Cup, no bracket) instead of the shared bracket-based
+  // SeasonPage every EventShape.headToHead sport uses. A separate flag
+  // from eventShape deliberately -- F1 is also EventShape.field but
+  // (once active) will want its own driver-standings shape, not
+  // necessarily this one; overloading eventShape would force them to
+  // match.
+  final bool usesFedexCupSeasonPage;
 }
 
 const kSports = [
@@ -75,11 +85,11 @@ const kSports = [
     eventShape: EventShape.field,
     accentColor: AppColors.violet,
     active: true,
-    // No season-long standings/odds concept for a field-event sport --
-    // set independently of `active` so SportShellPage's Season tab (which
-    // defaults to visible) never renders for PGA even before `active`
-    // flips, since GET /pga/season doesn't exist.
-    hasSeasonProjection: false,
+    // FedEx Cup season simulation (aws-lambdas/pga/predict/
+    // season_projection.py) -- a points-standings table, not a bracket,
+    // hence usesFedexCupSeasonPage routing to its own PgaSeasonPage.
+    hasSeasonProjection: true,
+    usesFedexCupSeasonPage: true,
   ),
   SportConfig(
     id: 'f1',

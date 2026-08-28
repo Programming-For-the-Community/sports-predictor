@@ -81,6 +81,21 @@ class TestRouting:
 
         assert response["statusCode"] == 200
 
+    def test_season_route_returns_the_cached_projection(self):
+        with patch.object(pga_predict_read, "_get_model_bucket"), \
+             patch.object(pga_predict_read.pga_reads, "get_season_projection", return_value={"sport": "pga", "season": 2026, "standings": []}):
+            response = pga_predict_read.lambda_handler(_api_event("/pga/season"), None)
+
+        assert response["statusCode"] == 200
+        assert json.loads(response["body"]) == {"sport": "pga", "season": 2026, "standings": []}
+
+    def test_season_route_returns_503_when_not_yet_available(self):
+        with patch.object(pga_predict_read, "_get_model_bucket"), \
+             patch.object(pga_predict_read.pga_reads, "get_season_projection", return_value=None):
+            response = pga_predict_read.lambda_handler(_api_event("/pga/season"), None)
+
+        assert response["statusCode"] == 503
+
     def test_unknown_route_returns_404(self):
         response = pga_predict_read.lambda_handler(_api_event("/pga/unknown"), None)
         assert response["statusCode"] == 404

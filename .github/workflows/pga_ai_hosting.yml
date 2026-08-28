@@ -34,9 +34,12 @@ jobs:
     with:
       test_path: >-
         Source/tests/library/
+        Source/tests/feature-engineering/pga/
         Source/tests/aws-lambdas/pga/test_live_features.py
         Source/tests/aws-lambdas/pga/test_event_prediction.py
         Source/tests/aws-lambdas/pga/test_predict_handler.py
+        Source/tests/aws-lambdas/pga/test_season_simulation.py
+        Source/tests/aws-lambdas/pga/test_season_projection.py
       # Both requirements files -- requirements-nodeps.txt (xgboost, only
       # ever installed --no-deps in the real Dockerfile build to dodge its
       # nvidia-nccl-cu12 GPU dependency) still needs to be installed HERE

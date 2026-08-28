@@ -108,6 +108,32 @@ def applicable_rounds(participant: dict) -> list[int]:
     return [r for r in range(next_round, 5)]
 
 
+def _golfer_prior_history(
+    storage, sport: str, history_events: list[dict], entity_id: str, before_date: str,
+    window: int, course_id: str | None, course_window: int, snapshots: list[dict],
+) -> tuple[list[dict], list[dict] | None, dict | None]:
+    """(prior_results, course_results, season_stats) -- every rolling-
+    history input build_golfer_event_features needs for one golfer,
+    independent of whether they have a REAL participant row on the event
+    being scored. Extracted so build_live_field_features (a real,
+    already-known field) and build_projected_field_features (a season
+    simulation's own PROJECTED field, no real participant row at all)
+    share this exact same history-resolution logic rather than each
+    re-implementing it -- the two used to diverge here before this
+    refactor, which is exactly the kind of drift a shared helper
+    prevents."""
+    field_events = _golfer_field_events(storage, sport, history_events, entity_id, before_date)
+    prior_results = _results_from_events(field_events, entity_id, window)
+
+    course_results = None
+    if course_id is not None:
+        course_events = [e for e in field_events if e.get("course_id") == course_id]
+        course_results = _results_from_events(course_events, entity_id, course_window)
+
+    season_stats = resolve_season_stats(snapshots, entity_id, before_date) if snapshots else None
+    return prior_results, course_results, season_stats
+
+
 def build_live_field_features(
     storage, sport: str, event_id: str,
     window: int = DEFAULT_ROLLING_WINDOW, course_window: int = DEFAULT_COURSE_HISTORY_WINDOW,
@@ -137,14 +163,10 @@ def build_live_field_features(
     for participant in participants:
         entity_id = participant["entity_id"]
         field_events = _golfer_field_events(storage, sport, history_events, entity_id, before_date)
-        prior_results = _results_from_events(field_events, entity_id, window)
+        prior_results, course_results, season_stats = _golfer_prior_history(
+            storage, sport, history_events, entity_id, before_date, window, course_id, course_window, snapshots,
+        )
 
-        course_results = None
-        if course_id is not None:
-            course_events = [e for e in field_events if e.get("course_id") == course_id]
-            course_results = _results_from_events(course_events, entity_id, course_window)
-
-        season_stats = resolve_season_stats(snapshots, entity_id, before_date) if snapshots else None
         # This golfer's own already-played rounds THIS tournament, live
         # off the current stored result -- what makes a round-completion
         # recompute (library/storage/prediction_cache.py's
@@ -190,6 +212,48 @@ def build_live_field_features(
     cutline_row = build_cutline_event_features(event, prior_course_cut_scores, course_window)
 
     return {"event": event, "golfer_rows": golfer_rows, "cutline_row": cutline_row}
+
+
+def build_projected_field_features(
+    storage, sport: str, event: dict, golfer_ids: list[str],
+    window: int = DEFAULT_ROLLING_WINDOW, course_window: int = DEFAULT_COURSE_HISTORY_WINDOW,
+    season_stat_snapshots: list[dict] | None = None,
+    history_events: list[dict] | None = None,
+) -> dict[str, dict]:
+    """{entity_id: golfer_row} for a PROJECTED field -- season_
+    simulation.py's own remaining-event scoring, keyed off an externally-
+    supplied golfer_ids list (library.features.pga_field_projection's own
+    output) instead of trusting `event`'s stored participants, which for
+    a genuinely future event is empty/sparse -- exactly why this function
+    exists, rather than reusing build_live_field_features unchanged.
+
+    Deliberately narrower than build_live_field_features's own output: no
+    round-level rows (nothing has been played yet for a projected field)
+    and no cutline_row (the season simulation doesn't use the cutline
+    model at all). Every golfer gets a bare {"entity_id": entity_id}
+    stand-in for a real participant row -- build_golfer_event_features
+    only ever reads participant["entity_id"] and participant.get(
+    "result") (None here, correctly resolving to the same "hasn't played"
+    defaults every genuinely pre-tournament row already gets).
+
+    history_events: pass the caller's own already-fetched
+    storage.get_all_events(sport) when scoring MANY remaining events in
+    one run (season_projection.py always does) to avoid re-fetching the
+    whole sport's event history once per event."""
+    before_date = event["event_date"]
+    course_id = event.get("course_id")
+    snapshots = season_stat_snapshots or []
+    all_events = history_events if history_events is not None else storage.get_all_events(sport)
+
+    golfer_rows = {}
+    for entity_id in golfer_ids:
+        prior_results, course_results, season_stats = _golfer_prior_history(
+            storage, sport, all_events, entity_id, before_date, window, course_id, course_window, snapshots,
+        )
+        golfer_rows[entity_id] = build_golfer_event_features(
+            event, {"entity_id": entity_id}, prior_results, window, course_results, course_window, season_stats,
+        )
+    return golfer_rows
 
 
 def _side_prior_results(storage, sport: str, history_events: list[dict], golfer_ids, before_date: str, window: int) -> dict[str, list[dict]]:

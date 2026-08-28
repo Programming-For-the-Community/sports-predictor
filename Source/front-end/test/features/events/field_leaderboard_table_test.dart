@@ -5,12 +5,17 @@ import 'package:front_end/core/models/field_live_score.dart';
 import 'package:front_end/core/models/field_prediction.dart';
 import 'package:front_end/features/events/field_leaderboard_table.dart';
 
-FieldParticipantPrediction _golfer(String id, String name, {double? projectedScoreToPar, double? actualScoreToPar, Map<int, ModelValue>? rounds, Map<int, ActualRoundResult>? actualRounds}) {
+FieldParticipantPrediction _golfer(
+  String id, String name, {
+  double? projectedScoreToPar, double? actualScoreToPar, double? actualTotalStrokes,
+  Map<int, ModelValue>? rounds, Map<int, ActualRoundResult>? actualRounds,
+}) {
   return FieldParticipantPrediction(
     entityId: id,
     name: name,
     projectedScoreToPar: projectedScoreToPar != null ? ModelValue(value: projectedScoreToPar, modelVersion: 1) : null,
     actualScoreToPar: actualScoreToPar,
+    actualTotalStrokes: actualTotalStrokes,
     rounds: rounds ?? const {},
     actualRounds: actualRounds ?? const {},
   );
@@ -102,7 +107,7 @@ void main() {
     expect(find.text('ROUND 2'), findsOneWidget);
     expect(find.text('ROUND 3'), findsOneWidget);
     expect(find.text('ROUND 4'), findsOneWidget);
-    expect(find.text('-4'), findsWidgets); // actual round 1
+    expect(find.text('68 (-4)'), findsWidgets); // actual round 1, strokes + to par
     expect(find.text('-3'), findsWidgets); // projected round 2 (also still shown at the top level, so 2 instances)
     expect(find.text('--'), findsWidgets); // rounds 3/4 -- placeholder, not omitted
 
@@ -133,5 +138,50 @@ void main() {
     expect(find.text('TO PAR'), findsOneWidget);
     expect(find.text('-5'), findsOneWidget); // actual standing
     expect(find.text('-8'), findsOneWidget); // projected final score-to-par, right underneath
+  });
+
+  testWidgets('TO PAR stays bare to-par even when a real stroke count and par are both available', (tester) async {
+    // Explicit user call: THIS RD/the round breakdown show "N strokes (to
+    // par)", but the whole-tournament TO PAR column never does -- there's
+    // no unambiguous par baseline for a full tournament (2-round missed
+    // cut vs. 4-round made cut).
+    final field = [_golfer('1', 'Xander Schauffele', projectedScoreToPar: -8, actualScoreToPar: -5, actualTotalStrokes: 275.0)];
+
+    await tester.pumpWidget(_wrap(FieldLeaderboardTable(field: field, par: 70)));
+
+    expect(find.text('-5'), findsOneWidget);
+    expect(find.text('-8'), findsOneWidget);
+    expect(find.textContaining('275'), findsNothing);
+  });
+
+  testWidgets('THIS RD shows the real stroke count alongside to par for an actual round', (tester) async {
+    final field = [
+      _golfer('1', 'Xander Schauffele', actualRounds: {1: const ActualRoundResult(round: 1, scoreToPar: -4, totalStrokes: 68.0)}),
+    ];
+
+    await tester.pumpWidget(_wrap(FieldLeaderboardTable(field: field)));
+
+    expect(find.text('68 (-4)'), findsOneWidget);
+  });
+
+  testWidgets('THIS RD shows an implied stroke count for a projected round when par is known', (tester) async {
+    final field = [
+      _golfer('1', 'Xander Schauffele', rounds: {2: const ModelValue(value: -3.0, modelVersion: 1)}),
+    ];
+
+    await tester.pumpWidget(_wrap(FieldLeaderboardTable(field: field, par: 70)));
+
+    expect(find.text('67 (-3)'), findsOneWidget); // 70 + (-3) = 67
+  });
+
+  testWidgets('a projected round shows the bare to-par number when par is unknown', (tester) async {
+    final field = [
+      _golfer('1', 'Xander Schauffele', rounds: {2: const ModelValue(value: -3.0, modelVersion: 1)}),
+    ];
+
+    await tester.pumpWidget(_wrap(FieldLeaderboardTable(field: field))); // no par passed
+
+    expect(find.text('-3'), findsOneWidget);
+    expect(find.textContaining('67'), findsNothing);
   });
 }

@@ -46,8 +46,22 @@ def map_status(status_type: dict) -> str:
     reuses this exact ESPN-status-name mapping for match-play competitor
     statuses -- same STATUS_FINISH/STATUS_SCHEDULED vocabulary, confirmed
     live on real Ryder Cup/Presidents Cup/WGC Match Play responses,
-    2026-08-26."""
+    2026-08-26.
+
+    STATUS_CUT is checked against its own shortDetail before the name-keyed
+    table below -- confirmed live, 2026-08-27, on a real TOUR Championship
+    withdrawal: ESPN's own status.type.name was "STATUS_CUT" while
+    type.shortDetail/description both said "WD"/"Withdrawn". TOUR
+    Championship's 30-man field has no 36-hole cut to even miss, so this
+    genuinely can't be a real cut -- ESPN reuses STATUS_CUT as a catch-all
+    "no longer in real contention" bucket in at least this one case, and
+    its own human-readable shortDetail is the more trustworthy signal here.
+    Every other status stays governed by `name` exactly as before -- this
+    doesn't change a real missed-cut's own mapping, only corrects the one
+    ambiguous case ESPN's own name field mislabels."""
     name = status_type.get("name", "")
+    if name == "STATUS_CUT" and status_type.get("shortDetail") == "WD":
+        return "withdrawn"
     if name in _STATUS_MAP:
         return _STATUS_MAP[name]
     logger.warning("Unmapped PGA status.type.name %r -- falling back to a generic mapping", name)
@@ -393,6 +407,14 @@ def leaderboard_event_to_event_item(event: dict, sport: str) -> dict:
         # -- added specifically for library/features/pga.py's own
         # rolling per-course history.
         "course_id": course.get("id"),
+        # par -- this course's own single-round par (e.g. 70), from the
+        # SAME host_course entry course_id already comes from
+        # (course.shotsToPar, confirmed live 2026-08-28 on a real TOUR
+        # Championship leaderboard response). Lets serving-time code
+        # convert a score-to-par value (real or model-projected) into an
+        # implied stroke count for display, without needing a dedicated
+        # strokes-prediction model.
+        "par": course.get("shotsToPar"),
         # purse/is_major -- field-strength context a ranking model needs
         # (design/DATA_SCHEMA.md and library/features/pga.py), not present
         # on any head-to-head sport's event item. purse comes from the

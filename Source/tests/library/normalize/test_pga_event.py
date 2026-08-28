@@ -22,7 +22,7 @@ from library.normalize.pga import (
 def _competitor(
     athlete_id="10140", name="Xander Schauffele", status_name="STATUS_FINISH", completed=True,
     position_display="T26", is_tie=True, score_display="-4", score_value=276.0, earnings=177500.0,
-    country="USA", amateur=False, linescores=None, tee_time=None,
+    country="USA", amateur=False, linescores=None, tee_time=None, status_short_detail=None,
 ):
     return {
         "id": athlete_id,
@@ -35,7 +35,10 @@ def _competitor(
         # (it must, to also cover Zurich Classic's roster-nested athletes).
         "athlete": {"id": athlete_id, "displayName": name, "flag": {"alt": country}, "amateur": amateur},
         "status": {
-            "type": {"id": "2", "name": status_name, "state": "post", "completed": completed},
+            "type": {
+                "id": "2", "name": status_name, "state": "post", "completed": completed,
+                **({"shortDetail": status_short_detail} if status_short_detail else {}),
+            },
             "position": {"id": "26", "displayName": position_display, "isTie": is_tie},
             **({"teeTime": tee_time} if tee_time else {}),
         },
@@ -79,7 +82,7 @@ def _team_stroke_competitor(
 def _event(
     event_id="401811963", status_completed=True, status_name="STATUS_FINAL", status_state=None, competitors=None,
     purse=20000000, major=False, scoring_system="Medal", tournament_name="BMW Championship",
-    cut_score=None, cut_round=None, cut_count=None,
+    cut_score=None, cut_round=None, cut_count=None, par=70,
 ):
     return {
         "id": event_id,
@@ -103,7 +106,7 @@ def _event(
             "state": status_state if status_state is not None else ("post" if status_completed else "pre"),
         }},
         "courses": [{
-            "id": "65", "name": "Bellerive Country Club", "host": True,
+            "id": "65", "name": "Bellerive Country Club", "host": True, "shotsToPar": par,
             "address": {"city": "St. Louis", "state": "MO", "country": "USA"},
         }],
         "competitions": [{"competitors": competitors if competitors is not None else [_competitor()]}],
@@ -199,6 +202,16 @@ class TestLeaderboardEventToEventItem:
     def test_course_id_comes_from_the_host_course(self):
         item = leaderboard_event_to_event_item(_event(), "pga")
         assert item["course_id"] == "65"
+
+    def test_par_comes_from_the_host_courses_own_shots_to_par(self):
+        item = leaderboard_event_to_event_item(_event(par=72), "pga")
+        assert item["par"] == 72
+
+    def test_par_is_none_when_missing_from_the_host_course(self):
+        event = _event()
+        del event["courses"][0]["shotsToPar"]
+        item = leaderboard_event_to_event_item(event, "pga")
+        assert item["par"] is None
 
     def test_international_course_has_no_state(self):
         event = _event()
@@ -388,6 +401,19 @@ class TestParticipantResult:
         )
         result = item["participants"][0]["result"]
         assert result["status"] == "cut"
+
+    def test_cut_status_with_wd_short_detail_maps_to_withdrawn_not_cut(self):
+        # Real ESPN bug, confirmed live 2026-08-27 on a TOUR Championship
+        # withdrawal: type.name says STATUS_CUT but type.shortDetail says
+        # "WD" -- TOUR Championship's 30-man field has no cut to miss at
+        # all, so this can only be a mislabeled withdrawal.
+        item = leaderboard_event_to_event_item(
+            _event(competitors=[_competitor(
+                status_name="STATUS_CUT", completed=False, position_display="-", is_tie=False,
+                status_short_detail="WD",
+            )]), "pga",
+        )
+        assert item["participants"][0]["result"]["status"] == "withdrawn"
 
     def test_scheduled_status_maps_to_scheduled(self):
         item = leaderboard_event_to_event_item(

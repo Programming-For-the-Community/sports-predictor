@@ -68,6 +68,7 @@ class FieldParticipantPrediction {
     this.rounds = const {},
     this.actualFinishPosition,
     this.actualScoreToPar,
+    this.actualTotalStrokes,
     this.actualRounds = const {},
     this.actualStatus,
   });
@@ -89,6 +90,11 @@ class FieldParticipantPrediction {
   // data at all yet (`actual` itself absent), treated identically here.
   final int? actualFinishPosition;
   final double? actualScoreToPar;
+  // Real cumulative tournament strokes-so-far -- pairs with
+  // actualScoreToPar for a "N strokes (to par)" display, the same
+  // stroke-count-plus-relative-par framing every real golf leaderboard
+  // uses.
+  final double? actualTotalStrokes;
   // Real per-round results already played, keyed by round number --
   // pairs with `rounds` (the PROJECTED per-round model output) for a
   // proj-vs-actual comparison per round.
@@ -131,6 +137,7 @@ class FieldParticipantPrediction {
       rounds: rounds,
       actualFinishPosition: actual?['finish_position'] as int?,
       actualScoreToPar: (actual?['score_to_par'] as num?)?.toDouble(),
+      actualTotalStrokes: (actual?['total_strokes'] as num?)?.toDouble(),
       actualRounds: actualRounds,
       actualStatus: actual?['status'] as String?,
     );
@@ -143,6 +150,7 @@ class FieldEventPrediction {
     required this.field,
     this.tournamentName,
     this.status,
+    this.par,
     this.cutline,
     this.stale = false,
     this.staleRetryAfterSeconds,
@@ -151,6 +159,11 @@ class FieldEventPrediction {
   final String eventId;
   final String? tournamentName;
   final String? status;
+  // This course's own single-round par -- lets the frontend convert a
+  // score-to-par value (actual or model-projected) into an implied
+  // stroke count for display. Null for an older cached response
+  // predating this field, or a course ESPN didn't report par for.
+  final int? par;
   final Cutline? cutline;
   // PRE-SORTED server-side (event_prediction.py's _field_sort_key), by
   // PROJECTION -- a reasonable order before any real standing exists.
@@ -168,6 +181,7 @@ class FieldEventPrediction {
         eventId: json['event_id'] as String,
         tournamentName: json['tournament_name'] as String?,
         status: json['status'] as String?,
+        par: json['par'] as int?,
         cutline: json['cutline'] != null ? Cutline.fromJson(json['cutline'] as Map<String, dynamic>) : null,
         field: (json['field'] as List<dynamic>? ?? [])
             .map((p) => FieldParticipantPrediction.fromJson(p as Map<String, dynamic>))
