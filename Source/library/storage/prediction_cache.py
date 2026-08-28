@@ -47,13 +47,26 @@ def _in_progress_key(cache_key: str) -> str:
     return f"{cache_key}.in-progress"
 
 
-def current_core_model_versions(s3, sport: str) -> dict[str, int | None]:
-    """{"win_probability": version, ...} for each CORE_EVENT_MODELS entry, None if unpromoted."""
+def current_model_versions(s3, sport: str, models: dict[str, str]) -> dict[str, int | None]:
+    """{key: version} for each `models` entry (key -> model_name), None if
+    unpromoted. `models` lets a caller supply its own model-name map
+    instead of this module hardcoding one shape -- CORE_EVENT_MODELS
+    below is specifically the head-to-head sports' (NFL/NCAAFB/NBA/
+    NCAAMBB) own map, not the only one that exists; a field-event sport
+    (PGA) has a genuinely different model set (top10/top5/score/cutline/
+    round, none of them win-probability/margin/home-score/away-score)
+    and builds its own map at its own call site rather than this module
+    growing a second hardcoded constant per sport shape."""
     versions: dict[str, int | None] = {}
-    for key, model_name in CORE_EVENT_MODELS.items():
+    for key, model_name in models.items():
         pointer_key = current_version_key(sport, model_name)
         versions[key] = s3.get_json(pointer_key)["version"] if s3.object_exists(pointer_key) else None
     return versions
+
+
+def current_core_model_versions(s3, sport: str) -> dict[str, int | None]:
+    """{"win_probability": version, ...} for each CORE_EVENT_MODELS entry, None if unpromoted."""
+    return current_model_versions(s3, sport, CORE_EVENT_MODELS)
 
 
 def current_player_prop_model_version(s3, sport: str, target_stat: str) -> int | None:

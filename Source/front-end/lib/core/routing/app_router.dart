@@ -4,12 +4,16 @@ import 'package:go_router/go_router.dart';
 
 import '../auth/auth_repository.dart';
 import '../data/events_repository.dart';
+import '../data/field_events_repository.dart';
 import '../data/models_repository.dart';
 import '../data/season_repository.dart';
+import '../models/sport_config.dart';
 import '../../features/auth/login_page.dart';
 import '../../features/home/home_page.dart';
 import '../../features/events/event_detail_page.dart';
 import '../../features/events/event_list_page.dart';
+import '../../features/events/field_event_detail_page.dart';
+import '../../features/events/field_event_list_page.dart';
 import '../../features/models/model_cards_page.dart';
 import '../../features/season/season_page.dart';
 import '../../features/sport_shell/sport_shell_page.dart';
@@ -37,6 +41,8 @@ class _AuthChangeNotifier extends ChangeNotifier {
       if (signedIn) {
         ref.invalidate(eventsListProvider);
         ref.invalidate(eventPredictionProvider);
+        ref.invalidate(fieldEventsListProvider);
+        ref.invalidate(fieldEventPredictionProvider);
         ref.invalidate(modelsListProvider);
         ref.invalidate(seasonProjectionProvider);
       }
@@ -75,14 +81,27 @@ final appRouterProvider = Provider<GoRouter>((ref) {
         routes: [
           GoRoute(
             path: '/:sport/events',
-            builder: (context, state) => EventListPage(sportId: state.pathParameters['sport']!),
+            // Router-level branch on eventShape -- keeps EventListPage/
+            // EventDetailPage/GameRow completely untouched, mirroring how
+            // SportCard already branches on eventShape at the leaf-widget
+            // level (sport_card.dart). Same path template either way, so
+            // this can't be two separate GoRoutes.
+            builder: (context, state) {
+              final sportId = state.pathParameters['sport']!;
+              return sportById(sportId).eventShape == EventShape.field
+                  ? FieldEventListPage(sportId: sportId)
+                  : EventListPage(sportId: sportId);
+            },
             routes: [
               GoRoute(
                 path: ':eventId',
-                builder: (context, state) => EventDetailPage(
-                  sportId: state.pathParameters['sport']!,
-                  eventId: state.pathParameters['eventId']!,
-                ),
+                builder: (context, state) {
+                  final sportId = state.pathParameters['sport']!;
+                  final eventId = state.pathParameters['eventId']!;
+                  return sportById(sportId).eventShape == EventShape.field
+                      ? FieldEventDetailPage(sportId: sportId, eventId: eventId)
+                      : EventDetailPage(sportId: sportId, eventId: eventId);
+                },
               ),
             ],
           ),

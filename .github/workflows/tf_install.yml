@@ -125,6 +125,15 @@ on:
       pga_schedule_sync_function_name:
         description: 'PGA schedule-sync Lambda function name'
         value: ${{ jobs.terraform.outputs.pga_schedule_sync_function_name }}
+      pga_predict_function_name:
+        description: 'PGA predict Lambda function name'
+        value: ${{ jobs.terraform.outputs.pga_predict_function_name }}
+      pga_predict_read_function_name:
+        description: 'PGA predict-read Lambda function name'
+        value: ${{ jobs.terraform.outputs.pga_predict_read_function_name }}
+      pga_live_scores_function_name:
+        description: 'PGA live-scores Lambda function name'
+        value: ${{ jobs.terraform.outputs.pga_live_scores_function_name }}
       cognito_user_pool_id:
         description: 'Cognito User Pool ID'
         value: ${{ jobs.terraform.outputs.cognito_user_pool_id }}
@@ -206,6 +215,9 @@ jobs:
       pga_ingest_function_name: ${{ steps.tf_outputs.outputs.pga_ingest_function_name }}
       pga_normalize_function_name: ${{ steps.tf_outputs.outputs.pga_normalize_function_name }}
       pga_schedule_sync_function_name: ${{ steps.tf_outputs.outputs.pga_schedule_sync_function_name }}
+      pga_predict_function_name: ${{ steps.tf_outputs.outputs.pga_predict_function_name }}
+      pga_predict_read_function_name: ${{ steps.tf_outputs.outputs.pga_predict_read_function_name }}
+      pga_live_scores_function_name: ${{ steps.tf_outputs.outputs.pga_live_scores_function_name }}
       cognito_user_pool_id: ${{ steps.tf_outputs.outputs.cognito_user_pool_id }}
       cognito_client_id: ${{ steps.tf_outputs.outputs.cognito_client_id }}
       api_endpoint: ${{ steps.tf_outputs.outputs.api_endpoint }}
@@ -334,6 +346,9 @@ jobs:
         capture_output pga_ingest_function_name
         capture_output pga_normalize_function_name
         capture_output pga_schedule_sync_function_name
+        capture_output pga_predict_function_name
+        capture_output pga_predict_read_function_name
+        capture_output pga_live_scores_function_name
         capture_output cognito_user_pool_id
         capture_output cognito_client_id
         capture_output api_endpoint

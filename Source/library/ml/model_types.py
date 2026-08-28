@@ -70,6 +70,29 @@ _EARLY_STOP_PATIENCE_BATCHES = 4
 _EARLY_STOP_MIN_RELATIVE_IMPROVEMENT = 0.0005
 
 
+def _time_series_splits(n_splits: int, n_samples: int) -> int:
+    """TimeSeriesSplit requires n_samples > n_splits. A shared constant
+    (8) sized for every target's typical, much larger training set can
+    still exceed a genuinely tiny target's own row count -- e.g. PGA's
+    cup-win-probability (one Ryder/Presidents Cup a year, 6 training
+    rows after the chronological split; real crash 2026-08-27:
+    ValueError: Cannot have number of folds=9 greater than the number
+    of samples=6). Clamps down to the largest split count the data can
+    actually support. Floored at 2 -- TimeSeriesSplit's own minimum,
+    and the smallest split count that still means anything as
+    cross-validation. A caller with fewer than 3 samples can't satisfy
+    even that floor; raises rather than silently forcing an invalid
+    TimeSeriesSplit, since scikit-learn's own error at that point
+    (folds=2 &gt; samples=2) is no clearer than the one this exists to
+    avoid."""
+    if n_samples < 3:
+        raise ValueError(
+            f"Not enough rows ({n_samples}) to cross-validate at all (need at least 3) -- "
+            "this target's training set is too small for hyperparameter search."
+        )
+    return max(2, min(n_splits, n_samples - 1))
+
+
 def _run_randomized_search_with_early_stopping(
     estimator, param_distributions: dict, X: pd.DataFrame, y: pd.Series,
     scoring: str, cv, max_iter: int, random_state: int, n_jobs: int, verbose: int, label: str,
@@ -244,7 +267,7 @@ class XGBoostClassifierAdapter(XGBoostAdapter):
             param_distributions=_XGB_PARAM_DISTRIBUTIONS,
             X=X_train, y=y_train,
             scoring="neg_log_loss",
-            cv=TimeSeriesSplit(n_splits=_XGB_CV_SPLITS),
+            cv=TimeSeriesSplit(n_splits=_time_series_splits(_XGB_CV_SPLITS, len(X_train))),
             max_iter=_XGB_SEARCH_ITERATIONS,
             random_state=_XGB_RANDOM_STATE,
             verbose=10,
@@ -267,7 +290,7 @@ class XGBoostRegressorAdapter(XGBoostAdapter):
             param_distributions=_XGB_PARAM_DISTRIBUTIONS,
             X=X_train, y=y_train,
             scoring="neg_root_mean_squared_error",
-            cv=TimeSeriesSplit(n_splits=_XGB_CV_SPLITS),
+            cv=TimeSeriesSplit(n_splits=_time_series_splits(_XGB_CV_SPLITS, len(X_train))),
             max_iter=_XGB_SEARCH_ITERATIONS,
             random_state=_XGB_RANDOM_STATE,
             verbose=10,
@@ -337,7 +360,7 @@ class LogisticRegressionAdapter(_JoblibSerializedAdapter):
             self._build_pipeline(),
             param_grid=_LOGISTIC_PARAM_GRID,
             scoring="neg_log_loss",
-            cv=TimeSeriesSplit(n_splits=_LOGISTIC_CV_SPLITS),
+            cv=TimeSeriesSplit(n_splits=_time_series_splits(_LOGISTIC_CV_SPLITS, len(X_train))),
             verbose=10,
             n_jobs=-1,
         )
@@ -386,7 +409,7 @@ class ElasticNetAdapter(_JoblibSerializedAdapter):
             self._build_pipeline(),
             param_grid=_ELASTIC_NET_PARAM_GRID,
             scoring="neg_root_mean_squared_error",
-            cv=TimeSeriesSplit(n_splits=_ELASTIC_NET_CV_SPLITS),
+            cv=TimeSeriesSplit(n_splits=_time_series_splits(_ELASTIC_NET_CV_SPLITS, len(X_train))),
             verbose=10,
             n_jobs=-1,
         )
@@ -466,7 +489,7 @@ class _RandomForestAdapterBase(_JoblibSerializedAdapter):
             param_distributions=_RF_PARAM_DISTRIBUTIONS,
             X=X_train, y=y_train,
             scoring=self._scoring,
-            cv=TimeSeriesSplit(n_splits=_RF_CV_SPLITS),
+            cv=TimeSeriesSplit(n_splits=_time_series_splits(_RF_CV_SPLITS, len(X_train))),
             max_iter=_RF_SEARCH_ITERATIONS,
             random_state=_RF_RANDOM_STATE,
             verbose=10,
@@ -538,7 +561,7 @@ class _MLPAdapterBase(_JoblibSerializedAdapter):
             param_distributions=_MLP_PARAM_DISTRIBUTIONS,
             X=X_train, y=y_train,
             scoring=self._scoring,
-            cv=TimeSeriesSplit(n_splits=_MLP_CV_SPLITS),
+            cv=TimeSeriesSplit(n_splits=_time_series_splits(_MLP_CV_SPLITS, len(X_train))),
             max_iter=_MLP_SEARCH_ITERATIONS,
             random_state=_MLP_RANDOM_STATE,
             verbose=10,
@@ -617,7 +640,7 @@ class LightGBMClassifierAdapter(_JoblibSerializedAdapter):
             param_distributions=_LGBM_PARAM_DISTRIBUTIONS,
             X=X_train, y=y_train,
             scoring="neg_log_loss",
-            cv=TimeSeriesSplit(n_splits=_LGBM_CV_SPLITS),
+            cv=TimeSeriesSplit(n_splits=_time_series_splits(_LGBM_CV_SPLITS, len(X_train))),
             max_iter=_LGBM_SEARCH_ITERATIONS,
             random_state=_LGBM_RANDOM_STATE,
             verbose=10,
@@ -651,7 +674,7 @@ class LightGBMRegressorAdapter(_JoblibSerializedAdapter):
             param_distributions=_LGBM_PARAM_DISTRIBUTIONS,
             X=X_train, y=y_train,
             scoring="neg_root_mean_squared_error",
-            cv=TimeSeriesSplit(n_splits=_LGBM_CV_SPLITS),
+            cv=TimeSeriesSplit(n_splits=_time_series_splits(_LGBM_CV_SPLITS, len(X_train))),
             max_iter=_LGBM_SEARCH_ITERATIONS,
             random_state=_LGBM_RANDOM_STATE,
             verbose=10,

@@ -113,6 +113,22 @@ data "aws_iam_policy_document" "lambda_inference_permissions" {
     resources = ["arn:aws:s3:::${local.raw_bucket_name}/ncaambb/conference-membership/*"]
   }
 
+  # pga_predict's own live_features.py resolves each golfer's season-stats
+  # block (driving distance/accuracy, GIR%, etc.) the same way feature-
+  # engineering/pga/build_dataset.py does at training time -- via
+  # library.storage.pga_season_stats reading pga-ingest's own daily raw
+  # snapshot directly from the raw bucket, the ONLY source for these
+  # values (confirmed live 2026-08-25: ESPN's own statistics endpoint is
+  # current-snapshot-only, no historical query support -- see
+  # project-pga-onboarding memory). Same "scoped to one sport's own
+  # prefix, not the whole raw bucket" pattern ReadConferenceMembershipCache
+  # above already uses.
+  statement {
+    sid       = "ReadPgaSeasonStatsSnapshots"
+    actions   = ["s3:GetObject"]
+    resources = ["arn:aws:s3:::${local.raw_bucket_name}/pga/statistics/*"]
+  }
+
   # predict-read's async invoke of predict on a prediction-cache miss
   # (library.aws.lambda_invoker).
   statement {
@@ -121,6 +137,7 @@ data "aws_iam_policy_document" "lambda_inference_permissions" {
     resources = [
       aws_lambda_function.nfl_predict.arn, aws_lambda_function.ncaafb_predict.arn,
       aws_lambda_function.nba_predict.arn, aws_lambda_function.ncaambb_predict.arn,
+      aws_lambda_function.pga_predict.arn,
     ]
   }
 }

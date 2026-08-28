@@ -94,6 +94,21 @@ jobs:
     uses: ./.github/workflows/ncaambb_ai_hosting.yml
     secrets: inherit
 
+  pga_backfill_build:
+    name: PGA backfill (build)
+    uses: ./.github/workflows/pga_backfill.yml
+    secrets: inherit
+
+  pga_ai_training_build:
+    name: PGA AI training (build)
+    uses: ./.github/workflows/pga_ai_training.yml
+    secrets: inherit
+
+  pga_ai_hosting_build:
+    name: PGA AI hosting (build)
+    uses: ./.github/workflows/pga_ai_hosting.yml
+    secrets: inherit
+
   # --- Infra: applies once, gated on every "before" job tolerating
   # success-or-skip ---
   infra:
@@ -103,6 +118,7 @@ jobs:
       ncaafb_backfill_build, ncaafb_ai_training_build, ncaafb_ai_hosting_build,
       nba_backfill_build, nba_ai_training_build, nba_ai_hosting_build,
       ncaambb_backfill_build, ncaambb_ai_training_build, ncaambb_ai_hosting_build,
+      pga_backfill_build, pga_ai_training_build, pga_ai_hosting_build,
     ]
     if: |
       always() &&
@@ -117,7 +133,10 @@ jobs:
       (needs.nba_ai_hosting_build.result == 'success' || needs.nba_ai_hosting_build.result == 'skipped') &&
       (needs.ncaambb_backfill_build.result == 'success' || needs.ncaambb_backfill_build.result == 'skipped') &&
       (needs.ncaambb_ai_training_build.result == 'success' || needs.ncaambb_ai_training_build.result == 'skipped') &&
-      (needs.ncaambb_ai_hosting_build.result == 'success' || needs.ncaambb_ai_hosting_build.result == 'skipped')
+      (needs.ncaambb_ai_hosting_build.result == 'success' || needs.ncaambb_ai_hosting_build.result == 'skipped') &&
+      (needs.pga_backfill_build.result == 'success' || needs.pga_backfill_build.result == 'skipped') &&
+      (needs.pga_ai_training_build.result == 'success' || needs.pga_ai_training_build.result == 'skipped') &&
+      (needs.pga_ai_hosting_build.result == 'success' || needs.pga_ai_hosting_build.result == 'skipped')
     uses: ./.github/workflows/tf_install.yml
     secrets: inherit
 
@@ -264,6 +283,41 @@ jobs:
       ingest_function_name: ${{ needs.infra.outputs.ncaambb_ingest_function_name }}
       normalize_function_name: ${{ needs.infra.outputs.ncaambb_normalize_function_name }}
       schedule_sync_function_name: ${{ needs.infra.outputs.ncaambb_schedule_sync_function_name }}
+
+  pga_predict_deploy:
+    name: PGA AI hosting (deploy)
+    needs: [infra, pga_ai_hosting_build]
+    uses: ./.github/workflows/pga_predict_deploy.yml
+    secrets: inherit
+    with:
+      function_name: ${{ needs.infra.outputs.pga_predict_function_name }}
+      image_uri: ${{ needs.pga_ai_hosting_build.outputs.predict_image_uri }}
+
+  pga_data_pipeline:
+    name: PGA data pipeline (deploy)
+    needs: infra
+    uses: ./.github/workflows/pga_data_pipeline.yml
+    secrets: inherit
+    with:
+      ingest_function_name: ${{ needs.infra.outputs.pga_ingest_function_name }}
+      normalize_function_name: ${{ needs.infra.outputs.pga_normalize_function_name }}
+      schedule_sync_function_name: ${{ needs.infra.outputs.pga_schedule_sync_function_name }}
+
+  pga_predict_read_deploy:
+    name: PGA predict-read (deploy)
+    needs: infra
+    uses: ./.github/workflows/pga_predict_read_deploy.yml
+    secrets: inherit
+    with:
+      function_name: ${{ needs.infra.outputs.pga_predict_read_function_name }}
+
+  pga_live_scores_deploy:
+    name: PGA live-scores (deploy)
+    needs: infra
+    uses: ./.github/workflows/pga_live_scores_deploy.yml
+    secrets: inherit
+    with:
+      function_name: ${{ needs.infra.outputs.pga_live_scores_function_name }}
 
   # No config `with:` block for either -- both read directly from
   # Terraform state instead of relaying it through needs.infra.outputs.*.

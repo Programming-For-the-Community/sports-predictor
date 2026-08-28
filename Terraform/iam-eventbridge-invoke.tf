@@ -51,8 +51,26 @@ data "aws_iam_policy_document" "eventbridge_invoke_permissions" {
   # target. ncaambb_live_scores: scheduler-ncaambb-live-scores.tf's own
   # target, same every-60s reasoning as nba_live_scores/ncaafb_live_scores.
   #
-  # The 3 predict-read functions: scheduler-predict-read-warmup.tf's own
-  # 5-minute warmup ping.
+  # The predict-read functions: scheduler-predict-read-warmup.tf's own
+  # 5-minute warmup ping (4 of them below, not 3 -- this comment's own
+  # count drifted stale at some point, not corrected here since fixing
+  # a comment isn't this pass's purpose).
+  #
+  # pga_predict/pga_predict_read: same warmup-ping reasoning, added
+  # 2026-08-27 alongside the rest of PGA's serving Lambda pair.
+  #
+  # pga_schedule_sync: a REAL pre-existing gap found while making the
+  # above two additions, not something this pass created --
+  # scheduler-pga-schedule-sync.tf's own target has pointed
+  # aws_iam_role.eventbridge_invoke at this function since it was first
+  # set up, but this statement never actually granted that role
+  # lambda:InvokeFunction on it. Every weekly Tuesday 10:00 UTC
+  # invocation has almost certainly been failing with a silent
+  # AccessDenied since deploy -- EventBridge Scheduler retries and logs
+  # the failure but there's no Terraform-time error, since both the
+  # scheduler resource and the Lambda itself apply cleanly on their own.
+  # Added here now that it's been found, same fix shape as every other
+  # sport's own schedule_sync/live_scores entry above.
   statement {
     sid     = "InvokeDirectLambdaJobs"
     actions = ["lambda:InvokeFunction"]
@@ -72,6 +90,15 @@ data "aws_iam_policy_document" "eventbridge_invoke_permissions" {
       aws_lambda_function.ncaambb_predict.arn,
       aws_lambda_function.ncaambb_predict_read.arn,
       aws_lambda_function.ncaambb_live_scores.arn,
+      aws_lambda_function.pga_schedule_sync.arn,
+      aws_lambda_function.pga_predict.arn,
+      aws_lambda_function.pga_predict_read.arn,
+      # pga_live_scores: scheduler-pga-live-scores.tf's own target --
+      # added in the same PR that creates the scheduler, unlike
+      # pga_schedule_sync's own entry above (added only after the gap was
+      # found live) -- see project-nba-eventbridge-permission-gap memory
+      # for why this must land together, not be assumed automatic.
+      aws_lambda_function.pga_live_scores.arn,
     ]
   }
 }

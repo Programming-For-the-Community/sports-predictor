@@ -1,6 +1,9 @@
 """
 Sport-agnostic serving helpers shared across sports' *_reads.py modules.
 """
+from concurrent.futures import ThreadPoolExecutor
+
+from library.storage.model_artifacts import current_version_key, model_artifact_key
 
 
 def enrich_participants(
@@ -95,3 +98,53 @@ def enrich_bracket_team_names(storage, sport: str, bracket: dict) -> dict:
         }
 
     return {**bracket, "team_names": team_names}
+
+
+def _load_model_summary(s3, sport: str, model_name: str) -> dict | None:
+    """One model's card summary, or None if it's never had a version
+    promoted. Added here 2026-08-27 for library.serving.pga_reads --
+    every head-to-head sport's own *_reads.py (nba/ncaafb/ncaambb/nfl)
+    still carries its own pre-existing copy of this function; left alone
+    rather than rewired to import from here, to avoid touching four
+    already-working, already-deployed serving Lambdas for a refactor this
+    task doesn't need. A future cleanup could point them here too."""
+    pointer_key = current_version_key(sport, model_name)
+    if not s3.object_exists(pointer_key):
+        return None
+    version = s3.get_json(pointer_key)["version"]
+    card = s3.get_json(model_artifact_key(sport, model_name, version, "model_card.json"))
+    top_features = [
+        {"feature": name, "importance": value}
+        for name, value in list(card.get("feature_importances", {}).items())[:5]
+    ]
+    return {
+        "model_name": card["model_name"],
+        "algorithm": card["algorithm"],
+        "version": card["version"],
+        "trained_at": card["trained_at"],
+        **{k: v for k, v in card.items() if k in (
+            "accuracy", "log_loss", "naive_baseline_accuracy", "rmse", "mae", "naive_baseline_rmse", "naive_baseline_mae",
+        )},
+        "top_features": top_features,
+        "candidates": card.get("candidates"),
+        "candidates_ranked_by": card.get("candidates_ranked_by"),
+    }
+
+
+def list_models(s3, sport: str) -> dict:
+    """GET /{sport}/models -- lists every currently-promoted model, with
+    its latest model card summary. A model that's never had a version
+    promoted simply doesn't appear in this list. Fully generic over S3
+    key prefixes -- works unchanged regardless of a sport's own model set
+    (win-probability + score models for a head-to-head sport, top-10/
+    top-5/score/cutline/round/match/cup for PGA's field-event shape)."""
+    prefix = f"{sport}/"
+    model_names = sorted({key[len(prefix):].split("/")[0] for key in s3.list_keys(prefix)})
+
+    if not model_names:
+        return {"sport": sport, "models": []}
+
+    with ThreadPoolExecutor(max_workers=min(len(model_names), 10)) as executor:
+        results = executor.map(lambda name: _load_model_summary(s3, sport, name), model_names)
+
+    return {"sport": sport, "models": [card for card in results if card is not None]}

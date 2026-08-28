@@ -1,10 +1,14 @@
 """
 Unit tests for the PGA feature-engineering entrypoint's orchestration
 logic -- the chronological golfer-history walk and Parquet assembly, plus
-(added 2026-08-25) the season-stats raw-snapshot loader/resolver and the
-round-level/cut-line dataset builders. The actual feature math is tested
-in tests/library/features/test_pga.py; FeatureStorage/S3Manager are
-mocked here so these tests only cover build_dataset.py's own wiring.
+the round-level/cut-line dataset builders. The actual feature math is
+tested in tests/library/features/test_pga.py; the season-stats raw-
+snapshot loader/resolver itself is tested in tests/library/storage/
+test_pga_season_stats.py (extracted there 2026-08-27, see library/
+storage/pga_season_stats.py) -- TestBuildGolferDatasetSeasonStats below
+only covers build_golfer_dataset's own wiring to it. FeatureStorage/
+S3Manager are mocked here so these tests only cover build_dataset.py's
+own wiring.
 """
 import io
 from unittest.mock import MagicMock
@@ -34,14 +38,6 @@ def _participant(entity_id, finish_position=None, score_to_par=None, earnings=0.
 
 def _round(round_number, score_to_par=None):
     return {"round": round_number, "score_to_par": score_to_par, "total_strokes": None}
-
-
-def _statistics_payload(categories: dict):
-    """categories: {raw_category_name: {athlete_id: value}}."""
-    return {"stats": {"categories": [
-        {"name": name, "leaders": [{"athlete": {"id": athlete_id}, "value": value} for athlete_id, value in values.items()]}
-        for name, values in categories.items()
-    ]}}
 
 
 class TestWriteParquet:
@@ -177,83 +173,6 @@ class TestCourseFitHistory:
 
         last_row = next(r for r in rows if r["event_key"] == "E7")
         assert last_row["course_events_played"] == 3
-
-
-class TestSeasonStatSnapshots:
-    def _raw_s3(self, keys_and_payloads: dict):
-        raw_s3 = MagicMock()
-        raw_s3.list_keys.return_value = list(keys_and_payloads.keys())
-        raw_s3.get_json.side_effect = lambda key: keys_and_payloads[key]
-        return raw_s3
-
-    def test_parses_a_date_keyed_snapshot(self):
-        raw_s3 = self._raw_s3({
-            "pga/statistics/20260601.json": _statistics_payload({"yardsPerDrive": {"9478": 320.1}}),
-        })
-
-        snapshots = build_dataset._load_season_stat_snapshots(raw_s3)
-
-        assert len(snapshots) == 1
-        assert snapshots[0]["as_of_date"] == "2026-06-01"
-        assert snapshots[0]["value_by_category_and_athlete"]["yardsPerDrive"]["9478"] == 320.1
-
-    def test_ignores_categories_outside_the_project_supported_set(self):
-        raw_s3 = self._raw_s3({
-            "pga/statistics/20260601.json": _statistics_payload({
-                "yardsPerDrive": {"9478": 320.1}, "officialAmount": {"9478": 1000000},
-            }),
-        })
-
-        snapshots = build_dataset._load_season_stat_snapshots(raw_s3)
-
-        assert "officialAmount" not in snapshots[0]["value_by_category_and_athlete"]
-
-    def test_ignores_a_non_matching_key(self):
-        raw_s3 = self._raw_s3({"pga/statistics/notadate.json": {}})
-
-        snapshots = build_dataset._load_season_stat_snapshots(raw_s3)
-
-        assert snapshots == []
-
-    def test_returns_snapshots_sorted_oldest_first(self):
-        raw_s3 = self._raw_s3({
-            "pga/statistics/20260801.json": _statistics_payload({}),
-            "pga/statistics/20260601.json": _statistics_payload({}),
-        })
-
-        snapshots = build_dataset._load_season_stat_snapshots(raw_s3)
-
-        assert [s["as_of_date"] for s in snapshots] == ["2026-06-01", "2026-08-01"]
-
-    def test_resolve_picks_the_most_recent_snapshot_strictly_before_the_event_date(self):
-        snapshots = [
-            {"as_of_date": "2026-06-01", "value_by_category_and_athlete": {"yardsPerDrive": {"9478": 300.0}}},
-            {"as_of_date": "2026-07-01", "value_by_category_and_athlete": {"yardsPerDrive": {"9478": 310.0}}},
-        ]
-
-        resolved = build_dataset._resolve_season_stats(snapshots, "9478", "2026-08-01")
-
-        assert resolved["yardsPerDrive"] == 310.0
-
-    def test_resolve_never_uses_a_same_day_or_later_snapshot(self):
-        snapshots = [{"as_of_date": "2026-08-01", "value_by_category_and_athlete": {"yardsPerDrive": {"9478": 310.0}}}]
-
-        resolved = build_dataset._resolve_season_stats(snapshots, "9478", "2026-08-01")
-
-        assert resolved["yardsPerDrive"] is None
-
-    def test_resolve_returns_none_for_every_category_when_no_snapshot_qualifies(self):
-        resolved = build_dataset._resolve_season_stats([], "9478", "2026-08-01")
-
-        assert all(value is None for value in resolved.values())
-        assert set(resolved.keys()) == set(build_dataset.SEASON_STAT_CATEGORIES)
-
-    def test_resolve_is_none_for_a_golfer_not_in_that_categorys_top_50(self):
-        snapshots = [{"as_of_date": "2026-06-01", "value_by_category_and_athlete": {"yardsPerDrive": {"9478": 300.0}}}]
-
-        resolved = build_dataset._resolve_season_stats(snapshots, "99999", "2026-08-01")
-
-        assert resolved["yardsPerDrive"] is None
 
 
 class TestBuildGolferDatasetSeasonStats:
