@@ -40,6 +40,7 @@ class AppColors {
     colors: [cyan, violet],
   );
   static const cyanFill = LinearGradient(colors: [cyan, cyan2]);
+  static const violetFill = LinearGradient(colors: [violet, violet2]);
   static const negFill = LinearGradient(colors: [neg, neg2]);
   static const accentStripH2h = LinearGradient(colors: [cyan, cyan2]);
   static const accentStripField = LinearGradient(colors: [violet, cyan]);

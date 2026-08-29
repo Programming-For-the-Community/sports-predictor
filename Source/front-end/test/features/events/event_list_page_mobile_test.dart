@@ -71,9 +71,10 @@ void main() {
                       _scheduledEvent('401547418', '2026-09-14T20:25:00Z', round: 'Divisional'),
                     ],
             ),
-            // One event live -- exercises _LiveStatus's pill + game-clock
-            // text (game_row.dart), not just the pre-game/prediction path
-            // the other mobile tests already cover.
+            // One event live -- exercises _LivePredictionSummary's live
+            // pill + game-clock text (game_row.dart), not just the
+            // pre-game/prediction path the other mobile tests already
+            // cover.
             liveScoresProvider.overrideWith(
               (ref, sport) async => {
                 '401547417': const LiveEventState(live: true, detail: 'Q3 08:14', homeScore: 17, awayScore: 14),

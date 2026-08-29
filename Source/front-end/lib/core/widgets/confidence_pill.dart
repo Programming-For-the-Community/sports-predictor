@@ -9,9 +9,13 @@ import '../theme/app_text_styles.dart';
 /// regression point estimates with no probability distribution to derive
 /// a tier from.
 class ConfidencePill extends StatelessWidget {
-  const ConfidencePill({super.key, required this.homeWinProbability});
+  const ConfidencePill({super.key, required this.homeWinProbability, this.dotOnly = false});
 
   final double homeWinProbability;
+  // True on a narrow (mobile) viewport -- collapses to just the
+  // color-coded dot (tier name moves into a Tooltip instead), same
+  // space-saving convention field_status_pill.dart's own dotOnly uses.
+  final bool dotOnly;
 
   @override
   Widget build(BuildContext context) {
@@ -21,6 +25,13 @@ class ConfidencePill extends StatelessWidget {
         : edge >= 0.06
             ? ('MED', AppColors.warn)
             : ('LOW', AppColors.inkMute);
+
+    if (dotOnly) {
+      return Tooltip(
+        message: label,
+        child: Container(width: 8, height: 8, decoration: BoxDecoration(color: color, shape: BoxShape.circle)),
+      );
+    }
 
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),

@@ -304,14 +304,23 @@ class _ComparisonPlayerRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     // Predicted is what decides which stats show -- actual is only shown
-    // as a comparison against something that was predicted.
-    final segments = player.predicted.entries.map((entry) {
+    // as a comparison against something that was predicted. Actual (live
+    // or final) renders in ink/white, predicted in cyan/blue, right next
+    // to each other with no "(pred N)" wording -- same live-white vs.
+    // predicted-blue convention field_leaderboard_table.dart's
+    // _RoundCell/_StandingCell use for PGA, color alone distinguishing
+    // the two numbers instead of a parenthetical.
+    final spans = <InlineSpan>[];
+    var first = true;
+    for (final entry in player.predicted.entries) {
       final label = _statShortLabels[entry.key] ?? entry.key.toUpperCase();
-      final predicted = entry.value.toStringAsFixed(0);
       final actual = player.actual[entry.key];
       final actualText = actual != null ? actual.toStringAsFixed(0) : '--';
-      return '$actualText $label (pred $predicted)';
-    }).join(' · ');
+      if (!first) spans.add(TextSpan(text: ' · ', style: AppTextStyles.metricValue(color: AppColors.inkMute)));
+      first = false;
+      spans.add(TextSpan(text: '$actualText $label ', style: AppTextStyles.metricValue(color: AppColors.ink)));
+      spans.add(TextSpan(text: entry.value.toStringAsFixed(0), style: AppTextStyles.metricValue(color: AppColors.cyan)));
+    }
 
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 3),
@@ -322,9 +331,8 @@ class _ComparisonPlayerRow extends StatelessWidget {
           ),
           const SizedBox(width: 8),
           Flexible(
-            child: Text(
-              segments,
-              style: AppTextStyles.metricValue(color: AppColors.cyan),
+            child: Text.rich(
+              TextSpan(children: spans),
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
               textAlign: TextAlign.end,

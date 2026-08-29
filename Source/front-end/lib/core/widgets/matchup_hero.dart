@@ -12,11 +12,29 @@ import 'team_color_dot.dart';
 import 'win_probability_bar.dart';
 
 /// design/FRONTEND_STYLE.md's "Matchup hero (detail)" component: two
-/// columns of team + predicted score (favored side gradient-clipped
-/// cyan, win probability % small underneath), a split bar, then the big
-/// PICK, then a Pred total / home margin duo. liveState (from
-/// liveScoresProvider) overrides the per-team scores with live ones and
-/// swaps the confidence pill for a LIVE status line when set and live.
+/// columns of team + score (win probability % small underneath), a split
+/// bar, then the big PICK (with its own confidence pill right under it),
+/// then a Pred total / home margin duo. liveState (from
+/// liveScoresProvider) adds its own LIVE status/game-clock line between
+/// the win-probability bar and PICK once set and live -- confidence and
+/// the spread (PRED TOTAL/HOME MARGIN below) stay visible either way,
+/// live or not, since both describe the pre-game pick, not the live game
+/// state.
+///
+/// Pre-game, each column's only number is the model's own predicted
+/// score, gradient-clipped cyan for the favored side. Once live, each
+/// column shows its real in-progress score (gradient-clipped violet for
+/// whichever side is currently ahead) with the same pre-game predicted
+/// score still visible right below it in cyan -- live/actual and
+/// predicted stay two distinctly colored numbers rather than one
+/// swapping value, same convention game_row.dart's list rows use
+/// (ink/cyan there; violet here since this big numeral doubles as the
+/// "who's currently winning" signal, distinct from the pre-game favorite).
+// Same breakpoint as game_row.dart's own _stackBreakpoint/
+// field_leaderboard_table.dart's own _compactBreakpoint -- collapses the
+// LIVE/confidence pills to just their colored dots on a phone-width card.
+const _compactBreakpoint = 600.0;
+
 class MatchupHero extends StatelessWidget {
   const MatchupHero({super.key, required this.sport, required this.event, required this.prediction, this.liveState});
 
@@ -31,6 +49,15 @@ class MatchupHero extends StatelessWidget {
     final away = teamDisplay(sport, event.away);
     final homeFavored = prediction.homeWinProbability >= 0.5;
     final isLive = liveState?.live ?? false;
+    final homeLiveScore = isLive ? liveState!.homeScore : null;
+    final awayLiveScore = isLive ? liveState!.awayScore : null;
+    // Who's ahead right now -- null pre-game (no live score yet) or on a
+    // live tie, when neither side is "winning". Distinct from
+    // homeFavored, which is the pre-game win-probability pick and stays
+    // fixed for the whole game.
+    final homeLeading = (homeLiveScore != null && awayLiveScore != null && homeLiveScore != awayLiveScore)
+        ? homeLiveScore > awayLiveScore
+        : null;
 
     return Container(
       padding: const EdgeInsets.all(28),
@@ -39,83 +66,102 @@ class MatchupHero extends StatelessWidget {
         gradient: LinearGradient(begin: Alignment.topLeft, end: Alignment.bottomRight, colors: AppColors.surfaceGrad),
         border: Border.all(color: AppColors.borderRaised),
       ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Row(
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final compact = constraints.maxWidth < _compactBreakpoint;
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              Expanded(
-                child: _TeamColumn(
-                  color: away.primary,
-                  abbr: away.abbreviation,
-                  probability: 1 - prediction.homeWinProbability,
-                  favored: !homeFavored,
-                  predictedScore: isLive ? liveState!.awayScore ?? prediction.awayScore : prediction.awayScore,
-                ),
+              Row(
+                children: [
+                  Expanded(
+                    child: _TeamColumn(
+                      color: away.primary,
+                      abbr: away.abbreviation,
+                      probability: 1 - prediction.homeWinProbability,
+                      favored: !homeFavored,
+                      predictedScore: prediction.awayScore,
+                      liveScore: awayLiveScore,
+                      leading: homeLeading == null ? null : !homeLeading,
+                    ),
+                  ),
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 16),
+                    // "@" reads as "away @ home"; away is the left column
+                    // above so this ordering matches that. This is the
+                    // only marker of which side is home/away.
+                    child: Text('@', style: AppTextStyles.sectionTitle(color: AppColors.inkMute)),
+                  ),
+                  Expanded(
+                    child: _TeamColumn(
+                      color: home.primary,
+                      abbr: home.abbreviation,
+                      probability: prediction.homeWinProbability,
+                      favored: homeFavored,
+                      predictedScore: prediction.homeScore,
+                      liveScore: homeLiveScore,
+                      leading: homeLeading,
+                    ),
+                  ),
+                ],
               ),
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 16),
-                // "@" reads as "away @ home"; away is the left column above
-                // so this ordering matches that. This is the only marker
-                // of which side is home/away.
-                child: Text('@', style: AppTextStyles.sectionTitle(color: AppColors.inkMute)),
-              ),
-              Expanded(
-                child: _TeamColumn(
-                  color: home.primary,
-                  abbr: home.abbreviation,
-                  probability: prediction.homeWinProbability,
-                  favored: homeFavored,
-                  predictedScore: isLive ? liveState!.homeScore ?? prediction.homeScore : prediction.homeScore,
-                ),
-              ),
-            ],
-          ),
-          if (event.venueLabel != null) ...[
-            const SizedBox(height: 12),
-            Center(child: _VenueLabel(label: event.venueLabel!)),
-          ],
-          const SizedBox(height: 20),
-          WinProbabilityBar(homeWinProbability: prediction.homeWinProbability, height: 12),
-          const SizedBox(height: 12),
-          Center(
-            child: isLive
-                ? Row(
+              if (event.venueLabel != null) ...[
+                const SizedBox(height: 12),
+                Center(child: _VenueLabel(label: event.venueLabel!)),
+              ],
+              const SizedBox(height: 20),
+              WinProbabilityBar(homeWinProbability: prediction.homeWinProbability, height: 12),
+              // Live status (game clock) is its own line, only present
+              // once live -- separate from confidence, which lives with
+              // the PICK below instead of next to the game clock (that
+              // pairing read as describing the live game itself, not the
+              // model's own pre-game pick).
+              if (isLive) ...[
+                const SizedBox(height: 12),
+                Center(
+                  child: Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      const LiveStatusPill(),
+                      LiveStatusPill(dotOnly: compact),
                       if (liveState!.detail != null) ...[
                         const SizedBox(width: 8),
                         Text(liveState!.detail!, style: AppTextStyles.body(color: AppColors.inkSub)),
                       ],
                     ],
-                  )
-                : ConfidencePill(homeWinProbability: prediction.homeWinProbability),
-          ),
-          const SizedBox(height: 24),
-          Center(
-            child: Column(
-              children: [
-                Text('PICK', style: AppTextStyles.microLabel()),
-                const SizedBox(height: 4),
-                Text(homeFavored ? home.abbreviation : away.abbreviation, style: AppTextStyles.bigStatNumeral()),
+                  ),
+                ),
               ],
-            ),
-          ),
-          const SizedBox(height: 24),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceAround,
-            children: [
-              Flexible(
-                child: _StatTrio(
-                  label: 'PRED TOTAL',
-                  value: (prediction.homeScore + prediction.awayScore).toStringAsFixed(1),
+              const SizedBox(height: 24),
+              Center(
+                child: Column(
+                  children: [
+                    Text('PICK', style: AppTextStyles.microLabel()),
+                    const SizedBox(height: 4),
+                    Text(homeFavored ? home.abbreviation : away.abbreviation, style: AppTextStyles.bigStatNumeral()),
+                    const SizedBox(height: 8),
+                    // Confidence stays visible live or not -- it's a
+                    // property of the pre-game pick above it, not
+                    // something the live game state changes.
+                    ConfidencePill(homeWinProbability: prediction.homeWinProbability, dotOnly: compact),
+                  ],
                 ),
               ),
-              Flexible(child: _StatTrio(label: 'HOME MARGIN', value: prediction.margin.toStringAsFixed(1))),
+              const SizedBox(height: 24),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceAround,
+                children: [
+                  Flexible(
+                    child: _StatTrio(
+                      label: 'PRED TOTAL',
+                      value: (prediction.homeScore + prediction.awayScore).toStringAsFixed(1),
+                    ),
+                  ),
+                  Flexible(child: _StatTrio(label: 'HOME MARGIN', value: prediction.margin.toStringAsFixed(1))),
+                ],
+              ),
             ],
-          ),
-        ],
+          );
+        },
       ),
     );
   }
@@ -124,17 +170,62 @@ class MatchupHero extends StatelessWidget {
 class _TeamColumn extends StatelessWidget {
   const _TeamColumn({
     required this.color, required this.abbr, required this.probability, required this.favored,
-    required this.predictedScore,
+    required this.predictedScore, this.liveScore, this.leading,
   });
   final Color? color;
   final String abbr;
   final double probability;
+  // The pre-game win-probability pick -- fixed for the whole game, only
+  // used to accent the predicted score before there's a live one.
   final bool favored;
   final double predictedScore;
+  // Non-null only once the event is actually live -- this team's own
+  // real, in-progress score.
+  final double? liveScore;
+  // Whether this team is currently ahead on the live scoreboard -- null
+  // pre-game or on a live tie, when neither side is "winning" yet.
+  final bool? leading;
 
   @override
   Widget build(BuildContext context) {
-    final scoreNumeral = Text('${predictedScore.round()} PTS', style: AppTextStyles.metricValueLarge());
+    // Predicted score always renders in cyan -- the sole number pre-game
+    // (gradient-clipped when favored), or the smaller companion value
+    // once a live score takes over the big numeral below.
+    final predictedText = liveScore != null
+        ? Text('${predictedScore.round()}', style: AppTextStyles.metricValue(color: AppColors.cyan))
+        : Text('${predictedScore.round()} PTS', style: AppTextStyles.metricValueLarge(color: AppColors.cyan));
+    final predictedNumeral = favored
+        ? ShaderMask(
+            shaderCallback: (bounds) => AppColors.cyanFill.createShader(bounds),
+            blendMode: BlendMode.srcIn,
+            child: predictedText,
+          )
+        : Opacity(opacity: 0.6, child: predictedText);
+
+    Widget scoreDisplay;
+    final live = liveScore;
+    if (live != null) {
+      // Live: this team's real, in-progress score is the big numeral,
+      // gradient-clipped violet when currently ahead (dimmed otherwise)
+      // -- distinct from the cyan predicted score, kept visible right
+      // below it rather than swapped out.
+      final liveNumeral = Text('${live.round()} PTS', style: AppTextStyles.metricValueLarge());
+      scoreDisplay = Column(
+        children: [
+          leading == true
+              ? ShaderMask(
+                  shaderCallback: (bounds) => AppColors.violetFill.createShader(bounds),
+                  blendMode: BlendMode.srcIn,
+                  child: liveNumeral,
+                )
+              : Opacity(opacity: 0.6, child: liveNumeral),
+          const SizedBox(height: 2),
+          predictedNumeral,
+        ],
+      );
+    } else {
+      scoreDisplay = predictedNumeral;
+    }
 
     return Column(
       children: [
@@ -142,13 +233,7 @@ class _TeamColumn extends StatelessWidget {
         const SizedBox(height: 8),
         Text(abbr, style: AppTextStyles.cardTitle()),
         const SizedBox(height: 8),
-        favored
-            ? ShaderMask(
-                shaderCallback: (bounds) => AppColors.cyanFill.createShader(bounds),
-                blendMode: BlendMode.srcIn,
-                child: scoreNumeral,
-              )
-            : Opacity(opacity: 0.6, child: scoreNumeral),
+        scoreDisplay,
         const SizedBox(height: 4),
         Text('${(probability * 100).round()}%', style: AppTextStyles.microLabel(color: AppColors.inkMute)),
       ],

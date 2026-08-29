@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:front_end/core/models/event_leaders.dart';
+import 'package:front_end/core/theme/app_colors.dart';
 import 'package:front_end/core/widgets/team_leaders_panel.dart';
 
 /// team_leaders_panel.dart picks its category set (label + which stat keys
@@ -81,6 +82,34 @@ void main() {
     );
 
     expect(find.text('SCORING'), findsOneWidget);
-    expect(find.textContaining('31 PTS (pred 27)'), findsOneWidget);
+    expect(find.textContaining('31 PTS 27'), findsOneWidget);
+  });
+
+  testWidgets(
+      'nba leaders comparison drops the "(pred N)" wording and colors the actual stat ink and the '
+      'predicted one cyan', (tester) async {
+    const comparison = EventLeadersComparison(
+      home: TeamLeadersComparison({
+        'scoring': [
+          PlayerStatLineComparison(entityId: '1', name: 'Jayson Tatum', predicted: {'points': 27}, actual: {'points': 31}),
+        ],
+        'rebounding': [],
+        'assists': [],
+      }),
+      away: TeamLeadersComparison({'scoring': [], 'rebounding': [], 'assists': []}),
+    );
+
+    await tester.pumpWidget(
+      wrap(const TeamLeadersComparisonPanel(sport: 'nba', homeAbbr: 'BOS', awayAbbr: 'LAL', comparison: comparison)),
+    );
+
+    expect(find.textContaining('(pred'), findsNothing);
+
+    final row = tester.widget<Text>(find.byWidgetPredicate(
+      (widget) => widget is Text && widget.textSpan?.toPlainText() == '31 PTS 27',
+    ));
+    final spans = (row.textSpan! as TextSpan).children!.cast<TextSpan>();
+    expect(spans.first.style?.color, AppColors.ink); // actual -- live/white
+    expect(spans.last.style?.color, AppColors.cyan); // predicted -- blue
   });
 }

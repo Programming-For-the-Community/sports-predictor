@@ -162,10 +162,11 @@ void main() {
     expect(find.text('PLAYER LEADERS -- LIVE'), findsOneWidget);
     expect(find.text('PLAYER LEADERS'), findsNothing);
     // Predicted 250 shown alongside the live-so-far 140, the same
-    // "actual X (pred Y)" row TeamLeadersComparisonPanel renders for a
-    // completed event.
+    // ink-actual/cyan-predicted row (no "(pred N)" wording)
+    // TeamLeadersComparisonPanel renders for a completed event.
     expect(find.textContaining('140'), findsOneWidget);
-    expect(find.textContaining('pred 250'), findsOneWidget);
+    expect(find.textContaining('250'), findsOneWidget);
+    expect(find.textContaining('pred'), findsNothing);
   });
 
   testWidgets('a scheduled (not yet live) event with predicted leaders still shows the predicted-only panel', (tester) async {
