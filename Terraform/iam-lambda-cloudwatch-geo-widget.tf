@@ -51,18 +51,3 @@ resource "aws_iam_role_policy" "lambda_cloudwatch_geo_widget_logs_insights" {
   role   = aws_iam_role.lambda_cloudwatch_geo_widget.id
   policy = data.aws_iam_policy_document.lambda_cloudwatch_geo_widget_logs_insights.json
 }
-
-# GetStaticMap is a standalone regional API action, not tied to a
-# provisioned Map resource -- no ARN to scope Resource to.
-data "aws_iam_policy_document" "lambda_cloudwatch_geo_widget_maps" {
-  statement {
-    actions   = ["geo-maps:GetStaticMap"]
-    resources = ["*"]
-  }
-}
-
-resource "aws_iam_role_policy" "lambda_cloudwatch_geo_widget_maps" {
-  name   = "${var.project}-lambda-cloudwatch-geo-widget-maps"
-  role   = aws_iam_role.lambda_cloudwatch_geo_widget.id
-  policy = data.aws_iam_policy_document.lambda_cloudwatch_geo_widget_maps.json
-}

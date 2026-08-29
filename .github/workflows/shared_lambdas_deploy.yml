@@ -45,6 +45,7 @@ jobs:
     uses: ./.github/workflows/run_python_tests.yml
     with:
       test_path: 'Source/tests/aws-lambdas/shared/test_cloudwatch_geo_widget.py'
+      requirements_files: 'Source/aws-lambdas/shared/cloudwatch-geo-widget/requirements.txt'
 
   deploy_cloudwatch_geo_widget:
     name: Deploy cloudwatch-geo-widget Lambda
@@ -54,3 +55,4 @@ jobs:
     with:
       function_name: ${{ inputs.cloudwatch_geo_widget_function_name || 'sports-predictor-cloudwatch-geo-widget' }}
       handler_dir: 'Source/aws-lambdas/shared/cloudwatch-geo-widget'
+      extra_source_files: 'Source/aws-lambdas/shared/cloudwatch-geo-widget/boundaries.json'

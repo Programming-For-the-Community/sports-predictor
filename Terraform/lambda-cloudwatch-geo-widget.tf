@@ -27,15 +27,18 @@ data "archive_file" "cloudwatch_geo_widget_placeholder" {
 
 resource "aws_lambda_function" "cloudwatch_geo_widget" {
   function_name = "${var.project}-cloudwatch-geo-widget"
-  description   = "CloudWatch custom-widget renderer for the viewer-analytics dashboard's geo panels (accepted-by-state, blocked-by-region)."
+  description   = "CloudWatch custom-widget renderer for the viewer-analytics dashboard's geo panels (accepted-by-state, blocked-by-country)."
   role          = aws_iam_role.lambda_cloudwatch_geo_widget.arn
   runtime       = "python3.12"
   handler       = "handler.lambda_handler"
   # Logs Insights StartQuery/GetQueryResults is polled synchronously
   # in-handler (up to ~8s) -- generous headroom above that, well under
   # CloudWatch's own custom-widget render budget.
-  timeout     = 20
-  memory_size = 256
+  timeout = 20
+  # Above the Pillow/boundary-data default -- loading boundaries.json
+  # (~370KB, ~24k coordinate pairs) plus per-render image compositing
+  # needs more than a bare-logs-query widget would.
+  memory_size = 384
 
   filename         = data.archive_file.cloudwatch_geo_widget_placeholder.output_path
   source_code_hash = data.archive_file.cloudwatch_geo_widget_placeholder.output_base64sha256
