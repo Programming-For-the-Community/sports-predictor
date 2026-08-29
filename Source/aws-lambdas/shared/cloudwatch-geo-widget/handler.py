@@ -2,22 +2,33 @@
 CloudWatch custom-widget Lambda for the viewer-analytics dashboard's two
 geo panels (Terraform/cloudwatch-dashboard-viewer-analytics.tf). CloudWatch
 strips every <script>/<iframe> tag from a custom widget's returned HTML
-(no client-side rendering allowed at all), so a real map here means a
-real image composited server-side, not an interactive one. Renders via
-Amazon Location Service's GetStaticMap: a real basemap (streets/borders/
-labels) with a translucent heat-colored blob overlaid per hotspot,
-returned as a JPEG and embedded as a base64 <img>. $0.04 per 1,000
+(no client-side rendering allowed at all, so no MapLibre/heatmap-layer
+style map is reachable here even though Amazon Location Service's own map
+style spec supports one). A real map here means a real image composited
+server-side, not an interactive one.
+
+Renders via Amazon Location Service's GetStaticMap ($0.04 per 1,000
 requests, no separately provisioned Map resource -- a standalone regional
-API action.
+API action), Satellite style so the image isn't covered in city-name
+labels competing with the overlay. Each hotspot draws as a handful of
+concentric, same-colored, decreasing-radius/increasing-opacity polygons
+-- a soft-glow approximation of a blurred heatmap. GetStaticMap draws
+this overlay itself using its own real basemap projection, so placement
+is always correct; a genuine Gaussian blur isn't reachable here since
+that would mean rendering the overlay ourselves against a projection
+GetStaticMap doesn't document (BoundingBox fit/padding), which risks
+silently misplacing every hotspot.
 
 Two render modes, via the widget's `mode` custom-widget parameter:
   "accepted" -- accepted requests by US state, from every sport's
     predict-read log group's viewer_analytics line (library.serving.
-    viewer_analytics's `region` field, a 2-letter code), one blob per
-    state with nonzero traffic at its own real (approximate) center.
+    viewer_analytics's `region` field, a 2-letter code), grouped into the
+    9 standard Census Bureau divisions (STATE_DIVISION) so each hotspot
+    is large enough to afford a multi-ring glow within GeoJsonOverlay's
+    4200-char limit.
   "blocked"  -- CloudFront-blocked (403) requests by country, from the
     CloudFront edge-access log group, grouped into world regions via
-    COUNTRY_REGION, one blob per region with nonzero traffic.
+    COUNTRY_REGION.
 
 Runs Logs Insights synchronously (StartQuery + poll GetQueryResults) on
 every render, then one GetStaticMap call. A GetStaticMap failure (e.g. a
@@ -35,10 +46,10 @@ import boto3
 
 logger = logging.getLogger("cloudwatch-geo-widget")
 
-# Approximate real geographic centers (lon, lat) -- state boundary shapes
-# aren't embedded here, so this plots one heat-colored blob per state via
-# GetStaticMap's own overlay instead. Close enough at this zoom to read
-# as a real map; not surveyed-precision.
+# Approximate real geographic centers (lon, lat) -- used only to look up
+# which Census division an incoming state code belongs to; the map
+# itself plots one glow per division (STATE_DIVISION/DIVISION_CENTROIDS
+# below), not one per state.
 US_STATE_CENTROIDS = {
     "AL": (-86.8, 32.8), "AK": (-152.0, 64.0), "AZ": (-111.6, 34.3), "AR": (-92.4, 34.9),
     "CA": (-119.4, 36.8), "CO": (-105.5, 39.0), "CT": (-72.7, 41.6), "DE": (-75.5, 39.0),
@@ -55,13 +66,43 @@ US_STATE_CENTROIDS = {
     "WV": (-80.6, 38.6), "WI": (-89.9, 44.6), "WY": (-107.3, 42.9),
 }
 
-# CONUS-only view -- AK/HI's own markers are still built into the overlay
-# string (they just render off-frame); a world-scale box would shrink
-# every CONUS state's marker down past legibility.
+# Standard US Census Bureau divisions -- every US_STATE_CENTROIDS code
+# belongs to exactly one.
+STATE_DIVISION = {
+    "CT": "New England", "ME": "New England", "MA": "New England", "NH": "New England", "RI": "New England", "VT": "New England",
+    "NJ": "Mid-Atlantic", "NY": "Mid-Atlantic", "PA": "Mid-Atlantic",
+    "IL": "East North Central", "IN": "East North Central", "MI": "East North Central", "OH": "East North Central", "WI": "East North Central",
+    "IA": "West North Central", "KS": "West North Central", "MN": "West North Central", "MO": "West North Central", "NE": "West North Central", "ND": "West North Central", "SD": "West North Central",
+    "DE": "South Atlantic", "FL": "South Atlantic", "GA": "South Atlantic", "MD": "South Atlantic", "NC": "South Atlantic", "SC": "South Atlantic", "VA": "South Atlantic", "WV": "South Atlantic", "DC": "South Atlantic",
+    "AL": "East South Central", "KY": "East South Central", "MS": "East South Central", "TN": "East South Central",
+    "AR": "West South Central", "LA": "West South Central", "OK": "West South Central", "TX": "West South Central",
+    "AZ": "Mountain", "CO": "Mountain", "ID": "Mountain", "MT": "Mountain", "NV": "Mountain", "NM": "Mountain", "UT": "Mountain", "WY": "Mountain",
+    "AK": "Pacific", "CA": "Pacific", "HI": "Pacific", "OR": "Pacific", "WA": "Pacific",
+}
+
+# Real centers of each division's own states -- Pacific uses its CONUS
+# states only (CA/OR/WA); AK/HI's own traffic still counts toward
+# Pacific's total, but averaging their coordinates in would drag the
+# glow's center out into the ocean, off the CONUS-only map view below.
+DIVISION_CENTROIDS = {
+    "New England": (-71.5, 43.1),
+    "Mid-Atlantic": (-75.9, 41.3),
+    "East North Central": (-86.6, 41.8),
+    "West North Central": (-97.1, 42.7),
+    "South Atlantic": (-79.3, 35.9),
+    "East South Central": (-87.0, 34.7),
+    "West South Central": (-95.3, 33.2),
+    "Mountain": (-110.5, 40.1),
+    "Pacific": (-120.1, 42.7),
+}
+
+# CONUS-only view -- AK/HI's own traffic is still counted (folded into
+# Pacific's total), it just has no marker of its own off this frame; a
+# world-scale box would shrink every division's glow down past legibility.
 _CONUS_BOUNDING_BOX = "-125,24,-67,49"
 
 # Not exhaustive. Anything unmapped falls into "Other" rather than being
-# dropped -- see _blocked_map_overlay for why "Other" has no blob.
+# dropped -- see _blocked_hotspots for why "Other" has no glow.
 COUNTRY_REGION = {
     **{c: "Americas" for c in ["US", "CA", "MX", "BR", "AR", "CO", "CL", "PE", "VE", "CU", "DO", "GT", "EC", "BO", "PY", "UY", "CR", "PA", "JM", "HT", "TT"]},
     **{c: "Europe" for c in ["GB", "DE", "FR", "IT", "ES", "NL", "BE", "SE", "NO", "DK", "FI", "PL", "PT", "IE", "AT", "CH", "GR", "CZ", "RO", "HU", "UA", "RU", "BY", "RS", "BG", "HR", "SK", "SI", "LT", "LV", "EE"]},
@@ -70,7 +111,7 @@ COUNTRY_REGION = {
     **{c: "Oceania" for c in ["AU", "NZ", "FJ", "PG"]},
 }
 
-# Rough real center points for each region bucket -- one blob per
+# Rough real center points for each region bucket -- one glow per
 # bucket, not per country (COUNTRY_REGION already only groups into these
 # 5, same abstraction level as before, now placed on a real map).
 REGION_CENTROIDS = {
@@ -83,10 +124,17 @@ REGION_CENTROIDS = {
 _WORLD_BOUNDING_BOX = "-170,-56,180,72"
 
 # Heat-gradient fill per nonzero bucket (1-4) -- cool blue (low) to hot
-# red (high). Bucket 0 (no data) never renders a blob at all.
+# red (high). Bucket 0 (no data) never renders a glow at all.
 _HEAT_COLORS = ["#3b82f6", "#eab308", "#f97316", "#ef4444"]
-_HEAT_BLOB_SIDES = 8
-_HEAT_COORD_DECIMALS = 2
+
+# Concentric-ring glow shape -- cheap hexagons (few vertices, coarse
+# rounding) so several rings per hotspot still fit GeoJsonOverlay's
+# 4200-char limit. Rings are listed outermost (largest, faintest) first
+# so the smallest/most-opaque ring paints on top.
+_RING_SIDES = 6
+_RING_COORD_DECIMALS = 1
+_RING_ALPHA_MIN = 40
+_RING_ALPHA_MAX = 200
 
 _MAP_WIDTH = 600
 _MAP_HEIGHT = 260
@@ -149,91 +197,105 @@ def _blocked_counts_by_country(logs_client, log_group_name: str, start_ms: int, 
     return {row["c-country"]: int(row["requests"]) for row in rows if row.get("c-country")}
 
 
-def _heat_color_with_alpha(bucket: int) -> str:
-    """8-digit hex (GetStaticMap's GeoJSON fill-color+alpha format) --
-    higher buckets get both a hotter color and higher opacity."""
-    scale = bucket / 4.0
-    alpha = int(60 + 130 * scale)
-    return f"{_HEAT_COLORS[bucket - 1]}{alpha:02x}"
+def _heat_color_with_alpha(hex_color: str, alpha: int) -> str:
+    return f"{hex_color}{max(0, min(255, alpha)):02x}"
 
 
-def _heat_radius_deg(base_radius_deg: float, bucket: int) -> float:
-    return base_radius_deg * (0.6 + 0.4 * (bucket / 4.0))
-
-
-def _heat_blob_ring(lon: float, lat: float, radius_deg: float) -> list[list[float]]:
-    """A closed polygon ring approximating a soft circular blob."""
+def _ring(lon: float, lat: float, radius_deg: float) -> list[list[float]]:
+    """A closed polygon ring approximating a soft circular glow."""
     ring = [
-        [round(lon + radius_deg * math.cos(2 * math.pi * i / _HEAT_BLOB_SIDES), _HEAT_COORD_DECIMALS),
-         round(lat + radius_deg * math.sin(2 * math.pi * i / _HEAT_BLOB_SIDES), _HEAT_COORD_DECIMALS)]
-        for i in range(_HEAT_BLOB_SIDES)
+        [round(lon + radius_deg * math.cos(2 * math.pi * i / _RING_SIDES), _RING_COORD_DECIMALS),
+         round(lat + radius_deg * math.sin(2 * math.pi * i / _RING_SIDES), _RING_COORD_DECIMALS)]
+        for i in range(_RING_SIDES)
     ]
     ring.append(ring[0])
     return ring
 
 
-def _heatmap_overlay(hotspots: list[tuple[float, float, int]], base_radius_deg: float, max_blobs: int) -> str:
-    """hotspots: (lon, lat, bucket) for locations with bucket >= 1,
-    already sorted highest-traffic first. Builds GetStaticMap's
-    GeoJsonOverlay (max 4200 chars) as translucent filled-polygon blobs --
-    no labels, no pins."""
-    features = [
-        {
+def _glow_features(lon: float, lat: float, bucket: int, base_radius_deg: float, num_rings: int) -> list[dict]:
+    """num_rings same-colored polygons, outermost/largest/faintest
+    first, shrinking and brightening inward -- a cheap stand-in for a
+    Gaussian blur using only GetStaticMap's flat-polygon overlay."""
+    color = _HEAT_COLORS[bucket - 1]
+    bucket_scale = 0.6 + 0.4 * (bucket / 4.0)
+    features = []
+    for i in range(num_rings):
+        radius = base_radius_deg * bucket_scale * (num_rings - i) / num_rings
+        alpha = int((_RING_ALPHA_MIN + (_RING_ALPHA_MAX - _RING_ALPHA_MIN) * (i + 1) / num_rings) * bucket_scale)
+        features.append({
             "type": "Feature",
-            "properties": {"color": _heat_color_with_alpha(bucket)},
-            "geometry": {"type": "Polygon", "coordinates": [_heat_blob_ring(lon, lat, _heat_radius_deg(base_radius_deg, bucket))]},
-        }
-        for lon, lat, bucket in hotspots[:max_blobs]
-    ]
+            "properties": {"color": _heat_color_with_alpha(color, alpha)},
+            "geometry": {"type": "Polygon", "coordinates": [_ring(lon, lat, radius)]},
+        })
+    return features
+
+
+def _heatmap_overlay(hotspots: list[tuple[float, float, int]], base_radius_deg: float, num_rings: int) -> str:
+    """hotspots: (lon, lat, bucket) for locations with bucket >= 1.
+    Builds GetStaticMap's GeoJsonOverlay (max 4200 chars) as a set of
+    concentric-ring glows -- no labels, no pins."""
+    features = [f for lon, lat, bucket in hotspots for f in _glow_features(lon, lat, bucket, base_radius_deg, num_rings)]
     return json.dumps({"type": "FeatureCollection", "features": features}, separators=(",", ":"))
 
 
-_ACCEPTED_HEAT_RADIUS_DEG = 3.0
-_ACCEPTED_HEAT_MAX_BLOBS = 16
-_BLOCKED_HEAT_RADIUS_DEG = 14.0
-_BLOCKED_HEAT_MAX_BLOBS = len(REGION_CENTROIDS)
+_ACCEPTED_HEAT_RADIUS_DEG = 5.0
+_ACCEPTED_HEAT_RINGS = 2
+_BLOCKED_HEAT_RADIUS_DEG = 16.0
+_BLOCKED_HEAT_RINGS = 4
+
+
+def _accepted_hotspots(counts: dict[str, int]) -> list[tuple[float, float, int]]:
+    by_division: dict[str, int] = {}
+    for code, count in counts.items():
+        division = STATE_DIVISION.get(code)
+        if division:
+            by_division[division] = by_division.get(division, 0) + count
+    max_count = max(by_division.values(), default=0)
+    scored = [
+        (by_division.get(division, 0), lon, lat, _bucket(by_division.get(division, 0), max_count))
+        for division, (lon, lat) in DIVISION_CENTROIDS.items()
+    ]
+    scored.sort(key=lambda s: -s[0])
+    return [(lon, lat, bucket) for count, lon, lat, bucket in scored if bucket > 0]
 
 
 def _accepted_map_overlay(counts: dict[str, int]) -> str:
-    max_count = max(counts.values(), default=0)
-    scored = [
-        (counts.get(code, 0), lon, lat, _bucket(counts.get(code, 0), max_count))
-        for code, (lon, lat) in US_STATE_CENTROIDS.items()
-    ]
-    scored.sort(key=lambda s: -s[0])
-    hotspots = [(lon, lat, bucket) for count, lon, lat, bucket in scored if bucket > 0]
-    return _heatmap_overlay(hotspots, _ACCEPTED_HEAT_RADIUS_DEG, _ACCEPTED_HEAT_MAX_BLOBS)
+    return _heatmap_overlay(_accepted_hotspots(counts), _ACCEPTED_HEAT_RADIUS_DEG, _ACCEPTED_HEAT_RINGS)
 
 
-def _blocked_map_overlay(counts_by_country: dict[str, int]) -> str:
+def _blocked_hotspots(counts_by_country: dict[str, int]) -> list[tuple[float, float, int]]:
     by_region: dict[str, int] = {}
     for country, count in counts_by_country.items():
         region = COUNTRY_REGION.get(country, "Other")
         by_region[region] = by_region.get(region, 0) + count
     # "Other" has no fixed real location -- its own count still lands in
     # by_region (so it isn't silently lost from the underlying data), it
-    # just never gets a blob on the map.
+    # just never gets a glow on the map.
     max_count = max(by_region.values(), default=0)
     scored = [
         (by_region.get(region, 0), lon, lat, _bucket(by_region.get(region, 0), max_count))
         for region, (lon, lat) in REGION_CENTROIDS.items()
     ]
     scored.sort(key=lambda s: -s[0])
-    hotspots = [(lon, lat, bucket) for count, lon, lat, bucket in scored if bucket > 0]
-    return _heatmap_overlay(hotspots, _BLOCKED_HEAT_RADIUS_DEG, _BLOCKED_HEAT_MAX_BLOBS)
+    return [(lon, lat, bucket) for count, lon, lat, bucket in scored if bucket > 0]
+
+
+def _blocked_map_overlay(counts_by_country: dict[str, int]) -> str:
+    return _heatmap_overlay(_blocked_hotspots(counts_by_country), _BLOCKED_HEAT_RADIUS_DEG, _BLOCKED_HEAT_RINGS)
 
 
 def _get_static_map(geo_maps_client, bounding_box: str, overlay: str) -> bytes:
     """Amazon Location Service's GetStaticMap -- a real composited map
-    image (Standard style, Dark color scheme to match the dashboard) with
-    translucent heat-colored blobs baked in server-side. No separate Map
-    resource to provision -- a standalone regional API action."""
+    image. Satellite style (real imagery, effectively no baked-in
+    city-label text) with the concentric-ring glow overlay baked in
+    server-side. No separate Map resource to provision -- a standalone
+    regional API action."""
     response = geo_maps_client.get_static_map(
         FileName="map",
         Width=_MAP_WIDTH,
         Height=_MAP_HEIGHT,
         BoundingBox=bounding_box,
-        Style="Standard",
+        Style="Satellite",
         ColorScheme="Dark",
         GeoJsonOverlay=overlay,
     )
@@ -256,9 +318,9 @@ def _map_html(geo_maps_client, bounding_box: str, overlay: str, counts: dict[str
 def _describe() -> str:
     return (
         "## Geo widget\n\n"
-        "A real map (Amazon Location Service GetStaticMap) with a translucent heat-colored blob "
-        "per hotspot. Set the `mode` parameter to `accepted` (US states, by accepted-request volume) "
-        "or `blocked` (world regions, by CloudFront-blocked-request volume)."
+        "A real map (Amazon Location Service GetStaticMap, Satellite style) with a soft concentric-ring "
+        "glow per hotspot. Set the `mode` parameter to `accepted` (US Census divisions, by accepted-request "
+        "volume) or `blocked` (world regions, by CloudFront-blocked-request volume)."
     )
 
 

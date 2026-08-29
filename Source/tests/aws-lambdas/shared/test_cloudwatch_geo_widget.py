@@ -46,7 +46,7 @@ class TestAcceptedCountsByState:
 
     def test_a_region_code_outside_the_known_states_is_dropped_not_misplaced(self):
         # A non-US or malformed region value must never silently land on
-        # some unrelated state's marker.
+        # some unrelated state's division.
         client = _mock_logs_client([{"region": "CA", "requests": 5}, {"region": "ON", "requests": 3}])
         counts = handler._accepted_counts_by_state(client, ["lg1"], 0, 1000)
         assert counts == {"CA": 5}
@@ -91,23 +91,81 @@ class TestRunLogsInsightsQuery:
         assert handler._run_logs_insights_query(client, ["lg"], "filter true", 0, 1000) == []
 
 
-class TestHeatColorAndRadius:
+class TestStateDivision:
+    def test_every_state_centroid_maps_to_exactly_one_division(self):
+        assert set(handler.STATE_DIVISION.keys()) == set(handler.US_STATE_CENTROIDS.keys())
+        assert set(handler.STATE_DIVISION.values()) == set(handler.DIVISION_CENTROIDS.keys())
+
+    def test_pacific_centroid_stays_within_the_conus_view_despite_ak_hi_membership(self):
+        # AK/HI belong to Pacific for count-grouping purposes, but the
+        # plotted centroid must stay near the CONUS Pacific states so it
+        # doesn't drift off the CONUS-only map view.
+        lon, lat = handler.DIVISION_CENTROIDS["Pacific"]
+        west, south, east, north = (float(v) for v in handler._CONUS_BOUNDING_BOX.split(","))
+        assert west < lon < east
+        assert south < lat < north
+
+
+class TestAcceptedHotspots:
+    def test_groups_state_counts_into_their_census_division(self):
+        counts = {"CA": 10, "OR": 5}  # both Pacific
+        hotspots = handler._accepted_hotspots(counts)
+        assert len(hotspots) == 1
+        assert hotspots[0][:2] == handler.DIVISION_CENTROIDS["Pacific"]
+
+    def test_zero_traffic_divisions_produce_no_hotspot(self):
+        hotspots = handler._accepted_hotspots({"CA": 10})
+        assert len(hotspots) == 1
+
+    def test_no_traffic_anywhere_produces_no_hotspots(self):
+        assert handler._accepted_hotspots({}) == []
+
+    def test_an_unmapped_state_code_is_dropped_not_misplaced(self):
+        hotspots = handler._accepted_hotspots({"ZZ": 100})
+        assert hotspots == []
+
+
+class TestBlockedHotspots:
+    def test_known_country_codes_group_under_their_real_region(self):
+        hotspots = handler._blocked_hotspots({"RU": 10, "BR": 2})
+        assert len(hotspots) == 2
+
+    def test_an_unmapped_country_code_produces_no_hotspot(self):
+        # "Other" has no real fixed location -- its own count is folded
+        # into by_region but never gets a glow.
+        assert handler._blocked_hotspots({"XX": 4}) == []
+
+    def test_no_blocked_traffic_at_all_produces_no_hotspots(self):
+        assert handler._blocked_hotspots({}) == []
+
+
+class TestGlowFeatures:
     def test_higher_bucket_gets_a_hotter_color(self):
-        assert handler._heat_color_with_alpha(1)[:7] == handler._HEAT_COLORS[0]
-        assert handler._heat_color_with_alpha(4)[:7] == handler._HEAT_COLORS[3]
+        low = handler._glow_features(-100.0, 40.0, 1, 5.0, 2)
+        high = handler._glow_features(-100.0, 40.0, 4, 5.0, 2)
+        assert low[0]["properties"]["color"][:7] == handler._HEAT_COLORS[0]
+        assert high[0]["properties"]["color"][:7] == handler._HEAT_COLORS[3]
 
-    def test_higher_bucket_gets_more_opacity(self):
-        alpha_low = int(handler._heat_color_with_alpha(1)[7:], 16)
-        alpha_high = int(handler._heat_color_with_alpha(4)[7:], 16)
-        assert alpha_high > alpha_low
+    def test_rings_shrink_from_outer_to_inner(self):
+        features = handler._glow_features(-100.0, 40.0, 4, 10.0, 3)
+        assert len(features) == 3
 
-    def test_higher_bucket_gets_a_larger_radius(self):
-        assert handler._heat_radius_deg(10.0, 4) > handler._heat_radius_deg(10.0, 1)
+        def _max_x(feature):
+            return max(pt[0] for pt in feature["geometry"]["coordinates"][0])
 
-    def test_blob_ring_is_closed(self):
-        ring = handler._heat_blob_ring(-100.0, 40.0, 3.0)
-        assert ring[0] == ring[-1]
-        assert len(ring) == handler._HEAT_BLOB_SIDES + 1
+        radii = [_max_x(f) for f in features]
+        assert radii == sorted(radii, reverse=True)  # outermost (index 0) is largest
+
+    def test_alpha_increases_from_outer_to_inner(self):
+        features = handler._glow_features(-100.0, 40.0, 4, 10.0, 3)
+        alphas = [int(f["properties"]["color"][7:], 16) for f in features]
+        assert alphas == sorted(alphas)
+
+    def test_every_ring_is_a_closed_polygon(self):
+        for feature in handler._glow_features(-100.0, 40.0, 2, 5.0, 2):
+            ring = feature["geometry"]["coordinates"][0]
+            assert ring[0] == ring[-1]
+            assert len(ring) == handler._RING_SIDES + 1
 
 
 class TestAcceptedMapOverlay:
@@ -117,65 +175,38 @@ class TestAcceptedMapOverlay:
         assert overlay["features"]
         for feature in overlay["features"]:
             assert feature["geometry"]["type"] == "Polygon"
-            # No labels, no point markers -- a filled blob only.
             assert "label" not in feature["properties"]
-
-    def test_zero_traffic_states_render_no_blob_at_all(self):
-        overlay = json.loads(handler._accepted_map_overlay({"CA": 9}))
-        assert len(overlay["features"]) == 1
 
     def test_no_traffic_anywhere_produces_an_empty_feature_collection(self):
         overlay = json.loads(handler._accepted_map_overlay({}))
         assert overlay["features"] == []
 
-    def test_highest_count_state_gets_the_hottest_color(self):
-        overlay = json.loads(handler._accepted_map_overlay({"CA": 100, "NY": 1}))
-        colors = {f["properties"]["color"][:7] for f in overlay["features"]}
-        assert handler._HEAT_COLORS[3] in colors  # CA, top bucket
-        assert handler._HEAT_COLORS[0] in colors  # NY, bottom nonzero bucket
-
-    def test_caps_at_the_configured_max_blob_count(self):
-        counts = {code: (i + 1) * 7 for i, code in enumerate(handler.US_STATE_CENTROIDS)}
-        overlay = json.loads(handler._accepted_map_overlay(counts))
-        assert len(overlay["features"]) == handler._ACCEPTED_HEAT_MAX_BLOBS
-
-    def test_worst_case_overlay_stays_within_the_geojson_overlay_length_limit(self):
+    def test_every_division_active_stays_within_the_geojson_overlay_length_limit(self):
         counts = {code: (i + 1) * 137 for i, code in enumerate(handler.US_STATE_CENTROIDS)}
         overlay = handler._accepted_map_overlay(counts)
         assert len(overlay) <= 4200
 
 
 class TestBlockedMapOverlay:
-    def test_known_country_codes_group_under_their_real_region(self):
-        overlay = json.loads(handler._blocked_map_overlay({"RU": 10, "BR": 2}))
-        assert len(overlay["features"]) == 2
-
-    def test_an_unmapped_country_code_is_dropped_from_the_map_not_misplaced(self):
-        # "Other" has no real fixed location -- its own count is folded
-        # into by_region but never gets a blob.
-        overlay = json.loads(handler._blocked_map_overlay({"XX": 4}))
-        assert overlay["features"] == []
-
     def test_no_blocked_traffic_at_all_produces_an_empty_feature_collection(self):
         overlay = json.loads(handler._blocked_map_overlay({}))
         assert overlay["features"] == []
 
-    def test_worst_case_overlay_stays_within_the_geojson_overlay_length_limit(self):
+    def test_every_region_active_stays_within_the_geojson_overlay_length_limit(self):
         by_country = {"RU": 500, "BR": 400, "CN": 300, "AU": 200, "NG": 100}
         overlay = handler._blocked_map_overlay(by_country)
         assert len(overlay) <= 4200
 
 
 class TestGetStaticMap:
-    def test_requests_a_jpeg_composited_with_the_given_bounding_box_and_geojson_overlay(self):
+    def test_requests_a_satellite_jpeg_composited_with_the_given_bounding_box_and_overlay(self):
         client = _mock_geo_maps_client(b"real-bytes")
         result = handler._get_static_map(client, "-125,24,-67,49", '{"type":"FeatureCollection","features":[]}')
         assert result == b"real-bytes"
         call_kwargs = client.get_static_map.call_args.kwargs
         assert call_kwargs["BoundingBox"] == "-125,24,-67,49"
         assert call_kwargs["GeoJsonOverlay"] == '{"type":"FeatureCollection","features":[]}'
-        assert call_kwargs["Style"] == "Standard"
-        assert call_kwargs["ColorScheme"] == "Dark"
+        assert call_kwargs["Style"] == "Satellite"
 
 
 class TestMapHtml:
