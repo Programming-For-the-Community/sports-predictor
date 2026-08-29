@@ -243,10 +243,11 @@ resource "aws_cloudwatch_dashboard" "viewer_analytics" {
       # Custom-widget geo panels (Terraform/lambda-cloudwatch-geo-widget.tf)
       # -- CloudWatch dashboards have no native map widget type, so these
       # call Amazon Location Service's GetStaticMap for a real composited
-      # map image; see the Lambda's own handler.py docstring for why (no
-      # client-side rendering is possible inside a custom widget at all).
-      # Appended here rather than interleaved with the bar/table panels
-      # above so every existing widget's y-position stays untouched.
+      # map image with a translucent heatmap overlay; see the Lambda's own
+      # handler.py docstring for why (no client-side rendering is possible
+      # inside a custom widget at all). Appended here rather than
+      # interleaved with the bar/table panels above so every existing
+      # widget's y-position stays untouched.
       {
         type   = "text"
         x      = 0

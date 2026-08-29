@@ -1,3 +1,4 @@
+import json
 import sys
 from unittest.mock import MagicMock
 
@@ -90,53 +91,89 @@ class TestRunLogsInsightsQuery:
         assert handler._run_logs_insights_query(client, ["lg"], "filter true", 0, 1000) == []
 
 
+class TestHeatColorAndRadius:
+    def test_higher_bucket_gets_a_hotter_color(self):
+        assert handler._heat_color_with_alpha(1)[:7] == handler._HEAT_COLORS[0]
+        assert handler._heat_color_with_alpha(4)[:7] == handler._HEAT_COLORS[3]
+
+    def test_higher_bucket_gets_more_opacity(self):
+        alpha_low = int(handler._heat_color_with_alpha(1)[7:], 16)
+        alpha_high = int(handler._heat_color_with_alpha(4)[7:], 16)
+        assert alpha_high > alpha_low
+
+    def test_higher_bucket_gets_a_larger_radius(self):
+        assert handler._heat_radius_deg(10.0, 4) > handler._heat_radius_deg(10.0, 1)
+
+    def test_blob_ring_is_closed(self):
+        ring = handler._heat_blob_ring(-100.0, 40.0, 3.0)
+        assert ring[0] == ring[-1]
+        assert len(ring) == handler._HEAT_BLOB_SIDES + 1
+
+
 class TestAcceptedMapOverlay:
-    def test_every_state_appears_as_a_labeled_point(self):
-        overlay = handler._accepted_map_overlay({"CA": 9})
-        for code in handler.US_STATE_CENTROIDS:
-            assert f"label={code}" in overlay
+    def test_is_a_valid_geojson_feature_collection_of_polygons_only(self):
+        overlay = json.loads(handler._accepted_map_overlay({"CA": 9}))
+        assert overlay["type"] == "FeatureCollection"
+        assert overlay["features"]
+        for feature in overlay["features"]:
+            assert feature["geometry"]["type"] == "Polygon"
+            # No labels, no point markers -- a filled blob only.
+            assert "label" not in feature["properties"]
 
-    def test_is_pipe_delimited_point_terms(self):
-        overlay = handler._accepted_map_overlay({})
-        terms = overlay.split("|")
-        assert len(terms) == len(handler.US_STATE_CENTROIDS)
-        assert all(term.startswith("point:") for term in terms)
+    def test_zero_traffic_states_render_no_blob_at_all(self):
+        overlay = json.loads(handler._accepted_map_overlay({"CA": 9}))
+        assert len(overlay["features"]) == 1
 
-    def test_highest_count_state_gets_the_top_bucket_color(self):
-        overlay = handler._accepted_map_overlay({"CA": 100, "NY": 1})
-        assert f"label=CA;color={handler._BUCKET_COLORS[4]}" in overlay
-        assert f"label=NY;color={handler._BUCKET_COLORS[1]}" in overlay
+    def test_no_traffic_anywhere_produces_an_empty_feature_collection(self):
+        overlay = json.loads(handler._accepted_map_overlay({}))
+        assert overlay["features"] == []
+
+    def test_highest_count_state_gets_the_hottest_color(self):
+        overlay = json.loads(handler._accepted_map_overlay({"CA": 100, "NY": 1}))
+        colors = {f["properties"]["color"][:7] for f in overlay["features"]}
+        assert handler._HEAT_COLORS[3] in colors  # CA, top bucket
+        assert handler._HEAT_COLORS[0] in colors  # NY, bottom nonzero bucket
+
+    def test_caps_at_the_configured_max_blob_count(self):
+        counts = {code: (i + 1) * 7 for i, code in enumerate(handler.US_STATE_CENTROIDS)}
+        overlay = json.loads(handler._accepted_map_overlay(counts))
+        assert len(overlay["features"]) == handler._ACCEPTED_HEAT_MAX_BLOBS
+
+    def test_worst_case_overlay_stays_within_the_geojson_overlay_length_limit(self):
+        counts = {code: (i + 1) * 137 for i, code in enumerate(handler.US_STATE_CENTROIDS)}
+        overlay = handler._accepted_map_overlay(counts)
+        assert len(overlay) <= 4200
 
 
 class TestBlockedMapOverlay:
     def test_known_country_codes_group_under_their_real_region(self):
-        overlay = handler._blocked_map_overlay({"RU": 10, "BR": 2})
-        assert "label=Europe" in overlay
-        assert "label=Americas" in overlay
+        overlay = json.loads(handler._blocked_map_overlay({"RU": 10, "BR": 2}))
+        assert len(overlay["features"]) == 2
 
     def test_an_unmapped_country_code_is_dropped_from_the_map_not_misplaced(self):
         # "Other" has no real fixed location -- its own count is folded
-        # into by_region but never gets a marker.
-        overlay = handler._blocked_map_overlay({"XX": 4})
-        assert "label=Other" not in overlay
-        # Every known region still renders (at bucket 0 -- no real data).
-        for region in handler.REGION_CENTROIDS:
-            assert f"label={region}" in overlay
+        # into by_region but never gets a blob.
+        overlay = json.loads(handler._blocked_map_overlay({"XX": 4}))
+        assert overlay["features"] == []
 
-    def test_no_blocked_traffic_at_all_still_renders_every_region_at_bucket_zero(self):
-        overlay = handler._blocked_map_overlay({})
-        for region in handler.REGION_CENTROIDS:
-            assert f"label={region};color={handler._BUCKET_COLORS[0]}" in overlay
+    def test_no_blocked_traffic_at_all_produces_an_empty_feature_collection(self):
+        overlay = json.loads(handler._blocked_map_overlay({}))
+        assert overlay["features"] == []
+
+    def test_worst_case_overlay_stays_within_the_geojson_overlay_length_limit(self):
+        by_country = {"RU": 500, "BR": 400, "CN": 300, "AU": 200, "NG": 100}
+        overlay = handler._blocked_map_overlay(by_country)
+        assert len(overlay) <= 4200
 
 
 class TestGetStaticMap:
-    def test_requests_a_jpeg_composited_with_the_given_bounding_box_and_overlay(self):
+    def test_requests_a_jpeg_composited_with_the_given_bounding_box_and_geojson_overlay(self):
         client = _mock_geo_maps_client(b"real-bytes")
-        result = handler._get_static_map(client, "-125,24,-67,49", "point:1,2;label=CA;color=#fff")
+        result = handler._get_static_map(client, "-125,24,-67,49", '{"type":"FeatureCollection","features":[]}')
         assert result == b"real-bytes"
         call_kwargs = client.get_static_map.call_args.kwargs
         assert call_kwargs["BoundingBox"] == "-125,24,-67,49"
-        assert call_kwargs["CompactOverlay"] == "point:1,2;label=CA;color=#fff"
+        assert call_kwargs["GeoJsonOverlay"] == '{"type":"FeatureCollection","features":[]}'
         assert call_kwargs["Style"] == "Standard"
         assert call_kwargs["ColorScheme"] == "Dark"
 
