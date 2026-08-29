@@ -288,15 +288,15 @@ def _get_static_map(geo_maps_client, bounding_box: str, overlay: str) -> bytes:
     """Amazon Location Service's GetStaticMap -- a real composited map
     image. Satellite style (real imagery, effectively no baked-in
     city-label text) with the concentric-ring glow overlay baked in
-    server-side. No separate Map resource to provision -- a standalone
-    regional API action."""
+    server-side. ColorScheme is Standard-only -- GetStaticMap rejects it
+    outright when Style is Satellite. No separate Map resource to
+    provision -- a standalone regional API action."""
     response = geo_maps_client.get_static_map(
         FileName="map",
         Width=_MAP_WIDTH,
         Height=_MAP_HEIGHT,
         BoundingBox=bounding_box,
         Style="Satellite",
-        ColorScheme="Dark",
         GeoJsonOverlay=overlay,
     )
     return response["Blob"].read()

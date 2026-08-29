@@ -208,6 +208,12 @@ class TestGetStaticMap:
         assert call_kwargs["GeoJsonOverlay"] == '{"type":"FeatureCollection","features":[]}'
         assert call_kwargs["Style"] == "Satellite"
 
+    def test_never_sends_colorscheme(self):
+        # GetStaticMap rejects ColorScheme outright when Style=Satellite.
+        client = _mock_geo_maps_client()
+        handler._get_static_map(client, "-125,24,-67,49", "overlay")
+        assert "ColorScheme" not in client.get_static_map.call_args.kwargs
+
 
 class TestMapHtml:
     def test_embeds_the_image_as_a_base64_img_tag(self):
