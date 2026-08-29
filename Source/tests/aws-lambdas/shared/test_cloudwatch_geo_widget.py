@@ -159,14 +159,14 @@ class TestPinpointLayer:
         # coolest color instead of the hottest.
         lon, lat = handler.US_STATE_CENTROIDS["CA"]
         layer = handler._pinpoint_layer([(lon, lat, 4)], handler._CONUS_BOUNDING_BOX)
-        x, y = handler._project(lon, lat, handler._CONUS_BOUNDING_BOX, handler._MAP_WIDTH, handler._MAP_HEIGHT)
+        x, y = handler._project(lon, lat, handler._CONUS_BOUNDING_BOX, handler._RENDER_WIDTH, handler._RENDER_HEIGHT)
         pixel = layer.getpixel((round(x), round(y)))
         hottest = handler._HEAT_COLOR_STOPS[-1][1]
         assert all(abs(pixel[i] - hottest[i]) <= 10 for i in range(3))  # close to the hottest color, not diluted toward the coolest
 
-    def test_layer_matches_the_canvas_size(self):
+    def test_layer_matches_the_render_canvas_size(self):
         layer = handler._pinpoint_layer([], "-125,24,-67,49")
-        assert layer.size == (handler._MAP_WIDTH, handler._MAP_HEIGHT)
+        assert layer.size == (handler._RENDER_WIDTH, handler._RENDER_HEIGHT)
 
 
 class TestChoroplethLayer:
@@ -181,6 +181,25 @@ class TestChoroplethLayer:
     def test_a_bucketed_country_paints_its_own_shape(self):
         layer = handler._choropleth_layer({"US": 4}, handler._WORLD_BOUNDING_BOX)
         assert layer.getextrema()[3][1] > 0  # something opaque got drawn
+
+
+class TestLegend:
+    def test_gradient_has_no_dead_black_zone_at_the_low_end(self):
+        # _HEAT_COLOR_STOPS' own bucket-0 stop is transparent black --
+        # the legend must skip it or "Low" would fade to black instead
+        # of showing the real lowest-bucket color.
+        gradient = handler._legend_gradient(120, 10)
+        assert gradient.getpixel((0, 0)) != (0, 0, 0)
+
+    def test_gradient_runs_cool_to_hot_left_to_right(self):
+        gradient = handler._legend_gradient(120, 10)
+        low = gradient.getpixel((0, 5))
+        high = gradient.getpixel((119, 5))
+        assert high[0] > low[0]  # red channel rises toward the hot end
+
+    def test_draw_legend_does_not_raise_on_a_normal_final_image(self):
+        image = Image.new("RGB", (handler._MAP_WIDTH, handler._MAP_HEIGHT), (13, 20, 32))
+        handler._draw_legend(image)  # no exception
 
 
 class TestRenderImages:

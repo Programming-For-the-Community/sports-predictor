@@ -43,7 +43,7 @@ import time
 from pathlib import Path
 
 import boto3
-from PIL import Image, ImageDraw, ImageFilter
+from PIL import Image, ImageDraw, ImageFilter, ImageFont
 
 logger = logging.getLogger("cloudwatch-geo-widget")
 
@@ -74,6 +74,15 @@ US_STATE_CENTROIDS = {
 _MAP_WIDTH = 600
 _MAP_HEIGHT = 260
 
+# Everything is drawn at this multiple of the final size, then
+# downscaled with a high-quality filter -- plain 1px-wide PIL lines and
+# small circles have no antialiasing of their own, so without this the
+# boundary strokes look jagged and the pinpoint glow's edge looks
+# stair-stepped instead of smooth.
+_SUPERSAMPLE = 3
+_RENDER_WIDTH = _MAP_WIDTH * _SUPERSAMPLE
+_RENDER_HEIGHT = _MAP_HEIGHT * _SUPERSAMPLE
+
 # CONUS-only view, aspect-matched to _MAP_WIDTH/_MAP_HEIGHT so plain
 # linear lon/lat -> pixel scaling (_project) doesn't visibly distort
 # state shapes. AK/HI's own traffic is still counted, they just have no
@@ -86,19 +95,20 @@ _WORLD_BOUNDING_BOX = "-131,-55,181,80"
 
 _BACKGROUND_COLOR = (13, 20, 32)  # matches the widget's own wrapper div
 _BOUNDARY_COLOR = (90, 104, 128)
-_BOUNDARY_WIDTH_PX = 1
+_BOUNDARY_WIDTH_PX = 1  # at final resolution -- scaled by _SUPERSAMPLE when drawn
 
-# Accepted-panel pinpoint appearance -- a small solid core per state,
-# Gaussian-blurred into a soft glow, then colorized via
+# Accepted-panel pinpoint appearance (final-resolution pixels, scaled by
+# _SUPERSAMPLE when drawn) -- a small solid core per state,
+# Gaussian-blurred into a tight glow, then colorized via
 # _HEAT_COLOR_STOPS (blue, low, up to red, high). Deliberately tight --
 # state is the real granularity of this data, so a pinpoint should read
 # as one state, not spill into its neighbors. Core must stay comfortably
 # above the blur radius or the blur dilutes a hotspot's own peak
 # intensity below its intended color-stop threshold (verified: core=4/
 # blur=6 washes a bucket-4 dot down to ~55/255, misreading as the
-# lowest color).
-_HEAT_CORE_RADIUS_PX = 10
-_HEAT_BLUR_RADIUS_PX = 4
+# lowest color; core=7/blur=2 keeps the peak at the full 255).
+_HEAT_CORE_RADIUS_PX = 7
+_HEAT_BLUR_RADIUS_PX = 2
 _HEAT_COLOR_STOPS = [
     (0, (0, 0, 0, 0)),
     (70, (59, 130, 246, 190)),
@@ -106,6 +116,13 @@ _HEAT_COLOR_STOPS = [
     (200, (249, 115, 22, 240)),
     (255, (239, 68, 68, 255)),
 ]
+
+_LEGEND_MARGIN_PX = 10
+_LEGEND_BAR_WIDTH_PX = 120
+_LEGEND_BAR_HEIGHT_PX = 10
+_LEGEND_FONT_SIZE_PX = 11
+_LEGEND_TEXT_COLOR = (154, 165, 177, 255)
+_LEGEND_BACKGROUND_COLOR = (13, 20, 32, 215)
 
 
 def _bucket(count: int, max_count: int) -> int:
@@ -200,11 +217,12 @@ def _draw_reference_boundaries(draw: ImageDraw.ImageDraw, rings_by_feature: list
     """rings_by_feature: one entry per state/country, each a list of
     closed [lon, lat] rings. Plain thin strokes -- no fill, no
     topography. Always drawn for every feature, regardless of traffic."""
+    width = max(1, _BOUNDARY_WIDTH_PX * _SUPERSAMPLE)
     for rings in rings_by_feature:
         for ring in rings:
-            points = [_project(lon, lat, bounding_box, _MAP_WIDTH, _MAP_HEIGHT) for lon, lat in ring]
+            points = [_project(lon, lat, bounding_box, _RENDER_WIDTH, _RENDER_HEIGHT) for lon, lat in ring]
             if len(points) >= 2:
-                draw.line(points + [points[0]], fill=_BOUNDARY_COLOR, width=_BOUNDARY_WIDTH_PX)
+                draw.line(points + [points[0]], fill=_BOUNDARY_COLOR, width=width)
 
 
 def _interp_heat_color(value: int) -> tuple[int, int, int, int]:
@@ -229,15 +247,15 @@ def _pinpoint_layer(hotspots: list[tuple[float, float, int]], bounding_box: str)
     """Accepted panel only. A single-channel intensity map (one small
     solid circle per state, bucket-weighted), Gaussian-blurred into a
     tight glow, then colorized into an RGBA layer the same size as the
-    canvas."""
-    density = Image.new("L", (_MAP_WIDTH, _MAP_HEIGHT), 0)
+    render canvas."""
+    density = Image.new("L", (_RENDER_WIDTH, _RENDER_HEIGHT), 0)
     draw = ImageDraw.Draw(density)
+    r = _HEAT_CORE_RADIUS_PX * _SUPERSAMPLE
     for lon, lat, bucket in hotspots:
-        x, y = _project(lon, lat, bounding_box, _MAP_WIDTH, _MAP_HEIGHT)
+        x, y = _project(lon, lat, bounding_box, _RENDER_WIDTH, _RENDER_HEIGHT)
         intensity = int(255 * (bucket / 4.0))
-        r = _HEAT_CORE_RADIUS_PX
         draw.ellipse([x - r, y - r, x + r, y + r], fill=intensity)
-    density = density.filter(ImageFilter.GaussianBlur(_HEAT_BLUR_RADIUS_PX))
+    density = density.filter(ImageFilter.GaussianBlur(_HEAT_BLUR_RADIUS_PX * _SUPERSAMPLE))
     lut_r, lut_g, lut_b, lut_a = _heat_color_lut()
     return Image.merge("RGBA", (density.point(lut_r), density.point(lut_g), density.point(lut_b), density.point(lut_a)))
 
@@ -247,7 +265,7 @@ def _choropleth_layer(bucket_by_code: dict[str, int], bounding_box: str) -> Imag
     with traffic -- country is the real granularity of this data, so no
     pinpoint/blur is needed, the country's own real shape carries the
     signal."""
-    layer = Image.new("RGBA", (_MAP_WIDTH, _MAP_HEIGHT), (0, 0, 0, 0))
+    layer = Image.new("RGBA", (_RENDER_WIDTH, _RENDER_HEIGHT), (0, 0, 0, 0))
     draw = ImageDraw.Draw(layer)
     for code, bucket in bucket_by_code.items():
         rings = COUNTRY_RINGS.get(code)
@@ -255,10 +273,49 @@ def _choropleth_layer(bucket_by_code: dict[str, int], bounding_box: str) -> Imag
             continue
         color = _interp_heat_color(int(255 * (bucket / 4.0)))
         for ring in rings:
-            points = [_project(lon, lat, bounding_box, _MAP_WIDTH, _MAP_HEIGHT) for lon, lat in ring]
+            points = [_project(lon, lat, bounding_box, _RENDER_WIDTH, _RENDER_HEIGHT) for lon, lat in ring]
             if len(points) >= 3:
                 draw.polygon(points, fill=color)
     return layer
+
+
+def _legend_gradient(width: int, height: int) -> Image.Image:
+    """A smooth blue -> red bar spanning only the real bucket range
+    (1-4) -- excludes _HEAT_COLOR_STOPS' own bucket-0 (transparent
+    black) stop, which would otherwise show as a dead black patch at
+    the "Low" end instead of a clean gradient."""
+    colors = [_interp_heat_color(int(255 * (bucket / 4.0)))[:3] for bucket in (1, 2, 3, 4)]
+    strip = Image.new("RGB", (len(colors), 1))
+    strip.putdata(colors)
+    return strip.resize((width, height), Image.BILINEAR)
+
+
+def _draw_legend(image: Image.Image) -> None:
+    """Drawn directly on the final (already downscaled) image -- PIL's
+    TrueType text rendering is already antialiased at normal scale, no
+    need to supersample it too."""
+    draw = ImageDraw.Draw(image, "RGBA")
+    font = ImageFont.load_default(size=_LEGEND_FONT_SIZE_PX)
+    title = "TRAFFIC VOLUME"
+    title_height = _LEGEND_FONT_SIZE_PX + 4
+    bar_x = _LEGEND_MARGIN_PX
+    bar_y = image.height - _LEGEND_MARGIN_PX - _LEGEND_BAR_HEIGHT_PX - _LEGEND_FONT_SIZE_PX - 4
+
+    pad = 6
+    box = [
+        bar_x - pad, bar_y - pad - title_height,
+        bar_x + _LEGEND_BAR_WIDTH_PX + pad, bar_y + _LEGEND_BAR_HEIGHT_PX + _LEGEND_FONT_SIZE_PX + 4 + pad,
+    ]
+    draw.rounded_rectangle(box, radius=6, fill=_LEGEND_BACKGROUND_COLOR)
+    draw.text((bar_x, bar_y - pad - title_height + 2), title, font=font, fill=_LEGEND_TEXT_COLOR)
+
+    gradient = _legend_gradient(_LEGEND_BAR_WIDTH_PX, _LEGEND_BAR_HEIGHT_PX)
+    image.paste(gradient, (bar_x, bar_y))
+
+    label_y = bar_y + _LEGEND_BAR_HEIGHT_PX + 2
+    draw.text((bar_x, label_y), "Low", font=font, fill=_LEGEND_TEXT_COLOR)
+    high_width = draw.textlength("High", font=font)
+    draw.text((bar_x + _LEGEND_BAR_WIDTH_PX - high_width, label_y), "High", font=font, fill=_LEGEND_TEXT_COLOR)
 
 
 def _encode_jpeg(image: Image.Image) -> bytes:
@@ -267,18 +324,28 @@ def _encode_jpeg(image: Image.Image) -> bytes:
     return buf.getvalue()
 
 
+def _downscale(image: Image.Image) -> Image.Image:
+    return image.resize((_MAP_WIDTH, _MAP_HEIGHT), Image.LANCZOS)
+
+
 def _render_accepted_image(counts: dict[str, int]) -> bytes:
-    canvas = Image.new("RGB", (_MAP_WIDTH, _MAP_HEIGHT), _BACKGROUND_COLOR)
+    canvas = Image.new("RGB", (_RENDER_WIDTH, _RENDER_HEIGHT), _BACKGROUND_COLOR)
     _draw_reference_boundaries(ImageDraw.Draw(canvas), list(STATE_RINGS.values()), _CONUS_BOUNDING_BOX)
     pinpoints = _pinpoint_layer(_accepted_hotspots(counts), _CONUS_BOUNDING_BOX)
-    return _encode_jpeg(Image.alpha_composite(canvas.convert("RGBA"), pinpoints).convert("RGB"))
+    composited = Image.alpha_composite(canvas.convert("RGBA"), pinpoints).convert("RGB")
+    final = _downscale(composited)
+    _draw_legend(final)
+    return _encode_jpeg(final)
 
 
 def _render_blocked_image(counts_by_country: dict[str, int]) -> bytes:
-    canvas = Image.new("RGB", (_MAP_WIDTH, _MAP_HEIGHT), _BACKGROUND_COLOR)
+    canvas = Image.new("RGB", (_RENDER_WIDTH, _RENDER_HEIGHT), _BACKGROUND_COLOR)
     _draw_reference_boundaries(ImageDraw.Draw(canvas), list(COUNTRY_RINGS.values()), _WORLD_BOUNDING_BOX)
     choropleth = _choropleth_layer(_country_buckets(counts_by_country), _WORLD_BOUNDING_BOX)
-    return _encode_jpeg(Image.alpha_composite(canvas.convert("RGBA"), choropleth).convert("RGB"))
+    composited = Image.alpha_composite(canvas.convert("RGBA"), choropleth).convert("RGB")
+    final = _downscale(composited)
+    _draw_legend(final)
+    return _encode_jpeg(final)
 
 
 def _map_html(render_fn, counts: dict[str, int]) -> str:
