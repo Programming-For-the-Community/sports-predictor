@@ -115,6 +115,24 @@ void main() {
       expect(find.text('HOME MARGIN'), findsOneWidget);
     });
 
+    testWidgets('a long live-detail string does not overflow a phone-width card', (tester) async {
+      // ESPN's own detail text isn't always a short clock -- situational
+      // strings ("End of 2nd Quarter", a weather delay message) run long
+      // enough to overflow the LIVE row if it isn't allowed to shrink.
+      const liveState = LiveEventState(live: true, detail: '2nd & Goal at NCAAFB 4 -- Timeout', homeScore: 14, awayScore: 7);
+
+      await tester.pumpWidget(MaterialApp(
+        home: Scaffold(
+          body: SizedBox(
+            width: 360,
+            child: MatchupHero(sport: 'ncaafb', event: _scheduledEvent(), prediction: prediction, liveState: liveState),
+          ),
+        ),
+      ));
+
+      expect(tester.takeException(), isNull);
+    });
+
     testWidgets('a pre-game (not yet live) event shows only the predicted score, in cyan', (tester) async {
       await tester.pumpWidget(MaterialApp(
         home: Scaffold(body: MatchupHero(sport: 'nfl', event: _scheduledEvent(), prediction: prediction)),

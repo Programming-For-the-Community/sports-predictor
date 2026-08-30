@@ -118,17 +118,28 @@ class MatchupHero extends StatelessWidget {
               // model's own pre-game pick).
               if (isLive) ...[
                 const SizedBox(height: 12),
-                Center(
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      LiveStatusPill(dotOnly: compact),
-                      if (liveState!.detail != null) ...[
-                        const SizedBox(width: 8),
-                        Text(liveState!.detail!, style: AppTextStyles.body(color: AppColors.inkSub)),
-                      ],
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    LiveStatusPill(dotOnly: compact),
+                    if (liveState!.detail != null) ...[
+                      const SizedBox(width: 8),
+                      // Flexible + ellipsis -- ESPN's own detail text isn't
+                      // always a short clock ("Q3 08:14"); situational
+                      // strings ("End of 2nd Quarter", "Delayed: Weather")
+                      // can run long enough to overflow a phone-width card
+                      // otherwise (same guard game_row.dart's own live-detail
+                      // text already uses).
+                      Flexible(
+                        child: Text(
+                          liveState!.detail!,
+                          style: AppTextStyles.body(color: AppColors.inkSub),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
                     ],
-                  ),
+                  ],
                 ),
               ],
               const SizedBox(height: 24),

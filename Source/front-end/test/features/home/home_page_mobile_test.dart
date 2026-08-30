@@ -7,6 +7,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:front_end/core/auth/auth_repository.dart';
 import 'package:front_end/core/auth/cognito_auth_client.dart';
+import 'package:front_end/core/data/live_scores_repository.dart';
 import 'package:front_end/features/home/home_page.dart';
 
 import '../../support/mobile_viewport.dart';
@@ -15,7 +16,10 @@ import '../../support/mobile_viewport.dart';
 /// simplest of this project's Wrap-of-fixed-width-card layouts -- no data
 /// provider involved, kSports is a static list -- so a regression here
 /// would point straight at core/widgets/responsive.dart's cardWidth()
-/// itself rather than any one page's wiring of it.
+/// itself rather than any one page's wiring of it. SportCard itself now
+/// watches per-sport live-scores providers (for its LIVE/ACTIVE badge), so
+/// both flavors are overridden here to keep this a pure layout test, not a
+/// real network call.
 void main() {
   setUp(() => SharedPreferences.setMockInitialValues({}));
 
@@ -29,6 +33,8 @@ void main() {
             authRepositoryProvider.overrideWith(
               (ref) => AuthRepository(authClient: CognitoAuthClient(httpClient: MockClient((r) async => http.Response('{}', 200)))),
             ),
+            liveScoresProvider.overrideWith((ref, sport) async => const {}),
+            pgaLiveScoresProvider.overrideWith((ref, sport) async => const {}),
           ],
           child: const MaterialApp(home: HomePage()),
         ),
