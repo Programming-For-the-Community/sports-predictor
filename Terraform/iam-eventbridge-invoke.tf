@@ -77,6 +77,16 @@ data "aws_iam_policy_document" "eventbridge_invoke_permissions" {
   # itself didn't even exist yet (not just missing from this list), so
   # this one was never invoked at all, ever, since NCAAFB onboarding --
   # see that new file's own comment.
+  #
+  # f1_predict/f1_predict_read: same warmup-ping reasoning as every other
+  # sport's own serving Lambda pair above. f1_predict is ALSO
+  # scheduler-f1-season-projection.tf's own direct target (F1 has no
+  # schedule_sync Lambda of its own -- Jolpica's full-season schedule
+  # call lives inside f1-ingest itself, see that Lambda's own docstring),
+  # added in the same change that creates the scheduler, unlike
+  # pga_schedule_sync's own entry above -- see project-nba-eventbridge-
+  # permission-gap memory for why this must land together, not be
+  # assumed automatic.
   statement {
     sid     = "InvokeDirectLambdaJobs"
     actions = ["lambda:InvokeFunction"]
@@ -106,6 +116,8 @@ data "aws_iam_policy_document" "eventbridge_invoke_permissions" {
       # for why this must land together, not be assumed automatic.
       aws_lambda_function.pga_live_scores.arn,
       aws_lambda_function.ncaafb_schedule_sync.arn,
+      aws_lambda_function.f1_predict.arn,
+      aws_lambda_function.f1_predict_read.arn,
     ]
   }
 }

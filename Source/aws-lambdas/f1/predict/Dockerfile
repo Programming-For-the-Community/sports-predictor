@@ -1,0 +1,46 @@
+# Build context is Source/ (not this directory) -- same reasoning as
+# Source/aws-lambdas/pga/predict/Dockerfile: this image needs both this
+# function's code and the sibling library/ package, and Docker can't COPY
+# anything from outside its build context. See
+# .github/workflows/f1_ai_hosting.yml for the `docker build -f
+# Source/aws-lambdas/f1/predict/Dockerfile Source` invocation.
+#
+# Container image, not the zip packaging every other F1 Lambda in this
+# repo uses -- same xgboost/numpy/scipy size reasoning as every other
+# sport's predict Dockerfile. requirements-nodeps.txt/requirements.txt
+# split for the identical reason too (dodging xgboost's unconditional
+# nvidia-nccl-cu12 GPU dependency).
+#
+# boto3 is intentionally excluded from requirements.txt -- the Lambda
+# Python base image ships it preinstalled, same as the managed (zip)
+# runtime does.
+
+FROM public.ecr.aws/lambda/python:3.12 AS builder
+
+WORKDIR /build
+
+COPY library/ ./library/
+COPY aws-lambdas/f1/predict/requirements.txt ./requirements.txt
+COPY aws-lambdas/f1/predict/requirements-nodeps.txt ./requirements-nodeps.txt
+
+RUN pip install --no-cache-dir --target=/install --no-deps ./library && \
+    pip install --no-cache-dir --target=/install --no-deps -r requirements-nodeps.txt && \
+    pip install --no-cache-dir --target=/install -r requirements.txt
+
+# --- Runtime: installed packages + application source, nothing else ---
+FROM public.ecr.aws/lambda/python:3.12 AS runtime
+
+# lightgbm's prebuilt wheel dynamically links libgomp.so.1 (OpenMP) at
+# import time -- python base images don't ship it. Every F1 train_*.py's
+# own CANDIDATES list includes LightGBM (see library/ml/model_types.py),
+# so whichever target promoted it needs this at inference time too, not
+# just training (see model-training/f1/Dockerfile's own equivalent fix).
+RUN dnf install -y libgomp && dnf clean all
+
+COPY --from=builder /install ${LAMBDA_TASK_ROOT}
+COPY aws-lambdas/f1/predict/handler.py aws-lambdas/f1/predict/live_features.py \
+     aws-lambdas/f1/predict/model_loader.py aws-lambdas/f1/predict/event_prediction.py \
+     aws-lambdas/f1/predict/season_projection.py aws-lambdas/f1/predict/season_simulation.py \
+     ${LAMBDA_TASK_ROOT}/
+
+CMD ["handler.lambda_handler"]

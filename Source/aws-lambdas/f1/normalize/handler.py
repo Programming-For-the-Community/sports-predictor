@@ -35,6 +35,16 @@ warning on every one of its daily pga/statistics/*.json writes for
 exactly this reason -- its S3 notification filters on the whole pga/
 prefix, not just pga/leaderboard/; avoided here on purpose).
 
+- f1/schedule/{season}/{date}.json -- the season's own full calendar,
+  written fresh every ingest run (aws-lambdas/f1/ingest/handler.py).
+  Upserts a "scheduled" stub event (library/normalize/f1.py's schedule_
+  payload_to_scheduled_events) for every race that ISN'T already stored
+  as "completed" -- checked per race against the current stored event,
+  so a re-fetch of the same calendar never clobbers an already-raced
+  round's real result back to a resultless placeholder. The only source
+  season simulation (aws-lambdas/f1/predict/season_projection.py) has
+  for the remaining schedule's own circuit_id/event_date at all.
+
 One Lambda invocation may receive multiple S3 records if notifications
 are batched. Each record is processed independently so a failure in one
 doesn't block the others.
@@ -51,6 +61,7 @@ from library.normalize.f1 import (
     race_result_to_constructor_entities,
     race_result_to_driver_entities,
     race_result_to_event_item,
+    schedule_payload_to_scheduled_events,
     sprint_result_to_constructor_entities,
     sprint_result_to_driver_entities,
     sprint_result_to_event_item,
@@ -170,6 +181,24 @@ def _process_sprint(payload: dict, key: str) -> None:
     )
 
 
+def _process_schedule(payload: dict, key: str) -> None:
+    storage = _get_storage()
+    stub_events = schedule_payload_to_scheduled_events(payload, SPORT)
+    written = skipped = 0
+    for stub_event in stub_events:
+        existing = storage.get_event(stub_event["event_key"])
+        # Never downgrade an already-completed race back to a resultless
+        # stub -- the calendar is re-fetched and re-processed every day
+        # (aws-lambdas/f1/ingest/handler.py), so this check runs on every
+        # single already-raced round, every day, forever.
+        if existing is not None and existing.get("status") == "completed":
+            skipped += 1
+            continue
+        storage.upsert_event(stub_event)
+        written += 1
+    logger.info("Processed schedule %s: %d stub(s) written, %d already-completed race(s) left untouched", key, written, skipped)
+
+
 def _dispatch(bucket: str, key: str) -> None:
     if "/results/" in key:
         _process_results(_read_json(bucket, key), key, bucket)
@@ -179,6 +208,9 @@ def _dispatch(bucket: str, key: str) -> None:
         return
     if "/sprint/" in key:
         _process_sprint(_read_json(bucket, key), key)
+        return
+    if "/schedule/" in key:
+        _process_schedule(_read_json(bucket, key), key)
         return
     if any(prefix in key for prefix in _RAW_ONLY_PREFIXES):
         logger.info("Skipping %s -- raw-only prefix, read directly from S3 by feature engineering.", key)

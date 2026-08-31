@@ -42,6 +42,23 @@ def _make_storage_with_events(storage_env):
     return storage, mock_events
 
 
+class TestGetEvent:
+    def test_reads_one_event_by_its_own_key(self, storage_env):
+        storage, mock_events = _make_storage_with_events(storage_env)
+        mock_events.get_item.return_value = {"event_key": "SPORT#F1#EVENT#2024-1", "status": "completed"}
+
+        result = storage.get_event("SPORT#F1#EVENT#2024-1")
+
+        assert result == {"event_key": "SPORT#F1#EVENT#2024-1", "status": "completed"}
+        mock_events.get_item.assert_called_once_with({"event_key": "SPORT#F1#EVENT#2024-1"})
+
+    def test_returns_none_when_no_such_event_exists(self, storage_env):
+        storage, mock_events = _make_storage_with_events(storage_env)
+        mock_events.get_item.return_value = None
+
+        assert storage.get_event("SPORT#F1#EVENT#missing") is None
+
+
 class TestUpsertPlayerEntity:
     def test_writes_with_a_condition_expression(self, storage_env):
         storage, mock_entities = _make_storage(storage_env)

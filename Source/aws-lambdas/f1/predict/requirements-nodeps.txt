@@ -1,0 +1,13 @@
+# Installed with --no-deps (see Dockerfile) specifically to skip
+# xgboost's unconditional Linux/x86_64 nvidia-nccl-cu12 dependency
+# (~300MB, GPU-only distributed training support). Its own genuine
+# runtime deps (numpy, scipy) are still satisfied by requirements.txt.
+#
+# Pinned to the EXACT version Source/model-training/f1/requirements.txt
+# also pins -- xgboost's raw model format is not guaranteed compatible
+# across major versions, and a real production bug confirmed this for
+# another sport this session: a model trained under xgboost 3.x, loaded
+# by a 2.x reader, predicted silently wrong (not an error) values roughly
+# half the real ones or worse (see project-xgboost-version-skew-bug
+# memory). Keep both requirements.txt files' xgboost pin identical.
+xgboost==3.3.0

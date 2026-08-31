@@ -28,8 +28,53 @@ def _load_handler(module_name: str, relative_path: str) -> None:
 _load_handler("f1_ingest", "aws-lambdas/f1/ingest/handler.py")
 _load_handler("f1_normalize", "aws-lambdas/f1/normalize/handler.py")
 
-# predict/'s own season_simulation.py has a unique name -- a plain
-# sys.path entry is enough for it, no _load_handler renaming trick
-# needed, same convention tests/aws-lambdas/pga/conftest.py uses for its
-# own predict/ modules.
+# predict/'s own modules (live_features.py, model_loader.py,
+# event_prediction.py, season_projection.py, season_simulation.py) have
+# unique names -- a plain sys.path entry is enough for them, no
+# _load_handler renaming trick needed. predict/handler.py itself still
+# needs one, same reasoning as ingest/normalize above -- same pattern
+# tests/aws-lambdas/pga/conftest.py already uses.
 sys.path.insert(0, os.path.join(_src, "aws-lambdas", "f1", "predict"))
+_load_handler("f1_predict", "aws-lambdas/f1/predict/handler.py")
+
+# predict-read/'s handler.py only ever imports from library.* (no local
+# sibling modules the way predict/'s model_loader.py etc. are) -- no
+# sys.path insert needed, just the same unique-module-name registration.
+_load_handler("f1_predict_read", "aws-lambdas/f1/predict-read/handler.py")
+
+
+import pytest  # noqa: E402
+
+
+@pytest.fixture(autouse=True)
+def reset_f1_predict_singletons():
+    """Clears f1_predict's own module-level singletons before and after
+    every test in this directory."""
+    f1_predict = sys.modules.get("f1_predict")
+    if f1_predict is None:
+        yield
+        return
+    f1_predict._storage = None
+    f1_predict._model_bucket = None
+    f1_predict._predictions_table = None
+    yield
+    f1_predict._storage = None
+    f1_predict._model_bucket = None
+    f1_predict._predictions_table = None
+
+
+@pytest.fixture(autouse=True)
+def reset_f1_predict_read_singletons():
+    f1_predict_read = sys.modules.get("f1_predict_read")
+    if f1_predict_read is None:
+        yield
+        return
+    f1_predict_read._storage = None
+    f1_predict_read._model_bucket = None
+    f1_predict_read._predictions_table = None
+    f1_predict_read._predict_invoker = None
+    yield
+    f1_predict_read._storage = None
+    f1_predict_read._model_bucket = None
+    f1_predict_read._predictions_table = None
+    f1_predict_read._predict_invoker = None

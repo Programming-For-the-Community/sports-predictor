@@ -1,0 +1,29 @@
+# boto3 is pre-installed in the Lambda Python runtime -- not bundled here.
+# The shared library (Source/library) is installed separately by the build
+# workflow.
+#
+# Same package set and reasoning as Source/aws-lambdas/pga/predict/
+# requirements.txt -- this Lambda's model_loader.py is a byte-for-byte
+# copy of PGA's own, dispatching on library.ml.model_types.ADAPTERS the
+# same way, so it needs the same deserialization footprint regardless of
+# which algorithm actually won any given F1 model's own backtest
+# tournament (9 models total: win/podium/dnf/finish-position/constructor-
+# winprob/qualifying-position/sprint-grid/sprint-winprob/sprint-podium,
+# all sharing the same CANDIDATES list shape).
+#
+# numpy/scipy: xgboost's own real runtime deps (installs --no-deps and
+# won't pull them in on its own).
+# scikit-learn/joblib/pandas: needed whenever a promoted model is a
+# non-XGBoost candidate (LogisticRegression/RandomForest/MLP -- see
+# library/ml/model_types.py's ADAPTERS).
+# lightgbm: every F1 train_*.py's own CANDIDATES list includes it, same
+# as PGA's -- unconditional here for the same reason scikit-learn is,
+# since which algorithm actually won any given target's tournament can
+# change from one retrain to the next. Needs libgomp at runtime too --
+# see this directory's own Dockerfile.
+numpy
+scipy
+scikit-learn
+joblib
+pandas
+lightgbm>=4.3

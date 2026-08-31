@@ -1,0 +1,69 @@
+# Points the f1-predict Lambda at an already-pushed image. Split out of
+# f1_ai_hosting.yml so build (no infra dependency) and deploy (needs the
+# Lambda function to already exist) can run on opposite sides of
+# `terraform apply` in f1_deploy.yml.
+#
+# Runs standalone (workflow_dispatch, defaulting to whatever is currently
+# tagged f1-predict-latest) or called from f1_deploy.yml with the exact
+# versioned tag f1_ai_hosting.yml just pushed.
+
+name: F1 Predict Deploy
+
+on:
+  workflow_dispatch:
+    inputs:
+      function_name:
+        description: 'F1 predict Lambda function name'
+        required: false
+        type: string
+        default: 'sports-predictor-f1-predict'
+      image_uri:
+        description: 'Image URI to deploy (leave blank to use the current f1-predict-latest tag)'
+        required: false
+        type: string
+  workflow_call:
+    inputs:
+      function_name:
+        description: 'F1 predict Lambda function name (from Terraform output f1_predict_function_name)'
+        required: false
+        type: string
+        default: 'sports-predictor-f1-predict'
+      image_uri:
+        description: 'Image URI to deploy (leave blank to use the current f1-predict-latest tag)'
+        required: false
+        type: string
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  deploy:
+    name: Point f1-predict Lambda at the image
+    runs-on: ubuntu-latest
+    steps:
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_DEPLOY_SVC_ACCT_ARN }}
+          aws-region: ${{ vars.AWS_RESOURCE_REGION }}
+          role-session-name: GitHubActions-${{ github.run_id }}
+
+      - name: Update function code
+        env:
+          FUNCTION_NAME: ${{ inputs.function_name || 'sports-predictor-f1-predict' }}
+          IMAGE_URI: ${{ inputs.image_uri }}
+          ECR_URI: ${{ secrets.ECR_URI }}
+        run: |
+          if [ -z "$IMAGE_URI" ]; then
+            IMAGE_URI="$ECR_URI:f1-predict-latest"
+          fi
+
+          aws lambda update-function-code \
+            --function-name "$FUNCTION_NAME" \
+            --image-uri "$IMAGE_URI"
+
+          aws lambda wait function-updated \
+            --function-name "$FUNCTION_NAME"
+
+          echo "Deployed $FUNCTION_NAME -> $IMAGE_URI"

@@ -1,4 +1,4 @@
-# Keeps the 5 predict-read Lambdas warm. Only real API Gateway requests
+# Keeps the 6 predict-read Lambdas warm. Only real API Gateway requests
 # reach predict-read, so a ping every 5 minutes, comfortably inside
 # Lambda's idle-reclaim window, keeps at least one warm container per
 # sport ready for real visits.
@@ -15,6 +15,7 @@ locals {
     nba     = aws_lambda_function.nba_predict_read.arn
     ncaambb = aws_lambda_function.ncaambb_predict_read.arn
     pga     = aws_lambda_function.pga_predict_read.arn
+    f1      = aws_lambda_function.f1_predict_read.arn
   }
 }
 

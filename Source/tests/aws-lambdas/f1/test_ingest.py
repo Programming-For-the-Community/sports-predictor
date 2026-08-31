@@ -59,8 +59,38 @@ class TestLambdaHandlerDateResolution:
         mock_client.get_races.assert_called_once_with(2026)
 
 
+class TestScheduleSnapshot:
+    def test_writes_the_full_calendar_every_run_unconditionally(self):
+        mock_client = _client(races=[])  # nothing in the trailing window
+        mock_s3 = MagicMock()
+
+        with patch.object(f1_ingest, "JolpicaClient", return_value=mock_client), \
+             patch.object(f1_ingest, "_s3", mock_s3), \
+             patch("f1_ingest.date") as mock_date:
+            mock_date.today.return_value = date(2026, 8, 23)
+            f1_ingest.lambda_handler({}, None)
+
+        written_keys = [call.kwargs["Key"] for call in mock_s3.put_object.call_args_list]
+        assert "f1/schedule/2026/20260823.json" in written_keys
+
+    def test_zero_extra_jolpica_requests_for_the_schedule_write(self):
+        """get_races is called exactly once -- the same response already
+        used for trailing-window discovery is reused for the schedule
+        write, not re-fetched."""
+        mock_client = _client(races=[_race()])
+        mock_s3 = MagicMock()
+
+        with patch.object(f1_ingest, "JolpicaClient", return_value=mock_client), \
+             patch.object(f1_ingest, "_s3", mock_s3), \
+             patch("f1_ingest.date") as mock_date:
+            mock_date.today.return_value = date(2026, 8, 23)
+            f1_ingest.lambda_handler({}, None)
+
+        mock_client.get_races.assert_called_once()
+
+
 class TestRaceDiscoveryAndFetch:
-    def test_no_races_in_the_trailing_window_writes_nothing(self):
+    def test_no_races_in_the_trailing_window_writes_no_round_specific_files(self):
         mock_client = _client(races=[_race(race_date="2026-01-01")])  # far outside the window
         mock_s3 = MagicMock()
 
@@ -69,7 +99,12 @@ class TestRaceDiscoveryAndFetch:
             result = f1_ingest.lambda_handler({"date": "20260823"}, None)
 
         assert result == {"processed": 0, "failed": 0, "standings_captured": False}
-        mock_s3.put_object.assert_not_called()
+        # The season's own full-calendar schedule snapshot is still
+        # written unconditionally every run (TestScheduleSnapshot) -- only
+        # per-round results/qualifying/sprint/pitstops writes are gated on
+        # the trailing window.
+        written_keys = [call.kwargs["Key"] for call in mock_s3.put_object.call_args_list]
+        assert written_keys == ["f1/schedule/2026/20260823.json"]
 
     def test_a_race_on_target_date_is_fetched_and_written(self):
         mock_client = _client(races=[_race(round_="14", race_date="2026-08-23")])

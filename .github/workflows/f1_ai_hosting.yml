@@ -1,0 +1,69 @@
+# Builds, tests, and pushes the F1 AI hosting/inference image. Runs
+# standalone (workflow_dispatch) or called from f1_deploy.yml
+# (workflow_call).
+#
+# aws_lambda_function.f1_predict is a container-image Lambda --
+# CreateFunction validates its image tag already exists in ECR before
+# Terraform can create it, so this must build before infra.
+#
+# Container image, not the zip packaging ingest/normalize use (see
+# python_lambda_build.yml) -- xgboost/numpy/scipy are too large for a
+# zip-based Lambda deployment package.
+
+name: F1 AI Hosting
+
+on:
+  workflow_dispatch:
+  workflow_call:
+    outputs:
+      predict_image_uri:
+        description: 'Versioned tag of the pushed f1-predict image, for f1_predict_deploy.yml to point the Lambda at'
+        value: ${{ jobs.build-predict-image.outputs.versioned_tag }}
+
+env:
+  PREDICT_IMAGE_VERSION: '1.0.0'
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  test-predict:
+    name: Run f1-predict tests
+    uses: ./.github/workflows/run_python_tests.yml
+    with:
+      test_path: >-
+        Source/tests/library/
+        Source/tests/aws-lambdas/f1/test_live_features.py
+        Source/tests/aws-lambdas/f1/test_event_prediction.py
+        Source/tests/aws-lambdas/f1/test_predict_handler.py
+        Source/tests/aws-lambdas/f1/test_season_simulation.py
+        Source/tests/aws-lambdas/f1/test_season_projection.py
+      # Both requirements files -- requirements-nodeps.txt (xgboost, only
+      # ever installed --no-deps in the real Dockerfile build to dodge its
+      # nvidia-nccl-cu12 GPU dependency) still needs to be installed HERE
+      # for xgboost itself to be importable at all in this test job.
+      requirements_files: 'Source/aws-lambdas/f1/predict/requirements.txt Source/aws-lambdas/f1/predict/requirements-nodeps.txt'
+
+  set-versions:
+    name: Resolve image versions
+    runs-on: ubuntu-latest
+    outputs:
+      predict_version: ${{ steps.out.outputs.predict_version }}
+    steps:
+      - id: out
+        run: echo "predict_version=${{ env.PREDICT_IMAGE_VERSION }}" >> "$GITHUB_OUTPUT"
+
+  build-predict-image:
+    name: Build and push predict image
+    needs: [set-versions, test-predict]
+    uses: ./.github/workflows/docker_build_push.yml
+    secrets: inherit
+    with:
+      dockerfile_path: 'Source/aws-lambdas/f1/predict/Dockerfile'
+      docker_context: 'Source'
+      image_name: 'f1-predict'
+      image_version: ${{ needs.set-versions.outputs.predict_version }}
+      # arm64 -- matches aws_lambda_function.f1_predict's own
+      # architectures = ["arm64"] (Terraform/lambda-f1-predict.tf).
+      platform: 'linux/arm64'

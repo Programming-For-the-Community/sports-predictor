@@ -1,4 +1,4 @@
-# Keeps the 5 heavy (container-image, xgboost/pandas/sklearn) predict
+# Keeps the 6 heavy (container-image, xgboost/pandas/sklearn) predict
 # Lambdas warm. Unlike the predict-read Lambdas (scheduler-predict-read-
 # warmup.tf, zip-packaged, sub-second cold start), these have a large
 # enough import chain that a genuinely cold start regularly exceeds
@@ -7,7 +7,8 @@
 # "INIT_REPORT ... Status: timeout" entries on nfl/ncaafb/nba; ncaambb
 # wired in from day one per its own onboarding plan, not retrofitted
 # after a live complaint the way the first 3 sports were; pga added
-# 2026-08-27 alongside the rest of its serving Lambda pair). A ping every
+# 2026-08-27 alongside the rest of its serving Lambda pair; f1 added
+# alongside its own serving Lambda pair, same reasoning). A ping every
 # 5 minutes, comfortably inside Lambda's idle-reclaim window, keeps at
 # least one already-initialized container ready so a real request doesn't
 # pay that cost itself.
@@ -18,7 +19,7 @@
 # DynamoDB/S3 itself, so each tick costs one Lambda invocation and
 # nothing else. IAM: already covered -- iam-eventbridge-invoke.tf's
 # InvokeDirectLambdaJobs statement already grants this role invoke on
-# all 5 of these functions (used by each sport's own scheduled season-
+# all 6 of these functions (used by each sport's own scheduled season-
 # projection trigger, or for pga -- which has no season-projection
 # concept -- simply by name).
 locals {
@@ -28,6 +29,7 @@ locals {
     nba     = aws_lambda_function.nba_predict.arn
     ncaambb = aws_lambda_function.ncaambb_predict.arn
     pga     = aws_lambda_function.pga_predict.arn
+    f1      = aws_lambda_function.f1_predict.arn
   }
 }
 
