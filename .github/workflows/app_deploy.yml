@@ -109,6 +109,21 @@ jobs:
     uses: ./.github/workflows/pga_ai_hosting.yml
     secrets: inherit
 
+  f1_backfill_build:
+    name: F1 backfill (build)
+    uses: ./.github/workflows/f1_backfill.yml
+    secrets: inherit
+
+  f1_ai_training_build:
+    name: F1 AI training (build)
+    uses: ./.github/workflows/f1_ai_training.yml
+    secrets: inherit
+
+  f1_ai_hosting_build:
+    name: F1 AI hosting (build)
+    uses: ./.github/workflows/f1_ai_hosting.yml
+    secrets: inherit
+
   # --- Infra: applies once, gated on every "before" job tolerating
   # success-or-skip ---
   infra:
@@ -119,6 +134,7 @@ jobs:
       nba_backfill_build, nba_ai_training_build, nba_ai_hosting_build,
       ncaambb_backfill_build, ncaambb_ai_training_build, ncaambb_ai_hosting_build,
       pga_backfill_build, pga_ai_training_build, pga_ai_hosting_build,
+      f1_backfill_build, f1_ai_training_build, f1_ai_hosting_build,
     ]
     if: |
       always() &&
@@ -136,7 +152,10 @@ jobs:
       (needs.ncaambb_ai_hosting_build.result == 'success' || needs.ncaambb_ai_hosting_build.result == 'skipped') &&
       (needs.pga_backfill_build.result == 'success' || needs.pga_backfill_build.result == 'skipped') &&
       (needs.pga_ai_training_build.result == 'success' || needs.pga_ai_training_build.result == 'skipped') &&
-      (needs.pga_ai_hosting_build.result == 'success' || needs.pga_ai_hosting_build.result == 'skipped')
+      (needs.pga_ai_hosting_build.result == 'success' || needs.pga_ai_hosting_build.result == 'skipped') &&
+      (needs.f1_backfill_build.result == 'success' || needs.f1_backfill_build.result == 'skipped') &&
+      (needs.f1_ai_training_build.result == 'success' || needs.f1_ai_training_build.result == 'skipped') &&
+      (needs.f1_ai_hosting_build.result == 'success' || needs.f1_ai_hosting_build.result == 'skipped')
     uses: ./.github/workflows/tf_install.yml
     secrets: inherit
 
@@ -318,6 +337,35 @@ jobs:
     secrets: inherit
     with:
       function_name: ${{ needs.infra.outputs.pga_live_scores_function_name }}
+
+  # F1 has no live_scores job yet -- still deferred (see
+  # project-f1-onboarding memory), same "add it when it's actually built"
+  # precedent NCAA MBB's own comment above sets.
+  f1_predict_deploy:
+    name: F1 AI hosting (deploy)
+    needs: [infra, f1_ai_hosting_build]
+    uses: ./.github/workflows/f1_predict_deploy.yml
+    secrets: inherit
+    with:
+      function_name: ${{ needs.infra.outputs.f1_predict_function_name }}
+      image_uri: ${{ needs.f1_ai_hosting_build.outputs.predict_image_uri }}
+
+  f1_data_pipeline:
+    name: F1 data pipeline (deploy)
+    needs: infra
+    uses: ./.github/workflows/f1_data_pipeline.yml
+    secrets: inherit
+    with:
+      ingest_function_name: ${{ needs.infra.outputs.f1_ingest_function_name }}
+      normalize_function_name: ${{ needs.infra.outputs.f1_normalize_function_name }}
+
+  f1_predict_read_deploy:
+    name: F1 predict-read (deploy)
+    needs: infra
+    uses: ./.github/workflows/f1_predict_read_deploy.yml
+    secrets: inherit
+    with:
+      function_name: ${{ needs.infra.outputs.f1_predict_read_function_name }}
 
   # No config `with:` block for either -- both read directly from
   # Terraform state instead of relaying it through needs.infra.outputs.*.

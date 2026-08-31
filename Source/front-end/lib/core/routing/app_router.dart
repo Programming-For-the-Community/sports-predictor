@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 
 import '../auth/auth_repository.dart';
 import '../data/events_repository.dart';
+import '../data/f1_events_repository.dart';
 import '../data/field_events_repository.dart';
 import '../data/models_repository.dart';
 import '../data/season_repository.dart';
@@ -13,9 +14,12 @@ import '../../features/auth/splash_page.dart';
 import '../../features/home/home_page.dart';
 import '../../features/events/event_detail_page.dart';
 import '../../features/events/event_list_page.dart';
+import '../../features/events/f1_event_detail_page.dart';
+import '../../features/events/f1_event_list_page.dart';
 import '../../features/events/field_event_detail_page.dart';
 import '../../features/events/field_event_list_page.dart';
 import '../../features/models/model_cards_page.dart';
+import '../../features/season/f1_season_page.dart';
 import '../../features/season/pga_season_page.dart';
 import '../../features/season/season_page.dart';
 import '../../features/sport_shell/sport_shell_page.dart';
@@ -45,6 +49,8 @@ class _AuthChangeNotifier extends ChangeNotifier {
         ref.invalidate(eventPredictionProvider);
         ref.invalidate(fieldEventsListProvider);
         ref.invalidate(fieldEventPredictionProvider);
+        ref.invalidate(f1EventsListProvider);
+        ref.invalidate(f1EventPredictionProvider);
         ref.invalidate(modelsListProvider);
         ref.invalidate(seasonProjectionProvider);
       }
@@ -85,13 +91,21 @@ final appRouterProvider = Provider<GoRouter>((ref) {
         routes: [
           GoRoute(
             path: '/:sport/events',
-            // Router-level branch on eventShape -- keeps EventListPage/
-            // EventDetailPage/GameRow completely untouched, mirroring how
-            // SportCard already branches on eventShape at the leaf-widget
-            // level (sport_card.dart). Same path template either way, so
-            // this can't be two separate GoRoutes.
+            // Router-level branch -- keeps EventListPage/EventDetailPage/
+            // GameRow completely untouched, mirroring how SportCard
+            // already branches on eventShape at the leaf-widget level
+            // (sport_card.dart). F1 is checked by id, not just eventShape
+            // -- it shares EventShape.field with PGA (both render a
+            // ranked list, never W/L), but the two sports' own /events and
+            // /predictions response shapes are genuinely different
+            // (f1_event.dart/f1_prediction.dart vs field_event.dart/
+            // field_prediction.dart), so eventShape alone can't pick the
+            // right widget the way it does for headToHead vs field.  Same
+            // path template regardless, so this can't be three separate
+            // GoRoutes.
             builder: (context, state) {
               final sportId = state.pathParameters['sport']!;
+              if (sportId == 'f1') return F1EventListPage(sportId: sportId);
               return sportById(sportId).eventShape == EventShape.field
                   ? FieldEventListPage(sportId: sportId)
                   : EventListPage(sportId: sportId);
@@ -102,6 +116,7 @@ final appRouterProvider = Provider<GoRouter>((ref) {
                 builder: (context, state) {
                   final sportId = state.pathParameters['sport']!;
                   final eventId = state.pathParameters['eventId']!;
+                  if (sportId == 'f1') return F1EventDetailPage(sportId: sportId, eventId: eventId);
                   return sportById(sportId).eventShape == EventShape.field
                       ? FieldEventDetailPage(sportId: sportId, eventId: eventId)
                       : EventDetailPage(sportId: sportId, eventId: eventId);
@@ -117,6 +132,7 @@ final appRouterProvider = Provider<GoRouter>((ref) {
             path: '/:sport/season',
             builder: (context, state) {
               final sportId = state.pathParameters['sport']!;
+              if (sportId == 'f1') return const F1SeasonPage();
               return sportById(sportId).usesFedexCupSeasonPage
                   ? const PgaSeasonPage()
                   : SeasonPage(sportId: sportId);
