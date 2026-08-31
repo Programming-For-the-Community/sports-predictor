@@ -71,6 +71,12 @@ data "aws_iam_policy_document" "eventbridge_invoke_permissions" {
   # scheduler resource and the Lambda itself apply cleanly on their own.
   # Added here now that it's been found, same fix shape as every other
   # sport's own schedule_sync/live_scores entry above.
+  #
+  # ncaafb_schedule_sync: a DIFFERENT, bigger version of the exact same
+  # gap class, found 2026-08-31 -- scheduler-ncaafb-schedule-sync.tf
+  # itself didn't even exist yet (not just missing from this list), so
+  # this one was never invoked at all, ever, since NCAAFB onboarding --
+  # see that new file's own comment.
   statement {
     sid     = "InvokeDirectLambdaJobs"
     actions = ["lambda:InvokeFunction"]
@@ -99,6 +105,7 @@ data "aws_iam_policy_document" "eventbridge_invoke_permissions" {
       # found live) -- see project-nba-eventbridge-permission-gap memory
       # for why this must land together, not be assumed automatic.
       aws_lambda_function.pga_live_scores.arn,
+      aws_lambda_function.ncaafb_schedule_sync.arn,
     ]
   }
 }

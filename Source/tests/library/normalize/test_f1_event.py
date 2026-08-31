@@ -289,6 +289,20 @@ class TestQualifyingPayloadToResults:
         # 1:29.179 -> 89.179 seconds.
         assert results["max_verstappen"]["q3_seconds"] == pytest.approx(89.179)
 
+    def test_parses_bare_sub_minute_lap_times_with_no_colon(self):
+        # Regression: a real backfill run (2026-08-31) logged dozens of
+        # genuinely valid sub-minute qualifying times ("54.963" etc, no
+        # "M:" prefix at all) as "unparseable" and silently discarded
+        # them -- the original parser assumed every value had a colon.
+        short_lap = {
+            "position": "1",
+            "Driver": {"driverId": "d"}, "Constructor": {"constructorId": "c"},
+            "Q1": "54.963",
+        }
+        results = qualifying_payload_to_results(_qualifying_payload(short_lap))
+        assert results["d"]["q1_seconds"] == pytest.approx(54.963)
+        assert results["d"]["best_seconds"] == pytest.approx(54.963)
+
     def test_best_seconds_is_the_deepest_segment_actually_reached(self):
         results = qualifying_payload_to_results(_qualifying_payload(_POLE, _Q2_ELIMINATED, _Q1_ELIMINATED))
 

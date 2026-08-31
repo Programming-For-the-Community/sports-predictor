@@ -14,6 +14,11 @@
 # delayed one). Year-round, not gated to a season window (PGA has none --
 # see dynamodb-sport-registry.tf's pga_registry row), so this always
 # runs.
+#
+# scheduler-pga-season-projection.tf runs the same Tuesday, 4 hours after
+# this (14:00 UTC) -- moved there 2026-08-31 specifically so that weekly
+# projection always uses this same day's freshly synced calendar, not a
+# stale one from up to 6 days earlier.
 resource "aws_scheduler_schedule" "pga_schedule_sync" {
   name        = "${var.project}-pga-schedule-sync"
   description = "Invokes the pga-schedule-sync Lambda weekly, Tue 10:00 UTC, to seed/refresh the current PGA season's tournament calendar."

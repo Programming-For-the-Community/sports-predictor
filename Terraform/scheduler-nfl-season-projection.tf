@@ -8,9 +8,12 @@
 # state machine like the ingest/training orchestrators: one computation,
 # no fan-out to justify that extra layer.
 #
-# Weekly, Wednesday 14:00 UTC, 2 hours after the training-orchestrator
-# (scheduler-training-orchestrator.tf, Wed 12:00 UTC) so that week's
-# leaderboards use that week's freshly promoted models.
+# Weekly, Wednesday 14:00 UTC -- same day as, and after, both
+# scheduler-nfl-schedule-sync.tf (Wed 10:00 UTC, moved there 2026-08-31
+# specifically so this ordering holds) and the training-orchestrator
+# (scheduler-training-orchestrator.tf, Wed 12:00 UTC), so that week's
+# leaderboards use both that week's freshly synced schedule and that
+# week's freshly promoted models.
 resource "aws_scheduler_schedule" "nfl_season_projection" {
   name        = "${var.project}-nfl-season-projection"
   description = "Invokes the nfl_predict Lambda weekly, Wed 14:00 UTC, to recompute the season projection and cache it to S3 for GET /nfl/season."
