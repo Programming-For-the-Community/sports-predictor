@@ -1,0 +1,80 @@
+# Builds and deploys the F1 recurring data pipeline Lambdas: f1-ingest
+# (EventBridge-orchestrator-triggered, discovers which race round(s) fall
+# in today's trailing window and writes raw results/qualifying/sprint/
+# pitstops JSON to S3) and f1-normalize (S3-triggered, writes to
+# DynamoDB). Both are deployed in parallel since they are independent -- a
+# failure in one does not block the other. Unlike PGA, there is no
+# f1-schedule-sync -- Jolpica's own season schedule call
+# (JolpicaClient.get_races) already resolves the whole season in one shot
+# from within f1-ingest itself (see Source/aws-lambdas/f1/ingest/
+# handler.py's own docstring), so no separate discovery Lambda is needed.
+#
+# Lambda function names are supplied by the caller (f1_deploy.yml) from
+# Terraform outputs so this workflow never hard-codes names that Terraform
+# owns. Defaults are provided so workflow_dispatch (manual, standalone run)
+# still works without needing the Terraform output values.
+#
+# Terraform (tf_install.yml) creates each Lambda function with a placeholder
+# ZIP and lifecycle { ignore_changes } so it never overwrites what this
+# workflow deploys. This workflow owns all subsequent code updates.
+
+name: F1 Data Pipeline
+
+on:
+  workflow_dispatch:
+  workflow_call:
+    inputs:
+      ingest_function_name:
+        description: 'F1 ingest Lambda function name (from Terraform output f1_ingest_function_name)'
+        required: false
+        type: string
+        default: 'sports-predictor-f1-ingest'
+      normalize_function_name:
+        description: 'F1 normalize Lambda function name (from Terraform output f1_normalize_function_name)'
+        required: false
+        type: string
+        default: 'sports-predictor-f1-normalize'
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  # Each Lambda gets its own upstream test job, pointed at its own
+  # specific test file -- not the whole Source/tests/aws-lambdas/f1/
+  # directory. A failing normalize test shouldn't fail the ingest deploy,
+  # or vice versa, purely because both deploys pointed at the same shared
+  # directory.
+  test-ingest:
+    name: Run f1-ingest tests
+    uses: ./.github/workflows/run_python_tests.yml
+    with:
+      test_path: 'Source/tests/aws-lambdas/f1/test_ingest.py'
+      requirements_files: 'Source/aws-lambdas/f1/ingest/requirements.txt'
+
+  test-normalize:
+    name: Run f1-normalize tests
+    uses: ./.github/workflows/run_python_tests.yml
+    with:
+      test_path: 'Source/tests/aws-lambdas/f1/test_normalize.py'
+      requirements_files: 'Source/aws-lambdas/f1/normalize/requirements.txt'
+
+  deploy-ingest:
+    name: Deploy f1-ingest Lambda
+    needs: test-ingest
+    uses: ./.github/workflows/python_lambda_build.yml
+    secrets: inherit
+    with:
+      function_name: ${{ inputs.ingest_function_name || 'sports-predictor-f1-ingest' }}
+      handler_dir: 'Source/aws-lambdas/f1/ingest'
+      library_path: 'Source/library'
+
+  deploy-normalize:
+    name: Deploy f1-normalize Lambda
+    needs: test-normalize
+    uses: ./.github/workflows/python_lambda_build.yml
+    secrets: inherit
+    with:
+      function_name: ${{ inputs.normalize_function_name || 'sports-predictor-f1-normalize' }}
+      handler_dir: 'Source/aws-lambdas/f1/normalize'
+      library_path: 'Source/library'

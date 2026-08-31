@@ -105,7 +105,7 @@ data "aws_iam_policy_document" "ecs_pipeline_permissions" {
     condition {
       test     = "StringLike"
       variable = "s3:prefix"
-      values   = ["nfl/*", "ncaafb/*", "nba/*", "ncaambb/*", "pga/*", "training-runs/*"]
+      values   = ["nfl/*", "ncaafb/*", "nba/*", "ncaambb/*", "pga/*", "f1/*", "training-runs/*"]
     }
   }
 }

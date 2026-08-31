@@ -1,0 +1,13 @@
+# Same dependency set as model-training/pga -- see that requirements.txt's
+# own comment -- including lightgbm, since several CANDIDATES lists include
+# a LightGBM adapter. lightgbm ships prebuilt manylinux wheels for standard
+# Fargate architectures, same as xgboost.
+pandas>=2.2
+pyarrow>=16.0
+scikit-learn>=1.4
+scikit-learn-intelex>=2024.0
+# Pinned to the EXACT version every other sport's training/serving images
+# pin -- xgboost's raw model format is not guaranteed compatible across
+# major versions (see project-xgboost-version-skew-bug memory).
+xgboost==3.3.0
+lightgbm>=4.3

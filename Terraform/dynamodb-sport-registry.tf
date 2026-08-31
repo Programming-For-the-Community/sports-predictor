@@ -476,3 +476,113 @@ resource "aws_dynamodb_table_item" "pga_registry" {
     }
   })
 }
+
+# F1's own season window uses the same year-round "01-01"/"12-31" bounds
+# as PGA -- F1's real calendar runs roughly March-December, but f1-ingest's
+# own trailing-window date discovery (Source/aws-lambdas/f1/ingest/
+# handler.py) already makes an out-of-season daily invocation a harmless
+# no-op (zero races found in the trailing window), so there's no real cost
+# to not guessing at F1's exact season boundaries here -- same reasoning
+# PGA's own year-round window uses. Unlike PGA's own registry item, no
+# round-number-style parametrization is needed -- all nine F1 models are
+# genuinely distinct scripts/targets, not one script repeated with a
+# per-round override.
+resource "aws_dynamodb_table_item" "f1_registry" {
+  table_name = aws_dynamodb_table.sport_registry.name
+  hash_key   = aws_dynamodb_table.sport_registry.hash_key
+
+  item = jsonencode({
+    sport_key       = { S = "SPORT#F1" }
+    sport           = { S = "f1" }
+    event_type      = { S = "field" }
+    polling_cadence = { S = "daily" }
+    season_start    = { S = "01-01" }
+    season_end      = { S = "12-31" }
+
+    training_targets = {
+      L = [
+        {
+          M = {
+            model_name             = { S = "win-probability" }
+            task_definition_suffix = { S = "train-winprob-model" }
+            container_name         = { S = "f1-train-winprob-model" }
+            env_name               = { S = "AWS_REGION" }
+            env_value              = { S = var.region }
+          }
+        },
+        {
+          M = {
+            model_name             = { S = "podium-probability" }
+            task_definition_suffix = { S = "train-podium-model" }
+            container_name         = { S = "f1-train-podium-model" }
+            env_name               = { S = "AWS_REGION" }
+            env_value              = { S = var.region }
+          }
+        },
+        {
+          M = {
+            model_name             = { S = "dnf-probability" }
+            task_definition_suffix = { S = "train-dnf-model" }
+            container_name         = { S = "f1-train-dnf-model" }
+            env_name               = { S = "AWS_REGION" }
+            env_value              = { S = var.region }
+          }
+        },
+        {
+          M = {
+            model_name             = { S = "projected-finish-position" }
+            task_definition_suffix = { S = "train-finish-position-model" }
+            container_name         = { S = "f1-train-finish-position-model" }
+            env_name               = { S = "AWS_REGION" }
+            env_value              = { S = var.region }
+          }
+        },
+        {
+          M = {
+            model_name             = { S = "constructor-win-probability" }
+            task_definition_suffix = { S = "train-constructor-winprob-model" }
+            container_name         = { S = "f1-train-constructor-winprob-model" }
+            env_name               = { S = "AWS_REGION" }
+            env_value              = { S = var.region }
+          }
+        },
+        {
+          M = {
+            model_name             = { S = "projected-qualifying-position" }
+            task_definition_suffix = { S = "train-qualifying-model" }
+            container_name         = { S = "f1-train-qualifying-model" }
+            env_name               = { S = "AWS_REGION" }
+            env_value              = { S = var.region }
+          }
+        },
+        {
+          M = {
+            model_name             = { S = "projected-sprint-grid-position" }
+            task_definition_suffix = { S = "train-sprint-grid-model" }
+            container_name         = { S = "f1-train-sprint-grid-model" }
+            env_name               = { S = "AWS_REGION" }
+            env_value              = { S = var.region }
+          }
+        },
+        {
+          M = {
+            model_name             = { S = "sprint-win-probability" }
+            task_definition_suffix = { S = "train-sprint-winprob-model" }
+            container_name         = { S = "f1-train-sprint-winprob-model" }
+            env_name               = { S = "AWS_REGION" }
+            env_value              = { S = var.region }
+          }
+        },
+        {
+          M = {
+            model_name             = { S = "sprint-podium-probability" }
+            task_definition_suffix = { S = "train-sprint-podium-model" }
+            container_name         = { S = "f1-train-sprint-podium-model" }
+            env_name               = { S = "AWS_REGION" }
+            env_value              = { S = var.region }
+          }
+        },
+      ]
+    }
+  })
+}

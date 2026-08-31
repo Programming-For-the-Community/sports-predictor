@@ -158,6 +158,20 @@ variable "cfbd_api_root_url" {
   nullable    = false
 }
 
+variable "jolpica_api_root_url" {
+  description = "Root URL of Jolpica-F1 (the Ergast-compatible successor API), used by every F1 task that calls it. https, not http -- a plain http:// request 301-redirects to https (Cloudflare-enforced, confirmed live 2026-08-31); pointing straight at https avoids both the extra redirect round-trip against Jolpica's own strict rate limit and leaving that first request open to being stripped/rewritten on-path. Override via TF_VAR_jolpica_api_root_url if Jolpica's domain changes -- see library/http/f1.py's own DEFAULT_JOLPICA_API_ROOT_URL, which this shadows the same way espn_api_root_url shadows library/http/espn.py's own default."
+  type        = string
+  default     = "https://api.jolpi.ca/ergast/f1"
+  nullable    = false
+}
+
+variable "jolpica_user_agent" {
+  description = "User-Agent sent on every Jolpica-F1 request -- Jolpica's own docs require a real, non-default identifying User-Agent (unlike ESPN, which just needs to not look like a bot). See library/http/f1.py's own DEFAULT_JOLPICA_USER_AGENT."
+  type        = string
+  default     = "sports-predictor-f1-client/1.0 (personal-use sports analytics; non-commercial)"
+  nullable    = false
+}
+
 variable "third_party_api_key_secret_arn" {
   description = "ARN of the single shared Secrets Manager secret holding every sport's third-party API key as a JSON field (e.g. ncaa_fb_ingest_key, ncaa_fb_backfill_key) -- supplied via TF_VAR_third_party_api_key_secret_arn from the THIRD_PARTY_API_KEYS_SECRET_ARN GitHub Actions secret. Only the ARN is a Terraform input; the key material itself is resolved from Secrets Manager at cold start by library/http/cfbd.py, never appearing in state or CI logs."
   type        = string
@@ -237,6 +251,12 @@ variable "feature_engineering_task_cpu" {
     # on the same "no evidence yet points at needing more" basis, not a
     # guess.
     pga = 1024
+    # Same reasoning as pga above -- F1's own datasets (driver_features/
+    # constructor_features/sprint_features.parquet) have no player_game_
+    # stats/team_game_stats history either, and 2010-present is a smaller
+    # season count than PGA's own 2017-present window. No evidence yet
+    # points at needing more than the smallest size.
+    f1 = 1024
   }
   nullable = false
 
@@ -255,6 +275,7 @@ variable "feature_engineering_task_memory_per_vcpu_mib" {
     nba     = 4096
     ncaambb = 7680
     pga     = 4096
+    f1      = 4096
   }
   nullable = false
 }

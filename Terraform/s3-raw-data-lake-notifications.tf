@@ -43,11 +43,19 @@ resource "aws_s3_bucket_notification" "raw_data_lake" {
     filter_suffix       = ".json"
   }
 
+  lambda_function {
+    lambda_function_arn = aws_lambda_function.f1_normalize.arn
+    events              = ["s3:ObjectCreated:*"]
+    filter_prefix       = "f1/"
+    filter_suffix       = ".json"
+  }
+
   depends_on = [
     aws_lambda_permission.s3_invoke_nfl_normalize,
     aws_lambda_permission.s3_invoke_ncaafb_normalize,
     aws_lambda_permission.s3_invoke_nba_normalize,
     aws_lambda_permission.s3_invoke_ncaambb_normalize,
     aws_lambda_permission.s3_invoke_pga_normalize,
+    aws_lambda_permission.s3_invoke_f1_normalize,
   ]
 }
