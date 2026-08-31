@@ -134,6 +134,12 @@ on:
       pga_live_scores_function_name:
         description: 'PGA live-scores Lambda function name'
         value: ${{ jobs.terraform.outputs.pga_live_scores_function_name }}
+      f1_ingest_function_name:
+        description: 'F1 ingest Lambda function name'
+        value: ${{ jobs.terraform.outputs.f1_ingest_function_name }}
+      f1_normalize_function_name:
+        description: 'F1 normalize Lambda function name'
+        value: ${{ jobs.terraform.outputs.f1_normalize_function_name }}
       cognito_user_pool_id:
         description: 'Cognito User Pool ID'
         value: ${{ jobs.terraform.outputs.cognito_user_pool_id }}
@@ -176,6 +182,7 @@ env:
   TF_VAR_espn_core_api_root_url: ${{ vars.ESPN_CORE_API_ROOT_URL }}
   TF_VAR_ncaambb_espn_core_api_root_url: ${{ vars.NCAAMBB_ESPN_CORE_API_ROOT_URL }}
   TF_VAR_cfbd_api_root_url: ${{ vars.CFBD_API_ROOT_URL }}
+  TF_VAR_jolpica_api_root_url: ${{ vars.JOLPICA_API_ROOT_URL }}
   TF_VAR_third_party_api_key_secret_arn: ${{ secrets.THIRD_PARTY_API_KEYS_SECRET_ARN }}
   TF_VAR_fargate_account_vcpu_limit: ${{ vars.FARGATE_VCPU_LIMIT }}
   TF_VAR_fargate_spot_account_vcpu_limit: ${{ vars.FARGATE_SPOT_VCPU_LIMIT }}
@@ -218,6 +225,8 @@ jobs:
       pga_predict_function_name: ${{ steps.tf_outputs.outputs.pga_predict_function_name }}
       pga_predict_read_function_name: ${{ steps.tf_outputs.outputs.pga_predict_read_function_name }}
       pga_live_scores_function_name: ${{ steps.tf_outputs.outputs.pga_live_scores_function_name }}
+      f1_ingest_function_name: ${{ steps.tf_outputs.outputs.f1_ingest_function_name }}
+      f1_normalize_function_name: ${{ steps.tf_outputs.outputs.f1_normalize_function_name }}
       cognito_user_pool_id: ${{ steps.tf_outputs.outputs.cognito_user_pool_id }}
       cognito_client_id: ${{ steps.tf_outputs.outputs.cognito_client_id }}
       api_endpoint: ${{ steps.tf_outputs.outputs.api_endpoint }}
@@ -255,6 +264,10 @@ jobs:
         fi
         if [ -z "$TF_VAR_cfbd_api_root_url" ]; then
           echo "::error::CFBD_API_ROOT_URL is not set. Create it under Settings > Secrets and variables > Actions > Variables (value: https://api.collegefootballdata.com)."
+          exit 1
+        fi
+        if [ -z "$TF_VAR_jolpica_api_root_url" ]; then
+          echo "::error::JOLPICA_API_ROOT_URL is not set. Create it under Settings > Secrets and variables > Actions > Variables (value: https://api.jolpi.ca/ergast/f1 -- https, not http: a plain http request 301-redirects to https, confirmed live 2026-08-31)."
           exit 1
         fi
         if [ -z "$TF_VAR_third_party_api_key_secret_arn" ]; then
@@ -349,6 +362,8 @@ jobs:
         capture_output pga_predict_function_name
         capture_output pga_predict_read_function_name
         capture_output pga_live_scores_function_name
+        capture_output f1_ingest_function_name
+        capture_output f1_normalize_function_name
         capture_output cognito_user_pool_id
         capture_output cognito_client_id
         capture_output api_endpoint

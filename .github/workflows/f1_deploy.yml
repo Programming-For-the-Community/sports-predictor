@@ -1,0 +1,93 @@
+# Top-level F1 deploy pipeline. Runs on every push to an f1* branch, but
+# pauses for manual approval (via the environment's required reviewers --
+# configure this in Settings > Environments, it can't be set from this
+# file) before doing anything.
+#
+# Trimmed down from PGA's own f1_deploy.yml-equivalent shape (pga_deploy.
+# yml) -- no ai_hosting/deploy_predict_lambda/predict_read_deploy/
+# live_scores_deploy jobs, since F1 has no predict/predict-read/live-
+# scores Lambda code yet (only the season_simulation.py Monte Carlo math
+# module exists so far -- see aws-lambdas/f1/predict/season_simulation.py).
+# Add those jobs once that serving layer actually exists, mirroring pga_
+# deploy.yml's own shape exactly at that point.
+#
+# Both this job's `approval` step AND tf_install.yml's own terraform job
+# gate on the `development`/`production` environment, so a run through
+# this pipeline prompts for approval twice.
+
+name: F1 Deploy
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - 'f1*'
+      - 'f1/*'
+  workflow_call:
+
+# Shared group across every workflow that can reach tf_install.yml's
+# terraform apply, since Terraform/main.tf's S3 backend has no state
+# locking configured.
+concurrency:
+  group: terraform-deploy-pipeline
+  cancel-in-progress: false
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  approval:
+    name: Await deployment approval
+    if: github.event_name != 'workflow_call'
+    runs-on: ubuntu-latest
+    environment: development
+    steps:
+      - name: Approved
+        run: echo "Deployment approved -- proceeding."
+
+  # approval is intentionally skipped (not failed) when called via
+  # workflow_call -- without this, a skipped `needs` job would cause
+  # everything downstream to be skipped too. Each build job below repeats
+  # this same tolerant check against `approval` directly.
+  backfill:
+    name: Historical backfill (build)
+    needs: approval
+    if: |
+      always() &&
+      (needs.approval.result == 'success' || needs.approval.result == 'skipped')
+    uses: ./.github/workflows/f1_backfill.yml
+    secrets: inherit
+
+  # Pushes f1-feature-engineering-latest and f1-train-winprob-model-latest.
+  # infra never runs without both already in ECR -- same reasoning as
+  # PGA's own ai_training job (its images are what the training ECS task
+  # definitions' `image` field points at; RunTask fails at runtime, not
+  # at `terraform apply`, if the tag doesn't exist yet).
+  ai_training:
+    name: AI training (build)
+    needs: approval
+    if: |
+      always() &&
+      (needs.approval.result == 'success' || needs.approval.result == 'skipped')
+    uses: ./.github/workflows/f1_ai_training.yml
+    secrets: inherit
+
+  infra:
+    name: Apply shared infrastructure
+    needs: [backfill, ai_training]
+    if: |
+      always() &&
+      (needs.backfill.result == 'success' || needs.backfill.result == 'skipped') &&
+      (needs.ai_training.result == 'success' || needs.ai_training.result == 'skipped')
+    uses: ./.github/workflows/tf_install.yml
+    secrets: inherit
+
+  data_pipeline:
+    name: Data pipeline
+    needs: infra
+    uses: ./.github/workflows/f1_data_pipeline.yml
+    secrets: inherit
+    with:
+      ingest_function_name: ${{ needs.infra.outputs.f1_ingest_function_name }}
+      normalize_function_name: ${{ needs.infra.outputs.f1_normalize_function_name }}

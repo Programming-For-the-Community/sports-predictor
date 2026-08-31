@@ -1,0 +1,94 @@
+# Builds, packages, and deploys the F1 AI training code. Runs standalone
+# (workflow_dispatch) or called from f1_deploy.yml (workflow_call) --
+# either way the work is identical: build and push image(s).
+#
+# This stage builds two images: Feature Engineering and Train Win-
+# Probability Model (the latter also serves train_podium_model.py/
+# train_dnf_model.py/train_finish_position_model.py/train_constructor_
+# winprob_model.py/train_qualifying_model.py/train_sprint_grid_model.py/
+# train_sprint_winprob_model.py/train_sprint_podium_model.py --
+# Terraform/ecs-task-f1-train-{podium,dnf,finish-position,constructor-
+# winprob,qualifying,sprint-grid,sprint-winprob,sprint-podium}-model.tf
+# all point at this same image tag and override `command` to run their
+# own script instead, same shared-image/command-override pattern PGA's
+# own train-top10-model image uses for top5/score/cutline/round/match-
+# winprob/cup-winprob).
+#
+# Each image gets its OWN version constant below, bumped independently --
+# feature engineering and train-winprob-model are unrelated Fargate tasks
+# with unrelated code, so a change to one has no reason to force a
+# version bump (and a new image tag/deploy) of the other. Bump only the
+# constant for whichever image actually changed, never both just to keep
+# them in sync.
+
+name: F1 AI Training
+
+on:
+  workflow_dispatch:
+  workflow_call:
+
+env:
+  FEATURE_ENGINEERING_IMAGE_VERSION: '1.0.0'
+  TRAIN_WINPROB_MODEL_IMAGE_VERSION: '1.0.0'
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  # Two independent test jobs, not one shared one -- a failing
+  # model-training test shouldn't fail feature engineering's deployment
+  # too, even though both re-run Source/tests/library/ redundantly.
+  #
+  # feature-engineering's own requirements.txt has no reason to carry
+  # xgboost/scikit-learn/pandas/lightgbm's ML-training extras (it only
+  # writes Parquet) -- library/tests/ml/ needs those and is excluded here.
+  # train-winprob-model's own job below already has all of them, so it
+  # needs no such exclusion.
+  test-feature-engineering:
+    name: Run feature engineering tests
+    uses: ./.github/workflows/run_python_tests.yml
+    with:
+      test_path: 'Source/tests/library/ Source/tests/feature-engineering/f1/ --ignore=Source/tests/library/ml'
+      requirements_files: 'Source/feature-engineering/f1/requirements.txt'
+
+  test-train-winprob-model:
+    name: Run train win-probability model tests
+    uses: ./.github/workflows/run_python_tests.yml
+    with:
+      test_path: 'Source/tests/library/ Source/tests/model-training/f1/'
+      requirements_files: 'Source/model-training/f1/requirements.txt'
+
+  set-versions:
+    name: Resolve image versions
+    runs-on: ubuntu-latest
+    outputs:
+      feature_engineering_version: ${{ steps.out.outputs.feature_engineering_version }}
+      train_winprob_model_version: ${{ steps.out.outputs.train_winprob_model_version }}
+    steps:
+      - id: out
+        run: |
+          echo "feature_engineering_version=${{ env.FEATURE_ENGINEERING_IMAGE_VERSION }}" >> "$GITHUB_OUTPUT"
+          echo "train_winprob_model_version=${{ env.TRAIN_WINPROB_MODEL_IMAGE_VERSION }}" >> "$GITHUB_OUTPUT"
+
+  build-feature-engineering-image:
+    name: Build and push feature engineering image
+    needs: [set-versions, test-feature-engineering]
+    uses: ./.github/workflows/docker_build_push.yml
+    secrets: inherit
+    with:
+      dockerfile_path: 'Source/feature-engineering/f1/Dockerfile'
+      docker_context: 'Source'
+      image_name: 'f1-feature-engineering'
+      image_version: ${{ needs.set-versions.outputs.feature_engineering_version }}
+
+  build-train-winprob-model-image:
+    name: Build and push train win-probability model image
+    needs: [set-versions, test-train-winprob-model]
+    uses: ./.github/workflows/docker_build_push.yml
+    secrets: inherit
+    with:
+      dockerfile_path: 'Source/model-training/f1/Dockerfile'
+      docker_context: 'Source'
+      image_name: 'f1-train-winprob-model'
+      image_version: ${{ needs.set-versions.outputs.train_winprob_model_version }}
