@@ -145,6 +145,52 @@ def _with_grid_from_qualifying(participant: dict) -> dict:
     return {**participant, "result": {**result, "grid_position": qualifying_position}}
 
 
+def current_roster(storage, sport: str, all_events: list[dict] | None = None) -> tuple[list[str], dict[str, str]]:
+    """(driver_ids, driver_to_constructor) resolved from the most
+    recently COMPLETED "field" race's own real participants -- the same
+    "current lineup" resolution aws-lambdas/f1/predict/season_projection.
+    py's own _season_standings_inputs already uses for its remaining-race
+    projection. Shared here so build_live_field_features (below) can
+    score a "scheduled" stub event (library/normalize/f1.py's schedule_
+    payload_to_scheduled_events -- always EMPTY participants, since
+    Jolpica has no pre-race entry-list endpoint at all, unlike ESPN's
+    real pre-tournament field PGA's own schedule-sync gets) against a
+    real field instead of coming back with nothing to show at all."""
+    events = all_events if all_events is not None else storage.get_all_events(sport, status="completed")
+    field_events_desc = sorted(
+        (e for e in events if e.get("event_type") == "field"), key=lambda e: e.get("event_date", ""), reverse=True,
+    )
+    participants = field_events_desc[0].get("participants", []) if field_events_desc else []
+    driver_ids = [p["entity_id"] for p in participants]
+    driver_to_constructor = {p["entity_id"]: p["constructor_entity_id"] for p in participants if p.get("constructor_entity_id") is not None}
+    return driver_ids, driver_to_constructor
+
+
+def _projected_constructor_rows(
+    storage, sport: str, event: dict, driver_ids: list[str], driver_to_constructor: dict[str, str],
+    window: int, field_events_before: list[dict],
+) -> dict[str, dict]:
+    """Constructor rows for a PROJECTED field -- same grouping
+    build_live_field_features' own by_constructor block does for a real
+    field, just built from the projected roster's own driver_ids/
+    driver_to_constructor instead of the event's own (empty) participants."""
+    by_constructor: dict[str, list[dict]] = defaultdict(list)
+    for entity_id in driver_ids:
+        constructor_id = driver_to_constructor.get(entity_id)
+        if constructor_id is not None:
+            by_constructor[constructor_id].append({"entity_id": entity_id, "constructor_entity_id": constructor_id, "result": {}})
+
+    constructor_rows = {}
+    for constructor_id, driver_participants in by_constructor.items():
+        prior_by_driver = {
+            p["entity_id"]: _driver_results(field_events_before, p["entity_id"], window) for p in driver_participants
+        }
+        constructor_rows[constructor_id] = build_constructor_event_features(
+            event, constructor_id, driver_participants, prior_by_driver, window,
+        )
+    return constructor_rows
+
+
 def build_live_field_features(
     storage, sport: str, event_id: str,
     window: int = DEFAULT_ROLLING_WINDOW, circuit_window: int = DEFAULT_CIRCUIT_HISTORY_WINDOW,
@@ -152,7 +198,16 @@ def build_live_field_features(
     """Returns {"event": event, "driver_rows": {entity_id: row},
     "constructor_rows": {constructor_entity_id: row}}. Raises
     EventNotFoundError if no stored event exists for event_id,
-    MalformedEventError if it isn't a "field" (main race) event."""
+    MalformedEventError if it isn't a "field" (main race) event.
+
+    A "scheduled" stub event (no real participants yet -- see library/
+    normalize/f1.py's schedule_payload_to_scheduled_events) is scored
+    against the CURRENT roster (current_roster, above) instead of coming
+    back empty -- same "project the current lineup onto a not-yet-run
+    race" idea season_projection.py already uses for the season
+    simulation, just applied here to a single on-demand event request
+    too. A completed OR already-underway (real, non-empty participants)
+    event is scored against its own real field, unchanged."""
     event = storage.get_event(build_event_key(sport, event_id))
     if event is None:
         raise EventNotFoundError(f"No stored F1 event for {event_id!r}")
@@ -166,6 +221,14 @@ def build_live_field_features(
     all_events = storage.get_all_events(sport)
     field_events_before = _events_before(all_events, "field", before_date)
     circuit_events_before = [e for e in field_events_before if circuit_id is not None and e.get("circuit_id") == circuit_id]
+
+    if not participants:
+        driver_ids, driver_to_constructor = current_roster(storage, sport, all_events=[e for e in all_events if e.get("status") == "completed"])
+        driver_rows = build_projected_field_features(
+            storage, sport, event, driver_ids, driver_to_constructor, window, circuit_window, all_events=all_events,
+        )
+        constructor_rows = _projected_constructor_rows(storage, sport, event, driver_ids, driver_to_constructor, window, field_events_before)
+        return {"event": event, "driver_rows": driver_rows, "constructor_rows": constructor_rows}
 
     driver_rows = {}
     for raw_participant in participants:

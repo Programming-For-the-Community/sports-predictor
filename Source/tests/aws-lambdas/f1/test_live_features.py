@@ -142,6 +142,82 @@ class TestBuildLiveFieldFeatures:
         assert built["driver_rows"]["max_verstappen"]["qualifying_qualifying_sessions"] == 1
 
 
+class TestBuildLiveFieldFeaturesProjectedFallback:
+    """A "scheduled" stub event (library/normalize/f1.py's schedule_
+    payload_to_scheduled_events -- always empty participants, since
+    Jolpica has no pre-race entry-list endpoint at all) must still score
+    against the CURRENT roster instead of coming back with nothing --
+    real gap found live 2026-08-31: every future F1 race's own detail
+    page showed no data at all until this fallback existed."""
+
+    def test_empty_participants_falls_back_to_the_current_roster(self):
+        most_recent_completed = _field_event(
+            "2024-1", "2024-03-02",
+            [_participant("max_verstappen", "red_bull"), _participant("lewis_hamilton", "mercedes")],
+            status="completed",
+        )
+        future_stub = _field_event("2024-9", "2024-06-01", [], status="scheduled")
+        storage = MagicMock()
+        storage.get_event.return_value = future_stub
+        storage.get_all_events.return_value = [most_recent_completed, future_stub]
+
+        built = live_features.build_live_field_features(storage, "f1", "2024-9")
+
+        assert set(built["driver_rows"]) == {"max_verstappen", "lewis_hamilton"}
+        assert set(built["constructor_rows"]) == {"red_bull", "mercedes"}
+
+    def test_a_real_already_underway_field_is_never_overridden_by_the_fallback(self):
+        # Real (non-empty) participants -- must use the event's OWN field,
+        # not the fallback roster, even though other completed events exist.
+        older_roster = _field_event("2024-1", "2024-03-02", [_participant("driver_a")], status="completed")
+        current_event = _field_event("2024-2", "2024-03-09", [_participant("driver_b")], status="scheduled")
+        storage = MagicMock()
+        storage.get_event.return_value = current_event
+        storage.get_all_events.return_value = [older_roster, current_event]
+
+        built = live_features.build_live_field_features(storage, "f1", "2024-2")
+
+        assert set(built["driver_rows"]) == {"driver_b"}
+
+    def test_no_completed_field_race_ever_stored_returns_an_empty_field_not_a_crash(self):
+        future_stub = _field_event("2024-1", "2024-03-02", [], status="scheduled")
+        storage = MagicMock()
+        storage.get_event.return_value = future_stub
+        storage.get_all_events.return_value = [future_stub]
+
+        built = live_features.build_live_field_features(storage, "f1", "2024-1")
+
+        assert built["driver_rows"] == {}
+        assert built["constructor_rows"] == {}
+
+
+class TestCurrentRoster:
+    def test_resolves_from_the_most_recently_completed_field_race(self):
+        older = _field_event("2024-1", "2024-03-02", [_participant("driver_a", "red_bull")], status="completed")
+        newer = _field_event("2024-2", "2024-03-09", [_participant("driver_b", "mercedes")], status="completed")
+        storage = MagicMock()
+
+        driver_ids, driver_to_constructor = live_features.current_roster(storage, "f1", all_events=[older, newer])
+
+        assert driver_ids == ["driver_b"]
+        assert driver_to_constructor == {"driver_b": "mercedes"}
+
+    def test_ignores_sprint_races_only_a_field_race_counts_as_the_current_lineup(self):
+        sprint = _sprint_event("2024-2-sprint", "2024-03-09", [_participant("sprint_only_driver")], status="completed")
+        field = _field_event("2024-1", "2024-03-02", [_participant("driver_a")], status="completed")
+        storage = MagicMock()
+
+        driver_ids, _ = live_features.current_roster(storage, "f1", all_events=[sprint, field])
+
+        assert driver_ids == ["driver_a"]
+
+    def test_no_completed_field_race_returns_an_empty_roster(self):
+        storage = MagicMock()
+        driver_ids, driver_to_constructor = live_features.current_roster(storage, "f1", all_events=[])
+        assert driver_ids == []
+        assert driver_to_constructor == {}
+
+
 class TestBuildLiveSprintFeatures:
     def test_raises_malformed_for_wrong_event_type(self):
         storage = MagicMock()

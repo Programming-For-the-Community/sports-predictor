@@ -93,7 +93,13 @@ const kSports = [
     displayName: 'Formula 1',
     eventShape: EventShape.field,
     accentColor: AppColors.violet,
-    active: false,
+    active: true,
+    // Driver + constructor championship season simulation (aws-lambdas/
+    // f1/predict/season_projection.py) -- a points-standings shape like
+    // PGA's own, but with a real second (constructor) standings table
+    // PGA has no analog for, hence its own F1SeasonPage rather than
+    // usesFedexCupSeasonPage's PgaSeasonPage.
+    hasSeasonProjection: true,
   ),
 ];
 
