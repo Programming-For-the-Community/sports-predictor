@@ -137,7 +137,7 @@ data "aws_iam_policy_document" "lambda_inference_permissions" {
     resources = [
       aws_lambda_function.nfl_predict.arn, aws_lambda_function.ncaafb_predict.arn,
       aws_lambda_function.nba_predict.arn, aws_lambda_function.ncaambb_predict.arn,
-      aws_lambda_function.pga_predict.arn,
+      aws_lambda_function.pga_predict.arn, aws_lambda_function.f1_predict.arn,
     ]
   }
 }

@@ -3,13 +3,10 @@
 # configure this in Settings > Environments, it can't be set from this
 # file) before doing anything.
 #
-# Trimmed down from PGA's own f1_deploy.yml-equivalent shape (pga_deploy.
-# yml) -- no ai_hosting/deploy_predict_lambda/predict_read_deploy/
-# live_scores_deploy jobs, since F1 has no predict/predict-read/live-
-# scores Lambda code yet (only the season_simulation.py Monte Carlo math
-# module exists so far -- see aws-lambdas/f1/predict/season_simulation.py).
-# Add those jobs once that serving layer actually exists, mirroring pga_
-# deploy.yml's own shape exactly at that point.
+# ai_hosting/deploy_predict_lambda/predict_read_deploy added once F1's own
+# serving layer (predict/predict-read Lambda pair) landed, mirroring pga_
+# deploy.yml's exact shape. No live_scores_deploy job -- F1's own
+# live-scores Lambda is still deferred (project-f1-onboarding memory).
 #
 # Both this job's `approval` step AND tf_install.yml's own terraform job
 # gate on the `development`/`production` environment, so a run through
@@ -73,15 +70,50 @@ jobs:
     uses: ./.github/workflows/f1_ai_training.yml
     secrets: inherit
 
+  # Pushes f1-predict-latest. infra never runs without it already in
+  # ECR -- aws_lambda_function.f1_predict is a container-image Lambda,
+  # and CreateFunction validates its image tag already exists in ECR
+  # before Terraform can create it, same reasoning as ai_training's own
+  # comment above for the training ECS task images.
+  ai_hosting:
+    name: AI hosting (build)
+    needs: approval
+    if: |
+      always() &&
+      (needs.approval.result == 'success' || needs.approval.result == 'skipped')
+    uses: ./.github/workflows/f1_ai_hosting.yml
+    secrets: inherit
+
   infra:
     name: Apply shared infrastructure
-    needs: [backfill, ai_training]
+    needs: [backfill, ai_training, ai_hosting]
     if: |
       always() &&
       (needs.backfill.result == 'success' || needs.backfill.result == 'skipped') &&
-      (needs.ai_training.result == 'success' || needs.ai_training.result == 'skipped')
+      (needs.ai_training.result == 'success' || needs.ai_training.result == 'skipped') &&
+      (needs.ai_hosting.result == 'success' || needs.ai_hosting.result == 'skipped')
     uses: ./.github/workflows/tf_install.yml
     secrets: inherit
+
+  deploy_predict_lambda:
+    name: AI hosting (deploy)
+    needs: [infra, ai_hosting]
+    uses: ./.github/workflows/f1_predict_deploy.yml
+    secrets: inherit
+    with:
+      function_name: ${{ needs.infra.outputs.f1_predict_function_name }}
+      image_uri: ${{ needs.ai_hosting.outputs.predict_image_uri }}
+
+  predict_read_deploy:
+    name: F1 predict-read (test + deploy)
+    needs: [approval, infra]
+    if: |
+      always() &&
+      (needs.approval.result == 'success' || needs.approval.result == 'skipped')
+    uses: ./.github/workflows/f1_predict_read_deploy.yml
+    secrets: inherit
+    with:
+      function_name: ${{ needs.infra.outputs.f1_predict_read_function_name }}
 
   data_pipeline:
     name: Data pipeline

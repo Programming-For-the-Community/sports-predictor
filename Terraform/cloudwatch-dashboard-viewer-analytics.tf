@@ -14,6 +14,7 @@ locals {
     aws_cloudwatch_log_group.nba_predict_read.name,
     aws_cloudwatch_log_group.ncaambb_predict_read.name,
     aws_cloudwatch_log_group.pga_predict_read.name,
+    aws_cloudwatch_log_group.f1_predict_read.name,
   ]
 
   # Dashboard-widget queries have no separate "log group" field for a

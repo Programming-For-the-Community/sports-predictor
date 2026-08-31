@@ -246,6 +246,67 @@ class TestRawOnlyAndUnrecognizedKeys:
         mock_storage.upsert_event.assert_not_called()
 
 
+def _schedule_payload(*rounds, season="2024"):
+    return {
+        "MRData": {
+            "RaceTable": {
+                "season": season,
+                "Races": [
+                    {
+                        "season": season, "round": round_, "raceName": "Bahrain Grand Prix",
+                        "Circuit": {"circuitId": "bahrain", "circuitName": "Bahrain International Circuit", "Location": {"locality": "Sakhir", "country": "Bahrain"}},
+                        "date": f"2024-0{round_}-02",
+                    }
+                    for round_ in rounds
+                ],
+            },
+        },
+    }
+
+
+class TestScheduleDispatch:
+    def test_writes_a_scheduled_stub_for_a_round_with_no_stored_event_yet(self):
+        mock_s3 = _s3_with({"f1/schedule/2024/20240301.json": _schedule_payload("1")})
+        mock_storage = MagicMock()
+        mock_storage.get_event.return_value = None
+
+        with patch.object(f1_normalize, "_s3", mock_s3), \
+             patch.object(f1_normalize, "_get_storage", return_value=mock_storage):
+            result = f1_normalize.lambda_handler({"Records": [_s3_record("bucket", "f1/schedule/2024/20240301.json")]}, None)
+
+        assert result == {"processed": 1, "failed": 0}
+        mock_storage.upsert_event.assert_called_once()
+        stub = mock_storage.upsert_event.call_args.args[0]
+        assert stub["status"] == "scheduled"
+        assert stub["participants"] == []
+
+    def test_refreshes_an_already_scheduled_stub(self):
+        mock_s3 = _s3_with({"f1/schedule/2024/20240301.json": _schedule_payload("1")})
+        mock_storage = MagicMock()
+        mock_storage.get_event.return_value = {"status": "scheduled"}
+
+        with patch.object(f1_normalize, "_s3", mock_s3), \
+             patch.object(f1_normalize, "_get_storage", return_value=mock_storage):
+            f1_normalize.lambda_handler({"Records": [_s3_record("bucket", "f1/schedule/2024/20240301.json")]}, None)
+
+        mock_storage.upsert_event.assert_called_once()
+
+    def test_never_clobbers_an_already_completed_race(self):
+        mock_s3 = _s3_with({"f1/schedule/2024/20240301.json": _schedule_payload("1", "2")})
+        mock_storage = MagicMock()
+        # Round 1 already has a real completed result; round 2 doesn't exist yet.
+        mock_storage.get_event.side_effect = lambda key: {"status": "completed"} if "2024-1" in key else None
+
+        with patch.object(f1_normalize, "_s3", mock_s3), \
+             patch.object(f1_normalize, "_get_storage", return_value=mock_storage):
+            f1_normalize.lambda_handler({"Records": [_s3_record("bucket", "f1/schedule/2024/20240301.json")]}, None)
+
+        # Only round 2's stub gets written; round 1's completed event is untouched.
+        assert mock_storage.upsert_event.call_count == 1
+        written = mock_storage.upsert_event.call_args.args[0]
+        assert written["event_id"] == "2024-2"
+
+
 class TestMultiRecordResilience:
     def test_one_records_failure_does_not_block_the_others(self):
         # Record 1's own get_object raises outright (a real S3 error,

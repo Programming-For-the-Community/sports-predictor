@@ -388,6 +388,31 @@ resource "aws_api_gateway_deployment" "main" {
       sha1(jsonencode(values(aws_api_gateway_method.pga_cors)[*].id)),
       sha1(jsonencode(values(aws_api_gateway_integration.pga_cors)[*].id)),
       sha1(jsonencode(values(aws_api_gateway_integration_response.pga_cors)[*].id)),
+      # F1 routes declared in api-gateway-f1-predict.tf -- no live-scores
+      # route yet (still deferred) and no per-driver predictions
+      # sub-route (see that file's own docstring).
+      aws_api_gateway_resource.f1.id,
+      aws_api_gateway_resource.f1_events.id,
+      aws_api_gateway_method.f1_events.id,
+      aws_api_gateway_integration.f1_events.id,
+      aws_api_gateway_integration.f1_events.uri,
+      aws_api_gateway_resource.f1_models.id,
+      aws_api_gateway_method.f1_models.id,
+      aws_api_gateway_integration.f1_models.id,
+      aws_api_gateway_integration.f1_models.uri,
+      aws_api_gateway_resource.f1_season.id,
+      aws_api_gateway_method.f1_season.id,
+      aws_api_gateway_integration.f1_season.id,
+      aws_api_gateway_integration.f1_season.uri,
+      aws_api_gateway_resource.f1_predictions.id,
+      aws_api_gateway_resource.f1_predictions_events.id,
+      aws_api_gateway_resource.f1_predictions_event.id,
+      aws_api_gateway_method.f1_predict_event.id,
+      aws_api_gateway_integration.f1_predict_event.id,
+      aws_api_gateway_integration.f1_predict_event.uri,
+      sha1(jsonencode(values(aws_api_gateway_method.f1_cors)[*].id)),
+      sha1(jsonencode(values(aws_api_gateway_integration.f1_cors)[*].id)),
+      sha1(jsonencode(values(aws_api_gateway_integration_response.f1_cors)[*].id)),
     ]))
   }
 

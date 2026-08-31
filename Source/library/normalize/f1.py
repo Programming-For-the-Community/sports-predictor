@@ -121,30 +121,15 @@ def _driver_result(result: dict) -> dict:
     }
 
 
-def _race_like_event_item(payload: dict, sport: str, *, results_key: str, event_type: str, event_id_suffix: str = "") -> dict:
-    """Shared builder for both a main race (results_key="Results",
-    event_type="field") and a Sprint race (results_key="SprintResults",
-    event_type="sprint") -- Jolpica returns a byte-identical per-driver
-    result shape for both (position/positionText/points/grid/laps/
-    status/Driver/Constructor/FastestLap, confirmed live 2026-08-30),
-    just under a different top-level key -- nothing here needs to know
-    which points table applied to produce `points`, only normalize
-    whatever Jolpica already recorded.
-
-    Races is always a single-element list, queried by an exact
-    season+round -- same "always exactly one" guarantee
-    library/http/pga.py's get_leaderboard documents for its own
-    event-scoped fetch. Raises ValueError up front for an empty Races
-    list (round not yet run) rather than crashing further down --
-    callers (ingest) should already only call this once a round's
-    results actually exist."""
-    races = payload.get("MRData", {}).get("RaceTable", {}).get("Races", [])
-    if not races:
-        raise ValueError(
-            f"No race found in payload for {results_key!r} -- this season/round hasn't been run yet, "
-            f"or isn't a real Jolpica response",
-        )
-    race = races[0]
+def _event_item_from_race(race: dict, sport: str, *, results_key: str, event_type: str, event_id_suffix: str = "") -> dict:
+    """The actual per-race dict builder, shared by _race_like_event_item
+    below (one already-resolved race, from the results/sprint endpoints)
+    and schedule_payload_to_scheduled_events further down (every race on
+    a season's own calendar at once, from the schedule endpoint -- which
+    carries no `results_key` at all, so `race.get(results_key, [])`
+    naturally resolves to an empty participants list and status
+    "scheduled" for a round that hasn't been run yet, with no special
+    casing needed here)."""
     circuit = race.get("Circuit", {})
     location = circuit.get("Location", {})
     season = race.get("season")
@@ -176,6 +161,32 @@ def _race_like_event_item(payload: dict, sport: str, *, results_key: str, event_
         "circuit_id": circuit.get("circuitId"),
         "race_name": race.get("raceName"),
     }
+
+
+def _race_like_event_item(payload: dict, sport: str, *, results_key: str, event_type: str, event_id_suffix: str = "") -> dict:
+    """Shared builder for both a main race (results_key="Results",
+    event_type="field") and a Sprint race (results_key="SprintResults",
+    event_type="sprint") -- Jolpica returns a byte-identical per-driver
+    result shape for both (position/positionText/points/grid/laps/
+    status/Driver/Constructor/FastestLap, confirmed live 2026-08-30),
+    just under a different top-level key -- nothing here needs to know
+    which points table applied to produce `points`, only normalize
+    whatever Jolpica already recorded.
+
+    Races is always a single-element list, queried by an exact
+    season+round -- same "always exactly one" guarantee
+    library/http/pga.py's get_leaderboard documents for its own
+    event-scoped fetch. Raises ValueError up front for an empty Races
+    list (round not yet run) rather than crashing further down --
+    callers (ingest) should already only call this once a round's
+    results actually exist."""
+    races = payload.get("MRData", {}).get("RaceTable", {}).get("Races", [])
+    if not races:
+        raise ValueError(
+            f"No race found in payload for {results_key!r} -- this season/round hasn't been run yet, "
+            f"or isn't a real Jolpica response",
+        )
+    return _event_item_from_race(races[0], sport, results_key=results_key, event_type=event_type, event_id_suffix=event_id_suffix)
 
 
 def race_result_to_event_item(payload: dict, sport: str) -> dict:
@@ -396,3 +407,40 @@ def merge_qualifying_into_event(event_item: dict, qualifying_payload: dict | Non
     for participant in event_item.get("participants", []):
         participant["result"]["qualifying"] = qualifying_by_driver.get(participant["entity_id"])
     return event_item
+
+
+def schedule_payload_to_scheduled_events(payload: dict, sport: str) -> list[dict]:
+    """One stub event per race on the season's own calendar
+    (JolpicaClient.get_races(season)'s raw response -- the SAME schedule
+    call aws-lambdas/f1/ingest/handler.py already makes every run to find
+    which round is in its own trailing results window), each with
+    status="scheduled" and an empty participants list -- circuit_id/
+    event_date/venue/race_name are all real and known well ahead of the
+    race itself; only the per-driver result is genuinely unknown yet.
+
+    Exists because Jolpica has no separate "what's upcoming" scoreboard
+    endpoint the way ESPN gives every other sport's own schedule-sync
+    Lambda (library/http/f1.py's own docstring) -- season simulation
+    (aws-lambdas/f1/predict/season_projection.py) needs the REMAINING
+    calendar's own circuit_id/event_date to build a projected feature row
+    for each of those races, and without a stored "scheduled" event at
+    all, storage.get_all_events(sport, status="scheduled") would return
+    nothing, ever -- the season projection would always fall through to
+    "nothing left to simulate," even mid-season.
+
+    Unlike ingest's own per-round results/qualifying/sprint fetches
+    (which only ever look at a short trailing window around today, see
+    ingest/handler.py's TRAILING_WINDOW_DAYS), this walks the WHOLE
+    season's calendar at once, matching how f1-ingest already fetches it
+    for its own window-filtering -- one extra S3 write, zero extra
+    Jolpica requests.
+
+    Each returned item's own event_id/event_key exactly matches what
+    race_result_to_event_item will later produce for the SAME round once
+    real results exist -- normalize's own _process_schedule (aws-lambdas/
+    f1/normalize/handler.py) relies on this to upsert-refresh a stub
+    without ever overwriting an already-completed race's real result (it
+    checks the existing stored event's own status first, not this
+    function's business)."""
+    races = payload.get("MRData", {}).get("RaceTable", {}).get("Races", [])
+    return [_event_item_from_race(race, sport, results_key="Results", event_type="field") for race in races]

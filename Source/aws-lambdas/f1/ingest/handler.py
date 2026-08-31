@@ -27,6 +27,16 @@ standings context). Only captured when a round was actually processed
 (unlike PGA's own stats snapshot, which runs every day regardless):
 standings are only meaningfully different right after a round completes,
 so an off week between races has nothing new to snapshot.
+
+Also writes the season's own full calendar (the SAME `schedule` response
+already fetched above to find this run's trailing-window candidates) to
+its own raw prefix every run, unconditionally -- normalize turns this
+into a "scheduled" stub event per remaining race (library/normalize/f1.py's
+schedule_payload_to_scheduled_events), the only way season simulation
+(aws-lambdas/f1/predict/season_projection.py) can learn each remaining
+race's own circuit_id/event_date at all, since Jolpica has no separate
+"what's upcoming" scoreboard endpoint. Zero extra Jolpica requests --
+`schedule` is already in hand.
 """
 import json
 import logging
@@ -117,6 +127,8 @@ def lambda_handler(event: dict, context) -> dict:
 
     client = JolpicaClient()
     schedule = client.get_races(season)
+    _put_json(f"f1/schedule/{season}/{target_date.strftime('%Y%m%d')}.json", schedule)
+
     candidates = _races_in_window(schedule, target_date)
     logger.info("Found %d race(s) in the trailing window for season %d, date %s", len(candidates), season, target_date)
 

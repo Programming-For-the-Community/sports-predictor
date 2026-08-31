@@ -72,6 +72,18 @@ class PipelineStorage:
         sport-status-index GSI."""
         return self._events_table.query(Key("sport_status").eq(f"{sport}#{status}"), index_name="sport-status-index")
 
+    def get_event(self, event_key: str) -> dict | None:
+        """One event by its own key, via a direct GetItem. Added for
+        aws-lambdas/f1/normalize/handler.py's own schedule-stub write
+        (library/normalize/f1.py's schedule_payload_to_scheduled_events)
+        -- needs to check an event's already-stored status before
+        upserting a "scheduled" stub over it, so a completed race never
+        gets clobbered back to a resultless placeholder by the next
+        day's own full-calendar schedule re-fetch. Same shape as
+        library.storage.feature_storage.FeatureStorage's own get_event,
+        just on the write-side pipeline storage class instead."""
+        return self._events_table.get_item({"event_key": event_key})
+
     def get_entity(self, sport: str, entity_id: str, entity_type: str) -> dict | None:
         """One entity by id, via a direct GetItem. entity_type ("team" or
         "player") is required to build the key."""

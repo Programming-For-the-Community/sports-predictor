@@ -1,0 +1,38 @@
+# Tests and deploys the F1 predict-read Lambda -- GET /f1/events, GET
+# /f1/models, GET /f1/season, split out of f1-predict for cold start (see
+# Terraform/lambda-f1-predict-read.tf). Zip-packaged like ingest/normalize,
+# not a container image.
+
+name: F1 Predict Read Deploy
+
+on:
+  workflow_dispatch:
+  workflow_call:
+    inputs:
+      function_name:
+        description: 'F1 predict-read Lambda function name (from Terraform output f1_predict_read_function_name)'
+        required: false
+        type: string
+        default: 'sports-predictor-f1-predict-read'
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  test:
+    name: Run f1-predict-read tests
+    uses: ./.github/workflows/run_python_tests.yml
+    with:
+      test_path: 'Source/tests/aws-lambdas/f1/test_predict_read_handler.py Source/tests/library/serving/test_f1_reads.py Source/tests/library/serving/test_common.py Source/tests/library/storage/test_prediction_cache.py Source/tests/library/storage/test_model_artifacts.py Source/tests/library/aws/test_lambda_invoker.py'
+      requirements_files: 'Source/aws-lambdas/f1/predict-read/requirements.txt'
+
+  deploy:
+    name: Deploy f1-predict-read Lambda
+    needs: test
+    uses: ./.github/workflows/python_lambda_build.yml
+    secrets: inherit
+    with:
+      function_name: ${{ inputs.function_name || 'sports-predictor-f1-predict-read' }}
+      handler_dir: 'Source/aws-lambdas/f1/predict-read'
+      library_path: 'Source/library'

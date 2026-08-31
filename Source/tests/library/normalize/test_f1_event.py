@@ -17,6 +17,7 @@ from library.normalize.f1 import (
     race_result_to_constructor_entities,
     race_result_to_driver_entities,
     race_result_to_event_item,
+    schedule_payload_to_scheduled_events,
     sprint_result_to_constructor_entities,
     sprint_result_to_driver_entities,
     sprint_result_to_event_item,
@@ -356,3 +357,51 @@ class TestMergeQualifyingIntoEvent:
         merged = merge_qualifying_into_event(event_item, None)
 
         assert merged["participants"][0]["result"]["qualifying"] is None
+
+
+def _schedule_payload(*races):
+    """The schedule endpoint's own real shape (JolpicaClient.get_races) --
+    every race carries circuit/date/raceName metadata but no "Results"
+    key at all, unlike _payload's own results-endpoint shape above."""
+    return {"MRData": {"RaceTable": {"Races": list(races)}}}
+
+
+def _schedule_race(season="2024", round_="1", event_date="2024-03-02", circuit_id="bahrain"):
+    return {
+        "season": season, "round": round_, "raceName": "Bahrain Grand Prix",
+        "Circuit": {
+            "circuitId": circuit_id, "circuitName": "Bahrain International Circuit",
+            "Location": {"locality": "Sakhir", "country": "Bahrain"},
+        },
+        "date": event_date,
+    }
+
+
+class TestSchedulePayloadToScheduledEvents:
+    def test_empty_races_list_returns_no_events(self):
+        assert schedule_payload_to_scheduled_events(_schedule_payload(), "f1") == []
+
+    def test_one_stub_event_per_race_on_the_calendar(self):
+        events = schedule_payload_to_scheduled_events(
+            _schedule_payload(_schedule_race(round_="1"), _schedule_race(round_="2")), "f1",
+        )
+        assert [e["event_id"] for e in events] == ["2024-1", "2024-2"]
+
+    def test_stub_events_are_scheduled_with_no_participants(self):
+        [event] = schedule_payload_to_scheduled_events(_schedule_payload(_schedule_race()), "f1")
+
+        assert event["status"] == "scheduled"
+        assert event["participants"] == []
+
+    def test_stub_carries_real_circuit_and_date_metadata(self):
+        [event] = schedule_payload_to_scheduled_events(_schedule_payload(_schedule_race(circuit_id="monaco", event_date="2024-05-26")), "f1")
+
+        assert event["circuit_id"] == "monaco"
+        assert event["event_date"] == "2024-05-26"
+
+    def test_stub_event_id_matches_what_race_result_to_event_item_will_later_produce(self):
+        [stub] = schedule_payload_to_scheduled_events(_schedule_payload(_schedule_race(season="2024", round_="1")), "f1")
+        real = race_result_to_event_item(_payload(_WINNER, season="2024", round_="1"), "f1")
+
+        assert stub["event_key"] == real["event_key"]
+        assert stub["event_id"] == real["event_id"]
