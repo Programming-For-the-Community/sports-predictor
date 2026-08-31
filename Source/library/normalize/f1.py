@@ -290,20 +290,37 @@ def sprint_result_to_constructor_entities(payload: dict, sport: str) -> list[dic
     return _constructor_entities(payload, sport, "SprintResults")
 
 
-def _parse_lap_time_seconds(value: str | None) -> float | None:
-    """Ergast/Jolpica lap-time strings are "M:SS.sss" (e.g. "1:29.374")
-    -- minutes, then seconds+milliseconds. Confirmed live 2026-08-31
-    against a real qualifying response. None/empty/malformed returns
-    None rather than raising -- a driver eliminated in Q1 genuinely has
-    no Q2/Q3 KEY AT ALL (confirmed live, not just a null value), and
-    that needs to be a silent, expected gap here, not a parse failure."""
+def _parse_lap_time_seconds(value: str | None, context: str = "") -> float | None:
+    """Ergast/Jolpica lap-time strings are USUALLY "M:SS.sss" (e.g.
+    "1:29.374") -- minutes, then seconds+milliseconds. But a lap under a
+    minute has no minutes prefix at all, just bare "SS.sss" (e.g.
+    "54.963") -- a real, genuinely valid value this function's first
+    version treated as a parse FAILURE (silently discarded as "missing"
+    instead of the real time it was), confirmed live 2026-08-31 from a
+    real backfill run's own logs -- dozens of real sub-minute qualifying
+    times, all logged as "unparseable" and dropped. The colon-only
+    assumption came from this module's own original spot-check, which
+    only ever happened to sample >=1-minute times. Both shapes are
+    handled directly on whether a colon is present, rather than assuming
+    one and treating the other as a failure.
+
+    None/empty/malformed still returns None -- a driver eliminated in Q1
+    genuinely has no Q2/Q3 KEY AT ALL (confirmed live, not just a null
+    value), and that needs to stay a silent, expected gap, not a parse
+    failure. `context` (e.g. "season 2014 round 7") is included in the
+    warning for any value that's STILL unparseable after handling both
+    shapes -- the original warning carried no season/round at all, which
+    is exactly why this bug's own real occurrences couldn't be traced
+    back to a specific round from the log alone."""
     if not value:
         return None
     try:
-        minutes_str, seconds_str = value.split(":")
-        return int(minutes_str) * 60 + float(seconds_str)
+        if ":" in value:
+            minutes_str, seconds_str = value.split(":")
+            return int(minutes_str) * 60 + float(seconds_str)
+        return float(value)
     except (ValueError, AttributeError):
-        logger.warning("Unparseable F1 lap time %r -- treating as missing", value)
+        logger.warning("Unparseable F1 lap time %r%s -- treating as missing", value, f" ({context})" if context else "")
         return None
 
 
@@ -329,15 +346,17 @@ def qualifying_payload_to_results(payload: dict) -> dict[str, dict]:
     races = payload.get("MRData", {}).get("RaceTable", {}).get("Races", [])
     if not races:
         return {}
+    race = races[0]
+    context = f"season {race.get('season')} round {race.get('round')}"
 
     parsed: dict[str, dict] = {}
-    for result in races[0].get("QualifyingResults", []):
+    for result in race.get("QualifyingResults", []):
         driver_id = (result.get("Driver") or {}).get("driverId")
         if not driver_id:
             continue
-        q1 = _parse_lap_time_seconds(result.get("Q1"))
-        q2 = _parse_lap_time_seconds(result.get("Q2"))
-        q3 = _parse_lap_time_seconds(result.get("Q3"))
+        q1 = _parse_lap_time_seconds(result.get("Q1"), context)
+        q2 = _parse_lap_time_seconds(result.get("Q2"), context)
+        q3 = _parse_lap_time_seconds(result.get("Q3"), context)
         best = q3 if q3 is not None else (q2 if q2 is not None else q1)
         parsed[driver_id] = {
             "position": _int_or_none(result.get("position")),

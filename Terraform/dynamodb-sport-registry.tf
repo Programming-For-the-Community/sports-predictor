@@ -477,16 +477,29 @@ resource "aws_dynamodb_table_item" "pga_registry" {
   })
 }
 
-# F1's own season window uses the same year-round "01-01"/"12-31" bounds
-# as PGA -- F1's real calendar runs roughly March-December, but f1-ingest's
-# own trailing-window date discovery (Source/aws-lambdas/f1/ingest/
-# handler.py) already makes an out-of-season daily invocation a harmless
-# no-op (zero races found in the trailing window), so there's no real cost
-# to not guessing at F1's exact season boundaries here -- same reasoning
-# PGA's own year-round window uses. Unlike PGA's own registry item, no
-# round-number-style parametrization is needed -- all nine F1 models are
-# genuinely distinct scripts/targets, not one script repeated with a
-# per-round override.
+# F1's season window is a REAL, verified boundary, NOT year-round --
+# genuinely different from PGA's own year-round item below despite an
+# earlier draft of this file copying PGA's "01-01"/"12-31" bounds
+# wholesale. PGA's own comment (below) has a real, specific reason to
+# stay ungated: its off-season gap is SHORT (a few weeks) and its exact
+# dates move year to year, so encoding a boundary risks silently gating
+# off a real tournament week. Neither is true for F1 -- confirmed live
+# 2026-08-31 against Jolpica's own real race dates across 2022-2025: the
+# season opener has landed 2022-03-20, 2023-03-05, 2024-03-02, 2025-03-16
+# (earliest: Mar 2), and the finale 2022-11-20, 2023-11-26, 2024-12-08,
+# 2025-12-07 (latest: Dec 8) -- a genuine, stable ~3-month off-season, not
+# a short, unstable one. Leaving F1 ungated the way PGA is would have cost
+# real money every one of those off-season months (the training
+# orchestrator would still attempt all nine F1 training targets monthly
+# with no new data to justify it), not just a negligible no-op ingest
+# call the way PGA's own short gap does.
+#
+# season_start pads a month ahead of the earliest confirmed opener (Mar
+# 2), season_end a week past the latest confirmed finale (Dec 8) -- same
+# padding convention every head-to-head sport's own registry item above
+# already uses. Unlike PGA's own registry item, no round-number-style
+# parametrization is needed -- all nine F1 models are genuinely distinct
+# scripts/targets, not one script repeated with a per-round override.
 resource "aws_dynamodb_table_item" "f1_registry" {
   table_name = aws_dynamodb_table.sport_registry.name
   hash_key   = aws_dynamodb_table.sport_registry.hash_key
@@ -496,8 +509,8 @@ resource "aws_dynamodb_table_item" "f1_registry" {
     sport           = { S = "f1" }
     event_type      = { S = "field" }
     polling_cadence = { S = "daily" }
-    season_start    = { S = "01-01" }
-    season_end      = { S = "12-31" }
+    season_start    = { S = "02-01" } # a month ahead of the earliest confirmed opener (2024-03-02)
+    season_end      = { S = "12-15" } # a week past the latest confirmed finale (2024-12-08)
 
     training_targets = {
       L = [
