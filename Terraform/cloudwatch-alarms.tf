@@ -123,6 +123,7 @@ resource "aws_cloudwatch_metric_alarm" "ingest_errors" {
     id          = "total"
     expression  = "SUM(SEARCH('{AWS/Lambda,FunctionName} Errors ${var.project}- ingest', 'Sum', 300))"
     label       = "Total ingest Errors"
+    period      = 300 # CloudWatch requires Period on the query itself when an alarm has no raw metric{} sub-block anywhere to derive it from -- the 300 embedded in SEARCH()'s own arguments isn't enough (real apply failure: "ValidationError: Period must not be null")
     return_data = true
   }
 
@@ -144,6 +145,7 @@ resource "aws_cloudwatch_metric_alarm" "normalize_errors" {
     id          = "total"
     expression  = "SUM(SEARCH('{AWS/Lambda,FunctionName} Errors ${var.project}- normalize', 'Sum', 300))"
     label       = "Total normalize Errors"
+    period      = 300 # see ingest_errors above for why this is required here
     return_data = true
   }
 
@@ -165,6 +167,7 @@ resource "aws_cloudwatch_metric_alarm" "live_scores_errors" {
     id          = "total"
     expression  = "SUM(SEARCH('{AWS/Lambda,FunctionName} Errors ${var.project}- live-scores', 'Sum', 300))"
     label       = "Total live-scores Errors"
+    period      = 300 # see ingest_errors above for why this is required here
     return_data = true
   }
 
@@ -186,6 +189,7 @@ resource "aws_cloudwatch_metric_alarm" "schedule_sync_errors" {
     id          = "total"
     expression  = "SUM(SEARCH('{AWS/Lambda,FunctionName} Errors ${var.project}- schedule-sync', 'Sum', 300))"
     label       = "Total schedule-sync Errors"
+    period      = 300 # see ingest_errors above for why this is required here
     return_data = true
   }
 
@@ -209,6 +213,7 @@ resource "aws_cloudwatch_metric_alarm" "lambda_throttles" {
     id          = "total"
     expression  = "SUM(SEARCH('{AWS/Lambda,FunctionName} Throttles ${var.project}-', 'Sum', 300))"
     label       = "Total Throttles"
+    period      = 300 # see ingest_errors above for why this is required here
     return_data = true
   }
 
@@ -237,6 +242,7 @@ resource "aws_cloudwatch_metric_alarm" "predict_path_duration_p99" {
     id          = "total"
     expression  = "SEARCH('{AWS/Lambda,FunctionName} Duration ${var.project}- predict', 'p99', 300)"
     label       = "predict/predict-read Duration p99"
+    period      = 300 # see ingest_errors above for why this is required here
     return_data = true
   }
 
@@ -262,17 +268,20 @@ resource "aws_cloudwatch_metric_alarm" "dynamodb_throttles" {
   metric_query {
     id          = "read_throttle"
     expression  = "SUM(SEARCH('{AWS/DynamoDB,TableName} ReadThrottleEvents ${var.project}', 'Sum', 300))"
+    period      = 300 # see ingest_errors above (cloudwatch-alarms.tf) for why this is required -- no query in this alarm has a raw metric{} sub-block
     return_data = false
   }
   metric_query {
     id          = "write_throttle"
     expression  = "SUM(SEARCH('{AWS/DynamoDB,TableName} WriteThrottleEvents ${var.project}', 'Sum', 300))"
+    period      = 300
     return_data = false
   }
   metric_query {
     id          = "total"
     expression  = "read_throttle + write_throttle"
     label       = "Total DynamoDB throttle events"
+    period      = 300
     return_data = true
   }
 
@@ -295,6 +304,7 @@ resource "aws_cloudwatch_metric_alarm" "dynamodb_system_errors" {
     id          = "total"
     expression  = "SUM(SEARCH('{AWS/DynamoDB,TableName} SystemErrors ${var.project}', 'Sum', 300))"
     label       = "Total DynamoDB SystemErrors"
+    period      = 300 # see ingest_errors above for why this is required here
     return_data = true
   }
 
