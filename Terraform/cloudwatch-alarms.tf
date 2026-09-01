@@ -13,20 +13,53 @@
 #   cloudwatch-dashboard-alerts.tf has a real alarm resource to show a
 #   tile for; deliberately never pages anyone.
 #
-# Lambda Errors is split by pipeline stage, not one blanket alarm, so a
+# Every aggregate alarm below (Lambda Errors/Throttles by stage, predict-
+# path Duration, DynamoDB throttles/SystemErrors) uses explicit per-
+# resource metric_query blocks summed/combined via an expression, NOT
+# SEARCH() -- a real apply confirmed CloudWatch's PutMetricAlarm flatly
+# rejects SEARCH() ("ValidationError: SEARCH is not supported on Metric
+# Alarms"), even though the identical SEARCH() expression works fine in a
+# dashboard widget (cloudwatch-dashboard-*.tf uses it that way). Lambda
+# Errors is further split by pipeline stage, not one blanket alarm, so a
 # predict-path failure (user-facing) can page while an ingest failure
-# (self-heals on tomorrow's run) doesn't. predict/predict-read use
-# explicit per-function metric_query blocks rather than a SEARCH prefix --
-# "sports-predictor-nfl-predict" is a literal PREFIX of "sports-predictor-
-# nfl-predict-read", so a SEARCH term of "predict" alone would silently
-# pull predict-read's own errors into the predict-only alarm (and vice
-# versa) -- exactly the SEARCH-prefix ambiguity class the Lambda-
-# observability-dashboard root-cause already surfaced once in this repo.
-# The 4 Warning-tier stages (ingest/normalize/live-scores/schedule-sync)
-# have no such sibling-name collision, so SEARCH stays safe and much
-# shorter there.
+# (self-heals on tomorrow's run) doesn't.
 locals {
   alarm_all_sports = ["nfl", "ncaafb", "nba", "ncaambb", "pga", "f1"]
+  # f1 has no schedule-sync Lambda (see lambda-f1-*.tf's own set) -- every
+  # other stage covers all 6 sports.
+  alarm_schedule_sync_sports = [for sport in local.alarm_all_sports : sport if sport != "f1"]
+
+  # Every Lambda function name suffix (after "${var.project}-") in the
+  # stack -- 37 total (6 sports x 5 stages [ingest/normalize/live-scores/
+  # predict/predict-read] + 5 sports' schedule-sync [not f1] + the 2
+  # standalone utility Lambdas) -- lambda_throttles' aggregate alarm sums
+  # one metric_query per function.
+  alarm_all_lambda_suffixes = concat(
+    [for sport in local.alarm_all_sports : "${sport}-ingest"],
+    [for sport in local.alarm_all_sports : "${sport}-normalize"],
+    [for sport in local.alarm_all_sports : "${sport}-live-scores"],
+    [for sport in local.alarm_all_sports : "${sport}-predict"],
+    [for sport in local.alarm_all_sports : "${sport}-predict-read"],
+    [for sport in local.alarm_schedule_sync_sports : "${sport}-schedule-sync"],
+    ["season-gate", "cloudwatch-geo-widget"],
+  )
+
+  # predict + predict-read together, for predict_path_duration_p99's own
+  # combined alarm -- see that resource's own comment for why it covers
+  # both stages in one Warning-tier signal.
+  alarm_predict_path_suffixes = concat(
+    [for sport in local.alarm_all_sports : "${sport}-predict"],
+    [for sport in local.alarm_all_sports : "${sport}-predict-read"],
+  )
+
+  alarm_dynamodb_tables = [
+    aws_dynamodb_table.entities.name,
+    aws_dynamodb_table.events.name,
+    aws_dynamodb_table.player_game_stats.name,
+    aws_dynamodb_table.team_game_stats.name,
+    aws_dynamodb_table.predictions.name,
+    aws_dynamodb_table.sport_registry.name,
+  ]
 }
 
 # ── 1-2. Predict / predict-read Lambda Errors (Critical) ────────────────────
@@ -119,11 +152,27 @@ resource "aws_cloudwatch_metric_alarm" "ingest_errors" {
   threshold           = 0
   treat_missing_data  = "notBreaching"
 
+  dynamic "metric_query" {
+    for_each = local.alarm_all_sports
+    content {
+      id          = "m${metric_query.key + 1}"
+      return_data = false
+      metric {
+        metric_name = "Errors"
+        namespace   = "AWS/Lambda"
+        period      = 300
+        stat        = "Sum"
+        dimensions = {
+          FunctionName = "${var.project}-${metric_query.value}-ingest"
+        }
+      }
+    }
+  }
+
   metric_query {
     id          = "total"
-    expression  = "SUM(SEARCH('{AWS/Lambda,FunctionName} Errors ${var.project}- ingest', 'Sum', 300))"
+    expression  = join("+", [for i in range(length(local.alarm_all_sports)) : "m${i + 1}"])
     label       = "Total ingest Errors"
-    period      = 300 # CloudWatch requires Period on the query itself when an alarm has no raw metric{} sub-block anywhere to derive it from -- the 300 embedded in SEARCH()'s own arguments isn't enough (real apply failure: "ValidationError: Period must not be null")
     return_data = true
   }
 
@@ -141,11 +190,27 @@ resource "aws_cloudwatch_metric_alarm" "normalize_errors" {
   threshold           = 0
   treat_missing_data  = "notBreaching"
 
+  dynamic "metric_query" {
+    for_each = local.alarm_all_sports
+    content {
+      id          = "m${metric_query.key + 1}"
+      return_data = false
+      metric {
+        metric_name = "Errors"
+        namespace   = "AWS/Lambda"
+        period      = 300
+        stat        = "Sum"
+        dimensions = {
+          FunctionName = "${var.project}-${metric_query.value}-normalize"
+        }
+      }
+    }
+  }
+
   metric_query {
     id          = "total"
-    expression  = "SUM(SEARCH('{AWS/Lambda,FunctionName} Errors ${var.project}- normalize', 'Sum', 300))"
+    expression  = join("+", [for i in range(length(local.alarm_all_sports)) : "m${i + 1}"])
     label       = "Total normalize Errors"
-    period      = 300 # see ingest_errors above for why this is required here
     return_data = true
   }
 
@@ -163,11 +228,27 @@ resource "aws_cloudwatch_metric_alarm" "live_scores_errors" {
   threshold           = 0
   treat_missing_data  = "notBreaching"
 
+  dynamic "metric_query" {
+    for_each = local.alarm_all_sports
+    content {
+      id          = "m${metric_query.key + 1}"
+      return_data = false
+      metric {
+        metric_name = "Errors"
+        namespace   = "AWS/Lambda"
+        period      = 300
+        stat        = "Sum"
+        dimensions = {
+          FunctionName = "${var.project}-${metric_query.value}-live-scores"
+        }
+      }
+    }
+  }
+
   metric_query {
     id          = "total"
-    expression  = "SUM(SEARCH('{AWS/Lambda,FunctionName} Errors ${var.project}- live-scores', 'Sum', 300))"
+    expression  = join("+", [for i in range(length(local.alarm_all_sports)) : "m${i + 1}"])
     label       = "Total live-scores Errors"
-    period      = 300 # see ingest_errors above for why this is required here
     return_data = true
   }
 
@@ -185,11 +266,27 @@ resource "aws_cloudwatch_metric_alarm" "schedule_sync_errors" {
   threshold           = 0
   treat_missing_data  = "notBreaching"
 
+  dynamic "metric_query" {
+    for_each = local.alarm_schedule_sync_sports
+    content {
+      id          = "m${metric_query.key + 1}"
+      return_data = false
+      metric {
+        metric_name = "Errors"
+        namespace   = "AWS/Lambda"
+        period      = 300
+        stat        = "Sum"
+        dimensions = {
+          FunctionName = "${var.project}-${metric_query.value}-schedule-sync"
+        }
+      }
+    }
+  }
+
   metric_query {
     id          = "total"
-    expression  = "SUM(SEARCH('{AWS/Lambda,FunctionName} Errors ${var.project}- schedule-sync', 'Sum', 300))"
+    expression  = join("+", [for i in range(length(local.alarm_schedule_sync_sports)) : "m${i + 1}"])
     label       = "Total schedule-sync Errors"
-    period      = 300 # see ingest_errors above for why this is required here
     return_data = true
   }
 
@@ -209,11 +306,27 @@ resource "aws_cloudwatch_metric_alarm" "lambda_throttles" {
   threshold           = 0
   treat_missing_data  = "notBreaching"
 
+  dynamic "metric_query" {
+    for_each = local.alarm_all_lambda_suffixes
+    content {
+      id          = "m${metric_query.key + 1}"
+      return_data = false
+      metric {
+        metric_name = "Throttles"
+        namespace   = "AWS/Lambda"
+        period      = 300
+        stat        = "Sum"
+        dimensions = {
+          FunctionName = "${var.project}-${metric_query.value}"
+        }
+      }
+    }
+  }
+
   metric_query {
     id          = "total"
-    expression  = "SUM(SEARCH('{AWS/Lambda,FunctionName} Throttles ${var.project}-', 'Sum', 300))"
+    expression  = join("+", [for i in range(length(local.alarm_all_lambda_suffixes)) : "m${i + 1}"])
     label       = "Total Throttles"
-    period      = 300 # see ingest_errors above for why this is required here
     return_data = true
   }
 
@@ -224,11 +337,11 @@ resource "aws_cloudwatch_metric_alarm" "lambda_throttles" {
 }
 
 # ── 8. Predict + predict-read Duration p99 (Warning) ─────────────────────────
-# Deliberately covers both -- see this file's own top comment on why a
-# SEARCH term can't isolate "predict" from "predict-read" the way the
-# explicit metric_query alarms above do. Fine here: this is latency
-# awareness, not routing, and both stages sharing one Warning-tier signal
-# is a reasonable simplification for a non-paging alarm.
+# Deliberately covers both stages in one alarm -- this is latency
+# awareness, not routing, so the predict/predict-read prefix-collision
+# concern this file's top comment raises for Errors doesn't apply here.
+# MAX() across each function's own p99 series (not SUM/AVG -- durations
+# aren't additive) surfaces the worst offender among all 12 functions.
 
 resource "aws_cloudwatch_metric_alarm" "predict_path_duration_p99" {
   alarm_name          = "${var.project}-predict-path-duration-p99"
@@ -238,11 +351,27 @@ resource "aws_cloudwatch_metric_alarm" "predict_path_duration_p99" {
   threshold           = 24000 # ms -- 80% of the 30s timeout every predict/predict-read Lambda shares
   treat_missing_data  = "notBreaching"
 
+  dynamic "metric_query" {
+    for_each = local.alarm_predict_path_suffixes
+    content {
+      id          = "m${metric_query.key + 1}"
+      return_data = false
+      metric {
+        metric_name = "Duration"
+        namespace   = "AWS/Lambda"
+        period      = 300
+        stat        = "p99"
+        dimensions = {
+          FunctionName = "${var.project}-${metric_query.value}"
+        }
+      }
+    }
+  }
+
   metric_query {
     id          = "total"
-    expression  = "SEARCH('{AWS/Lambda,FunctionName} Duration ${var.project}- predict', 'p99', 300)"
-    label       = "predict/predict-read Duration p99"
-    period      = 300 # see ingest_errors above for why this is required here
+    expression  = "MAX(${join(",", [for i in range(length(local.alarm_predict_path_suffixes)) : "m${i + 1}"])})"
+    label       = "predict/predict-read Duration p99 (worst of any function)"
     return_data = true
   }
 
@@ -253,9 +382,6 @@ resource "aws_cloudwatch_metric_alarm" "predict_path_duration_p99" {
 }
 
 # ── 9-10. DynamoDB throttles / system errors, aggregate across 6 tables ─────
-# SEARCH by TableName alone (no Operation dimension specified) matches
-# every per-operation series CloudWatch actually stores and sums across
-# all of them -- a standard partial-dimension SEARCH, not an approximation.
 
 resource "aws_cloudwatch_metric_alarm" "dynamodb_throttles" {
   alarm_name          = "${var.project}-dynamodb-throttles"
@@ -265,23 +391,46 @@ resource "aws_cloudwatch_metric_alarm" "dynamodb_throttles" {
   threshold           = 0
   treat_missing_data  = "notBreaching"
 
-  metric_query {
-    id          = "read_throttle"
-    expression  = "SUM(SEARCH('{AWS/DynamoDB,TableName} ReadThrottleEvents ${var.project}', 'Sum', 300))"
-    period      = 300 # see ingest_errors above (cloudwatch-alarms.tf) for why this is required -- no query in this alarm has a raw metric{} sub-block
-    return_data = false
+  dynamic "metric_query" {
+    for_each = local.alarm_dynamodb_tables
+    content {
+      id          = "read${metric_query.key}"
+      return_data = false
+      metric {
+        metric_name = "ReadThrottleEvents"
+        namespace   = "AWS/DynamoDB"
+        period      = 300
+        stat        = "Sum"
+        dimensions = {
+          TableName = metric_query.value
+        }
+      }
+    }
   }
-  metric_query {
-    id          = "write_throttle"
-    expression  = "SUM(SEARCH('{AWS/DynamoDB,TableName} WriteThrottleEvents ${var.project}', 'Sum', 300))"
-    period      = 300
-    return_data = false
+  dynamic "metric_query" {
+    for_each = local.alarm_dynamodb_tables
+    content {
+      id          = "write${metric_query.key}"
+      return_data = false
+      metric {
+        metric_name = "WriteThrottleEvents"
+        namespace   = "AWS/DynamoDB"
+        period      = 300
+        stat        = "Sum"
+        dimensions = {
+          TableName = metric_query.value
+        }
+      }
+    }
   }
+
   metric_query {
-    id          = "total"
-    expression  = "read_throttle + write_throttle"
+    id = "total"
+    expression = join("+", concat(
+      [for i in range(length(local.alarm_dynamodb_tables)) : "read${i}"],
+      [for i in range(length(local.alarm_dynamodb_tables)) : "write${i}"],
+    ))
     label       = "Total DynamoDB throttle events"
-    period      = 300
     return_data = true
   }
 
@@ -300,11 +449,27 @@ resource "aws_cloudwatch_metric_alarm" "dynamodb_system_errors" {
   treat_missing_data  = "notBreaching"
   alarm_actions       = [aws_sns_topic.ops_alerts.arn]
 
+  dynamic "metric_query" {
+    for_each = local.alarm_dynamodb_tables
+    content {
+      id          = "m${metric_query.key + 1}"
+      return_data = false
+      metric {
+        metric_name = "SystemErrors"
+        namespace   = "AWS/DynamoDB"
+        period      = 300
+        stat        = "Sum"
+        dimensions = {
+          TableName = metric_query.value
+        }
+      }
+    }
+  }
+
   metric_query {
     id          = "total"
-    expression  = "SUM(SEARCH('{AWS/DynamoDB,TableName} SystemErrors ${var.project}', 'Sum', 300))"
+    expression  = join("+", [for i in range(length(local.alarm_dynamodb_tables)) : "m${i + 1}"])
     label       = "Total DynamoDB SystemErrors"
-    period      = 300 # see ingest_errors above for why this is required here
     return_data = true
   }
 
