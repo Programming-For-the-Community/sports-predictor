@@ -1,0 +1,43 @@
+# Tests and deploys the F1 live-scores Lambda -- GET /f1/live-scores plus
+# the EventBridge-triggered cache refresh.
+#
+# Function name is supplied by the caller from a Terraform output, with a
+# default so workflow_dispatch (manual, standalone run) still works
+# without needing that wiring.
+
+name: F1 Live Scores Deploy
+
+on:
+  workflow_dispatch:
+  workflow_call:
+    inputs:
+      function_name:
+        description: 'F1 live-scores Lambda function name (from Terraform output f1_live_scores_function_name)'
+        required: false
+        type: string
+        default: 'sports-predictor-f1-live-scores'
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  test:
+    name: Run f1-live-scores tests
+    uses: ./.github/workflows/run_python_tests.yml
+    with:
+      test_path: >-
+        Source/tests/aws-lambdas/f1/test_live_scores.py
+        Source/tests/aws-lambdas/f1/test_live_scores_handler.py
+      requirements_files: 'Source/aws-lambdas/f1/live-scores/requirements.txt'
+
+  deploy:
+    name: Deploy f1-live-scores Lambda
+    needs: test
+    uses: ./.github/workflows/python_lambda_build.yml
+    secrets: inherit
+    with:
+      function_name: ${{ inputs.function_name || 'sports-predictor-f1-live-scores' }}
+      handler_dir: 'Source/aws-lambdas/f1/live-scores'
+      library_path: 'Source/library'
+      extra_source_files: 'Source/aws-lambdas/f1/live-scores/live_scores.py'

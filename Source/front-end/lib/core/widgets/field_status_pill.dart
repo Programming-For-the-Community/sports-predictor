@@ -3,11 +3,32 @@ import 'package:flutter/material.dart';
 import '../theme/app_colors.dart';
 import '../theme/app_text_styles.dart';
 
+/// map_status vocabulary (library/normalize/pga.py) -- FieldStatusPill's
+/// own switch, plus every other file that tests one of these values
+/// (sport_card.dart, field_leaderboard_table.dart), reference these
+/// instead of retyping the raw string.
+abstract final class PgaParticipantStatus {
+  static const scheduled = 'scheduled';
+  static const finished = 'finished';
+  static const cut = 'cut';
+  static const madeCutDidNotFinish = 'made_cut_did_not_finish';
+  static const withdrawn = 'withdrawn';
+  static const inProgress = 'in_progress';
+
+  // FieldStatusPill's own display label for each value above -- not
+  // shared with any other file, but named instead of typed inline in the
+  // pill's switch.
+  static const scheduledLabel = 'Scheduled';
+  static const finishedLabel = 'Finished';
+  static const cutLabel = 'Cut';
+  static const madeCutDidNotFinishLabel = 'Made Cut, DNF';
+  static const withdrawnLabel = 'Withdrawn';
+  static const inProgressLabel = 'In Progress';
+}
+
 /// One golfer's own round/tournament status, as a small colored pill --
-/// map_status vocabulary (library/normalize/pga.py): scheduled/finished/
-/// cut/made_cut_did_not_finish/withdrawn/in_progress, plus any other
-/// unrecognized value, which falls through to the "still playing" branch
-/// below.
+/// PgaParticipantStatus above, plus any other unrecognized value, which
+/// falls through to the "still playing" branch below.
 class FieldStatusPill extends StatelessWidget {
   const FieldStatusPill({super.key, required this.status, this.dotOnly = false});
 
@@ -20,12 +41,12 @@ class FieldStatusPill extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final (label, color) = switch (status) {
-      'scheduled' => ('Scheduled', AppColors.inkMute),
-      'finished' => ('Finished', AppColors.inkSub),
-      'cut' => ('Cut', AppColors.neg),
-      'made_cut_did_not_finish' => ('Made Cut, DNF', AppColors.warn),
-      'withdrawn' => ('Withdrawn', AppColors.neg),
-      'in_progress' => ('In Progress', AppColors.live),
+      PgaParticipantStatus.scheduled => (PgaParticipantStatus.scheduledLabel, AppColors.inkMute),
+      PgaParticipantStatus.finished => (PgaParticipantStatus.finishedLabel, AppColors.inkSub),
+      PgaParticipantStatus.cut => (PgaParticipantStatus.cutLabel, AppColors.neg),
+      PgaParticipantStatus.madeCutDidNotFinish => (PgaParticipantStatus.madeCutDidNotFinishLabel, AppColors.warn),
+      PgaParticipantStatus.withdrawn => (PgaParticipantStatus.withdrawnLabel, AppColors.neg),
+      PgaParticipantStatus.inProgress => (PgaParticipantStatus.inProgressLabel, AppColors.live),
       null => ('--', AppColors.inkMute),
       // Unrecognized -- treat as still playing. Title-cased from the raw
       // status name, matching every recognized label's own casing above.

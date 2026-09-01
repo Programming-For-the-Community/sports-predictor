@@ -14,6 +14,9 @@
 /// parsePgaEventPrediction uses.
 library;
 
+import 'event_status.dart';
+import 'field_prediction.dart' show PgaEventType;
+
 /// One already-played round's real result -- kept as its own small class
 /// (not shared with field_prediction.dart's ActualRoundResult) for the
 /// same "separate endpoint/cache, independent evolution path" reason
@@ -79,7 +82,7 @@ class FieldLiveEventState {
   factory FieldLiveEventState.fromJson(Map<String, dynamic> json) {
     final participantsJson = json['participants'] as Map<String, dynamic>? ?? {};
     return FieldLiveEventState(
-      status: json['status'] as String? ?? '',
+      status: json['status'] as String? ?? EventStatus.unknown,
       tournamentName: json['tournament_name'] as String?,
       participants: participantsJson.map(
         (entityId, value) => MapEntry(entityId, FieldParticipantLiveResult.fromJson(value as Map<String, dynamic>)),
@@ -128,7 +131,7 @@ class TwoSidedLiveEventState {
     final participantsJson = json['participants'] as Map<String, dynamic>? ?? {};
     return TwoSidedLiveEventState(
       eventType: json['event_type'] as String,
-      status: json['status'] as String? ?? '',
+      status: json['status'] as String? ?? EventStatus.unknown,
       tournamentName: json['tournament_name'] as String?,
       participants: participantsJson.map(
         (entityId, value) => MapEntry(entityId, TwoSidedParticipantLiveResult.fromJson(value as Map<String, dynamic>)),
@@ -155,12 +158,12 @@ class PgaTwoSidedLiveState extends PgaLiveEventState {
 /// 'field' when absent, so an old cached entry (before this pass's
 /// backend deploy lands) still parses instead of throwing.
 PgaLiveEventState parsePgaLiveEventState(Map<String, dynamic> json) {
-  final eventType = json['event_type'] as String? ?? 'field';
+  final eventType = json['event_type'] as String? ?? PgaEventType.field;
   switch (eventType) {
-    case 'field':
+    case PgaEventType.field:
       return PgaFieldLiveState(FieldLiveEventState.fromJson(json));
-    case 'match_play':
-    case 'cup':
+    case PgaEventType.matchPlay:
+    case PgaEventType.cup:
       return PgaTwoSidedLiveState(TwoSidedLiveEventState.fromJson(json));
     default:
       throw FormatException('Unrecognized PGA live-scores event_type: $eventType');

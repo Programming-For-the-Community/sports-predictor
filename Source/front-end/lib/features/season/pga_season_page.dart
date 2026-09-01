@@ -54,6 +54,20 @@ class _Column {
   final Widget Function(BuildContext, PgaFedexStanding, int rank) cell;
 }
 
+// Every column header this page shows -- not shared with any other file
+// (season_page.dart's own h2h column set is entirely disjoint), but named
+// here instead of typed inline at each of the 2 sites (the _Column list
+// below and _ExpandedPlayoffOdds' own _LabeledPercent calls) that use them.
+abstract final class _PgaStandingsLabels {
+  static const rank = '#';
+  static const golfer = 'GOLFER';
+  static const points = 'POINTS';
+  static const fedexStJude = 'ST. JUDE%';
+  static const bmw = 'BMW%';
+  static const tourChampionship = 'TOUR CH.%';
+  static const champion = 'CHAMP%';
+}
+
 String _formatPoints(double value) => value >= 1000 ? value.round().toString() : value.toStringAsFixed(1);
 
 String _formatPercent(double value) => '${(value * 100).round()}%';
@@ -66,10 +80,10 @@ String _formatPercent(double value) => '${(value * 100).round()}%';
 const _compactBreakpoint = 600.0;
 
 List<_Column> _fullColumns() => [
-      _Column('#', 1, (context, row, rank) => Text(
+      _Column(_PgaStandingsLabels.rank, 1, (context, row, rank) => Text(
             '$rank', style: AppTextStyles.metricValue(color: AppColors.inkMute), textAlign: TextAlign.center,
           )),
-      _Column('GOLFER', 4, (context, row, rank) => Column(
+      _Column(_PgaStandingsLabels.golfer, 4, (context, row, rank) => Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             mainAxisSize: MainAxisSize.min,
             children: [
@@ -77,7 +91,7 @@ List<_Column> _fullColumns() => [
               if (row.country != null) Text(row.country!, style: AppTextStyles.microLabel(color: AppColors.inkSub)),
             ],
           )),
-      _Column('POINTS', 2, (context, row, rank) => Column(
+      _Column(_PgaStandingsLabels.points, 2, (context, row, rank) => Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.center,
             children: [
@@ -85,10 +99,10 @@ List<_Column> _fullColumns() => [
               Text(_formatPoints(row.projectedPoints), style: AppTextStyles.microLabel(color: AppColors.cyan), maxLines: 1),
             ],
           )),
-      _Column('ST. JUDE%', 2, (context, row, rank) => _PercentText(row.fedexStJudeProbability)),
-      _Column('BMW%', 2, (context, row, rank) => _PercentText(row.bmwProbability)),
-      _Column('TOUR CH.%', 2, (context, row, rank) => _PercentText(row.tourChampionshipProbability)),
-      _Column('CHAMP%', 2, (context, row, rank) => _PercentText(row.championProbability)),
+      _Column(_PgaStandingsLabels.fedexStJude, 2, (context, row, rank) => _PercentText(row.fedexStJudeProbability)),
+      _Column(_PgaStandingsLabels.bmw, 2, (context, row, rank) => _PercentText(row.bmwProbability)),
+      _Column(_PgaStandingsLabels.tourChampionship, 2, (context, row, rank) => _PercentText(row.tourChampionshipProbability)),
+      _Column(_PgaStandingsLabels.champion, 2, (context, row, rank) => _PercentText(row.championProbability)),
     ];
 
 List<_Column> _columns({required bool compact}) {
@@ -219,9 +233,9 @@ class _ExpandedPlayoffOdds extends StatelessWidget {
       spacing: 20,
       runSpacing: 8,
       children: [
-        _LabeledPercent('ST. JUDE%', standing.fedexStJudeProbability),
-        _LabeledPercent('BMW%', standing.bmwProbability),
-        _LabeledPercent('TOUR CH.%', standing.tourChampionshipProbability),
+        _LabeledPercent(_PgaStandingsLabels.fedexStJude, standing.fedexStJudeProbability),
+        _LabeledPercent(_PgaStandingsLabels.bmw, standing.bmwProbability),
+        _LabeledPercent(_PgaStandingsLabels.tourChampionship, standing.tourChampionshipProbability),
       ],
     );
   }

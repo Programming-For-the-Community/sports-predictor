@@ -7,6 +7,9 @@
 /// page surfaces that distinction.
 library;
 
+import 'event_status.dart';
+import 'f1_prediction.dart' show F1EventType;
+
 class F1QualifyingResult {
   const F1QualifyingResult({this.position, this.gapToPoleSeconds});
 
@@ -95,13 +98,13 @@ class F1Event {
   final String? venueCity;
   final String? venueState;
 
-  bool get isSprint => eventType == 'sprint';
+  bool get isSprint => eventType == F1EventType.sprint;
 
   factory F1Event.fromJson(Map<String, dynamic> json) => F1Event(
         eventId: json['event_id'] as String,
-        eventType: json['event_type'] as String? ?? 'field',
+        eventType: json['event_type'] as String? ?? F1EventType.field,
         eventDate: json['event_date'] as String? ?? '',
-        status: json['status'] as String? ?? '',
+        status: json['status'] as String? ?? EventStatus.unknown,
         season: json['season'] as int?,
         week: json['week'] as int?,
         raceName: json['race_name'] as String?,

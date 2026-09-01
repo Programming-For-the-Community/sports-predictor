@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../core/models/event.dart';
+import '../core/models/sport_config.dart';
 
 /// Frontend-only, hand-typed real brand colors for NFL's 32 teams, keyed
 /// by ESPN's numeric team_id. No other sport has an equivalent table --
@@ -70,7 +71,7 @@ Color? _parseApiColor(String? hex) {
 /// Participant so both event-shaped callers (teamDisplay below) and
 /// standings/bracket/cup rows share one rule.
 NflTeam teamDisplayFor(String sport, String entityId, String? abbreviation, {String? apiColor}) {
-  if (sport == 'nfl') {
+  if (sport == SportIds.nfl) {
     final known = kNflTeams[entityId];
     if (known != null) return known;
   }

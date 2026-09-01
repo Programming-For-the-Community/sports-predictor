@@ -7,6 +7,11 @@ import '../theme/app_text_styles.dart';
 class LiveStatusPill extends StatelessWidget {
   const LiveStatusPill({super.key, this.dotOnly = false});
 
+  // sport_card.dart's own private _StatusPill also shows this exact word
+  // (its LIVE state has no pulsing dot, so it doesn't just compose this
+  // widget) -- referenced from there instead of retyped.
+  static const label = 'LIVE';
+
   // True on a narrow (mobile) viewport -- collapses to just the colored
   // dot (with "LIVE" moved into a Tooltip instead), same space-saving
   // convention field_status_pill.dart's own dotOnly uses.
@@ -16,7 +21,7 @@ class LiveStatusPill extends StatelessWidget {
   Widget build(BuildContext context) {
     if (dotOnly) {
       return const Tooltip(
-        message: 'LIVE',
+        message: label,
         child: SizedBox(
           width: 8,
           height: 8,
@@ -32,7 +37,7 @@ class LiveStatusPill extends StatelessWidget {
         children: [
           Container(width: 6, height: 6, decoration: BoxDecoration(shape: BoxShape.circle, color: AppColors.live)),
           const SizedBox(width: 6),
-          Text('LIVE', style: AppTextStyles.microLabel(color: AppColors.live)),
+          Text(label, style: AppTextStyles.microLabel(color: AppColors.live)),
         ],
       ),
     );

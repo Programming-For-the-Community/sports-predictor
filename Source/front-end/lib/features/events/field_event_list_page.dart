@@ -2,9 +2,11 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/data/field_events_repository.dart';
+import '../../core/models/event_status.dart';
 import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_text_styles.dart';
 import '../../core/widgets/field_event_row.dart';
+import '../../core/widgets/status_toggle.dart';
 
 /// PGA's own list page -- mirrors event_list_page.dart's shell
 /// (RefreshIndicator + Upcoming/Completed toggle) but flat, not grouped:
@@ -24,7 +26,7 @@ class FieldEventListPage extends ConsumerStatefulWidget {
 }
 
 class _FieldEventListPageState extends ConsumerState<FieldEventListPage> {
-  String _status = 'scheduled';
+  String _status = EventStatus.scheduled;
 
   void _setStatus(String status) => setState(() => _status = status);
 
@@ -45,22 +47,32 @@ class _FieldEventListPageState extends ConsumerState<FieldEventListPage> {
               spacing: 8,
               runSpacing: 8,
               children: [
-                _StatusToggle(label: 'Upcoming/Current', selected: _status == 'scheduled', onTap: () => _setStatus('scheduled')),
-                _StatusToggle(label: 'Completed', selected: _status == 'completed', onTap: () => _setStatus('completed')),
+                StatusToggle(
+                  label: StatusToggleLabels.upcoming,
+                  selected: _status == EventStatus.scheduled,
+                  onTap: () => _setStatus(EventStatus.scheduled),
+                  accentColor: AppColors.violet,
+                ),
+                StatusToggle(
+                  label: StatusToggleLabels.completed,
+                  selected: _status == EventStatus.completed,
+                  onTap: () => _setStatus(EventStatus.completed),
+                  accentColor: AppColors.violet,
+                ),
               ],
             ),
             const SizedBox(height: 16),
             events.when(
               data: (list) {
                 if (list.isEmpty) {
-                  final message = _status == 'scheduled' ? 'Coming Soon' : 'No tournaments found.';
+                  final message = _status == EventStatus.scheduled ? 'Coming Soon' : 'No tournaments found.';
                   return Text(message, style: AppTextStyles.body(color: AppColors.inkSub));
                 }
                 // Soonest-first for Upcoming, most-recent-first for
                 // Completed -- both read top-to-bottom as "closest to now
                 // at the top" (same convention event_list_page.dart uses).
                 final sorted = [...list]..sort(
-                    (a, b) => _status == 'scheduled'
+                    (a, b) => _status == EventStatus.scheduled
                         ? a.eventDate.compareTo(b.eventDate)
                         : b.eventDate.compareTo(a.eventDate),
                   );
@@ -79,30 +91,6 @@ class _FieldEventListPageState extends ConsumerState<FieldEventListPage> {
             ),
           ],
         ),
-      ),
-    );
-  }
-}
-
-class _StatusToggle extends StatelessWidget {
-  const _StatusToggle({required this.label, required this.selected, required this.onTap});
-  final String label;
-  final bool selected;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(999),
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-        decoration: BoxDecoration(
-          color: selected ? AppColors.surface : null,
-          border: Border.all(color: selected ? AppColors.violet : AppColors.border),
-          borderRadius: BorderRadius.circular(999),
-        ),
-        child: Text(label, style: AppTextStyles.microLabel(color: selected ? AppColors.violet : AppColors.inkMute)),
       ),
     );
   }

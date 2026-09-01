@@ -118,6 +118,12 @@ data "aws_iam_policy_document" "eventbridge_invoke_permissions" {
       aws_lambda_function.ncaafb_schedule_sync.arn,
       aws_lambda_function.f1_predict.arn,
       aws_lambda_function.f1_predict_read.arn,
+      # f1_live_scores: scheduler-f1-live-scores.tf's own target -- same
+      # every-3-minutes reasoning as every other sport's own live-scores
+      # entry above, added in the same change that creates the scheduler
+      # (not retrofitted after a live gap the way pga_schedule_sync/
+      # ncaafb_schedule_sync above were).
+      aws_lambda_function.f1_live_scores.arn,
     ]
   }
 }

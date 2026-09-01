@@ -13,6 +13,14 @@ import '../../core/widgets/page_glow.dart';
 /// lives here.
 enum _SportTab { events, season, models }
 
+// Not shared with any other file, but named here instead of typed inline
+// in _TabToggle's own 3 _TabButton calls below.
+abstract final class _SportTabLabels {
+  static const events = 'Events';
+  static const season = 'Season';
+  static const models = 'Models';
+}
+
 class SportShellPage extends StatelessWidget {
   const SportShellPage({super.key, required this.sportId, required this.child, this.sportConfigOverride});
 
@@ -106,7 +114,7 @@ class _TabToggle extends StatelessWidget {
         children: [
           Expanded(
             child: _TabButton(
-              label: 'Events',
+              label: _SportTabLabels.events,
               active: activeTab == _SportTab.events,
               onTap: () => context.go('/$sportId/events'),
             ),
@@ -114,14 +122,14 @@ class _TabToggle extends StatelessWidget {
           if (showSeasonTab)
             Expanded(
               child: _TabButton(
-                label: 'Season',
+                label: _SportTabLabels.season,
                 active: activeTab == _SportTab.season,
                 onTap: () => context.go('/$sportId/season'),
               ),
             ),
           Expanded(
             child: _TabButton(
-              label: 'Models',
+              label: _SportTabLabels.models,
               active: activeTab == _SportTab.models,
               onTap: () => context.go('/$sportId/models'),
             ),

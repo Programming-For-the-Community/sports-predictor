@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../core/models/f1_live_score.dart';
 import '../../core/models/f1_prediction.dart';
 import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_text_styles.dart';
@@ -11,15 +12,41 @@ import '../../core/widgets/f1_status_pill.dart';
 /// keys (win/podium/finish-or-grid/dnf/qualifying) share no column names
 /// with PGA's (top10/top5/score-to-par/rounds), and F1 additionally
 /// varies its own column set by event_type (field vs sprint) -- see
-/// isSprint below. No live-scores overlay yet -- F1's own live-scores
-/// Lambda is still deferred (project-f1-onboarding memory), so this table
-/// shows only the cached prediction response's own actual/projected
-/// values, not a live-poll overlay the way PGA's own table does.
+/// isSprint below. Live overlay (F1LiveEventState.participants, from
+/// f1LiveScoresProvider) is optional and ESPN-sourced -- see
+/// f1_live_score.dart's own docstring for why it's a genuinely different
+/// shape from PGA's own live overlay, just per-driver running order/
+/// winner, no status vocabulary.
+// Stable identity for each column, distinct from its own display label --
+// _columns' compact-column filter below matches on this, not on label
+// text, so renaming a header can never silently break which columns
+// survive into the compact layout (real complaint 2026-08-31, same root
+// cause as the projected-finish-order ties fix above: a display value
+// standing in for an identity).
+enum _F1ColumnKey { position, driver, status, finishOrGrid, qualifying, win, podium, dnf }
+
+// Every column header this table can show -- not shared with any other
+// file (field_leaderboard_table.dart's own PLAYER/TOTAL/etc. are a
+// genuinely different set), but named here instead of typed inline in
+// _fullColumns below.
+abstract final class _F1ColumnLabels {
+  static const position = '#';
+  static const driver = 'DRIVER';
+  static const status = 'STATUS';
+  static const finish = 'FINISH';
+  static const grid = 'GRID';
+  static const qualifying = 'QUALIFYING';
+  static const win = 'WIN%';
+  static const podium = 'PODIUM%';
+  static const dnf = 'DNF%';
+}
+
 class _LeaderboardColumn {
-  const _LeaderboardColumn(this.label, this.flex, this.cell);
+  const _LeaderboardColumn(this.key, this.label, this.flex, this.cell);
+  final _F1ColumnKey key;
   final String label;
   final int flex;
-  final Widget Function(BuildContext context, F1DriverPrediction entry, int rowNumber) cell;
+  final Widget Function(BuildContext context, F1DriverPrediction entry, F1DriverLiveResult? live, int rowNumber) cell;
 }
 
 String _formatPercent(double? value) => value == null ? '--' : '${(value * 100).round()}%';
@@ -37,28 +64,54 @@ class _PercentText extends StatelessWidget {
   }
 }
 
-/// "3" (real, already-happened) in ink, or "P5" (still just a model
-/// projection) muted -- same "actual, else projected, visually
-/// distinguished" idea PGA's own _StandingCell establishes, simplified
-/// to a single integer position rather than a to-par score.
+/// "3" (real, already-happened) in ink, "5" (ESPN's own live running
+/// order, mid-session) in the live accent color, or "P5" (still just a
+/// model projection) muted -- same "actual, else projected, visually
+/// distinguished" idea PGA's own _StandingCell establishes, simplified to
+/// a single integer position rather than a to-par score, with the live
+/// overlay slotted in between actual and projected (a real, if
+/// provisional, running position beats a pre-race model estimate).
+///
+/// `rank`, when given, is shown instead of rounding `projected` itself --
+/// the raw regression value rounded independently per row can collide
+/// (two close-but-distinct floats rounding to the same integer), which
+/// reads as an impossible shared finishing/grid slot (real complaint
+/// 2026-08-31). Only pass `rank` for a column the field is ACTUALLY
+/// sorted by (event_prediction.py's own _field_sort_key -- FINISH for a
+/// field event, GRID for a sprint) so the row's own position in the list
+/// is guaranteed to match; QUALIFYING isn't the sort key, so it still
+/// rounds the raw value and can rarely show a tie.
 class _PositionCell extends StatelessWidget {
-  const _PositionCell({required this.actual, required this.projected});
+  const _PositionCell({required this.actual, this.live, required this.projected, this.rank});
   final int? actual;
+  final int? live;
   final double? projected;
+  final int? rank;
 
   @override
   Widget build(BuildContext context) {
     if (actual != null) {
       return Text('$actual', style: AppTextStyles.metricValue(color: AppColors.ink), textAlign: TextAlign.center, maxLines: 1);
     }
+    if (live != null) {
+      return Text('$live', style: AppTextStyles.metricValue(color: AppColors.live), textAlign: TextAlign.center, maxLines: 1);
+    }
     if (projected != null) {
       return Text(
-        'P${projected!.round()}', style: AppTextStyles.metricValue(color: AppColors.inkMute), textAlign: TextAlign.center, maxLines: 1,
+        'P${rank ?? projected!.round()}', style: AppTextStyles.metricValue(color: AppColors.inkMute), textAlign: TextAlign.center, maxLines: 1,
       );
     }
     return Text('--', style: AppTextStyles.metricValue(color: AppColors.inkMute), textAlign: TextAlign.center);
   }
 }
+
+// "Red Bull" from "red_bull" -- last-resort fallback for the rare case
+// constructor_name itself came back null (entity lookup failed
+// server-side); never shows a raw lowercase/underscored id verbatim.
+// Public (not file-private) so f1_event_detail_page.dart's own
+// _ConstructorsTable can apply the same fallback to a standalone
+// constructor row, not just a driver row's constructor sub-label.
+String humanizeF1EntityId(String id) => id.split('_').map((w) => w.isEmpty ? w : '${w[0].toUpperCase()}${w.substring(1)}').join(' ');
 
 // Below this width, a ~20-driver field with real names/pills doesn't fit
 // across 6+ columns -- same breakpoint every other leaderboard-shaped
@@ -66,55 +119,97 @@ class _PositionCell extends StatelessWidget {
 const _compactBreakpoint = 600.0;
 
 List<_LeaderboardColumn> _fullColumns({required bool isSprint}) => [
-      _LeaderboardColumn('#', 1, (context, entry, rowNumber) {
-        final position = isSprint ? entry.actual?.gridPosition : entry.actual?.finishPosition;
+      _LeaderboardColumn(_F1ColumnKey.position, _F1ColumnLabels.position, 1, (context, entry, live, rowNumber) {
+        final actual = isSprint ? entry.actual?.gridPosition : entry.actual?.finishPosition;
+        final position = actual ?? live?.order;
+        final color = position != null ? (actual != null ? AppColors.inkMute : AppColors.live) : AppColors.inkMute;
         return Text(
-          '${position ?? rowNumber}', style: AppTextStyles.metricValue(color: AppColors.inkMute), textAlign: TextAlign.center,
+          '${position ?? rowNumber}', style: AppTextStyles.metricValue(color: color), textAlign: TextAlign.center,
           maxLines: 1, softWrap: false, overflow: TextOverflow.ellipsis,
         );
       }),
-      _LeaderboardColumn('DRIVER', 4, (context, entry, rowNumber) {
+      _LeaderboardColumn(_F1ColumnKey.driver, _F1ColumnLabels.driver, 4, (context, entry, live, rowNumber) {
         final name = entry.name ?? entry.entityId;
+        final constructorLabel = entry.constructorName ?? (entry.constructorEntityId != null ? humanizeF1EntityId(entry.constructorEntityId!) : null);
         return Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           mainAxisSize: MainAxisSize.min,
           children: [
             Text(name, style: AppTextStyles.body(color: AppColors.ink), maxLines: 1, overflow: TextOverflow.ellipsis),
-            if (entry.constructorEntityId != null)
-              Text(entry.constructorEntityId!, style: AppTextStyles.microLabel(color: AppColors.inkSub), maxLines: 1, overflow: TextOverflow.ellipsis),
+            if (constructorLabel != null)
+              Text(constructorLabel, style: AppTextStyles.microLabel(color: AppColors.inkSub), maxLines: 1, overflow: TextOverflow.ellipsis),
           ],
         );
       }),
-      _LeaderboardColumn('STATUS', 2, (context, entry, rowNumber) => Center(child: F1StatusPill(status: entry.actual?.status))),
+      _LeaderboardColumn(_F1ColumnKey.status, _F1ColumnLabels.status, 2,
+          (context, entry, live, rowNumber) => Center(child: F1StatusPill(status: entry.actual?.status))),
       isSprint
-          ? _LeaderboardColumn('GRID', 2, (context, entry, rowNumber) =>
-              _PositionCell(actual: entry.actual?.gridPosition, projected: entry.projectedGridPosition?.value))
-          : _LeaderboardColumn('FINISH', 2, (context, entry, rowNumber) =>
-              _PositionCell(actual: entry.actual?.finishPosition, projected: entry.projectedFinishPosition?.value)),
-      _LeaderboardColumn('WIN%', 2, (context, entry, rowNumber) => _PercentText(entry.winProbability?.value)),
-      _LeaderboardColumn('PODIUM%', 2, (context, entry, rowNumber) => _PercentText(entry.podiumProbability?.value)),
-      if (!isSprint) _LeaderboardColumn('DNF%', 2, (context, entry, rowNumber) => _PercentText(entry.dnfProbability?.value)),
+          ? _LeaderboardColumn(_F1ColumnKey.finishOrGrid, _F1ColumnLabels.grid, 2, (context, entry, live, rowNumber) =>
+              _PositionCell(actual: entry.actual?.gridPosition, live: live?.order, projected: entry.projectedGridPosition?.value, rank: rowNumber))
+          : _LeaderboardColumn(_F1ColumnKey.finishOrGrid, _F1ColumnLabels.finish, 2, (context, entry, live, rowNumber) =>
+              _PositionCell(actual: entry.actual?.finishPosition, live: live?.order, projected: entry.projectedFinishPosition?.value, rank: rowNumber)),
+      if (!isSprint)
+        _LeaderboardColumn(_F1ColumnKey.qualifying, _F1ColumnLabels.qualifying, 2, (context, entry, live, rowNumber) =>
+            _PositionCell(actual: entry.actual?.qualifyingPosition, projected: entry.projectedQualifyingPosition?.value)),
+      _LeaderboardColumn(_F1ColumnKey.win, _F1ColumnLabels.win, 2, (context, entry, live, rowNumber) => _PercentText(entry.winProbability?.value)),
+      _LeaderboardColumn(
+        _F1ColumnKey.podium, _F1ColumnLabels.podium, 2, (context, entry, live, rowNumber) => _PercentText(entry.podiumProbability?.value),
+      ),
+      if (!isSprint)
+        _LeaderboardColumn(_F1ColumnKey.dnf, _F1ColumnLabels.dnf, 2, (context, entry, live, rowNumber) => _PercentText(entry.dnfProbability?.value)),
     ];
 
 List<_LeaderboardColumn> _columns({required bool isSprint, required bool compact}) {
   final full = _fullColumns(isSprint: isSprint);
   if (!compact) return full;
-  // #, DRIVER, WIN% at the top level; STATUS/FINISH-or-GRID/PODIUM%/DNF%
-  // move into the expanded per-row detail below _compactBreakpoint.
-  return [full[0], full[1], full[4]];
+  // #, DRIVER, WIN% at the top level; STATUS/FINISH-or-GRID/QUALIFYING/
+  // PODIUM%/DNF% move into the expanded per-row detail below
+  // _compactBreakpoint. Found by key, not label text or a fixed index --
+  // QUALIFYING only exists for a field event, so WIN%'s own position in
+  // `full` shifts depending on isSprint.
+  final winPercent = full.firstWhere((c) => c.key == _F1ColumnKey.win);
+  return [full[0], full[1], winPercent];
+}
+
+/// Live order first (freshest, only present during/shortly after an
+/// active ESPN session -- see f1_live_score.dart's own docstring), falling
+/// back to the server's own projected order for a driver not in the live
+/// overlay at all -- same "real signal first, else the model's own order"
+/// precedent field_leaderboard_table.dart's own _sortedByStanding
+/// establishes. A stable sort: ties within either group preserve the
+/// original (server) order rather than reshuffling arbitrarily.
+List<F1DriverPrediction> _sortedByLiveOrder(List<F1DriverPrediction> field, Map<String, F1DriverLiveResult> liveResults) {
+  final indexed = [for (var i = 0; i < field.length; i++) (index: i, entry: field[i])];
+  indexed.sort((a, b) {
+    final aOrder = liveResults[a.entry.entityId]?.order;
+    final bOrder = liveResults[b.entry.entityId]?.order;
+    if (aOrder != null && bOrder != null) {
+      final cmp = aOrder.compareTo(bOrder);
+      return cmp != 0 ? cmp : a.index.compareTo(b.index);
+    }
+    if (aOrder != null) return -1;
+    if (bOrder != null) return 1;
+    return a.index.compareTo(b.index);
+  });
+  return [for (final e in indexed) e.entry];
 }
 
 class F1LeaderboardTable extends StatelessWidget {
-  const F1LeaderboardTable({super.key, required this.field, required this.isSprint});
+  const F1LeaderboardTable({super.key, required this.field, required this.isSprint, this.liveResults = const {}});
 
   final List<F1DriverPrediction> field;
   final bool isSprint;
+  // Optional overlay from f1LiveScoresProvider -- the table itself doesn't
+  // own polling, the detail page feeds fresher data in as it arrives (same
+  // split field_leaderboard_table.dart's own liveResults param uses).
+  final Map<String, F1DriverLiveResult> liveResults;
 
   @override
   Widget build(BuildContext context) {
     if (field.isEmpty) {
       return Text('No field available yet.', style: AppTextStyles.body(color: AppColors.inkSub));
     }
+    final sorted = liveResults.isEmpty ? field : _sortedByLiveOrder(field, liveResults);
     return LayoutBuilder(
       builder: (context, constraints) {
         final compact = constraints.maxWidth < _compactBreakpoint;
@@ -147,9 +242,12 @@ class F1LeaderboardTable extends StatelessWidget {
                   ],
                 ),
               ),
-              for (var i = 0; i < field.length; i++) ...[
+              for (var i = 0; i < sorted.length; i++) ...[
                 const Divider(height: 1, color: AppColors.border),
-                _LeaderboardRow(entry: field[i], columns: columns, rowNumber: i + 1, compact: compact, isSprint: isSprint),
+                _LeaderboardRow(
+                  entry: sorted[i], live: liveResults[sorted[i].entityId], columns: columns, rowNumber: i + 1,
+                  compact: compact, isSprint: isSprint,
+                ),
               ],
             ],
           ),
@@ -161,10 +259,11 @@ class F1LeaderboardTable extends StatelessWidget {
 
 class _LeaderboardRow extends StatefulWidget {
   const _LeaderboardRow({
-    required this.entry, required this.columns, required this.rowNumber, required this.compact, required this.isSprint,
+    required this.entry, required this.live, required this.columns, required this.rowNumber, required this.compact, required this.isSprint,
   });
 
   final F1DriverPrediction entry;
+  final F1DriverLiveResult? live;
   final List<_LeaderboardColumn> columns;
   final int rowNumber;
   final bool compact;
@@ -188,7 +287,7 @@ class _LeaderboardRowState extends State<_LeaderboardRow> {
         ],
         for (var c = 0; c < widget.columns.length; c++) ...[
           if (c > 0) const SizedBox(width: 6),
-          Expanded(flex: widget.columns[c].flex, child: widget.columns[c].cell(context, widget.entry, widget.rowNumber)),
+          Expanded(flex: widget.columns[c].flex, child: widget.columns[c].cell(context, widget.entry, widget.live, widget.rowNumber)),
         ],
       ],
     );
@@ -205,7 +304,10 @@ class _LeaderboardRowState extends State<_LeaderboardRow> {
             row,
             if (_expanded) ...[
               const SizedBox(height: 8),
-              Padding(padding: const EdgeInsets.only(left: 20), child: _ExpandedDetail(entry: widget.entry, isSprint: widget.isSprint)),
+              Padding(
+                padding: const EdgeInsets.only(left: 20),
+                child: _ExpandedDetail(entry: widget.entry, live: widget.live, isSprint: widget.isSprint, rowNumber: widget.rowNumber),
+              ),
             ],
           ],
         ),
@@ -215,9 +317,11 @@ class _LeaderboardRowState extends State<_LeaderboardRow> {
 }
 
 class _ExpandedDetail extends StatelessWidget {
-  const _ExpandedDetail({required this.entry, required this.isSprint});
+  const _ExpandedDetail({required this.entry, required this.live, required this.isSprint, required this.rowNumber});
   final F1DriverPrediction entry;
+  final F1DriverLiveResult? live;
   final bool isSprint;
+  final int rowNumber;
 
   @override
   Widget build(BuildContext context) {
@@ -227,12 +331,15 @@ class _ExpandedDetail extends StatelessWidget {
       spacing: 20,
       runSpacing: 8,
       children: [
-        _Labeled('STATUS', F1StatusPill(status: entry.actual?.status)),
-        _Labeled(isSprint ? 'GRID' : 'FINISH', _PositionCell(actual: position, projected: projected)),
-        if (!isSprint) _Labeled('DNF%', _PercentText(entry.dnfProbability?.value)),
-        if (!isSprint && (entry.actual?.qualifyingPosition != null || entry.projectedQualifyingPosition != null))
+        _Labeled(_F1ColumnLabels.status, F1StatusPill(status: entry.actual?.status)),
+        _Labeled(
+          isSprint ? _F1ColumnLabels.grid : _F1ColumnLabels.finish,
+          _PositionCell(actual: position, live: live?.order, projected: projected, rank: rowNumber),
+        ),
+        if (!isSprint) _Labeled(_F1ColumnLabels.dnf, _PercentText(entry.dnfProbability?.value)),
+        if (!isSprint)
           _Labeled(
-            'QUALIFYING',
+            _F1ColumnLabels.qualifying,
             _PositionCell(actual: entry.actual?.qualifyingPosition, projected: entry.projectedQualifyingPosition?.value),
           ),
       ],

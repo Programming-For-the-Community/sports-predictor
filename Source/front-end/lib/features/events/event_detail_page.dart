@@ -7,6 +7,7 @@ import '../../core/data/events_repository.dart';
 import '../../core/data/live_scores_repository.dart';
 import '../../core/models/event.dart';
 import '../../core/models/event_leaders.dart';
+import '../../core/models/event_status.dart';
 import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_text_styles.dart';
 import '../../core/widgets/matchup_hero.dart';
@@ -77,7 +78,7 @@ class _EventDetailPageState extends ConsumerState<EventDetailPage> {
 
   // Only polls once the event is known and still scheduled.
   void _poll() {
-    final scheduled = ref.read(eventsListProvider((sport: widget.sportId, status: 'scheduled'))).value ?? const <SportEvent>[];
+    final scheduled = ref.read(eventsListProvider((sport: widget.sportId, status: EventStatus.scheduled))).value ?? const <SportEvent>[];
     final event = _findEvent(scheduled);
     if (event == null) return;
 
@@ -91,8 +92,8 @@ class _EventDetailPageState extends ConsumerState<EventDetailPage> {
   Widget build(BuildContext context) {
     // There's no "get one event" route -- the event could be in either
     // list depending on whether it's already been played.
-    final scheduledAsync = ref.watch(eventsListProvider((sport: widget.sportId, status: 'scheduled')));
-    final completedAsync = ref.watch(eventsListProvider((sport: widget.sportId, status: 'completed')));
+    final scheduledAsync = ref.watch(eventsListProvider((sport: widget.sportId, status: EventStatus.scheduled)));
+    final completedAsync = ref.watch(eventsListProvider((sport: widget.sportId, status: EventStatus.completed)));
 
     if (scheduledAsync.isLoading || completedAsync.isLoading) {
       return const Center(child: CircularProgressIndicator());
@@ -113,7 +114,7 @@ class _EventDetailPageState extends ConsumerState<EventDetailPage> {
       return Text('Event not found.', style: AppTextStyles.body(color: AppColors.neg));
     }
 
-    if (event.status == 'completed') {
+    if (event.status == EventStatus.completed) {
       final leadersComparison = event.leadersComparison;
       return SingleChildScrollView(
         padding: const EdgeInsets.all(24),

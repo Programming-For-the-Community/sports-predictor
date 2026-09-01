@@ -1,9 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
+import '../models/event_status.dart';
 import '../models/f1_event.dart';
 import '../theme/app_colors.dart';
 import '../theme/app_text_styles.dart';
+import 'sprint_badge.dart';
 
 const _months = [
   'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
@@ -31,7 +33,7 @@ class F1EventRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final isCompleted = event.status == 'completed';
+    final isCompleted = event.status == EventStatus.completed;
     return InkWell(
       onTap: () => context.go('/$sport/events/${event.eventId}'),
       borderRadius: BorderRadius.circular(16),
@@ -66,14 +68,7 @@ class F1EventRow extends StatelessWidget {
                             ),
                             if (event.isSprint) ...[
                               const SizedBox(width: 8),
-                              Container(
-                                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                                decoration: BoxDecoration(
-                                  color: AppColors.cyan.withValues(alpha: 0.15),
-                                  borderRadius: BorderRadius.circular(999),
-                                ),
-                                child: Text('SPRINT', style: AppTextStyles.microLabel(color: AppColors.cyan)),
-                              ),
+                              const SprintBadge(),
                             ],
                           ],
                         ),

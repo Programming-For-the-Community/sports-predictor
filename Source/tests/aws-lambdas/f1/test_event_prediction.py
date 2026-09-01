@@ -107,6 +107,38 @@ class TestPredictFieldEvent:
 
         assert "actual" not in result["field"][0]
 
+    def test_constructor_name_is_the_constructors_own_real_name_not_the_drivers(self):
+        built = _built_field_features()
+        storage = MagicMock()
+
+        def _get_entity(sport, entity_id, entity_type):
+            if entity_type == "team":
+                return {"name": "Red Bull"}
+            return {"name": "Max Verstappen"}
+        storage.get_entity.side_effect = _get_entity
+
+        with patch.object(event_prediction.live_features, "build_live_field_features", return_value=built), \
+             patch.object(event_prediction.model_loader, "load_current_model", return_value=(MagicMock(), {"version": 1})), \
+             patch.object(event_prediction.model_loader, "predict", return_value=0.5):
+            result = event_prediction.predict_field_event(storage, MagicMock(), MagicMock(), "2024-1")
+
+        entry = result["field"][0]
+        assert entry["name"] == "Max Verstappen"
+        assert entry["constructor_entity_id"] == "red_bull"
+        assert entry["constructor_name"] == "Red Bull"
+
+    def test_constructor_name_is_none_when_the_constructor_has_no_entity(self):
+        built = _built_field_features()
+        storage = MagicMock()
+        storage.get_entity.return_value = None
+
+        with patch.object(event_prediction.live_features, "build_live_field_features", return_value=built), \
+             patch.object(event_prediction.model_loader, "load_current_model", return_value=(MagicMock(), {"version": 1})), \
+             patch.object(event_prediction.model_loader, "predict", return_value=0.5):
+            result = event_prediction.predict_field_event(storage, MagicMock(), MagicMock(), "2024-1")
+
+        assert result["field"][0]["constructor_name"] is None
+
     def test_field_sorted_ascending_by_projected_finish_position(self):
         built = _built_field_features(driver_rows={
             "driver_a": {"constructor_entity_id": "red_bull"}, "driver_b": {"constructor_entity_id": "mercedes"},
@@ -126,6 +158,29 @@ class TestPredictFieldEvent:
             result = event_prediction.predict_field_event(storage, MagicMock(), MagicMock(), "2024-1")
 
         assert result["field"][0]["entity_id"] == "driver_b"
+
+
+class TestFieldSortKey:
+    def _entry(self, **predictions):
+        return {"predictions": predictions}
+
+    def test_sorts_by_projected_finish_position_ascending_when_present(self):
+        worse = self._entry(projected_finish_position={"value": 5.0})
+        better = self._entry(projected_finish_position={"value": 2.0})
+        assert event_prediction._field_sort_key(better) < event_prediction._field_sort_key(worse)
+
+    def test_falls_back_to_projected_grid_position_when_no_finish_position_model(self):
+        # Sprint events have no projected_finish_position at all -- real
+        # regression: the old fallback (win_probability) meant a sprint's
+        # own field was never actually ordered by projected grid at all.
+        worse = self._entry(projected_grid_position={"value": 8.0}, win_probability={"value": 0.9})
+        better = self._entry(projected_grid_position={"value": 1.0}, win_probability={"value": 0.1})
+        assert event_prediction._field_sort_key(better) < event_prediction._field_sort_key(worse)
+
+    def test_falls_back_to_win_probability_descending_when_neither_position_model_exists(self):
+        worse = self._entry(win_probability={"value": 0.1})
+        better = self._entry(win_probability={"value": 0.9})
+        assert event_prediction._field_sort_key(better) < event_prediction._field_sort_key(worse)
 
 
 class TestPredictSprintEvent:

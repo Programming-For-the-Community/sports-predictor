@@ -338,9 +338,6 @@ jobs:
     with:
       function_name: ${{ needs.infra.outputs.pga_live_scores_function_name }}
 
-  # F1 has no live_scores job yet -- still deferred (see
-  # project-f1-onboarding memory), same "add it when it's actually built"
-  # precedent NCAA MBB's own comment above sets.
   f1_predict_deploy:
     name: F1 AI hosting (deploy)
     needs: [infra, f1_ai_hosting_build]
@@ -366,6 +363,14 @@ jobs:
     secrets: inherit
     with:
       function_name: ${{ needs.infra.outputs.f1_predict_read_function_name }}
+
+  f1_live_scores_deploy:
+    name: F1 live-scores (deploy)
+    needs: infra
+    uses: ./.github/workflows/f1_live_scores_deploy.yml
+    secrets: inherit
+    with:
+      function_name: ${{ needs.infra.outputs.f1_live_scores_function_name }}
 
   # No config `with:` block for either -- both read directly from
   # Terraform state instead of relaying it through needs.infra.outputs.*.

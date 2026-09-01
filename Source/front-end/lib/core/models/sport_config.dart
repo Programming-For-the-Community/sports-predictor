@@ -7,6 +7,20 @@ import '../theme/app_colors.dart';
 /// events show a finishing-position distribution.
 enum EventShape { headToHead, field }
 
+/// Every sport id this app knows about -- also the literal backend API
+/// path segment (see SportConfig.id's own doc comment), so these values
+/// can never diverge from what the backend routes on. The one place a
+/// sport id is ever spelled out as a string; every other file compares
+/// against these constants instead of retyping the literal.
+abstract final class SportIds {
+  static const nfl = 'nfl';
+  static const ncaafb = 'ncaafb';
+  static const nba = 'nba';
+  static const ncaambb = 'ncaambb';
+  static const pga = 'pga';
+  static const f1 = 'f1';
+}
+
 /// One entry per sport this app knows about, active or not. Adding a new
 /// sport to the backend means flipping `active: true` here -- no new
 /// widgets, no new repository code, since every sport hits the same
@@ -44,7 +58,7 @@ class SportConfig {
 
 const kSports = [
   SportConfig(
-    id: 'nfl',
+    id: SportIds.nfl,
     displayName: 'NFL',
     eventShape: EventShape.headToHead,
     accentColor: AppColors.cyan,
@@ -54,14 +68,14 @@ const kSports = [
     // Matches the backend's own route prefix (/ncaafb/...) exactly --
     // this id is passed straight through as the API path segment (see
     // app_router.dart's :sport param), so it can't diverge from it.
-    id: 'ncaafb',
+    id: SportIds.ncaafb,
     displayName: 'NCAA Football',
     eventShape: EventShape.headToHead,
     accentColor: AppColors.cyan,
     active: true,
   ),
   SportConfig(
-    id: 'nba',
+    id: SportIds.nba,
     displayName: 'NBA',
     eventShape: EventShape.headToHead,
     accentColor: AppColors.cyan,
@@ -70,14 +84,14 @@ const kSports = [
   SportConfig(
     // Matches the backend's own route prefix (/ncaambb/...) exactly, same
     // reasoning as ncaafb's id above.
-    id: 'ncaambb',
+    id: SportIds.ncaambb,
     displayName: 'NCAA MBB',
     eventShape: EventShape.headToHead,
     accentColor: AppColors.cyan,
     active: true,
   ),
   SportConfig(
-    id: 'pga',
+    id: SportIds.pga,
     displayName: 'PGA Tour',
     eventShape: EventShape.field,
     accentColor: AppColors.violet,
@@ -89,7 +103,7 @@ const kSports = [
     usesFedexCupSeasonPage: true,
   ),
   SportConfig(
-    id: 'f1',
+    id: SportIds.f1,
     displayName: 'Formula 1',
     eventShape: EventShape.field,
     accentColor: AppColors.violet,

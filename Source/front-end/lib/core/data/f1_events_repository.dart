@@ -1,6 +1,7 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../api/api_client.dart';
+import '../models/event_status.dart';
 import '../models/f1_event.dart';
 import '../models/f1_prediction.dart';
 import 'events_repository.dart' show PredictionComputingException;
@@ -18,7 +19,7 @@ class F1EventsRepository {
 
   final ApiClient _api;
 
-  Future<List<F1Event>> listEvents(String sport, {String status = 'scheduled'}) async {
+  Future<List<F1Event>> listEvents(String sport, {String status = EventStatus.scheduled}) async {
     final response = await _api.get('/$sport/events', queryParameters: {'status': status}) as Map<String, dynamic>;
     final events = response['events'] as List<dynamic>? ?? [];
     return events.map((e) => F1Event.fromJson(e as Map<String, dynamic>)).toList();

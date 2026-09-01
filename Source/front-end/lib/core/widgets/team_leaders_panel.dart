@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../models/event_leaders.dart';
+import '../models/sport_config.dart';
 import '../theme/app_colors.dart';
 import '../theme/app_text_styles.dart';
 
@@ -83,7 +84,7 @@ const _basketballCategories = [
 ];
 
 List<_CategoryConfig> _categoriesFor(String sport) =>
-    sport == 'nba' || sport == 'ncaambb' ? _basketballCategories : _footballCategories;
+    sport == SportIds.nba || sport == SportIds.ncaambb ? _basketballCategories : _footballCategories;
 
 /// Renders the `leaders` block from GET /{sport}/predictions/events/{id}.
 /// Category set is sport-specific (see _categoriesFor above); each

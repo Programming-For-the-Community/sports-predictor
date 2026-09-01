@@ -287,6 +287,20 @@ class TwoSidedPgaPrediction {
   }
 }
 
+/// PGA's own event_type values -- parsePgaEventPrediction's and
+/// parsePgaLiveEventState's (field_live_score.dart) switches, plus every
+/// fromJson default and sport_card.dart's own event_type check, reference
+/// these instead of retyping the raw string. Field-shape-only concept --
+/// head-to-head sports have no event_type field at all. F1 has its own,
+/// separate F1EventType (f1_prediction.dart) -- 'field' is coincidentally
+/// the same literal in both, but the two vocabularies are otherwise
+/// unrelated (F1 has no match_play/cup analog; PGA has no sprint analog).
+abstract final class PgaEventType {
+  static const field = 'field';
+  static const matchPlay = 'match_play';
+  static const cup = 'cup';
+}
+
 /// Discriminated union of the two possible /pga/predictions/events/{id}
 /// shapes -- see parsePgaEventPrediction for the dispatch. Callers
 /// pattern-match on the concrete type (Dart 3 sealed class + switch, same
@@ -310,10 +324,10 @@ class PgaTwoSidedPrediction extends PgaEventPrediction {
 PgaEventPrediction parsePgaEventPrediction(Map<String, dynamic> json) {
   final eventType = json['event_type'] as String?;
   switch (eventType) {
-    case 'field':
+    case PgaEventType.field:
       return PgaFieldPrediction(FieldEventPrediction.fromJson(json));
-    case 'match_play':
-    case 'cup':
+    case PgaEventType.matchPlay:
+    case PgaEventType.cup:
       return PgaTwoSidedPrediction(TwoSidedPgaPrediction.fromJson(json));
     default:
       throw FormatException('Unrecognized PGA event_type: $eventType');

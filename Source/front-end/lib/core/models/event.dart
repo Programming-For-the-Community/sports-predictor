@@ -1,4 +1,5 @@
 import 'event_leaders.dart';
+import 'event_status.dart';
 
 /// Mirrors GET /{sport}/events' response shape.
 class ParticipantResult {
@@ -134,7 +135,7 @@ class SportEvent {
         eventId: json['event_id'] as String,
         eventDate: json['event_date'] as String? ?? '',
         kickoffTime: json['kickoff_time'] as String?,
-        status: json['status'] as String? ?? '',
+        status: json['status'] as String? ?? EventStatus.unknown,
         week: json['week'] as int?,
         round: json['round'] as String?,
         participants: (json['participants'] as List<dynamic>? ?? [])

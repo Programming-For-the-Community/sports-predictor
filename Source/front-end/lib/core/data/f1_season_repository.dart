@@ -2,6 +2,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../api/api_client.dart';
 import '../models/f1_season_projection.dart';
+import '../models/sport_config.dart';
 
 /// F1's own /f1/season repository -- same trivial GET+FutureProvider
 /// shape as pga_season_repository.dart. Not folded into that one, or into
@@ -15,7 +16,7 @@ class F1SeasonRepository {
   final ApiClient _api;
 
   Future<F1SeasonProjection> getSeasonProjection() async {
-    final response = await _api.get('/f1/season') as Map<String, dynamic>;
+    final response = await _api.get('/${SportIds.f1}/season') as Map<String, dynamic>;
     return F1SeasonProjection.fromJson(response);
   }
 }

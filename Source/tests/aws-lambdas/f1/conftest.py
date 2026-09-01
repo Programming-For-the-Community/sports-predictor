@@ -42,6 +42,11 @@ _load_handler("f1_predict", "aws-lambdas/f1/predict/handler.py")
 # sys.path insert needed, just the same unique-module-name registration.
 _load_handler("f1_predict_read", "aws-lambdas/f1/predict-read/handler.py")
 
+# live-scores/'s own live_scores.py has a unique name -- same split as
+# predict/'s modules above.
+sys.path.insert(0, os.path.join(_src, "aws-lambdas", "f1", "live-scores"))
+_load_handler("f1_live_scores", "aws-lambdas/f1/live-scores/handler.py")
+
 
 import pytest  # noqa: E402
 
@@ -78,3 +83,14 @@ def reset_f1_predict_read_singletons():
     f1_predict_read._model_bucket = None
     f1_predict_read._predictions_table = None
     f1_predict_read._predict_invoker = None
+
+
+@pytest.fixture(autouse=True)
+def reset_f1_live_scores_singletons():
+    f1_live_scores = sys.modules.get("f1_live_scores")
+    if f1_live_scores is None:
+        yield
+        return
+    f1_live_scores._storage = None
+    yield
+    f1_live_scores._storage = None

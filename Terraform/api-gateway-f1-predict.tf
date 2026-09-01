@@ -7,14 +7,12 @@
 #   GET /f1/models                          -> f1_predict_read
 #   GET /f1/season                          -> f1_predict_read (cache), async-computed weekly by f1_predict
 #   GET /f1/predictions/events/{event_id}   -> f1_predict_read (cache), async-computed by f1_predict
+#   GET /f1/live-scores                     -> f1_live_scores (api-gateway-f1-live-scores.tf, separate Lambda)
 #
-# No live-scores route (unlike PGA's own api-gateway-pga-live-scores.tf) --
-# F1's own live-scores Lambda is still deferred (project-f1-onboarding
-# memory). No per-driver prediction sub-route (unlike NBA's
-# .../players/{entity_id}) -- one race compute already scores every
-# driver (and every constructor, for a "field" event), there's nothing
-# narrower to fetch. See aws-lambdas/f1/predict-read/handler.py's own
-# docstring.
+# No per-driver prediction sub-route (unlike NBA's .../players/{entity_id})
+# -- one race compute already scores every driver (and every constructor,
+# for a "field" event), there's nothing narrower to fetch. See
+# aws-lambdas/f1/predict-read/handler.py's own docstring.
 
 resource "aws_api_gateway_resource" "f1" {
   rest_api_id = aws_api_gateway_rest_api.main.id
@@ -139,6 +137,7 @@ locals {
     models        = aws_api_gateway_resource.f1_models.id
     season        = aws_api_gateway_resource.f1_season.id
     predict_event = aws_api_gateway_resource.f1_predictions_event.id
+    live_scores   = aws_api_gateway_resource.f1_live_scores.id
   }
 }
 

@@ -105,7 +105,7 @@ final appRouterProvider = Provider<GoRouter>((ref) {
             // GoRoutes.
             builder: (context, state) {
               final sportId = state.pathParameters['sport']!;
-              if (sportId == 'f1') return F1EventListPage(sportId: sportId);
+              if (sportId == SportIds.f1) return F1EventListPage(sportId: sportId);
               return sportById(sportId).eventShape == EventShape.field
                   ? FieldEventListPage(sportId: sportId)
                   : EventListPage(sportId: sportId);
@@ -116,7 +116,7 @@ final appRouterProvider = Provider<GoRouter>((ref) {
                 builder: (context, state) {
                   final sportId = state.pathParameters['sport']!;
                   final eventId = state.pathParameters['eventId']!;
-                  if (sportId == 'f1') return F1EventDetailPage(sportId: sportId, eventId: eventId);
+                  if (sportId == SportIds.f1) return F1EventDetailPage(sportId: sportId, eventId: eventId);
                   return sportById(sportId).eventShape == EventShape.field
                       ? FieldEventDetailPage(sportId: sportId, eventId: eventId)
                       : EventDetailPage(sportId: sportId, eventId: eventId);
@@ -132,7 +132,7 @@ final appRouterProvider = Provider<GoRouter>((ref) {
             path: '/:sport/season',
             builder: (context, state) {
               final sportId = state.pathParameters['sport']!;
-              if (sportId == 'f1') return const F1SeasonPage();
+              if (sportId == SportIds.f1) return const F1SeasonPage();
               return sportById(sportId).usesFedexCupSeasonPage
                   ? const PgaSeasonPage()
                   : SeasonPage(sportId: sportId);

@@ -3,10 +3,12 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/data/season_repository.dart';
 import '../../core/models/season_projection.dart';
+import '../../core/models/sport_config.dart';
 import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_text_styles.dart';
 import '../../core/widgets/conference_filter_field.dart';
 import '../../core/widgets/responsive.dart';
+import '../../core/widgets/status_toggle.dart';
 import '../../core/widgets/team_color_dot.dart';
 import '../../static/conference_order.dart';
 import '../../static/nfl_team_colors.dart';
@@ -32,7 +34,7 @@ const _statLabels = {
 /// division.
 String _standingsGroupKey(String sport, String? division) {
   final raw = division ?? 'Other';
-  if (sport != 'nba') return raw;
+  if (sport != SportIds.nba) return raw;
   final firstWord = raw.split(' ').first;
   return firstWord.isEmpty ? raw : firstWord;
 }
@@ -51,6 +53,27 @@ List<MapEntry<String, List<TeamStanding>>> _groupByDivision(String sport, List<T
   return [for (final division in divisions) MapEntry(division, byDivision[division]!)];
 }
 
+// Internal-only view-selector values -- never sent to or received from
+// the backend, not shared with any other file, but named instead of
+// typed inline at each of the toggle/branch sites below.
+abstract final class _SeasonTab {
+  static const standings = 'standings';
+  static const props = 'props';
+  static const bracket = 'bracket';
+  static const cupBracket = 'cup_bracket';
+  static const marchMadness = 'march_madness';
+  static const conferenceBrackets = 'conference_brackets';
+}
+
+abstract final class _SeasonTabLabels {
+  static const standings = 'Standings & Playoff Odds';
+  static const props = 'Player Prop Leaders';
+  static const bracket = 'Playoff Bracket';
+  static const cupBracket = 'NBA Cup Bracket';
+  static const marchMadness = 'March Madness';
+  static const conferenceBrackets = 'Conference Brackets';
+}
+
 class SeasonPage extends ConsumerStatefulWidget {
   const SeasonPage({super.key, required this.sportId});
 
@@ -61,7 +84,7 @@ class SeasonPage extends ConsumerStatefulWidget {
 }
 
 class _SeasonPageState extends ConsumerState<SeasonPage> {
-  String _tab = 'standings';
+  String _tab = _SeasonTab.standings;
   String _conferenceFilter = '';
 
   @override
@@ -93,49 +116,55 @@ class _SeasonPageState extends ConsumerState<SeasonPage> {
                 scrollDirection: Axis.horizontal,
                 child: Row(
                   children: [
-                    _StatusToggle(
-                      label: 'Standings & Playoff Odds',
-                      selected: _tab == 'standings',
-                      onTap: () => setState(() => _tab = 'standings'),
+                    StatusToggle(
+                      label: _SeasonTabLabels.standings,
+                      selected: _tab == _SeasonTab.standings,
+                      onTap: () => setState(() => _tab = _SeasonTab.standings),
+                      accentColor: AppColors.cyan,
                     ),
                     if (season.leaderboards != null) ...[
                       const SizedBox(width: 8),
-                      _StatusToggle(
-                        label: 'Player Prop Leaders',
-                        selected: _tab == 'props',
-                        onTap: () => setState(() => _tab = 'props'),
+                      StatusToggle(
+                        label: _SeasonTabLabels.props,
+                        selected: _tab == _SeasonTab.props,
+                        onTap: () => setState(() => _tab = _SeasonTab.props),
+                        accentColor: AppColors.cyan,
                       ),
                     ],
                     if (season.bracket != null) ...[
                       const SizedBox(width: 8),
-                      _StatusToggle(
-                        label: 'Playoff Bracket',
-                        selected: _tab == 'bracket',
-                        onTap: () => setState(() => _tab = 'bracket'),
+                      StatusToggle(
+                        label: _SeasonTabLabels.bracket,
+                        selected: _tab == _SeasonTab.bracket,
+                        onTap: () => setState(() => _tab = _SeasonTab.bracket),
+                        accentColor: AppColors.cyan,
                       ),
                     ],
                     if (season.cupBracket != null) ...[
                       const SizedBox(width: 8),
-                      _StatusToggle(
-                        label: 'NBA Cup Bracket',
-                        selected: _tab == 'cup_bracket',
-                        onTap: () => setState(() => _tab = 'cup_bracket'),
+                      StatusToggle(
+                        label: _SeasonTabLabels.cupBracket,
+                        selected: _tab == _SeasonTab.cupBracket,
+                        onTap: () => setState(() => _tab = _SeasonTab.cupBracket),
+                        accentColor: AppColors.cyan,
                       ),
                     ],
                     if (season.marchMadnessBracket != null) ...[
                       const SizedBox(width: 8),
-                      _StatusToggle(
-                        label: 'March Madness',
-                        selected: _tab == 'march_madness',
-                        onTap: () => setState(() => _tab = 'march_madness'),
+                      StatusToggle(
+                        label: _SeasonTabLabels.marchMadness,
+                        selected: _tab == _SeasonTab.marchMadness,
+                        onTap: () => setState(() => _tab = _SeasonTab.marchMadness),
+                        accentColor: AppColors.cyan,
                       ),
                     ],
                     if (season.conferenceBrackets != null) ...[
                       const SizedBox(width: 8),
-                      _StatusToggle(
-                        label: 'Conference Brackets',
-                        selected: _tab == 'conference_brackets',
-                        onTap: () => setState(() => _tab = 'conference_brackets'),
+                      StatusToggle(
+                        label: _SeasonTabLabels.conferenceBrackets,
+                        selected: _tab == _SeasonTab.conferenceBrackets,
+                        onTap: () => setState(() => _tab = _SeasonTab.conferenceBrackets),
+                        accentColor: AppColors.cyan,
                       ),
                     ],
                   ],
@@ -143,15 +172,15 @@ class _SeasonPageState extends ConsumerState<SeasonPage> {
               ),
               const SizedBox(height: 20),
             ],
-            if (_tab == 'props' && season.leaderboards != null)
+            if (_tab == _SeasonTab.props && season.leaderboards != null)
               _Leaderboards(leaderboards: season.leaderboards)
-            else if (_tab == 'bracket' && season.bracket != null)
+            else if (_tab == _SeasonTab.bracket && season.bracket != null)
               _BracketSection(sport: season.sport, bracket: season.bracket!)
-            else if (_tab == 'cup_bracket' && season.cupBracket != null)
+            else if (_tab == _SeasonTab.cupBracket && season.cupBracket != null)
               _BracketSection(sport: season.sport, bracket: season.cupBracket!)
-            else if (_tab == 'march_madness' && season.marchMadnessBracket != null)
+            else if (_tab == _SeasonTab.marchMadness && season.marchMadnessBracket != null)
               _MarchMadnessSection(sport: season.sport, bracket: season.marchMadnessBracket!)
-            else if (_tab == 'conference_brackets' && season.conferenceBrackets != null)
+            else if (_tab == _SeasonTab.conferenceBrackets && season.conferenceBrackets != null)
               _ConferenceBracketsSection(sport: season.sport, conferenceBrackets: season.conferenceBrackets!)
             else ...[
               // Only shown when there's more than one conference/division
@@ -167,8 +196,9 @@ class _SeasonPageState extends ConsumerState<SeasonPage> {
               // fit per row on a wide screen.
               LayoutBuilder(
                 builder: (context, constraints) {
-                  final width =
-                      cardWidth(season.sport == 'ncaafb' || season.sport == 'ncaambb' ? 560 : 480, constraints.maxWidth);
+                  final width = cardWidth(
+                    season.sport == SportIds.ncaafb || season.sport == SportIds.ncaambb ? 560 : 480, constraints.maxWidth,
+                  );
                   final divisions = _groupByDivision(season.sport, season.standings, _conferenceFilter);
                   if (divisions.isEmpty) {
                     return Text('No conferences match "$_conferenceFilter".', style: AppTextStyles.body(color: AppColors.inkSub));
@@ -207,33 +237,6 @@ class _SeasonPageState extends ConsumerState<SeasonPage> {
   }
 }
 
-class _StatusToggle extends StatelessWidget {
-  const _StatusToggle({required this.label, required this.selected, required this.onTap});
-  final String label;
-  final bool selected;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(999),
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-        decoration: BoxDecoration(
-          color: selected ? AppColors.surface : null,
-          border: Border.all(color: selected ? AppColors.cyan : AppColors.border),
-          borderRadius: BorderRadius.circular(999),
-        ),
-        child: Text(
-          label,
-          style: AppTextStyles.microLabel(color: selected ? AppColors.cyan : AppColors.inkMute),
-        ),
-      ),
-    );
-  }
-}
-
 // One list of (label, flex, cell) drives both the header row and every
 // data row, keeping each column's label and value in sync per sport.
 class _StandingsColumn {
@@ -243,14 +246,35 @@ class _StandingsColumn {
   final Widget Function(BuildContext context, String sport, TeamStanding team) cell;
 }
 
+// Every column header this table can show, across all 4 h2h sports --
+// not shared with any other file (each sport-shaped table in this app
+// owns its own column labels), but named here instead of typed inline in
+// _standingsColumns below.
+abstract final class _StandingsLabels {
+  static const rank = 'RANK';
+  static const team = 'TEAM';
+  static const proj = 'PROJ';
+  static const rec = 'REC';
+  static const playIn = 'PLAY-IN%'; // NBA's own extra playoff-seeding tier
+  static const conf = 'CONF%'; // NCAAFB/NCAA MBB
+  static const div = 'DIV%'; // NFL
+  static const playoffsNba = 'PLAYOFFS%';
+  static const cfp = 'CFP%'; // NCAAFB
+  static const ncaaTourney = 'NCAA%'; // NCAA MBB
+  static const po = 'PO%'; // NFL
+  static const champNbaNcaambb = 'CHAMP%'; // NBA/NCAA MBB
+  static const nc = 'NC%'; // NCAAFB
+  static const sb = 'SB%'; // NFL
+}
+
 List<_StandingsColumn> _standingsColumns(String sport) {
-  final isNcaafb = sport == 'ncaafb';
-  final isNba = sport == 'nba';
-  final isNcaambb = sport == 'ncaambb';
+  final isNcaafb = sport == SportIds.ncaafb;
+  final isNba = sport == SportIds.nba;
+  final isNcaambb = sport == SportIds.ncaambb;
   return [
     // NCAAFB/NCAA MBB only -- both have a live national-ranking model.
     if (isNcaafb || isNcaambb)
-      _StandingsColumn('RANK', 2, (context, sport, team) {
+      _StandingsColumn(_StandingsLabels.rank, 2, (context, sport, team) {
         final rank = team.currentRank;
         return Text(
           rank != null ? '#$rank' : '--',
@@ -261,7 +285,7 @@ List<_StandingsColumn> _standingsColumns(String sport) {
           overflow: TextOverflow.ellipsis,
         );
       }),
-    _StandingsColumn('TEAM', 3, (context, sport, team) {
+    _StandingsColumn(_StandingsLabels.team, 3, (context, sport, team) {
       final info = teamDisplayFor(sport, team.teamId, team.abbreviation, apiColor: team.color);
       return Row(
         children: [
@@ -273,14 +297,14 @@ List<_StandingsColumn> _standingsColumns(String sport) {
         ],
       );
     }),
-    _StandingsColumn('PROJ', 2, (context, sport, team) => Text(
+    _StandingsColumn(_StandingsLabels.proj, 2, (context, sport, team) => Text(
           // Rounded to whole games -- projectedWins/Losses are Monte Carlo
           // averages, not a real final record.
           '${team.projectedWins.round()}-${team.projectedLosses.round()}',
           style: AppTextStyles.metricValue(color: AppColors.cyan),
           textAlign: TextAlign.center,
         )),
-    _StandingsColumn('REC', 2, (context, sport, team) => Text(
+    _StandingsColumn(_StandingsLabels.rec, 2, (context, sport, team) => Text(
           // Ties only appended when non-zero (always 0 for NBA).
           team.ties > 0 ? '${team.wins}-${team.losses}-${team.ties}' : '${team.wins}-${team.losses}',
           style: AppTextStyles.metricValue(),
@@ -288,17 +312,20 @@ List<_StandingsColumn> _standingsColumns(String sport) {
         )),
     // NBA swaps DIV% for PLAY-IN%, its extra playoff-seeding tier.
     if (isNba)
-      _StandingsColumn('PLAY-IN%', 2, (context, sport, team) => _PercentText(team.playInProbability ?? 0.0))
+      _StandingsColumn(_StandingsLabels.playIn, 2, (context, sport, team) => _PercentText(team.playInProbability ?? 0.0))
     else
       _StandingsColumn(
-        isNcaafb || isNcaambb ? 'CONF%' : 'DIV%', 2, (context, sport, team) => _PercentText(team.divisionWinnerProbability),
+        isNcaafb || isNcaambb ? _StandingsLabels.conf : _StandingsLabels.div,
+        2, (context, sport, team) => _PercentText(team.divisionWinnerProbability),
       ),
     _StandingsColumn(
-      isNba ? 'PLAYOFFS%' : (isNcaafb ? 'CFP%' : (isNcaambb ? 'NCAA%' : 'PO%')),
+      isNba
+          ? _StandingsLabels.playoffsNba
+          : (isNcaafb ? _StandingsLabels.cfp : (isNcaambb ? _StandingsLabels.ncaaTourney : _StandingsLabels.po)),
       2, (context, sport, team) => _PercentText(team.playoffProbability),
     ),
     _StandingsColumn(
-      isNba || isNcaambb ? 'CHAMP%' : (isNcaafb ? 'NC%' : 'SB%'),
+      isNba || isNcaambb ? _StandingsLabels.champNbaNcaambb : (isNcaafb ? _StandingsLabels.nc : _StandingsLabels.sb),
       2, (context, sport, team) => _PercentText(team.championshipProbability),
     ),
   ];
@@ -582,6 +609,16 @@ class _ConferenceBracketRow extends StatelessWidget {
   }
 }
 
+// Synthesized final-round labels for the two bracket shapes below --
+// these aren't backend data (unlike BracketRound.round for every other
+// round, which is whatever the backend named it), so they're authored
+// here rather than parsed. Not shared with any other file.
+abstract final class _BracketRoundLabels {
+  static const superBowl = 'Super Bowl';
+  static const championship = 'Championship';
+  static const firstFour = 'First Four';
+}
+
 /// Playoff/Cup-knockout bracket, rendered as a single converging tree
 /// (_BracketTree). A flat-bracket sport (NCAAFB -- bracket.rounds
 /// non-null) already has its championship as the last round. A
@@ -629,7 +666,10 @@ class _BracketSection extends StatelessWidget {
     final combinedRounds = [
       for (var r = 0; r < roundCount; r++)
         BracketRound(round: roundsA[r].round, matchups: [...roundsA[r].matchups, ...roundsB[r].matchups]),
-      BracketRound(round: sport == 'nfl' ? 'Super Bowl' : 'Championship', matchups: [finalMatchup]),
+      BracketRound(
+        round: sport == SportIds.nfl ? _BracketRoundLabels.superBowl : _BracketRoundLabels.championship,
+        matchups: [finalMatchup],
+      ),
     ];
 
     final combined = _computeConferenceBracketLayout(roundsA, roundsB, finalMatchup);
@@ -954,11 +994,11 @@ class _MarchMadnessGrid extends StatelessWidget {
                 child: Stack(
                   clipBehavior: Clip.none,
                   children: [
-                    if (hasLeftFirstFour) roundHeader('First Four', firstFourLeftColumn),
+                    if (hasLeftFirstFour) roundHeader(_BracketRoundLabels.firstFour, firstFourLeftColumn),
                     for (var r = 0; r < halfColumns; r++) roundHeader(roundLabel(leftRegionRounds[0], r), leftColumn(r)),
                     for (var r = 0; r < halfColumns; r++) roundHeader(roundLabel(rightRegionRounds[0], r), rightColumn(r)),
-                    if (hasRightFirstFour) roundHeader('First Four', firstFourRightColumn),
-                    roundHeader('Championship', championshipColumn.toDouble(), width: _championshipCardWidth),
+                    if (hasRightFirstFour) roundHeader(_BracketRoundLabels.firstFour, firstFourRightColumn),
+                    roundHeader(_BracketRoundLabels.championship, championshipColumn.toDouble(), width: _championshipCardWidth),
                   ],
                 ),
               ),
@@ -1899,10 +1939,10 @@ class _BracketMatchupCard extends StatelessWidget {
               : '${matchup.predictedWinsB}-${matchup.predictedWinsA}')
           : null;
       switch (matchup.status) {
-        case 'final':
+        case BracketMatchupStatus.finalStatus:
           final winnerName = matchup.actualWinner != null ? _teamLabel(matchup.actualWinner!) : null;
           return winnerName != null ? '$winnerName WINS SERIES' : 'SERIES FINAL';
-        case 'scheduled':
+        case BracketMatchupStatus.scheduled:
           if (matchup.winProbability == null || winnerLabel == null) return 'PREDICTION PENDING';
           final probability = '${(matchup.winProbability! * 100).round()}%';
           return predictedRecord != null ? '$winnerLabel $predictedRecord $probability' : '$probability $winnerLabel';
@@ -1915,9 +1955,9 @@ class _BracketMatchupCard extends StatelessWidget {
       }
     }
     switch (matchup.status) {
-      case 'final':
+      case BracketMatchupStatus.finalStatus:
         return 'FINAL';
-      case 'scheduled':
+      case BracketMatchupStatus.scheduled:
         return matchup.winProbability != null && winnerLabel != null
             ? '${(matchup.winProbability! * 100).round()}% $winnerLabel'
             : 'PREDICTION PENDING';
@@ -1930,9 +1970,9 @@ class _BracketMatchupCard extends StatelessWidget {
 
   Color _statusColor() {
     switch (matchup.status) {
-      case 'final':
+      case BracketMatchupStatus.finalStatus:
         return AppColors.cyan;
-      case 'scheduled':
+      case BracketMatchupStatus.scheduled:
         return AppColors.ink;
       default:
         return AppColors.inkMute;

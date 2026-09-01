@@ -8,6 +8,16 @@ import '../../core/theme/app_text_styles.dart';
 
 enum _StandingsTab { drivers, constructors }
 
+// Not shared with f1_event_detail_page.dart's own shorter "Drivers"/
+// "Constructors" tab-label form (a per-event tab, not this page's own
+// section header) -- deliberately different copy for a different
+// context, but named here instead of typed inline in the 2
+// _StandingsTabToggle calls below.
+abstract final class _StandingsTabLabels {
+  static const drivers = 'Drivers\' Championship';
+  static const constructors = 'Constructors\' Championship';
+}
+
 /// F1's own /:sport/season page -- TWO points-standings tables (Drivers'
 /// and Constructors' Championship) from the same simulated pass, not one
 /// -- see f1_season_projection.dart's own docstring for why this can't
@@ -59,9 +69,11 @@ class _F1SeasonPageState extends ConsumerState<F1SeasonPage> {
                 spacing: 8,
                 runSpacing: 8,
                 children: [
-                  _StandingsTabToggle(label: 'Drivers\' Championship', selected: _tab == _StandingsTab.drivers, onTap: () => _setTab(_StandingsTab.drivers)),
                   _StandingsTabToggle(
-                    label: 'Constructors\' Championship',
+                    label: _StandingsTabLabels.drivers, selected: _tab == _StandingsTab.drivers, onTap: () => _setTab(_StandingsTab.drivers),
+                  ),
+                  _StandingsTabToggle(
+                    label: _StandingsTabLabels.constructors,
                     selected: _tab == _StandingsTab.constructors,
                     onTap: () => _setTab(_StandingsTab.constructors),
                   ),

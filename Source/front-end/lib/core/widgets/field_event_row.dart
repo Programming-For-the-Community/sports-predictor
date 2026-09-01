@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
+import '../models/event_status.dart';
 import '../models/field_event.dart';
 import '../theme/app_colors.dart';
 import '../theme/app_text_styles.dart';
@@ -40,7 +41,7 @@ class FieldEventRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final isCompleted = event.status == 'completed';
+    final isCompleted = event.status == EventStatus.completed;
     return InkWell(
       onTap: () => context.go('/$sport/events/${event.eventId}'),
       borderRadius: BorderRadius.circular(16),

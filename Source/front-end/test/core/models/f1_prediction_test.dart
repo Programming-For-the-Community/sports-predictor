@@ -9,7 +9,7 @@ void main() {
       'status': 'scheduled', 'circuit_id': 'monaco', 'season': 2026, 'week': 5,
       'field': [
         {
-          'entity_id': 'max_verstappen', 'name': 'Max Verstappen', 'constructor_entity_id': 'red_bull',
+          'entity_id': 'max_verstappen', 'name': 'Max Verstappen', 'constructor_entity_id': 'red_bull', 'constructor_name': 'Red Bull',
           'predictions': {
             'win_probability': {'value': 0.42, 'model_version': 3},
             'podium_probability': {'value': 0.71, 'model_version': 3},
@@ -32,6 +32,7 @@ void main() {
     expect(prediction.eventType, 'field');
     expect(prediction.isSprint, isFalse);
     final driver = prediction.field.single;
+    expect(driver.constructorName, 'Red Bull');
     expect(driver.winProbability!.value, 0.42);
     expect(driver.projectedFinishPosition!.value, 1.8);
     expect(driver.projectedGridPosition, isNull); // field-only response, no sprint key

@@ -176,6 +176,16 @@ class CupProjection {
       );
 }
 
+/// BracketMatchup.status' 3 possible values -- season_page.dart's own
+/// _statusLabel/_statusColor switch on these instead of retyping the raw
+/// strings. h2h-only (NFL/NBA/NCAAFB/NCAA MBB bracket pages); PGA/F1 have
+/// no bracket page and no analog for this vocabulary.
+abstract final class BracketMatchupStatus {
+  static const projected = 'projected';
+  static const scheduled = 'scheduled';
+  static const finalStatus = 'final'; // `final` is a reserved word
+}
+
 /// One resolved bracket slot -- a 3-state design: "projected" (no real
 /// game exists yet -- the model's own deterministic pick), "scheduled" (a
 /// real game exists, not yet played), or "final" (a real game exists and
@@ -233,7 +243,7 @@ class BracketMatchup {
   final int? predictedWinsA;
   final int? predictedWinsB;
 
-  bool get isFinal => status == 'final';
+  bool get isFinal => status == BracketMatchupStatus.finalStatus;
 
   /// True for a real best-of-7 series slot -- lets the UI show a running
   /// series record instead of a single game's score.
@@ -242,7 +252,7 @@ class BracketMatchup {
   factory BracketMatchup.fromJson(Map<String, dynamic> json) => BracketMatchup(
         teamA: json['team_a'] as String?,
         teamB: json['team_b'] as String?,
-        status: json['status'] as String? ?? 'projected',
+        status: json['status'] as String? ?? BracketMatchupStatus.projected,
         seedA: json['seed_a'] as int?,
         seedB: json['seed_b'] as int?,
         predictedWinner: json['predicted_winner'] as String?,

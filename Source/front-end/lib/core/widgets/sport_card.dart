@@ -3,26 +3,33 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../data/live_scores_repository.dart';
+import '../models/event_status.dart';
 import '../models/field_live_score.dart';
+import '../models/field_prediction.dart' show PgaEventType;
 import '../models/sport_config.dart';
 import '../theme/app_colors.dart';
 import '../theme/app_text_styles.dart';
+import 'field_status_pill.dart' show PgaParticipantStatus;
+import 'live_status_pill.dart';
 
-// A field-shape (PGA/F1) participant/match counts as "actually happening
-// right now", not just within its poll window -- see
-// live_scores_repository.dart's own docstring: presence in this map alone
-// only means "within the poll window" (which for a field event starts as
-// soon as its next tee time is due, same pre-start lead-in h2h sports
-// signal via LiveEventState.live == false). match/field participant
-// status comes from library/normalize/pga.py's own map_status vocabulary
-// (shared by golfer and match-play results); a cup event's participants
-// carry no status field at all, so its own top-level status (scheduled/
-// completed binary) is the only signal available.
+// A PGA field-shape participant/match counts as "actually happening right
+// now", not just within its poll window -- see live_scores_repository.
+// dart's own docstring: presence in this map alone only means "within the
+// poll window" (which for a field event starts as soon as its next tee
+// time is due, same pre-start lead-in h2h sports signal via
+// LiveEventState.live == false). match/field participant status comes
+// from library/normalize/pga.py's own map_status vocabulary (shared by
+// golfer and match-play results); a cup event's participants carry no
+// status field at all, so its own top-level status (scheduled/completed
+// binary) is the only signal available. F1's own live cache carries no
+// such per-driver status vocabulary at all (ESPN's own shape -- see
+// f1_live_score.dart's docstring), so F1 uses its own, simpler check
+// below (F1LiveEventState.isLive) rather than this one.
 bool _fieldEntryIsLive(PgaLiveEventState state) => switch (state) {
-      PgaFieldLiveState(:final state) => state.participants.values.any((p) => p.status == 'in_progress'),
-      PgaTwoSidedLiveState(:final state) => state.eventType == 'cup'
-          ? state.status != 'completed'
-          : state.participants.values.any((p) => p.status == 'in_progress'),
+      PgaFieldLiveState(:final state) => state.participants.values.any((p) => p.status == PgaParticipantStatus.inProgress),
+      PgaTwoSidedLiveState(:final state) => state.eventType == PgaEventType.cup
+          ? state.status != EventStatus.completed
+          : state.participants.values.any((p) => p.status == PgaParticipantStatus.inProgress),
     };
 
 /// design/FRONTEND_STYLE.md's "Sport card" component. Inactive (not yet
@@ -42,11 +49,15 @@ class SportCard extends ConsumerWidget {
     final accentStrip = sport.eventShape == EventShape.headToHead ? AppColors.accentStripH2h : AppColors.accentStripField;
 
     // Only watched for an active sport -- an inactive one has no live-
-    // scores route to call at all.
+    // scores route to call at all. F1 gets its own branch here (not the
+    // PGA one below) -- same "own live-scores shape, not PGA's" reasoning
+    // f1_live_score.dart's own docstring gives.
     final live = active &&
         (sport.eventShape == EventShape.headToHead
             ? (ref.watch(liveScoresProvider(sport.id)).value?.values.any((s) => s.live) ?? false)
-            : (ref.watch(pgaLiveScoresProvider(sport.id)).value?.values.any(_fieldEntryIsLive) ?? false));
+            : sport.id == SportIds.f1
+                ? (ref.watch(f1LiveScoresProvider(sport.id)).value?.values.any((s) => s.isLive) ?? false)
+                : (ref.watch(pgaLiveScoresProvider(sport.id)).value?.values.any(_fieldEntryIsLive) ?? false));
 
     return Opacity(
       opacity: active ? 1 : 0.55,
@@ -140,9 +151,16 @@ class SportCard extends ConsumerWidget {
 }
 
 // Three states: not implemented (SOON, muted), implemented with something
-// live right now (LIVE, green), implemented with nothing live right now
-// (ACTIVE, muted -- distinct wording from SOON so "not yet built" and
-// "built, just quiet right now" don't read as the same thing).
+// live right now (LIVE, green -- LiveStatusPill.label, not retyped here),
+// implemented with nothing live right now (ACTIVE, muted -- distinct
+// wording from SOON so "not yet built" and "built, just quiet right now"
+// don't read as the same thing). Not shared with any other file, but
+// named instead of typed inline.
+abstract final class _SportCardStatusLabels {
+  static const soon = 'SOON';
+  static const active = 'ACTIVE';
+}
+
 class _StatusPill extends StatelessWidget {
   const _StatusPill({required this.active, required this.live});
   final bool active;
@@ -150,7 +168,7 @@ class _StatusPill extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final label = !active ? 'SOON' : (live ? 'LIVE' : 'ACTIVE');
+    final label = !active ? _SportCardStatusLabels.soon : (live ? LiveStatusPill.label : _SportCardStatusLabels.active);
     final color = live ? AppColors.live : AppColors.inkMute;
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),

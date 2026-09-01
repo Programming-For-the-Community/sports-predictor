@@ -9,6 +9,19 @@
 /// the UI branches on eventType, not on runtime type.
 library;
 
+/// F1's own event_type values -- both F1Event's (f1_event.dart) and
+/// F1EventPrediction's own isSprint getters, plus their fromJson
+/// defaults and f1_live_score.dart's, reference these instead of
+/// retyping the raw string. Field-shape-only concept -- head-to-head
+/// sports have no event_type field. Separate from PGA's own PgaEventType
+/// (field_prediction.dart) -- 'field' is coincidentally the same literal
+/// in both, but F1 has no match_play/cup analog and PGA has no sprint
+/// analog, so they're kept as two unrelated vocabularies.
+abstract final class F1EventType {
+  static const field = 'field';
+  static const sprint = 'sprint';
+}
+
 class F1ModelValue {
   const F1ModelValue({required this.value, required this.modelVersion});
 
@@ -59,6 +72,7 @@ class F1DriverPrediction {
     required this.entityId,
     this.name,
     this.constructorEntityId,
+    this.constructorName,
     this.winProbability,
     this.podiumProbability,
     this.projectedFinishPosition,
@@ -71,6 +85,13 @@ class F1DriverPrediction {
   final String entityId;
   final String? name;
   final String? constructorEntityId;
+  // The constructor's own real display name (e.g. "Red Bull") --
+  // event_prediction.py's own _driver_entry_base, NOT derived from
+  // constructorEntityId (a lowercase/underscored id like "red_bull") on
+  // the frontend. Null only when the constructor entity itself couldn't
+  // be resolved -- f1_leaderboard_table.dart falls back to humanizing
+  // constructorEntityId in that case, never showing the raw id verbatim.
+  final String? constructorName;
   final F1ModelValue? winProbability;
   final F1ModelValue? podiumProbability;
   // "field" event only -- null for a sprint entry.
@@ -89,6 +110,7 @@ class F1DriverPrediction {
       entityId: json['entity_id'] as String,
       name: json['name'] as String?,
       constructorEntityId: json['constructor_entity_id'] as String?,
+      constructorName: json['constructor_name'] as String?,
       winProbability: modelValue('win_probability'),
       podiumProbability: modelValue('podium_probability'),
       projectedFinishPosition: modelValue('projected_finish_position'),
@@ -143,9 +165,11 @@ class F1EventPrediction {
   final int? week;
   // Server-side sorted ascending by projected_finish_position/grid
   // position (event_prediction.py's own _field_sort_key) -- a reasonable
-  // order before any real result exists. No live-scores overlay yet
-  // (F1's own live-scores Lambda is still deferred), so this order is
-  // shown as-is, unlike PGA's own re-sort-by-live-standing.
+  // order before any real result exists, and the order shown whenever no
+  // live overlay is present. f1_leaderboard_table.dart re-sorts by live
+  // running order instead once f1LiveScoresProvider has one, same
+  // "real signal first, else the model's own order" idea PGA's own
+  // re-sort-by-live-standing uses.
   final List<F1DriverPrediction> field;
   // Empty for a "sprint" event -- no constructor model is scored per
   // Sprint race (see event_prediction.py's predict_sprint_event).
@@ -153,11 +177,11 @@ class F1EventPrediction {
   final bool stale;
   final int? staleRetryAfterSeconds;
 
-  bool get isSprint => eventType == 'sprint';
+  bool get isSprint => eventType == F1EventType.sprint;
 
   factory F1EventPrediction.fromJson(Map<String, dynamic> json) => F1EventPrediction(
         eventId: json['event_id'] as String,
-        eventType: json['event_type'] as String? ?? 'field',
+        eventType: json['event_type'] as String? ?? F1EventType.field,
         raceName: json['race_name'] as String?,
         status: json['status'] as String?,
         circuitId: json['circuit_id'] as String?,

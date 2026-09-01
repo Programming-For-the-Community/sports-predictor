@@ -4,18 +4,23 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/data/f1_events_repository.dart';
+import '../../core/data/live_scores_repository.dart';
+import '../../core/models/f1_live_score.dart';
 import '../../core/models/f1_prediction.dart';
 import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_text_styles.dart';
 import '../../core/widgets/f1_prediction_computing_retry.dart';
 import '../../core/widgets/f1_prediction_freshness_badge.dart';
+import '../../core/widgets/live_status_pill.dart';
+import '../../core/widgets/sprint_badge.dart';
 import 'f1_leaderboard_table.dart';
 
-// No live-scores poll yet (F1's own live-scores Lambda is still deferred,
-// see project-f1-onboarding memory) -- this only re-fetches the cached
-// prediction itself, same interval as event_detail_page.dart's own,
-// which is enough to pick up a stale->fresh transition after the predict
-// Lambda finishes a background recompute.
+// Also re-fetches the cached prediction itself, same interval as
+// event_detail_page.dart's own, which is enough to pick up a
+// stale->fresh transition after the predict Lambda finishes a background
+// recompute. f1LiveScoresProvider's own backend cache (live_scores.py) is
+// refreshed on a 3-minute EventBridge tick (scheduler-f1-live-scores.tf),
+// so this interval is plenty to catch a live session starting/ending.
 const _pollInterval = Duration(seconds: 30);
 
 /// F1's own detail page -- mirrors field_event_detail_page.dart's
@@ -24,7 +29,10 @@ const _pollInterval = Duration(seconds: 30);
 /// event_types (field/sprint) render through the SAME leaderboard-table
 /// shape, just with a different column set (F1LeaderboardTable's own
 /// isSprint flag) and "field" alone additionally shows a constructors
-/// panel.
+/// panel. Also watches f1LiveScoresProvider (ESPN-sourced -- see
+/// f1_live_score.dart's own docstring) and feeds this event's own live
+/// state down to _PredictionView, same split field_event_detail_page.dart
+/// uses for its own fieldLiveScoresProvider watch.
 class F1EventDetailPage extends ConsumerStatefulWidget {
   const F1EventDetailPage({super.key, required this.sportId, required this.eventId});
 
@@ -51,15 +59,18 @@ class _F1EventDetailPageState extends ConsumerState<F1EventDetailPage> {
   }
 
   void _poll() {
+    ref.invalidate(f1LiveScoresProvider(widget.sportId));
     ref.invalidate(f1EventPredictionProvider((sport: widget.sportId, eventId: widget.eventId)));
   }
 
   @override
   Widget build(BuildContext context) {
+    final liveScores = ref.watch(f1LiveScoresProvider(widget.sportId)).value ?? const <String, F1LiveEventState>{};
+    final liveState = liveScores[widget.eventId];
     return SingleChildScrollView(
       padding: const EdgeInsets.all(24),
       child: ref.watch(f1EventPredictionProvider((sport: widget.sportId, eventId: widget.eventId))).when(
-            data: (prediction) => _PredictionView(sport: widget.sportId, eventId: widget.eventId, prediction: prediction),
+            data: (prediction) => _PredictionView(sport: widget.sportId, eventId: widget.eventId, prediction: prediction, liveState: liveState),
             loading: () => const Center(child: CircularProgressIndicator()),
             error: (error, _) => error is PredictionComputingException
                 ? F1PredictionComputingRetry(sport: widget.sportId, eventId: widget.eventId, retryAfterSeconds: error.retryAfterSeconds)
@@ -69,15 +80,44 @@ class _F1EventDetailPageState extends ConsumerState<F1EventDetailPage> {
   }
 }
 
-class _PredictionView extends StatelessWidget {
-  const _PredictionView({required this.sport, required this.eventId, required this.prediction});
+enum _DetailTab { drivers, constructors }
+
+// Not shared with f1_season_page.dart's own longer "...' Championship"
+// form (a section-header, not a tab label) -- deliberately different
+// copy for a different context, but named here instead of typed inline
+// in _DetailTabToggle's own 2 calls below.
+abstract final class _DetailTabLabels {
+  static const drivers = 'Drivers';
+  static const constructors = 'Constructors';
+}
+
+class _PredictionView extends StatefulWidget {
+  const _PredictionView({required this.sport, required this.eventId, required this.prediction, this.liveState});
 
   final String sport;
   final String eventId;
   final F1EventPrediction prediction;
+  // From f1LiveScoresProvider -- null when there's no live/recently-live
+  // ESPN session for this event at all (the ordinary case).
+  final F1LiveEventState? liveState;
+
+  @override
+  State<_PredictionView> createState() => _PredictionViewState();
+}
+
+class _PredictionViewState extends State<_PredictionView> {
+  _DetailTab _tab = _DetailTab.drivers;
+
+  void _setTab(_DetailTab tab) => setState(() => _tab = tab);
 
   @override
   Widget build(BuildContext context) {
+    final prediction = widget.prediction;
+    final hasConstructors = prediction.constructors.isNotEmpty;
+    // Sprint has no constructors block at all -- stay on Drivers rather
+    // than land on a tab with nothing to show.
+    final tab = hasConstructors ? _tab : _DetailTab.drivers;
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -89,29 +129,72 @@ class _PredictionView extends StatelessWidget {
                 style: AppTextStyles.sectionTitle(color: AppColors.violet),
               ),
             ),
-            if (prediction.isSprint)
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                decoration: BoxDecoration(color: AppColors.cyan.withValues(alpha: 0.15), borderRadius: BorderRadius.circular(999)),
-                child: Text('SPRINT', style: AppTextStyles.microLabel(color: AppColors.cyan)),
-              ),
+            if (widget.liveState?.isLive ?? false) const LiveStatusPill(),
+            if (prediction.isSprint) ...[
+              const SizedBox(width: 8),
+              const SprintBadge(),
+            ],
           ],
         ),
         if (prediction.stale) ...[
           const SizedBox(height: 12),
           F1PredictionFreshnessBadge(
-            sport: sport, eventId: eventId, stale: prediction.stale, retryAfterSeconds: prediction.staleRetryAfterSeconds,
+            sport: widget.sport, eventId: widget.eventId, stale: prediction.stale, retryAfterSeconds: prediction.staleRetryAfterSeconds,
+          ),
+        ],
+        // Own Drivers/Constructors tab toggle, same pill shape f1_season_
+        // page.dart's own standings toggle uses -- a stacked driver list
+        // (up to ~20 rows) plus a constructors table below it was a lot
+        // to scroll through just to compare constructors (real complaint
+        // 2026-09-01). Toggle only shown when there's a constructors
+        // block to switch to at all.
+        if (hasConstructors) ...[
+          const SizedBox(height: 16),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              _DetailTabToggle(
+                label: _DetailTabLabels.drivers, selected: tab == _DetailTab.drivers, onTap: () => _setTab(_DetailTab.drivers),
+              ),
+              _DetailTabToggle(
+                label: _DetailTabLabels.constructors, selected: tab == _DetailTab.constructors, onTap: () => _setTab(_DetailTab.constructors),
+              ),
+            ],
           ),
         ],
         const SizedBox(height: 16),
-        F1LeaderboardTable(field: prediction.field, isSprint: prediction.isSprint),
-        if (prediction.constructors.isNotEmpty) ...[
-          const SizedBox(height: 24),
-          Text('CONSTRUCTORS', style: AppTextStyles.microLabel()),
-          const SizedBox(height: 8),
+        if (tab == _DetailTab.drivers)
+          F1LeaderboardTable(
+            field: prediction.field, isSprint: prediction.isSprint, liveResults: widget.liveState?.participants ?? const {},
+          )
+        else
           _ConstructorsTable(constructors: prediction.constructors),
-        ],
       ],
+    );
+  }
+}
+
+class _DetailTabToggle extends StatelessWidget {
+  const _DetailTabToggle({required this.label, required this.selected, required this.onTap});
+  final String label;
+  final bool selected;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(999),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+        decoration: BoxDecoration(
+          color: selected ? AppColors.surface : null,
+          border: Border.all(color: selected ? AppColors.violet : AppColors.border),
+          borderRadius: BorderRadius.circular(999),
+        ),
+        child: Text(label, style: AppTextStyles.microLabel(color: selected ? AppColors.violet : AppColors.inkMute)),
+      ),
     );
   }
 }
@@ -141,7 +224,7 @@ class _ConstructorsTable extends StatelessWidget {
                   const SizedBox(width: 16),
                   Expanded(
                     child: Text(
-                      constructors[i].name ?? constructors[i].entityId,
+                      constructors[i].name ?? humanizeF1EntityId(constructors[i].entityId),
                       style: AppTextStyles.body(color: AppColors.ink),
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,

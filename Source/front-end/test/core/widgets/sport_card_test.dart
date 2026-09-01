@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:front_end/core/data/live_scores_repository.dart';
+import 'package:front_end/core/models/f1_live_score.dart';
 import 'package:front_end/core/models/field_live_score.dart';
 import 'package:front_end/core/models/live_score.dart';
 import 'package:front_end/core/models/sport_config.dart';
@@ -12,6 +13,7 @@ import 'package:front_end/core/widgets/sport_card.dart';
 const _nfl = SportConfig(id: 'nfl', displayName: 'NFL', eventShape: EventShape.headToHead, accentColor: AppColors.cyan, active: true);
 const _pga = SportConfig(id: 'pga', displayName: 'PGA Tour', eventShape: EventShape.field, accentColor: AppColors.violet, active: true);
 const _f1 = SportConfig(id: 'f1', displayName: 'Formula 1', eventShape: EventShape.field, accentColor: AppColors.violet, active: false);
+const _f1Active = SportConfig(id: 'f1', displayName: 'Formula 1', eventShape: EventShape.field, accentColor: AppColors.violet, active: true);
 
 // Finds the small colored dot/glow indicator -- the first DecoratedBox with
 // a BoxShape.circle in the tree (SportCard's own left-of-title dot).
@@ -109,6 +111,36 @@ void main() {
           ),
         ],
         child: MaterialApp(home: Scaffold(body: SportCard(sport: _pga))),
+      ),
+    );
+    await tester.pump();
+
+    expect(find.text('ACTIVE'), findsOneWidget);
+    expect(find.text('LIVE'), findsNothing);
+  });
+
+  testWidgets('an implemented F1 with a live ESPN session shows LIVE, glowing', (tester) async {
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          f1LiveScoresProvider.overrideWith(
+            (ref, sport) async => {'2026-5': const F1LiveEventState(eventType: 'field', state: 'in')},
+          ),
+        ],
+        child: MaterialApp(home: Scaffold(body: SportCard(sport: _f1Active))),
+      ),
+    );
+    await tester.pump();
+
+    expect(find.text('LIVE'), findsOneWidget);
+    expect(find.text('ACTIVE'), findsNothing);
+  });
+
+  testWidgets('an implemented F1 with no live ESPN session shows ACTIVE, not LIVE', (tester) async {
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [f1LiveScoresProvider.overrideWith((ref, sport) async => const {})],
+        child: MaterialApp(home: Scaffold(body: SportCard(sport: _f1Active))),
       ),
     );
     await tester.pump();

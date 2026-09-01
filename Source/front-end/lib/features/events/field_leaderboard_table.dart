@@ -13,6 +13,21 @@ import '../../core/widgets/field_status_pill.dart';
 /// List<{label, flex, cell}> shape was built for). Public (not private
 /// like _StandingsTable) since it's used from field_event_detail_page.dart,
 /// a different file.
+// Every column header this table can show -- not shared with any other
+// file (f1_leaderboard_table.dart's own column set is a genuinely
+// different one), but named here instead of typed inline at each of the
+// several sites (the _leaderboardColumns list, _ExpandedProbabilities)
+// that use them.
+abstract final class _FieldColumnLabels {
+  static const position = '#';
+  static const player = 'PLAYER';
+  static const status = 'STATUS';
+  static const total = 'TOTAL';
+  static const thisRound = 'THIS RD';
+  static const top10 = 'TOP 10%';
+  static const top5 = 'TOP 5%';
+}
+
 class _LeaderboardColumn {
   const _LeaderboardColumn(this.label, this.flex, this.cell);
   final String label;
@@ -42,7 +57,7 @@ const _compactBreakpoint = 600.0;
 
 List<_LeaderboardColumn> _leaderboardColumns(int? par, {required bool compact}) {
   final core = [
-      _LeaderboardColumn('#', 1, (context, entry, live, rowNumber) {
+      _LeaderboardColumn(_FieldColumnLabels.position, 1, (context, entry, live, rowNumber) {
         final position = live?.finishPosition ?? entry.actualFinishPosition;
         final isTie = live?.isTie ?? false;
         // Falls back to the row's own displayed position rather than
@@ -54,7 +69,7 @@ List<_LeaderboardColumn> _leaderboardColumns(int? par, {required bool compact}) 
           maxLines: 1, softWrap: false, overflow: TextOverflow.ellipsis,
         );
       }),
-      _LeaderboardColumn('PLAYER', 4, (context, entry, live, rowNumber) {
+      _LeaderboardColumn(_FieldColumnLabels.player, 4, (context, entry, live, rowNumber) {
         final name = entry.name ?? entry.entityId;
         return Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -70,7 +85,7 @@ List<_LeaderboardColumn> _leaderboardColumns(int? par, {required bool compact}) 
       // live.status first (freshest, live-poll window only), else this
       // golfer's own real stored status -- not inferred from
       // actualFinishPosition's presence.
-      _LeaderboardColumn('STATUS', compact ? 1 : 3, (context, entry, live, rowNumber) {
+      _LeaderboardColumn(_FieldColumnLabels.status, compact ? 1 : 3, (context, entry, live, rowNumber) {
         final status = live?.status ?? entry.actualStatus;
         return Center(child: FieldStatusPill(status: status, dotOnly: compact));
       }),
@@ -79,7 +94,7 @@ List<_LeaderboardColumn> _leaderboardColumns(int? par, {required bool compact}) 
       // TOTAL, not TO PAR -- same term ESPN/PGA Tour's own real
       // leaderboards use, and distinguishes it from THIS RD's own
       // to-par-for-the-round-alone value.
-      _LeaderboardColumn('TOTAL', 3, (context, entry, live, rowNumber) {
+      _LeaderboardColumn(_FieldColumnLabels.total, 3, (context, entry, live, rowNumber) {
         final scoreToPar = live?.scoreToPar ?? entry.actualScoreToPar;
         final projected = entry.projectedScoreToPar?.value;
         return Center(child: _StandingCell(actual: scoreToPar, projected: projected));
@@ -92,7 +107,7 @@ List<_LeaderboardColumn> _leaderboardColumns(int? par, {required bool compact}) 
     // row -- the full 1-4 breakdown is still only in the expanded panel
     // below (_RoundBreakdownStrip). Dropped from the compact (mobile)
     // column set below _compactBreakpoint.
-    _LeaderboardColumn('THIS RD', 2, (context, entry, live, rowNumber) {
+    _LeaderboardColumn(_FieldColumnLabels.thisRound, 2, (context, entry, live, rowNumber) {
       final round = _currentRoundNumber(entry);
       if (round == null) {
         return Text('--', style: AppTextStyles.metricValue(color: AppColors.inkMute), textAlign: TextAlign.center);
@@ -104,8 +119,8 @@ List<_LeaderboardColumn> _leaderboardColumns(int? par, {required bool compact}) 
         ),
       );
     }),
-    _LeaderboardColumn('TOP 10%', 2, (context, entry, live, rowNumber) => _PercentText(entry.top10Probability?.value)),
-    _LeaderboardColumn('TOP 5%', 2, (context, entry, live, rowNumber) => _PercentText(entry.top5Probability?.value)),
+    _LeaderboardColumn(_FieldColumnLabels.top10, 2, (context, entry, live, rowNumber) => _PercentText(entry.top10Probability?.value)),
+    _LeaderboardColumn(_FieldColumnLabels.top5, 2, (context, entry, live, rowNumber) => _PercentText(entry.top5Probability?.value)),
   ];
 }
 
@@ -318,11 +333,11 @@ class _ExpandedProbabilities extends StatelessWidget {
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
-        Text('TOP 10%', style: AppTextStyles.microLabel(color: AppColors.inkMute)),
+        Text(_FieldColumnLabels.top10, style: AppTextStyles.microLabel(color: AppColors.inkMute)),
         const SizedBox(width: 6),
         _PercentText(entry.top10Probability?.value),
         const SizedBox(width: 20),
-        Text('TOP 5%', style: AppTextStyles.microLabel(color: AppColors.inkMute)),
+        Text(_FieldColumnLabels.top5, style: AppTextStyles.microLabel(color: AppColors.inkMute)),
         const SizedBox(width: 6),
         _PercentText(entry.top5Probability?.value),
       ],
@@ -346,7 +361,7 @@ class _ExpandedProbabilities extends StatelessWidget {
 /// 'in_progress' -- null otherwise.
 int? _currentThru(FieldParticipantPrediction entry, FieldParticipantLiveResult? live) {
   final status = live?.status ?? entry.actualStatus;
-  if (status != 'in_progress') return null;
+  if (status != PgaParticipantStatus.inProgress) return null;
   return live?.thru ?? entry.actualThru;
 }
 

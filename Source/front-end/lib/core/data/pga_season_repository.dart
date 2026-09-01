@@ -2,6 +2,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../api/api_client.dart';
 import '../models/pga_season_projection.dart';
+import '../models/sport_config.dart';
 
 /// PGA's own /pga/season repository -- same trivial GET+FutureProvider
 /// shape as season_repository.dart, a real precedent for a sport-specific
@@ -15,7 +16,7 @@ class PgaSeasonRepository {
   final ApiClient _api;
 
   Future<PgaSeasonProjection> getSeasonProjection() async {
-    final response = await _api.get('/pga/season') as Map<String, dynamic>;
+    final response = await _api.get('/${SportIds.pga}/season') as Map<String, dynamic>;
     return PgaSeasonProjection.fromJson(response);
   }
 }

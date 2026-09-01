@@ -5,8 +5,10 @@
 #
 # ai_hosting/deploy_predict_lambda/predict_read_deploy added once F1's own
 # serving layer (predict/predict-read Lambda pair) landed, mirroring pga_
-# deploy.yml's exact shape. No live_scores_deploy job -- F1's own
-# live-scores Lambda is still deferred (project-f1-onboarding memory).
+# deploy.yml's exact shape. live_scores_deploy added once F1's own
+# ESPN-sourced live-scores Lambda landed (see aws-lambdas/f1/live-scores/
+# live_scores.py's own docstring for why it's ESPN-, not Jolpica-,
+# sourced).
 #
 # Both this job's `approval` step AND tf_install.yml's own terraform job
 # gate on the `development`/`production` environment, so a run through
@@ -123,3 +125,14 @@ jobs:
     with:
       ingest_function_name: ${{ needs.infra.outputs.f1_ingest_function_name }}
       normalize_function_name: ${{ needs.infra.outputs.f1_normalize_function_name }}
+
+  live_scores_deploy:
+    name: F1 live-scores (test + deploy)
+    needs: [approval, infra]
+    if: |
+      always() &&
+      (needs.approval.result == 'success' || needs.approval.result == 'skipped')
+    uses: ./.github/workflows/f1_live_scores_deploy.yml
+    secrets: inherit
+    with:
+      function_name: ${{ needs.infra.outputs.f1_live_scores_function_name }}

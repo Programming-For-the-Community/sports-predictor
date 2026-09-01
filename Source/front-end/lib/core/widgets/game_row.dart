@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 
 import '../data/events_repository.dart';
 import '../models/event.dart';
+import '../models/event_status.dart';
 import '../models/live_score.dart';
 import '../models/prediction.dart';
 import '../theme/app_colors.dart';
@@ -105,7 +106,7 @@ class GameRow extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final home = teamDisplay(sport, event.home);
     final away = teamDisplay(sport, event.away);
-    final isCompleted = event.status == 'completed';
+    final isCompleted = event.status == EventStatus.completed;
     final isLive = liveState?.live ?? false;
     // Fetched for any not-yet-completed event, live included -- watched
     // here (not inside _LivePredictionSummary) because _MatchupLine below

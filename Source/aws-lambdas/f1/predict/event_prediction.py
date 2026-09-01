@@ -60,6 +60,30 @@ def _entity_name(storage, entity_id: str, entity_type: str) -> dict:
     return {"name": entity.get("name")}
 
 
+def _driver_entry_base(storage, entity_id: str, constructor_entity_id: str | None, predictions: dict) -> dict:
+    """Shared entry shape for both predict_field_event/predict_sprint_
+    event's own per-driver rows -- the driver's own name via _entity_name,
+    PLUS the constructor's own real display name (not just its raw
+    entity_id, which is a lowercase/underscored id like "red_bull" -- see
+    library/normalize/f1.py's _constructor_entities: "name" is Jolpica's
+    own real constructor name, e.g. "Red Bull". A real gap found live
+    2026-08-31: the frontend's own driver-row subtitle was showing this
+    raw id verbatim with no name lookup at all). constructor_name is None
+    when constructor_entity_id itself is None or the entity lookup comes
+    back empty -- the frontend falls back to humanizing the id itself in
+    that case, same defensive discipline every other name field here
+    already has."""
+    constructor_name = None
+    if constructor_entity_id is not None:
+        constructor_entity = storage.get_entity(SPORT, constructor_entity_id, "team")
+        constructor_name = (constructor_entity or {}).get("name")
+    return {
+        "entity_id": entity_id, **_entity_name(storage, entity_id, "player"),
+        "constructor_entity_id": constructor_entity_id, "constructor_name": constructor_name,
+        "predictions": predictions,
+    }
+
+
 def _actual_driver_result(participant: dict) -> dict | None:
     """Real, already-stored result -- meaningful once qualifying has
     landed even before the race itself runs, not just once "completed"."""
@@ -79,16 +103,28 @@ def _actual_driver_result(participant: dict) -> dict | None:
 
 
 def _field_sort_key(entry: dict):
-    """Ascending by projected_finish_position (lowest = best); falls back
-    to win_probability descending if no finish-position model is
-    promoted."""
+    """Ascending by projected_finish_position (field events); falls back
+    to projected_grid_position (sprint events, which have no finish-
+    position model at all -- see model-training/f1/train_sprint_*.py),
+    then to win_probability descending if neither is promoted.
+
+    The frontend's own leaderboard relies on this exact order to display
+    a driver's ROW RANK as their projected position instead of the raw
+    regression value rounded independently per row -- two close-but-
+    distinct floats can round to the SAME integer, which reads as an
+    impossible shared finishing/grid slot (real complaint 2026-08-31).
+    Row rank is always unique by construction; see f1_leaderboard_table.
+    dart's own _PositionCell."""
     finish = entry["predictions"].get("projected_finish_position")
     if finish is not None:
         return (0, finish["value"])
+    grid = entry["predictions"].get("projected_grid_position")
+    if grid is not None:
+        return (1, grid["value"])
     win = entry["predictions"].get("win_probability")
     if win is not None:
-        return (1, -win["value"])
-    return (2, 0)
+        return (2, -win["value"])
+    return (3, 0)
 
 
 def predict_field_event(storage, s3, predictions_table, event_id: str) -> dict:
@@ -106,10 +142,7 @@ def predict_field_event(storage, s3, predictions_table, event_id: str) -> dict:
             if scored is not None:
                 predictions[key] = scored
 
-        entry = {
-            "entity_id": entity_id, **_entity_name(storage, entity_id, "player"),
-            "constructor_entity_id": row.get("constructor_entity_id"), "predictions": predictions,
-        }
+        entry = _driver_entry_base(storage, entity_id, row.get("constructor_entity_id"), predictions)
         participant = participants_by_id.get(entity_id)
         if participant is not None:
             actual = _actual_driver_result(participant)
@@ -153,10 +186,7 @@ def predict_sprint_event(storage, s3, predictions_table, event_id: str) -> dict:
             if scored is not None:
                 predictions[key] = scored
 
-        entry = {
-            "entity_id": entity_id, **_entity_name(storage, entity_id, "player"),
-            "constructor_entity_id": row.get("constructor_entity_id"), "predictions": predictions,
-        }
+        entry = _driver_entry_base(storage, entity_id, row.get("constructor_entity_id"), predictions)
         participant = participants_by_id.get(entity_id)
         if participant is not None:
             actual = _actual_driver_result(participant)

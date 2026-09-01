@@ -4,6 +4,11 @@
 /// own entity IS the participant (no role, no team) -- see
 /// design/FRONTEND_STYLE.md's own "field events render a finishing-
 /// position distribution, never win/loss shape" guidance.
+library;
+
+import 'event_status.dart';
+import 'field_prediction.dart' show PgaEventType;
+
 class FieldParticipantResult {
   const FieldParticipantResult({this.finishPosition, this.isTie = false, this.status, this.scoreToPar, this.totalStrokes});
 
@@ -80,10 +85,10 @@ class FieldEvent {
 
   factory FieldEvent.fromJson(Map<String, dynamic> json) => FieldEvent(
         eventId: json['event_id'] as String,
-        eventType: json['event_type'] as String? ?? 'field',
+        eventType: json['event_type'] as String? ?? PgaEventType.field,
         eventDate: json['event_date'] as String? ?? '',
         endDate: json['end_date'] as String?,
-        status: json['status'] as String? ?? '',
+        status: json['status'] as String? ?? EventStatus.unknown,
         season: json['season'] as int?,
         tournamentName: json['tournament_name'] as String?,
         participants: (json['participants'] as List<dynamic>? ?? [])

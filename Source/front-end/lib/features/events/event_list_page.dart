@@ -6,11 +6,13 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/data/events_repository.dart';
 import '../../core/data/live_scores_repository.dart';
 import '../../core/models/event.dart';
+import '../../core/models/event_status.dart';
 import '../../core/models/live_score.dart';
 import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_text_styles.dart';
 import '../../core/widgets/conference_filter_field.dart';
 import '../../core/widgets/game_row.dart';
+import '../../core/widgets/status_toggle.dart';
 import '../../static/conference_order.dart';
 
 const _weekdayNames = [
@@ -92,7 +94,7 @@ class EventListPage extends ConsumerStatefulWidget {
 }
 
 class _EventListPageState extends ConsumerState<EventListPage> {
-  String _status = 'scheduled';
+  String _status = EventStatus.scheduled;
   String _conferenceFilter = '';
   Timer? _liveScoresTimer;
 
@@ -112,7 +114,7 @@ class _EventListPageState extends ConsumerState<EventListPage> {
   // change so switching to Completed actually stops the ticking.
   void _scheduleLiveScoresPoll() {
     _liveScoresTimer?.cancel();
-    if (_status != 'scheduled') return;
+    if (_status != EventStatus.scheduled) return;
     _liveScoresTimer = Timer.periodic(const Duration(seconds: 30), (_) {
       ref.invalidate(liveScoresProvider(widget.sportId));
     });
@@ -127,7 +129,7 @@ class _EventListPageState extends ConsumerState<EventListPage> {
   Widget build(BuildContext context) {
     final events = ref.watch(eventsListProvider((sport: widget.sportId, status: _status)));
     // Only fetched/watched for the Upcoming tab.
-    final liveScores = _status == 'scheduled'
+    final liveScores = _status == EventStatus.scheduled
         ? ref.watch(liveScoresProvider(widget.sportId)).value ?? const <String, LiveEventState>{}
         : const <String, LiveEventState>{};
 
@@ -146,15 +148,17 @@ class _EventListPageState extends ConsumerState<EventListPage> {
             spacing: 8,
             runSpacing: 8,
             children: [
-              _StatusToggle(
-                label: 'Upcoming/Current',
-                selected: _status == 'scheduled',
-                onTap: () => _setStatus('scheduled'),
+              StatusToggle(
+                label: StatusToggleLabels.upcoming,
+                selected: _status == EventStatus.scheduled,
+                onTap: () => _setStatus(EventStatus.scheduled),
+                accentColor: AppColors.cyan,
               ),
-              _StatusToggle(
-                label: 'Completed',
-                selected: _status == 'completed',
-                onTap: () => _setStatus('completed'),
+              StatusToggle(
+                label: StatusToggleLabels.completed,
+                selected: _status == EventStatus.completed,
+                onTap: () => _setStatus(EventStatus.completed),
+                accentColor: AppColors.cyan,
               ),
             ],
           ),
@@ -168,14 +172,14 @@ class _EventListPageState extends ConsumerState<EventListPage> {
               if (list.isEmpty) {
                 // An empty "scheduled" list means next week hasn't been
                 // ingested yet, not that there's nothing to show.
-                final message = _status == 'scheduled' ? 'Coming Soon' : 'No games found.';
+                final message = _status == EventStatus.scheduled ? 'Coming Soon' : 'No games found.';
                 return Text(message, style: AppTextStyles.body(color: AppColors.inkSub));
               }
               // Soonest-first for Upcoming, most-recent-first for
               // Completed -- both read top-to-bottom as "closest to now
               // at the top".
               final sorted = [...list]..sort(
-                  (a, b) => _status == 'scheduled'
+                  (a, b) => _status == EventStatus.scheduled
                       ? _sortKey(a).compareTo(_sortKey(b))
                       : _sortKey(b).compareTo(_sortKey(a)),
                 );
@@ -222,33 +226,6 @@ class _EventListPageState extends ConsumerState<EventListPage> {
           ),
         ],
       ),
-      ),
-    );
-  }
-}
-
-class _StatusToggle extends StatelessWidget {
-  const _StatusToggle({required this.label, required this.selected, required this.onTap});
-  final String label;
-  final bool selected;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(999),
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-        decoration: BoxDecoration(
-          color: selected ? AppColors.surface : null,
-          border: Border.all(color: selected ? AppColors.cyan : AppColors.border),
-          borderRadius: BorderRadius.circular(999),
-        ),
-        child: Text(
-          label,
-          style: AppTextStyles.microLabel(color: selected ? AppColors.cyan : AppColors.inkMute),
-        ),
       ),
     );
   }

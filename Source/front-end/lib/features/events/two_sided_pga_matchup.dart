@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../core/models/event_status.dart';
 import '../../core/models/field_live_score.dart';
 import '../../core/models/field_prediction.dart';
 import '../../core/theme/app_colors.dart';
@@ -31,7 +32,7 @@ class TwoSidedPgaMatchup extends StatelessWidget {
     final winProbability = prediction.winProbability?.value;
     final homeLive = home != null ? liveState?.participants[home.entityId] : null;
     final awayLive = away != null ? liveState?.participants[away.entityId] : null;
-    final isLive = liveState != null && liveState!.status != 'completed';
+    final isLive = liveState != null && liveState!.status != EventStatus.completed;
 
     return Container(
       padding: const EdgeInsets.all(20),
@@ -72,7 +73,7 @@ class TwoSidedPgaMatchup extends StatelessWidget {
             ),
           ] else
             Text('No prediction available yet.', style: AppTextStyles.body(color: AppColors.inkMute)),
-          if (prediction.status == 'completed' && prediction.actualHomeWon != null) ...[
+          if (prediction.status == EventStatus.completed && prediction.actualHomeWon != null) ...[
             const SizedBox(height: 16),
             const Divider(height: 1, color: AppColors.border),
             const SizedBox(height: 12),

@@ -1,19 +1,23 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../api/api_client.dart';
+import '../models/f1_live_score.dart';
 import '../models/field_live_score.dart';
 import '../models/live_score.dart';
 
 /// Generic, sport-parametrized repository over GET /{sport}/live-scores.
-/// Three value-shape parses over the same route -- getLiveScores for
+/// Four value-shape parses over the same route -- getLiveScores for
 /// every head-to-head sport's home/away shape, getPgaLiveScores for PGA's
 /// own discriminated field/match_play/cup shape (each cache entry carries
-/// its own event_type -- see field_live_score.dart's own docstring), and
+/// its own event_type -- see field_live_score.dart's own docstring),
 /// getFieldLiveScores (filtered down to just the field-typed entries, for
 /// callers -- FieldLeaderboardTable's own liveResults param -- that only
 /// ever render a field event and shouldn't have to pattern-match the
-/// union themselves). Same "one class, multiple concerns" split
-/// EventsRepository already uses for list/predict.
+/// union themselves), and getF1LiveScores for F1's own genuinely
+/// different ESPN-sourced shape (f1_live_score.dart's own docstring --
+/// per-competitor order/winner, no PGA-shaped status vocabulary). Same
+/// "one class, multiple concerns" split EventsRepository already uses for
+/// list/predict.
 class LiveScoresRepository {
   LiveScoresRepository(this._api);
 
@@ -38,6 +42,12 @@ class LiveScoresRepository {
         if (entry.value case PgaFieldLiveState(:final state)) entry.key: state,
     };
   }
+
+  Future<Map<String, F1LiveEventState>> getF1LiveScores(String sport) async {
+    final response = await _api.get('/$sport/live-scores') as Map<String, dynamic>;
+    final events = response['events'] as Map<String, dynamic>? ?? {};
+    return events.map((eventId, state) => MapEntry(eventId, F1LiveEventState.fromJson(state as Map<String, dynamic>)));
+  }
 }
 
 final liveScoresRepositoryProvider =
@@ -53,4 +63,8 @@ final pgaLiveScoresProvider = FutureProvider.family<Map<String, PgaLiveEventStat
 
 final fieldLiveScoresProvider = FutureProvider.family<Map<String, FieldLiveEventState>, String>((ref, sport) {
   return ref.watch(liveScoresRepositoryProvider).getFieldLiveScores(sport);
+});
+
+final f1LiveScoresProvider = FutureProvider.family<Map<String, F1LiveEventState>, String>((ref, sport) {
+  return ref.watch(liveScoresRepositoryProvider).getF1LiveScores(sport);
 });
