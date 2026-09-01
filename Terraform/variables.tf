@@ -255,7 +255,7 @@ variable "ec2_spot_account_vcpu_limit" {
 }
 
 variable "training_ec2_sport_concurrency" {
-  description = "How many sports' ForEachSport iterations may run at once on the EC2 track (sfn-training-orchestrator-ec2.tf) -- unlike the Fargate orchestrator, not hardcoded to 1, since EC2 vCPU quota is assumed unconstrained here (see the section comment above). Defaulted to 6 -- all 6 sports free to run concurrently, with no artificial cap of its own. Still capped by local.feature_engineering_max_concurrency (locals-feature-engineering-compute.tf, on-demand Fargate headroom for feature-engineering, which both tracks share and which this variable can't bypass) -- the effective concurrency is min() of the two, so this is a ceiling only EC2 controls, not the real limit on its own"
+  description = "How many sports' ForEachSport iterations may run at once on the EC2 track (sfn-training-orchestrator-ec2.tf) -- unlike the Fargate orchestrator, not hardcoded to 1, since EC2 vCPU quota is assumed unconstrained here (see the section comment above). Deliberately NOT capped by local.feature_engineering_max_concurrency (locals-feature-engineering-compute.tf, on-demand Fargate headroom) -- that's a real constraint on the Fargate compute RunFeatureEngineering itself uses, but TrainAllTargets (what this figure actually sizes) runs on a totally separate EC2 capacity pool, so the two concurrency limits are kept independent rather than one Fargate quota bounding EC2's own parallelism. Defaulted to 6 -- all 6 sports free to train concurrently, with no artificial cap of its own"
   type        = number
   default     = 6
   nullable    = false

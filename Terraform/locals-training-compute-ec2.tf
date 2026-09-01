@@ -11,12 +11,17 @@ locals {
   )
 
   # Unlike the Fargate orchestrator (ForEachSport pinned to 1), sports can
-  # run concurrently here. local.feature_engineering_max_concurrency
-  # (locals-feature-engineering-compute.tf) already computes the on-demand
-  # Fargate headroom RunFeatureEngineering itself needs -- both tracks
-  # share that same task, so this can't exceed it regardless of how large
-  # var.training_ec2_sport_concurrency is set.
-  ec2_training_sport_concurrency = min(var.training_ec2_sport_concurrency, local.feature_engineering_max_concurrency)
+  # run concurrently here -- governed only by var.training_ec2_sport_
+  # concurrency itself, not by local.feature_engineering_max_concurrency
+  # (locals-feature-engineering-compute.tf). That Fargate on-demand
+  # headroom local is a real constraint on RunFeatureEngineering (which
+  # stays on Fargate, unchanged, even within this EC2 orchestrator -- see
+  # sfn-training-orchestrator-ec2.tf's own comment), but TrainAllTargets --
+  # the piece this concurrency figure actually exists to size -- runs on a
+  # completely separate EC2 capacity pool, so tying its concurrency to a
+  # Fargate quota would bound one compute method's parallelism by an
+  # unrelated one's.
+  ec2_training_sport_concurrency = var.training_ec2_sport_concurrency
 
   # Divides the vCPU budget by sport-concurrency BEFORE dividing by
   # per-task vCPU, so N sports' TrainAllTargets Maps running at once can
