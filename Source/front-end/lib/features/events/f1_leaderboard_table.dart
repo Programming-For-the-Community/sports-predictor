@@ -75,12 +75,13 @@ class _PercentText extends StatelessWidget {
 /// `rank`, when given, is shown instead of rounding `projected` itself --
 /// the raw regression value rounded independently per row can collide
 /// (two close-but-distinct floats rounding to the same integer), which
-/// reads as an impossible shared finishing/grid slot (real complaint
-/// 2026-08-31). Only pass `rank` for a column the field is ACTUALLY
-/// sorted by (event_prediction.py's own _field_sort_key -- FINISH for a
-/// field event, GRID for a sprint) so the row's own position in the list
-/// is guaranteed to match; QUALIFYING isn't the sort key, so it still
-/// rounds the raw value and can rarely show a tie.
+/// reads as an impossible shared finishing/grid/qualifying slot (real
+/// complaints 2026-08-31 for FINISH/GRID, 2026-09-01 for QUALIFYING).
+/// FINISH/GRID get `rank` for free from the field's own row order
+/// (event_prediction.py's own _field_sort_key sorts by exactly one of
+/// them). QUALIFYING isn't the sort key, so it can't reuse row order --
+/// event_prediction.py's own _assign_qualifying_ranks computes an
+/// independent rank instead, carried on F1ModelValue.rank.
 class _PositionCell extends StatelessWidget {
   const _PositionCell({required this.actual, this.live, required this.projected, this.rank});
   final int? actual;
@@ -150,7 +151,10 @@ List<_LeaderboardColumn> _fullColumns({required bool isSprint}) => [
               _PositionCell(actual: entry.actual?.finishPosition, live: live?.order, projected: entry.projectedFinishPosition?.value, rank: rowNumber)),
       if (!isSprint)
         _LeaderboardColumn(_F1ColumnKey.qualifying, _F1ColumnLabels.qualifying, 2, (context, entry, live, rowNumber) =>
-            _PositionCell(actual: entry.actual?.qualifyingPosition, projected: entry.projectedQualifyingPosition?.value)),
+            _PositionCell(
+              actual: entry.actual?.qualifyingPosition, projected: entry.projectedQualifyingPosition?.value,
+              rank: entry.projectedQualifyingPosition?.rank,
+            )),
       _LeaderboardColumn(_F1ColumnKey.win, _F1ColumnLabels.win, 2, (context, entry, live, rowNumber) => _PercentText(entry.winProbability?.value)),
       _LeaderboardColumn(
         _F1ColumnKey.podium, _F1ColumnLabels.podium, 2, (context, entry, live, rowNumber) => _PercentText(entry.podiumProbability?.value),
@@ -340,7 +344,10 @@ class _ExpandedDetail extends StatelessWidget {
         if (!isSprint)
           _Labeled(
             _F1ColumnLabels.qualifying,
-            _PositionCell(actual: entry.actual?.qualifyingPosition, projected: entry.projectedQualifyingPosition?.value),
+            _PositionCell(
+              actual: entry.actual?.qualifyingPosition, projected: entry.projectedQualifyingPosition?.value,
+              rank: entry.projectedQualifyingPosition?.rank,
+            ),
           ),
       ],
     );

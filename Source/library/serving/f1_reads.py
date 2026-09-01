@@ -20,7 +20,7 @@ event_types.
 """
 from concurrent.futures import ThreadPoolExecutor
 
-from library.serving.common import enrich_participants
+from library.serving.common import enrich_participants, most_recent_event, prefetch_entities
 from library.storage.season_projections import season_projection_key
 
 FIELD_EVENT_MODELS = {
@@ -81,7 +81,7 @@ def result_fingerprint(event: dict) -> int:
     return total
 
 
-def _entry(storage, sport: str, event: dict) -> dict:
+def _entry(storage, sport: str, event: dict, entity_cache: dict[tuple[str, str], dict]) -> dict:
     return {
         "event_id": event["event_id"],
         "event_type": event.get("event_type"),
@@ -91,7 +91,9 @@ def _entry(storage, sport: str, event: dict) -> dict:
         "week": event.get("week"),
         "race_name": event.get("race_name"),
         "circuit_id": event.get("circuit_id"),
-        "participants": enrich_participants(storage, sport, event.get("participants"), entity_type="player"),
+        "participants": enrich_participants(
+            storage, sport, event.get("participants"), entity_type="player", entity_cache=entity_cache,
+        ),
         "venue_name": event.get("venue_name"),
         "venue_city": event.get("venue_city"),
         "venue_state": event.get("venue_state"),
@@ -99,20 +101,31 @@ def _entry(storage, sport: str, event: dict) -> dict:
 
 
 def list_events(storage, sport: str, status: str) -> dict:
-    """GET /f1/events?status=scheduled|completed -- every stored event at
-    that status, across both event_types ("field"/"sprint") unfiltered;
-    the frontend uses event_type to decide how to render each one before
-    it ever calls GET /f1/predictions/events/{event_id}. Same "no
-    date-bucketing, one event = one entry" shape pga_reads.py's own
-    list_events uses (F1's grouping unit is one race weekend, not one
-    calendar date)."""
+    """GET /f1/events?status=scheduled|completed -- across both
+    event_types ("field"/"sprint") unfiltered; the frontend uses
+    event_type to decide how to render each one before it ever calls GET
+    /f1/predictions/events/{event_id}. Same "one event = one entry, no
+    week/day-bucketing" shape pga_reads.py's own list_events uses (F1's
+    grouping unit is one race weekend, not one calendar date) -- including
+    the same status=completed bound to the single most recent event
+    (library.serving.common.most_recent_event), for the same reason
+    pga_reads.py's own docstring gives: unbounded history plus
+    per-participant entity GetItems was a real production 504 there, and
+    F1's own 20-driver field times the same "every race ever backfilled"
+    shape is the same architectural gap, just smaller (real complaint
+    2026-09-01: "I have noticed this with other sports")."""
     events = storage.get_all_events(sport, status=status)
+    if status == "completed":
+        events = most_recent_event(events)
 
     if not events:
         return {"sport": sport, "events": []}
 
+    refs = [(p["entity_id"], "player") for event in events for p in (event.get("participants") or [])]
+    entity_cache = prefetch_entities(storage, sport, refs)
+
     with ThreadPoolExecutor(max_workers=min(len(events), 16)) as executor:
-        entries = list(executor.map(lambda e: _entry(storage, sport, e), events))
+        entries = list(executor.map(lambda e: _entry(storage, sport, e, entity_cache), events))
 
     return {"sport": sport, "events": entries}
 

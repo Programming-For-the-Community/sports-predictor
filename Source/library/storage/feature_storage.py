@@ -58,6 +58,7 @@ class FeatureStorage:
 
     def get_all_events(
         self, sport: str, status: str = "completed", scan_index_forward: bool = False, limit: int | None = None,
+        since_date: str | None = None,
     ) -> list[dict]:
         """Every event for a sport, most recent first (or soonest first,
         scan_index_forward=True), via the sport-status-index GSI (range key
@@ -69,16 +70,25 @@ class FeatureStorage:
         soonest date's events (not full-season history, e.g. ELO) should
         pass this; sorted by event_date, so a coarse limit still reliably
         includes every event on that one date regardless of how long ago
-        or far ahead it falls."""
+        or far ahead it falls. since_date (inclusive, ISO 8601) bounds the
+        query the same way get_all_team_game_stats' own since_date does --
+        a training-set-building caller that wants a rolling lookback
+        window (not full history) should pass this instead of limit."""
         condition = Key("sport_status").eq(f"{sport}#{status}")
+        if since_date is not None:
+            condition = condition & Key("event_date").gte(since_date)
         return self._events_table.query(
             condition, index_name="sport-status-index", scan_index_forward=scan_index_forward, limit=limit,
         )
 
-    def get_all_player_game_stats(self, sport: str) -> list[dict]:
+    def get_all_player_game_stats(self, sport: str, since_date: str | None = None) -> list[dict]:
         """Every player_game_stats row for one sport, unsorted, via the
-        sport-index GSI."""
-        return self._player_game_stats_table.query(Key("sport").eq(sport), index_name="sport-index")
+        sport-index GSI. since_date (inclusive, ISO 8601) bounds the query
+        the same way get_all_team_game_stats' own since_date does."""
+        condition = Key("sport").eq(sport)
+        if since_date is not None:
+            condition = condition & Key("event_date").gte(since_date)
+        return self._player_game_stats_table.query(condition, index_name="sport-index")
 
     def get_all_team_game_stats(self, sport: str, since_date: str | None = None) -> list[dict]:
         """Every team_game_stats row for one sport, unsorted, via the
@@ -119,6 +129,30 @@ class FeatureStorage:
         """One entity by id, via a direct GetItem. entity_type ("team" or
         "player") is required to build the key."""
         return self._entities_table.get_item({"entity_key": entity_key(sport, entity_id, entity_type)})
+
+    def get_entities(self, sport: str, entity_refs: list[tuple[str, str]]) -> dict[tuple[str, str], dict]:
+        """Batched form of get_entity -- entity_refs is [(entity_id,
+        entity_type), ...]. Returns {(entity_id, entity_type): entity},
+        one BatchGetItem round trip per 100 refs instead of one GetItem
+        per ref -- the fix behind library.serving.common's own
+        enrich_participants(..., entity_cache=...) fast path (real
+        production 504 serving PGA's completed-tournaments list: up to
+        ~150 golfers x every historical tournament, sequential GetItems,
+        real complaint 2026-09-01). A ref with no matching entity is
+        simply absent from the result, same "no error on a miss" contract
+        get_entity already has. Deduplicates entity_refs internally --
+        the same (entity_id, entity_type) pair repeated across many
+        events' participant lists is fetched once."""
+        unique_refs = list(dict.fromkeys(entity_refs))
+        if not unique_refs:
+            return {}
+        keys = [{"entity_key": entity_key(sport, entity_id, entity_type)} for entity_id, entity_type in unique_refs]
+        items_by_key = {item["entity_key"]: item for item in self._entities_table.batch_get_items(keys)}
+        return {
+            (entity_id, entity_type): items_by_key[entity_key(sport, entity_id, entity_type)]
+            for entity_id, entity_type in unique_refs
+            if entity_key(sport, entity_id, entity_type) in items_by_key
+        }
 
     def get_team_entities(self, sport: str, team_id: str) -> list[dict]:
         """Every player currently rostered to team_id, via the entities

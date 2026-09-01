@@ -17,7 +17,7 @@ resource "aws_iam_role" "ncaafb_live_scores" {
   assume_role_policy = data.aws_iam_policy_document.ncaafb_live_scores_assume.json
 
   tags = merge(local.common_tags, {
-    Sport     = "ncaa-fb"
+    Sport     = "ncaafb"
     Component = "serving"
   })
 }

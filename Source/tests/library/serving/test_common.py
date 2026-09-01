@@ -11,7 +11,10 @@ for the through-list_events/through-build_season_projection integration.
 """
 from unittest.mock import MagicMock
 
-from library.serving.common import enrich_bracket_team_names, enrich_participants, enrich_team_standings, list_models
+from library.serving.common import (
+    enrich_bracket_team_names, enrich_participants, enrich_team_standings, list_models, most_recent_event,
+    prefetch_entities,
+)
 
 
 class TestEnrichParticipants:
@@ -87,6 +90,61 @@ class TestEnrichParticipants:
         storage.get_entity.assert_called_once_with("pga", "9478", "player")
         assert result[0]["name"] == "Scottie Scheffler"
         assert result[0]["abbreviation"] is None
+
+    def test_entity_cache_hit_skips_get_entity_entirely(self):
+        storage = MagicMock()
+        cache = {("9478", "player"): {"name": "Scottie Scheffler", "metadata": {}}}
+
+        result = enrich_participants(
+            storage, "pga", [{"entity_id": "9478"}], entity_type="player", entity_cache=cache,
+        )
+
+        assert result[0]["name"] == "Scottie Scheffler"
+        storage.get_entity.assert_not_called()
+
+    def test_entity_cache_miss_falls_back_to_get_entity(self):
+        storage = MagicMock()
+        storage.get_entity.return_value = {"name": "Rory McIlroy", "metadata": {}}
+        cache: dict = {}  # prefetch didn't include this golfer
+
+        result = enrich_participants(
+            storage, "pga", [{"entity_id": "9999"}], entity_type="player", entity_cache=cache,
+        )
+
+        assert result[0]["name"] == "Rory McIlroy"
+        storage.get_entity.assert_called_once_with("pga", "9999", "player")
+
+
+class TestPrefetchEntities:
+    def test_delegates_to_storages_own_get_entities(self):
+        storage = MagicMock()
+        storage.get_entities.return_value = {("9478", "player"): {"name": "Scottie Scheffler"}}
+
+        result = prefetch_entities(storage, "pga", [("9478", "player")])
+
+        assert result == {("9478", "player"): {"name": "Scottie Scheffler"}}
+        storage.get_entities.assert_called_once_with("pga", [("9478", "player")])
+
+
+class TestMostRecentEvent:
+    def test_empty_list_returns_empty(self):
+        assert most_recent_event([]) == []
+
+    def test_returns_only_the_latest_dated_event(self):
+        events = [
+            {"event_key": "E1", "event_date": "2026-06-01"},
+            {"event_key": "E2", "event_date": "2026-08-15"},
+            {"event_key": "E3", "event_date": "2026-07-04"},
+        ]
+
+        result = most_recent_event(events)
+
+        assert [e["event_key"] for e in result] == ["E2"]
+
+    def test_single_event_returns_that_event(self):
+        events = [{"event_key": "E1", "event_date": "2026-06-01"}]
+
+        assert most_recent_event(events) == events
 
 
 class TestEnrichTeamStandings:

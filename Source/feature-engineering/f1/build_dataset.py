@@ -37,6 +37,9 @@ Optional environment variables:
     CIRCUIT_HISTORY_WINDOW (default 5) -- past appearances AT THE SAME
     CIRCUIT each circuit-fit rolling average covers, see
     library.features.f1.DEFAULT_CIRCUIT_HISTORY_WINDOW.
+    TRAINING_LOOKBACK_SEASONS -- caps how far back FeatureStorage reads,
+    via a since_date computed as roughly that many seasons before today.
+    Unset (the default) reads full history, same as before this existed.
 
 Usage:
     python build_dataset.py
@@ -45,6 +48,7 @@ import io
 import logging
 import os
 from collections import defaultdict
+from datetime import date, timedelta
 
 import pandas as pd
 
@@ -66,7 +70,7 @@ CONSTRUCTOR_FEATURES_KEY = "f1/training-data/constructor_features.parquet"
 SPRINT_FEATURES_KEY = "f1/training-data/sprint_features.parquet"
 
 
-def _completed_events_ascending(storage: FeatureStorage, event_type: str) -> list[dict]:
+def _completed_events_ascending(storage: FeatureStorage, event_type: str, since_date: str | None = None) -> list[dict]:
     # Filtered by event_type -- "field" (the main race) and "sprint" both
     # come back from the same get_all_events(SPORT) call (library/
     # normalize/f1.py writes both under this one sport), so every caller
@@ -74,11 +78,14 @@ def _completed_events_ascending(storage: FeatureStorage, event_type: str) -> lis
     # accidentally mixing a Sprint race's own participants (no
     # circuit-fit/qualifying data at all) into the main race's dataset
     # or vice versa.
-    events = [e for e in storage.get_all_events(SPORT) if e.get("event_type") == event_type]
+    events = [e for e in storage.get_all_events(SPORT, since_date=since_date) if e.get("event_type") == event_type]
     return sorted(events, key=lambda e: e.get("event_date", ""))
 
 
-def build_driver_dataset(storage: FeatureStorage, window: int, circuit_window: int = DEFAULT_CIRCUIT_HISTORY_WINDOW) -> list[dict]:
+def build_driver_dataset(
+    storage: FeatureStorage, window: int, circuit_window: int = DEFAULT_CIRCUIT_HISTORY_WINDOW,
+    since_date: str | None = None,
+) -> list[dict]:
     """Walks completed races in chronological order, growing each
     driver's own result history one race at a time, capped to the last
     `window` starts -- plus a SEPARATE circuit-fit history keyed by
@@ -108,7 +115,7 @@ def build_driver_dataset(storage: FeatureStorage, window: int, circuit_window: i
     entirely rather than folding in a None row, same "don't pollute the
     history with a placeholder" discipline every other history here
     already follows implicitly via its own None-safe rolling functions."""
-    events_ascending = _completed_events_ascending(storage, "field")
+    events_ascending = _completed_events_ascending(storage, "field", since_date=since_date)
     logger.info("Loaded %d completed F1 races", len(events_ascending))
 
     history: dict[str, list[dict]] = defaultdict(list)  # entity_id -> ascending result dicts
@@ -161,7 +168,7 @@ def build_driver_dataset(storage: FeatureStorage, window: int, circuit_window: i
     return rows
 
 
-def build_constructor_dataset(storage: FeatureStorage, window: int) -> list[dict]:
+def build_constructor_dataset(storage: FeatureStorage, window: int, since_date: str | None = None) -> list[dict]:
     """Constructor-race grain -- one row per constructor per race,
     grouping that race's participants by constructor_entity_id (1 or 2
     drivers). Tracks its own per-DRIVER history (not the pooled
@@ -169,7 +176,7 @@ def build_constructor_dataset(storage: FeatureStorage, window: int) -> list[dict
     build_constructor_event_features needs each individual driver's own
     prior results to sum (see that function's own docstring for why sum,
     not average)."""
-    events_ascending = _completed_events_ascending(storage, "field")
+    events_ascending = _completed_events_ascending(storage, "field", since_date=since_date)
     logger.info("Loaded %d completed F1 races for constructor features", len(events_ascending))
 
     history: dict[str, list[dict]] = defaultdict(list)  # entity_id (driver) -> ascending result dicts
@@ -200,14 +207,14 @@ def build_constructor_dataset(storage: FeatureStorage, window: int) -> list[dict
     return rows
 
 
-def build_sprint_dataset(storage: FeatureStorage, window: int) -> list[dict]:
+def build_sprint_dataset(storage: FeatureStorage, window: int, since_date: str | None = None) -> list[dict]:
     """Sprint-race grain -- tracked with its OWN rolling history,
     entirely separate from build_driver_dataset's main-race history (see
     library/normalize/f1.py's sprint_result_to_event_item docstring for
     why). No circuit-fit or qualifying-pace history -- see
     library.features.f1.build_sprint_event_features's own docstring for
     why neither exists for a Sprint race."""
-    events_ascending = _completed_events_ascending(storage, "sprint")
+    events_ascending = _completed_events_ascending(storage, "sprint", since_date=since_date)
     logger.info("Loaded %d completed F1 Sprint races", len(events_ascending))
 
     history: dict[str, list[dict]] = defaultdict(list)  # entity_id -> ascending result dicts
@@ -254,27 +261,40 @@ def _write_dataset(s3: S3Manager, bucket: str, key: str, rows: list[dict], label
     logger.info("Wrote %d %s rows to s3://%s/%s", len(rows), label, bucket, key)
 
 
+def _lookback_since_date() -> str | None:
+    """Converts TRAINING_LOOKBACK_SEASONS (a season count) into an
+    approximate since_date FeatureStorage's GSI queries can filter on --
+    unset (the common case today) means unbounded, same as before this
+    existed. 366 days/season is deliberately generous (never trims a
+    genuinely in-window season for being a day short)."""
+    lookback = os.environ.get("TRAINING_LOOKBACK_SEASONS")
+    if not lookback:
+        return None
+    return (date.today() - timedelta(days=int(lookback) * 366)).isoformat()
+
+
 def main() -> None:
     window = int(os.environ.get("ROLLING_WINDOW", 5))
     circuit_window = int(os.environ.get("CIRCUIT_HISTORY_WINDOW", DEFAULT_CIRCUIT_HISTORY_WINDOW))
     bucket = os.environ["MODEL_ARTIFACTS_BUCKET_NAME"]
     region = os.environ.get("AWS_REGION")
+    since_date = _lookback_since_date()
 
     logger.info(
-        "Starting F1 feature engineering (rolling window=%d races, circuit history window=%d appearances)",
-        window, circuit_window,
+        "Starting F1 feature engineering (rolling window=%d races, circuit history window=%d appearances, "
+        "since_date=%s)", window, circuit_window, since_date or "unbounded",
     )
 
     storage = FeatureStorage()
     s3 = S3Manager(bucket, region=region)
 
-    driver_rows = build_driver_dataset(storage, window, circuit_window)
+    driver_rows = build_driver_dataset(storage, window, circuit_window, since_date=since_date)
     _write_dataset(s3, bucket, DRIVER_FEATURES_KEY, driver_rows, "driver")
 
-    constructor_rows = build_constructor_dataset(storage, window)
+    constructor_rows = build_constructor_dataset(storage, window, since_date=since_date)
     _write_dataset(s3, bucket, CONSTRUCTOR_FEATURES_KEY, constructor_rows, "constructor")
 
-    sprint_rows = build_sprint_dataset(storage, window)
+    sprint_rows = build_sprint_dataset(storage, window, since_date=since_date)
     if sprint_rows:
         _write_dataset(s3, bucket, SPRINT_FEATURES_KEY, sprint_rows, "sprint")
     else:

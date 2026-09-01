@@ -46,7 +46,12 @@ def _from_dynamodb_safe(value):
 class DynamoDBTable:
     def __init__(self, table_name: str, region: str | None = None):
         self.table_name = table_name
-        self._table = boto3.resource("dynamodb", region_name=region, config=_CONFIG).Table(table_name)
+        # Keeps the service resource, not just the Table, so batch_get_items
+        # can call its own batch_get_item -- Table has no equivalent method,
+        # and the low-level client's own batch_get_item returns raw
+        # DynamoDB AttributeValue maps instead of native Python types.
+        self._resource = boto3.resource("dynamodb", region_name=region, config=_CONFIG)
+        self._table = self._resource.Table(table_name)
 
     def put_item(self, item: dict, condition_expression=None) -> bool:
         """Writes item, returning True if written. condition_expression (a
@@ -70,6 +75,28 @@ class DynamoDBTable:
 
     def delete_item(self, key: dict) -> None:
         self._table.delete_item(Key=key)
+
+    def batch_get_items(self, keys: list[dict]) -> list[dict]:
+        """Fetches many items by key in as few round trips as possible --
+        BatchGetItem caps at 100 keys per call, so this chunks and retries
+        any UnprocessedKeys (a normal, expected partial response under
+        throttling, not an error). A key with no matching item is simply
+        absent from the result, same "no error on a miss" contract
+        get_item already has. Does not deduplicate `keys` itself --
+        BatchGetItem returns at most one row per unique key regardless, so
+        a caller with repeat keys (e.g. the same entity referenced by many
+        events) should dedupe first to avoid wasting request-item slots on
+        keys it already asked for in the same batch."""
+        if not keys:
+            return []
+        items: list[dict] = []
+        for i in range(0, len(keys), 100):
+            request_items = {self.table_name: {"Keys": [_to_dynamodb_safe(key) for key in keys[i:i + 100]]}}
+            while request_items:
+                response = self._resource.batch_get_item(RequestItems=request_items)
+                items.extend(response.get("Responses", {}).get(self.table_name, []))
+                request_items = response.get("UnprocessedKeys") or {}
+        return [_from_dynamodb_safe(item) for item in items]
 
     def batch_write(self, items: list[dict], key_names: list[str]) -> None:
         if not items:

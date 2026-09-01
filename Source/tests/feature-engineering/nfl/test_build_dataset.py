@@ -69,7 +69,17 @@ class TestBuildEventDataset:
         rows = build_dataset.build_event_dataset(storage, window=5)
 
         assert {row["event_key"] for row in rows} == {"E1", "E2"}
-        storage.get_all_events.assert_called_once_with(build_dataset.SPORT)
+        storage.get_all_events.assert_called_once_with(build_dataset.SPORT, since_date=None)
+
+    def test_passes_since_date_through_to_every_storage_call(self):
+        events = [_event("E1", "2025-09-07", "12", "24")]
+        storage = self._storage(events)
+
+        build_dataset.build_event_dataset(storage, window=5, since_date="2016-01-01")
+
+        storage.get_all_events.assert_called_once_with(build_dataset.SPORT, since_date="2016-01-01")
+        storage.get_all_player_game_stats.assert_called_once_with(build_dataset.SPORT, since_date="2016-01-01")
+        storage.get_all_team_game_stats.assert_called_once_with(build_dataset.SPORT, since_date="2016-01-01")
 
     def test_second_game_sees_first_games_pre_game_elo_change(self):
         events = [
@@ -319,3 +329,19 @@ class TestBuildPlayerDataset:
         assert row["own_elo"] is not None
         assert row["opponent_elo"] is not None
         assert row["rest_days"] is None  # no prior LAC event in this fixture
+
+
+class TestLookbackSinceDate:
+    def test_unset_env_var_returns_none(self, monkeypatch):
+        monkeypatch.delenv("TRAINING_LOOKBACK_SEASONS", raising=False)
+
+        assert build_dataset._lookback_since_date() is None
+
+    def test_converts_seasons_to_an_iso_date_roughly_that_far_back(self, monkeypatch):
+        monkeypatch.setenv("TRAINING_LOOKBACK_SEASONS", "10")
+
+        since_date = build_dataset._lookback_since_date()
+
+        from datetime import date, timedelta
+        expected = (date.today() - timedelta(days=10 * 366)).isoformat()
+        assert since_date == expected

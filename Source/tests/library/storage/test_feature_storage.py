@@ -105,6 +105,27 @@ class TestGetAllEvents:
         assert call.kwargs["scan_index_forward"] is True
         assert call.kwargs["limit"] == 400
 
+    def test_since_date_bounds_the_query(self, storage_env):
+        # build_dataset.py (every sport) relies on this for a
+        # TRAINING_LOOKBACK_SEASONS rolling window, same pattern
+        # get_all_team_game_stats' own since_date already uses.
+        storage, _, mock_events, _, _ = _make_storage(storage_env)
+        mock_events.query.return_value = []
+
+        storage.get_all_events("nfl", since_date="2016-01-01")
+
+        condition = mock_events.query.call_args.args[0]
+        assert condition == Key("sport_status").eq("nfl#completed") & Key("event_date").gte("2016-01-01")
+
+    def test_defaults_to_no_since_date(self, storage_env):
+        storage, _, mock_events, _, _ = _make_storage(storage_env)
+        mock_events.query.return_value = []
+
+        storage.get_all_events("nfl")
+
+        condition = mock_events.query.call_args.args[0]
+        assert condition == Key("sport_status").eq("nfl#completed")
+
 
 class TestGetTeamEvents:
     def test_filters_by_participant(self, storage_env):
@@ -173,6 +194,15 @@ class TestGetAllPlayerGameStats:
         call = mock_stats.query.call_args
         assert call.args[0] == Key("sport").eq("nfl")
         assert call.kwargs["index_name"] == "sport-index"
+
+    def test_since_date_bounds_the_query(self, storage_env):
+        storage, _, _, mock_stats, _ = _make_storage(storage_env)
+        mock_stats.query.return_value = []
+
+        storage.get_all_player_game_stats("nfl", since_date="2016-01-01")
+
+        condition = mock_stats.query.call_args.args[0]
+        assert condition == Key("sport").eq("nfl") & Key("event_date").gte("2016-01-01")
 
 
 class TestGetAllTeamGameStats:
@@ -261,6 +291,56 @@ class TestGetEntity:
         storage.get_entity("nba", "25", "team")
 
         mock_entities.get_item.assert_called_once_with({"entity_key": "SPORT#NBA#ENTITY#TEAM#25"})
+
+
+class TestGetEntities:
+    def test_batches_and_keys_the_result_by_ref(self, storage_env):
+        storage, mock_entities, _, _, _ = _make_storage(storage_env)
+        mock_entities.batch_get_items.return_value = [
+            {"entity_key": "SPORT#PGA#ENTITY#PLAYER#scheffler-scottie", "name": "Scottie Scheffler"},
+            {"entity_key": "SPORT#PGA#ENTITY#PLAYER#mcilroy-rory", "name": "Rory McIlroy"},
+        ]
+
+        result = storage.get_entities("pga", [("scheffler-scottie", "player"), ("mcilroy-rory", "player")])
+
+        assert result == {
+            ("scheffler-scottie", "player"): {"entity_key": "SPORT#PGA#ENTITY#PLAYER#scheffler-scottie", "name": "Scottie Scheffler"},
+            ("mcilroy-rory", "player"): {"entity_key": "SPORT#PGA#ENTITY#PLAYER#mcilroy-rory", "name": "Rory McIlroy"},
+        }
+        mock_entities.batch_get_items.assert_called_once_with([
+            {"entity_key": "SPORT#PGA#ENTITY#PLAYER#scheffler-scottie"},
+            {"entity_key": "SPORT#PGA#ENTITY#PLAYER#mcilroy-rory"},
+        ])
+
+    def test_dedupes_repeated_refs_before_calling_batch_get(self, storage_env):
+        storage, mock_entities, _, _, _ = _make_storage(storage_env)
+        mock_entities.batch_get_items.return_value = [
+            {"entity_key": "SPORT#PGA#ENTITY#PLAYER#scheffler-scottie", "name": "Scottie Scheffler"},
+        ]
+
+        refs = [("scheffler-scottie", "player")] * 5  # same golfer, 5 different tournaments
+        result = storage.get_entities("pga", refs)
+
+        assert list(result) == [("scheffler-scottie", "player")]
+        mock_entities.batch_get_items.assert_called_once_with([
+            {"entity_key": "SPORT#PGA#ENTITY#PLAYER#scheffler-scottie"},
+        ])
+
+    def test_a_ref_with_no_matching_entity_is_simply_absent(self, storage_env):
+        storage, mock_entities, _, _, _ = _make_storage(storage_env)
+        mock_entities.batch_get_items.return_value = []
+
+        result = storage.get_entities("pga", [("unknown-golfer", "player")])
+
+        assert result == {}
+
+    def test_empty_refs_returns_empty_without_calling_batch_get(self, storage_env):
+        storage, mock_entities, _, _, _ = _make_storage(storage_env)
+
+        result = storage.get_entities("pga", [])
+
+        assert result == {}
+        mock_entities.batch_get_items.assert_not_called()
 
 
 class TestGetTeamEntities:

@@ -5,10 +5,17 @@ Lambda (Source/aws-lambdas/pga/predict-read). GET /pga/models reuses
 library.serving.common.list_models directly (fully generic, no PGA-
 specific wrapper needed).
 
-No date-bucketing, unlike nba_reads.py's own list_events -- PGA's
-grouping unit is one tournament (one event_key), not one calendar date,
-so there's nothing to bucket: every event already matching `status` is
-returned as-is.
+No week/day-bucketing the way nba_reads.py's own list_events has -- PGA's
+grouping unit is already one tournament (one event_key), not one calendar
+date, so there's no smaller bucket to group multiple events into.
+status=completed still bounds to the single MOST RECENT tournament
+(library.serving.common.most_recent_event) rather than returning every
+completed tournament ever backfilled -- unbounded history here was a real
+production 504 (up to ~150 golfers x every historical tournament,
+sequential entity GetItems with no cache; real complaint 2026-09-01).
+status=scheduled stays unbounded -- there are only ever a handful of
+future tournaments in the registry at once, so it's never shown the same
+symptom.
 
 No prediction_comparison/leaders_comparison block yet (nba_reads.py's own
 predicted-vs-actual audit-trail comparison for a completed event) -- a
@@ -32,7 +39,7 @@ Callers own their own storage/s3 objects and Lambda-lifecycle concerns.
 """
 from concurrent.futures import ThreadPoolExecutor
 
-from library.serving.common import enrich_participants
+from library.serving.common import enrich_participants, most_recent_event, prefetch_entities
 from library.storage.season_projections import season_projection_key
 
 FIELD_EVENT_MODELS = {
@@ -98,7 +105,24 @@ def _match_play_entity_type(participant: dict) -> str:
     return "player" if participant["entity_id"] in participant.get("golfer_entity_ids", []) else "team"
 
 
-def _enrich_match_play_participants(storage, sport: str, participants: list[dict] | None) -> list[dict] | None:
+def _entity_refs(event: dict) -> list[tuple[str, str]]:
+    """Every (entity_id, entity_type) this one event's own enrichment will
+    need -- the prefetch list list_events builds once across every event
+    in the (now-bounded, see list_events) result, instead of each event
+    resolving its own participants independently."""
+    event_type = event.get("event_type")
+    participants = event.get("participants") or []
+    if event_type == "cup":
+        return [(p["entity_id"], "team") for p in participants]
+    if event_type == "match_play":
+        return [(p["entity_id"], _match_play_entity_type(p)) for p in participants]
+    # "field" (and any future/unrecognized event_type).
+    return [(p["entity_id"], "player") for p in participants]
+
+
+def _enrich_match_play_participants(
+    storage, sport: str, participants: list[dict] | None, entity_cache: dict[tuple[str, str], dict] | None,
+) -> list[dict] | None:
     """enrich_participants takes one entity_type for the whole list --
     correct for a "field" event (always "player") or a "cup" event
     (always "team"), but a match_play event's own two sides can each
@@ -109,24 +133,28 @@ def _enrich_match_play_participants(storage, sport: str, participants: list[dict
     if not participants:
         return participants
     return [
-        enrich_participants(storage, sport, [participant], entity_type=_match_play_entity_type(participant))[0]
+        enrich_participants(
+            storage, sport, [participant], entity_type=_match_play_entity_type(participant), entity_cache=entity_cache,
+        )[0]
         for participant in participants
     ]
 
 
-def _enrich_pga_participants(storage, sport: str, event: dict) -> list[dict] | None:
+def _enrich_pga_participants(
+    storage, sport: str, event: dict, entity_cache: dict[tuple[str, str], dict] | None,
+) -> list[dict] | None:
     event_type = event.get("event_type")
     participants = event.get("participants")
     if event_type == "cup":
-        return enrich_participants(storage, sport, participants, entity_type="team")
+        return enrich_participants(storage, sport, participants, entity_type="team", entity_cache=entity_cache)
     if event_type == "match_play":
-        return _enrich_match_play_participants(storage, sport, participants)
+        return _enrich_match_play_participants(storage, sport, participants, entity_cache)
     # "field" (and any future/unrecognized event_type -- golfer entities
     # are the only kind a stroke-play field ever carries).
-    return enrich_participants(storage, sport, participants, entity_type="player")
+    return enrich_participants(storage, sport, participants, entity_type="player", entity_cache=entity_cache)
 
 
-def _entry(storage, sport: str, event: dict) -> dict:
+def _entry(storage, sport: str, event: dict, entity_cache: dict[tuple[str, str], dict] | None) -> dict:
     return {
         "event_id": event["event_id"],
         "event_type": event.get("event_type"),
@@ -135,7 +163,7 @@ def _entry(storage, sport: str, event: dict) -> dict:
         "status": event.get("status"),
         "season": event.get("season"),
         "tournament_name": event.get("tournament_name"),
-        "participants": _enrich_pga_participants(storage, sport, event),
+        "participants": _enrich_pga_participants(storage, sport, event, entity_cache),
         "venue_name": event.get("venue_name"),
         "venue_city": event.get("venue_city"),
         "venue_state": event.get("venue_state"),
@@ -143,20 +171,34 @@ def _entry(storage, sport: str, event: dict) -> dict:
 
 
 def list_events(storage, sport: str, status: str) -> dict:
-    """GET /pga/events?status=scheduled|completed -- every stored event at
-    that status, across all 3 event_types ("field"/"match_play"/"cup")
-    unfiltered; the frontend uses event_type to decide how to render each
-    one before it ever calls GET /pga/predictions/events/{event_id}."""
+    """GET /pga/events?status=scheduled|completed -- across all 3
+    event_types ("field"/"match_play"/"cup"), unfiltered; the frontend
+    uses event_type to decide how to render each one before it ever calls
+    GET /pga/predictions/events/{event_id}. status=completed is bounded to
+    the single most recent tournament -- see this module's own docstring."""
     events = storage.get_all_events(sport, status=status)
+    if status == "completed":
+        events = most_recent_event(events)
 
     if not events:
         return {"sport": sport, "events": []}
 
-    # Concurrent, not sequential -- each entry makes its own get_entity
-    # round trips (one per participant, or up to ~150 for a full field),
-    # independent per event.
+    # One BatchGetItem pass across every event's own participants (up to
+    # ~150 golfers for a single tournament, deduplicated -- the same
+    # golfer showing up as, say, both a "field" and a "cup" participant is
+    # only fetched once) instead of each participant costing its own
+    # GetItem -- the fix behind the 504 this module's own docstring
+    # describes. entity_cache stays a plain dict even when empty, so a
+    # cache MISS still safely falls back to enrich_participants' own
+    # per-participant GetItem path (see that function's own docstring).
+    refs = [ref for event in events for ref in _entity_refs(event)]
+    entity_cache = prefetch_entities(storage, sport, refs)
+
+    # Concurrent, not sequential -- each entry still makes its own
+    # independent per-event work (venue/status/etc.), even though entity
+    # lookups themselves are now cache hits, not their own round trips.
     with ThreadPoolExecutor(max_workers=min(len(events), 16)) as executor:
-        entries = list(executor.map(lambda e: _entry(storage, sport, e), events))
+        entries = list(executor.map(lambda e: _entry(storage, sport, e, entity_cache), events))
 
     return {"sport": sport, "events": entries}
 

@@ -81,6 +81,19 @@ data "aws_iam_policy_document" "stepfunctions_orchestrator_permissions" {
     ]
   }
 
+  # Same grant, for sfn-training-orchestrator-ec2.tf's own Distributed
+  # Map -- a separate statement (not a wildcard added to the one above)
+  # since it's a distinct state machine name, not a suffix/prefix variant
+  # of the Fargate one.
+  statement {
+    sid     = "RunTrainingEc2DistributedMapChildren"
+    actions = ["states:StartExecution", "states:DescribeExecution", "states:StopExecution"]
+    resources = [
+      "arn:aws:states:${var.region}:${var.account_id}:stateMachine:${var.project}-training-orchestrator-ec2",
+      "arn:aws:states:${var.region}:${var.account_id}:execution:${var.project}-training-orchestrator-ec2:*",
+    ]
+  }
+
   # training_orchestrator's logging_configuration needs these to deliver
   # execution logs to CloudWatch. Resource "*" is required since the log
   # delivery API these actions cover operates on the account's log

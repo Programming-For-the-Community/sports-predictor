@@ -8,9 +8,18 @@ from library.storage.model_artifacts import current_version_key, model_artifact_
 
 def enrich_participants(
     storage, sport: str, participants: list[dict] | None, entity_type: str = "team",
+    entity_cache: dict[tuple[str, str], dict] | None = None,
 ) -> list[dict] | None:
     """Attaches each participant's own entity name/abbreviation/conference/
-    color. One get_entity per participant.
+    color. One get_entity per participant, UNLESS entity_cache is given
+    (see prefetch_entities) -- then a cache hit costs nothing, and a miss
+    (a ref the caller's own prefetch didn't include) still falls back to
+    get_entity rather than silently rendering blank. Callers with many
+    participants across many events (a field-event sport's own list_events,
+    e.g. up to ~150 golfers per PGA tournament) should prefetch first --
+    the plain per-participant GetItem path here is fine for the common
+    single-event case (2-6 participants), same as before entity_cache
+    existed.
 
     entity_type defaults to "team" for head-to-head sports' participants;
     field-event sports (PGA, F1) pass entity_type="player" instead, since
@@ -23,7 +32,11 @@ def enrich_participants(
 
     enriched = []
     for participant in participants:
-        entity = storage.get_entity(sport, participant["entity_id"], entity_type)
+        entity_id = participant["entity_id"]
+        if entity_cache is not None:
+            entity = entity_cache.get((entity_id, entity_type)) or storage.get_entity(sport, entity_id, entity_type)
+        else:
+            entity = storage.get_entity(sport, entity_id, entity_type)
         metadata = (entity or {}).get("metadata") or {}
         enriched.append({
             **participant,
@@ -33,6 +46,33 @@ def enrich_participants(
             "color": metadata.get("color"),
         })
     return enriched
+
+
+def prefetch_entities(storage, sport: str, refs: list[tuple[str, str]]) -> dict[tuple[str, str], dict]:
+    """Thin pass-through to FeatureStorage.get_entities (BatchGetItem,
+    deduplicated) -- named/re-exported here so a *_reads.py caller
+    building an entity_cache for enrich_participants doesn't need to know
+    FeatureStorage's own method name, matching how enrich_participants
+    already hides get_entity itself from callers."""
+    return storage.get_entities(sport, refs)
+
+
+def most_recent_event(events: list[dict]) -> list[dict]:
+    """The single most recently-dated event, wrapped in a list (empty if
+    `events` is empty). For a field-event sport whose grouping unit is
+    already "one tournament"/"one race weekend" (one event_key) -- unlike
+    a head-to-head sport's own per-week/per-day bucketing (nfl_reads.py's
+    _previous_week_events and siblings), which groups MULTIPLE games
+    sharing a week/day, there's no smaller natural bucket here to filter
+    down to. Used by pga_reads.py/f1_reads.py's own list_events to bound a
+    status=completed response to the same "just the most recent bucket,
+    not full history" shape every other sport's list_events already has --
+    returning EVERY historical event was a real production 504 (PGA: up to
+    ~150 golfers x every tournament ever backfilled, sequential GetItems,
+    real complaint 2026-09-01)."""
+    if not events:
+        return []
+    return [max(events, key=lambda e: e.get("event_date", ""))]
 
 
 def enrich_team_standings(storage, sport: str, standings: list[dict]) -> list[dict]:

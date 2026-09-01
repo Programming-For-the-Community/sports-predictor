@@ -4,7 +4,7 @@ resource "aws_cloudwatch_log_group" "ncaafb_feature_engineering" {
   retention_in_days = 30
 
   tags = merge(local.common_tags, {
-    Sport     = "ncaa-fb"
+    Sport     = "ncaafb"
     Component = "training"
   })
 }
@@ -49,7 +49,7 @@ resource "aws_ecs_task_definition" "ncaafb_feature_engineering" {
   ])
 
   tags = merge(local.common_tags, {
-    Sport     = "ncaa-fb"
+    Sport     = "ncaafb"
     Component = "training"
   })
 }

@@ -40,17 +40,20 @@ def _match_play_event(event_id="401465497-match-10951", participants=None):
 class TestListEvents:
     def test_empty_when_nothing_stored(self):
         storage = MagicMock()
+        storage.get_entities.return_value = {}
         storage.get_all_events.return_value = []
 
         result = pga_reads.list_events(storage, "pga", "scheduled")
 
         assert result == {"sport": "pga", "events": []}
 
-    def test_returns_every_matching_event_no_date_bucketing(self):
-        """Unlike nba_reads.list_events, PGA's list_events doesn't narrow
-        to a single soonest/most-recent date -- every event at the
-        requested status comes back."""
+    def test_scheduled_returns_every_matching_event_no_bucketing(self):
+        """Unlike status=completed (see test_completed_bounds_to_the_most_
+        recent_event_only below), scheduled isn't bounded -- there are
+        only ever a handful of future tournaments in the registry at
+        once, so every one of them comes back."""
         storage = MagicMock()
+        storage.get_entities.return_value = {}
         storage.get_all_events.return_value = [
             _field_event("e1", "2026-08-20"), _field_event("e2", "2026-09-10"),
         ]
@@ -60,8 +63,40 @@ class TestListEvents:
 
         assert {e["event_id"] for e in result["events"]} == {"e1", "e2"}
 
+    def test_completed_bounds_to_the_most_recent_event_only(self):
+        # Real production 504 (2026-09-01): unbounded completed history
+        # meant enriching up to ~150 golfers x every tournament ever
+        # backfilled. Only the latest-dated event should come back.
+        storage = MagicMock()
+        storage.get_entities.return_value = {}
+        storage.get_all_events.return_value = [
+            _field_event("older", "2026-06-01", status="completed"),
+            _field_event("newest", "2026-08-20", status="completed"),
+            _field_event("middle", "2026-07-04", status="completed"),
+        ]
+        storage.get_entity.return_value = None
+
+        result = pga_reads.list_events(storage, "pga", "completed")
+
+        assert [e["event_id"] for e in result["events"]] == ["newest"]
+
+    def test_completed_prefetches_entities_once_across_the_field_instead_of_per_participant(self):
+        # The other half of the same fix -- even bounded to one
+        # tournament, a ~150-golfer field enriches via one batched
+        # prefetch, not 150 individual get_entity calls.
+        storage = MagicMock()
+        storage.get_entities.return_value = {}
+        participants = [{"entity_id": "9478"}, {"entity_id": "3439"}]
+        storage.get_all_events.return_value = [_field_event(participants=participants, status="completed")]
+        storage.get_entity.return_value = None
+
+        pga_reads.list_events(storage, "pga", "completed")
+
+        storage.get_entities.assert_called_once_with("pga", [("9478", "player"), ("3439", "player")])
+
     def test_end_date_is_carried_through(self):
         storage = MagicMock()
+        storage.get_entities.return_value = {}
         storage.get_all_events.return_value = [_field_event(end_date="2026-08-23")]
         storage.get_entity.return_value = None
 
@@ -71,6 +106,7 @@ class TestListEvents:
 
     def test_event_type_is_carried_through(self):
         storage = MagicMock()
+        storage.get_entities.return_value = {}
         storage.get_all_events.return_value = [_cup_event()]
         storage.get_entity.return_value = None
 
@@ -82,6 +118,7 @@ class TestListEvents:
 class TestEnrichPgaParticipants:
     def test_field_event_participants_are_looked_up_as_players(self):
         storage = MagicMock()
+        storage.get_entities.return_value = {}
         storage.get_all_events.return_value = [_field_event(participants=[{"entity_id": "9478"}])]
         storage.get_entity.return_value = {"name": "Scottie Scheffler", "metadata": {}}
 
@@ -91,6 +128,7 @@ class TestEnrichPgaParticipants:
 
     def test_cup_event_participants_are_looked_up_as_teams(self):
         storage = MagicMock()
+        storage.get_entities.return_value = {}
         storage.get_all_events.return_value = [_cup_event(participants=[{"entity_id": "1"}])]
         storage.get_entity.return_value = {"name": "USA", "metadata": {"abbreviation": "USA"}}
 
@@ -102,6 +140,7 @@ class TestEnrichPgaParticipants:
         """entity_id ("1") is the national team id, never present in this
         participant's own golfer_entity_ids -- a disjoint id space."""
         storage = MagicMock()
+        storage.get_entities.return_value = {}
         storage.get_all_events.return_value = [
             _match_play_event(participants=[{"entity_id": "1", "golfer_entity_ids": ["1085", "1086"]}]),
         ]
@@ -115,6 +154,7 @@ class TestEnrichPgaParticipants:
         """entity_id doubles as this golfer's own single-element
         golfer_entity_ids -- WGC has no team layer at all."""
         storage = MagicMock()
+        storage.get_entities.return_value = {}
         storage.get_all_events.return_value = [
             _match_play_event(participants=[{"entity_id": "3439", "golfer_entity_ids": ["3439"]}]),
         ]
@@ -130,6 +170,7 @@ class TestEnrichPgaParticipants:
         proves per-participant resolution doesn't just look at the first
         participant and apply that type to the whole list."""
         storage = MagicMock()
+        storage.get_entities.return_value = {}
         storage.get_all_events.return_value = [
             _match_play_event(participants=[
                 {"entity_id": "1", "golfer_entity_ids": ["1085", "1086"]},  # team

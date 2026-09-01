@@ -159,6 +159,61 @@ class TestPredictFieldEvent:
 
         assert result["field"][0]["entity_id"] == "driver_b"
 
+    def test_qualifying_positions_get_a_unique_rank_even_when_predicted_values_round_the_same(self):
+        built = _built_field_features(driver_rows={
+            "driver_a": {"constructor_entity_id": "red_bull"}, "driver_b": {"constructor_entity_id": "mercedes"},
+        })
+        storage = MagicMock()
+        storage.get_entity.return_value = None
+
+        # 5th value in each driver's own block of 5 is projected_qualifying_
+        # position -- 3.4 and 3.2 both round to 3, which used to render as
+        # a duplicate "P3" for both drivers before rank existed.
+        predict_values = [1.0, 1.0, 1.0, 1.0, 3.4, 1.0, 1.0, 1.0, 1.0, 3.2, 1.0]
+        with patch.object(event_prediction.live_features, "build_live_field_features", return_value=built), \
+             patch.object(event_prediction.model_loader, "load_current_model", return_value=(MagicMock(), {"version": 1})), \
+             patch.object(event_prediction.model_loader, "predict", side_effect=predict_values):
+            result = event_prediction.predict_field_event(storage, MagicMock(), MagicMock(), "2024-1")
+
+        by_entity = {entry["entity_id"]: entry for entry in result["field"]}
+        assert by_entity["driver_b"]["predictions"]["projected_qualifying_position"]["rank"] == 1  # 3.2, better
+        assert by_entity["driver_a"]["predictions"]["projected_qualifying_position"]["rank"] == 2  # 3.4, worse
+
+
+class TestAssignQualifyingRanks:
+    def _entry(self, entity_id, qualifying_value=None):
+        predictions = {}
+        if qualifying_value is not None:
+            predictions["projected_qualifying_position"] = {"value": qualifying_value}
+        return {"entity_id": entity_id, "predictions": predictions}
+
+    def test_ranks_ascending_by_value(self):
+        field = [self._entry("a", 5.0), self._entry("b", 1.0), self._entry("c", 3.0)]
+
+        event_prediction._assign_qualifying_ranks(field)
+
+        assert {e["entity_id"]: e["predictions"]["projected_qualifying_position"]["rank"] for e in field} == {
+            "b": 1, "c": 2, "a": 3,
+        }
+
+    def test_ties_broken_deterministically_by_entity_id(self):
+        field = [self._entry("zed", 2.0), self._entry("alice", 2.0)]
+
+        event_prediction._assign_qualifying_ranks(field)
+
+        # Same predicted value -- "alice" sorts first alphabetically, so it
+        # gets the better (lower) rank, every time this runs.
+        assert field[0]["predictions"]["projected_qualifying_position"]["rank"] == 2  # zed
+        assert field[1]["predictions"]["projected_qualifying_position"]["rank"] == 1  # alice
+
+    def test_entries_with_no_qualifying_model_are_skipped_not_errored(self):
+        field = [self._entry("a", 2.0), self._entry("b", qualifying_value=None)]
+
+        event_prediction._assign_qualifying_ranks(field)
+
+        assert field[0]["predictions"]["projected_qualifying_position"]["rank"] == 1
+        assert "projected_qualifying_position" not in field[1]["predictions"]
+
 
 class TestFieldSortKey:
     def _entry(self, **predictions):

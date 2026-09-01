@@ -5,7 +5,7 @@ import 'package:front_end/core/models/f1_live_score.dart';
 import 'package:front_end/core/models/f1_prediction.dart';
 import 'package:front_end/features/events/f1_leaderboard_table.dart';
 
-F1ModelValue _mv(double value) => F1ModelValue(value: value, modelVersion: 1);
+F1ModelValue _mv(double value, {int? rank}) => F1ModelValue(value: value, modelVersion: 1, rank: rank);
 
 F1DriverPrediction _driver(
   String entityId, {
@@ -15,6 +15,7 @@ F1DriverPrediction _driver(
   double? projectedFinishPosition,
   double? projectedGridPosition,
   double? projectedQualifyingPosition,
+  int? projectedQualifyingRank,
   F1ActualResult? actual,
 }) =>
     F1DriverPrediction(
@@ -24,7 +25,8 @@ F1DriverPrediction _driver(
       constructorName: constructorName,
       projectedFinishPosition: projectedFinishPosition != null ? _mv(projectedFinishPosition) : null,
       projectedGridPosition: projectedGridPosition != null ? _mv(projectedGridPosition) : null,
-      projectedQualifyingPosition: projectedQualifyingPosition != null ? _mv(projectedQualifyingPosition) : null,
+      projectedQualifyingPosition:
+          projectedQualifyingPosition != null ? _mv(projectedQualifyingPosition, rank: projectedQualifyingRank) : null,
       actual: actual,
     );
 
@@ -68,6 +70,23 @@ void main() {
     expect(find.text('P1'), findsOneWidget);
     expect(find.text('P2'), findsOneWidget);
     expect(find.text('P6'), findsNothing);
+  });
+
+  testWidgets('projected qualifying shows its own backend-computed rank, never a tied position', (tester) async {
+    // 3.4 and 3.2 both round to 3 on their own -- without a rank, both
+    // would show "P3". event_prediction.py's own _assign_qualifying_ranks
+    // computes rank 1/2 for these regardless of how close the raw values
+    // are; the widget must prefer that over rounding value itself.
+    final field = [
+      _driver('a', name: 'A', projectedQualifyingPosition: 3.4, projectedQualifyingRank: 2),
+      _driver('b', name: 'B', projectedQualifyingPosition: 3.2, projectedQualifyingRank: 1),
+    ];
+
+    await tester.pumpWidget(_wrap(F1LeaderboardTable(field: field, isSprint: false)));
+
+    expect(find.text('P1'), findsOneWidget);
+    expect(find.text('P2'), findsOneWidget);
+    expect(find.text('P3'), findsNothing);
   });
 
   testWidgets('a field event shows a QUALIFYING column, a sprint event does not', (tester) async {

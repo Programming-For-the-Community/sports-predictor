@@ -19,6 +19,12 @@ Required environment variables:
 Optional environment variables:
     ROLLING_WINDOW (default 5) -- games of history each rolling average
     covers, see library.features.nfl.DEFAULT_ROLLING_WINDOW.
+    TRAINING_LOOKBACK_SEASONS -- caps how far back FeatureStorage reads,
+    via a since_date computed as roughly that many seasons before today.
+    Unset (the default) reads full history, same as before this existed.
+    Set by sfn-training-orchestrator.tf's RunFeatureEngineering override,
+    from each sport's own training_lookback_seasons registry field
+    (dynamodb-sport-registry.tf).
 
 Usage:
     python build_dataset.py
@@ -28,6 +34,7 @@ import json
 import logging
 import os
 from collections import defaultdict
+from datetime import date, timedelta
 
 import pandas as pd
 
@@ -80,7 +87,7 @@ def _leader_and_history(
     return game, prior_games
 
 
-def build_event_dataset(storage: FeatureStorage, window: int) -> list[dict]:
+def build_event_dataset(storage: FeatureStorage, window: int, since_date: str | None = None) -> list[dict]:
     """Walks events in a single chronological pass, growing each team's
     own history one game at a time, capped to the last `window` games.
 
@@ -88,12 +95,14 @@ def build_event_dataset(storage: FeatureStorage, window: int) -> list[dict]:
     incremental treatment, keyed by player entity_id so a player's rolling
     history follows them across a trade; a team without an identifiable
     leader that game gets an empty history for that row."""
-    events = storage.get_all_events(SPORT)
+    events = storage.get_all_events(SPORT, since_date=since_date)
     events = [e for e in events if is_real_franchise_matchup(e)]
     logger.info("Loaded %d completed events (excluding exhibition games)", len(events))
 
-    player_games_by_event_team = _group_player_games_by_event_and_team(storage.get_all_player_game_stats(SPORT))
-    team_game_stats_by_event_team = _index_team_game_stats(storage.get_all_team_game_stats(SPORT))
+    player_games_by_event_team = _group_player_games_by_event_and_team(
+        storage.get_all_player_game_stats(SPORT, since_date=since_date))
+    team_game_stats_by_event_team = _index_team_game_stats(
+        storage.get_all_team_game_stats(SPORT, since_date=since_date))
 
     elo_ratings, _ = compute_elo_ratings(events)  # only the pre-game side is used here
     events_ascending = sorted(events, key=lambda e: e.get("event_date", ""))
@@ -191,16 +200,16 @@ def _team_previous_event_dates(events: list[dict]) -> dict[tuple[str, str], str 
     return previous_dates
 
 
-def build_player_dataset(storage: FeatureStorage, window: int) -> list[dict]:
+def build_player_dataset(storage: FeatureStorage, window: int, since_date: str | None = None) -> list[dict]:
     """Same incremental-history approach as build_event_dataset, per
     player instead of per team."""
-    events = storage.get_all_events(SPORT)
+    events = storage.get_all_events(SPORT, since_date=since_date)
     events = [e for e in events if is_real_franchise_matchup(e)]
     events_by_key = {event["event_key"]: event for event in events}
     elo_ratings, _ = compute_elo_ratings(events)  # only the pre-game side is used here
     team_previous_event_dates = _team_previous_event_dates(events)
 
-    player_games = storage.get_all_player_game_stats(SPORT)
+    player_games = storage.get_all_player_game_stats(SPORT, since_date=since_date)
     logger.info("Loaded %d player-game rows", len(player_games))
 
     games_by_player = _group_player_games_by_player(player_games)
@@ -252,18 +261,33 @@ def _write_parquet(rows: list[dict]) -> bytes:
     return buffer.getvalue()
 
 
+def _lookback_since_date() -> str | None:
+    """Converts TRAINING_LOOKBACK_SEASONS (a season count) into an
+    approximate since_date FeatureStorage's GSI queries can filter on --
+    unset (the common case today) means unbounded, same as before this
+    existed. 366 days/season is deliberately generous (never trims a
+    genuinely in-window season for being a day short)."""
+    lookback = os.environ.get("TRAINING_LOOKBACK_SEASONS")
+    if not lookback:
+        return None
+    return (date.today() - timedelta(days=int(lookback) * 366)).isoformat()
+
+
 def main() -> None:
     window = int(os.environ.get("ROLLING_WINDOW", 5))
     bucket = os.environ["MODEL_ARTIFACTS_BUCKET_NAME"]
     region = os.environ.get("AWS_REGION")
+    since_date = _lookback_since_date()
 
-    logger.info("Starting NFL feature engineering (rolling window=%d games)", window)
+    logger.info(
+        "Starting NFL feature engineering (rolling window=%d games, since_date=%s)", window, since_date or "unbounded",
+    )
 
     storage = FeatureStorage()
     s3 = S3Manager(bucket, region=region)
 
     logger.info("Building event-level dataset...")
-    event_rows = build_event_dataset(storage, window)
+    event_rows = build_event_dataset(storage, window, since_date=since_date)
     if not event_rows:
         raise RuntimeError(
             "build_event_dataset produced 0 rows -- refusing to overwrite "
@@ -274,7 +298,7 @@ def main() -> None:
     logger.info("Wrote %d event feature rows to s3://%s/%s", len(event_rows), bucket, EVENT_FEATURES_KEY)
 
     logger.info("Building player-level dataset...")
-    player_rows = build_player_dataset(storage, window)
+    player_rows = build_player_dataset(storage, window, since_date=since_date)
     player_row_count = len(player_rows)
     if not player_row_count:
         raise RuntimeError(

@@ -14,7 +14,7 @@ resource "aws_cloudwatch_log_group" "ncaafb_predict_read" {
   retention_in_days = 30
 
   tags = merge(local.common_tags, {
-    Sport     = "ncaa-fb"
+    Sport     = "ncaafb"
     Component = "serving"
   })
 }
@@ -64,7 +64,7 @@ resource "aws_lambda_function" "ncaafb_predict_read" {
   }
 
   tags = merge(local.common_tags, {
-    Sport     = "ncaa-fb"
+    Sport     = "ncaafb"
     Component = "serving"
   })
 }

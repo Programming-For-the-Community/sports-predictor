@@ -40,6 +40,9 @@ Optional environment variables:
     COURSE_HISTORY_WINDOW (default 5) -- past appearances AT THE SAME
     COURSE each course-fit/cut-line rolling average covers, see
     library.features.pga.DEFAULT_COURSE_HISTORY_WINDOW.
+    TRAINING_LOOKBACK_SEASONS -- caps how far back FeatureStorage reads,
+    via a since_date computed as roughly that many seasons before today.
+    Unset (the default) reads full history, same as before this existed.
 
 Usage:
     python build_dataset.py
@@ -48,6 +51,7 @@ import io
 import logging
 import os
 from collections import defaultdict
+from datetime import date, timedelta
 
 import pandas as pd
 
@@ -76,7 +80,7 @@ CUP_FEATURES_KEY = "pga/training-data/cup_features.parquet"
 
 def build_golfer_dataset(
     storage: FeatureStorage, window: int, course_window: int = DEFAULT_COURSE_HISTORY_WINDOW,
-    season_stat_snapshots: list[dict] | None = None,
+    season_stat_snapshots: list[dict] | None = None, since_date: str | None = None,
 ) -> list[dict]:
     """Walks completed tournaments in chronological order, growing each
     golfer's own result history one tournament at a time, capped to the
@@ -124,7 +128,7 @@ def build_golfer_dataset(
     # golfer-count participants list at all, so processing them here
     # unfiltered would silently corrupt this dataset (e.g. a "cup" event's
     # 2-team participants list would read as a 2-golfer field_size).
-    events = [e for e in storage.get_all_events(SPORT) if e.get("event_type") == "field"]
+    events = [e for e in storage.get_all_events(SPORT, since_date=since_date) if e.get("event_type") == "field"]
     events_ascending = sorted(events, key=lambda e: e.get("event_date", ""))
     logger.info("Loaded %d completed PGA tournaments", len(events_ascending))
 
@@ -168,7 +172,7 @@ def build_golfer_dataset(
     return rows
 
 
-def build_round_dataset(storage: FeatureStorage, window: int) -> list[dict]:
+def build_round_dataset(storage: FeatureStorage, window: int, since_date: str | None = None) -> list[dict]:
     """Round-level grain: one row per golfer per round ACTUALLY PLAYED
     (design/DATA_SCHEMA.md's participants[].result.rounds -- a cut
     golfer naturally contributes only rounds 1-2, never 3-4, no
@@ -191,7 +195,7 @@ def build_round_dataset(storage: FeatureStorage, window: int) -> list[dict]:
     # golfer-count participants list at all, so processing them here
     # unfiltered would silently corrupt this dataset (e.g. a "cup" event's
     # 2-team participants list would read as a 2-golfer field_size).
-    events = [e for e in storage.get_all_events(SPORT) if e.get("event_type") == "field"]
+    events = [e for e in storage.get_all_events(SPORT, since_date=since_date) if e.get("event_type") == "field"]
     events_ascending = sorted(events, key=lambda e: e.get("event_date", ""))
     logger.info("Loaded %d completed PGA tournaments for round-level features", len(events_ascending))
 
@@ -225,7 +229,9 @@ def build_round_dataset(storage: FeatureStorage, window: int) -> list[dict]:
     return rows
 
 
-def build_cutline_dataset(storage: FeatureStorage, course_window: int = DEFAULT_COURSE_HISTORY_WINDOW) -> list[dict]:
+def build_cutline_dataset(
+    storage: FeatureStorage, course_window: int = DEFAULT_COURSE_HISTORY_WINDOW, since_date: str | None = None,
+) -> list[dict]:
     """Tournament-level grain (no golfer dimension at all -- a cut line
     is a property of the whole field). Includes every completed Medal-
     scoring tournament, cut or not -- train_cutline_model.py filters to
@@ -244,7 +250,7 @@ def build_cutline_dataset(storage: FeatureStorage, course_window: int = DEFAULT_
     # golfer-count participants list at all, so processing them here
     # unfiltered would silently corrupt this dataset (e.g. a "cup" event's
     # 2-team participants list would read as a 2-golfer field_size).
-    events = [e for e in storage.get_all_events(SPORT) if e.get("event_type") == "field"]
+    events = [e for e in storage.get_all_events(SPORT, since_date=since_date) if e.get("event_type") == "field"]
     events_ascending = sorted(events, key=lambda e: e.get("event_date", ""))
     logger.info("Loaded %d completed PGA tournaments for cut-line features", len(events_ascending))
 
@@ -261,7 +267,9 @@ def build_cutline_dataset(storage: FeatureStorage, course_window: int = DEFAULT_
     return rows
 
 
-def build_match_and_cup_datasets(storage: FeatureStorage, window: int) -> tuple[list[dict], list[dict]]:
+def build_match_and_cup_datasets(
+    storage: FeatureStorage, window: int, since_date: str | None = None,
+) -> tuple[list[dict], list[dict]]:
     """Match win-probability rows (event_type "match_play") and Cup
     (team) win-probability rows (event_type "cup") -- built together
     because they share one chronological history walk.
@@ -293,7 +301,7 @@ def build_match_and_cup_datasets(storage: FeatureStorage, window: int) -> tuple[
     Cup's own matches are walked -- which is the correct behavior for a
     Cup-outcome prediction (pre-tournament form only, not results that
     happened mid-tournament)."""
-    events = storage.get_all_events(SPORT)
+    events = storage.get_all_events(SPORT, since_date=since_date)
     field_events = [e for e in events if e.get("event_type") == "field"]
     match_events = [e for e in events if e.get("event_type") == "match_play"]
     cup_events = [e for e in events if e.get("event_type") == "cup"]
@@ -360,16 +368,29 @@ def _write_dataset(s3: S3Manager, bucket: str, key: str, rows: list[dict], label
     logger.info("Wrote %d %s rows to s3://%s/%s", len(rows), label, bucket, key)
 
 
+def _lookback_since_date() -> str | None:
+    """Converts TRAINING_LOOKBACK_SEASONS (a season count) into an
+    approximate since_date FeatureStorage's GSI queries can filter on --
+    unset (the common case today) means unbounded, same as before this
+    existed. 366 days/season is deliberately generous (never trims a
+    genuinely in-window season for being a day short)."""
+    lookback = os.environ.get("TRAINING_LOOKBACK_SEASONS")
+    if not lookback:
+        return None
+    return (date.today() - timedelta(days=int(lookback) * 366)).isoformat()
+
+
 def main() -> None:
     window = int(os.environ.get("ROLLING_WINDOW", 5))
     course_window = int(os.environ.get("COURSE_HISTORY_WINDOW", DEFAULT_COURSE_HISTORY_WINDOW))
     bucket = os.environ["MODEL_ARTIFACTS_BUCKET_NAME"]
     raw_bucket = os.environ["RAW_BUCKET_NAME"]
     region = os.environ.get("AWS_REGION")
+    since_date = _lookback_since_date()
 
     logger.info(
-        "Starting PGA feature engineering (rolling window=%d tournaments, course history window=%d appearances)",
-        window, course_window,
+        "Starting PGA feature engineering (rolling window=%d tournaments, course history window=%d appearances, "
+        "since_date=%s)", window, course_window, since_date or "unbounded",
     )
 
     storage = FeatureStorage()
@@ -379,16 +400,16 @@ def main() -> None:
     snapshots = load_season_stat_snapshots(raw_s3)
     logger.info("Loaded %d season-stats snapshot(s)", len(snapshots))
 
-    golfer_rows = build_golfer_dataset(storage, window, course_window, snapshots)
+    golfer_rows = build_golfer_dataset(storage, window, course_window, snapshots, since_date=since_date)
     _write_dataset(s3, bucket, GOLFER_FEATURES_KEY, golfer_rows, "golfer")
 
-    round_rows = build_round_dataset(storage, window)
+    round_rows = build_round_dataset(storage, window, since_date=since_date)
     _write_dataset(s3, bucket, ROUND_FEATURES_KEY, round_rows, "round")
 
-    cutline_rows = build_cutline_dataset(storage, course_window)
+    cutline_rows = build_cutline_dataset(storage, course_window, since_date=since_date)
     _write_dataset(s3, bucket, CUTLINE_FEATURES_KEY, cutline_rows, "cutline")
 
-    match_rows, cup_rows = build_match_and_cup_datasets(storage, window)
+    match_rows, cup_rows = build_match_and_cup_datasets(storage, window, since_date=since_date)
     _write_dataset(s3, bucket, MATCH_FEATURES_KEY, match_rows, "match")
     _write_dataset(s3, bucket, CUP_FEATURES_KEY, cup_rows, "cup")
 

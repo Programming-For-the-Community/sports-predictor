@@ -4,7 +4,7 @@ resource "aws_cloudwatch_log_group" "ncaafb_train_win_probability_model" {
   retention_in_days = 30
 
   tags = merge(local.common_tags, {
-    Sport     = "ncaa-fb"
+    Sport     = "ncaafb"
     Component = "training"
   })
 }
@@ -20,7 +20,7 @@ resource "aws_cloudwatch_log_group" "ncaafb_train_win_probability_model" {
 # locals-training-compute.tf.
 resource "aws_ecs_task_definition" "ncaafb_train_win_probability_model" {
   family                   = "${var.project}-ncaafb-train-win-probability-model"
-  requires_compatibilities = ["FARGATE"]
+  requires_compatibilities = ["FARGATE", "EC2"] # EC2 for the parallel training track (sfn-training-orchestrator-ec2.tf); unchanged for Fargate
   network_mode             = "awsvpc"
   cpu                      = local.training_task_cpu
   memory                   = local.training_task_memory
@@ -53,7 +53,7 @@ resource "aws_ecs_task_definition" "ncaafb_train_win_probability_model" {
   ])
 
   tags = merge(local.common_tags, {
-    Sport     = "ncaa-fb"
+    Sport     = "ncaafb"
     Component = "training"
   })
 }

@@ -23,14 +23,23 @@ abstract final class F1EventType {
 }
 
 class F1ModelValue {
-  const F1ModelValue({required this.value, required this.modelVersion});
+  const F1ModelValue({required this.value, required this.modelVersion, this.rank});
 
   final double value;
   final int modelVersion;
+  // Only ever set for projected_qualifying_position -- event_prediction.py's
+  // own _assign_qualifying_ranks. A position-shaped prediction the field
+  // ISN'T sorted by (see _field_sort_key -- FINISH/GRID take priority)
+  // needs its own independently-computed rank so f1_leaderboard_table.
+  // dart's _PositionCell can show a tie-free "P<n>" instead of rounding
+  // `value` per row, the same collision FINISH/GRID already avoid by using
+  // row order as rank. null for every other prediction type.
+  final int? rank;
 
   factory F1ModelValue.fromJson(Map<String, dynamic> json) => F1ModelValue(
         value: (json['value'] as num).toDouble(),
         modelVersion: json['model_version'] as int,
+        rank: json['rank'] as int?,
       );
 }
 

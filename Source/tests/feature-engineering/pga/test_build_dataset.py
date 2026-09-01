@@ -66,7 +66,15 @@ class TestBuildGolferDataset:
         rows = build_dataset.build_golfer_dataset(storage, window=5)
 
         assert {(r["event_key"], r["entity_id"]) for r in rows} == {("E1", "1"), ("E1", "2")}
-        storage.get_all_events.assert_called_once_with(build_dataset.SPORT)
+        storage.get_all_events.assert_called_once_with(build_dataset.SPORT, since_date=None)
+
+    def test_passes_since_date_through(self):
+        events = [_event("E1", "2026-06-01", [_participant("1", finish_position=1)])]
+        storage = self._storage(events)
+
+        build_dataset.build_golfer_dataset(storage, window=5, since_date="2017-01-01")
+
+        storage.get_all_events.assert_called_once_with(build_dataset.SPORT, since_date="2017-01-01")
 
     def test_second_event_sees_only_the_first_events_result_as_history(self):
         events = [
@@ -303,6 +311,14 @@ class TestBuildRoundDataset:
         assert e2_round1["same_round_avg_score_to_par"] == -5  # only E1's own round 1
         assert e2_round2["same_round_avg_score_to_par"] == 1  # only E1's own round 2
 
+    def test_passes_since_date_through(self):
+        events = [_event("E1", "2026-06-01", [_participant("1")], rounds_by_participant={"1": [_round(1, -2)]})]
+        storage = self._storage(events)
+
+        build_dataset.build_round_dataset(storage, window=5, since_date="2017-01-01")
+
+        storage.get_all_events.assert_called_once_with(build_dataset.SPORT, since_date="2017-01-01")
+
 
 class TestBuildCutlineDataset:
     def _storage(self, events):
@@ -332,6 +348,14 @@ class TestBuildCutlineDataset:
 
         e2_row = next(r for r in rows if r["event_key"] == "E2")
         assert e2_row["course_avg_cut_score"] == -4
+
+    def test_passes_since_date_through(self):
+        events = [_event("E1", "2026-06-01", [_participant("1")], cut_score=-2, cut_count=71)]
+        storage = self._storage(events)
+
+        build_dataset.build_cutline_dataset(storage, since_date="2017-01-01")
+
+        storage.get_all_events.assert_called_once_with(build_dataset.SPORT, since_date="2017-01-01")
 
 
 def _match_play_event(event_key, event_date, parent_event_id, home_golfer_ids, away_golfer_ids, match_format="foursome", home_won=True):
@@ -369,6 +393,14 @@ class TestBuildMatchAndCupDatasets:
 
         assert [r["event_key"] for r in match_rows] == ["E1-match-1"]
         assert cup_rows == []
+
+    def test_passes_since_date_through(self):
+        events = [_match_play_event("E1-match-1", "2022-09-22", "E1", ["10"], ["20"])]
+        storage = self._storage(events)
+
+        build_dataset.build_match_and_cup_datasets(storage, window=5, since_date="2017-01-01")
+
+        storage.get_all_events.assert_called_once_with(build_dataset.SPORT, since_date="2017-01-01")
 
     def test_one_cup_row_per_cup_event(self):
         events = [_cup_event("E1", "2022-09-22")]
@@ -458,3 +490,19 @@ class TestWriteDataset:
         build_dataset._write_dataset(s3, "bucket", "some/key.parquet", [{"a": 1}], "test")
         s3.put_bytes.assert_called_once()
         assert s3.put_bytes.call_args.args[0] == "some/key.parquet"
+
+
+class TestLookbackSinceDate:
+    def test_unset_env_var_returns_none(self, monkeypatch):
+        monkeypatch.delenv("TRAINING_LOOKBACK_SEASONS", raising=False)
+
+        assert build_dataset._lookback_since_date() is None
+
+    def test_converts_seasons_to_an_iso_date_roughly_that_far_back(self, monkeypatch):
+        monkeypatch.setenv("TRAINING_LOOKBACK_SEASONS", "10")
+
+        since_date = build_dataset._lookback_since_date()
+
+        from datetime import date, timedelta
+        expected = (date.today() - timedelta(days=10 * 366)).isoformat()
+        assert since_date == expected

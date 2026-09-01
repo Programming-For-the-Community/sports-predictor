@@ -61,6 +61,14 @@ class TestBuildDriverDataset:
         assert len(rows) == 2
         assert {r["entity_id"] for r in rows} == {"a", "b"}
 
+    def test_passes_since_date_through(self):
+        events = [_event("e1", "2024-01-01", [_participant("a")])]
+        storage = self._storage(events)
+
+        build_dataset.build_driver_dataset(storage, window=5, since_date="2015-01-01")
+
+        storage.get_all_events.assert_called_once_with(build_dataset.SPORT, since_date="2015-01-01")
+
     def test_non_field_events_are_excluded(self):
         events = [_event("e1", "2024-01-01", [_participant("a")], event_type="something_else")]
         storage = self._storage(events)
@@ -198,6 +206,14 @@ class TestBuildConstructorDataset:
         assert {r["entity_id"] for r in rows} == {"red_bull", "ferrari"}
         assert len(rows) == 2
 
+    def test_passes_since_date_through(self):
+        events = [_event("e1", "2024-01-01", [_participant("a", constructor_entity_id="red_bull")])]
+        storage = self._storage(events)
+
+        build_dataset.build_constructor_dataset(storage, window=5, since_date="2015-01-01")
+
+        storage.get_all_events.assert_called_once_with(build_dataset.SPORT, since_date="2015-01-01")
+
     def test_a_driver_with_no_constructor_is_excluded(self):
         events = [_event("e1", "2024-01-01", [_participant("a", constructor_entity_id=None)])]
         storage = self._storage(events)
@@ -254,6 +270,14 @@ class TestBuildSprintDataset:
         assert len(rows) == 1
         assert rows[0]["event_key"] == "e2"
 
+    def test_passes_since_date_through(self):
+        events = [_event("e1", "2024-01-01", [_participant("a")], event_type="sprint")]
+        storage = self._storage(events)
+
+        build_dataset.build_sprint_dataset(storage, window=5, since_date="2015-01-01")
+
+        storage.get_all_events.assert_called_once_with(build_dataset.SPORT, since_date="2015-01-01")
+
     def test_sprint_history_is_tracked_separately_from_the_main_race(self):
         events = [
             _event("e1", "2024-01-01", [_participant("a", finish_position=1)], event_type="sprint"),
@@ -289,3 +313,19 @@ class TestBuildSprintDataset:
         e2_row = next(r for r in rows if r["event_key"] == "e2")
 
         assert e2_row["constructor_avg_finish_position"] == 1.5
+
+
+class TestLookbackSinceDate:
+    def test_unset_env_var_returns_none(self, monkeypatch):
+        monkeypatch.delenv("TRAINING_LOOKBACK_SEASONS", raising=False)
+
+        assert build_dataset._lookback_since_date() is None
+
+    def test_converts_seasons_to_an_iso_date_roughly_that_far_back(self, monkeypatch):
+        monkeypatch.setenv("TRAINING_LOOKBACK_SEASONS", "15")
+
+        since_date = build_dataset._lookback_since_date()
+
+        from datetime import date, timedelta
+        expected = (date.today() - timedelta(days=15 * 366)).isoformat()
+        assert since_date == expected

@@ -36,6 +36,7 @@ data "aws_iam_policy_document" "lambda_cloudwatch_geo_widget_logs_insights" {
       aws_cloudwatch_log_group.nba_predict_read.arn,
       aws_cloudwatch_log_group.ncaambb_predict_read.arn,
       aws_cloudwatch_log_group.pga_predict_read.arn,
+      aws_cloudwatch_log_group.f1_predict_read.arn,
       aws_cloudwatch_log_group.cloudfront_edge_access_logs.arn,
     ]
   }

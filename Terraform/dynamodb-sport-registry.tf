@@ -64,6 +64,13 @@ resource "aws_dynamodb_table_item" "nfl_registry" {
     season_start    = { S = "08-01" } # preseason
     season_end      = { S = "03-01" } # Super Bowl
 
+    # Rolling training-set window in seasons, read by build_dataset.py via
+    # TRAINING_LOOKBACK_SEASONS (sfn-training-orchestrator.tf's
+    # RunFeatureEngineering override). Matches NFL's current ~10-season
+    # backfill depth -- no trim yet, just a ceiling before it grows past
+    # what's still representative.
+    training_lookback_seasons = { N = "10" }
+
     training_targets = {
       L = concat(
         [
@@ -140,6 +147,13 @@ resource "aws_dynamodb_table_item" "ncaafb_registry" {
     polling_cadence = { S = "daily" }
     season_start    = { S = "08-01" } # fall camp
     season_end      = { S = "02-01" } # CFP championship
+
+    # Shorter than NFL/NBA/PGA's 10 -- NCAAFB has the highest per-season
+    # game volume in the portfolio and the most conference-realignment
+    # churn (Pac-12 dissolution, Big 12 shifts), so older seasons age out
+    # of relevance faster here. Trims the current ~11-season backfill by
+    # about 3 once training actually reads this.
+    training_lookback_seasons = { N = "8" }
 
     training_targets = {
       L = concat(
@@ -225,6 +239,10 @@ resource "aws_dynamodb_table_item" "nba_registry" {
     season_start    = { S = "10-01" } # regular season starts late October
     season_end      = { S = "07-01" } # padding past the early-June Finals
 
+    # Matches NBA's current ~10-season backfill depth -- rules are stable
+    # and roster turnover is moderate, so no trim yet.
+    training_lookback_seasons = { N = "10" }
+
     training_targets = {
       L = concat(
         [
@@ -302,6 +320,13 @@ resource "aws_dynamodb_table_item" "ncaambb_registry" {
     polling_cadence = { S = "daily" }
     season_start    = { S = "11-01" } # regular season starts first Monday of November
     season_end      = { S = "05-01" } # padding past the early-April championship
+
+    # Same volume argument as NCAAFB (~362 D1 teams, ~4x NBA's per-season
+    # game count -- see variables.tf's feature-engineering CPU sizing
+    # comment), plus the 2021+ transfer-portal era makes pre-portal
+    # seasons a weaker analog for current roster construction. Trims the
+    # current ~11-season backfill by about 3.
+    training_lookback_seasons = { N = "8" }
 
     training_targets = {
       L = concat(
@@ -402,6 +427,10 @@ resource "aws_dynamodb_table_item" "pga_registry" {
     polling_cadence = { S = "daily" }
     season_start    = { S = "01-01" }
     season_end      = { S = "12-31" }
+
+    # Matches PGA's current ~10-season backfill depth -- golf changes
+    # slowly (course conditions, equipment), so no trim yet.
+    training_lookback_seasons = { N = "10" }
 
     training_targets = {
       L = concat(
@@ -511,6 +540,15 @@ resource "aws_dynamodb_table_item" "f1_registry" {
     polling_cadence = { S = "daily" }
     season_start    = { S = "02-01" } # a month ahead of the earliest confirmed opener (2024-03-02)
     season_end      = { S = "12-15" } # a week past the latest confirmed finale (2024-12-08)
+
+    # Deliberately conservative: trims only the 2010-2011 seasons off the
+    # current 17-season (2010-2026) backfill depth. A shorter window split
+    # by target -- full history for driver-skill targets, 2022+ only for
+    # car/chassis-sensitive ones (podium, finish-position), since 2022's
+    # ground-effect regulation reset makes older aero data a weaker analog
+    # -- is a real modeling question, not an ops one, and stays a follow-up
+    # rather than a silent default here.
+    training_lookback_seasons = { N = "15" }
 
     training_targets = {
       L = [

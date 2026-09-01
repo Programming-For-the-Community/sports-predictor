@@ -18,14 +18,16 @@ def _field_event(event_id="2026-5", event_date="2026-05-24", status="scheduled",
 class TestListEvents:
     def test_empty_when_nothing_stored(self):
         storage = MagicMock()
+        storage.get_entities.return_value = {}
         storage.get_all_events.return_value = []
 
         result = f1_reads.list_events(storage, "f1", "scheduled")
 
         assert result == {"sport": "f1", "events": []}
 
-    def test_returns_every_matching_event(self):
+    def test_scheduled_returns_every_matching_event(self):
         storage = MagicMock()
+        storage.get_entities.return_value = {}
         storage.get_all_events.return_value = [_field_event("e1"), _field_event("e2")]
         storage.get_entity.return_value = None
 
@@ -33,8 +35,26 @@ class TestListEvents:
 
         assert {e["event_id"] for e in result["events"]} == {"e1", "e2"}
 
+    def test_completed_bounds_to_the_most_recent_event_only(self):
+        # Same fix as pga_reads.py's own list_events -- real complaint
+        # 2026-09-01: unbounded completed history across every race ever
+        # backfilled, same architectural gap as PGA's own 504.
+        storage = MagicMock()
+        storage.get_entities.return_value = {}
+        storage.get_all_events.return_value = [
+            _field_event("older", "2026-03-02", status="completed"),
+            _field_event("newest", "2026-05-24", status="completed"),
+            _field_event("middle", "2026-04-06", status="completed"),
+        ]
+        storage.get_entity.return_value = None
+
+        result = f1_reads.list_events(storage, "f1", "completed")
+
+        assert [e["event_id"] for e in result["events"]] == ["newest"]
+
     def test_enriches_participants_as_players(self):
         storage = MagicMock()
+        storage.get_entities.return_value = {}
         storage.get_all_events.return_value = [_field_event(participants=[{"entity_id": "max_verstappen"}])]
         storage.get_entity.return_value = {"name": "Max Verstappen", "metadata": {}}
 
@@ -42,6 +62,17 @@ class TestListEvents:
 
         assert result["events"][0]["participants"][0]["name"] == "Max Verstappen"
         storage.get_entity.assert_called_with("f1", "max_verstappen", "player")
+
+    def test_prefetches_entities_once_across_the_whole_field(self):
+        storage = MagicMock()
+        storage.get_entities.return_value = {}
+        participants = [{"entity_id": "max_verstappen"}, {"entity_id": "lando_norris"}]
+        storage.get_all_events.return_value = [_field_event(participants=participants, status="completed")]
+        storage.get_entity.return_value = None
+
+        f1_reads.list_events(storage, "f1", "completed")
+
+        storage.get_entities.assert_called_once_with("f1", [("max_verstappen", "player"), ("lando_norris", "player")])
 
 
 class TestModelVersionsFor:

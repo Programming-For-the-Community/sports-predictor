@@ -36,6 +36,17 @@ def _make_table(
     return table, mock_boto_table
 
 
+def _make_table_for_batch_get(batch_get_responses: list[dict]):
+    """Separate from _make_table -- batch_get_item is called on the
+    service RESOURCE (self._resource), not the Table object every other
+    method here uses, so this exposes that mock instead."""
+    with patch("library.aws.dynamodb_table.boto3") as mock_boto3:
+        mock_resource = mock_boto3.resource.return_value
+        mock_resource.batch_get_item.side_effect = batch_get_responses
+        table = DynamoDBTable("test-table", region="us-east-1")
+    return table, mock_resource
+
+
 class TestConditionalPutItem:
     def test_unconditional_write_returns_true(self):
         table, mock_boto_table = _make_table()
@@ -144,6 +155,67 @@ class TestQuery:
 
         assert result == [{"id": "1"}, {"id": "2"}]
         assert mock_boto_table.query.call_count == 1
+
+
+class TestBatchGetItems:
+    def test_empty_keys_returns_empty_without_calling_aws(self):
+        table, mock_resource = _make_table_for_batch_get([])
+
+        result = table.batch_get_items([])
+
+        assert result == []
+        mock_resource.batch_get_item.assert_not_called()
+
+    def test_single_page_returns_responses_for_the_table(self):
+        table, mock_resource = _make_table_for_batch_get([
+            {"Responses": {"test-table": [{"entity_id": "KC"}, {"entity_id": "LAC"}]}},
+        ])
+
+        result = table.batch_get_items([{"entity_id": "KC"}, {"entity_id": "LAC"}])
+
+        assert result == [{"entity_id": "KC"}, {"entity_id": "LAC"}]
+        mock_resource.batch_get_item.assert_called_once_with(
+            RequestItems={"test-table": {"Keys": [{"entity_id": "KC"}, {"entity_id": "LAC"}]}},
+        )
+
+    def test_retries_unprocessed_keys_until_none_remain(self):
+        table, mock_resource = _make_table_for_batch_get([
+            {
+                "Responses": {"test-table": [{"entity_id": "KC"}]},
+                "UnprocessedKeys": {"test-table": {"Keys": [{"entity_id": "LAC"}]}},
+            },
+            {"Responses": {"test-table": [{"entity_id": "LAC"}]}},
+        ])
+
+        result = table.batch_get_items([{"entity_id": "KC"}, {"entity_id": "LAC"}])
+
+        assert result == [{"entity_id": "KC"}, {"entity_id": "LAC"}]
+        assert mock_resource.batch_get_item.call_count == 2
+
+    def test_chunks_into_batches_of_100_keys(self):
+        keys = [{"entity_id": str(i)} for i in range(150)]
+        table, mock_resource = _make_table_for_batch_get([
+            {"Responses": {"test-table": [{"entity_id": "a"}]}},
+            {"Responses": {"test-table": [{"entity_id": "b"}]}},
+        ])
+
+        table.batch_get_items(keys)
+
+        assert mock_resource.batch_get_item.call_count == 2
+        first_call_keys = mock_resource.batch_get_item.call_args_list[0].kwargs["RequestItems"]["test-table"]["Keys"]
+        second_call_keys = mock_resource.batch_get_item.call_args_list[1].kwargs["RequestItems"]["test-table"]["Keys"]
+        assert len(first_call_keys) == 100
+        assert len(second_call_keys) == 50
+
+    def test_converts_decimal_in_response(self):
+        table, _ = _make_table_for_batch_get([
+            {"Responses": {"test-table": [{"entity_id": "KC", "score": Decimal("27")}]}},
+        ])
+
+        result = table.batch_get_items([{"entity_id": "KC"}])
+
+        assert result == [{"entity_id": "KC", "score": 27}]
+        assert isinstance(result[0]["score"], int)
 
 
 class TestScan:

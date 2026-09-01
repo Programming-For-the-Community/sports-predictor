@@ -15,7 +15,7 @@ void main() {
             'podium_probability': {'value': 0.71, 'model_version': 3},
             'projected_finish_position': {'value': 1.8, 'model_version': 2},
             'dnf_probability': {'value': 0.05, 'model_version': 1},
-            'projected_qualifying_position': {'value': 1.2, 'model_version': 1},
+            'projected_qualifying_position': {'value': 1.2, 'model_version': 1, 'rank': 1},
           },
           'actual': {
             'finish_position': 1, 'grid_position': 1, 'status': 'finished', 'points': 25.0, 'fastest_lap': true,
@@ -35,6 +35,8 @@ void main() {
     expect(driver.constructorName, 'Red Bull');
     expect(driver.winProbability!.value, 0.42);
     expect(driver.projectedFinishPosition!.value, 1.8);
+    expect(driver.projectedFinishPosition!.rank, isNull); // not backend-computed for FINISH -- row order is its own rank
+    expect(driver.projectedQualifyingPosition!.rank, 1); // backend-computed -- QUALIFYING isn't the field's own sort key
     expect(driver.projectedGridPosition, isNull); // field-only response, no sprint key
     expect(driver.actual!.finishPosition, 1);
     expect(driver.actual!.qualifyingPosition, 1);

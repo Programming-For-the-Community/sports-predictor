@@ -23,6 +23,13 @@ Optional environment variables:
     ROLLING_WINDOW (default 5) -- games of history each event/player
     rolling average covers. Does not affect the ranking dataset, which
     always uses each team's full season-to-date history.
+    TRAINING_LOOKBACK_SEASONS -- caps how far back FeatureStorage reads,
+    via a since_date computed as roughly that many seasons before today.
+    Unset (the default) reads full history, same as before this existed.
+    Applies to the ranking dataset too, despite that dataset's own
+    "full season-to-date" note above -- that note is about not
+    trailing-windowing within a season, not about how many seasons back
+    to start from.
 
 Usage:
     python build_dataset.py
@@ -32,6 +39,7 @@ import json
 import logging
 import os
 from collections import defaultdict
+from datetime import date, timedelta
 
 import pandas as pd
 
@@ -106,15 +114,17 @@ def _leader_and_history(
     return game, prior_games
 
 
-def build_event_dataset(storage: FeatureStorage, window: int) -> list[dict]:
+def build_event_dataset(storage: FeatureStorage, window: int, since_date: str | None = None) -> list[dict]:
     """Walks events in a single chronological pass, growing each team's
     own history one game at a time."""
-    events = storage.get_all_events(SPORT)
+    events = storage.get_all_events(SPORT, since_date=since_date)
     logger.info("Loaded %d completed events", len(events))
 
     team_coordinates = _team_coordinates(storage, _team_ids(events))
-    player_games_by_event_team = _group_player_games_by_event_and_team(storage.get_all_player_game_stats(SPORT))
-    team_game_stats_by_event_team = _index_team_game_stats(storage.get_all_team_game_stats(SPORT))
+    player_games_by_event_team = _group_player_games_by_event_and_team(
+        storage.get_all_player_game_stats(SPORT, since_date=since_date))
+    team_game_stats_by_event_team = _index_team_game_stats(
+        storage.get_all_team_game_stats(SPORT, since_date=since_date))
 
     elo_ratings, _ = compute_elo_ratings(events)
     events_ascending = sorted(events, key=lambda e: e.get("event_date", ""))
@@ -210,15 +220,15 @@ def _team_previous_event_dates(events: list[dict]) -> dict[tuple[str, str], str 
     return previous_dates
 
 
-def build_player_dataset(storage: FeatureStorage, window: int) -> list[dict]:
+def build_player_dataset(storage: FeatureStorage, window: int, since_date: str | None = None) -> list[dict]:
     """Same incremental per-player walk as build_event_dataset."""
-    events = storage.get_all_events(SPORT)
+    events = storage.get_all_events(SPORT, since_date=since_date)
     events_by_key = {event["event_key"]: event for event in events}
     team_coordinates = _team_coordinates(storage, _team_ids(events))
     elo_ratings, _ = compute_elo_ratings(events)
     team_previous_event_dates = _team_previous_event_dates(events)
 
-    player_games = storage.get_all_player_game_stats(SPORT)
+    player_games = storage.get_all_player_game_stats(SPORT, since_date=since_date)
     logger.info("Loaded %d player-game rows", len(player_games))
 
     games_by_player = _group_player_games_by_player(player_games)
@@ -251,12 +261,12 @@ def build_player_dataset(storage: FeatureStorage, window: int) -> list[dict]:
     return rows
 
 
-def build_ranking_dataset(storage: FeatureStorage) -> list[dict]:
+def build_ranking_dataset(storage: FeatureStorage, since_date: str | None = None) -> list[dict]:
     """Team-week granularity, for the National Ranking model. Each team's
     own season history grows unboundedly here since the ranking model
     uses season-to-date record/scoring/SOS rather than a trailing N-game
     average."""
-    events = storage.get_all_events(SPORT)
+    events = storage.get_all_events(SPORT, since_date=since_date)
     elo_ratings, _ = compute_elo_ratings(events)
     events_ascending = sorted(events, key=lambda e: e.get("event_date", ""))
 
@@ -304,21 +314,36 @@ def _write_dataset(s3: S3Manager, key: str, rows: list[dict], label: str) -> Non
     logger.info("Wrote %d %s rows to s3://%s/%s", len(rows), label, s3.bucket, key)
 
 
+def _lookback_since_date() -> str | None:
+    """Converts TRAINING_LOOKBACK_SEASONS (a season count) into an
+    approximate since_date FeatureStorage's GSI queries can filter on --
+    unset (the common case today) means unbounded, same as before this
+    existed. 366 days/season is deliberately generous (never trims a
+    genuinely in-window season for being a day short)."""
+    lookback = os.environ.get("TRAINING_LOOKBACK_SEASONS")
+    if not lookback:
+        return None
+    return (date.today() - timedelta(days=int(lookback) * 366)).isoformat()
+
+
 def main() -> None:
     window = int(os.environ.get("ROLLING_WINDOW", 5))
     bucket = os.environ["MODEL_ARTIFACTS_BUCKET_NAME"]
     region = os.environ.get("AWS_REGION")
+    since_date = _lookback_since_date()
 
-    logger.info("Starting NCAAFB feature engineering (rolling window=%d games)", window)
+    logger.info(
+        "Starting NCAAFB feature engineering (rolling window=%d games, since_date=%s)", window, since_date or "unbounded",
+    )
 
     storage = FeatureStorage()
     s3 = S3Manager(bucket, region=region)
 
     logger.info("Building event-level dataset...")
-    _write_dataset(s3, EVENT_FEATURES_KEY, build_event_dataset(storage, window), "event")
+    _write_dataset(s3, EVENT_FEATURES_KEY, build_event_dataset(storage, window, since_date=since_date), "event")
 
     logger.info("Building player-level dataset...")
-    player_rows = build_player_dataset(storage, window)
+    player_rows = build_player_dataset(storage, window, since_date=since_date)
     player_row_count = len(player_rows)
     if not player_row_count:
         raise RuntimeError(f"build_player_dataset produced 0 rows -- refusing to overwrite s3://{bucket}/{PLAYER_FEATURES_KEY}")
@@ -329,7 +354,7 @@ def main() -> None:
     logger.info("Wrote %d player feature rows to s3://%s/%s", player_row_count, bucket, PLAYER_FEATURES_KEY)
 
     logger.info("Building team-week ranking dataset...")
-    _write_dataset(s3, RANKING_FEATURES_KEY, build_ranking_dataset(storage), "ranking")
+    _write_dataset(s3, RANKING_FEATURES_KEY, build_ranking_dataset(storage, since_date=since_date), "ranking")
 
     logger.info("Feature engineering complete.")
 

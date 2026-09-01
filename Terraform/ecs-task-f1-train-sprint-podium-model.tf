@@ -18,7 +18,7 @@ resource "aws_cloudwatch_log_group" "f1_train_sprint_podium_model" {
 # train-sprint-grid-model's own comment.
 resource "aws_ecs_task_definition" "f1_train_sprint_podium_model" {
   family                   = "${var.project}-f1-train-sprint-podium-model"
-  requires_compatibilities = ["FARGATE"]
+  requires_compatibilities = ["FARGATE", "EC2"] # EC2 for the parallel training track (sfn-training-orchestrator-ec2.tf); unchanged for Fargate
   network_mode             = "awsvpc"
   cpu                      = local.training_task_cpu
   memory                   = local.training_task_memory

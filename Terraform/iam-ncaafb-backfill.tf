@@ -19,7 +19,7 @@ resource "aws_iam_role" "ncaafb_backfill" {
   assume_role_policy = data.aws_iam_policy_document.ncaafb_backfill_assume.json
 
   tags = merge(local.common_tags, {
-    Sport     = "ncaa-fb"
+    Sport     = "ncaafb"
     Component = "ingestion"
   })
 }

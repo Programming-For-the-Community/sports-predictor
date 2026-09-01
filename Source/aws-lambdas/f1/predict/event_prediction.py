@@ -127,6 +127,27 @@ def _field_sort_key(entry: dict):
     return (3, 0)
 
 
+def _assign_qualifying_ranks(field: list[dict]) -> None:
+    """Mutates each entry's own predictions["projected_qualifying_position"]
+    in place, adding a "rank" alongside "value" -- the same "row rank
+    instead of independently-rounded raw value" fix _field_sort_key/
+    f1_leaderboard_table.dart's _PositionCell already apply to FINISH/GRID,
+    now extended to QUALIFYING (real complaint 2026-09-01: two close-but-
+    distinct projected_qualifying_position values rounding to the same
+    integer showed as duplicate qualifying positions). Qualifying isn't
+    the field's own sort key (see _field_sort_key -- FINISH takes
+    priority), so this ranks independently of field's own row order rather
+    than reusing it. Ties broken by entity_id for a fully deterministic
+    order across repeat computations, not just an incidental stable-sort
+    artifact."""
+    ranked = sorted(
+        (entry for entry in field if entry["predictions"].get("projected_qualifying_position") is not None),
+        key=lambda entry: (entry["predictions"]["projected_qualifying_position"]["value"], entry["entity_id"]),
+    )
+    for rank, entry in enumerate(ranked, start=1):
+        entry["predictions"]["projected_qualifying_position"]["rank"] = rank
+
+
 def predict_field_event(storage, s3, predictions_table, event_id: str) -> dict:
     built = live_features.build_live_field_features(storage, SPORT, event_id)
     event = built["event"]
@@ -150,6 +171,7 @@ def predict_field_event(storage, s3, predictions_table, event_id: str) -> dict:
                 entry["actual"] = actual
         field.append(entry)
 
+    _assign_qualifying_ranks(field)
     field.sort(key=_field_sort_key)
 
     constructors = []
