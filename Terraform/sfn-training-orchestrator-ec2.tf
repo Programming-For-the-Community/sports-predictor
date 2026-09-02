@@ -32,6 +32,23 @@
 # (ec2-training-launch-template.tf's network_interfaces block) since these
 # public subnets don't auto-assign one (map_public_ip_on_launch = false,
 # subnet-public.tf).
+#
+# Both states' own Overrides.Memory (61440 MiB) trims the task-definition's
+# own 65536 MiB (training_task_memory_per_vcpu_mib x training_task_vcpu,
+# variables.tf) down for THIS state machine only -- the task definitions
+# themselves (ecs-task-*-train-*.tf) are untouched, so Fargate's own
+# training_orchestrator still launches every task at the full 65536 MiB it
+# always has. EC2-on-EC2 needs this override because a real "64GB" 4xlarge
+# instance never actually registers a full 65536 MiB of schedulable memory
+# with ECS -- the OS/kernel/ECS agent reserve a slice first (a real m7a.
+# 4xlarge in this account registered 62924 MiB, confirmed via
+# describe-container-instances during the second canary run) -- so a task
+# still asking for the full 65536 MiB can never be placed on ANY instance
+# of this size, no matter how long the capacity provider waits. 61440
+# leaves a margin below the observed 62924 ceiling for cross-instance-type
+# variance (m7i/m6i/m7a/m6a) without giving back more of the RF-model's
+# own OOM-driven 64GB budget (ec2-training-launch-template.tf's own
+# comment) than this constraint actually forces.
 resource "aws_cloudwatch_log_group" "training_orchestrator_ec2" {
   name              = "/aws/vendedlogs/states/${var.project}-training-orchestrator-ec2"
   retention_in_days = 30
@@ -196,6 +213,7 @@ resource "aws_sfn_state_machine" "training_orchestrator_ec2" {
                       }
                     },
                     "Overrides": {
+                      "Memory": "61440",
                       "ContainerOverrides": [
                         {
                           "Name.$": "$.target.M.container_name.S",
@@ -250,6 +268,7 @@ resource "aws_sfn_state_machine" "training_orchestrator_ec2" {
                       }
                     },
                     "Overrides": {
+                      "Memory": "61440",
                       "ContainerOverrides": [
                         {
                           "Name.$": "$.target.M.container_name.S",
