@@ -6,17 +6,8 @@
 # routes live under the same API, path-routed -- see design/ARCHITECTURE.md),
 # so metrics are referenced directly by ApiName/Stage rather than a
 # SEARCH() prefix the way the Lambda/DynamoDB dashboards discover an
-# open-ended, per-sport resource set.
-#
-# Added 2026-08-25 specifically because there was previously ZERO
-# dashboard visibility at the gateway level -- this project already had
-# one real production incident here (a 429 thundering-herd from the
-# event-list page's fan-out pattern combined with too-low a throttle,
-# since fixed by raising the throttle and adding client-side jitter/
-# retry -- see project-api-gateway-429-thundering-herd-fix memory). A
-# 429 surfaces here as part of the 4XXError metric (API Gateway has no
-# separate 429-specific CloudWatch metric); this dashboard is what would
-# confirm that fix is holding and catch a recurrence early.
+# open-ended, per-sport resource set. A 429 surfaces here as part of the
+# 4XXError metric -- API Gateway has no separate 429-specific metric.
 resource "aws_cloudwatch_dashboard" "api_gateway" {
   dashboard_name = "${var.project}-api-gateway"
 

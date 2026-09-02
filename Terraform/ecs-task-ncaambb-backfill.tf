@@ -18,12 +18,10 @@ resource "aws_cloudwatch_log_group" "ncaambb_backfill" {
 # ESPN's public API.
 #
 # 2048 CPU / 4096 memory -- double NBA's own 1024/2048. D1's ~362 teams
-# and up to ~150-155 games on a single date (confirmed live, 2026-08-19 --
-# see project-ncaambb-onboarding memory) mean backfill.py's own
-# ThreadPoolExecutor concurrency (both the season-batch level and the new
+# and up to ~150-155 games on a single date give backfill.py's own
+# ThreadPoolExecutor concurrency (both the season-batch level and the
 # per-date event level -- see backfill.py's own VOLUME docstring section)
-# has real, simultaneous JSON parsing/normalization work to do, not just
-# more time spent waiting on the shared rate limiter.
+# real, simultaneous JSON parsing/normalization work to do.
 #
 # START_SEASON/END_SEASON/BATCH_SIZE/REQUEST_DELAY_SECONDS default to a
 # full historical run here; override them per-run via ECS "Run Task" ->

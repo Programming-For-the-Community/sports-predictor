@@ -125,10 +125,7 @@ data "aws_iam_policy_document" "lambda_inference_permissions" {
   # block (driving distance/accuracy, GIR%, etc.) the same way feature-
   # engineering/pga/build_dataset.py does at training time -- via
   # library.storage.pga_season_stats reading pga-ingest's own daily raw
-  # snapshot directly from the raw bucket, the ONLY source for these
-  # values (confirmed live 2026-08-25: ESPN's own statistics endpoint is
-  # current-snapshot-only, no historical query support -- see
-  # project-pga-onboarding memory). Same "scoped to one sport's own
+  # snapshot directly from the raw bucket. Same "scoped to one sport's own
   # prefix, not the whole raw bucket" pattern ReadConferenceMembershipCache
   # above already uses.
   statement {

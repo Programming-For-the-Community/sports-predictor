@@ -6,27 +6,12 @@
 # `containerInsights = "enhanced"` turned on (no Terraform change needed
 # for this dashboard to work).
 #
-# Added 2026-08-25 specifically because there was previously ZERO
-# resource-utilization visibility into any Fargate task run -- there's
-# already been one real production OOM kill here (a RandomForest
-# candidate hit a genuine memory ceiling at 64GB during a live NCAA MBB
-# training run, 2026-08-22 -- see library/ml/model_types.py's own
-# comment on _RF_PARAM_DISTRIBUTIONS), discovered only after the fact
-# from the task simply dying. A per-task-family memory widget is exactly
-# what would have made that visible in real time instead.
-#
 # CAUTION -- the per-task-family widgets below (TaskCpuUtilization/
-# TaskMemoryUtilization) are AWS's own documented metric names for ECS
-# Container Insights with enhanced observability, but were NOT
-# independently confirmed against this account's actually-emitted
-# metrics (no live AWS access from this environment -- see this repo's
-# own "verify real fields before writing code" convention, which
-# normally applies to API responses, not CloudWatch metric schemas, but
-# the same honesty applies here). If a widget renders empty after apply,
-# check `aws cloudwatch list-metrics --namespace ECS/ContainerInsights`
-# for the real metric name and fix it here -- an empty graph fails safe
-# (no Terraform error, nothing breaks), it just means this comment's
-# guess needs a one-line correction.
+# TaskMemoryUtilization) are AWS's documented metric names for ECS
+# Container Insights with enhanced observability, not independently
+# confirmed against this account's own emitted metrics. If a widget
+# renders empty, check `aws cloudwatch list-metrics --namespace
+# ECS/ContainerInsights` for the real metric name and fix it here.
 resource "aws_cloudwatch_dashboard" "ecs_fargate" {
   dashboard_name = "${var.project}-ecs-fargate"
 

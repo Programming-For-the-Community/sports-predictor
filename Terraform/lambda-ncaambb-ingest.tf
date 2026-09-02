@@ -40,13 +40,9 @@ resource "aws_lambda_function" "ncaambb_ingest" {
   handler       = "handler.lambda_handler"
   # 600s/512MB -- higher than NBA's 300s/256MB on both counts. D1 has
   # ~362 teams (every one re-fetched every run) vs NBA's ~30, and a single
-  # busy Saturday can carry ~150-155 games vs NBA's ~15 (confirmed live,
-  # 2026-08-19 -- see project-ncaambb-onboarding memory). handler.py's own
+  # busy Saturday can carry ~150-155 games vs NBA's ~15. handler.py's own
   # VOLUME docstring section covers the ThreadPoolExecutor concurrency this
-  # timeout/memory budget is sized for; even with that concurrency, the
-  # shared RateLimiter's 0.3s floor alone puts a worst-case (fully
-  # unseeded roster fetch + a max-volume game night) run's floor north of
-  # NBA's own worst case.
+  # timeout/memory budget is sized for.
   timeout     = 600
   memory_size = 512
 

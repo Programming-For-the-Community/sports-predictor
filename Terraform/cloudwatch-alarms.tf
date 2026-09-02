@@ -1,40 +1,22 @@
-# The audit that prompted this file found ZERO aws_cloudwatch_metric_alarm
-# resources anywhere in the stack -- 37 Lambdas, 2 Step Functions state
-# machines, 6 DynamoDB tables, and the shared API Gateway all had
-# dashboards (cloudwatch-dashboard-*.tf) but nothing that actually pages
-# anyone. This file is deliberately NOT exhaustive per-resource coverage --
-# see the cost/tiering table in the accompanying chat response for the
-# reasoning behind these 18 logical concerns (25 physical alarm resources
-# -- see the next paragraph for why the count grew past 18).
+# 25 alarms covering 18 logical concerns: Lambda errors/throttles/duration,
+# DynamoDB throttles/system errors, both Step Functions orchestrators'
+# failed/timed-out executions, and API Gateway/CloudFront error rates and
+# latency.
 #
 # Two tiers, by whether alarm_actions is set:
 #   Critical -- alarm_actions = [aws_sns_topic.ops_alerts.arn] (sns-ops-
 #   alerts.tf), pages var.alert_email.
-#   Warning  -- no alarm_actions at all. Exists purely so
-#   cloudwatch-dashboard-alerts.tf has a real alarm resource to show a
-#   tile for; deliberately never pages anyone.
+#   Warning  -- no alarm_actions. Shows on cloudwatch-dashboard-alerts.tf,
+#   never pages anyone.
 #
 # Every aggregate alarm below (Lambda Errors/Throttles by stage, predict/
 # predict-read Duration, DynamoDB throttles/SystemErrors) uses explicit
-# per-resource metric_query blocks summed/combined via an expression, NOT
-# SEARCH() -- a real apply confirmed CloudWatch's PutMetricAlarm flatly
-# rejects SEARCH() ("ValidationError: SEARCH is not supported on Metric
-# Alarms"), even though the identical SEARCH() expression works fine in a
-# dashboard widget (cloudwatch-dashboard-*.tf uses it that way). A second
-# real apply failure ("ValidationError: Too many metrics in alarm, maximum
-# is 10") then capped how much fan-out one alarm's metric_query array can
-# hold -- raw queries plus the combining expression together, max 10 --
-# which is why Lambda Throttles (originally 1 alarm summing all 37
-# functions), Predict+predict-read Duration p99 (originally 1 alarm
-# covering 12 functions), and DynamoDB throttles (originally 1 alarm
-# covering 6 tables x 2 operations) each split into several narrower
-# alarms below instead of a composite alarm (which would cost more --
-# $0.50/mo per composite alarm vs $0.10/mo standard -- and add
-# indirection for no real benefit here). Splitting by pipeline stage /
-# operation is also more actionable than the original single blanket
-# alarm would have been: you learn WHICH stage or operation is the
-# problem, not just that something is -- the same reasoning Lambda Errors
-# already applied by splitting per stage below.
+# per-resource metric_query blocks summed/combined via an expression, not
+# SEARCH() -- PutMetricAlarm rejects SEARCH() even though the identical
+# expression works in a dashboard widget. A metric_query array is capped
+# at 10 entries (raw queries plus the combining expression together),
+# which is why Lambda Throttles, Predict+predict-read Duration p99, and
+# DynamoDB throttles each split into several narrower alarms below.
 locals {
   alarm_all_sports = ["nfl", "ncaafb", "nba", "ncaambb", "pga", "f1"]
   # f1 has no schedule-sync Lambda (see lambda-f1-*.tf's own set) -- every
@@ -286,16 +268,7 @@ resource "aws_cloudwatch_metric_alarm" "schedule_sync_errors" {
 }
 
 # ── 7a-7f. Lambda Throttles, by pipeline stage (Warning) ────────────────────
-# Originally one alarm summing all 37 functions -- CloudWatch's
-# PutMetricAlarm caps the metric_query array at 10 entries total (raw +
-# combining expression), real apply failure: "ValidationError: Too many
-# metrics in alarm, maximum is 10". 37 raw + 1 total was never going to
-# fit regardless of how it's combined, and a composite alarm stitching
-# together several batch alarms costs more ($0.50/mo per composite alarm
-# vs $0.10/mo standard) and adds indirection for no real benefit here --
-# splitting by pipeline stage, the same way Errors already is above, is
-# both cheaper and more actionable (you learn WHICH stage is throttling,
-# not just that something is).
+# Split by pipeline stage, same as Errors above.
 
 resource "aws_cloudwatch_metric_alarm" "ingest_throttles" {
   alarm_name          = "${var.project}-ingest-lambda-throttles"

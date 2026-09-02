@@ -3,23 +3,10 @@
 # orchestrator.tf, sfn-training-orchestrator.tf), built from AWS/States
 # namespace metrics.
 #
-# Only two state machines exist in this project, so metrics are
-# referenced directly by StateMachineArn rather than a SEARCH() prefix
-# the way the Lambda/DynamoDB dashboards discover an open-ended,
-# per-sport resource set -- a third orchestrator is architecturally
-# unlikely (every new sport onboards through these same two, by design;
-# see design/CLAUDE.md's registry-driven onboarding principle), so there's
-# nothing here that would otherwise go undiscovered the way a new sport's
-# Lambda/table would.
-#
-# Added 2026-08-25 specifically because there was previously ZERO
-# visibility into either orchestrator's own execution health -- the real
-# NFL active-flag bug (checked $.active.BOOL when the SDK integration
-# actually returns "Bool") silently broke daily ingest for a while before
-# being caught by other means; a failed-executions widget here would have
-# surfaced that class of bug directly, rather than only being inferable
-# after the fact from a sport's ingest Lambda simply not being invoked on
-# the Lambda-observability dashboard.
+# Only two state machines exist in this project (every sport onboards
+# through these same two), so metrics are referenced directly by
+# StateMachineArn rather than a SEARCH() prefix the way the Lambda/
+# DynamoDB dashboards discover an open-ended, per-sport resource set.
 resource "aws_cloudwatch_dashboard" "step_functions" {
   dashboard_name = "${var.project}-step-functions"
 

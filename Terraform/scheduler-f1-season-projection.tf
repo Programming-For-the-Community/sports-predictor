@@ -3,16 +3,9 @@
 # to S3. GET /f1/season serves the cached result.
 #
 # Tuesday 14:00 UTC -- shares PGA's own slot (scheduler-pga-season-
-# projection.tf) by explicit user instruction: F1 was originally told to
-# use Tuesday before PGA's own ordering-bug fix later moved there too the
-# same session; confirmed with the user that both sports running at the
-# same time is fine (see feedback-f1-tuesday-scheduling memory). Unlike
-# every other sport's own weekly season-projection scheduler, this has no
-# same-sport schedule-sync to land after -- F1 has no schedule_sync
-# Lambda of its own at all (Jolpica's full-season schedule call lives
-# inside f1-ingest itself, refreshed daily; see that Lambda's own
-# docstring), so only the cross-sport collision-avoidance concern applies
-# here, and Tuesday was never actually a collision to begin with.
+# projection.tf). F1 has no schedule-sync Lambda of its own -- Jolpica's
+# full-season schedule call lives inside f1-ingest itself, refreshed
+# daily.
 resource "aws_scheduler_schedule" "f1_season_projection" {
   name        = "${var.project}-f1-season-projection"
   description = "Invokes the f1_predict Lambda weekly, Tue 14:00 UTC, to recompute the championship season simulation and cache it to S3 for GET /f1/season."

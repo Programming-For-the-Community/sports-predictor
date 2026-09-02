@@ -306,9 +306,8 @@ locals {
 # NCAA MBB's registry row -- same shape as nba_registry plus NCAAFB's
 # national-ranking target (used by season_simulation.py's field selection
 # for March Madness/conference brackets, not an in-season poll). Regular
-# season starts the first Monday of November (2025-26 confirmed live:
-# 2025-11-03); season_end pads past the National Championship, which falls
-# on the first Monday of April (2026 confirmed live: 2026-04-06).
+# season starts the first Monday of November; season_end pads past the
+# National Championship, which falls on the first Monday of April.
 resource "aws_dynamodb_table_item" "ncaambb_registry" {
   table_name = aws_dynamodb_table.sport_registry.name
   hash_key   = aws_dynamodb_table.sport_registry.hash_key
@@ -377,21 +376,12 @@ resource "aws_dynamodb_table_item" "ncaambb_registry" {
   })
 }
 
-# PGA's registry row -- the first field-event sport (Phase 5). Unlike
-# every head-to-head sport above, season_start/season_end covers the
-# entire calendar year rather than a real window: PGA TOUR's own schedule
-# (confirmed live against ESPN's real season calendar, 2026-08-24) runs
-# nearly continuously, from The Sentry in early January through the Tour
-# Championship in late August and straight into a fall stretch (World
-# Wide Technology Championship, RSM Classic, Q-School, ...) that only
-# breaks for a few weeks in December before the next January's Sentry.
-# That gap is short and its exact dates aren't stable year to year, so
-# rather than encode a boundary that risks silently gating off ingest
-# during a real tournament week, this sport is simply never gated --
-# is_in_season(season_start, season_end) with season_start <= season_end
-# covering the whole year always returns true (library/season.py). The
-# cost of a no-op ingest/schedule-sync call during the real off weeks is
-# negligible next to that risk.
+# PGA's registry row -- the first field-event sport. Unlike every
+# head-to-head sport above, season_start/season_end covers the entire
+# calendar year: PGA TOUR's own schedule runs nearly continuously with no
+# stable off-season window, so this sport is never season-gated --
+# is_in_season(season_start, season_end) always returns true
+# (library/season.py).
 #
 # training_targets, expanded 2026-08-25 from the original single top-10-
 # probability entry (Phase 5 step 3) to the full model set: top-10/top-5
@@ -507,24 +497,13 @@ resource "aws_dynamodb_table_item" "pga_registry" {
 }
 
 # F1's season window is a REAL, verified boundary, NOT year-round --
-# genuinely different from PGA's own year-round item below despite an
-# earlier draft of this file copying PGA's "01-01"/"12-31" bounds
-# wholesale. PGA's own comment (below) has a real, specific reason to
-# stay ungated: its off-season gap is SHORT (a few weeks) and its exact
-# dates move year to year, so encoding a boundary risks silently gating
-# off a real tournament week. Neither is true for F1 -- confirmed live
-# 2026-08-31 against Jolpica's own real race dates across 2022-2025: the
-# season opener has landed 2022-03-20, 2023-03-05, 2024-03-02, 2025-03-16
-# (earliest: Mar 2), and the finale 2022-11-20, 2023-11-26, 2024-12-08,
-# 2025-12-07 (latest: Dec 8) -- a genuine, stable ~3-month off-season, not
-# a short, unstable one. Leaving F1 ungated the way PGA is would have cost
-# real money every one of those off-season months (the training
-# orchestrator would still attempt all nine F1 training targets monthly
-# with no new data to justify it), not just a negligible no-op ingest
-# call the way PGA's own short gap does.
+# genuinely different from PGA's own year-round item above -- F1's
+# season has a real, stable ~3-month off-season (season opener between
+# early and mid March, finale between late November and early December),
+# so it's season-gated rather than left ungated the way PGA is.
 #
-# season_start pads a month ahead of the earliest confirmed opener (Mar
-# 2), season_end a week past the latest confirmed finale (Dec 8) -- same
+# season_start pads a month ahead of the earliest opener (Mar 2),
+# season_end a week past the latest finale (Dec 8) -- same
 # padding convention every head-to-head sport's own registry item above
 # already uses. Unlike PGA's own registry item, no round-number-style
 # parametrization is needed -- all nine F1 models are genuinely distinct

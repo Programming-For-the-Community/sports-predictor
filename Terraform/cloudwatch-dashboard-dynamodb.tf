@@ -6,16 +6,10 @@
 # Uses a SEARCH() by table-name prefix ("${var.project}-"), same
 # discovery technique cloudwatch-dashboard-lambda-observability.tf uses
 # for Lambdas -- covers every table without referencing each
-# aws_dynamodb_table resource individually, so a future table (e.g. a
-# player_game_stats-equivalent for a second field-event sport, though
-# PGA/F1 don't need one -- see design/DATA_SCHEMA.md) appears here
-# automatically with no dashboard edit required.
-#
-# Added 2026-08-25 -- there was previously ZERO dashboard visibility into
-# any table's health. Every table is PAY_PER_REQUEST (on-demand) billing,
-# which still throttles under a sudden burst or hot partition (unlike
-# provisioned capacity, there's no fixed ceiling to alarm against, but a
-# real throttled-request count is still a real symptom worth seeing).
+# aws_dynamodb_table resource individually, so a future table appears
+# here automatically with no dashboard edit required. Every table is
+# PAY_PER_REQUEST (on-demand) billing, which still throttles under a
+# sudden burst or hot partition.
 locals {
   dynamodb_dashboard_table_prefix = "${var.project}-"
 }

@@ -120,7 +120,7 @@ locals {
     ncaambb_season = {
       path        = "/ncaambb/season", method = "GET"
       summary     = "Season projection, March Madness bracket, and conference brackets"
-      description = "Cached NCAA MBB season-long projection. Currently always returns 503 (not yet available) -- season_projection.py's scheduled write, the conference-tournament brackets, and the March Madness bracket are a later build step; the route and its read-through path already exist so no further API Gateway wiring is needed once that step ships."
+      description = "Cached NCAA MBB season-long projection: standings, national ranking, conference-tournament brackets, and the March Madness bracket, real-vs-projected reconciled as games complete. Read-through from S3, populated by a scheduled simulation."
     }
     ncaambb_predict_event = {
       path        = "/ncaambb/predictions/events/{event_id}", method = "GET"
@@ -264,13 +264,9 @@ resource "aws_api_gateway_documentation_version" "main" {
     aws_api_gateway_documentation_part.cognito_authorizer,
   ]
 
-  # version is part of this resource's identity (ForceNew) -- bumping it
-  # replaces the resource. Default destroy-then-create order deletes the
-  # old version while api-gateway-nfl-predict.tf's aws_api_gateway_stage
-  # is still pointing at it in AWS, which AWS rejects
-  # (DeleteDocumentationVersion: "API Stages associated with it") --
-  # confirmed live 2026-08-22. create_before_destroy makes the new version
-  # exist (and the stage repoint to it) before the old one is ever deleted.
+  # version is part of this resource's identity (ForceNew). create_before_destroy
+  # avoids a conflict with api-gateway-nfl-predict.tf's aws_api_gateway_stage,
+  # which still points at the old version until the new one exists.
   lifecycle {
     create_before_destroy = true
   }

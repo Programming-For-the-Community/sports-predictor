@@ -25,7 +25,7 @@ resource "aws_cloudwatch_log_group" "ncaambb_train_ranking_model" {
 # (locals-training-compute.tf) as every other training task.
 resource "aws_ecs_task_definition" "ncaambb_train_ranking_model" {
   family                   = "${var.project}-ncaambb-train-ranking-model"
-  requires_compatibilities = ["EC2"] # training is EC2-only now (sfn-training-orchestrator.tf); Fargate training was retired
+  requires_compatibilities = ["EC2"]
   network_mode             = "awsvpc"
   cpu                      = local.training_task_cpu
   memory                   = local.training_task_memory

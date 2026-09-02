@@ -17,14 +17,11 @@ resource "aws_cloudwatch_log_group" "pga_backfill" {
 # them by default. Runs in a public subnet with a public IP to reach
 # ESPN's public API.
 #
-# PLAYER_GAME_STATS_TABLE_NAME/TEAM_GAME_STATS_TABLE_NAME ARE still set
-# below even though PGA's PipelineStorage usage never touches either
-# table (see iam-pga-backfill.tf's own header comment, which is why
-# neither table gets an IAM grant here) -- confirmed live 2026-08-26,
-# PipelineStorage.__init__ requires both env vars unconditionally just to
-# construct the (unused) DynamoDBTable wrappers, same reason
-# ecs-task-pga-feature-engineering.tf sets all four FeatureStorage table
-# vars regardless of which ones build_dataset.py actually reads.
+# PLAYER_GAME_STATS_TABLE_NAME/TEAM_GAME_STATS_TABLE_NAME are set below
+# even though PGA's PipelineStorage usage never touches either table
+# (see iam-pga-backfill.tf's own header comment, which is why neither
+# table gets an IAM grant here) -- PipelineStorage.__init__ requires both
+# env vars unconditionally just to construct the DynamoDBTable wrappers.
 #
 # START_SEASON/END_SEASON/BATCH_SIZE/REQUEST_DELAY_SECONDS default to a
 # full historical run here; override them per-run via ECS "Run Task" ->

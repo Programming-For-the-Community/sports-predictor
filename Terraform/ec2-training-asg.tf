@@ -1,10 +1,7 @@
-# EC2 training track's compute -- two ASGs (Spot-primary, on-demand
-# fallback) on the same launch template (ec2-training-launch-template.tf),
-# each wrapped in its own ECS capacity provider so
-# sfn-training-orchestrator.tf can launch tasks against them exactly
-# the way sfn-training-orchestrator.tf already launches against
-# FARGATE_SPOT/FARGATE -- same ecs:runTask.sync integration, same
-# Retry/Catch shape, just a different CapacityProviderStrategy.
+# Training compute -- two ASGs (Spot-primary, on-demand fallback) on the
+# same launch template (ec2-training-launch-template.tf), each wrapped in
+# its own ECS capacity provider so sfn-training-orchestrator.tf can
+# launch tasks against them via ecs:runTask.sync.
 #
 # min_size = 0 on both: managed_scaling below only launches an instance
 # once a task actually needs placement, and managed_termination_protection
@@ -13,14 +10,8 @@
 # shutdown script.
 #
 # Instance-type diversification (m7i/m6i newer-gen Intel, m7a/m6a AMD) --
-# all 4 are the same 16 vCPU / 64 GB shape Fargate training already uses
-# (general-purpose, not compute-optimized, since the RF-model OOM history
-# already consumed the full 64 GB budget once), chosen for stronger
-# per-core throughput on the CPU-bound XGBoost/LightGBM/sklearn workloads
-# than the equivalent older-gen m5, and for the Spot-interruption-rate
-# benefit of drawing from more than one capacity pool -- something
-# Fargate Spot structurally can't offer since it has no instance-type
-# selection at all.
+# all 4 are the same 16 vCPU / 64 GB general-purpose shape, drawing from
+# more than one Spot capacity pool.
 locals {
   ec2_training_instance_types = ["m7i.4xlarge", "m6i.4xlarge", "m7a.4xlarge", "m6a.4xlarge"]
 }
@@ -54,15 +45,8 @@ resource "aws_autoscaling_group" "ec2_training_spot" {
     instances_distribution {
       on_demand_base_capacity                  = 0
       on_demand_percentage_above_base_capacity = 0 # 100% Spot
-      # price-capacity-optimized (AWS's own current recommended default,
-      # since late 2023), not capacity-optimized-prioritized -- that
-      # strategy picks purely for lowest interruption risk and never
-      # considers price at all, confirmed picking m7a.4xlarge for 100% of
-      # a real run's instances while m6i.4xlarge's own real Spot price sat
-      # at roughly half of every other candidate's that same night. This
-      # still screens out genuinely volatile/high-interruption pools
-      # (unlike plain lowest-price, which doesn't), just no longer ignores
-      # price entirely the way the prior strategy did.
+      # Screens out volatile/high-interruption pools, then picks by price
+      # among what's left.
       spot_allocation_strategy = "price-capacity-optimized"
     }
   }

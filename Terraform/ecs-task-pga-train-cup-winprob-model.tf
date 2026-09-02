@@ -19,7 +19,7 @@ resource "aws_cloudwatch_log_group" "pga_train_cup_winprob_model" {
 # other PGA train-*-model task definition uses.
 resource "aws_ecs_task_definition" "pga_train_cup_winprob_model" {
   family                   = "${var.project}-pga-train-cup-winprob-model"
-  requires_compatibilities = ["EC2"] # training is EC2-only now (sfn-training-orchestrator.tf); Fargate training was retired
+  requires_compatibilities = ["EC2"]
   network_mode             = "awsvpc"
   cpu                      = local.training_task_cpu
   memory                   = local.training_task_memory
