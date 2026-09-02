@@ -35,7 +35,7 @@ variable "alert_email" {
 variable "monthly_limit" {
   description = "Whole-project monthly budget limit in USD"
   type        = string
-  default     = "15"
+  default     = "30"
   nullable    = false
 }
 

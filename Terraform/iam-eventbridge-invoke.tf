@@ -124,9 +124,10 @@ data "aws_iam_policy_document" "eventbridge_invoke_permissions" {
       # (not retrofitted after a live gap the way pga_schedule_sync/
       # ncaafb_schedule_sync above were).
       aws_lambda_function.f1_live_scores.arn,
-      # ec2_training_reaper: scheduler-ec2-training-reaper.tf's own target
-      # -- added in the same change that creates the scheduler, same as
-      # f1_live_scores above (not retrofitted after a live gap).
+      # ec2_training_reaper: no persistent schedule targets this Lambda at
+      # all (see its own handler.py docstring) -- this grant is what lets
+      # its own self-created, one-time EventBridge Scheduler retries
+      # (also assumed via this same role) actually invoke it.
       aws_lambda_function.ec2_training_reaper.arn,
     ]
   }

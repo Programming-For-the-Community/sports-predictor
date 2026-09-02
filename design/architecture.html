@@ -471,7 +471,7 @@ footer{
   <div class="stat-strip">
     <div class="stat"><b>1&times;/day</b><span>ingest-orchestrator</span></div>
     <div class="stat"><b>1&times;/mo</b><span>training-orchestrator</span></div>
-    <div class="stat"><b>10 min</b><span>ec2-training-reaper</span></div>
+    <div class="stat"><b>event-driven</b><span>ec2-training-reaper</span></div>
     <div class="stat"><b>~35</b><span>training targets, all sports</span></div>
   </div>
 
@@ -621,12 +621,12 @@ footer{
 
   <div class="card integration compact" style="margin-top:14px; max-width:480px;">
     <div class="badge integration sm"><svg><use href="#i-eventbridge"/></svg></div>
-    <div class="card-txt"><div class="name">ec2-training-reaper <span class="mono" style="font-weight:400;color:var(--ink-faint)">every 10 min</span></div><div class="desc">Independent idle-instance backstop (X-Ray traced) &mdash; catches a manually-stopped execution the state machine's own scale-to-0 states never run for.</div></div>
+    <div class="card-txt"><div class="name">ec2-training-reaper <span class="mono" style="font-weight:400;color:var(--ink-faint)">event-driven, no schedule</span></div><div class="desc">Independent idle-instance backstop (X-Ray traced) &mdash; invoked by the state machine's own delayed post-completion check, an EventBridge rule on ABORTED/FAILED/TIMED_OUT, and its own capped self-scheduled retries.</div></div>
   </div>
 
   <div class="note">
     <h4>Fargate training retired &mdash; EC2 is the sole training path</h4>
-    A real canary run validated EC2 Spot/on-demand as both cheaper (~20% on verified active-training-time cost) and reliable, after three real bugs were found and fixed live. Feature engineering is untouched &mdash; still Fargate on-demand in public subnets. The reaper Lambda is an <em>independent</em> backstop against orphaned instances: the state machine's own scale-to-0 states only run on a clean completion, so the reaper's 10-minute poll is what catches a manually-stopped execution.
+    A real canary run validated EC2 Spot/on-demand as both cheaper (~20% on verified active-training-time cost) and reliable, after three real bugs were found and fixed live. Feature engineering is untouched &mdash; still Fargate on-demand in public subnets. The reaper Lambda is an <em>independent</em> backstop against orphaned instances, but has no schedule of its own: the state machine's own scale-to-0 states only run on a clean completion, so an EventBridge rule on the execution's ABORTED/FAILED/TIMED_OUT status catches the case they can't, and the Lambda self-schedules its own capped, one-time retries if something's still not idle a few minutes later.
   </div>
 </section>
 

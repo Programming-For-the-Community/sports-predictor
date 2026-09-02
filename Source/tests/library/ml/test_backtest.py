@@ -10,12 +10,24 @@ library/ml/test_model_types.py covers the real adapters, library/ml/
 test_training_common.py covers save_model_artifact/promote_if_better/
 would_beat_current/the run-progress helpers themselves.
 """
+import json
 from unittest.mock import ANY, MagicMock, patch
 
 import numpy as np
 import pandas as pd
+import pytest
 
 from library.ml import backtest
+
+
+@pytest.fixture(autouse=True)
+def _no_real_xray_calls():
+    """run_backtest's own X-Ray segment (library.aws.xray.independent_
+    segment) would otherwise attempt a real AWS API call from every test
+    in this file -- autouse so a test added later doesn't need to
+    remember this."""
+    with patch.object(backtest.xray, "_xray"):
+        yield
 
 
 class _FakeAdapter:
@@ -66,6 +78,34 @@ def _run(candidates, run_id="run-1", **overrides):
          patch.object(backtest.training_common, "save_run_progress"), \
          patch.object(backtest.training_common, "clear_run_progress"):
         return backtest.run_backtest(**kwargs)
+
+
+class TestRunBacktestXRaySegment:
+    """run_backtest is the one place a training task's own X-Ray segment
+    gets emitted -- see library.aws.xray's own docstring for why every
+    training task uses independent_segment rather than joining a parent
+    trace (TrainAllTargets is a Distributed Map; Step Functions doesn't
+    propagate X-Ray trace context into a Distributed Map's child workflow
+    executions at all)."""
+
+    def test_emits_one_segment_named_after_sport_and_model(self):
+        with patch.object(backtest.training_common, "save_model_artifact", side_effect=_fake_save), \
+             patch.object(backtest.training_common, "would_beat_current", return_value=False):
+            _run([_FakeAdapter("xgboost", np.array([0.9, 0.1, 0.9, 0.1]))], sport="nfl", model_name="win-probability")
+
+        mock_xray = backtest.xray._xray
+        assert mock_xray.put_trace_segments.call_count == 1
+        document = json.loads(mock_xray.put_trace_segments.call_args.kwargs["TraceSegmentDocuments"][0])
+        assert document["name"] == "nfl-train-win-probability"
+        assert "parent_id" not in document  # independent trace, never linked to the orchestrator's own
+
+    def test_annotates_with_the_run_id_for_cross_task_correlation(self):
+        with patch.object(backtest.training_common, "save_model_artifact", side_effect=_fake_save), \
+             patch.object(backtest.training_common, "would_beat_current", return_value=False):
+            _run([_FakeAdapter("xgboost", np.array([0.9, 0.1, 0.9, 0.1]))], run_id="run-42")
+
+        document = json.loads(backtest.xray._xray.put_trace_segments.call_args.kwargs["TraceSegmentDocuments"][0])
+        assert document["annotations"] == {"training_run_id": "run-42"}
 
 
 class TestRunBacktest:

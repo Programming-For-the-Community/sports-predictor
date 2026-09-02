@@ -59,6 +59,29 @@ data "aws_iam_policy_document" "lambda_ec2_training_reaper_permissions" {
       "arn:aws:autoscaling:${var.region}:${var.account_id}:autoScalingGroup:*:autoScalingGroupName/${var.project}-ec2-training-ondemand",
     ]
   }
+
+  # Self-scheduling: when this Lambda finds a training-tagged instance
+  # still running but not yet idle, it creates a one-time, self-deleting
+  # EventBridge Scheduler schedule (ActionAfterCompletion=DELETE) to check
+  # again in a few minutes, capped at MAX_RETRIES -- see handler.py's own
+  # docstring. No persistent recurring schedule exists at all; every
+  # schedule created here is transient and only ever exists around a real
+  # completion/abort event.
+  statement {
+    sid       = "ScheduleOwnRetryCheck"
+    actions   = ["scheduler:CreateSchedule"]
+    resources = ["arn:aws:scheduler:${var.region}:${var.account_id}:schedule/${aws_scheduler_schedule_group.sports_predictor.name}/*"]
+  }
+
+  # EventBridge Scheduler needs this Lambda's own execution role to have
+  # granted it permission to pass eventbridge_invoke's role (the same role
+  # every OTHER schedule in this project already uses to invoke its own
+  # target) as the new schedule's own target role.
+  statement {
+    sid       = "PassEventbridgeInvokeRole"
+    actions   = ["iam:PassRole"]
+    resources = [aws_iam_role.eventbridge_invoke.arn]
+  }
 }
 
 resource "aws_iam_role_policy" "lambda_ec2_training_reaper_permissions" {

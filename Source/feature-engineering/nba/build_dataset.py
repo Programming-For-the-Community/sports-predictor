@@ -39,6 +39,7 @@ from datetime import date, timedelta
 
 import pandas as pd
 
+from library.aws import xray
 from library.aws.s3_manager import S3Manager
 from library.features.common import compute_elo_ratings
 from library.features.nba import build_event_features, build_player_features
@@ -249,4 +250,5 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    with xray.linked_segment_from_env(f"{SPORT}-feature-engineering"):
+        main()

@@ -16,6 +16,7 @@ import gc
 import logging
 import time
 
+from library.aws import xray
 from library.aws.s3_manager import S3Manager
 from library.ml import training_common
 from library.ml.model_types import ModelAdapter
@@ -93,6 +94,37 @@ def _is_worse_than_baseline(metadata: dict, naive_baseline_metrics: dict, promot
 
 
 def run_backtest(
+    s3: S3Manager,
+    sport: str,
+    model_name: str,
+    task: str,
+    X_train, y_train, X_test, y_test,
+    candidates: list[ModelAdapter],
+    naive_baseline_metrics: dict,
+    extra_metadata: dict,
+    summary_metrics: list[str],
+    promotion_metric: str,
+    run_id: str,
+) -> dict:
+    """Thin wrapper around _run_backtest -- every train_*.py script's own
+    call funnels through here, so this is the one place a training run's
+    own X-Ray segment can be emitted without every one of the 30 scripts
+    needing its own instrumentation. independent_segment, not
+    linked_segment_from_env: TrainAllTargets (sfn-training-orchestrator.tf)
+    is a Distributed Map, and AWS doesn't propagate X-Ray trace context
+    into a Distributed Map's child workflow executions at all (see
+    library.aws.xray's own docstring) -- there's no parent trace to join.
+    Still correlatable across sport/target by the training_run_id
+    annotation, even though it won't show as a graph edge off
+    training_orchestrator in the X-Ray Trace Map."""
+    with xray.independent_segment(f"{sport}-train-{model_name}", annotations={"training_run_id": run_id}):
+        return _run_backtest(
+            s3, sport, model_name, task, X_train, y_train, X_test, y_test,
+            candidates, naive_baseline_metrics, extra_metadata, summary_metrics, promotion_metric, run_id,
+        )
+
+
+def _run_backtest(
     s3: S3Manager,
     sport: str,
     model_name: str,

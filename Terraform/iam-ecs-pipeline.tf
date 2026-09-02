@@ -29,6 +29,15 @@ resource "aws_iam_role_policy_attachment" "ecs_pipeline_execution" {
   policy_arn = "arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy"
 }
 
+# Lets both the Feature Engineering and Train Model tasks emit their own
+# X-Ray segments directly (library/aws/xray.py -- PutTraceSegments, no
+# daemon/sidecar). Same managed policy lambda-season-gate.tf's own
+# tracing_config already uses.
+resource "aws_iam_role_policy_attachment" "ecs_pipeline_xray" {
+  role       = aws_iam_role.ecs_pipeline.name
+  policy_arn = "arn:aws:iam::aws:policy/AWSXRayDaemonWriteAccess"
+}
+
 data "aws_iam_policy_document" "ecs_pipeline_permissions" {
   # dynamodb:Scan is needed alongside Query/GetItem for entities (looked
   # up one at a time or scanned in bulk depending on caller). A table's

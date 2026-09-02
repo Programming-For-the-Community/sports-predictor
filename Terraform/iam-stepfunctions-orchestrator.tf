@@ -44,6 +44,17 @@ data "aws_iam_policy_document" "stepfunctions_orchestrator_permissions" {
     resources = [aws_lambda_function.season_gate.arn]
   }
 
+  # sfn-training-orchestrator.tf's own InvokeReaperAfterCompletion state --
+  # a same-invocation check right after a normal SUCCEEDED completion,
+  # ahead of ec2-training-reaper's own delayed self-scheduled retries
+  # (iam-lambda-ec2-training-reaper.tf) that cover an ABORTED/FAILED/
+  # TIMED_OUT completion instead, which never reaches this state at all.
+  statement {
+    sid       = "InvokeEc2TrainingReaperLambda"
+    actions   = ["lambda:InvokeFunction"]
+    resources = [aws_lambda_function.ec2_training_reaper.arn]
+  }
+
   statement {
     sid       = "RunTrainingTasks"
     actions   = ["ecs:RunTask", "ecs:StopTask", "ecs:DescribeTasks"]

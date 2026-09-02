@@ -35,6 +35,15 @@ In **Cost Explorer**, group by the `Sport` tag to see what each sport's pipeline
 
 In **AWS Budgets** (`Terraform/budgets.tf`, IaC-managed), a budget is already scoped both account-wide and per-sport via the `Sport` tag — `aws_budgets_budget.project` for the whole account, `aws_budgets_budget.per_sport` filtered to each `Sport` value, both alerting at 80%/100% actual spend and 100% forecasted spend to the email in `var.alert_email`.
 
+## Per-sport EC2 training cost (split cost allocation data)
+
+The training EC2 fleet (`ec2-training-asg.tf`) is tagged `Sport = "shared"` at the instance level, deliberately — one Spot/on-demand instance routinely runs training tasks for multiple sports back-to-back over its life, so there's no single correct sport to tag the instance itself with. Per-sport attribution instead relies on two things already in place:
+
+- Every `ecs-task-<sport>-train-<target>.tf` task definition carries a real `Sport = "<sport>"` tag.
+- `sfn-training-orchestrator.tf`'s `RunTask` calls set `PropagateTags: TASK_DEFINITION`, so every actual training task launches with its own correct `Sport` tag, independent of which instance it happens to land on.
+
+That task-level tagging is what AWS's **split cost allocation data for Amazon ECS** consumes to split each instance's cost proportionally across the tasks that ran on it, by CPU/memory reservation. Opt in under **Billing and Cost Management → Cost Management preferences → General → Split cost allocation data** (not the Cost Allocation Tags page — a separate, easy-to-miss spot). It surfaces in **Cost and Usage Reports (CUR/CUR 2.0)**, not Cost Explorer directly, so seeing a simple per-sport number still means querying that export (Athena/QuickSight) rather than a Cost Explorer graph — no CUR export exists in this project yet (`Terraform` has no `aws_cur_report_definition`/Data Export resource), so this is a bigger lift than the tag activation above if pursued. Takes up to 24 hours to populate once opted in, and isn't retroactive.
+
 ## Native cost dashboards (manual, console-only)
 
 **Billing and Cost Management → Dashboards** supports pinning a tag-grouped cost report directly — group by `Sport` or `Component` the same way you would in Cost Explorer, but pinned to a dashboard instead of rebuilt each visit. There's no Terraform resource for this (the `hashicorp/aws` provider manages `aws_budgets_budget` and cost-allocation-tag activation, not the Dashboards UI itself), so this is a one-time manual setup, same as tag activation above:

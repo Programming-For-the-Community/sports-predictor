@@ -8,6 +8,16 @@
 # before being divided by per-task vCPU, so concurrent sports can't
 # jointly exceed the same total budget one sport alone would use).
 #
+# Orphaned-instance cleanup has no schedule of its own anywhere in this
+# project -- WaitForLingeringInstances/InvokeReaperAfterCompletion below
+# cover a normal SUCCEEDED completion, eventbridge-training-orchestrator-
+# terminal.tf's own EventBridge rule covers ABORTED/FAILED/TIMED_OUT (the
+# endings that never reach this state machine's own later states at all),
+# and ec2-training-reaper's own handler.py self-schedules a small, capped
+# number of delayed one-time retries past either of those if something's
+# still not idle yet. Every invocation is caused by something that
+# actually just happened.
+#
 # RunTrainingTask/RunTrainingTaskOnDemand's own NetworkConfiguration has
 # no AssignPublicIp -- unlike RunFeatureEngineering above (still FARGATE
 # launch type, where that field is required), it isn't valid at all for a
@@ -57,11 +67,25 @@ resource "aws_sfn_state_machine" "training_orchestrator" {
   }
 
   # Surfaces this state machine (and, via propagated trace headers, the
-  # season_gate/ec2_training_reaper Lambdas it invokes) in the CloudWatch
-  # Application Map alongside the existing sports-predictor-api and
-  # standalone-Lambda nodes. Cheap at this cadence: a monthly execution is
-  # a handful of traces/month, nowhere near X-Ray's 100k-traces-recorded
-  # free tier.
+  # season_gate Lambda it invokes) in the X-Ray Trace Map alongside the
+  # existing sports-predictor-api and standalone-Lambda nodes. Cheap at
+  # this cadence: a monthly execution is a handful of traces/month,
+  # nowhere near X-Ray's 100k-traces-recorded free tier.
+  #
+  # This only covers the state machine's own execution and its native
+  # integrations (Lambda) -- ECS is not a native X-Ray integration for
+  # Step Functions, so RunFeatureEngineering/RunTrainingTask don't get
+  # traced just because this is enabled. RunFeatureEngineering joins this
+  # same trace anyway, via CheckSeason's Lambda invoke handing its own
+  # trace header down as a ContainerOverrides env var (season-gate's own
+  # handler.py, library.aws.xray.linked_segment_from_env). RunTrainingTask/
+  # RunTrainingTaskOnDemand can't -- they run inside TrainAllTargets, a
+  # Distributed Map, and AWS doesn't propagate X-Ray trace context into a
+  # Distributed Map's child workflow executions at all -- so every
+  # training task instead emits its own independent, unlinked trace
+  # (library.ml.backtest.run_backtest, via library.aws.xray.
+  # independent_segment), correlatable by its training_run_id annotation
+  # but not graph-connected to this state machine's own trace.
   tracing_configuration {
     enabled = true
   }
@@ -101,7 +125,9 @@ resource "aws_sfn_state_machine" "training_orchestrator" {
               }
             },
             "ResultSelector": {
-              "in_season.$": "$.Payload.in_season"
+              "in_season.$": "$.Payload.in_season",
+              "xray_trace_id.$": "$.Payload.xray_trace_id",
+              "xray_parent_id.$": "$.Payload.xray_parent_id"
             },
             "ResultPath": "$.season_check",
             "Catch": [
@@ -151,6 +177,14 @@ resource "aws_sfn_state_machine" "training_orchestrator" {
                       {
                         "Name": "TRAINING_LOOKBACK_SEASONS",
                         "Value.$": "$.training_lookback_seasons.N"
+                      },
+                      {
+                        "Name": "XRAY_TRACE_ID",
+                        "Value.$": "$.season_check.xray_trace_id"
+                      },
+                      {
+                        "Name": "XRAY_PARENT_ID",
+                        "Value.$": "$.season_check.xray_parent_id"
                       }
                     ]
                   }
@@ -332,6 +366,29 @@ resource "aws_sfn_state_machine" "training_orchestrator" {
         {
           "ErrorEquals": ["States.ALL"],
           "ResultPath": "$.scale_down_ondemand_error",
+          "Next": "WaitForLingeringInstances"
+        }
+      ],
+      "Next": "WaitForLingeringInstances"
+    },
+    "WaitForLingeringInstances": {
+      "Type": "Wait",
+      "Comment": "20 minutes -- ScaleDownTrainingOnDemandCapacity above only sets DesiredCapacity to 0; a real run has still taken 30-40 minutes for the ASG to actually terminate the now-unwanted instances (managed_termination_protection waits for a task to genuinely finish first). Free: Standard workflows bill per state transition, not wall-clock duration.",
+      "Seconds": 1200,
+      "Next": "InvokeReaperAfterCompletion"
+    },
+    "InvokeReaperAfterCompletion": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::lambda:invoke",
+      "Comment": "Only covers a normal SUCCEEDED completion -- reaches this state either way, since ScaleDownTrainingOnDemandCapacity's own Catch also routes here. An ABORTED/FAILED/TIMED_OUT completion never reaches this far at all; eventbridge-training-orchestrator-terminal.tf's own EventBridge rule covers that case instead, invoking the same Lambda directly off Step Functions' own execution status-change event.",
+      "Parameters": {
+        "FunctionName": "${aws_lambda_function.ec2_training_reaper.function_name}"
+      },
+      "ResultPath": null,
+      "Catch": [
+        {
+          "ErrorEquals": ["States.ALL"],
+          "ResultPath": "$.reaper_invoke_error",
           "Next": "TrainingOrchestratorDone"
         }
       ],

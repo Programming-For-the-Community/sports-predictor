@@ -5,6 +5,14 @@
 # states. Shared/utility Lambda, not sport-specific -- same
 # placeholder-ZIP + shared_lambdas_deploy.yml deployment pattern as
 # lambda-season-gate.tf.
+#
+# No recurring schedule triggers this Lambda at all -- it's invoked
+# directly by sfn-training-orchestrator.tf's own InvokeReaperAfterCompletion
+# state (a normal SUCCEEDED completion), by eventbridge-training-orchestrator-
+# terminal.tf's own EventBridge rule (an ABORTED/FAILED/TIMED_OUT
+# completion), and by its own self-created one-time retry schedules
+# (handler.py) -- every invocation is caused by something that actually
+# just happened, never a blind poll.
 
 resource "aws_cloudwatch_log_group" "ec2_training_reaper" {
   name              = "/aws/lambda/${var.project}-ec2-training-reaper"
@@ -40,7 +48,17 @@ resource "aws_lambda_function" "ec2_training_reaper" {
   environment {
     variables = {
       ECS_CLUSTER_NAME     = aws_ecs_cluster.main.name
+      PROJECT_TAG_VALUE    = var.project
       GRACE_PERIOD_MINUTES = "5"
+      # Self-scheduling retry (handler.py) -- how long until the next
+      # check, and how many times it may reschedule itself before giving
+      # up. 3 x 15 minutes = 45 minutes, comfortably past the 30-40
+      # minutes a real run's own lingering instances have taken to
+      # actually terminate after DesiredCapacity was already set to 0.
+      RETRY_DELAY_MINUTES  = "15"
+      MAX_RETRIES          = "3"
+      SCHEDULER_GROUP_NAME = aws_scheduler_schedule_group.sports_predictor.name
+      SCHEDULER_ROLE_ARN   = aws_iam_role.eventbridge_invoke.arn
     }
   }
 
@@ -50,9 +68,9 @@ resource "aws_lambda_function" "ec2_training_reaper" {
   }
 
   # Same reasoning as lambda-season-gate.tf's tracing_config -- puts this
-  # Lambda on the CloudWatch Application Map too. At a rate(10 minutes)
-  # schedule (scheduler-ec2-training-reaper.tf) that's ~4,300 traces/month,
-  # still well inside X-Ray's 100k-traces-recorded free tier.
+  # Lambda on the X-Ray Trace Map too. Invocation volume is bounded by
+  # real completion/abort events now, not a fixed schedule -- nowhere
+  # near X-Ray's 100k-traces-recorded free tier.
   tracing_config {
     mode = "Active"
   }
