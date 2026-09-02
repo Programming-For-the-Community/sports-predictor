@@ -4,7 +4,8 @@
 # dashboards (cloudwatch-dashboard-*.tf) but nothing that actually pages
 # anyone. This file is deliberately NOT exhaustive per-resource coverage --
 # see the cost/tiering table in the accompanying chat response for the
-# reasoning behind exactly these 18.
+# reasoning behind these 18 logical concerns (25 physical alarm resources
+# -- see the next paragraph for why the count grew past 18).
 #
 # Two tiers, by whether alarm_actions is set:
 #   Critical -- alarm_actions = [aws_sns_topic.ops_alerts.arn] (sns-ops-
@@ -13,44 +14,32 @@
 #   cloudwatch-dashboard-alerts.tf has a real alarm resource to show a
 #   tile for; deliberately never pages anyone.
 #
-# Every aggregate alarm below (Lambda Errors/Throttles by stage, predict-
-# path Duration, DynamoDB throttles/SystemErrors) uses explicit per-
-# resource metric_query blocks summed/combined via an expression, NOT
+# Every aggregate alarm below (Lambda Errors/Throttles by stage, predict/
+# predict-read Duration, DynamoDB throttles/SystemErrors) uses explicit
+# per-resource metric_query blocks summed/combined via an expression, NOT
 # SEARCH() -- a real apply confirmed CloudWatch's PutMetricAlarm flatly
 # rejects SEARCH() ("ValidationError: SEARCH is not supported on Metric
 # Alarms"), even though the identical SEARCH() expression works fine in a
-# dashboard widget (cloudwatch-dashboard-*.tf uses it that way). Lambda
-# Errors is further split by pipeline stage, not one blanket alarm, so a
-# predict-path failure (user-facing) can page while an ingest failure
-# (self-heals on tomorrow's run) doesn't.
+# dashboard widget (cloudwatch-dashboard-*.tf uses it that way). A second
+# real apply failure ("ValidationError: Too many metrics in alarm, maximum
+# is 10") then capped how much fan-out one alarm's metric_query array can
+# hold -- raw queries plus the combining expression together, max 10 --
+# which is why Lambda Throttles (originally 1 alarm summing all 37
+# functions), Predict+predict-read Duration p99 (originally 1 alarm
+# covering 12 functions), and DynamoDB throttles (originally 1 alarm
+# covering 6 tables x 2 operations) each split into several narrower
+# alarms below instead of a composite alarm (which would cost more --
+# $0.50/mo per composite alarm vs $0.10/mo standard -- and add
+# indirection for no real benefit here). Splitting by pipeline stage /
+# operation is also more actionable than the original single blanket
+# alarm would have been: you learn WHICH stage or operation is the
+# problem, not just that something is -- the same reasoning Lambda Errors
+# already applied by splitting per stage below.
 locals {
   alarm_all_sports = ["nfl", "ncaafb", "nba", "ncaambb", "pga", "f1"]
   # f1 has no schedule-sync Lambda (see lambda-f1-*.tf's own set) -- every
   # other stage covers all 6 sports.
   alarm_schedule_sync_sports = [for sport in local.alarm_all_sports : sport if sport != "f1"]
-
-  # Every Lambda function name suffix (after "${var.project}-") in the
-  # stack -- 37 total (6 sports x 5 stages [ingest/normalize/live-scores/
-  # predict/predict-read] + 5 sports' schedule-sync [not f1] + the 2
-  # standalone utility Lambdas) -- lambda_throttles' aggregate alarm sums
-  # one metric_query per function.
-  alarm_all_lambda_suffixes = concat(
-    [for sport in local.alarm_all_sports : "${sport}-ingest"],
-    [for sport in local.alarm_all_sports : "${sport}-normalize"],
-    [for sport in local.alarm_all_sports : "${sport}-live-scores"],
-    [for sport in local.alarm_all_sports : "${sport}-predict"],
-    [for sport in local.alarm_all_sports : "${sport}-predict-read"],
-    [for sport in local.alarm_schedule_sync_sports : "${sport}-schedule-sync"],
-    ["season-gate", "cloudwatch-geo-widget"],
-  )
-
-  # predict + predict-read together, for predict_path_duration_p99's own
-  # combined alarm -- see that resource's own comment for why it covers
-  # both stages in one Warning-tier signal.
-  alarm_predict_path_suffixes = concat(
-    [for sport in local.alarm_all_sports : "${sport}-predict"],
-    [for sport in local.alarm_all_sports : "${sport}-predict-read"],
-  )
 
   alarm_dynamodb_tables = [
     aws_dynamodb_table.entities.name,
@@ -296,18 +285,28 @@ resource "aws_cloudwatch_metric_alarm" "schedule_sync_errors" {
   })
 }
 
-# ── 7. Lambda Throttles, aggregate across all 37 functions (Warning) ────────
+# ── 7a-7f. Lambda Throttles, by pipeline stage (Warning) ────────────────────
+# Originally one alarm summing all 37 functions -- CloudWatch's
+# PutMetricAlarm caps the metric_query array at 10 entries total (raw +
+# combining expression), real apply failure: "ValidationError: Too many
+# metrics in alarm, maximum is 10". 37 raw + 1 total was never going to
+# fit regardless of how it's combined, and a composite alarm stitching
+# together several batch alarms costs more ($0.50/mo per composite alarm
+# vs $0.10/mo standard) and adds indirection for no real benefit here --
+# splitting by pipeline stage, the same way Errors already is above, is
+# both cheaper and more actionable (you learn WHICH stage is throttling,
+# not just that something is).
 
-resource "aws_cloudwatch_metric_alarm" "lambda_throttles" {
-  alarm_name          = "${var.project}-lambda-throttles"
-  alarm_description   = "Any Lambda (any sport, any stage) got throttled in the last 5 minutes -- a concurrency-limit symptom."
+resource "aws_cloudwatch_metric_alarm" "ingest_throttles" {
+  alarm_name          = "${var.project}-ingest-lambda-throttles"
+  alarm_description   = "Any ingest Lambda (any sport) got throttled in the last 5 minutes -- a concurrency-limit symptom."
   comparison_operator = "GreaterThanThreshold"
   evaluation_periods  = 1
   threshold           = 0
   treat_missing_data  = "notBreaching"
 
   dynamic "metric_query" {
-    for_each = local.alarm_all_lambda_suffixes
+    for_each = local.alarm_all_sports
     content {
       id          = "m${metric_query.key + 1}"
       return_data = false
@@ -317,7 +316,7 @@ resource "aws_cloudwatch_metric_alarm" "lambda_throttles" {
         period      = 300
         stat        = "Sum"
         dimensions = {
-          FunctionName = "${var.project}-${metric_query.value}"
+          FunctionName = "${var.project}-${metric_query.value}-ingest"
         }
       }
     }
@@ -325,8 +324,8 @@ resource "aws_cloudwatch_metric_alarm" "lambda_throttles" {
 
   metric_query {
     id          = "total"
-    expression  = join("+", [for i in range(length(local.alarm_all_lambda_suffixes)) : "m${i + 1}"])
-    label       = "Total Throttles"
+    expression  = join("+", [for i in range(length(local.alarm_all_sports)) : "m${i + 1}"])
+    label       = "Total ingest Throttles"
     return_data = true
   }
 
@@ -336,23 +335,213 @@ resource "aws_cloudwatch_metric_alarm" "lambda_throttles" {
   })
 }
 
-# ── 8. Predict + predict-read Duration p99 (Warning) ─────────────────────────
-# Deliberately covers both stages in one alarm -- this is latency
-# awareness, not routing, so the predict/predict-read prefix-collision
-# concern this file's top comment raises for Errors doesn't apply here.
-# MAX() across each function's own p99 series (not SUM/AVG -- durations
-# aren't additive) surfaces the worst offender among all 12 functions.
+resource "aws_cloudwatch_metric_alarm" "normalize_throttles" {
+  alarm_name          = "${var.project}-normalize-lambda-throttles"
+  alarm_description   = "Any normalize Lambda (any sport) got throttled in the last 5 minutes."
+  comparison_operator = "GreaterThanThreshold"
+  evaluation_periods  = 1
+  threshold           = 0
+  treat_missing_data  = "notBreaching"
 
-resource "aws_cloudwatch_metric_alarm" "predict_path_duration_p99" {
-  alarm_name          = "${var.project}-predict-path-duration-p99"
-  alarm_description   = "p99 duration across predict + predict-read Lambdas (any sport) exceeded 80% of their configured timeout."
+  dynamic "metric_query" {
+    for_each = local.alarm_all_sports
+    content {
+      id          = "m${metric_query.key + 1}"
+      return_data = false
+      metric {
+        metric_name = "Throttles"
+        namespace   = "AWS/Lambda"
+        period      = 300
+        stat        = "Sum"
+        dimensions = {
+          FunctionName = "${var.project}-${metric_query.value}-normalize"
+        }
+      }
+    }
+  }
+
+  metric_query {
+    id          = "total"
+    expression  = join("+", [for i in range(length(local.alarm_all_sports)) : "m${i + 1}"])
+    label       = "Total normalize Throttles"
+    return_data = true
+  }
+
+  tags = merge(local.common_tags, {
+    Sport     = "shared"
+    Component = "observability"
+  })
+}
+
+resource "aws_cloudwatch_metric_alarm" "live_scores_throttles" {
+  alarm_name          = "${var.project}-live-scores-lambda-throttles"
+  alarm_description   = "Any live-scores Lambda (any sport) got throttled in the last 5 minutes."
+  comparison_operator = "GreaterThanThreshold"
+  evaluation_periods  = 1
+  threshold           = 0
+  treat_missing_data  = "notBreaching"
+
+  dynamic "metric_query" {
+    for_each = local.alarm_all_sports
+    content {
+      id          = "m${metric_query.key + 1}"
+      return_data = false
+      metric {
+        metric_name = "Throttles"
+        namespace   = "AWS/Lambda"
+        period      = 300
+        stat        = "Sum"
+        dimensions = {
+          FunctionName = "${var.project}-${metric_query.value}-live-scores"
+        }
+      }
+    }
+  }
+
+  metric_query {
+    id          = "total"
+    expression  = join("+", [for i in range(length(local.alarm_all_sports)) : "m${i + 1}"])
+    label       = "Total live-scores Throttles"
+    return_data = true
+  }
+
+  tags = merge(local.common_tags, {
+    Sport     = "shared"
+    Component = "observability"
+  })
+}
+
+resource "aws_cloudwatch_metric_alarm" "predict_throttles" {
+  alarm_name          = "${var.project}-predict-lambda-throttles"
+  alarm_description   = "Any predict Lambda (any sport) got throttled in the last 5 minutes."
+  comparison_operator = "GreaterThanThreshold"
+  evaluation_periods  = 1
+  threshold           = 0
+  treat_missing_data  = "notBreaching"
+
+  dynamic "metric_query" {
+    for_each = local.alarm_all_sports
+    content {
+      id          = "m${metric_query.key + 1}"
+      return_data = false
+      metric {
+        metric_name = "Throttles"
+        namespace   = "AWS/Lambda"
+        period      = 300
+        stat        = "Sum"
+        dimensions = {
+          FunctionName = "${var.project}-${metric_query.value}-predict"
+        }
+      }
+    }
+  }
+
+  metric_query {
+    id          = "total"
+    expression  = join("+", [for i in range(length(local.alarm_all_sports)) : "m${i + 1}"])
+    label       = "Total predict Throttles"
+    return_data = true
+  }
+
+  tags = merge(local.common_tags, {
+    Sport     = "shared"
+    Component = "observability"
+  })
+}
+
+resource "aws_cloudwatch_metric_alarm" "predict_read_throttles" {
+  alarm_name          = "${var.project}-predict-read-lambda-throttles"
+  alarm_description   = "Any predict-read Lambda (any sport) got throttled in the last 5 minutes."
+  comparison_operator = "GreaterThanThreshold"
+  evaluation_periods  = 1
+  threshold           = 0
+  treat_missing_data  = "notBreaching"
+
+  dynamic "metric_query" {
+    for_each = local.alarm_all_sports
+    content {
+      id          = "m${metric_query.key + 1}"
+      return_data = false
+      metric {
+        metric_name = "Throttles"
+        namespace   = "AWS/Lambda"
+        period      = 300
+        stat        = "Sum"
+        dimensions = {
+          FunctionName = "${var.project}-${metric_query.value}-predict-read"
+        }
+      }
+    }
+  }
+
+  metric_query {
+    id          = "total"
+    expression  = join("+", [for i in range(length(local.alarm_all_sports)) : "m${i + 1}"])
+    label       = "Total predict-read Throttles"
+    return_data = true
+  }
+
+  tags = merge(local.common_tags, {
+    Sport     = "shared"
+    Component = "observability"
+  })
+}
+
+resource "aws_cloudwatch_metric_alarm" "schedule_sync_throttles" {
+  alarm_name          = "${var.project}-schedule-sync-lambda-throttles"
+  alarm_description   = "Any schedule-sync Lambda (any sport except F1, which has none) got throttled in the last 5 minutes."
+  comparison_operator = "GreaterThanThreshold"
+  evaluation_periods  = 1
+  threshold           = 0
+  treat_missing_data  = "notBreaching"
+
+  dynamic "metric_query" {
+    for_each = local.alarm_schedule_sync_sports
+    content {
+      id          = "m${metric_query.key + 1}"
+      return_data = false
+      metric {
+        metric_name = "Throttles"
+        namespace   = "AWS/Lambda"
+        period      = 300
+        stat        = "Sum"
+        dimensions = {
+          FunctionName = "${var.project}-${metric_query.value}-schedule-sync"
+        }
+      }
+    }
+  }
+
+  metric_query {
+    id          = "total"
+    expression  = join("+", [for i in range(length(local.alarm_schedule_sync_sports)) : "m${i + 1}"])
+    label       = "Total schedule-sync Throttles"
+    return_data = true
+  }
+
+  tags = merge(local.common_tags, {
+    Sport     = "shared"
+    Component = "observability"
+  })
+}
+
+# ── 8a-8b. Predict / predict-read Duration p99 (Warning) ────────────────────
+# Originally one alarm covering both stages (12 functions) -- also hit the
+# 10-metric_query cap (see the Throttles comment above), so split by stage
+# the same way. MAX() across each function's own p99 series (not SUM/AVG
+# -- durations aren't additive) surfaces the worst offender within each
+# stage's 6 sports.
+
+resource "aws_cloudwatch_metric_alarm" "predict_duration_p99" {
+  alarm_name          = "${var.project}-predict-duration-p99"
+  alarm_description   = "p99 duration across predict Lambdas (any sport) exceeded 80% of their configured timeout."
   comparison_operator = "GreaterThanThreshold"
   evaluation_periods  = 2
   threshold           = 24000 # ms -- 80% of the 30s timeout every predict/predict-read Lambda shares
   treat_missing_data  = "notBreaching"
 
   dynamic "metric_query" {
-    for_each = local.alarm_predict_path_suffixes
+    for_each = local.alarm_all_sports
     content {
       id          = "m${metric_query.key + 1}"
       return_data = false
@@ -362,7 +551,7 @@ resource "aws_cloudwatch_metric_alarm" "predict_path_duration_p99" {
         period      = 300
         stat        = "p99"
         dimensions = {
-          FunctionName = "${var.project}-${metric_query.value}"
+          FunctionName = "${var.project}-${metric_query.value}-predict"
         }
       }
     }
@@ -370,8 +559,8 @@ resource "aws_cloudwatch_metric_alarm" "predict_path_duration_p99" {
 
   metric_query {
     id          = "total"
-    expression  = "MAX(${join(",", [for i in range(length(local.alarm_predict_path_suffixes)) : "m${i + 1}"])})"
-    label       = "predict/predict-read Duration p99 (worst of any function)"
+    expression  = "MAX(${join(",", [for i in range(length(local.alarm_all_sports)) : "m${i + 1}"])})"
+    label       = "predict Duration p99 (worst of any sport)"
     return_data = true
   }
 
@@ -381,11 +570,52 @@ resource "aws_cloudwatch_metric_alarm" "predict_path_duration_p99" {
   })
 }
 
-# ── 9-10. DynamoDB throttles / system errors, aggregate across 6 tables ─────
+resource "aws_cloudwatch_metric_alarm" "predict_read_duration_p99" {
+  alarm_name          = "${var.project}-predict-read-duration-p99"
+  alarm_description   = "p99 duration across predict-read Lambdas (any sport) exceeded 80% of their configured timeout."
+  comparison_operator = "GreaterThanThreshold"
+  evaluation_periods  = 2
+  threshold           = 24000 # ms -- 80% of the 30s timeout every predict/predict-read Lambda shares
+  treat_missing_data  = "notBreaching"
 
-resource "aws_cloudwatch_metric_alarm" "dynamodb_throttles" {
-  alarm_name          = "${var.project}-dynamodb-throttles"
-  alarm_description   = "Any of the 6 DynamoDB tables throttled a read or write in the last 5 minutes."
+  dynamic "metric_query" {
+    for_each = local.alarm_all_sports
+    content {
+      id          = "m${metric_query.key + 1}"
+      return_data = false
+      metric {
+        metric_name = "Duration"
+        namespace   = "AWS/Lambda"
+        period      = 300
+        stat        = "p99"
+        dimensions = {
+          FunctionName = "${var.project}-${metric_query.value}-predict-read"
+        }
+      }
+    }
+  }
+
+  metric_query {
+    id          = "total"
+    expression  = "MAX(${join(",", [for i in range(length(local.alarm_all_sports)) : "m${i + 1}"])})"
+    label       = "predict-read Duration p99 (worst of any sport)"
+    return_data = true
+  }
+
+  tags = merge(local.common_tags, {
+    Sport     = "shared"
+    Component = "observability"
+  })
+}
+
+# ── 9a-9b. DynamoDB read / write throttles, across 6 tables (Warning) ───────
+# Originally one alarm covering both operations (6 tables x 2 metrics = 12
+# raw + 1 total = 13 queries) -- also hit the 10-metric_query cap (see the
+# Throttles comment above), so split by operation instead.
+
+resource "aws_cloudwatch_metric_alarm" "dynamodb_read_throttles" {
+  alarm_name          = "${var.project}-dynamodb-read-throttles"
+  alarm_description   = "Any of the 6 DynamoDB tables throttled a read in the last 5 minutes."
   comparison_operator = "GreaterThanThreshold"
   evaluation_periods  = 1
   threshold           = 0
@@ -394,7 +624,7 @@ resource "aws_cloudwatch_metric_alarm" "dynamodb_throttles" {
   dynamic "metric_query" {
     for_each = local.alarm_dynamodb_tables
     content {
-      id          = "read${metric_query.key}"
+      id          = "m${metric_query.key + 1}"
       return_data = false
       metric {
         metric_name = "ReadThrottleEvents"
@@ -407,10 +637,32 @@ resource "aws_cloudwatch_metric_alarm" "dynamodb_throttles" {
       }
     }
   }
+
+  metric_query {
+    id          = "total"
+    expression  = join("+", [for i in range(length(local.alarm_dynamodb_tables)) : "m${i + 1}"])
+    label       = "Total DynamoDB read throttle events"
+    return_data = true
+  }
+
+  tags = merge(local.common_tags, {
+    Sport     = "shared"
+    Component = "observability"
+  })
+}
+
+resource "aws_cloudwatch_metric_alarm" "dynamodb_write_throttles" {
+  alarm_name          = "${var.project}-dynamodb-write-throttles"
+  alarm_description   = "Any of the 6 DynamoDB tables throttled a write in the last 5 minutes."
+  comparison_operator = "GreaterThanThreshold"
+  evaluation_periods  = 1
+  threshold           = 0
+  treat_missing_data  = "notBreaching"
+
   dynamic "metric_query" {
     for_each = local.alarm_dynamodb_tables
     content {
-      id          = "write${metric_query.key}"
+      id          = "m${metric_query.key + 1}"
       return_data = false
       metric {
         metric_name = "WriteThrottleEvents"
@@ -425,12 +677,9 @@ resource "aws_cloudwatch_metric_alarm" "dynamodb_throttles" {
   }
 
   metric_query {
-    id = "total"
-    expression = join("+", concat(
-      [for i in range(length(local.alarm_dynamodb_tables)) : "read${i}"],
-      [for i in range(length(local.alarm_dynamodb_tables)) : "write${i}"],
-    ))
-    label       = "Total DynamoDB throttle events"
+    id          = "total"
+    expression  = join("+", [for i in range(length(local.alarm_dynamodb_tables)) : "m${i + 1}"])
+    label       = "Total DynamoDB write throttle events"
     return_data = true
   }
 
@@ -439,6 +688,8 @@ resource "aws_cloudwatch_metric_alarm" "dynamodb_throttles" {
     Component = "observability"
   })
 }
+
+# ── 10. DynamoDB SystemErrors, aggregate across 6 tables (Critical) ─────────
 
 resource "aws_cloudwatch_metric_alarm" "dynamodb_system_errors" {
   alarm_name          = "${var.project}-dynamodb-system-errors"
