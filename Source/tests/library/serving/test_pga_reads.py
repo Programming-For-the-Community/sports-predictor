@@ -80,6 +80,19 @@ class TestListEvents:
 
         assert [e["event_id"] for e in result["events"]] == ["newest"]
 
+    def test_completed_queries_get_all_events_bounded_to_one(self):
+        # Regression: most_recent_event's own post-hoc narrowing wasn't
+        # enough on its own -- the unbounded get_all_events call itself
+        # paginated through the sport's entire completed-event history
+        # first, a real production 504 confirmed live 2026-09-02 (1186
+        # PGA completed events) even after the entity-prefetch fix above.
+        storage = MagicMock()
+        storage.get_all_events.return_value = []
+
+        pga_reads.list_events(storage, "pga", "completed")
+
+        storage.get_all_events.assert_called_once_with("pga", status="completed", limit=1)
+
     def test_completed_prefetches_entities_once_across_the_field_instead_of_per_participant(self):
         # The other half of the same fix -- even bounded to one
         # tournament, a ~150-golfer field enriches via one batched

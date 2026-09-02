@@ -50,7 +50,7 @@ class TestListEvents:
 
         call = storage.get_all_events.call_args
         assert call.kwargs.get("scan_index_forward", False) is False
-        assert call.kwargs["limit"] == ncaambb_reads._RECENT_EVENTS_LIMIT
+        assert call.kwargs["limit"] == ncaambb_reads.RECENT_EVENTS_LIMIT
 
     def test_scheduled_queries_get_all_events_soonest_first_and_bounded(self):
         storage = MagicMock()
@@ -61,7 +61,7 @@ class TestListEvents:
 
         call = storage.get_all_events.call_args
         assert call.kwargs["scan_index_forward"] is True
-        assert call.kwargs["limit"] == ncaambb_reads._RECENT_EVENTS_LIMIT
+        assert call.kwargs["limit"] == ncaambb_reads.RECENT_EVENTS_LIMIT
 
     def test_scheduled_returns_only_the_soonest_date(self):
         storage = MagicMock()

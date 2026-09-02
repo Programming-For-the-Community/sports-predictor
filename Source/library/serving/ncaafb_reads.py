@@ -14,7 +14,7 @@ from datetime import date, datetime, timedelta, timezone
 from boto3.dynamodb.conditions import Key
 
 from library.features.ncaafb import is_bowl_game, is_playoff_game
-from library.serving.common import enrich_participants
+from library.serving.common import RECENT_EVENTS_LIMIT, enrich_participants
 from library.storage.model_artifacts import current_version_key, model_artifact_key
 from library.storage.season_projections import season_projection_key
 
@@ -274,13 +274,22 @@ def list_events(storage, predictions_table, sport: str, status: str) -> dict:
     also carries `name`/`abbreviation` off its own team entity -- see
     enrich_participants. Also carries `venue_name`/`venue_city`/
     `venue_state` straight off the stored event, `null` on any of the
-    three the venue lacked."""
-    events = storage.get_all_events(sport, status=status)
+    three the venue lacked.
 
+    Bounded to RECENT_EVENTS_LIMIT rows on the query itself, most-recent-
+    or soonest-first to match whichever bucket status narrows down to
+    below -- an unbounded get_all_events call here paginates through the
+    sport's entire completed/scheduled history before ever discarding
+    everything but one week, a real production 504 confirmed live
+    2026-09-02 (see pga_reads.py's own list_events docstring)."""
     if status == "completed":
+        events = storage.get_all_events(sport, status=status, limit=RECENT_EVENTS_LIMIT)
         events = _previous_week_events(events)
     elif status == "scheduled":
+        events = storage.get_all_events(sport, status=status, scan_index_forward=True, limit=RECENT_EVENTS_LIMIT)
         events = _next_week_events(events)
+    else:
+        events = storage.get_all_events(sport, status=status)
 
     def _entry(e: dict) -> dict:
         entry = {

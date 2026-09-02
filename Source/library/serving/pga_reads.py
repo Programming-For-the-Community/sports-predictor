@@ -175,10 +175,23 @@ def list_events(storage, sport: str, status: str) -> dict:
     event_types ("field"/"match_play"/"cup"), unfiltered; the frontend
     uses event_type to decide how to render each one before it ever calls
     GET /pga/predictions/events/{event_id}. status=completed is bounded to
-    the single most recent tournament -- see this module's own docstring."""
-    events = storage.get_all_events(sport, status=status)
+    the single most recent tournament -- see this module's own docstring.
+
+    limit=1 on the query itself for status=completed, not just
+    most_recent_event's own post-hoc narrowing -- the real production 504
+    this module's own docstring describes persisted after the entity-
+    enrichment fix below because the unbounded get_all_events call was
+    itself the bottleneck once completed-event count grew large enough
+    (1186 PGA events, confirmed live 2026-09-02): every historical
+    completed event paginated in from DynamoDB before most_recent_event
+    ever got to discard all but one. get_all_events already sorts
+    most-recent-first by default, so Limit=1 returns exactly the same row
+    most_recent_event's own max() would have picked out of the full set."""
     if status == "completed":
+        events = storage.get_all_events(sport, status=status, limit=1)
         events = most_recent_event(events)
+    else:
+        events = storage.get_all_events(sport, status=status)
 
     if not events:
         return {"sport": sport, "events": []}

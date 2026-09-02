@@ -42,4 +42,11 @@ locals {
   # straight from the budget instead of multiplying the two back together,
   # so flooring only happens once.
   training_max_instances = max(1, floor(local.training_vcpu_budget / var.training_task_vcpu))
+
+  # ECS task definitions take cpu/memory as strings, in CPU units (1024
+  # per vCPU) and MiB respectively -- same units under EC2 launch type as
+  # Fargate. Dropped in the initial retirement rewrite (every ecs-task-
+  # *-train-*.tf still references these two), restored here.
+  training_task_cpu    = tostring(var.training_task_vcpu * 1024)
+  training_task_memory = tostring(var.training_task_vcpu * var.training_task_memory_per_vcpu_mib)
 }

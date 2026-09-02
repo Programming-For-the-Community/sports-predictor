@@ -44,7 +44,22 @@ class TestListEvents:
         assert result["sport"] == "nfl"
         assert result["events"][0]["event_id"] == "401547417"
         assert result["events"][0]["kickoff_time"] == f"{event_date}T20:25Z"
-        storage.get_all_events.assert_called_once_with("nfl", status="scheduled")
+        storage.get_all_events.assert_called_once_with(
+            "nfl", status="scheduled", scan_index_forward=True, limit=nfl_reads.RECENT_EVENTS_LIMIT,
+        )
+
+    def test_completed_queries_get_all_events_most_recent_first_and_bounded(self):
+        # Regression: an unbounded get_all_events call here pulled a
+        # sport's entire completed-event history on every request, a real
+        # production 504 confirmed live 2026-09-02 (same root cause as
+        # pga_reads.py/f1_reads.py's own list_events, just not yet
+        # triggered at NFL's current completed-event volume).
+        storage = MagicMock()
+        storage.get_all_events.return_value = []
+
+        nfl_reads.list_events(storage, MagicMock(), "nfl", "completed")
+
+        storage.get_all_events.assert_called_once_with("nfl", status="completed", limit=nfl_reads.RECENT_EVENTS_LIMIT)
 
     def test_participants_carry_name_and_abbreviation_from_their_entity(self):
         storage = MagicMock()

@@ -5,6 +5,19 @@ from concurrent.futures import ThreadPoolExecutor
 
 from library.storage.model_artifacts import current_version_key, model_artifact_key
 
+# Every head-to-head sport's own list_events narrows a get_all_events call
+# down to just the single most recent (completed) or soonest (scheduled)
+# day/week's games -- this bounds the query itself to that many of the
+# most-recent/soonest rows instead of a full-history read that grows with
+# the whole season/backfill (a real production 504, confirmed live
+# 2026-09-02: PGA's own unbounded completed-event query alone paginated
+# through 1186 rows before narrowing to the 1 it actually needed).
+# Comfortably above any sport's own documented single-date/week peak (NCAA
+# MBB's ~150-game Saturday, NCAAFB's full FBS weekly slate), so the true
+# most/least recent bucket's full slate is always included regardless of
+# how long the gap to it is (e.g. the off-season).
+RECENT_EVENTS_LIMIT = 400
+
 
 def enrich_participants(
     storage, sport: str, participants: list[dict] | None, entity_type: str = "team",

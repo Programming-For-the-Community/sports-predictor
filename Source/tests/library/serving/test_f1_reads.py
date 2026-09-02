@@ -6,10 +6,13 @@ from unittest.mock import MagicMock
 from library.serving import f1_reads
 
 
-def _field_event(event_id="2026-5", event_date="2026-05-24", status="scheduled", participants=None):
+def _field_event(
+    event_id="2026-5", event_date="2026-05-24", status="scheduled", participants=None,
+    event_type="field", season=2026, week=5,
+):
     return {
-        "event_id": event_id, "event_key": f"K{event_id}", "event_type": "field", "event_date": event_date,
-        "status": status, "season": 2026, "week": 5, "race_name": "Monaco Grand Prix", "circuit_id": "monaco",
+        "event_id": event_id, "event_key": f"K{event_id}", "event_type": event_type, "event_date": event_date,
+        "status": status, "season": season, "week": week, "race_name": "Monaco Grand Prix", "circuit_id": "monaco",
         "participants": participants if participants is not None else [{"entity_id": "max_verstappen"}],
         "venue_name": "Circuit de Monaco", "venue_city": "Monte Carlo", "venue_state": "Monaco",
     }
@@ -35,22 +38,57 @@ class TestListEvents:
 
         assert {e["event_id"] for e in result["events"]} == {"e1", "e2"}
 
-    def test_completed_bounds_to_the_most_recent_event_only(self):
-        # Same fix as pga_reads.py's own list_events -- real complaint
-        # 2026-09-01: unbounded completed history across every race ever
-        # backfilled, same architectural gap as PGA's own 504.
+    def test_completed_bounds_to_the_most_recent_race_weekend_only(self):
+        # Real complaint 2026-09-01: unbounded completed history across
+        # every race ever backfilled, same architectural gap as PGA's own
+        # 504. Distinct (season, week) per race, matching real data --
+        # each is its own round, not a shared one.
         storage = MagicMock()
         storage.get_entities.return_value = {}
         storage.get_all_events.return_value = [
-            _field_event("older", "2026-03-02", status="completed"),
-            _field_event("newest", "2026-05-24", status="completed"),
-            _field_event("middle", "2026-04-06", status="completed"),
+            _field_event("older", "2026-03-02", status="completed", week=1),
+            _field_event("newest", "2026-05-24", status="completed", week=5),
+            _field_event("middle", "2026-04-06", status="completed", week=3),
         ]
         storage.get_entity.return_value = None
 
         result = f1_reads.list_events(storage, "f1", "completed")
 
         assert [e["event_id"] for e in result["events"]] == ["newest"]
+
+    def test_completed_includes_both_events_of_a_sprint_weekend(self):
+        # Regression: a Sprint weekend writes the Saturday sprint race and
+        # the Sunday Grand Prix as two separate events (event_type
+        # "sprint"/"field") sharing the same (season, week=round) but
+        # different event_dates -- most_recent_event's old single-event
+        # narrowing silently dropped the sprint result every time, since
+        # it always has the earlier date of the two.
+        storage = MagicMock()
+        storage.get_entities.return_value = {}
+        storage.get_all_events.return_value = [
+            _field_event(
+                "2026-5-sprint", "2026-05-23", status="completed", event_type="sprint", week=5,
+                participants=[{"entity_id": "max_verstappen"}],
+            ),
+            _field_event("2026-5", "2026-05-24", status="completed", event_type="field", week=5),
+        ]
+        storage.get_entity.return_value = None
+
+        result = f1_reads.list_events(storage, "f1", "completed")
+
+        assert {e["event_id"] for e in result["events"]} == {"2026-5-sprint", "2026-5"}
+
+    def test_completed_queries_get_all_events_most_recent_first_and_bounded(self):
+        # _current_race_weekend_events' own post-hoc narrowing wasn't
+        # enough on its own -- the unbounded get_all_events call itself
+        # paginated through the sport's entire completed-event history
+        # first.
+        storage = MagicMock()
+        storage.get_all_events.return_value = []
+
+        f1_reads.list_events(storage, "f1", "completed")
+
+        storage.get_all_events.assert_called_once_with("f1", status="completed", limit=f1_reads.RECENT_EVENTS_LIMIT)
 
     def test_enriches_participants_as_players(self):
         storage = MagicMock()

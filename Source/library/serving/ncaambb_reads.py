@@ -22,21 +22,11 @@ from datetime import datetime, timezone
 
 from boto3.dynamodb.conditions import Key
 
-from library.serving.common import enrich_participants
+from library.serving.common import RECENT_EVENTS_LIMIT, enrich_participants
 from library.storage.model_artifacts import current_version_key, model_artifact_key
 from library.storage.season_projections import season_projection_key
 
 _PLAYER_PROP_MODEL_KEY_RE = re.compile(r"^MODEL#player-prop-([a-z-]+)#v\d+#PLAYER#(.+)$")
-
-# list_events only ever keeps the single most recent (completed) or
-# soonest (scheduled) date's events -- this caps get_all_events to that
-# many of the most-recent/soonest rows instead of a full-history partition
-# read that grows with the whole season/backfill. Comfortably above NCAA
-# MBB's own documented ~150-game-Saturday peak, so the true most/least
-# recent date's full slate is always included regardless of how long the
-# gap to it is (e.g. the off-season, where the "most recent" date can be
-# months back).
-_RECENT_EVENTS_LIMIT = 400
 
 WIN_PROBABILITY_MODEL = "win-probability"
 SCORE_MODELS = {"margin": "score-margin", "home_score": "home-score", "away_score": "away-score"}
@@ -207,12 +197,12 @@ def list_events(storage, predictions_table, sport: str, status: str) -> dict:
     three the venue lacked."""
     if status == "completed":
         # Most recent first (the function's own default order) -- the top
-        # _RECENT_EVENTS_LIMIT rows are guaranteed to include every game on
+        # RECENT_EVENTS_LIMIT rows are guaranteed to include every game on
         # the single most recent date.
-        events = storage.get_all_events(sport, status=status, limit=_RECENT_EVENTS_LIMIT)
+        events = storage.get_all_events(sport, status=status, limit=RECENT_EVENTS_LIMIT)
     elif status == "scheduled":
         # Soonest first -- the mirror case, for the single soonest date.
-        events = storage.get_all_events(sport, status=status, scan_index_forward=True, limit=_RECENT_EVENTS_LIMIT)
+        events = storage.get_all_events(sport, status=status, scan_index_forward=True, limit=RECENT_EVENTS_LIMIT)
     else:
         events = storage.get_all_events(sport, status=status)
 

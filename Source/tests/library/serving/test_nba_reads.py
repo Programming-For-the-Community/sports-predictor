@@ -103,6 +103,29 @@ class TestListEvents:
 
         assert {e["event_id"] for e in result["events"]} == {"e2"}
 
+    def test_completed_queries_get_all_events_most_recent_first_and_bounded(self):
+        # Regression: an unbounded get_all_events call here pulled a
+        # sport's entire completed-event history on every request, a real
+        # production 504 confirmed live 2026-09-02.
+        storage = MagicMock()
+        predictions_table = MagicMock()
+        storage.get_all_events.return_value = []
+
+        nba_reads.list_events(storage, predictions_table, "nba", "completed")
+
+        storage.get_all_events.assert_called_once_with("nba", status="completed", limit=nba_reads.RECENT_EVENTS_LIMIT)
+
+    def test_scheduled_queries_get_all_events_soonest_first_and_bounded(self):
+        storage = MagicMock()
+        predictions_table = MagicMock()
+        storage.get_all_events.return_value = []
+
+        nba_reads.list_events(storage, predictions_table, "nba", "scheduled")
+
+        storage.get_all_events.assert_called_once_with(
+            "nba", status="scheduled", scan_index_forward=True, limit=nba_reads.RECENT_EVENTS_LIMIT,
+        )
+
     def test_empty_when_nothing_ingested_for_that_status(self):
         storage = MagicMock()
         storage.get_all_events.return_value = []

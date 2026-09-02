@@ -20,7 +20,7 @@ event_types.
 """
 from concurrent.futures import ThreadPoolExecutor
 
-from library.serving.common import enrich_participants, most_recent_event, prefetch_entities
+from library.serving.common import RECENT_EVENTS_LIMIT, enrich_participants, prefetch_entities
 from library.storage.season_projections import season_projection_key
 
 FIELD_EVENT_MODELS = {
@@ -100,23 +100,52 @@ def _entry(storage, sport: str, event: dict, entity_cache: dict[tuple[str, str],
     }
 
 
+def _current_race_weekend_events(completed: list[dict]) -> list[dict]:
+    """Every event sharing the most recently-dated event's own (season,
+    round) -- NOT most_recent_event's single-event narrowing, which
+    silently dropped one race on every real Sprint weekend. A Sprint
+    weekend writes the Saturday sprint race and the Sunday Grand Prix as
+    TWO separate events (event_type "sprint"/"field", event_id suffixed
+    "-sprint" on the former -- library/normalize/f1.py's own
+    sprint_result_to_event_item), sharing the same `week` (the season's
+    round number, not a calendar week) but different event_dates --
+    most_recent_event's own max()-by-date kept only the later-dated one
+    (always the Sunday Grand Prix, since the sprint runs the day before
+    it), the same architectural gap nfl_reads.py's own _previous_week_
+    events/_week_key already solves for multi-game weeks, just keyed by
+    round instead of a (season_type, week) triple since F1 has no
+    season_type."""
+    if not completed:
+        return []
+    latest = max(completed, key=lambda e: e.get("event_date", ""))
+    target = (latest.get("season"), latest.get("week"))
+    return [e for e in completed if (e.get("season"), e.get("week")) == target]
+
+
 def list_events(storage, sport: str, status: str) -> dict:
     """GET /f1/events?status=scheduled|completed -- across both
     event_types ("field"/"sprint") unfiltered; the frontend uses
     event_type to decide how to render each one before it ever calls GET
-    /f1/predictions/events/{event_id}. Same "one event = one entry, no
-    week/day-bucketing" shape pga_reads.py's own list_events uses (F1's
-    grouping unit is one race weekend, not one calendar date) -- including
-    the same status=completed bound to the single most recent event
-    (library.serving.common.most_recent_event), for the same reason
-    pga_reads.py's own docstring gives: unbounded history plus
-    per-participant entity GetItems was a real production 504 there, and
-    F1's own 20-driver field times the same "every race ever backfilled"
-    shape is the same architectural gap, just smaller (real complaint
-    2026-09-01: "I have noticed this with other sports")."""
-    events = storage.get_all_events(sport, status=status)
+    /f1/predictions/events/{event_id}. status=completed is bounded to the
+    single most recent race weekend (_current_race_weekend_events) -- up
+    to 2 events on a Sprint weekend, 1 otherwise -- same "just the most
+    recent bucket, not full history" shape pga_reads.py's own list_events
+    uses, for the same reason: unbounded history plus per-participant
+    entity GetItems was a real production 504 there, and F1's own
+    20-driver field times the same "every race ever backfilled" shape is
+    the same architectural gap, just smaller (real complaint 2026-09-01:
+    "I have noticed this with other sports").
+
+    Bounded to RECENT_EVENTS_LIMIT rows on the query itself, most-recent-
+    first -- an unbounded get_all_events call here paginates through the
+    sport's entire completed-event history before ever discarding
+    everything but one race weekend, a real production 504 confirmed live
+    2026-09-02 (see pga_reads.py's own list_events docstring)."""
     if status == "completed":
-        events = most_recent_event(events)
+        events = storage.get_all_events(sport, status=status, limit=RECENT_EVENTS_LIMIT)
+        events = _current_race_weekend_events(events)
+    else:
+        events = storage.get_all_events(sport, status=status)
 
     if not events:
         return {"sport": sport, "events": []}

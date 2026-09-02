@@ -160,6 +160,31 @@ class TestListEvents:
 
         assert {e["event_id"] for e in result["events"]} == {"e2"}
 
+    def test_completed_queries_get_all_events_most_recent_first_and_bounded(self):
+        # Regression: an unbounded get_all_events call here pulled a
+        # sport's entire completed-event history on every request, a real
+        # production 504 confirmed live 2026-09-02.
+        storage = MagicMock()
+        predictions_table = MagicMock()
+        storage.get_all_events.return_value = []
+
+        ncaafb_reads.list_events(storage, predictions_table, "ncaafb", "completed")
+
+        storage.get_all_events.assert_called_once_with(
+            "ncaafb", status="completed", limit=ncaafb_reads.RECENT_EVENTS_LIMIT,
+        )
+
+    def test_scheduled_queries_get_all_events_soonest_first_and_bounded(self):
+        storage = MagicMock()
+        predictions_table = MagicMock()
+        storage.get_all_events.return_value = []
+
+        ncaafb_reads.list_events(storage, predictions_table, "ncaafb", "scheduled")
+
+        storage.get_all_events.assert_called_once_with(
+            "ncaafb", status="scheduled", scan_index_forward=True, limit=ncaafb_reads.RECENT_EVENTS_LIMIT,
+        )
+
     def test_postseason_completed_events_group_by_date_not_the_flat_week_number(self):
         # Regression: CFBD's postseason `week` is flat (every bowl/CFP
         # round in a season comes back as week=1) -- confirmed live an
