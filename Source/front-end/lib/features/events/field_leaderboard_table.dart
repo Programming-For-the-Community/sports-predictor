@@ -51,11 +51,9 @@ class _LeaderboardColumn {
 /// ROUND 1-4 breakdown can show it next to the real actual"), on top of
 /// whatever applicable_rounds itself still considers live. For a
 /// completed tournament that's every round 1-4 at once. Trusting
-/// entry.rounds.keys.first the way this used to picked round 1's own
-/// long-stale forecast as "This Rd" for a golfer who'd already finished
-/// the whole tournament (real complaint 2026-09-02: a completed event's
-/// own THIS RD column didn't match what the golfer actually shot that
-/// day) -- checking each candidate round against actualRounds is what
+/// entry.rounds.keys.first would pick round 1's own long-stale forecast
+/// as "This Rd" for a golfer who'd already finished the whole tournament
+/// -- checking each candidate round against actualRounds is what
 /// actually finds the one round, if any, still genuinely unresolved.
 int? _currentRoundNumber(FieldParticipantPrediction entry) {
   final stillProjecting = entry.rounds.keys.where((round) => !entry.actualRounds.containsKey(round));

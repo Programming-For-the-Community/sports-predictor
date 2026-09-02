@@ -1059,10 +1059,10 @@ class _ChampionshipCard extends StatelessWidget {
   // Combined outer + inner Padding below, each side -- the actual width
   // _BracketMatchupCard renders at is _championshipCardWidth minus twice
   // this, not the full _championshipCardWidth. Passing the outer width
-  // as its own cardWidth (as this used to) understates how much space
-  // its FittedBox status line actually has, overflowing it -- a real bug
-  // only visible in debug mode (the overflow's hazard-stripe rendering
-  // and console warning are both debug-only).
+  // as its own cardWidth would understate how much space its FittedBox
+  // status line actually has, overflowing it -- only visible in debug
+  // mode (the overflow's hazard-stripe rendering and console warning
+  // are both debug-only).
   static const double _borderInset = 2 + 1.5;
 
   @override

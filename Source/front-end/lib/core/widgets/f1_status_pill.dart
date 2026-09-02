@@ -51,11 +51,10 @@ class F1StatusPill extends StatelessWidget {
       F1DriverStatus.dsq => (F1DriverStatus.dsqLabel, AppColors.neg),
       F1DriverStatus.dns => (F1DriverStatus.dnsLabel, AppColors.warn),
       // No real result recorded for this driver yet -- a real, meaningful
-      // word rather than a bare dash that reads as missing/broken data
-      // (real complaint 2026-08-31: "status is blank instead of a real
-      // status"). True for every driver on a not-yet-run event, since
-      // there's no per-driver result at all until the race (or, for
-      // qualifying-only, that session) actually happens.
+      // word rather than a bare dash that reads as missing/broken data.
+      // True for every driver on a not-yet-run event, since there's no
+      // per-driver result at all until the race (or, for qualifying-only,
+      // that session) actually happens.
       null => ('Scheduled', AppColors.inkMute),
       // Unrecognized -- treat as still racing/unresolved rather than
       // guessing at a negative outcome.

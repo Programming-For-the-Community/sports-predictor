@@ -20,9 +20,7 @@ import '../../core/widgets/f1_status_pill.dart';
 // Stable identity for each column, distinct from its own display label --
 // _columns' compact-column filter below matches on this, not on label
 // text, so renaming a header can never silently break which columns
-// survive into the compact layout (real complaint 2026-08-31, same root
-// cause as the projected-finish-order ties fix above: a display value
-// standing in for an identity).
+// survive into the compact layout.
 enum _F1ColumnKey { position, driver, status, finishOrGrid, qualifying, win, podium, dnf }
 
 // Every column header this table can show -- not shared with any other
@@ -224,10 +222,8 @@ List<F1DriverPrediction> _sortedByLiveOrder(List<F1DriverPrediction> field, Map<
 /// event_prediction.py's own _field_sort_key, computed before the race).
 /// _sortedByLiveOrder above only ever fires while liveResults is
 /// populated (mid-race); once live polling stops and the checkered flag
-/// has fallen, this is what should take over instead of silently
-/// reverting to the stale pre-race order (real complaint 2026-09-02: a
-/// completed Grand Prix's own row order didn't match the actual
-/// finishing order at all). isSprint picks grid vs. finish the same way
+/// has fallen, this is what takes over instead of silently reverting to
+/// the stale pre-race order. isSprint picks grid vs. finish the same way
 /// every other actual-vs-projected cell in this file already does.
 /// A driver with no actual position (DNF/unclassified -- entry.actual
 /// exists but its own finishPosition/gridPosition is null) sorts after

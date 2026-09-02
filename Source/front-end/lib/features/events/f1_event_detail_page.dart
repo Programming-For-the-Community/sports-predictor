@@ -144,10 +144,9 @@ class _PredictionViewState extends State<_PredictionView> {
         ],
         // Own Drivers/Constructors tab toggle, same pill shape f1_season_
         // page.dart's own standings toggle uses -- a stacked driver list
-        // (up to ~20 rows) plus a constructors table below it was a lot
-        // to scroll through just to compare constructors (real complaint
-        // 2026-09-01). Toggle only shown when there's a constructors
-        // block to switch to at all.
+        // (up to ~20 rows) plus a constructors table below it is a lot
+        // to scroll through just to compare constructors. Toggle only
+        // shown when there's a constructors block to switch to at all.
         if (hasConstructors) ...[
           const SizedBox(height: 16),
           Wrap(
