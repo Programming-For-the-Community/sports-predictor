@@ -11,14 +11,14 @@ interrupted or repeated run just fills in whatever is missing.
 
 Walks calendar dates within each season (ESPN's scoreboard is date-based)
 from November 1 of `season - 1` through May 15 of `season`; ESPN labels a
-season by its ending year (confirmed live, 2026-08-20: a 2025-11-03 game
-carries season.year=2026), same convention as NBA's. Unlike NBA/NFL, there
-is no preseason concept to skip here -- confirmed live, 2026-08-19 (see
-aws-lambdas/ncaambb/ingest/handler.py's own docstring): ESPN's NCAA MBB
-scoreboard has zero events before the real regular-season start date, and
-the earliest games of a season already carry season.type=2/"regular-
-season". May 15 pads about 5 weeks past the early-April National
-Championship, same padding spirit as NBA's own end-of-season buffer.
+season by its ending year (e.g. a 2025-11-03 game carries
+season.year=2026), same convention as NBA's. Unlike NBA/NFL, there is no
+preseason concept to skip here (see aws-lambdas/ncaambb/ingest/
+handler.py's own docstring): ESPN's NCAA MBB scoreboard has zero events
+before the real regular-season start date, and the earliest games of a
+season already carry season.type=2/"regular-season". May 15 pads about 5
+weeks past the early-April National Championship, same padding spirit as
+NBA's own end-of-season buffer.
 
 Player entities are derived entirely from box scores; there is no
 roster-based entity seeding.
@@ -29,9 +29,8 @@ single NCAAMBBClient / rate limiter so concurrent batches don't multiply
 the request rate.
 
 VOLUME: unlike NBA (~30 teams, ~15 games on a busy night), D1 has ~362
-teams and a single busy Saturday can carry ~150-155 games (confirmed live,
-2026-08-19 -- see project-ncaambb-onboarding memory), which multiplies
-into roughly 4x NBA's total games per season. process_date's own
+teams and a single busy Saturday can carry ~150-155 games, which
+multiplies into roughly 4x NBA's total games per season. process_date's own
 per-event box-score fetch loop uses a ThreadPoolExecutor of
 _DATE_MAX_WORKERS workers (same shared-limiter idiom as the season-batch
 concurrency above, and as aws-lambdas/ncaambb/ingest/handler.py's own
@@ -45,13 +44,11 @@ AP RANKINGS: also seeds the national-ranking model's training label --
 one AP Top 25 poll per (season, season_type, week), fetched via
 NCAAMBBCoreClient (a different host/client than the site-API one above --
 see library/http/ncaambb_core.py). This is a genuinely separate, much
-smaller data source (~500 poll-weeks total across a full 2016-2026 run,
-confirmed live 2026-08-20) folded into this SAME script rather than a
-standalone one, per an explicit request while a first backfill run was
-already in flight -- see project-ncaambb-onboarding memory for why it
-wasn't scoped in from the start. seed_rankings runs once per season
-(season-level, not date-level), sequentially -- the volume here never
-approaches the box-score/scoreboard concurrency's own justification.
+smaller data source (~500 poll-weeks total across a full 2016-2026 run)
+folded into this same script rather than a standalone one.
+seed_rankings runs once per season (season-level, not date-level),
+sequentially -- the volume here never approaches the box-score/
+scoreboard concurrency's own justification.
 
 Required environment variables:
     RAW_BUCKET_NAME
@@ -96,11 +93,11 @@ _DATE_MAX_WORKERS = 8
 
 # ESPN's own season.type convention (same 2=regular/3=postseason values
 # scoreboard events carry). Week ranges are generous ceilings, not exact
-# counts -- confirmed live, 2026-08-20: a real season's regular-type weeks
-# run 1 (preseason poll, mid-October) through ~20 (mid-March, covering
-# through conference-tournament week); postseason-type weeks only ever
-# had ONE real poll in every season checked (the final poll, the week
-# after the National Championship), at week ~4. Every out-of-range week
+# counts -- a real season's regular-type weeks run 1 (preseason poll,
+# mid-October) through ~20 (mid-March, covering through conference-
+# tournament week); postseason-type weeks only ever have one real poll
+# per season (the final poll, the week after the National Championship),
+# at week ~4. Every out-of-range week
 # is a clean, expected 404 (see NCAAMBBCoreClient.get_ap_poll), not an
 # error -- same "walk a generous ceiling, skip what's empty" pattern as
 # aws-lambdas/ncaambb/schedule-sync/handler.py.

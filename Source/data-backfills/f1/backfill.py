@@ -44,12 +44,12 @@ data-backfills/pga/backfill.py's own process_tournament docstring gives.
 Every DynamoDB write is an upsert, so an interrupted or repeated run just
 fills in whatever is missing.
 
-An EMPTY response (a round/qualifying session that genuinely hasn't run
+An empty response (a round/qualifying session that genuinely hasn't run
 yet -- always a real, not-a-permanent-gap case: Jolpica's own schedule
-never lists a canceled/never-run round at all, confirmed live against
-the real 2020 Australian GP and 2022 Russian GP cancellations, both
-fully absent from their season's own schedule rather than appearing as
-a phantom entry) is deliberately NEVER cached to S3 -- see process_round
+never lists a canceled/never-run round at all, e.g. the 2020 Australian
+GP and 2022 Russian GP cancellations are both fully absent from their
+season's own schedule rather than appearing as a phantom entry) is
+deliberately never cached to S3 -- see process_round
 and _fetch_qualifying's own docstrings. Caching an empty response would
 make the "skip the fetch if already cached" optimization above
 permanently trust a stale "not run yet" snapshot even after the real

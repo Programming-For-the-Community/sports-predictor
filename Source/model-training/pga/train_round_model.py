@@ -17,11 +17,11 @@ Rounds 3 and 4 naturally have fewer training rows than rounds 1-2 -- a
 cut golfer's own `rounds` list simply has no round-3/4 entry at all (see
 library/normalize/pga.py's _parse_rounds), so this script never needs to
 special-case "did this golfer make the cut" -- the dataset itself already
-reflects it. Serving whether to even CALL the round-3/4 model for a
-given golfer on a live, in-progress tournament (skip it if they're
-projected to miss the cut) is a Phase-5-step-4 (predict Lambda, not yet
-built) concern, not a training-time one -- see train_cutline_model.py's
-own docstring.
+reflects it. Whether to even call the round-3/4 model for a given golfer
+on a live, in-progress tournament (skipped if they're projected to miss
+the cut) is a serving-time concern, handled in
+aws-lambdas/pga/predict/event_prediction.py, not a training-time one --
+see train_cutline_model.py's own docstring.
 
 Required environment variables:
     MODEL_ARTIFACTS_BUCKET_NAME

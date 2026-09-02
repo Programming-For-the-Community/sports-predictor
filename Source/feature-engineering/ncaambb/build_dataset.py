@@ -13,12 +13,10 @@ Produces three datasets: team-level event features, player-level
 features, and team-poll features (the National Ranking model). Unlike
 NBA's own build_dataset.py, there's no is_real_franchise_matchup-equivalent
 filter here -- NCAA MBB has no exhibition/All-Star-style games to exclude
-(confirmed live, no preseason concept exists at all -- see
-aws-lambdas/ncaambb/ingest/handler.py's own docstring), and NIT/secondary-
-postseason-tournament games are deliberately INCLUDED as real training
-data, not filtered out (a real competitive elimination tournament, unlike
-an exhibition -- see project-ncaambb-onboarding memory for the full
-reasoning).
+(no preseason concept exists at all -- see aws-lambdas/ncaambb/ingest/
+handler.py's own docstring), and NIT/secondary-postseason-tournament
+games are deliberately included as real training data, not filtered out
+-- a real competitive elimination tournament, unlike an exhibition.
 
 The ranking dataset (build_ranking_dataset) is poll-centric, not
 event-centric like NCAAFB's own equivalent -- see

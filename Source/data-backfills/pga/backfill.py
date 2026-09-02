@@ -23,8 +23,8 @@ Unlike every head-to-head sport's backfill (which walks every individual
 calendar date within a season, since a day-by-day schedule is the only
 way to discover games), one scoreboard call per season resolves that
 whole season's entire tournament list in one shot --
-`response["leagues"][0]["calendar"]`, ~45-51 entries -- confirmed live,
-2026-08-24 (see PGAClient.get_scoreboard_for_date's own docstring). The
+`response["leagues"][0]["calendar"]`, ~45-51 entries -- see
+PGAClient.get_scoreboard_for_date's own docstring. The
 `dates` param just needs to land somewhere inside the season's window;
 June 1 of the season's own label year is used since ESPN labels a PGA
 season by the year it ENDS (a season spanning Sept of year N-1 through
@@ -137,19 +137,17 @@ def process_tournament(client: PGAClient, storage: PipelineStorage, season: int,
     error, a malformed payload this function doesn't already guard
     against) should ever reach that.
 
-    Skips the ESPN FETCH (not the processing) when the raw leaderboard is
-    already cached in S3 -- confirmed live, 2026-08-26/27, that skipping
-    BOTH used to mean a tournament already cached under old dispatch
-    logic (e.g. before match-play support existed) would stay classified
-    as "skipped" FOREVER on every future re-run, even after the code that
-    would now correctly process it had already shipped -- a re-run is
-    only safe to treat as a no-op for tournaments the CURRENT code would
-    still make the same decision about, which isn't something this
-    function can know without actually re-running the classification.
-    Re-processing an already-cached raw JSON is cheap (no ESPN network
-    call, just a local S3 GetObject + DynamoDB upserts) -- the original
-    per-tournament cache existed to avoid re-hitting ESPN's rate limit,
-    not to avoid re-running this function's own logic."""
+    Skips the ESPN fetch (not the processing) when the raw leaderboard is
+    already cached in S3 -- skipping both would mean a tournament cached
+    under an older dispatch decision stays classified the same way
+    forever on every future re-run, even after the code that classifies
+    it changes. A re-run is only safe to treat as a no-op for tournaments
+    the current code would still make the same decision about, which
+    isn't something this function can know without actually re-running
+    the classification. Re-processing an already-cached raw JSON is cheap
+    (no ESPN network call, just a local S3 GetObject + DynamoDB upserts)
+    -- the per-tournament cache exists to avoid re-hitting ESPN's rate
+    limit, not to avoid re-running this function's own logic."""
     raw_key = f"pga/leaderboard/{season}/{event_id}.json"
     if storage.raw_object_exists(raw_key):
         logger.debug("Leaderboard already cached, reusing raw JSON for event %s", event_id)
@@ -189,8 +187,7 @@ def process_tournament(client: PGAClient, storage: PipelineStorage, season: int,
     # Neither a supported flat-stroke-play format (Medal/Teamstroke) nor
     # a supported match-play format -- an unrecognized future scoring
     # system, or a not-yet-populated calendar entry missing `tournament`/
-    # `scoringSystem` entirely (confirmed live on a real Presidents Cup
-    # entry, 2026-08-25). Fail closed rather than guess a shape.
+    # `scoringSystem` entirely. Fail closed rather than guess a shape.
     if not is_flat_stroke_play(event):
         logger.info(
             "Skipping event %s -- unrecognized scoring system (tournament=%r, scoringSystem=%r)",

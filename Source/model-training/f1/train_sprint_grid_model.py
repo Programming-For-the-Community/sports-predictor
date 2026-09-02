@@ -4,8 +4,8 @@ regression target, the closest available "Sprint qualifying" model this
 project can build. label_sprint_grid_position is a driver's real
 starting grid for the Sprint race itself (see library/features/f1.py's
 build_sprint_event_features docstring) -- Jolpica has no separate Sprint
-Qualifying/Sprint Shootout results endpoint at all (confirmed live
-2026-08-31), so there is no lap-time/pace data behind this target the
+Qualifying/Sprint Shootout results endpoint at all, so there is no
+lap-time/pace data behind this target the
 way train_qualifying_model.py's own gap-to-pole-derived features have
 for the main qualifying session; this model can only learn from rolling
 Sprint-specific race-day form (see sprint_features.parquet's own
