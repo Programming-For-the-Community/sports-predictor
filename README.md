@@ -12,6 +12,7 @@ Built for a single user, not a public product — the frontend and API sit at a 
 - [Data Sources](design/DATA_SOURCES.md) — free data source per sport, update cadence, auth requirements, API key handling
 - [Tagging Strategy](design/TAGGING_STRATEGY.md) — AWS resource tagging convention for cost tracking in Billing/Cost Explorer
 - [Frontend Style](design/FRONTEND_STYLE.md) — the Flutter Web app's "Arena" visual language (design tokens, components, data-viz conventions)
+- [Onboarding a New Sport](design/ONBOARDING_NEW_SPORT.md) — the runbook for adding sport #7 and beyond: build order, naming convention, Terraform/CI checklist, common pitfalls
 
 **[docs/](docs/)** — as-built reference for the API contract and per-sport model details:
 - [Sport Predictor API](docs/SPORT_PREDICTOR_API.md) — every live API Gateway route and request/response shape, per sport
