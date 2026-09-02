@@ -42,6 +42,47 @@ class TestTimeSeriesSplits:
             model_types._time_series_splits(8, 2)
 
 
+class TestBinaryLogLossScorer:
+    """Real crash, 2026-09-02: PGA's cup-win-probability again -- even
+    after TestTimeSeriesSplits' own fix (clamping n_splits down to what
+    the data can support), a TimeSeriesSplit validation fold that small
+    can still land on a single class, and sklearn's default "neg_log_loss"
+    scoring string infers its label set from that one fold's own y_true,
+    raising ValueError instead of scoring it. _BINARY_LOG_LOSS_SCORER
+    passes labels=[0, 1] explicitly so a degenerate fold scores instead of
+    crashing the whole search."""
+
+    def test_scores_a_single_class_validation_fold_without_raising(self):
+        from sklearn.linear_model import LogisticRegression
+
+        model = LogisticRegression().fit(
+            pd.DataFrame({"a": [1.0, 2.0, 3.0, 4.0]}), pd.Series([0, 1, 0, 1]),
+        )
+        # A degenerate fold, same shape as the real crash -- every label
+        # in this particular (small) validation slice happens to be 0.
+        X_val = pd.DataFrame({"a": [1.5, 2.5]})
+        y_val = pd.Series([0, 0])
+
+        score = model_types._BINARY_LOG_LOSS_SCORER(model, X_val, y_val)
+
+        assert isinstance(score, float)
+
+    def test_the_default_neg_log_loss_string_scorer_really_does_crash_on_the_same_fold(self):
+        """Confirms this is a genuine before/after, not a test that would
+        have passed either way."""
+        from sklearn.linear_model import LogisticRegression
+        from sklearn.metrics import get_scorer
+
+        model = LogisticRegression().fit(
+            pd.DataFrame({"a": [1.0, 2.0, 3.0, 4.0]}), pd.Series([0, 1, 0, 1]),
+        )
+        X_val = pd.DataFrame({"a": [1.5, 2.5]})
+        y_val = pd.Series([0, 0])
+
+        with pytest.raises(ValueError, match="y_true contains only one label"):
+            get_scorer("neg_log_loss")(model, X_val, y_val)
+
+
 class TestXGBoostAdapterPredict:
     """predict() always means "the model's raw output" -- probability for
     a classification-task booster, a continuous value for a
@@ -249,7 +290,7 @@ class TestXGBoostClassifierAdapter:
              patch.object(model_types.xgb, "XGBClassifier", return_value=mock_fitted) as mock_cls:
             estimator, params = adapter.tune_and_fit(_df(), pd.Series([0, 1, 0, 1]))
 
-        assert mock_search_cls.call_args.kwargs["scoring"] == "neg_log_loss"
+        assert mock_search_cls.call_args.kwargs["scoring"] is model_types._BINARY_LOG_LOSS_SCORER
         mock_cls.assert_called_with(objective="binary:logistic", eval_metric="logloss", max_depth=3)
         assert estimator == "the-booster"
         assert params == {"max_depth": 3}
@@ -327,7 +368,7 @@ class TestLogisticRegressionAdapter:
             estimator, params = adapter.tune_and_fit(_df(), pd.Series([0, 1, 0, 1]))
 
         assert params == {"C": 1.0, "penalty": "l2"}
-        assert mock_search_cls.call_args.kwargs["scoring"] == "neg_log_loss"
+        assert mock_search_cls.call_args.kwargs["scoring"] is model_types._BINARY_LOG_LOSS_SCORER
         mock_pipeline.set_params.assert_called_once_with(model__C=1.0, model__penalty="l2")
         assert estimator is mock_pipeline
 
@@ -452,7 +493,7 @@ class TestRandomForestAdapters:
              patch.object(adapter, "_build_pipeline", return_value=mock_pipeline):
             estimator, params = adapter.tune_and_fit(_df(), pd.Series([0, 1, 0, 1]))
 
-        assert mock_search_cls.call_args.kwargs["scoring"] == "neg_log_loss"
+        assert mock_search_cls.call_args.kwargs["scoring"] is model_types._BINARY_LOG_LOSS_SCORER
         assert params == {"n_estimators": 200}
         assert estimator is mock_pipeline
 
@@ -531,7 +572,7 @@ class TestMLPAdapters:
              patch.object(adapter, "_build_pipeline", return_value=mock_pipeline):
             estimator, params = adapter.tune_and_fit(_df(), pd.Series([0, 1, 0, 1]))
 
-        assert mock_search_cls.call_args.kwargs["scoring"] == "neg_log_loss"
+        assert mock_search_cls.call_args.kwargs["scoring"] is model_types._BINARY_LOG_LOSS_SCORER
         assert params == {"alpha": 0.01}
         assert estimator is mock_pipeline
 
@@ -584,7 +625,7 @@ class TestLightGBMAdapters:
              patch.object(model_types, "_lgbm_estimator_classes", return_value=(mock_classifier_cls, mock_regressor_cls)):
             estimator, params = adapter.tune_and_fit(_df(), pd.Series([0, 1, 0, 1]))
 
-        assert mock_search_cls.call_args.kwargs["scoring"] == "neg_log_loss"
+        assert mock_search_cls.call_args.kwargs["scoring"] is model_types._BINARY_LOG_LOSS_SCORER
         mock_classifier_cls.assert_called_with(
             objective="binary", verbosity=-1, random_state=model_types._LGBM_RANDOM_STATE, num_leaves=31,
         )

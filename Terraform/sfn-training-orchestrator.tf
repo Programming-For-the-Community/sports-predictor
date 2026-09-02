@@ -1,40 +1,76 @@
-# CloudWatch Logs destination for training_orchestrator's
-# logging_configuration below. Distributed Map's own per-iteration status
-# (dispatched/succeeded/failed child executions) shows up here, not just
-# in the top-level execution's own graph.
+# Monthly training orchestrator -- scans the sport registry, rebuilds each
+# in-season sport's training dataset (Fargate on-demand), then trains every
+# target on EC2 (ec2-training-asg.tf's Spot-primary/on-demand-fallback
+# capacity providers). EC2 is the only training compute path -- the
+# original Fargate Spot/on-demand training path was retired once a real
+# canary run validated EC2 as both cheaper (real, CloudWatch-log-verified
+# active-training-time cost comparison) and reliable, after three real bugs
+# found and fixed during testing (see the comments below on
+# NetworkConfiguration/Overrides.Memory/Subnets for what those were and why
+# each fix looks the way it does).
+#
+# ForEachSport's MaxConcurrency is NOT pinned to 1 -- see locals-training-
+# compute.tf's comment for why that's safe here (EC2's vCPU budget is
+# divided by sport-concurrency before being divided by per-task vCPU, so
+# concurrent sports can't jointly exceed the same total budget one sport
+# alone would use).
+#
+# RunTrainingTask/RunTrainingTaskOnDemand's own NetworkConfiguration has no
+# AssignPublicIp -- unlike RunFeatureEngineering above (still FARGATE
+# launch type, where that field is required), it isn't valid at all for a
+# CapacityProviderStrategy task on EC2 launch type ("ECS.
+# InvalidParameterException: Assign public IP is not supported for this
+# launch type" -- a real canary run's first-ever execution failed 100% of
+# its 42 training targets on exactly this, silently, since
+# TrainingTaskFailed's own tolerant Pass state let the execution report
+# SUCCEEDED anyway). Reachability instead comes from the EC2 instance's OWN
+# public IP, requested at the launch-template level (ec2-training-launch-
+# template.tf's network_interfaces block) since these public subnets don't
+# auto-assign one (map_public_ip_on_launch = false, subnet-public.tf).
+#
+# Both states' own Overrides.Memory (61440 MiB) trims the task-definition's
+# own 65536 MiB (training_task_memory_per_vcpu_mib x training_task_vcpu,
+# variables.tf) down for THIS state machine only -- the task definitions
+# themselves (ecs-task-*-train-*.tf) are untouched. A "64GB" 4xlarge
+# instance never actually registers a full 65536 MiB of schedulable memory
+# with ECS -- the OS/kernel/ECS agent reserve a slice first (a real m7a.
+# 4xlarge in this account registered 62924 MiB, confirmed via
+# describe-container-instances during a real canary run) -- so a task
+# still asking for the full 65536 MiB can never be placed on ANY instance
+# of this size, no matter how long the capacity provider waits. 61440
+# leaves a margin below the observed 62924 ceiling for cross-instance-type
+# variance (m7i/m6i/m7a/m6a) without giving back more of the RF-model's
+# own OOM-driven 64GB budget (ec2-training-launch-template.tf's own
+# comment) than this constraint actually forces.
+#
+# Both states' own NetworkConfiguration.Subnets are the PRIVATE subnets
+# (aws_subnet.private_a/b/c), not the public ones RunFeatureEngineering
+# above still uses -- for EC2 launch type + awsvpc mode, the task's own
+# network interface is independent of the underlying EC2 host's own subnet
+# (ec2-training-asg.tf's ASGs still launch into the public subnets, needed
+# for ECR pull/agent registration), so the task's own data-plane traffic
+# never needs to touch a public route at all. It only ever calls S3/
+# DynamoDB (vpc-endpoints.tf's Gateway Endpoints, private route table
+# only) -- a real canary run's training containers, put in a public subnet
+# earlier, logged one "Loading ... from s3://..." line each and then hung
+# indefinitely on the actual GetObject call, since a task ENI on EC2
+# launch type can never get a public IP and the public route table has no
+# path to S3 without one.
 resource "aws_cloudwatch_log_group" "training_orchestrator" {
   name              = "/aws/vendedlogs/states/${var.project}-training-orchestrator"
   retention_in_days = 30
 
   tags = merge(local.common_tags, {
     Sport     = "shared"
-    Component = "orchestration"
+    Component = "training"
   })
 }
 
-# One registry-driven state machine: for each in-season sport (per its
-# season_start/season_end window, checked via the season-gate Lambda --
-# lambda-season-gate.tf), run its feature-engineering task, then fan out
-# over its own training_targets list (see dynamodb-sport-registry.tf) to
-# run every training target as its own ECS task. TrainAllTargets'
-# MaxConcurrency (locals-training-compute.tf) caps how many training
-# tasks run at once, to stay under the account's Fargate on-demand vCPU
-# quota, and runs in Distributed mode since that cap can exceed
-# Standard/INLINE Map's hard 40-concurrent-iteration ceiling.
-#
-# ForEachSport (the outer, per-sport Map) stays INLINE, with its own
-# MaxConcurrency pinned to 1. training_vcpu_budget_fraction
-# (locals-training-compute.tf) is sized as a fraction of the whole
-# account's Fargate quota, assuming only one sport's TrainAllTargets Map
-# spends it at a time; serializing sports here is what enforces that
-# shared limit.
 resource "aws_sfn_state_machine" "training_orchestrator" {
   name     = "${var.project}-training-orchestrator"
   role_arn = aws_iam_role.stepfunctions_orchestrator.arn
   type     = "STANDARD"
 
-  # Waits for IAM/CloudWatch policy propagation -- see
-  # iam-stepfunctions-orchestrator.tf's time_sleep.iam_propagation.
   depends_on = [time_sleep.iam_propagation]
 
   logging_configuration {
@@ -45,7 +81,7 @@ resource "aws_sfn_state_machine" "training_orchestrator" {
 
   definition = <<EOF
 {
-  "Comment": "Scans the sport registry for in-season sports, rebuilds each one's training dataset, then trains every one of its registered targets.",
+  "Comment": "Scans the sport registry, rebuilds each in-season sport's training dataset on Fargate on-demand, then trains every target on EC2 (Spot-primary, on-demand fallback). Monthly, via scheduler-training-orchestrator.tf.",
   "StartAt": "ScanSportRegistry",
   "States": {
     "ScanSportRegistry": {
@@ -59,8 +95,8 @@ resource "aws_sfn_state_machine" "training_orchestrator" {
     "ForEachSport": {
       "Type": "Map",
       "ItemsPath": "$.Items",
-      "MaxConcurrency": 1,
-      "Comment": "Pinned to 1, not left at a higher default -- see this file's top comment. training_vcpu_budget_fraction assumes only one sport's TrainAllTargets Map spends it at a time; running sports concurrently here would let each independently spend the full budget with no cross-sport coordination. local.feature_engineering_max_concurrency (locals-feature-engineering-compute.tf) already computes the real on-demand headroom available if this is ever raised -- unused today since this stays at 1.",
+      "MaxConcurrency": ${local.training_sport_concurrency},
+      "Comment": "Not pinned to 1 -- locals-training-compute.tf divides the EC2 vCPU budget by this same concurrency before dividing by per-task vCPU, so sports running at once can't jointly exceed it.",
       "ItemProcessor": {
         "ProcessorConfig": {
           "Mode": "INLINE"
@@ -70,7 +106,6 @@ resource "aws_sfn_state_machine" "training_orchestrator" {
           "CheckSeason": {
             "Type": "Task",
             "Resource": "arn:aws:states:::lambda:invoke",
-            "Comment": "season_start/season_end are year-agnostic \"MM-DD\" strings (dynamodb-sport-registry.tf) -- season-gate (lambda-season-gate.tf) recomputes membership fresh every run rather than reading a stored on/off bit.",
             "Parameters": {
               "FunctionName": "${aws_lambda_function.season_gate.function_name}",
               "Payload": {
@@ -108,7 +143,7 @@ resource "aws_sfn_state_machine" "training_orchestrator" {
           "RunFeatureEngineering": {
             "Type": "Task",
             "Resource": "arn:aws:states:::ecs:runTask.sync",
-            "Comment": "TRAINING_LOOKBACK_SEASONS (dynamodb-sport-registry.tf) bounds how much history build_dataset.py reads per sport, via $.training_lookback_seasons.N below -- every current registry item sets it, but a future sport's item must too, or this JSONPath reference fails at runtime the same way the RunTrainingTask Catch below already warns about for a missing field.",
+            "Comment": "Stays on Fargate on-demand -- feature-engineering's own vCPU footprint is small and was never the reason sports were serialized; only TrainAllTargets below runs on EC2.",
             "Parameters": {
               "Cluster": "${aws_ecs_cluster.main.arn}",
               "TaskDefinition.$": "States.Format('${var.project}-{}-feature-engineering', $.sport.S)",
@@ -146,7 +181,6 @@ resource "aws_sfn_state_machine" "training_orchestrator" {
           },
           "FeatureEngineeringFailed": {
             "Type": "Pass",
-            "Comment": "Skip training entirely for this sport this run -- training against a dataset feature engineering failed to rebuild would train on stale or partial data.",
             "End": true
           },
           "TrainAllTargets": {
@@ -154,7 +188,6 @@ resource "aws_sfn_state_machine" "training_orchestrator" {
             "ItemsPath": "$.training_targets.L",
             "MaxConcurrency": ${local.training_max_concurrency},
             "ToleratedFailurePercentage": 100,
-            "Comment": "Distributed Map defaults ToleratedFailurePercentage to 0 -- undocumented here until a real run showed it -- meaning any single target's unhandled failure aborted every other in-flight/pending target in the same sport's cycle, directly contradicting TrainingTaskFailed's own stated design (one target's failure shouldn't block the rest, each target versions independently). Set to 100 so only RunTrainingTaskOnDemand's own Catch (TrainingTaskFailed) governs a genuinely-exhausted target; the Map itself never gates on iteration failures.",
             "ItemSelector": {
               "sport.$": "$.sport.S",
               "target.$": "$$.Map.Item.Value"
@@ -169,25 +202,25 @@ resource "aws_sfn_state_machine" "training_orchestrator" {
                 "RunTrainingTask": {
                   "Type": "Task",
                   "Resource": "arn:aws:states:::ecs:runTask.sync",
-                  "Comment": "Fargate Spot (~68% cheaper than on-demand) -- library/ml/backtest.py's run_backtest now promotes each tournament candidate the moment it beats what's live, specifically so a Spot reclaim mid-run doesn't lose the whole training run's progress, just whatever candidate was actively fitting. TRAINING_RUN_ID (below, $$.Execution.Name -- not .Id, which is the full execution ARN and an uglier S3 key for no benefit) stays identical across a Retry attempt and the Catch-driven RunTrainingTaskOnDemand fallback, since both stay within this one Step Functions execution -- run_backtest uses it to key a resumable-progress breadcrumb in S3 (training_common.save_run_progress), so a relaunched attempt skips whichever candidates an earlier attempt already settled instead of redoing them. Retry absorbs a transient reclaim; if it keeps failing, the Catch below falls through to RunTrainingTaskOnDemand (guaranteed on-demand Fargate) rather than giving up on this target for the month.",
+                  "Comment": "Same TRAINING_RUN_ID/resumability mechanism every training task uses (library/ml/training_common.py) -- only the CapacityProviderStrategy differs from the on-demand fallback below.",
                   "Parameters": {
                     "Cluster": "${aws_ecs_cluster.main.arn}",
                     "TaskDefinition.$": "States.Format('${var.project}-{}-{}', $.sport, $.target.M.task_definition_suffix.S)",
                     "CapacityProviderStrategy": [
                       {
-                        "CapacityProvider": "FARGATE_SPOT",
+                        "CapacityProvider": "${aws_ecs_capacity_provider.ec2_training_spot.name}",
                         "Weight": 1
                       }
                     ],
                     "PropagateTags": "TASK_DEFINITION",
                     "NetworkConfiguration": {
                       "AwsvpcConfiguration": {
-                        "Subnets": ["${aws_subnet.public_1.id}", "${aws_subnet.public_2.id}", "${aws_subnet.public_3.id}"],
-                        "SecurityGroups": ["${aws_security_group.fargate_internet_egress.id}"],
-                        "AssignPublicIp": "ENABLED"
+                        "Subnets": ["${aws_subnet.private_a.id}", "${aws_subnet.private_b.id}", "${aws_subnet.private_c.id}"],
+                        "SecurityGroups": ["${aws_security_group.fargate_internet_egress.id}"]
                       }
                     },
                     "Overrides": {
+                      "Memory": "61440",
                       "ContainerOverrides": [
                         {
                           "Name.$": "$.target.M.container_name.S",
@@ -208,7 +241,6 @@ resource "aws_sfn_state_machine" "training_orchestrator" {
                   "Retry": [
                     {
                       "ErrorEquals": ["States.ALL"],
-                      "Comment": "Absorbs a transient Spot reclaim -- a genuine failure (a real bug in the training script) just burns these 2 retries before still reaching the Catch below, same eventual outcome as no retry at all.",
                       "MaxAttempts": 2,
                       "IntervalSeconds": 30,
                       "BackoffRate": 2.0
@@ -217,7 +249,6 @@ resource "aws_sfn_state_machine" "training_orchestrator" {
                   "Catch": [
                     {
                       "ErrorEquals": ["States.ALL"],
-                      "Comment": "ResultPath matters here -- omitting it (the original bug, found live 2026-08-22 via a real ncaambb run: player-prop-assists OOM'd on Spot, then its fallback below crashed on 'JsonPath argument for the field $.sport could not be found') defaults to $, replacing the whole state input with just {Error, Cause} and losing $.sport/$.target that RunTrainingTaskOnDemand's own State.Format(...) calls need. Scoping the error under $.spot_failure keeps the original input intact alongside it.",
                       "ResultPath": "$.spot_failure",
                       "Next": "RunTrainingTaskOnDemand"
                     }
@@ -227,20 +258,24 @@ resource "aws_sfn_state_machine" "training_orchestrator" {
                 "RunTrainingTaskOnDemand": {
                   "Type": "Task",
                   "Resource": "arn:aws:states:::ecs:runTask.sync",
-                  "Comment": "Fallback after RunTrainingTask's own Spot attempts were all reclaimed or failed -- guaranteed on-demand capacity, no further fallback after this one. Not budgeted against training_max_concurrency's Spot-sized vCPU math (locals-training-compute.tf) -- a rare path, and the worst case if many targets fall back at once is some of THESE on-demand launches failing on capacity, not a wider outage.",
                   "Parameters": {
                     "Cluster": "${aws_ecs_cluster.main.arn}",
                     "TaskDefinition.$": "States.Format('${var.project}-{}-{}', $.sport, $.target.M.task_definition_suffix.S)",
-                    "LaunchType": "FARGATE",
+                    "CapacityProviderStrategy": [
+                      {
+                        "CapacityProvider": "${aws_ecs_capacity_provider.ec2_training_ondemand.name}",
+                        "Weight": 1
+                      }
+                    ],
                     "PropagateTags": "TASK_DEFINITION",
                     "NetworkConfiguration": {
                       "AwsvpcConfiguration": {
-                        "Subnets": ["${aws_subnet.public_1.id}", "${aws_subnet.public_2.id}", "${aws_subnet.public_3.id}"],
-                        "SecurityGroups": ["${aws_security_group.fargate_internet_egress.id}"],
-                        "AssignPublicIp": "ENABLED"
+                        "Subnets": ["${aws_subnet.private_a.id}", "${aws_subnet.private_b.id}", "${aws_subnet.private_c.id}"],
+                        "SecurityGroups": ["${aws_security_group.fargate_internet_egress.id}"]
                       }
                     },
                     "Overrides": {
+                      "Memory": "61440",
                       "ContainerOverrides": [
                         {
                           "Name.$": "$.target.M.container_name.S",
@@ -268,7 +303,6 @@ resource "aws_sfn_state_machine" "training_orchestrator" {
                 },
                 "TrainingTaskFailed": {
                   "Type": "Pass",
-                  "Comment": "One target's training failure doesn't block the rest of this sport's targets -- each target is independently versioned (library/ml/training_common.py), so a failed run here just means this cycle's retrain didn't happen for this one target.",
                   "End": true
                 }
               }
@@ -277,6 +311,47 @@ resource "aws_sfn_state_machine" "training_orchestrator" {
           }
         }
       },
+      "Next": "ScaleDownTrainingSpotCapacity"
+    },
+    "ScaleDownTrainingSpotCapacity": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::aws-sdk:autoscaling:setDesiredCapacity",
+      "Comment": "Explicitly scales both ASGs back to 0 the moment every sport's ForEachSport iteration finishes, rather than waiting on ECS managed_scaling's own reactive scale-in -- a real run left instances sitting InService and billing for 30-40+ minutes after the execution itself had already SUCCEEDED, since nothing tells the ASG the demand is gone until its own target-tracking policy notices on its own (deliberately conservative, slower to scale in than out, and not tunable via the capacity provider's own managed_scaling arguments). Best-effort: a failure here doesn't fail the orchestrator run itself, same tolerant pattern TrainingTaskFailed above already uses. lambda-ec2-training-reaper.tf is the independent backstop for this same problem when a run is stopped manually instead of finishing normally -- this state alone can't cover that case, since a manually-stopped execution runs no further states at all. See iam-stepfunctions-orchestrator.tf for the autoscaling:SetDesiredCapacity grant this needs.",
+      "Parameters": {
+        "AutoScalingGroupName": "${aws_autoscaling_group.ec2_training_spot.name}",
+        "DesiredCapacity": 0,
+        "HonorCooldown": false
+      },
+      "ResultPath": null,
+      "Catch": [
+        {
+          "ErrorEquals": ["States.ALL"],
+          "ResultPath": "$.scale_down_spot_error",
+          "Next": "ScaleDownTrainingOnDemandCapacity"
+        }
+      ],
+      "Next": "ScaleDownTrainingOnDemandCapacity"
+    },
+    "ScaleDownTrainingOnDemandCapacity": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::aws-sdk:autoscaling:setDesiredCapacity",
+      "Parameters": {
+        "AutoScalingGroupName": "${aws_autoscaling_group.ec2_training_ondemand.name}",
+        "DesiredCapacity": 0,
+        "HonorCooldown": false
+      },
+      "ResultPath": null,
+      "Catch": [
+        {
+          "ErrorEquals": ["States.ALL"],
+          "ResultPath": "$.scale_down_ondemand_error",
+          "Next": "TrainingOrchestratorDone"
+        }
+      ],
+      "Next": "TrainingOrchestratorDone"
+    },
+    "TrainingOrchestratorDone": {
+      "Type": "Pass",
       "End": true
     }
   }
@@ -285,6 +360,6 @@ EOF
 
   tags = merge(local.common_tags, {
     Sport     = "shared"
-    Component = "orchestration"
+    Component = "training"
   })
 }

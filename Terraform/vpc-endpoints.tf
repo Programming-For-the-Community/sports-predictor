@@ -5,8 +5,8 @@
 # architecture (see docs/ARCHITECTURE.md).
 #
 # Private route table only -- the EC2 training track's own task traffic
-# (sfn-training-orchestrator-ec2.tf's RunTrainingTaskEc2Spot/OnDemand) runs
-# its NetworkConfiguration in the PRIVATE subnets specifically so it reaches
+# (sfn-training-orchestrator.tf's RunTrainingTask/RunTrainingTaskOnDemand)
+# runs its NetworkConfiguration in the PRIVATE subnets specifically so it reaches
 # S3/DynamoDB through these endpoints, not a public route -- see that file's
 # own comment. The EC2 hosts themselves (ec2-training-asg.tf) still launch
 # into the public subnets (needed for ECR pull/agent registration, the same

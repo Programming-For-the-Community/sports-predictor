@@ -184,21 +184,14 @@ variable "third_party_api_key_secret_arn" {
 # the cpu/memory on every nfl-train-*-model ECS task definition.
 
 variable "fargate_account_vcpu_limit" {
-  description = "Account-wide Fargate on-demand concurrent vCPU quota (as shown in the Service Quotas console for 'Fargate On-Demand vCPU count'; CI supplies the real value via FARGATE_VCPU_LIMIT, tf_install.yml). Consulted for both feature-engineering (local.feature_engineering_max_concurrency, locals-feature-engineering-compute.tf) and training's own on-demand fallback share -- RunTrainingTask itself launches on FARGATE_SPOT (see fargate_spot_account_vcpu_limit below), but its Catch can fall through to RunTrainingTaskOnDemand, on-demand, within that same concurrent slot"
+  description = "Account-wide Fargate on-demand concurrent vCPU quota (as shown in the Service Quotas console for 'Fargate On-Demand vCPU count'; CI supplies the real value via FARGATE_VCPU_LIMIT, tf_install.yml). Consulted by feature-engineering (local.feature_engineering_max_concurrency, locals-feature-engineering-compute.tf), which is the only thing still running on Fargate for the training pipeline -- training itself moved fully to EC2 (ec2-training-asg.tf), so this quota is no longer shared with training's own on-demand fallback"
   type        = number
   default     = 250
   nullable    = false
 }
 
-variable "fargate_spot_account_vcpu_limit" {
-  description = "Account-wide Fargate SPOT concurrent vCPU quota (Service Quotas console, 'Fargate Spot vCPU count'; CI supplies the real value via FARGATE_SPOT_VCPU_LIMIT, tf_install.yml) -- a separate quota from fargate_account_vcpu_limit's on-demand one, and the one that actually constrains RunTrainingTask's CapacityProviderStrategy. Raise this default only once a Service Quotas increase is actually granted, not before, so local.training_max_concurrency never asks ECS RunTask for more concurrent Spot tasks than the account can actually satisfy"
-  type        = number
-  default     = 64
-  nullable    = false
-}
-
 variable "training_vcpu_budget_fraction" {
-  description = "Max fraction of both fargate_account_vcpu_limit and fargate_spot_account_vcpu_limit the training orchestrator's concurrent ECS tasks may consume at once (CI supplies the real value via VCPU_BUDGET_FRACTION, tf_install.yml). On the on-demand side this leaves the rest of the quota free for feature-engineering, backfill, and ingest tasks that can run at the same time; on the Spot side, nothing else in this project shares that quota, so the fraction instead lowers target concurrency to reduce how often a Spot reclaim interrupts an in-flight training candidate"
+  description = "Max fraction of ec2_spot_account_vcpu_limit the training orchestrator's concurrent Spot ECS tasks may consume at once (CI supplies the real value via VCPU_BUDGET_FRACTION, tf_install.yml). Nothing else in this project shares that quota, so the fraction lowers target concurrency to reduce how often a Spot reclaim interrupts an in-flight training candidate"
   type        = number
   default     = 0.75 # 3/4
   nullable    = false
@@ -228,41 +221,30 @@ variable "training_task_memory_per_vcpu_mib" {
   nullable    = false
 }
 
-# ── EC2 training track (locals-training-compute-ec2.tf) ──────────────────────
-# A second, parallel training path (sfn-training-orchestrator-ec2.tf) that
-# runs ECS-on-EC2 instead of Fargate -- built to be A/B-tested against the
-# existing Fargate path, not to replace it; Fargate's own vCPU-limit
-# variables above are untouched. Unlike Fargate (a dedicated, comparatively
-# small per-region vCPU quota), EC2 Standard-instance vCPU quotas are
-# assumed unconstrained for this project's scale -- defaults below reflect
-# that (no practical limit, all 6 sports free to run at once), not a
-# conservative placeholder. The variables stay in place so a real Service
-# Quotas value can still be substituted if that assumption ever proves
-# wrong.
-
-variable "ec2_ondemand_account_vcpu_limit" {
-  description = "Account-wide EC2 on-demand Standard-instance-family concurrent vCPU quota (Service Quotas console, 'Running On-Demand Standard (A, C, D, H, I, M, R, T, Z) instances'; CI supplies the real value via EC2_ONDEMAND_VCPU_LIMIT, tf_install.yml). Bounds ec2_training_ondemand's fallback capacity provider -- defaulted high since this project assumes no practical EC2 on-demand vCPU constraint; lower it if a real Service Quotas check ever says otherwise"
-  type        = number
-  default     = 100000
-  nullable    = false
-}
+# ── EC2 training compute (locals-training-compute.tf) ────────────────────────
+# EC2 is the sole training compute path (ec2-training-asg.tf, sfn-training-
+# orchestrator.tf) -- Fargate training was retired once EC2 held up on a
+# real canary run. Only the Spot quota is tracked here -- the on-demand
+# fallback path is deliberately small and fixed (ec2-training-asg.tf's own
+# on-demand ASG hardcodes max_size = 1, independent of any account quota),
+# not something local.training_vcpu_budget needs to share or be bounded by.
 
 variable "ec2_spot_account_vcpu_limit" {
-  description = "Account-wide EC2 Spot Standard-instance-family concurrent vCPU quota (Service Quotas console, 'All Standard (A, C, D, H, I, M, R, T, Z) Spot Instance Requests'; CI supplies the real value via EC2_SPOT_VCPU_LIMIT, tf_install.yml). Defaulted high, same as ec2_ondemand_account_vcpu_limit above -- EC2's Spot quota is assumed to comfortably exceed Fargate Spot's own dedicated 64-vCPU quota (fargate_spot_account_vcpu_limit), the whole reason a second track is worth building"
+  description = "Account-wide EC2 Spot Standard-instance-family concurrent vCPU quota (Service Quotas console, 'All Standard (A, C, D, H, I, M, R, T, Z) Spot Instance Requests'; CI supplies the real value via EC2_SPOT_VCPU_LIMIT, tf_install.yml). Confirmed via this account's own real Service Quotas data (2026-09-02) and the AWS/Usage vCPU-denominated usage metric tied to it -- default reflects that real value, not a placeholder"
   type        = number
-  default     = 100000
+  default     = 256
   nullable    = false
 }
 
-variable "training_ec2_sport_concurrency" {
-  description = "How many sports' ForEachSport iterations may run at once on the EC2 track (sfn-training-orchestrator-ec2.tf) -- unlike the Fargate orchestrator, not hardcoded to 1, since EC2 vCPU quota is assumed unconstrained here (see the section comment above). Deliberately NOT capped by local.feature_engineering_max_concurrency (locals-feature-engineering-compute.tf, on-demand Fargate headroom) -- that's a real constraint on the Fargate compute RunFeatureEngineering itself uses, but TrainAllTargets (what this figure actually sizes) runs on a totally separate EC2 capacity pool, so the two concurrency limits are kept independent rather than one Fargate quota bounding EC2's own parallelism. Defaulted to 6 -- all 6 sports free to train concurrently, with no artificial cap of its own"
+variable "training_sport_concurrency" {
+  description = "How many sports' ForEachSport iterations may run at once (sfn-training-orchestrator.tf) -- not hardcoded to 1, since EC2 vCPU quota is assumed unconstrained here (see the section comment above). Deliberately NOT capped by local.feature_engineering_max_concurrency (locals-feature-engineering-compute.tf, on-demand Fargate headroom) -- that's a real constraint on the Fargate compute RunFeatureEngineering itself uses, but TrainAllTargets (what this figure actually sizes) runs on a totally separate EC2 capacity pool, so the two concurrency limits are kept independent rather than one Fargate quota bounding EC2's own parallelism. Defaulted to 6 -- all 6 sports free to train concurrently, with no artificial cap of its own"
   type        = number
   default     = 6
   nullable    = false
 
   validation {
-    condition     = var.training_ec2_sport_concurrency >= 1
-    error_message = "training_ec2_sport_concurrency must be at least 1."
+    condition     = var.training_sport_concurrency >= 1
+    error_message = "training_sport_concurrency must be at least 1."
   }
 }
 

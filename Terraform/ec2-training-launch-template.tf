@@ -27,8 +27,8 @@ resource "aws_launch_template" "ec2_training" {
   # auto-assign a public IP (map_public_ip_on_launch = false, subnet-
   # public.tf) -- Fargate's own training tasks cover the equivalent gap
   # with AssignPublicIp on the task's own ENI, which isn't a valid
-  # parameter for EC2 launch type (see sfn-training-orchestrator-ec2.tf's
-  # own comment on RunTrainingTaskEc2Spot/OnDemand -- their real first
+  # parameter for EC2 launch type (see sfn-training-orchestrator.tf's
+  # own comment on RunTrainingTask/RunTrainingTaskOnDemand -- their real first
   # run failed 100% of its targets on exactly this before this was added).
   network_interfaces {
     device_index                = 0
@@ -65,13 +65,13 @@ resource "aws_launch_template" "ec2_training" {
     resource_type = "instance"
     tags = merge(local.common_tags, {
       Sport     = "shared"
-      Component = "training-ec2-canary"
+      Component = "training"
     })
   }
 
   tags = merge(local.common_tags, {
     Sport     = "shared"
-    Component = "training-ec2-canary"
+    Component = "training"
   })
 
   lifecycle {

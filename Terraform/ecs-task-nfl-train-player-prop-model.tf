@@ -24,7 +24,7 @@ resource "aws_cloudwatch_log_group" "nfl_train_player_prop_model" {
 # Uses the shared aws_iam_role.ecs_pipeline (iam-ecs-pipeline.tf).
 resource "aws_ecs_task_definition" "nfl_train_player_prop_model" {
   family                   = "${var.project}-nfl-train-player-prop-model"
-  requires_compatibilities = ["FARGATE", "EC2"] # EC2 for the parallel training track (sfn-training-orchestrator-ec2.tf); unchanged for Fargate
+  requires_compatibilities = ["EC2"] # training is EC2-only now (sfn-training-orchestrator.tf); Fargate training was retired
   network_mode             = "awsvpc"
   cpu                      = local.training_task_cpu
   memory                   = local.training_task_memory

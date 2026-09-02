@@ -167,6 +167,7 @@ jobs:
     secrets: inherit
     with:
       season_gate_function_name: ${{ needs.infra.outputs.season_gate_function_name }}
+      ec2_training_reaper_function_name: ${{ needs.infra.outputs.ec2_training_reaper_function_name }}
 
   nfl_predict_deploy:
     name: NFL predict (deploy)

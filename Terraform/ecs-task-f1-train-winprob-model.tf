@@ -31,7 +31,7 @@ resource "aws_cloudwatch_log_group" "f1_train_winprob_model" {
 # sizing is, since every sport's training task shares one fixed budget.
 resource "aws_ecs_task_definition" "f1_train_winprob_model" {
   family                   = "${var.project}-f1-train-winprob-model"
-  requires_compatibilities = ["FARGATE", "EC2"] # EC2 for the parallel training track (sfn-training-orchestrator-ec2.tf); unchanged for Fargate
+  requires_compatibilities = ["EC2"] # training is EC2-only now (sfn-training-orchestrator.tf); Fargate training was retired
   network_mode             = "awsvpc"
   cpu                      = local.training_task_cpu
   memory                   = local.training_task_memory

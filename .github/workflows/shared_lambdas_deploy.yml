@@ -18,6 +18,11 @@ on:
         required: false
         type: string
         default: 'sports-predictor-cloudwatch-geo-widget'
+      ec2_training_reaper_function_name:
+        description: 'ec2-training-reaper Lambda function name (from Terraform output ec2_training_reaper_function_name)'
+        required: false
+        type: string
+        default: 'sports-predictor-ec2-training-reaper'
 
 permissions:
   id-token: write
@@ -56,3 +61,18 @@ jobs:
       function_name: ${{ inputs.cloudwatch_geo_widget_function_name || 'sports-predictor-cloudwatch-geo-widget' }}
       handler_dir: 'Source/aws-lambdas/shared/cloudwatch-geo-widget'
       extra_source_files: 'Source/aws-lambdas/shared/cloudwatch-geo-widget/boundaries.json'
+
+  test_ec2_training_reaper:
+    name: Run ec2-training-reaper tests
+    uses: ./.github/workflows/run_python_tests.yml
+    with:
+      test_path: 'Source/tests/aws-lambdas/shared/test_ec2_training_reaper.py'
+
+  deploy_ec2_training_reaper:
+    name: Deploy ec2-training-reaper Lambda
+    needs: test_ec2_training_reaper
+    uses: ./.github/workflows/python_lambda_build.yml
+    secrets: inherit
+    with:
+      function_name: ${{ inputs.ec2_training_reaper_function_name || 'sports-predictor-ec2-training-reaper' }}
+      handler_dir: 'Source/aws-lambdas/shared/ec2-training-reaper'

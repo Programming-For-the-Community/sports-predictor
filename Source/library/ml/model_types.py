@@ -34,6 +34,7 @@ import xgboost as xgb
 from sklearn.ensemble import RandomForestClassifier, RandomForestRegressor
 from sklearn.impute import SimpleImputer
 from sklearn.linear_model import ElasticNet, LogisticRegression
+from sklearn.metrics import log_loss, make_scorer
 from sklearn.model_selection import GridSearchCV, RandomizedSearchCV, TimeSeriesSplit
 from sklearn.neural_network import MLPClassifier, MLPRegressor
 from sklearn.pipeline import Pipeline
@@ -69,6 +70,23 @@ _EARLY_STOP_PATIENCE_BATCHES = 4
 # enough to still count that as real, not just floating-point/CV noise.
 _EARLY_STOP_MIN_RELATIVE_IMPROVEMENT = 0.0005
 
+# scikit-learn's own "neg_log_loss" scoring string infers its label set
+# from each individual CV fold's own y_true -- fine for a normal-sized
+# dataset, but a fold from a genuinely tiny one (see _time_series_splits'
+# own docstring: PGA's cup-win-probability has only 6 training rows total)
+# can easily land on a single class, and sklearn's default log_loss raises
+# rather than guessing the other label ("ValueError: y_true contains only
+# one label (0)... provide the list of all expected class labels
+# explicitly" -- real crash 2026-09-02, PGA cup-win-probability, a
+# TimeSeriesSplit validation fold degenerate even after
+# _time_series_splits' own clamp already fixed the earlier, different
+# crash on this same dataset). Passing labels=[0, 1] explicitly is exactly
+# what sklearn's own error message asks for. Every classifier adapter
+# below is binary, so this is safe everywhere it's used, not just for PGA
+# cup specifically -- any other sport/target with a similarly small or
+# rare dataset would hit the identical crash otherwise.
+_BINARY_LOG_LOSS_SCORER = make_scorer(log_loss, response_method="predict_proba", greater_is_better=False, labels=[0, 1])
+
 
 def _time_series_splits(n_splits: int, n_samples: int) -> int:
     """TimeSeriesSplit requires n_samples > n_splits. A shared constant
@@ -95,7 +113,7 @@ def _time_series_splits(n_splits: int, n_samples: int) -> int:
 
 def _run_randomized_search_with_early_stopping(
     estimator, param_distributions: dict, X: pd.DataFrame, y: pd.Series,
-    scoring: str, cv, max_iter: int, random_state: int, n_jobs: int, verbose: int, label: str,
+    scoring, cv, max_iter: int, random_state: int, n_jobs: int, verbose: int, label: str,
 ) -> types.SimpleNamespace:
     """Runs RandomizedSearchCV in batches of roughly _EARLY_STOP_BATCH_
     FRACTION * max_iter iterations, instead of one n_iter=max_iter call,
@@ -266,7 +284,7 @@ class XGBoostClassifierAdapter(XGBoostAdapter):
             xgb.XGBClassifier(objective="binary:logistic", eval_metric="logloss", n_jobs=1),
             param_distributions=_XGB_PARAM_DISTRIBUTIONS,
             X=X_train, y=y_train,
-            scoring="neg_log_loss",
+            scoring=_BINARY_LOG_LOSS_SCORER,
             cv=TimeSeriesSplit(n_splits=_time_series_splits(_XGB_CV_SPLITS, len(X_train))),
             max_iter=_XGB_SEARCH_ITERATIONS,
             random_state=_XGB_RANDOM_STATE,
@@ -359,7 +377,7 @@ class LogisticRegressionAdapter(_JoblibSerializedAdapter):
         search = GridSearchCV(
             self._build_pipeline(),
             param_grid=_LOGISTIC_PARAM_GRID,
-            scoring="neg_log_loss",
+            scoring=_BINARY_LOG_LOSS_SCORER,
             cv=TimeSeriesSplit(n_splits=_time_series_splits(_LOGISTIC_CV_SPLITS, len(X_train))),
             verbose=10,
             n_jobs=-1,
@@ -472,7 +490,7 @@ _RF_SEARCH_N_JOBS = _RF_CV_SPLITS
 class _RandomForestAdapterBase(_JoblibSerializedAdapter):
     artifact_filename = "model.joblib"
     _estimator_cls: type = None
-    _scoring: str = None
+    _scoring = None
 
     def _build_pipeline(self) -> Pipeline:
         # No StandardScaler -- trees split on raw thresholds. SimpleImputer
@@ -513,7 +531,7 @@ class _RandomForestAdapterBase(_JoblibSerializedAdapter):
 class RandomForestClassifierAdapter(_RandomForestAdapterBase):
     algorithm = "random_forest_classifier"
     _estimator_cls = RandomForestClassifier
-    _scoring = "neg_log_loss"
+    _scoring = _BINARY_LOG_LOSS_SCORER
 
     def predict(self, estimator: Pipeline, X: pd.DataFrame) -> np.ndarray:
         return estimator.predict_proba(X)[:, 1]
@@ -544,7 +562,7 @@ _MLP_RANDOM_STATE = 42
 class _MLPAdapterBase(_JoblibSerializedAdapter):
     artifact_filename = "model.joblib"
     _estimator_cls: type = None
-    _scoring: str = None
+    _scoring = None
 
     def _build_pipeline(self) -> Pipeline:
         return Pipeline([
@@ -583,7 +601,7 @@ class _MLPAdapterBase(_JoblibSerializedAdapter):
 class MLPClassifierAdapter(_MLPAdapterBase):
     algorithm = "mlp_classifier"
     _estimator_cls = MLPClassifier
-    _scoring = "neg_log_loss"
+    _scoring = _BINARY_LOG_LOSS_SCORER
 
     def predict(self, estimator: Pipeline, X: pd.DataFrame) -> np.ndarray:
         return estimator.predict_proba(X)[:, 1]
@@ -639,7 +657,7 @@ class LightGBMClassifierAdapter(_JoblibSerializedAdapter):
             LGBMClassifier(objective="binary", n_jobs=1, verbosity=-1, random_state=_LGBM_RANDOM_STATE),
             param_distributions=_LGBM_PARAM_DISTRIBUTIONS,
             X=X_train, y=y_train,
-            scoring="neg_log_loss",
+            scoring=_BINARY_LOG_LOSS_SCORER,
             cv=TimeSeriesSplit(n_splits=_time_series_splits(_LGBM_CV_SPLITS, len(X_train))),
             max_iter=_LGBM_SEARCH_ITERATIONS,
             random_state=_LGBM_RANDOM_STATE,

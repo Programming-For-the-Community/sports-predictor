@@ -1,7 +1,7 @@
 # EC2 training track's compute -- two ASGs (Spot-primary, on-demand
 # fallback) on the same launch template (ec2-training-launch-template.tf),
 # each wrapped in its own ECS capacity provider so
-# sfn-training-orchestrator-ec2.tf can launch tasks against them exactly
+# sfn-training-orchestrator.tf can launch tasks against them exactly
 # the way sfn-training-orchestrator.tf already launches against
 # FARGATE_SPOT/FARGATE -- same ecs:runTask.sync integration, same
 # Retry/Catch shape, just a different CapacityProviderStrategy.
@@ -26,10 +26,14 @@ locals {
 }
 
 resource "aws_autoscaling_group" "ec2_training_spot" {
-  name                  = "${var.project}-ec2-training-spot"
-  vpc_zone_identifier   = [aws_subnet.public_1.id, aws_subnet.public_2.id, aws_subnet.public_3.id]
-  min_size              = 0
-  max_size              = local.ec2_training_target_concurrency
+  name                = "${var.project}-ec2-training-spot"
+  vpc_zone_identifier = [aws_subnet.public_1.id, aws_subnet.public_2.id, aws_subnet.public_3.id]
+  min_size            = 0
+  # The AGGREGATE ceiling (locals-training-compute.tf), not
+  # training_max_concurrency -- that's one sport's own 1/N share of the
+  # budget, but this one fleet is shared by every sport running at once,
+  # so it needs headroom for all of them combined, not just one.
+  max_size              = local.training_max_instances
   protect_from_scale_in = true # required for managed_termination_protection below
 
   mixed_instances_policy {
@@ -50,13 +54,22 @@ resource "aws_autoscaling_group" "ec2_training_spot" {
     instances_distribution {
       on_demand_base_capacity                  = 0
       on_demand_percentage_above_base_capacity = 0 # 100% Spot
-      spot_allocation_strategy                 = "capacity-optimized-prioritized"
+      # price-capacity-optimized (AWS's own current recommended default,
+      # since late 2023), not capacity-optimized-prioritized -- that
+      # strategy picks purely for lowest interruption risk and never
+      # considers price at all, confirmed picking m7a.4xlarge for 100% of
+      # a real run's instances while m6i.4xlarge's own real Spot price sat
+      # at roughly half of every other candidate's that same night. This
+      # still screens out genuinely volatile/high-interruption pools
+      # (unlike plain lowest-price, which doesn't), just no longer ignores
+      # price entirely the way the prior strategy did.
+      spot_allocation_strategy = "price-capacity-optimized"
     }
   }
 
   tag {
     key                 = "Component"
-    value               = "training-ec2-canary"
+    value               = "training"
     propagate_at_launch = true
   }
   tag {
@@ -83,7 +96,7 @@ resource "aws_autoscaling_group" "ec2_training_spot" {
 
 # Guaranteed on-demand fallback -- same relationship RunTrainingTaskOnDemand
 # already has to RunTrainingTask's Spot attempt. Not sized against
-# local.ec2_training_target_concurrency -- a rare path, same reasoning
+# local.training_max_concurrency -- a rare path, same reasoning
 # the Fargate on-demand fallback's own comment gives (sfn-training-
 # orchestrator.tf).
 resource "aws_autoscaling_group" "ec2_training_ondemand" {
@@ -116,7 +129,7 @@ resource "aws_autoscaling_group" "ec2_training_ondemand" {
 
   tag {
     key                 = "Component"
-    value               = "training-ec2-canary"
+    value               = "training"
     propagate_at_launch = true
   }
   tag {
@@ -158,7 +171,7 @@ resource "aws_ecs_capacity_provider" "ec2_training_spot" {
 
   tags = merge(local.common_tags, {
     Sport     = "shared"
-    Component = "training-ec2-canary"
+    Component = "training"
   })
 }
 
@@ -179,6 +192,6 @@ resource "aws_ecs_capacity_provider" "ec2_training_ondemand" {
 
   tags = merge(local.common_tags, {
     Sport     = "shared"
-    Component = "training-ec2-canary"
+    Component = "training"
   })
 }

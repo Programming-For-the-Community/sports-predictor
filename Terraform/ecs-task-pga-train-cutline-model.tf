@@ -17,7 +17,7 @@ resource "aws_cloudwatch_log_group" "pga_train_cutline_model" {
 # pattern NBA's own train-score-model task definition uses.
 resource "aws_ecs_task_definition" "pga_train_cutline_model" {
   family                   = "${var.project}-pga-train-cutline-model"
-  requires_compatibilities = ["FARGATE", "EC2"] # EC2 for the parallel training track (sfn-training-orchestrator-ec2.tf); unchanged for Fargate
+  requires_compatibilities = ["EC2"] # training is EC2-only now (sfn-training-orchestrator.tf); Fargate training was retired
   network_mode             = "awsvpc"
   cpu                      = local.training_task_cpu
   memory                   = local.training_task_memory

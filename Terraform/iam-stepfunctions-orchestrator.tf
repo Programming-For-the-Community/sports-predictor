@@ -81,16 +81,17 @@ data "aws_iam_policy_document" "stepfunctions_orchestrator_permissions" {
     ]
   }
 
-  # Same grant, for sfn-training-orchestrator-ec2.tf's own Distributed
-  # Map -- a separate statement (not a wildcard added to the one above)
-  # since it's a distinct state machine name, not a suffix/prefix variant
-  # of the Fargate one.
+  # sfn-training-orchestrator.tf's own ScaleDownTrainingSpotCapacity/
+  # ScaleDownTrainingOnDemandCapacity states -- explicit cleanup once the
+  # run finishes, rather than waiting on ECS managed_scaling's own slower,
+  # reactive scale-in (see that file's own comment on those two states).
+  # Scoped to the two specific EC2 training ASGs, not autoscaling:* broadly.
   statement {
-    sid     = "RunTrainingEc2DistributedMapChildren"
-    actions = ["states:StartExecution", "states:DescribeExecution", "states:StopExecution"]
+    sid     = "ScaleDownEc2TrainingCapacity"
+    actions = ["autoscaling:SetDesiredCapacity"]
     resources = [
-      "arn:aws:states:${var.region}:${var.account_id}:stateMachine:${var.project}-training-orchestrator-ec2",
-      "arn:aws:states:${var.region}:${var.account_id}:execution:${var.project}-training-orchestrator-ec2:*",
+      "arn:aws:autoscaling:${var.region}:${var.account_id}:autoScalingGroup:*:autoScalingGroupName/${var.project}-ec2-training-spot",
+      "arn:aws:autoscaling:${var.region}:${var.account_id}:autoScalingGroup:*:autoScalingGroupName/${var.project}-ec2-training-ondemand",
     ]
   }
 

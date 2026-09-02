@@ -1,12 +1,16 @@
-# Available on-demand Fargate vCPU headroom for feature-engineering tasks,
-# once training's own on-demand fallback share (local.training_vcpu_budget,
-# locals-training-compute.tf) is set aside.
+# Available on-demand Fargate vCPU headroom for feature-engineering tasks.
+# Training itself no longer shares this pool at all -- it moved fully to a
+# separate EC2 vCPU budget (locals-training-compute.tf) once Fargate
+# training was retired, so this local gets the full on-demand quota rather
+# than reserving a share away from it.
 #
-# ForEachSport's own MaxConcurrency (sfn-training-orchestrator.tf) is
-# pinned at 1, so at most one sport's feature-engineering task runs at
-# once regardless of this value.
+# ForEachSport's own MaxConcurrency (sfn-training-orchestrator.tf) is NOT
+# pinned to 1 -- up to local.training_sport_concurrency sports can run
+# RunFeatureEngineering at once, so feature_engineering_max_concurrency
+# below is a real, load-bearing cap on how many of those can actually get
+# Fargate capacity simultaneously, not just a formality.
 locals {
-  feature_engineering_vcpu_budget = var.fargate_account_vcpu_limit - floor(var.fargate_account_vcpu_limit * var.training_vcpu_budget_fraction)
+  feature_engineering_vcpu_budget = var.fargate_account_vcpu_limit
 
   # feature_engineering_task_cpu (variables.tf) is keyed by sport; take the
   # largest configured size so this stays a safe worst-case.

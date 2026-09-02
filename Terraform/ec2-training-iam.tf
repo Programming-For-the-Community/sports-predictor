@@ -23,7 +23,7 @@ resource "aws_iam_role" "ec2_training_instance" {
 
   tags = merge(local.common_tags, {
     Sport     = "shared"
-    Component = "training-ec2-canary"
+    Component = "training"
   })
 }
 
@@ -41,6 +41,6 @@ resource "aws_iam_instance_profile" "ec2_training_instance" {
 
   tags = merge(local.common_tags, {
     Sport     = "shared"
-    Component = "training-ec2-canary"
+    Component = "training"
   })
 }

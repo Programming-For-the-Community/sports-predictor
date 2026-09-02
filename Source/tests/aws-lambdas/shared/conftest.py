@@ -26,3 +26,4 @@ def _load_handler(module_name: str, relative_path: str) -> None:
 
 _load_handler("shared_season_gate", "aws-lambdas/shared/season-gate/handler.py")
 _load_handler("shared_cloudwatch_geo_widget", "aws-lambdas/shared/cloudwatch-geo-widget/handler.py")
+_load_handler("shared_ec2_training_reaper", "aws-lambdas/shared/ec2-training-reaper/handler.py")
