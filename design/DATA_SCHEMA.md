@@ -129,18 +129,18 @@ One row per event per model per version for event-level outcomes, or one row per
 
 ## Serving layer
 
-Three Lambdas sit behind API Gateway (`Terraform/api-gateway-nfl-predict.tf`, `api-gateway-nfl-live-scores.tf`), all authenticated by the same Cognito authorizer (see "Access control" in `ARCHITECTURE.md`). `predict` and `predict-read` are split for cold-start isolation — `predict-read` never imports the ML dependency chain, so its two routes stay light. Most predictions are computed live from current DynamoDB/S3 state on each request; `GET /nfl/season` is the one exception, serving a cached S3 object that `predict` recomputes weekly rather than per-request.
+Three Lambda types sit behind API Gateway per sport (`Terraform/api-gateway-{sport}-predict.tf`, `api-gateway-{sport}-live-scores.tf` — identical shape for all 6 sports), all authenticated by the same Cognito authorizer (see `docs/AWS_ARCHITECTURE.md`'s client-request-path diagram). `predict` and `predict-read` are split for cold-start isolation — `predict-read` never imports the ML dependency chain, so its two routes stay light and, unlike `predict`, isn't VPC-attached at all (see that same doc for why). Most predictions are computed live from current DynamoDB/S3 state on each request; `GET /{sport}/season` is the one exception, serving a cached S3 object that `predict` recomputes weekly rather than per-request.
 
 | Route | Lambda | Returns |
 |---|---|---|
-| `GET /nfl/predictions/events/{event_id}` | `predict` | Win probability, margin, home score, and away score for one matchup, from one shared live feature vector (`live_features.build_live_event_features`) scored against all four event-level models |
-| `GET /nfl/predictions/events/{event_id}/players/{entity_id}?stat=passing_yards` | `predict` | One player-prop prediction for one player in one game (`live_features.build_live_player_features`), scored against the `player-prop-<stat>` model matching the `stat` query parameter |
-| `GET /nfl/events?status=scheduled\|completed` | `predict-read` | Event list, filtered by status |
-| `GET /nfl/models` | `predict-read` | Current model versions |
-| `GET /nfl/season` | `predict-read` | Season-projection output, read from the S3 cache `predict` writes weekly (`scheduler-nfl-season-projection.tf`) |
-| `GET /nfl/live-scores` | `nfl_live_scores` | Cache-only live score refresh for events near kickoff or in progress; never writes to the Predictions table (see `ARCHITECTURE.md`'s Serving Layer note) |
+| `GET /{sport}/predictions/events/{event_id}` | `predict` | Event-level prediction(s) for one matchup/tournament/race, from one shared live feature vector scored against every event-level model that sport trains |
+| `GET /{sport}/predictions/events/{event_id}/players/{entity_id}?stat=passing_yards` | `predict` | One player-prop prediction for one player in one event (head-to-head sports only), scored against the `player-prop-<stat>` model matching the `stat` query parameter |
+| `GET /{sport}/events?status=scheduled\|completed` | `predict-read` | Event list, filtered by status |
+| `GET /{sport}/models` | `predict-read` | Current model versions |
+| `GET /{sport}/season` | `predict-read` | Season-projection output, read from the S3 cache `predict` writes weekly (`scheduler-{sport}-season-projection.tf`) |
+| `GET /{sport}/live-scores` | `{sport}-live-scores` | Cache-only live score refresh for events near kickoff or in progress; never writes to the Predictions table. Its own IAM role (`lambda_live_scores`), not `lambda_inference` — also not VPC-attached |
 
-`event_id`/`entity_id` are raw ESPN ids, translated internally to `SPORT#NFL#EVENT#...`/`SPORT#NFL#ENTITY#...` keys the same way every other NFL adapter does — callers never construct a DynamoDB key themselves. Packaged as a container image rather than the zip format `ingest`/`normalize` use (`Terraform/lambda-nfl-predict.tf`) — xgboost pulls in numpy and scipy, which alone measure ~225MB unzipped for this runtime, leaving almost no headroom under Lambda's 250MB unzipped zip limit; container Lambdas get a 10GB image limit instead.
+`event_id`/`entity_id` are raw source-system ids (ESPN, CFBD, Jolpica-F1, etc., depending on sport), translated internally to `SPORT#{SPORT}#EVENT#...`/`SPORT#{SPORT}#ENTITY#...` keys the same way every adapter does — callers never construct a DynamoDB key themselves. `predict` is packaged as a container image rather than the zip format `ingest`/`normalize`/`predict-read` use (`Terraform/lambda-{sport}-predict.tf`) — xgboost pulls in numpy and scipy, which alone measure ~225MB unzipped for this runtime, leaving almost no headroom under Lambda's 250MB unzipped zip limit; container Lambdas get a 10GB image limit instead.
 
 ## Sport registry table (live as of Phase 4)
 
@@ -150,7 +150,7 @@ Drives both orchestrator state machines' Map states (`Terraform/sfn-ingest-orche
 |---|---|---|
 | `sport_key` | `SPORT#NFL` | |
 | `sport` | `nfl` | |
-| `event_type` | `head_to_head` | `field` for PGA/F1 once Phase 5 adds them — not yet consumed by either orchestrator, which only handles head-to-head sports so far |
+| `event_type` | `head_to_head` | `field` for PGA/F1 — both orchestrators are event-type-agnostic (they resolve every sport's Lambda/ECS task purely by name, never branching on `event_type`), so this column is read by feature/serving code, not by either state machine |
 | `polling_cadence` | `daily` | Informational for now — both orchestrators' own EventBridge schedules run year-round at a fixed cadence (daily for ingest, monthly for training) and rely on `season_start`/`season_end` for season gating, not a per-sport cadence lookup. Revisit once a second sport's real cadence differs enough to need it |
 | `season_start` / `season_end` | `08-01` / `02-28` | Year-agnostic `MM-DD` bounds (inclusive) of this sport's season — the season on/off switch. Both orchestrators check `Terraform/lambda-season-gate.tf` (which calls `library.season.is_in_season`, handling the calendar-year wraparound most real seasons cross) against these before running anything for a sport. Deliberately static, Terraform-owned config, not a runtime-mutable flag: an earlier `active` boolean lived here instead, and every `terraform apply` silently reset it back to whatever this file declared, since `aws_dynamodb_table_item` manages a whole item as one opaque blob with no way to let something outside Terraform own just one field of it |
 | `training_targets` | see below | List of every model this sport trains, read by the training-orchestrator's inner Map state instead of what used to be Terraform `for_each` maps (`local.nfl_score_targets`, `local.nfl_player_prop_stats`) |

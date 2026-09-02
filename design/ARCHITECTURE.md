@@ -1,6 +1,6 @@
 ﻿# Architecture
 
-This document describes the system architecture in two stages: the single-sport pipeline you build first (Phase 1 of `PROJECT_PLAN.md`), and the multi-sport, registry-driven version it evolves into (Phase 4 onward). Both diagrams render natively in GitHub and in most Markdown viewers.
+This document describes the system architecture in two stages: the single-sport pipeline it started as, and the multi-sport, registry-driven version it evolved into and runs as today. Both diagrams render natively in GitHub and in most Markdown viewers.
 
 ## Single-sport architecture
 
@@ -67,7 +67,7 @@ flowchart TD
 
 ## Multi-sport architecture
 
-The orchestration half of this (sport registry + Step Functions Map states) is live as of Phase 4, ahead of the original Phase 2/3 sequencing — see `design/PROJECT_PLAN.md`'s Phase 4 note on why. **NFL, NCAA FB, NBA, and NCAA MBB are all registered and flowing through both orchestrators today** (NBA and NCAA MBB backends are both fully built — see their own onboarding memories for exact per-step status, e.g. NCAA MBB's frontend not being activated yet); the diagram below shows PGA Tour/F1 as the two adapters still pending (Phase 5/6, field-event schema not built yet).
+The orchestration half of this (sport registry + Step Functions Map states) was pulled forward ahead of the original per-sport rollout, once NFL alone had already produced 13 hand-cron EventBridge Scheduler resources -- generalizing after a second or third sport copied that pattern would have meant unwinding several sports' worth of deployed infra at once instead of a one-sport refactor. **All six sports — NFL, NCAA FB, NBA, NCAA MBB, PGA Tour, and F1 — are registered, active in the frontend, and flowing through both orchestrators today.** PGA Tour and F1's field-event schema is built and live, not pending. See `docs/AWS_ARCHITECTURE.md` for the current, as-built architecture (this document is the target-state design it evolved from) — notably, scheduled **training now runs entirely on an EC2 Spot/on-demand fleet, not Fargate** (feature engineering is still Fargate on-demand; only the training-tournament step itself moved to EC2, once a real canary run validated it as both cheaper and reliable).
 
 There are two orchestrator state machines, not one, split by how differently ingest and training actually need to run: `Terraform/sfn-ingest-orchestrator.tf` fans out to each active sport's ingest Lambda once daily, and `Terraform/sfn-training-orchestrator.tf` fans out to each active sport's feature-engineering task and then, per sport, an inner Map over that sport's own `training_targets` list (win-probability, score, and every player-prop model) once monthly — collapsing what used to be up to a dozen separate EventBridge Scheduler resources and hand-picked cron time slots per sport into two schedules total, regardless of how many sports or training targets exist. Both read the same sport registry table; onboarding a new sport means deploying its own Lambdas/ECS task definitions under the existing `<project>-<sport>-<stage>` naming convention and adding one registry row — nothing on this diagram or in either state machine's definition changes.
 

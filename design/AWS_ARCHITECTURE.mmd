@@ -1,32 +1,40 @@
 %%{init: {'flowchart': {'curve': 'stepAfter', 'nodeSpacing': 45, 'rankSpacing': 65}}}%%
-%% sports-predictor -- client request path (NFL, Phase 1). Companion
-%% diagram design/AWS_ARCHITECTURE_PIPELINE.mmd covers scheduled
-%% ingestion/backfill/training. See docs/AWS_ARCHITECTURE.md for the full
-%% walkthrough and legend -- this file is the single source of truth for
-%% this diagram; the doc links here and embeds a generated image rather
-%% than duplicating this source (regenerate the image after editing this
-%% file -- see the doc's own comment for the exact command).
+%% sports-predictor -- client request path, all 6 sports (NFL, NCAA FB, NBA,
+%% NCAA MBB, PGA Tour, F1 -- every sport runs this exact same shape, so
+%% per-sport Lambdas are drawn once per TYPE with a "x6" annotation rather
+%% than 18 near-identical nodes). Companion diagrams:
+%% design/AWS_ARCHITECTURE_PIPELINE.mmd (scheduled ingestion/training),
+%% design/AWS_ARCHITECTURE_OBSERVABILITY.mmd (dashboards/alarms/tracing).
+%% See docs/AWS_ARCHITECTURE.md for the full walkthrough and legend -- this
+%% file is the single source of truth for this diagram; the doc links here
+%% and embeds a generated image rather than duplicating this source
+%% (regenerate the image after editing this file -- see the doc's own
+%% comment for the exact command).
 %% Solid arrows = data flow / invocation. Dotted arrows = supporting,
 %% non-data-flow dependency (TLS cert, container image pull, VPC endpoint
-%% path). Arrows are numbered 1-7 in request order.
+%% path, warmup ping). Arrows are numbered 1-8 in request order.
 flowchart TD
     BROWSER(["Browser<br/>Cognito-authenticated user"])
     R53["Route 53<br/>hosted zone"]
-    ACM["ACM Certificate<br/>(us-east-1, DNS-validated)"]
-    CF["CloudFront Distribution<br/>single public domain"]
+    ACM["ACM Certificates<br/>(us-east-1, DNS-validated --<br/>one for CloudFront, one for the<br/>API's own custom domain)"]
+    WAF["WAF WebACL<br/>AWS IP-reputation managed rule"]
+    CF["CloudFront Distribution<br/>single public domain, WAF-protected,<br/>geo-restricted (whitelist)"]
     S3FE[("S3: Frontend")]
-    APIGW["API Gateway REST API<br/>/nfl/* -- Cognito authorizer"]
+    APIDOMAIN["API Gateway custom domain<br/>TLS 1.2 floor -- default<br/>execute-api endpoint disabled"]
+    APIGW["API Gateway REST API<br/>/{sport}/* x6 -- Cognito authorizer"]
     COGNITO["Cognito User Pool<br/>+ App Client"]
+    WARMUP["EventBridge Schedule<br/>predict warmup (5 min) +<br/>predict-read warmup (5 min)"]
 
     subgraph VPCBox["VPC private subnets (3 AZs) -- no NAT Gateway"]
         direction LR
-        PREDICTREAD["Lambda: nfl-predict-read<br/>(zip, read-only --<br/>no xgboost/scikit-learn/pandas)"]
-        PREDICT["Lambda: nfl-predict<br/>(container image --<br/>xgboost/scikit-learn/pandas)"]
+        PREDICT["Lambda: {sport}-predict  x6<br/>(container image --<br/>xgboost/scikit-learn/pandas)"]
     end
+    PREDICTREAD["Lambda: {sport}-predict-read  x6<br/>(zip, read-only -- no VPC,<br/>no xgboost/scikit-learn/pandas)"]
+    LIVESCORES["Lambda: {sport}-live-scores  x6<br/>(zip, cache-only -- no VPC,<br/>never writes predictions)"]
     GWEP{{"VPC Gateway Endpoints<br/>S3 + DynamoDB"}}
     ECR[("ECR<br/>shared, pre-existing")]
 
-    subgraph StorageBox["Storage"]
+    subgraph StorageBox["Storage, partitioned by sport key"]
         direction LR
         S3MODEL[("S3: Model Artifacts")]
         DDBCORE[("DynamoDB: entities / events /<br/>player_game_stats / team_game_stats")]
@@ -35,20 +43,26 @@ flowchart TD
 
     BROWSER -->|"1. HTTPS"| CF
     R53 -.->|"alias"| CF
-    ACM -.->|"TLS cert"| CF
+    ACM -.->|"TLS certs"| CF
+    ACM -.->|"TLS cert"| APIDOMAIN
+    WAF -.->|"inspects every request"| CF
     CF -->|"2a. /*"| S3FE
-    CF -->|"2b. /nfl/*"| APIGW
+    CF -->|"2b. /{sport}/*"| APIDOMAIN --> APIGW
     APIGW -->|"3. validates JWT"| COGNITO
     APIGW -->|"4a. /events, /models"| PREDICTREAD
     APIGW -->|"4b. /season, /predictions/*"| PREDICT
-    VPCBox -.->|"outbound HTTPS"| GWEP
+    APIGW -->|"4c. /live-scores"| LIVESCORES
+    WARMUP -.->|"keeps containers initialized"| PREDICT
+    WARMUP -.->|"keeps containers initialized"| PREDICTREAD
+    VPCBox -.->|"outbound HTTPS, no internet route"| GWEP
     GWEP -.-> StorageBox
-    PREDICTREAD -->|"5a. read events + logged predictions"| DDBCORE
+    PREDICTREAD -->|"5a. read events + logged predictions<br/>(direct AWS API, not VPC-routed)"| DDBCORE
     PREDICTREAD -->|"5b. read model card metadata"| S3MODEL
     PREDICTREAD -.->|"read predictions"| DDBPRED
-    PREDICT -->|"5. read live features"| DDBCORE
-    PREDICT -->|"6. read + deserialize model"| S3MODEL
-    PREDICT -->|"7. write audit record"| DDBPRED
+    LIVESCORES -->|"5c. read/write cached live state<br/>(direct AWS API, not VPC-routed)"| DDBCORE
+    PREDICT -->|"6. read live features"| DDBCORE
+    PREDICT -->|"7. read + deserialize model"| S3MODEL
+    PREDICT -->|"8. write audit record"| DDBPRED
     PREDICT -.->|"pulls image"| ECR
 
     classDef client fill:#e8eaed,stroke:#5f6368,color:#202124;
@@ -57,13 +71,15 @@ flowchart TD
     classDef servingCompute fill:#ffd8a8,stroke:#e8590c,color:#5c2200;
     classDef storage fill:#ffc9c9,stroke:#e03131,color:#5c1111;
     classDef external fill:#dee2e6,stroke:#343a40,color:#212529;
+    classDef schedule fill:#e9ecef,stroke:#495057,color:#212529,stroke-dasharray: 4 3;
 
     class BROWSER client;
-    class ECR,GWEP external;
+    class ECR,GWEP,WAF external;
     class R53,ACM,CF,S3FE edge;
-    class APIGW,COGNITO auth;
-    class PREDICT,PREDICTREAD servingCompute;
+    class APIDOMAIN,APIGW,COGNITO auth;
+    class PREDICT,PREDICTREAD,LIVESCORES servingCompute;
     class S3MODEL,DDBCORE,DDBPRED storage;
+    class WARMUP schedule;
 
     style VPCBox fill:#fff3bf,stroke:#e8b800
     style StorageBox fill:#fff5f5,stroke:#e03131

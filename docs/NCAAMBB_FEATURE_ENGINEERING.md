@@ -2,7 +2,7 @@
 
 Describes what NCAA MBB's model-training features are, how they're computed, and where each field comes from. Covers the same ground `design/DATA_SCHEMA.md` covers for storage -- this doc is specifically about the derived training data, not the raw DynamoDB/S3 schema it's built from.
 
-**Status: fully built and live (Sub-phase 3B steps 1-8).** Ingest/normalize/schedule-sync/backfill, feature engineering + training, inference (`predict`/`predict-read`), live-scores, and season simulation (both a March Madness bracket and one bracket per conference tournament) are all deployed. Only frontend activation (step 9 -- `sport_config.dart`'s `id` is still the mismatched `ncaa_mbb` and `active: false`) and a final CI/config sweep (step 10) remain -- see the `project-ncaambb-onboarding` memory for build-order status.
+**Status: fully built and live.** Ingest/normalize/schedule-sync/backfill, feature engineering + training, inference (`predict`/`predict-read`), live-scores, and season simulation (both a March Madness bracket and one bracket per conference tournament) are all deployed, and the frontend is active (`sport_config.dart`'s `id: ncaambb`, `active: true`) -- see the `project-ncaambb-onboarding` memory for build history.
 
 Code lives in three places:
 - `Source/library/features/ncaambb.py` -- pure feature-computation functions (no AWS calls). `build_event_features`, `build_player_features`, `build_team_week_features`.

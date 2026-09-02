@@ -1,12 +1,12 @@
 # Sport Predictor API
 
-This documents every route live on the shared API Gateway REST API (`Terraform/api-gateway.tf`, `Terraform/api-gateway-{nfl,ncaafb,nba,ncaambb}-predict.tf`, `Terraform/api-gateway-{nfl,ncaafb,nba,ncaambb}-live-scores.tf`), fronted by CloudFront at the app's single public domain -- see `design/ARCHITECTURE.md`'s serving-layer diagram. Per `design/CLAUDE.md`'s registry-driven onboarding principle, every head-to-head sport gets the identical `/{sport}/events`, `/{sport}/models`, `/{sport}/season`, `/{sport}/live-scores`, `/{sport}/predictions/...` route shape -- nothing about this contract is sport-specific except the path prefix and each sport's own player-prop stat names. **NFL, NCAAFB, and NBA are fully live** (backend and frontend); **NCAAMBB's backend is fully live but its frontend isn't activated yet** -- see the NCAAMBB section below.
+This documents every route live on the shared API Gateway REST API (`Terraform/api-gateway.tf`, `Terraform/api-gateway-{sport}-predict.tf`, `Terraform/api-gateway-{sport}-live-scores.tf`, one pair per sport), fronted by CloudFront at the app's single public domain -- see `docs/AWS_ARCHITECTURE.md`'s client-request-path diagram. Every head-to-head sport (NFL, NCAAFB, NBA, NCAAMBB) gets the identical `/{sport}/events`, `/{sport}/models`, `/{sport}/season`, `/{sport}/live-scores`, `/{sport}/predictions/events/{event_id}[/players/{entity_id}]` route shape; the two field-event sports (PGA, F1) share the same first four routes but have no `/players/{entity_id}` route at all -- a golfer's/driver's own entity IS the participant, so their full prediction is already the single event-level response (see the PGA/F1 section below). Nothing about either contract is sport-specific beyond the path prefix, response field names, and (for head-to-head sports) player-prop stat names. **All six sports are fully live, backend and frontend.**
 
 Formerly `NFL_API.md` -- renamed and expanded to cover every onboarded sport under one doc, since the contract genuinely is shared (this file documents the contract once, then calls out each sport's own concrete values).
 
 ## Base URL
 
-`https://<project>.<domain>` -- the CloudFront distribution's own domain (`local.domain` in `Terraform/locals.tf`, exposed as the `api_endpoint` Terraform output). CloudFront routes `/nfl/*`, `/ncaafb/*`, `/nba/*` to API Gateway and everything else to the Flutter frontend's S3 bucket (`Terraform/cloudfront.tf`), so the frontend and API share one origin -- no CORS is involved in production traffic.
+`https://<project>.<domain>` -- the CloudFront distribution's own domain (`local.domain` in `Terraform/locals.tf`, exposed as the `api_endpoint` Terraform output). CloudFront routes `/nfl/*`, `/ncaafb/*`, `/nba/*`, `/ncaambb/*`, `/pga/*`, `/f1/*` to API Gateway's own custom domain (`Terraform/api-gateway-domain.tf` -- not the raw `execute-api` hostname, which is disabled entirely) and everything else to the Flutter frontend's S3 bucket (`Terraform/cloudfront.tf`), so the frontend and API share one origin -- no CORS is involved in production traffic.
 
 ## Authentication
 
@@ -183,7 +183,7 @@ Cache-only -- never triggers a live ESPN call itself; served entirely from what 
 }
 ```
 
-`player_stats` is only present for an event currently `live` -- best-effort per-player live stats for that event's predicted leaders (see `design/PROJECT_PLAN.md`'s live-leader-stats feature), omitted (not `null`) if that fetch failed this tick. `events` is `{}` if nothing is currently in a live-poll window.
+`player_stats` is only present for an event currently `live` -- best-effort per-player live stats for that event's predicted leaders, omitted (not `null`) if that fetch failed this tick. `events` is `{}` if nothing is currently in a live-poll window.
 
 ### `GET /nfl/predictions/events/{event_id}`
 
@@ -361,9 +361,9 @@ Identical contract to `/nfl/live-scores` -- `player_stats` keys are `points`/`re
 
 Same contract as NFL's own. `leaders` has **no** position-based categories (`passing`/`rushing`/etc.) -- basketball has no single-player-dominates concept the way a QB does, so the three categories are `scoring`/`rebounding`/`assists`, each always a list (up to 5 candidates, re-sorted by this game's own predicted value, not recent-volume order). Player-prop `stat` values (`Terraform/dynamodb-sport-registry.tf`'s `nba_player_prop_stats`): `points`, `rebounds`, `assists`, `steals`, `blocks`, `three_pointers_made`.
 
-## NCAAMBB routes (`/ncaambb/*`) -- **backend live, frontend not yet activated**
+## NCAAMBB routes (`/ncaambb/*`) -- live
 
-Every route below is real, deployed, and returns real data today -- `ncaambb-predict`/`ncaambb-predict-read`/`ncaambb-live-scores` are not placeholder stubs (unlike NBA's own routes before its step 6). What's still pending is Sub-phase 3B step 9: the Flutter frontend's `sport_config.dart` entry is still `id: 'ncaa_mbb'` (a real id-mismatch bug that would 404 every call once flipped on, not yet fixed) and `active: false`, so this sport doesn't appear in the app UI yet even though its API is fully callable directly. Identical route shape to NBA otherwise, with these differences.
+Identical route shape to NBA, with these differences.
 
 ### `GET /ncaambb/events`
 
@@ -431,6 +431,87 @@ Identical contract to `/nfl/live-scores` -- `player_stats` keys match NBA's (`po
 ### `GET /ncaambb/predictions/events/{event_id}` and `.../players/{entity_id}`
 
 Identical contract to NBA's own, including the `scoring`/`rebounding`/`assists` `leaders` shape. Player-prop `stat` values (`Terraform/dynamodb-sport-registry.tf`'s `ncaambb_player_prop_stats`) -- same 6 names as NBA: `points`, `rebounds`, `assists`, `steals`, `blocks`, `three_pointers_made`.
+
+## PGA routes (`/pga/*`) -- live
+
+Field-event shape, genuinely different from every head-to-head sport above -- a golfer's own entity IS the participant, so there's no separate player-prop route at all. `/pga/events`, `/pga/models`, `/pga/live-scores` follow the same contract as the head-to-head sports (tournament-scoped instead of week-scoped for `/events`); `/pga/predictions/events/{event_id}` has its own shape.
+
+### `GET /pga/predictions/events/{event_id}`
+
+One response scores the **entire field** against every model that applies -- there's no per-golfer sub-route to call separately. See "Prediction-route caching semantics" above for the `200`/`203`/`202` shapes; the example below is the `200` (fresh) case, trimmed to one golfer.
+
+```json
+{
+  "sport": "pga",
+  "event_key": "SPORT#PGA#EVENT#401703511",
+  "event_id": "401703511",
+  "event_type": "field",
+  "tournament_name": "THE PLAYERS Championship",
+  "status": "in_progress",
+  "par": 72,
+  "cutline": {"projected_cut_score": {"value": -2.1, "model_version": 3}},
+  "field": [
+    {
+      "entity_id": "9478",
+      "name": "Scottie Scheffler",
+      "predictions": {
+        "top_10_probability": {"value": 0.61, "model_version": 4},
+        "top_5_probability": {"value": 0.44, "model_version": 3},
+        "projected_score_to_par": {"value": -9.2, "model_version": 5},
+        "rounds": {
+          "round_1": {"value": -3.0, "model_version": 2},
+          "round_2": {"value": -2.4, "model_version": 2}
+        }
+      },
+      "actual": {"finish_position": null, "score_to_par": -5, "rounds": ["..."]}
+    }
+  ],
+  "generated_at": "2026-08-03T00:00:00Z"
+}
+```
+
+`field` is sorted ascending by `projected_score_to_par` (lowest = best; falls back to `top_10_probability` descending if no score model is promoted) -- this ordering, not a separately trained ranking model, is what the frontend calls "field finish order." `predictions.rounds` only carries rounds a golfer has actually played or a live pre-round forecast exists for -- a projected-cut golfer's rounds 3-4 are never scored once their `cutline` comparison says they missed it. `actual` is present whenever the tournament has any real result yet (mid-tournament, not just once completed) -- `null` finish_position/score_to_par with a populated `rounds` list is a real, valid state (still playing). `cutline` is `null` if no cutline model is promoted yet.
+
+**Team/individual match-play events** (Ryder Cup, Presidents Cup, WGC-Dell Technologies Match Play) return a different `event_type` (`"match_play"` per individual match, `"cup"` for the team aggregate) with a two-sided `home`/`away` prediction shape instead of a `field` array, scored against `match-win-probability`/`cup-win-probability` respectively -- see `design/DATA_SCHEMA.md`'s match-play section for the underlying event shapes this mirrors.
+
+## F1 routes (`/f1/*`) -- live
+
+Same field-event shape as PGA -- no player-prop route, one response scores the whole grid. `/f1/events`, `/f1/models`, `/f1/live-scores` follow the same contract as the head-to-head sports; `/f1/predictions/events/{event_id}` scores every driver in the field against win/podium/DNF/finish-position/qualifying-position, plus a constructor-level win-probability block. A Sprint weekend's Saturday sprint and Sunday Grand Prix are two separate events with two separate `event_id`s (`design/DATA_SCHEMA.md`), each scored against its own model set (the Sprint event's own `sprint-win-probability`/`sprint-podium-probability`/`sprint-grid` models, not the main race's).
+
+### `GET /f1/predictions/events/{event_id}`
+
+```json
+{
+  "sport": "f1",
+  "event_key": "SPORT#F1#EVENT#2026-15",
+  "event_id": "2026-15",
+  "event_type": "field",
+  "race_name": "Italian Grand Prix",
+  "status": "scheduled",
+  "field": [
+    {
+      "entity_id": "max_verstappen",
+      "name": "Max Verstappen",
+      "constructor_entity_id": "red_bull",
+      "constructor_name": "Red Bull",
+      "predictions": {
+        "win_probability": {"value": 0.31, "model_version": 2},
+        "podium_probability": {"value": 0.68, "model_version": 2},
+        "dnf_probability": {"value": 0.06, "model_version": 1},
+        "projected_finish_position": {"value": 1.8, "model_version": 3},
+        "projected_qualifying_position": {"value": 1.2, "model_version": 2}
+      },
+      "actual": null
+    }
+  ],
+  "constructors": [
+    {"entity_id": "red_bull", "name": "Red Bull", "predictions": {"win_probability": {"value": 0.29, "model_version": 1}}}
+  ],
+  "generated_at": "2026-08-03T00:00:00Z"
+}
+```
+
+`field` is sorted ascending by `projected_finish_position` -- the same "field finish order" role PGA's `projected_score_to_par` plays. `actual` follows the same "populated whenever real data exists, not gated on `completed`" rule as PGA's -- a DNF is a real, distinct `status` value (`"dnf"`), not a null finish position with no explanation.
 
 ## Error responses
 

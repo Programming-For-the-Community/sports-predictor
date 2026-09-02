@@ -70,6 +70,7 @@ Expressed as Flutter `LinearGradient` / `RadialGradient` values:
 brandMark   = LinearGradient(begin: Alignment.topLeft, end: Alignment.bottomRight,
                 colors: [Color(0xFF22D3EE), Color(0xFF7C6CFF)])  // logo tile, avatar
 cyanFill    = LinearGradient(colors: [Color(0xFF22D3EE), Color(0xFF5EEAD4)])  // prob bars, positive
+violetFill  = LinearGradient(colors: [Color(0xFF7C6CFF), Color(0xFFA99DFF)])  // field-event emphasis
 negFill     = LinearGradient(colors: [Color(0xFFFF5C7A), Color(0xFFFF8FA3)]) // negative bars
 accentStripH2h   = LinearGradient(colors: [Color(0xFF22D3EE), Color(0xFF5EEAD4)]) // 4px card top (h2h)
 accentStripField = LinearGradient(colors: [Color(0xFF7C6CFF), Color(0xFF22D3EE)]) // 4px card top (field)

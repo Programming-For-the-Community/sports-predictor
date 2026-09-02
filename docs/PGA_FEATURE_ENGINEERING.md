@@ -2,7 +2,7 @@
 
 Describes what PGA's model-training features are, how they're computed, and where each field comes from. Covers the same ground `design/DATA_SCHEMA.md` covers for storage -- this doc is specifically about the derived training data, not the raw DynamoDB/S3 schema it's built from.
 
-**Status: feature engineering + training fully built (Phase 5 step 3, expanded 2026-08-25 to 5 models across 3 datasets), inference not live yet (step 4, frontend-only remaining -- the sport registry row itself already shipped in step 2).** Every dataset/training script here is fully built and runnable via `aws ecs run-task`, but no model has been trained against real backfilled data yet, and there is no `Source/aws-lambdas/pga/predict/` Lambda at all yet -- see `design/PROJECT_PLAN.md`'s Phase 5 and the `project-pga-onboarding` memory for build-order status.
+**Status: fully built and live.** Feature engineering, training (now 7 models across 4 datasets -- the original 5 stroke-play/cutline/round targets below, plus cup and individual-match win-probability, see "Cup and match win-probability" below), inference (`predict`/`predict-read`), live-scores, and a FedEx Cup season simulation are all deployed and active in the frontend -- see the `project-pga-onboarding` and `project-pga-fedex-cup-simulation` memories for build history.
 
 Code lives in four places:
 - `Source/library/features/pga.py` -- pure feature-computation functions (no AWS calls). `rolling_golfer_averages`/`build_golfer_event_features` (tournament grain), `rolling_round_averages`/`build_round_event_features` (round grain), `build_cutline_event_features` (tournament grain, no golfer dimension).
@@ -10,7 +10,7 @@ Code lives in four places:
 - `Source/library/http/pga.py` -- `PGAClient.get_statistics`, the season-stats snapshot fetch (see "Season stats" below).
 - `Source/feature-engineering/pga/build_dataset.py` -- the Fargate entrypoint that walks DynamoDB history (via `FeatureStorage`) plus raw season-stats snapshots (via a raw-bucket `S3Manager`), calls the functions above, and writes THREE Parquet files to S3.
 
-**This is not a scaled-down copy of NBA's/NFL's feature set** -- PGA is the first field-event sport (design/CLAUDE.md's second event shape), and the differences below aren't missing pieces, they're the shape a sport with no opponent, no team, and no separate box-score table actually has.
+**This is not a scaled-down copy of NBA's/NFL's feature set** -- PGA is the first field-event sport (see `design/DATA_SCHEMA.md`'s two event shapes), and the differences below aren't missing pieces, they're the shape a sport with no opponent, no team, and no separate box-score table actually has.
 
 ## Pipeline
 
@@ -141,7 +141,7 @@ This is a per-golfer-per-tournament in-progress signal, not a rolling history on
 
 ## Why a top-10 classifier, not a win/loss classifier or a genuine multinomial model
 
-`design/PROJECT_PLAN.md`'s Phase 5 checklist calls for "a ranking-style model (multinomial classification or top-N probability) rather than reusing the win/loss classifier." Both alternatives it names were considered:
+A ranking-style model (multinomial classification, or top-N probability) was the goal, rather than reusing a plain win/loss classifier. Both alternatives were considered:
 
 - **Plain win/loss** was rejected outright -- it's explicitly what the checklist says to avoid, and for good reason: winning is roughly a 1-in-100+ event in a full field, an extreme class-imbalance problem that would barely be learnable and wouldn't say much about a golfer's real form the way "top 10" does.
 - **A genuine multinomial (softmax) model** over ordered finish tiers (win / top 5 / top 10 / top 20 / made cut / missed cut) was the more literal reading of "multinomial classification," but **no multi-class task type exists anywhere in `library/ml/backtest.py`/`library/ml/model_types.py` today** -- every classifier adapter hardcodes a binary objective (`objective="binary:logistic"`, `predict_proba(X)[:, 1]`, etc.). Building real multi-class support would mean extending shared training infrastructure every other sport's models also depend on, for a checklist item that names an equally valid, much lower-risk alternative right in the same sentence.
@@ -163,7 +163,7 @@ Found + fixed 2026-08-25, during a pre-backfill review: PGA TOUR's real calendar
 
 ## Models trained on these features
 
-`Source/model-training/pga/` -- same shared plumbing as every other sport (`library/ml/training_common.py`, `library/ml/backtest.py`), all five scripts sharing one Docker image (`model-training/pga/Dockerfile`), same shared-image/command-override pattern NBA's own train-win-probability-model image uses.
+`Source/model-training/pga/` -- same shared plumbing as every other sport (`library/ml/training_common.py`, `library/ml/backtest.py`), all seven scripts sharing one Docker image (`model-training/pga/Dockerfile`), same shared-image/command-override pattern NBA's own train-win-probability-model image uses.
 
 | Predicted value | Model type(s) trained & evaluated | Training script | Dataset |
 |---|---|---|---|
@@ -172,22 +172,23 @@ Found + fixed 2026-08-25, during a pre-backfill review: PGA TOUR's real calendar
 | Remaining score-to-par (`label_remaining_score_to_par`) -- served as `projected_score_to_par` (the real cumulative-so-far added back on, see `event_prediction.py`'s `_field_projected_score_to_par`) and the basis for "field finish order" (a serving-time ranking of that served value, not a separately trained artifact -- see below) | 4-way regressor tournament (XGBoost, ElasticNet, random forest, MLP) on `rmse` | `train_score_model.py` | `golfer_features.parquet` |
 | Projected cut line (`label_cut_score`), tournament grain | Same 4-way regressor tournament, filtered to `cut_count > 0` | `train_cutline_model.py` | `cutline_features.parquet` |
 | Per-round projected score (`label_round_score_to_par`), one model per round | Same 4-way regressor tournament, one model per `ROUND_NUMBER` (1-4), filtered to that round | `train_round_model.py` (`ROUND_NUMBER` env var) | `round_features.parquet` |
+| Cup (team) win probability (`label_home_won`), Ryder Cup/Presidents Cup only | Same 5-way classifier tournament | `train_cup_winprob_model.py` | `cup_features.parquet` |
+| Individual match win probability (`label_home_won`), one row per foursomes/fourball/singles match or WGC bracket match | Same 5-way classifier tournament | `train_match_winprob_model.py` | `match_features.parquet` |
 
 ### Field finish order
 
-Not a separately trained model -- `design/PROJECT_PLAN.md`'s Phase 5 checklist and this project's shared training harness (`library/ml/backtest.py`) have no rank-loss/learning-to-rank objective, and building one would mean extending shared infrastructure every other sport's models also depend on (the same reasoning that kept top-10/top-5 as plain binary classifiers instead of a genuine multinomial model). Instead, a live prediction request (Phase 5 step 4, not built yet) would score every golfer in a tournament's field through `projected-score-to-par` and rank the field by predicted value, lowest score first -- a serving-time transformation of an existing regression model's output, not a new artifact.
+Not a separately trained model -- this project's shared training harness (`library/ml/backtest.py`) has no rank-loss/learning-to-rank objective, and building one would mean extending shared infrastructure every other sport's models also depend on (the same reasoning that kept top-10/top-5 as plain binary classifiers instead of a genuine multinomial model). Instead, a live prediction request scores every golfer in a tournament's field through `projected-score-to-par` and ranks the field by predicted value, lowest score first -- a serving-time transformation of an existing regression model's output, not a new artifact.
 
 ### Projected cut line and skipping rounds 3-4
 
-The user's own framing -- "for an event prediction we should also include a projected cut line if applicable and if a player gets cut we don't need to project their 3rd and 4th rounds" -- describes SERVING-time behavior, not a training-time one. `train_cutline_model.py` trains the cut-line NUMBER; `train_round_model.py` trains each round's own score independently, with rounds 3-4 naturally having fewer training rows already (a cut golfer's own `rounds` list simply has no round-3/4 entry -- no special-casing needed at training time, see `round_features.parquet`'s own section above). The actual "skip round 3/4 for a golfer projected to miss the cut" decision -- comparing a golfer's own projected 36-hole cumulative score against `projected-cut-line`'s output before ever calling the round-3/4 models for them -- belongs in the predict Lambda Phase 5 step 4 will build, which doesn't exist yet.
+`train_cutline_model.py` trains the cut-line NUMBER; `train_round_model.py` trains each round's own score independently, with rounds 3-4 naturally having fewer training rows already (a cut golfer's own `rounds` list simply has no round-3/4 entry -- no special-casing needed at training time, see `round_features.parquet`'s own section above). The predict Lambda compares a golfer's own projected 36-hole cumulative score against `projected-cut-line`'s output before ever calling the round-3/4 models for them, so a projected-cut golfer's own "This Rd" display shows their real round-4 predicted-vs-actual rather than a simulated round it never expected them to play.
 
-## What's not built yet
+### Cup and match win probability
 
-- **No `Source/aws-lambdas/pga/predict/` Lambda** -- nothing serves any of these models' predictions yet, including the "field finish order" ranking and the "skip rounds 3-4 for a projected cut" logic described above. That's Phase 5 step 4 (frontend), not this step.
-- **Terraform/CI for all 5 training targets is built** (`Terraform/ecs-task-pga-train-{top5,score,cutline,round}-model.tf`, the registry's `training_targets` list, `.github/workflows/pga_ai_training.yml`) -- see the `project-pga-onboarding` memory for the full build-out.
+Two more binary classifiers, added after the original 5: `cup_features.parquet` (one row per Ryder Cup/Presidents Cup, home-team vs. away-team rolling stroke-play form averaged across each team's full roster) and `match_features.parquet` (one row per individual match -- a foursomes/fourball/singles pairing, or a WGC-Dell Technologies Match Play bracket match). Both reuse `label_home_won` as the target and the same 5-way classifier tournament as top-10/top-5. `cup_features.parquet` is genuinely small -- only Ryder Cup/Presidents Cup editions since 2017 (WGC Match Play has no Cup-level row at all) -- so its promoted model's metrics warrant more skepticism than the other 6's.
 
 ## What this makes it possible to predict
 
-**Directly, once real training runs have been evaluated:** a golfer's probability of finishing in the top 10 or top 5 of a given tournament; their projected score-to-par (and, derived from it at serving time, their implied position in the field); a tournament's own projected cut line; and a golfer's own projected score for any round they're expected to play.
+A golfer's probability of finishing in the top 10 or top 5 of a given tournament; their projected score-to-par (and, derived from it at serving time, their implied position in the field); a tournament's own projected cut line; a golfer's own projected score for any round they're expected to play; a team's win probability in the Ryder Cup/Presidents Cup; and an individual match's win probability (Ryder Cup/Presidents Cup sessions, or a WGC Match Play bracket match). All served live by `Source/aws-lambdas/pga/predict/`, plus a separate FedEx Cup season-long simulation (see the `project-pga-fedex-cup-simulation` memory).
 
-**Not built at all yet, simulated or otherwise:** win probability, finish-position regression, season-long standings/points-race projections (e.g. FedEx Cup), and any second field-event sport's reuse of this pattern (`design/PROJECT_PLAN.md`'s Phase 6, F1) -- all future work, not scoped to Phase 5.
+**Not built:** finish-position regression (a genuine multinomial/ranked-finish model, superseded by the field-finish-order serving-time ranking above) and any second field-event sport's reuse of this pattern (F1 has its own parallel model set, not a reuse of PGA's -- see `docs/F1_FEATURE_ENGINEERING.md`).
