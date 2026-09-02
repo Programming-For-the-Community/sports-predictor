@@ -17,6 +17,7 @@ import pytest
 
 import nfl_predict_read
 from library.schema.keys import event_key as build_event_key
+from library.serving.common import RECENT_EVENTS_LIMIT
 from library.storage.model_artifacts import current_version_key
 
 
@@ -78,7 +79,9 @@ class TestEventsRoute:
         response = nfl_predict_read.lambda_handler(_api_event("/nfl/events"), None)
 
         assert response["statusCode"] == 200
-        nfl_predict_read._storage.get_all_events.assert_called_once_with("nfl", status="scheduled")
+        nfl_predict_read._storage.get_all_events.assert_called_once_with(
+            "nfl", status="scheduled", scan_index_forward=True, limit=RECENT_EVENTS_LIMIT,
+        )
 
     def test_passes_the_requested_status_through(self):
         nfl_predict_read._storage = MagicMock()
@@ -87,7 +90,7 @@ class TestEventsRoute:
 
         nfl_predict_read.lambda_handler(_api_event("/nfl/events", {"status": "completed"}), None)
 
-        nfl_predict_read._storage.get_all_events.assert_called_once_with("nfl", status="completed")
+        nfl_predict_read._storage.get_all_events.assert_called_once_with("nfl", status="completed", limit=RECENT_EVENTS_LIMIT)
 
     def test_response_body_matches_list_events_shape(self):
         # event_date is relative to today -- list_events' soonest-upcoming-week

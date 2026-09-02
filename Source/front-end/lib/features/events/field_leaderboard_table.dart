@@ -40,11 +40,26 @@ class _LeaderboardColumn {
 }
 
 /// The single round a golfer's own top-level row summarizes: whichever
-/// round is currently being projected (applicable_rounds always returns
-/// at most one -- aws-lambdas/pga/predict/live_features.py), or, once
-/// nothing is left to project, the most recently completed real round.
+/// round is genuinely still being projected (has a prediction in `rounds`
+/// but no matching real result in `actualRounds` yet), or, once every
+/// predicted round already has a real actual to match it, the most
+/// recently completed real round.
+///
+/// `rounds` is NOT "0 or 1 entries in practice" the way it reads at a
+/// glance -- event_prediction.py's own predict_field_event backfills
+/// every PLAYED round's own pre-round forecast into it too ("so the
+/// ROUND 1-4 breakdown can show it next to the real actual"), on top of
+/// whatever applicable_rounds itself still considers live. For a
+/// completed tournament that's every round 1-4 at once. Trusting
+/// entry.rounds.keys.first the way this used to picked round 1's own
+/// long-stale forecast as "This Rd" for a golfer who'd already finished
+/// the whole tournament (real complaint 2026-09-02: a completed event's
+/// own THIS RD column didn't match what the golfer actually shot that
+/// day) -- checking each candidate round against actualRounds is what
+/// actually finds the one round, if any, still genuinely unresolved.
 int? _currentRoundNumber(FieldParticipantPrediction entry) {
-  if (entry.rounds.isNotEmpty) return entry.rounds.keys.first;
+  final stillProjecting = entry.rounds.keys.where((round) => !entry.actualRounds.containsKey(round));
+  if (stillProjecting.isNotEmpty) return stillProjecting.reduce((a, b) => a < b ? a : b);
   if (entry.actualRounds.isNotEmpty) return entry.actualRounds.keys.reduce((a, b) => a > b ? a : b);
   return null;
 }

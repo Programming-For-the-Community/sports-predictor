@@ -125,26 +125,45 @@ def _roster_marker_key(season: int) -> str:
     return f"ncaafb/cache/roster-fetched-at/{season}.json"
 
 
-def _roster_needs_refresh(season: int) -> bool:
+def _season_kickoff(client: CFBDClient, season: int) -> datetime | None:
+    """The season's own regular-season week-1 firstGameStart, or None if
+    the calendar doesn't have one yet (e.g., well before the season)."""
+    for week in client.get_calendar(season):
+        if week.get("week") == 1 and week.get("seasonType", "regular") == "regular" and week.get("firstGameStart"):
+            return _parse_iso(week["firstGameStart"])
+    return None
+
+
+def _roster_needs_refresh(season: int, season_kickoff: datetime | None) -> bool:
     """True if season's roster hasn't been fetched within
-    ROSTER_CACHE_TTL_DAYS. CFBD's /roster is one ~9MB bulk call covering
-    every team, and college rosters barely move outside the transfer
-    portal windows, so this is refreshed monthly rather than daily.
+    ROSTER_CACHE_TTL_DAYS, OR if it was fetched before the season's own
+    week-1 kickoff. CFBD's /roster is one ~9MB bulk call covering every
+    team, and college rosters barely move outside the transfer portal
+    windows, so a plain rolling TTL is normally enough to refresh
+    monthly rather than daily -- but fall-camp cuts/walk-on promotions/
+    late portal moves cluster right before kickoff, so a snapshot taken
+    during camp can still read as "fresh" under the TTL alone for weeks
+    into the season it predates entirely (real complaint 2026-09-02:
+    fetched 2026-08-12, season started 2026-08-23, still "fresh" per TTL
+    through week 1, Sep 3-7 -- USC's own roster-derived stat leaders
+    still showed players who'd already been cut/transferred out).
     Marker-file pattern, kept local to this Lambda since the roster
     payload has to be written to S3 for normalize to pick up."""
     try:
         response = _s3.get_object(Bucket=RAW_BUCKET, Key=_roster_marker_key(season))
         fetched_at = datetime.fromisoformat(json.loads(response["Body"].read())["fetched_at"])
-        return datetime.now(timezone.utc) - fetched_at >= timedelta(days=ROSTER_CACHE_TTL_DAYS)
     except (ClientError, json.JSONDecodeError, KeyError, ValueError):
         return True  # cache miss or malformed marker -- treat as never fetched
+    if season_kickoff is not None and fetched_at < season_kickoff:
+        return True
+    return datetime.now(timezone.utc) - fetched_at >= timedelta(days=ROSTER_CACHE_TTL_DAYS)
 
 
 def _fetch_roster_if_stale(client: CFBDClient, season: int, teams: list[dict]) -> bool:
     """Fetches and writes season's full roster to
     ncaafb/roster/{season}.json (picked up by normalize's own S3 trigger)
-    if the TTL marker says it's due. Returns True if a fetch actually
-    happened, False on a cache hit.
+    if the TTL/kickoff marker says it's due. Returns True if a fetch
+    actually happened, False on a cache hit.
 
     Wraps the payload in a {"fetched_at", "data"} envelope -- CFBD's
     /roster has no per-payload timestamp of its own, so normalize reads
@@ -152,9 +171,11 @@ def _fetch_roster_if_stale(client: CFBDClient, season: int, teams: list[dict]) -
 
     teams is that same season's get_cached_teams result, passed in by
     the caller rather than re-fetched here."""
-    if not _roster_needs_refresh(season):
+    season_kickoff = _season_kickoff(client, season)
+    if not _roster_needs_refresh(season, season_kickoff):
         logger.info(
-            "Roster for season %s was already fetched within the last %d days -- skipping (delete %s to force a refresh)",
+            "Roster for season %s was already fetched within the last %d days and after kickoff -- skipping "
+            "(delete %s to force a refresh)",
             season, ROSTER_CACHE_TTL_DAYS, _roster_marker_key(season),
         )
         return False

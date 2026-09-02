@@ -149,4 +149,38 @@ void main() {
     expect(find.text('1'), findsNWidgets(2));
     expect(find.text('7'), findsNothing);
   });
+
+  testWidgets('a completed race re-sorts rows by actual finish position, not stale pre-race order', (tester) async {
+    // Server/prediction order was b, a -- the real result has a finishing
+    // ahead of b. Real complaint 2026-09-02: a completed Grand Prix's own
+    // row order still matched the pre-race projected order, not the
+    // actual result.
+    final field = [
+      _driver('b', name: 'Driver B', actual: const F1ActualResult(finishPosition: 2)),
+      _driver('a', name: 'Driver A', actual: const F1ActualResult(finishPosition: 1)),
+    ];
+
+    await tester.pumpWidget(_wrap(F1LeaderboardTable(field: field, isSprint: false)));
+
+    final aPos = tester.getTopLeft(find.text('Driver A'));
+    final bPos = tester.getTopLeft(find.text('Driver B'));
+    expect(aPos.dy, lessThan(bPos.dy));
+  });
+
+  testWidgets('a DNF driver in a completed race sorts last and shows no stale projected position', (tester) async {
+    // Real complaint 2026-09-02: a DNF'd driver (finishPosition null,
+    // status "dnf") displayed "P6" in the FINISH column -- a stale
+    // pre-race projection, misleading once the race is already over.
+    final field = [
+      _driver('dnf', name: 'DNF Driver', projectedFinishPosition: 3.0, actual: const F1ActualResult(status: 'dnf')),
+      _driver('a', name: 'Driver A', actual: const F1ActualResult(finishPosition: 1)),
+    ];
+
+    await tester.pumpWidget(_wrap(F1LeaderboardTable(field: field, isSprint: false)));
+
+    final aPos = tester.getTopLeft(find.text('Driver A'));
+    final dnfPos = tester.getTopLeft(find.text('DNF Driver'));
+    expect(aPos.dy, lessThan(dnfPos.dy));
+    expect(find.text('P3'), findsNothing);
+  });
 }

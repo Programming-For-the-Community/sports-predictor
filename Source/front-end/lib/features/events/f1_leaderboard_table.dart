@@ -83,11 +83,22 @@ class _PercentText extends StatelessWidget {
 /// event_prediction.py's own _assign_qualifying_ranks computes an
 /// independent rank instead, carried on F1ModelValue.rank.
 class _PositionCell extends StatelessWidget {
-  const _PositionCell({required this.actual, this.live, required this.projected, this.rank});
+  const _PositionCell({required this.actual, this.live, required this.projected, this.rank, this.hasResult = false});
   final int? actual;
   final int? live;
   final double? projected;
   final int? rank;
+  // True when this driver's own F1ActualResult exists (the race is
+  // decided and we have a real recorded outcome for them) even though
+  // `actual` itself is null -- a DNF/unclassified driver has no numeric
+  // finishPosition/gridPosition, but the race is still over. Falling
+  // through to the projected/"P{rank}" branch below in that case shows a
+  // stale pre-race prediction as if it still meant something (real
+  // complaint 2026-09-02: a DNF driver displayed "P6", implying an
+  // ongoing projection, for a race that already ended hours earlier).
+  // STATUS's own pill (F1StatusPill) already carries the real DNF/
+  // classified signal -- this cell just needs to stay out of its way.
+  final bool hasResult;
 
   @override
   Widget build(BuildContext context) {
@@ -96,6 +107,9 @@ class _PositionCell extends StatelessWidget {
     }
     if (live != null) {
       return Text('$live', style: AppTextStyles.metricValue(color: AppColors.live), textAlign: TextAlign.center, maxLines: 1);
+    }
+    if (hasResult) {
+      return Text('--', style: AppTextStyles.metricValue(color: AppColors.inkMute), textAlign: TextAlign.center);
     }
     if (projected != null) {
       return Text(
@@ -146,9 +160,15 @@ List<_LeaderboardColumn> _fullColumns({required bool isSprint}) => [
           (context, entry, live, rowNumber) => Center(child: F1StatusPill(status: entry.actual?.status))),
       isSprint
           ? _LeaderboardColumn(_F1ColumnKey.finishOrGrid, _F1ColumnLabels.grid, 2, (context, entry, live, rowNumber) =>
-              _PositionCell(actual: entry.actual?.gridPosition, live: live?.order, projected: entry.projectedGridPosition?.value, rank: rowNumber))
+              _PositionCell(
+                actual: entry.actual?.gridPosition, live: live?.order, projected: entry.projectedGridPosition?.value,
+                rank: rowNumber, hasResult: entry.actual != null,
+              ))
           : _LeaderboardColumn(_F1ColumnKey.finishOrGrid, _F1ColumnLabels.finish, 2, (context, entry, live, rowNumber) =>
-              _PositionCell(actual: entry.actual?.finishPosition, live: live?.order, projected: entry.projectedFinishPosition?.value, rank: rowNumber)),
+              _PositionCell(
+                actual: entry.actual?.finishPosition, live: live?.order, projected: entry.projectedFinishPosition?.value,
+                rank: rowNumber, hasResult: entry.actual != null,
+              )),
       if (!isSprint)
         _LeaderboardColumn(_F1ColumnKey.qualifying, _F1ColumnLabels.qualifying, 2, (context, entry, live, rowNumber) =>
             _PositionCell(
@@ -198,6 +218,39 @@ List<F1DriverPrediction> _sortedByLiveOrder(List<F1DriverPrediction> field, Map<
   return [for (final e in indexed) e.entry];
 }
 
+/// Once a race is actually over, row order should reflect the real
+/// result, not stay frozen at whatever order the pre-race prediction
+/// happened to list drivers in (field's own baseline order --
+/// event_prediction.py's own _field_sort_key, computed before the race).
+/// _sortedByLiveOrder above only ever fires while liveResults is
+/// populated (mid-race); once live polling stops and the checkered flag
+/// has fallen, this is what should take over instead of silently
+/// reverting to the stale pre-race order (real complaint 2026-09-02: a
+/// completed Grand Prix's own row order didn't match the actual
+/// finishing order at all). isSprint picks grid vs. finish the same way
+/// every other actual-vs-projected cell in this file already does.
+/// A driver with no actual position (DNF/unclassified -- entry.actual
+/// exists but its own finishPosition/gridPosition is null) sorts after
+/// every classified driver, stable amongst themselves in field's own
+/// original order -- same "ties preserve original order" rule
+/// _sortedByLiveOrder already follows.
+List<F1DriverPrediction> _sortedByActualResult(List<F1DriverPrediction> field, bool isSprint) {
+  final indexed = [for (var i = 0; i < field.length; i++) (index: i, entry: field[i])];
+  int? position(F1DriverPrediction e) => isSprint ? e.actual?.gridPosition : e.actual?.finishPosition;
+  indexed.sort((a, b) {
+    final aPos = position(a.entry);
+    final bPos = position(b.entry);
+    if (aPos != null && bPos != null) {
+      final cmp = aPos.compareTo(bPos);
+      return cmp != 0 ? cmp : a.index.compareTo(b.index);
+    }
+    if (aPos != null) return -1;
+    if (bPos != null) return 1;
+    return a.index.compareTo(b.index);
+  });
+  return [for (final e in indexed) e.entry];
+}
+
 class F1LeaderboardTable extends StatelessWidget {
   const F1LeaderboardTable({super.key, required this.field, required this.isSprint, this.liveResults = const {}});
 
@@ -213,7 +266,12 @@ class F1LeaderboardTable extends StatelessWidget {
     if (field.isEmpty) {
       return Text('No field available yet.', style: AppTextStyles.body(color: AppColors.inkSub));
     }
-    final sorted = liveResults.isEmpty ? field : _sortedByLiveOrder(field, liveResults);
+    final hasActualResults = field.any((e) => e.actual != null);
+    final sorted = liveResults.isNotEmpty
+        ? _sortedByLiveOrder(field, liveResults)
+        : hasActualResults
+            ? _sortedByActualResult(field, isSprint)
+            : field;
     return LayoutBuilder(
       builder: (context, constraints) {
         final compact = constraints.maxWidth < _compactBreakpoint;

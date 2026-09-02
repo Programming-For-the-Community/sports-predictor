@@ -34,9 +34,16 @@ import boto3
 logger = logging.getLogger("ec2-training-reaper")
 logger.setLevel(logging.INFO)
 
-ec2 = boto3.client("ec2")
-ecs = boto3.client("ecs")
-autoscaling = boto3.client("autoscaling")
+# Explicit region_name -- Lambda always sets AWS_REGION in the real
+# execution environment, but these clients construct at import time, and
+# CI's test-collection environment has no AWS_REGION at all, so an
+# unqualified boto3.client() raises NoRegionError before a single test
+# can even run (real CI failure, 2026-09-02). Same fix
+# lambda-cloudwatch-geo-widget's own handler.py already uses.
+_REGION = os.environ.get("AWS_REGION", "us-east-2")
+ec2 = boto3.client("ec2", region_name=_REGION)
+ecs = boto3.client("ecs", region_name=_REGION)
+autoscaling = boto3.client("autoscaling", region_name=_REGION)
 
 
 def _describe_container_instances_in_batches(cluster_name: str, container_instance_arns: list[str]) -> list[dict]:

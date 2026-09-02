@@ -189,6 +189,43 @@ void main() {
     expect(find.textContaining('67'), findsNothing);
   });
 
+  testWidgets(
+      'THIS RD shows round 4 predicted-vs-actual for a finished tournament, not a stale round 1 forecast',
+      (tester) async {
+    // Real complaint 2026-09-02: event_prediction.py backfills every
+    // PLAYED round's own pre-round forecast into `rounds` (so the
+    // expanded ROUND 1-4 breakdown can show it), not just whichever round
+    // is still genuinely being projected -- for a finished tournament
+    // that's rounds 1-4 all at once. THIS RD used to just grab
+    // rounds.keys.first, landing on round 1's own long-resolved forecast
+    // instead of round 4's -- the one round that actually matches what
+    // this golfer shot that day.
+    final field = [
+      _golfer(
+        '1', 'Xander Schauffele',
+        rounds: {
+          1: const ModelValue(value: -2.0, modelVersion: 1),
+          2: const ModelValue(value: -1.0, modelVersion: 1),
+          3: const ModelValue(value: 0.0, modelVersion: 1),
+          4: const ModelValue(value: -3.0, modelVersion: 1),
+        },
+        actualRounds: {
+          1: const ActualRoundResult(round: 1, scoreToPar: -3, totalStrokes: 67.0),
+          2: const ActualRoundResult(round: 2, scoreToPar: 1, totalStrokes: 71.0),
+          3: const ActualRoundResult(round: 3, scoreToPar: -3, totalStrokes: 67.0),
+          4: const ActualRoundResult(round: 4, scoreToPar: -4, totalStrokes: 66.0),
+        },
+        actualStatus: 'finished',
+      ),
+    ];
+
+    await tester.pumpWidget(_wrap(FieldLeaderboardTable(field: field)));
+
+    // Round 4's own real result (66, -4), not round 1's (67, -3).
+    expect(find.text('66 (-4)'), findsOneWidget);
+    expect(find.text('67 (-3)'), findsNothing);
+  });
+
   testWidgets('THIS RD shows how many holes are played so far when the golfer is in progress', (tester) async {
     final field = [
       _golfer(

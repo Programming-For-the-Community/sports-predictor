@@ -33,19 +33,25 @@ def _calendar_week(season_type="regular", week=4, first_game_start="2025-09-25T0
 
 
 class TestLambdaHandlerWeekResolution:
-    def test_uses_explicit_season_week_type_without_calling_calendar(self):
+    def test_uses_explicit_season_week_type_without_auto_detecting(self):
+        # get_calendar is still called once here -- not for week
+        # resolution (an explicit override skips that entirely, the thing
+        # this test actually cares about), but because
+        # _fetch_roster_if_stale's own _season_kickoff check runs on
+        # every invocation regardless of override.
         mock_client = MagicMock()
         mock_client.get_games.return_value = []
         mock_client.get_calendar.return_value = []
+        mock_s3, _ = _make_s3()
 
         with patch.object(ncaafb_ingest, "CFBDClient", return_value=mock_client), \
-             patch.object(ncaafb_ingest, "_s3", MagicMock()), \
+             patch.object(ncaafb_ingest, "_s3", mock_s3), \
              patch.object(ncaafb_ingest, "get_cached_teams"), \
              patch.object(ncaafb_ingest.enrichment, "get_cached_coaches"), \
              patch.object(ncaafb_ingest.enrichment, "enrich_games"):
             ncaafb_ingest.lambda_handler({"season": 2024, "week": 3, "season_type": "postseason"}, None)
 
-        mock_client.get_calendar.assert_not_called()
+        mock_client.get_calendar.assert_called_once_with(2024)
         mock_client.get_games.assert_called_once_with(2024, week=3, season_type="postseason")
 
     def test_auto_detects_most_recently_started_week(self):
@@ -88,15 +94,19 @@ class TestLambdaHandlerWeekResolution:
         mock_client = MagicMock()
         mock_client.get_games.return_value = []
         mock_client.get_calendar.return_value = [_calendar_week(week=4)]
+        mock_s3, _ = _make_s3()
 
         with patch.object(ncaafb_ingest, "CFBDClient", return_value=mock_client), \
-             patch.object(ncaafb_ingest, "_s3", MagicMock()), \
+             patch.object(ncaafb_ingest, "_s3", mock_s3), \
              patch.object(ncaafb_ingest, "get_cached_teams"), \
              patch.object(ncaafb_ingest.enrichment, "get_cached_coaches"), \
              patch.object(ncaafb_ingest.enrichment, "enrich_games"):
             ncaafb_ingest.lambda_handler({"season": 2025}, None)
 
-        mock_client.get_calendar.assert_called_once()
+        # Twice -- once for _fetch_roster_if_stale's own _season_kickoff
+        # check (every invocation), once for _resolve_current_week's real
+        # auto-detection (season alone isn't a full override).
+        assert mock_client.get_calendar.call_count == 2
 
 
 class TestLambdaHandlerCacheRefresh:
@@ -251,31 +261,83 @@ def _make_s3():
     return mock_s3, store
 
 
+class TestSeasonKickoff:
+    def test_returns_the_regular_season_week_1_first_game_start(self):
+        client = MagicMock()
+        client.get_calendar.return_value = [
+            _calendar_week(season_type="regular", week=1, first_game_start="2026-08-23T00:00:00.000Z"),
+            _calendar_week(season_type="regular", week=2, first_game_start="2026-09-05T00:00:00.000Z"),
+        ]
+
+        result = ncaafb_ingest._season_kickoff(client, 2026)
+
+        assert result == datetime(2026, 8, 23, tzinfo=timezone.utc)
+
+    def test_none_when_the_calendar_has_no_week_1_yet(self):
+        client = MagicMock()
+        client.get_calendar.return_value = [_calendar_week(season_type="regular", week=2)]
+
+        assert ncaafb_ingest._season_kickoff(client, 2026) is None
+
+    def test_ignores_a_postseason_week_1(self):
+        # Postseason week numbering is flat and restarts at 1 -- not the
+        # real regular-season kickoff.
+        client = MagicMock()
+        client.get_calendar.return_value = [
+            _calendar_week(season_type="postseason", week=1, first_game_start="2025-12-01T00:00:00.000Z"),
+            _calendar_week(season_type="regular", week=1, first_game_start="2026-08-23T00:00:00.000Z"),
+        ]
+
+        result = ncaafb_ingest._season_kickoff(client, 2026)
+
+        assert result == datetime(2026, 8, 23, tzinfo=timezone.utc)
+
+
 class TestRosterNeedsRefresh:
     def test_true_on_cache_miss(self):
         mock_s3, _ = _make_s3()
         with patch.object(ncaafb_ingest, "_s3", mock_s3):
-            assert ncaafb_ingest._roster_needs_refresh(2025) is True
+            assert ncaafb_ingest._roster_needs_refresh(2025, None) is True
 
-    def test_false_within_ttl(self):
+    def test_false_within_ttl_and_after_kickoff(self):
         mock_s3, store = _make_s3()
         fresh = (datetime.now(timezone.utc) - timedelta(days=1)).isoformat()
         store[ncaafb_ingest._roster_marker_key(2025)] = json.dumps({"fetched_at": fresh}).encode()
         with patch.object(ncaafb_ingest, "_s3", mock_s3):
-            assert ncaafb_ingest._roster_needs_refresh(2025) is False
+            assert ncaafb_ingest._roster_needs_refresh(2025, None) is False
 
     def test_true_past_ttl(self):
         mock_s3, store = _make_s3()
         stale = (datetime.now(timezone.utc) - timedelta(days=31)).isoformat()
         store[ncaafb_ingest._roster_marker_key(2025)] = json.dumps({"fetched_at": stale}).encode()
         with patch.object(ncaafb_ingest, "_s3", mock_s3):
-            assert ncaafb_ingest._roster_needs_refresh(2025) is True
+            assert ncaafb_ingest._roster_needs_refresh(2025, None) is True
 
     def test_true_on_malformed_marker(self):
         mock_s3, store = _make_s3()
         store[ncaafb_ingest._roster_marker_key(2025)] = b"not json"
         with patch.object(ncaafb_ingest, "_s3", mock_s3):
-            assert ncaafb_ingest._roster_needs_refresh(2025) is True
+            assert ncaafb_ingest._roster_needs_refresh(2025, None) is True
+
+    def test_true_when_fetched_before_season_kickoff_even_within_ttl(self):
+        # Real complaint 2026-09-02: fetched during fall camp (2026-08-12),
+        # season kicked off 2026-08-23 -- still well within the 30-day TTL
+        # a week into the season, but the snapshot predates the real
+        # season-opening roster (cuts/portal moves/walk-on promotions).
+        mock_s3, store = _make_s3()
+        fetched_during_camp = datetime(2026, 8, 12, tzinfo=timezone.utc)
+        store[ncaafb_ingest._roster_marker_key(2025)] = json.dumps({"fetched_at": fetched_during_camp.isoformat()}).encode()
+        kickoff = datetime(2026, 8, 23, tzinfo=timezone.utc)
+        with patch.object(ncaafb_ingest, "_s3", mock_s3):
+            assert ncaafb_ingest._roster_needs_refresh(2025, kickoff) is True
+
+    def test_false_when_fetched_after_season_kickoff_and_within_ttl(self):
+        mock_s3, store = _make_s3()
+        fetched_after_kickoff = datetime.now(timezone.utc) - timedelta(days=1)
+        store[ncaafb_ingest._roster_marker_key(2025)] = json.dumps({"fetched_at": fetched_after_kickoff.isoformat()}).encode()
+        kickoff = fetched_after_kickoff - timedelta(days=3)
+        with patch.object(ncaafb_ingest, "_s3", mock_s3):
+            assert ncaafb_ingest._roster_needs_refresh(2025, kickoff) is False
 
 
 class TestAnnotateRoster:
@@ -298,6 +360,7 @@ class TestFetchRosterIfStale:
     def test_cache_miss_fetches_writes_both_roster_and_marker_with_team_id_resolved(self):
         mock_s3, store = _make_s3()
         client = MagicMock()
+        client.get_calendar.return_value = []
         client.get_roster.return_value = [{"id": "1", "team": "Georgia", "position": "QB"}]
         teams = [{"id": 61, "school": "Georgia"}]
 
@@ -316,12 +379,30 @@ class TestFetchRosterIfStale:
         fresh = (datetime.now(timezone.utc) - timedelta(days=1)).isoformat()
         store[ncaafb_ingest._roster_marker_key(2025)] = json.dumps({"fetched_at": fresh}).encode()
         client = MagicMock()
+        client.get_calendar.return_value = []
 
         with patch.object(ncaafb_ingest, "_s3", mock_s3):
             result = ncaafb_ingest._fetch_roster_if_stale(client, 2025, [])
 
         assert result is False
         client.get_roster.assert_not_called()
+
+    def test_refetches_a_pre_kickoff_snapshot_even_though_it_is_within_the_ttl(self):
+        # Real complaint 2026-09-02 -- see TestRosterNeedsRefresh's own
+        # equivalent test for the full scenario this reproduces end to end.
+        mock_s3, store = _make_s3()
+        store[ncaafb_ingest._roster_marker_key(2025)] = json.dumps(
+            {"fetched_at": datetime(2026, 8, 12, tzinfo=timezone.utc).isoformat()},
+        ).encode()
+        client = MagicMock()
+        client.get_calendar.return_value = [_calendar_week(season_type="regular", week=1, first_game_start="2026-08-23T00:00:00.000Z")]
+        client.get_roster.return_value = []
+
+        with patch.object(ncaafb_ingest, "_s3", mock_s3):
+            result = ncaafb_ingest._fetch_roster_if_stale(client, 2025, [])
+
+        assert result is True
+        client.get_roster.assert_called_once_with(2025)
 
 
 class TestLambdaHandlerRosterFetch:
