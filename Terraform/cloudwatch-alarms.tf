@@ -528,9 +528,15 @@ resource "aws_cloudwatch_metric_alarm" "schedule_sync_throttles" {
 # ── 8a-8b. Predict / predict-read Duration p99 (Warning) ────────────────────
 # Originally one alarm covering both stages (12 functions) -- also hit the
 # 10-metric_query cap (see the Throttles comment above), so split by stage
-# the same way. MAX() across each function's own p99 series (not SUM/AVG
-# -- durations aren't additive) surfaces the worst offender within each
-# stage's 6 sports.
+# the same way. Worst-of-N is still MAX, not SUM/AVG (durations aren't
+# additive), but a real apply confirmed CloudWatch's N-ary
+# "MAX(m1,m2,...,m6)" form isn't valid on 6 individually-named metrics
+# ("ValidationError: ... Unsupported operand type(s) for MAX:
+# '[TimeSeries, TimeSeries, ...]'" -- MAX() only accepts an array produced
+# by METRICS()/SEARCH(), both of which are themselves unsupported in
+# alarms, or exactly 2 scalar operands). Nesting MAX two at a time (a
+# left-fold, "MAX(MAX(MAX(MAX(MAX(m1,m2),m3),m4),m5),m6)") sidesteps
+# both restrictions -- every call site only ever sees 2 scalar operands.
 
 resource "aws_cloudwatch_metric_alarm" "predict_duration_p99" {
   alarm_name          = "${var.project}-predict-duration-p99"
@@ -559,7 +565,7 @@ resource "aws_cloudwatch_metric_alarm" "predict_duration_p99" {
 
   metric_query {
     id          = "total"
-    expression  = "MAX(${join(",", [for i in range(length(local.alarm_all_sports)) : "m${i + 1}"])})"
+    expression  = "MAX(MAX(MAX(MAX(MAX(m1,m2),m3),m4),m5),m6)"
     label       = "predict Duration p99 (worst of any sport)"
     return_data = true
   }
@@ -597,7 +603,7 @@ resource "aws_cloudwatch_metric_alarm" "predict_read_duration_p99" {
 
   metric_query {
     id          = "total"
-    expression  = "MAX(${join(",", [for i in range(length(local.alarm_all_sports)) : "m${i + 1}"])})"
+    expression  = "MAX(MAX(MAX(MAX(MAX(m1,m2),m3),m4),m5),m6)"
     label       = "predict-read Duration p99 (worst of any sport)"
     return_data = true
   }
