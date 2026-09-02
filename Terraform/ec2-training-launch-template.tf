@@ -14,13 +14,27 @@ resource "aws_launch_template" "ec2_training" {
     arn = aws_iam_instance_profile.ec2_training_instance.arn
   }
 
-  # awsvpc network mode (same as every Fargate training task) still needs
-  # this instance-level SG for the ECS agent's own traffic (cluster
-  # control-plane API, ECR, CloudWatch Logs) -- identical shape to what
-  # training already uses on Fargate, no new SG needed. The task's own
-  # ENI gets its SG from RunTask's NetworkConfiguration
-  # (sfn-training-orchestrator-ec2.tf), same as Fargate.
-  vpc_security_group_ids = [aws_security_group.fargate_internet_egress.id]
+  # Same SG Fargate training already uses (ECS agent traffic -- cluster
+  # control-plane API, ECR, CloudWatch Logs -- plus the task's own ENI SG
+  # comes from RunTask's own NetworkConfiguration, sfn-training-
+  # orchestrator-ec2.tf, same as Fargate). Set inside network_interfaces,
+  # not the top-level vpc_security_group_ids, because EC2 rejects a launch
+  # template that sets both.
+  #
+  # associate_public_ip_address = true is what actually gives this
+  # instance internet reachability: ec2-training-asg.tf's ASGs sit in the
+  # public subnets (aws_subnet.public_1/2/3), but those subnets don't
+  # auto-assign a public IP (map_public_ip_on_launch = false, subnet-
+  # public.tf) -- Fargate's own training tasks cover the equivalent gap
+  # with AssignPublicIp on the task's own ENI, which isn't a valid
+  # parameter for EC2 launch type (see sfn-training-orchestrator-ec2.tf's
+  # own comment on RunTrainingTaskEc2Spot/OnDemand -- their real first
+  # run failed 100% of its targets on exactly this before this was added).
+  network_interfaces {
+    device_index                = 0
+    associate_public_ip_address = true
+    security_groups             = [aws_security_group.fargate_internet_egress.id]
+  }
 
   metadata_options {
     http_tokens   = "required" # IMDSv2 only

@@ -18,6 +18,20 @@
 # why that's safe here (EC2's vCPU budget is divided by sport-concurrency
 # before being divided by per-task vCPU, so concurrent sports can't
 # jointly exceed the same total budget one sport alone would use).
+#
+# RunTrainingTaskEc2Spot/RunTrainingTaskEc2OnDemand's own
+# NetworkConfiguration has no AssignPublicIp -- unlike RunFeatureEngineering
+# above (still FARGATE launch type, where that field is required), it isn't
+# valid at all for a CapacityProviderStrategy task on EC2 launch type
+# ("ECS.InvalidParameterException: Assign public IP is not supported for
+# this launch type" -- a real canary run's first-ever execution failed
+# 100% of its 42 training targets on exactly this, silently, since
+# TrainingTaskFailed's own tolerant Pass state let the execution report
+# SUCCEEDED anyway). Reachability instead comes from the EC2 instance's
+# OWN public IP, requested at the launch-template level
+# (ec2-training-launch-template.tf's network_interfaces block) since these
+# public subnets don't auto-assign one (map_public_ip_on_launch = false,
+# subnet-public.tf).
 resource "aws_cloudwatch_log_group" "training_orchestrator_ec2" {
   name              = "/aws/vendedlogs/states/${var.project}-training-orchestrator-ec2"
   retention_in_days = 30
@@ -178,8 +192,7 @@ resource "aws_sfn_state_machine" "training_orchestrator_ec2" {
                     "NetworkConfiguration": {
                       "AwsvpcConfiguration": {
                         "Subnets": ["${aws_subnet.public_1.id}", "${aws_subnet.public_2.id}", "${aws_subnet.public_3.id}"],
-                        "SecurityGroups": ["${aws_security_group.fargate_internet_egress.id}"],
-                        "AssignPublicIp": "ENABLED"
+                        "SecurityGroups": ["${aws_security_group.fargate_internet_egress.id}"]
                       }
                     },
                     "Overrides": {
@@ -233,8 +246,7 @@ resource "aws_sfn_state_machine" "training_orchestrator_ec2" {
                     "NetworkConfiguration": {
                       "AwsvpcConfiguration": {
                         "Subnets": ["${aws_subnet.public_1.id}", "${aws_subnet.public_2.id}", "${aws_subnet.public_3.id}"],
-                        "SecurityGroups": ["${aws_security_group.fargate_internet_egress.id}"],
-                        "AssignPublicIp": "ENABLED"
+                        "SecurityGroups": ["${aws_security_group.fargate_internet_egress.id}"]
                       }
                     },
                     "Overrides": {
