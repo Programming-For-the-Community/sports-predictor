@@ -108,10 +108,10 @@ def ap_poll_to_rank_by_team(poll: dict) -> dict[str, int]:
 
 
 # NCAA Division I's own group id, one level below the (unused here)
-# all-divisions root -- confirmed live, 2026-08-22, the same id
-# NCAAMBBClient.get_scoreboard_for_date's own groups=50 param already
-# relies on. Stable across seasons (it's ESPN's id for the division
-# itself, not for any one year's membership of it).
+# all-divisions root -- the same id NCAAMBBClient.get_scoreboard_for_date's
+# own groups=50 param already relies on. Stable across seasons (it's
+# ESPN's id for the division itself, not for any one year's membership
+# of it).
 DIVISION_I_GROUP_ID = "50"
 
 
@@ -138,8 +138,7 @@ class NCAAMBBCoreClient(HttpClient):
 
     def get_conference_group_refs(self, season: int, season_type: int = 2) -> list[str]:
         """$ref URLs for every group directly under Division I this season
-        -- confirmed live, 2026-08-22: 31 items for season 2026/type 2,
-        each one a real conference (isConference=true; see
+        -- each one a real conference (isConference=true; see
         get_group_detail). season_type=2 (regular season) is the default
         since conference membership doesn't change mid-season the way a
         team's own postseason `groups` pointer sometimes reads (a Duke

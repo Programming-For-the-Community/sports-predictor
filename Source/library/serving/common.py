@@ -9,13 +9,11 @@ from library.storage.model_artifacts import current_version_key, model_artifact_
 # down to just the single most recent (completed) or soonest (scheduled)
 # day/week's games -- this bounds the query itself to that many of the
 # most-recent/soonest rows instead of a full-history read that grows with
-# the whole season/backfill (a real production 504, confirmed live
-# 2026-09-02: PGA's own unbounded completed-event query alone paginated
-# through 1186 rows before narrowing to the 1 it actually needed).
-# Comfortably above any sport's own documented single-date/week peak (NCAA
-# MBB's ~150-game Saturday, NCAAFB's full FBS weekly slate), so the true
-# most/least recent bucket's full slate is always included regardless of
-# how long the gap to it is (e.g. the off-season).
+# the whole season/backfill. Comfortably above any sport's own documented
+# single-date/week peak (NCAA MBB's ~150-game Saturday, NCAAFB's full FBS
+# weekly slate), so the true most/least recent bucket's full slate is
+# always included regardless of how long the gap to it is (e.g. the
+# off-season).
 RECENT_EVENTS_LIMIT = 400
 
 
@@ -79,10 +77,7 @@ def most_recent_event(events: list[dict]) -> list[dict]:
     sharing a week/day, there's no smaller natural bucket here to filter
     down to. Used by pga_reads.py/f1_reads.py's own list_events to bound a
     status=completed response to the same "just the most recent bucket,
-    not full history" shape every other sport's list_events already has --
-    returning EVERY historical event was a real production 504 (PGA: up to
-    ~150 golfers x every tournament ever backfilled, sequential GetItems,
-    real complaint 2026-09-01)."""
+    not full history" shape every other sport's list_events already has."""
     if not events:
         return []
     return [max(events, key=lambda e: e.get("event_date", ""))]

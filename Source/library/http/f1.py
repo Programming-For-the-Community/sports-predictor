@@ -5,24 +5,16 @@ directly rather than a source-specific base class (library/http/espn.py's
 EspnBaseClient) -- Jolpica shares nothing with ESPN's response envelope,
 so there's no shared base to extend.
 
-Base URL/response shape/rate limits confirmed live 2026-08-30:
-https://api.jolpi.ca/ergast/f1/, Ergast-compatible JSON (an "MRData" root
-object wrapping a RaceTable/StandingsTable/etc. per endpoint), `limit`/
-`offset` pagination (default 30 rows/page, 100 max). Unauthenticated
-rate limits: 4 req/s burst, 500 req/hr sustained -- DEFAULT_MIN_INTERVAL_
-SECONDS uses the stricter sustained bound (3600/500 = 7.2s), which
-trivially satisfies the burst limit too.
+Base URL is https://api.jolpi.ca/ergast/f1/, Ergast-compatible JSON (an
+"MRData" root object wrapping a RaceTable/StandingsTable/etc. per
+endpoint), `limit`/`offset` pagination (default 30 rows/page, 100 max).
+Unauthenticated rate limits: 4 req/s burst, 500 req/hr sustained --
+DEFAULT_MIN_INTERVAL_SECONDS uses the stricter sustained bound
+(3600/500 = 7.2s), which trivially satisfies the burst limit too.
 
-Base URL is https, not http -- confirmed live 2026-08-31 that a plain
-http:// request 301-redirects to https:// (Cloudflare-enforced). requests
-follows that redirect transparently, so a wrong http:// default wasn't a
-functional bug, but it cost a real extra request against Jolpica's own
-strict sustained-rate limit on every call, and left the request open to
-having that redirect stripped/rewritten by anything positioned on-path
-before the upgrade -- not a secrets leak (Jolpica is keyless, nothing
-sensitive ever goes out), but a real, avoidable integrity gap for data
-this project trains models on. Pointing straight at https:// removes
-both problems outright.
+https, not http -- a plain http:// request 301-redirects to https://
+(Cloudflare-enforced); pointing straight at https:// avoids the extra
+redirect round trip against the sustained-rate limit.
 
 A custom, non-default User-Agent is REQUIRED by Jolpica's own docs
 (unlike ESPN, which just needs to not look like a bot). Same

@@ -24,8 +24,8 @@ Genuinely different from NFL/NCAAFB, not just renamed:
   sub-features exist here at all). Sourced from Source/aws-lambdas/nba/
   ingest/handler.py's _attach_injuries, which attaches each event's
   home_injuries/away_injuries from that SAME run's roster fetch (NBA's
-  roster response embeds injuries directly -- confirmed live -- so unlike
-  NFL this needs no separate injury-report API call). Forward-only, same
+  roster response embeds injuries directly, so unlike NFL this needs no
+  separate injury-report API call). Forward-only, same
   as NFL's own coach/injury fields: only populated for events an ingest
   run has actually enriched, null on anything backfilled before this
   shipped. The exact raw per-athlete injury status field name is

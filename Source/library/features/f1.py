@@ -267,8 +267,7 @@ def build_sprint_event_features(
     be sparse to the point of being noise rather than signal.
 
     No qualifying-pace block either -- Jolpica has no separate Sprint
-    Qualifying/Sprint Shootout results endpoint at all (confirmed live
-    2026-08-31, see design/PROJECT_PLAN.md's F1 section), so there is no
+    Qualifying/Sprint Shootout results endpoint at all, so there is no
     real pace data for that session to build a rolling block from.
 
     label_sprint_grid_position is this driver's real STARTING grid for

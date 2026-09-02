@@ -10,10 +10,8 @@ only API with one flat set of endpoints, so this extends HttpClient
 directly, the same way EspnCoreApiClient does for its own single-host,
 no-sport-path shape.
 
-Endpoint shapes marked "confirmed live" below were verified against real
-CFBD responses (Phase 1, plus a Phase 3 follow-up pass for /calendar and
-/games/teams specifically -- see project memory's project-ncaafb-onboarding
-notes for both).
+Endpoint shapes documented below are verified against real CFBD
+responses.
 """
 import json
 import os
@@ -59,24 +57,21 @@ class CFBDClient(HttpClient):
         self._session.headers["Authorization"] = f"Bearer {_resolve_api_key()}"
 
     def get_games(self, year: int, week: int | None = None, season_type: str = "regular") -> list[dict]:
-        """One week's games (the whole season if week is omitted) --
-        confirmed live: flat per-game dicts with id/homeId/awayId/
-        homePoints/awayPoints/homeConference/awayConference/
-        conferenceGame/startDate/completed/homeClassification/
-        awayClassification. classification=fbs scopes this project's
-        FBS-only coverage -- confirmed live it means "at least one side is
+        """One week's games (the whole season if week is omitted) -- flat
+        per-game dicts with id/homeId/awayId/homePoints/awayPoints/
+        homeConference/awayConference/conferenceGame/startDate/completed/
+        homeClassification/awayClassification. classification=fbs scopes
+        this project's FBS-only coverage, meaning "at least one side is
         FBS" (an FBS team's scheduled game against an FCS opponent still
-        comes back, e.g. a September money game), not "both sides FBS" --
-        the right behavior, since that's still a real game one of this
-        project's FBS teams played."""
+        comes back), not "both sides FBS"."""
         params = {"year": year, "seasonType": season_type, "classification": "fbs"}
         if week is not None:
             params["week"] = week
         return self._get("games", params=params)
 
     def get_game_player_stats(self, year: int, week: int, season_type: str = "regular") -> list[dict]:
-        """One week's player box scores in one call -- confirmed live
-        (Phase 1): [{"id": game_id, "teams": [{"team": school_name,
+        """One week's player box scores in one call: [{"id": game_id,
+        "teams": [{"team": school_name,
         "homeAway": ..., "categories": [{"name": ..., "types": [{"name":
         ..., "athletes": [{"id", "name", "stat"}]}]}]}]}]. No numeric team
         id or game date at this level -- callers must cross-reference "id"
@@ -89,7 +84,7 @@ class CFBDClient(HttpClient):
 
     def get_game_team_stats(self, year: int, week: int, season_type: str = "regular") -> list[dict]:
         """One week's team box scores (turnovers, possession time, etc.)
-        in one call -- confirmed live (2025 data): [{"id": game_id,
+        in one call: [{"id": game_id,
         "teams": [{"teamId", "team": school_name, "conference", "homeAway",
         "points", "stats": [{"category", "stat"}]}]}]. Unlike
         get_game_player_stats, each team block DOES carry its own numeric
@@ -103,15 +98,14 @@ class CFBDClient(HttpClient):
         })
 
     def get_coaches(self, year: int) -> list[dict]:
-        """Every FBS coach for `year` in one call -- confirmed live (Phase
-        1, 161 coaches): [{"firstName", "lastName", "hireDate", "seasons":
+        """Every FBS coach for `year` in one call: [{"firstName", "lastName", "hireDate", "seasons":
         [{"school", "year", "games", "wins", "losses", "ties", ...}]}]. No
         numeric team or coach id -- team association is by school name
         only, via each season entry's own "school" field."""
         return self._get("coaches", params={"year": year})
 
     def get_rankings(self, year: int, week: int | None = None, season_type: str = "regular") -> list[dict]:
-        """Confirmed live (Phase 1): [{"season", "seasonType", "week",
+        """[{"season", "seasonType", "week",
         "polls": [{"poll": "AP Top 25", "ranks": [{"rank", "school",
         "conference", ...}]}, ...]}] -- includes non-FBS polls
         ("FCS Coaches Poll" etc.) in the same payload; callers must filter
@@ -124,13 +118,13 @@ class CFBDClient(HttpClient):
         return self._get("rankings", params=params)
 
     def get_teams(self, year: int) -> list[dict]:
-        """Every FBS team for `year` in one call -- confirmed live (Phase
-        1, 136 teams, no classification filter needed). [{"id", "school",
+        """Every FBS team for `year` in one call, no classification filter
+        needed. [{"id", "school",
         "conference", "location": {"dome": bool, "grass": bool, ...}}]."""
         return self._get("teams", params={"year": year})
 
     def get_calendar(self, year: int) -> list[dict]:
-        """Week date-boundaries for `year` -- confirmed live (2025 data):
+        """Week date-boundaries for `year`:
         [{"season", "week", "seasonType", "startDate", "endDate",
         "firstGameStart", "lastGameStart"}, ...]. Used by ingest/
         handler.py to resolve "today" into a season/week, the same role
@@ -141,7 +135,6 @@ class CFBDClient(HttpClient):
 
     def get_roster(self, year: int) -> list[dict]:
         """Every FBS (and other-division) team's full roster in one bulk
-        call -- confirmed live (Phase 1, ~9MB). Not wired into ingest yet
-        (see project memory) -- monthly cadence, deferred as a small
-        follow-on rather than this phase's scope."""
+        call (~9MB). Fetched by ingest/handler.py on a monthly cadence,
+        refreshed early if the season has already started."""
         return self._get("roster", params={"year": year})

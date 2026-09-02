@@ -77,13 +77,12 @@ def _previous_week_events(completed: list[dict]) -> list[dict]:
 _STALE_SCHEDULED_GRACE_DAYS = 3  # tolerates ingest lag flipping a played game's status to completed
 
 # The largest calendar gap between two consecutive game-dates that still
-# counts as the same real week -- confirmed live, 2026-08-24, against the
-# full 2026 schedule: every real week's own internal date-to-date gaps are
-# at most 2 days (e.g. week 8's Oct 20 -> Oct 22), while week 1's tagged
-# games split into two clusters (Aug 29-30, then Sep 3-7) with a 3-day gap
-# between them -- see _next_week_events' own docstring for why a single
-# fixed-span-from-the-earliest-date cap (the prior approach) wasn't tight
-# enough to separate those two clusters.
+# counts as the same real week -- every real week's own internal
+# date-to-date gaps are at most 2 days (e.g. week 8's Oct 20 -> Oct 22),
+# while week 1's tagged games can split into two clusters (e.g. Aug
+# 29-30, then Sep 3-7) with a larger gap between them -- see
+# _next_week_events' own docstring for why a single fixed-span-from-the-
+# earliest-date cap isn't tight enough to separate those two clusters.
 _MAX_INTRA_WEEK_GAP_DAYS = 2
 
 
@@ -278,10 +277,10 @@ def list_events(storage, predictions_table, sport: str, status: str) -> dict:
 
     Bounded to RECENT_EVENTS_LIMIT rows on the query itself, most-recent-
     or soonest-first to match whichever bucket status narrows down to
-    below -- an unbounded get_all_events call here paginates through the
-    sport's entire completed/scheduled history before ever discarding
-    everything but one week, a real production 504 confirmed live
-    2026-09-02 (see pga_reads.py's own list_events docstring)."""
+    below -- an unbounded get_all_events call here would paginate through
+    the sport's entire completed/scheduled history before ever
+    discarding everything but one week (see pga_reads.py's own
+    list_events docstring)."""
     if status == "completed":
         events = storage.get_all_events(sport, status=status, limit=RECENT_EVENTS_LIMIT)
         events = _previous_week_events(events)

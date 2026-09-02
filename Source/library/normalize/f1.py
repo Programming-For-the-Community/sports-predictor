@@ -13,10 +13,7 @@ single leaderboard fetch that already carries everything.
 All field names verified against real Jolpica-F1 responses (a normal
 race, a DNF-heavy race with both a classified and an unclassified
 retirement, a Sprint weekend, a real qualifying response including a
-Q1-only-eliminated driver with no Q2/Q3 keys at all) before being
-written, per this project's own "verify raw fields before feature code"
-rule -- confirmed live 2026-08-30/2026-08-31 against
-http://api.jolpi.ca/ergast/f1/2024/*.
+Q1-only-eliminated driver with no Q2/Q3 keys at all).
 """
 import logging
 
@@ -41,10 +38,8 @@ _STATUS_TEXT_MAP = {
 
 # positionText's own letter-code vocabulary for a driver Ergast didn't
 # assign a real classification position to (didn't cover F1's real
-# >=90%-of-race-distance classification threshold) -- confirmed live
-# 2026-08-30 (2024 Australian GP) for "R"; the rest ("D"/"W"/"N"/"F")
-# follow the same documented Ergast convention, not yet individually
-# observed live in this project's own spot-check.
+# >=90%-of-race-distance classification threshold), per the documented
+# Ergast convention.
 _POSITION_LETTER_MAP = {
     "R": "dnf",  # retired, unclassified
     "D": "dsq",
@@ -168,8 +163,8 @@ def _race_like_event_item(payload: dict, sport: str, *, results_key: str, event_
     event_type="field") and a Sprint race (results_key="SprintResults",
     event_type="sprint") -- Jolpica returns a byte-identical per-driver
     result shape for both (position/positionText/points/grid/laps/
-    status/Driver/Constructor/FastestLap, confirmed live 2026-08-30),
-    just under a different top-level key -- nothing here needs to know
+    status/Driver/Constructor/FastestLap), just under a different
+    top-level key -- nothing here needs to know
     which points table applied to produce `points`, only normalize
     whatever Jolpica already recorded.
 
@@ -302,27 +297,18 @@ def sprint_result_to_constructor_entities(payload: dict, sport: str) -> list[dic
 
 
 def _parse_lap_time_seconds(value: str | None, context: str = "") -> float | None:
-    """Ergast/Jolpica lap-time strings are USUALLY "M:SS.sss" (e.g.
+    """Ergast/Jolpica lap-time strings are usually "M:SS.sss" (e.g.
     "1:29.374") -- minutes, then seconds+milliseconds. But a lap under a
     minute has no minutes prefix at all, just bare "SS.sss" (e.g.
-    "54.963") -- a real, genuinely valid value this function's first
-    version treated as a parse FAILURE (silently discarded as "missing"
-    instead of the real time it was), confirmed live 2026-08-31 from a
-    real backfill run's own logs -- dozens of real sub-minute qualifying
-    times, all logged as "unparseable" and dropped. The colon-only
-    assumption came from this module's own original spot-check, which
-    only ever happened to sample >=1-minute times. Both shapes are
-    handled directly on whether a colon is present, rather than assuming
-    one and treating the other as a failure.
+    "54.963"). Both shapes are handled directly on whether a colon is
+    present, rather than assuming one and treating the other as a
+    failure.
 
     None/empty/malformed still returns None -- a driver eliminated in Q1
-    genuinely has no Q2/Q3 KEY AT ALL (confirmed live, not just a null
-    value), and that needs to stay a silent, expected gap, not a parse
-    failure. `context` (e.g. "season 2014 round 7") is included in the
-    warning for any value that's STILL unparseable after handling both
-    shapes -- the original warning carried no season/round at all, which
-    is exactly why this bug's own real occurrences couldn't be traced
-    back to a specific round from the log alone."""
+    genuinely has no Q2/Q3 key at all, and that needs to stay a silent,
+    expected gap, not a parse failure. `context` (e.g. "season 2014
+    round 7") is included in the warning for any value that's still
+    unparseable after handling both shapes."""
     if not value:
         return None
     try:

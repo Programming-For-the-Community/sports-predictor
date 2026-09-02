@@ -131,16 +131,13 @@ def list_events(storage, sport: str, status: str) -> dict:
     to 2 events on a Sprint weekend, 1 otherwise -- same "just the most
     recent bucket, not full history" shape pga_reads.py's own list_events
     uses, for the same reason: unbounded history plus per-participant
-    entity GetItems was a real production 504 there, and F1's own
-    20-driver field times the same "every race ever backfilled" shape is
-    the same architectural gap, just smaller (real complaint 2026-09-01:
-    "I have noticed this with other sports").
+    entity GetItems doesn't scale.
 
     Bounded to RECENT_EVENTS_LIMIT rows on the query itself, most-recent-
-    first -- an unbounded get_all_events call here paginates through the
-    sport's entire completed-event history before ever discarding
-    everything but one race weekend, a real production 504 confirmed live
-    2026-09-02 (see pga_reads.py's own list_events docstring)."""
+    first -- an unbounded get_all_events call here would paginate through
+    the sport's entire completed-event history before ever discarding
+    everything but one race weekend (see pga_reads.py's own list_events
+    docstring)."""
     if status == "completed":
         events = storage.get_all_events(sport, status=status, limit=RECENT_EVENTS_LIMIT)
         events = _current_race_weekend_events(events)

@@ -4,16 +4,13 @@ basketball/mens-college-basketball sport path.
 
 Same shape as NBAClient -- no depth-chart method (basketball has no
 position-ranked depth-chart concept), and no bulk box-score-by-date
-endpoint exists (confirmed live, 2026-08-19, see project-ncaambb-onboarding
-memory) -- get_summary is strictly per-game, same as every other sport.
+endpoint exists -- get_summary is strictly per-game, same as every other
+sport.
 
-UNLIKE NBA's client, both get_teams and get_scoreboard_for_date need an
-explicit extra param -- confirmed live, 2026-08-20 (a real bug caught by
-running the live-ESPN integration suite on a real network, not caught in
-this sandbox's own earlier verification, which happened to only exercise
-dates/endpoints small enough to hide it): with 30 teams and NBA's own
-game-per-night volume, NBA's client never needed either fix, so this
-class is NOT a blind copy of NBAClient's shape despite looking similar.
+Unlike NBA's client, both get_teams and get_scoreboard_for_date need an
+explicit extra param: with 30 teams and NBA's own game-per-night volume,
+NBA's client never needed either fix, so this class is not a blind copy
+of NBAClient's shape despite looking similar.
 """
 from library.http.espn import EspnBaseClient
 
@@ -24,38 +21,30 @@ class NCAAMBBClient(EspnBaseClient):
 
     def get_teams(self) -> dict:
         """Every D1 team -- ESPN's default page size is 50 with no `limit`
-        param, silently truncating D1's real ~362 teams to the first 50
-        (confirmed live, 2026-08-20). No pagination metadata (count/
-        pageIndex/pageSize/pageCount) is present anywhere in this response
-        shape to detect truncation or drive real paging, so 1000 is a
-        fixed, generously-padded ceiling rather than a computed value --
-        confirmed live to return the full 362 with room to spare."""
+        param, silently truncating D1's real ~362 teams to the first 50.
+        No pagination metadata (count/pageIndex/pageSize/pageCount) is
+        present anywhere in this response shape to detect truncation or
+        drive real paging, so 1000 is a fixed, generously-padded ceiling
+        rather than a computed value."""
         return self._get("teams", params={"limit": 1000})
 
     def get_scoreboard_for_date(self, date: str) -> dict:
         """Fetch the day's full scoreboard (YYYYMMDD) -- ESPN infers
         season/season-type entirely from this one parameter, same as
-        NBAClient.get_scoreboard_for_date. Confirmed live: no preseason
-        games appear on this scoreboard at all (first games of a season
-        are already season.type=2/regular-season), unlike NFL/NBA -- so
-        callers here have no preseason-type filter to apply.
+        NBAClient.get_scoreboard_for_date. No preseason games appear on
+        this scoreboard at all (first games of a season are already
+        season.type=2/regular-season), unlike NFL/NBA -- so callers here
+        have no preseason-type filter to apply.
 
-        groups=50 (ESPN's id for "NCAA Division I", confirmed live via the
-        core API's groups/children listing -- see
-        project-ncaambb-onboarding memory) is required, not optional: a
-        bare `dates`-only call silently returns some unscoped/"featured"
-        subset of the day's games (confirmed live, 2026-08-20 -- as few as
-        ~10% of a full slate on a busy date, e.g. 19 of 169 games on
-        2025-11-03), not the full D1 schedule. NBA's own client never
-        needed this because NBA's single-league scoreboard has no
-        equivalent scoping ambiguity.
+        groups=50 (ESPN's id for "NCAA Division I") is required, not
+        optional: a bare `dates`-only call silently returns some
+        unscoped/"featured" subset of the day's games (as few as ~10% of
+        a full slate on a busy date), not the full D1 schedule. NBA's own
+        client never needed this because NBA's single-league scoreboard
+        has no equivalent scoping ambiguity.
 
-        limit=400 is defensive padding, not itself confirmed necessary --
-        groups=50 alone already returned the correct full count (up to
-        169 events) in every live sample checked, unlike get_teams' own
-        confirmed-real 50-item default cap. Given how costly that silent
-        truncation just proved to be, this stays in rather than being
-        trimmed as unnecessary."""
+        limit=400 is defensive padding -- groups=50 alone already returns
+        the correct full count (up to 169 events)."""
         return self._get("scoreboard", params={"dates": date, "groups": 50, "limit": 400})
 
     def get_summary(self, event_id: str) -> dict:
@@ -63,8 +52,8 @@ class NCAAMBBClient(EspnBaseClient):
 
     def get_current_rankings_pointer(self) -> dict:
         """The site API's own /rankings response -- current-only, no
-        historical season/week query support (confirmed live, 2026-08-20:
-        season/week params are silently ignored). Shaped
+        historical season/week query support (season/week params are
+        silently ignored). Shaped
         {"rankings": [{"id", "name", "type", "$ref", "occurrence"}, ...]},
         one entry per poll (AP, Coaches, ...) -- callers use
         library.http.ncaambb_core.current_ap_poll_pointer to pick the AP
@@ -75,10 +64,9 @@ class NCAAMBBClient(EspnBaseClient):
         return self._get("rankings", params={})
 
     def get_roster(self, team_id: str) -> dict:
-        """One team's full current roster -- confirmed live, 2026-08-19.
-        Same flat (ungrouped) athletes list as NBAClient.get_roster, each
-        athlete carrying its own `position`/`injuries`; the response also
-        carries a top-level `coach` field. No pagination concern here --
-        a team's roster is at most ~15-20 players, far under ESPN's
-        default page size."""
+        """One team's full current roster. Same flat (ungrouped) athletes
+        list as NBAClient.get_roster, each athlete carrying its own
+        `position`/`injuries`; the response also carries a top-level
+        `coach` field. No pagination concern here -- a team's roster is
+        at most ~15-20 players, far under ESPN's default page size."""
         return self._get(f"teams/{team_id}/roster", params={})

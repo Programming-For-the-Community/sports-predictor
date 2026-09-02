@@ -9,8 +9,7 @@ adding event_type branches to espn.py's functions.
 
 All field names below verified against a real ESPN golf leaderboard
 response before being written (site.web.api.espn.com/apis/site/v2/sports/
-golf/leaderboard?event={id}), per this project's own "verify raw fields
-before feature code" rule -- see project-pga-onboarding memory.
+golf/leaderboard?event={id}).
 """
 import logging
 
@@ -72,24 +71,22 @@ def _parse_score(score: dict) -> tuple[int | float | None, float | None]:
 
     displayValue is relative-to-par, already signed ("-4", "+2") except
     for even par, which ESPN represents as the literal string "E" rather
-    than "0", and "-" for a golfer with no score yet (confirmed live on a
-    real not-yet-started tournament's leaderboard, 2026-08-24 -- every
-    competitor is pre-listed with score {"value": 0.0, "displayValue":
-    "-"} before their round starts, so a literal 0 strokes here is a
-    sentinel for "hasn't played," not a real total). parse_number alone
-    would leave "E"/"-" as unparsed strings and 0.0 as a bogus stroke
-    count, so both are special-cased together here rather than treating
-    total_strokes as a plain passthrough of score.value.
+    than "0", and "-" for a golfer with no score yet -- every competitor
+    is pre-listed with score {"value": 0.0, "displayValue": "-"} before
+    their round starts, so a literal 0 strokes here is a sentinel for
+    "hasn't played," not a real total. parse_number alone would leave
+    "E"/"-" as unparsed strings and 0.0 as a bogus stroke count, so both
+    are special-cased together here rather than treating total_strokes as
+    a plain passthrough of score.value.
 
-    Any OTHER non-numeric displayValue (confirmed live 2026-08-27, a real
-    crash: a withdrawn golfer's score is displayValue "WD", not "-" or a
-    signed number) falls back to the same (None, None) "no score" result
-    as "-" -- parse_number returns a raw string unparsed rather than
-    guessing, and that string reaching rolling_golfer_averages' sum()
-    crashes with a str/int TypeError. "WD" isn't special-cased by name
-    (a "DQ" or any future ESPN status-string would hit the exact same
-    shape) -- fail closed on anything parse_number couldn't turn into a
-    real number, same discipline this module's other guards use."""
+    Any other non-numeric displayValue (e.g. a withdrawn golfer's score
+    is displayValue "WD", not "-" or a signed number) falls back to the
+    same (None, None) "no score" result as "-" -- parse_number returns a
+    raw string unparsed rather than guessing, and that string reaching
+    rolling_golfer_averages' sum() would crash with a str/int TypeError.
+    "WD" isn't special-cased by name (a "DQ" or any future ESPN
+    status-string would hit the exact same shape) -- fail closed on
+    anything parse_number couldn't turn into a real number."""
     display_value = score.get("displayValue")
     if display_value == "-":
         return None, None
@@ -103,35 +100,30 @@ def _parse_score(score: dict) -> tuple[int | float | None, float | None]:
 
 def _parse_rounds(linescores: list[dict]) -> list[dict]:
     """One entry per round this golfer actually played, from
-    competitor["linescores"] -- confirmed live, 2026-08-25, always
-    present (100% of competitors checked across two real tournaments) at
-    the ROUND grain (a `period`/`value`/`displayValue` triple per round),
-    though the further-nested HOLE-level breakdown within each round is
-    not consistently populated and isn't parsed here.
+    competitor["linescores"] -- always present at the round grain (a
+    `period`/`value`/`displayValue` triple per round), though the
+    further-nested hole-level breakdown within each round is not
+    consistently populated and isn't parsed here.
 
     A cut golfer's own linescores naturally has only 2 entries, not 4 --
-    confirmed live directly on a real missed-cut player -- so a golfer
-    who didn't play rounds 3-4 simply contributes no entries for them at
-    all here, with no conditional cut-logic needed in this function or
-    anywhere downstream that consumes it (feature engineering, training).
+    a golfer who didn't play rounds 3-4 simply contributes no entries for
+    them at all here, with no conditional cut-logic needed in this
+    function or anywhere downstream that consumes it (feature
+    engineering, training).
 
-    Skips a round with no `displayValue`/`value` key at all -- confirmed
-    live 2026-08-27/28 on the real in-progress TOUR Championship: once
-    ESPN publishes a golfer's NEXT round's tee time (same day their
-    current round wraps up, sometimes the evening before), it adds a
-    linescores entry for that round carrying only
-    {period, teeTime, hasStream, isPlayoff}, no score fields whatsoever --
-    genuinely different from this function's own prior assumption that
-    a linescores entry only ever exists for a round already played.
-    Without this guard, that stub was parsed as a real round via
-    _parse_score's own (None, None) "no score" fallback and appended to
-    `rounds` anyway, which corrupts aws-lambdas/pga/predict/
-    live_features.py's applicable_rounds() (`played = {r["round"] for r
-    in result.get("rounds", [])}` would count the *unplayed* next round
-    as played, skipping the model for the actual next round to predict).
-    A live check of a real not-yet-started round confirms this is not a
-    rare edge case -- it's the norm once next-round tee times exist,
-    i.e. for most of the field most of the time.
+    Skips a round with no `displayValue`/`value` key at all: once ESPN
+    publishes a golfer's next round's tee time (same day their current
+    round wraps up, sometimes the evening before), it adds a linescores
+    entry for that round carrying only {period, teeTime, hasStream,
+    isPlayoff}, no score fields whatsoever -- a linescores entry doesn't
+    only ever exist for a round already played. Without this guard, that
+    stub gets parsed as a real round via _parse_score's own (None, None)
+    "no score" fallback and appended to `rounds` anyway, which corrupts
+    aws-lambdas/pga/predict/live_features.py's applicable_rounds()
+    (`played = {r["round"] for r in result.get("rounds", [])}` would
+    count the unplayed next round as played, skipping the model for the
+    actual next round to predict). This is the norm once next-round tee
+    times exist, i.e. for most of the field most of the time.
 
     Each round's own score is parsed through the exact same _parse_score
     used for the tournament-level total -- an individual round can show
@@ -154,7 +146,7 @@ def _competitor_to_participants(competitor: dict) -> list[dict]:
     """Almost always a single-element list (one Medal-scoring competitor
     is one golfer, keyed by `athlete`) -- except a Teamstroke competitor
     (Zurich Classic of New Orleans, the only non-Medal stroke-play format
-    this project supports, confirmed live 2026-08-26), which has no
+    this project supports), which has no
     `athlete` key at all: it's a 2-golfer pairing keyed by `roster`
     instead ([{"playerId", "athlete": {...}}, ...]), sharing one combined
     score/status/earnings between them. In that case this returns TWO
@@ -218,11 +210,10 @@ def _competitor_to_participants(competitor: dict) -> list[dict]:
     athlete = competitor.get("athlete", {})
     athlete_id = athlete.get("id")
     if athlete_id is None:
-        # A stub athlete object with no "id" at all -- same real gap
+        # A stub athlete object with no "id" at all -- same gap
         # library/normalize/espn.py's box-score parsing already guards
-        # against for a DNP player, confirmed live here 2026-08-26/27 on
-        # a real Medal-scoring competitor. leaderboard_event_to_player_
-        # entities (below) already skips these silently; this competitor
+        # against for a DNP player. leaderboard_event_to_player_entities
+        # (below) already skips these silently; this competitor
         # contributes no participant rows either, rather than crashing.
         return []
     return [{"entity_id": str(athlete_id), "result": shared_result}]
@@ -232,21 +223,14 @@ def event_status(status: dict) -> str:
     """Public -- reused by library/normalize/pga_matchplay.py's cup/match
     event builders, same completed/scheduled binary either way.
 
-    Checks `type.state == "post"`, not `type.completed`. Confirmed live
-    2026-08-27 on a real cached Presidents Cup leaderboard (401465497):
-    the TOP-LEVEL tournament status carries both `state: "post"` and
-    `completed: true` together, but an INDIVIDUAL match's own status
-    object (nested inside `competitions[n][m]["status"]`, the one
-    library/normalize/pga_matchplay.py's leaderboard_event_to_match_
-    event_items feeds this same function) never carries `completed` at
-    all -- only `state`/`name`/`description`. Every match_play event was
-    silently written to DynamoDB with status "scheduled" (falsy .get on
-    a missing key) forever, so FeatureStorage.get_all_events's default
-    status="completed" query found 0 of them -- feature-engineering's
-    match/cup dataset build logged "0 match-play... event(s)" and raised
-    on the resulting empty match_features.parquet write. `state` is
-    present and correct at both nesting levels (confirmed on the same
-    real tournament), so one check now covers tournament-level (Medal/
+    Checks `type.state == "post"`, not `type.completed`. The top-level
+    tournament status carries both `state: "post"` and `completed: true`
+    together, but an individual match's own status object (nested inside
+    `competitions[n][m]["status"]`, the one library/normalize/
+    pga_matchplay.py's leaderboard_event_to_match_event_items feeds this
+    same function) never carries `completed` at all -- only
+    `state`/`name`/`description`. `state` is present and correct at both
+    nesting levels, so one check covers tournament-level (Medal/
     Teamstroke and Cup-summary) and match-level status alike."""
     return "completed" if status.get("type", {}).get("state") == "post" else "scheduled"
 
@@ -255,10 +239,9 @@ def host_course(courses: list[dict]) -> dict:
     """The `host: true` course entry -- see this project's own note on
     why golf has no single top-level `venue` object (design/
     DATA_SCHEMA.md). Falls back to the first course if none is flagged
-    host (not observed live, but courses is never empty for a real
-    tournament). Public -- reused by pga_matchplay.py, Ryder Cup/
-    Presidents Cup/WGC Match Play responses carry the same `courses`
-    shape (confirmed live, 2026-08-26)."""
+    host (courses is never empty for a real tournament). Public --
+    reused by pga_matchplay.py, Ryder Cup/Presidents Cup/WGC Match Play
+    responses carry the same `courses` shape."""
     return next((c for c in courses if c.get("host")), courses[0] if courses else {})
 
 
@@ -271,16 +254,15 @@ def is_medal_scoring(event: dict) -> bool:
     they specifically need to distinguish Medal from Teamstroke.
 
     Missing `tournament`/`scoringSystem` entirely (e.g. a future calendar
-    entry ESPN hasn't fully populated yet -- confirmed live on a
-    not-yet-configured Presidents Cup entry) is treated as NOT Medal --
+    entry ESPN hasn't fully populated yet) is treated as not Medal --
     fail closed rather than assume a shape that might not hold."""
     return (event.get("tournament") or {}).get("scoringSystem", {}).get("name") == "Medal"
 
 
 def is_team_stroke_play(event: dict) -> bool:
     """Zurich Classic of New Orleans, ESPN's only "Teamstroke" tournament
-    -- confirmed live, 2026-08-26, structurally identical to a Medal
-    event (same FLAT `competitions` shape, same STATUS_CUT/STATUS_FINISH
+    -- structurally identical to a Medal event (same flat `competitions`
+    shape, same STATUS_CUT/STATUS_FINISH
     vocabulary, same score/linescores shape), except each competitor is a
     2-golfer pairing (`team.displayName` + `roster`) rather than a single
     `athlete`. See _competitor_to_participants' own docstring for how
@@ -290,21 +272,21 @@ def is_team_stroke_play(event: dict) -> bool:
 
 def is_flat_stroke_play(event: dict) -> bool:
     """Medal or Teamstroke -- the two scoring systems this normalizer
-    supports, both sharing the exact same FLAT `event["competitions"]`
+    supports, both sharing the exact same flat `event["competitions"]`
     shape (a single-element list) and the same event/participant
     structure below. PGA TOUR's real calendar also carries genuinely
-    different formats this normalizer does NOT support: team match play
+    different formats this normalizer does not support: team match play
     (Ryder Cup, Presidents Cup, WGC-Dell Technologies Match Play --
     scoringSystem "Match") and made-for-TV exhibitions (The Match, also
     scored "Match") -- see library/normalize/pga_matchplay.py, which
-    handles those instead. All confirmed live, 2026-08-25/26, that a
-    "Match"-scored event uses a genuinely different `competitions` shape
-    (a list of per-session dicts wrapped in an EXTRA list layer --
-    `[[{...}], [{...}], ...]`) that would crash this module's normalizers
-    (an AttributeError from the extra list layer) if fed through
-    unchanged. Callers (ingest, schedule-sync, normalize, backfill) must
-    check this BEFORE calling either normalizer function below, and route
-    a "Match"-scored event to pga_matchplay.py instead."""
+    handles those instead. A "Match"-scored event uses a genuinely
+    different `competitions` shape (a list of per-session dicts wrapped
+    in an extra list layer -- `[[{...}], [{...}], ...]`) that would crash
+    this module's normalizers (an AttributeError from the extra list
+    layer) if fed through unchanged. Callers (ingest, schedule-sync,
+    normalize, backfill) must check this before calling either normalizer
+    function below, and route a "Match"-scored event to pga_matchplay.py
+    instead."""
     return is_medal_scoring(event) or is_team_stroke_play(event)
 
 
@@ -313,16 +295,13 @@ def _next_tee_time(competitors: list[dict]) -> str | None:
     competitors (excludes cut/withdrawn/MDF -- they have no round left to
     tee off for), or None if nobody has a known tee time yet.
 
-    Confirmed live 2026-08-27/28 on the real in-progress TOUR
-    Championship: each competitor's own `status.teeTime` carries their
-    NEXT (or current) round's tee time -- e.g. a golfer who just finished
-    today's round already shows tomorrow's published tee time here, often
-    the same day it's still being played. This is the one real clock
-    signal PGA data has for "when does play next start" -- see
-    aws-lambdas/pga/live-scores/live_scores.py's own docstring for why an
-    earlier attempt to use the event-level `date` field instead was wrong
-    (that field is a static midnight-UTC placeholder, not a real tee
-    time, confirmed by the same live check)."""
+    Each competitor's own `status.teeTime` carries their next (or
+    current) round's tee time -- e.g. a golfer who just finished today's
+    round already shows tomorrow's published tee time here, often the
+    same day it's still being played. This is the one real clock signal
+    PGA data has for "when does play next start" -- the event-level
+    `date` field is a static midnight-UTC placeholder, not a real tee
+    time."""
     tee_times = [
         status["teeTime"]
         for c in competitors
@@ -367,8 +346,8 @@ def leaderboard_event_to_event_item(event: dict, sport: str) -> dict:
     course = host_course(event.get("courses", []))
     address = course.get("address") or {}
     # No season.type on the leaderboard endpoint's `season` (unlike the
-    # scoreboard endpoint's) -- confirmed live, it's a bare {"year": ...}
-    # here. season_type instead comes from the sibling top-level
+    # scoreboard endpoint's) -- it's a bare {"year": ...} here.
+    # season_type instead comes from the sibling top-level
     # `seasonType` field. `week` is always an empty {} for golf (no
     # week-number concept, unlike NFL) -- included as None for schema
     # consistency with the head-to-head sports, not a gap.
@@ -386,15 +365,10 @@ def leaderboard_event_to_event_item(event: dict, sport: str) -> dict:
         # known in DynamoDB before live-scores' scheduler ever needs them
         # that day, without a dedicated "discover tee times" call.
         "next_tee_time": _next_tee_time(competition.get("competitors", [])),
-        # end_date -- confirmed live on the same leaderboard response
-        # (library/http/pga.py's own docstring, 2026-08-24). Needed by
-        # pga-live-scores to know which calendar days are tournament
-        # days at all.
+        # end_date -- from the same leaderboard response (see
+        # library/http/pga.py's own docstring). Needed by pga-live-scores
+        # to know which calendar days are tournament days at all.
         "end_date": (event.get("endDate") or "")[:10] or None,
-        # tournament_name -- already read by library/serving/pga_reads.py
-        # and aws-lambdas/pga/predict/event_prediction.py, but was never
-        # set here (only pga_matchplay.py's match_play/cup normalizers
-        # set it) -- every field-event tournament_name was silently null.
         "tournament_name": tournament.get("displayName"),
         "status": event_status(event.get("status", {})),
         "participants": participants,
@@ -422,20 +396,17 @@ def leaderboard_event_to_event_item(event: dict, sport: str) -> dict:
         # (design/DATA_SCHEMA.md and library/features/pga.py), not present
         # on any head-to-head sport's event item. purse comes from the
         # event's own top-level `purse` (a plain integer, USD); is_major
-        # from the nested `tournament.major` flag -- both confirmed live
-        # on a real leaderboard response, 2026-08-24.
+        # from the nested `tournament.major` flag.
         "purse": event.get("purse"),
         "is_major": bool(tournament.get("major", False)),
         # cut_score/cut_round/cut_count -- for the projected-cut-line
         # model (library/features/pga.py, feature-engineering/pga/
         # build_dataset.py's build_cutline_dataset). All three come
-        # straight off the leaderboard's own `tournament` object,
-        # confirmed live, 2026-08-25, on both a real-cut event (a 71-
-        # player-field Genesis Scottish Open, cutRound=2, cutScore=-2,
-        # cutCount=71) and a no-cut FedEx Cup playoff event (BMW
-        # Championship, all three genuinely 0 -- treated as "this
-        # tournament had no cut," not missing data, so cut-line training
-        # filters to cut_count > 0 rather than cut_score.notna()).
+        # straight off the leaderboard's own `tournament` object; a
+        # no-cut event (e.g. a FedEx Cup playoff event) reports all
+        # three as 0, treated as "this tournament had no cut," not
+        # missing data, so cut-line training filters to cut_count > 0
+        # rather than cut_score.notna().
         "cut_score": tournament.get("cutScore"),
         "cut_round": tournament.get("cutRound"),
         "cut_count": tournament.get("cutCount"),
@@ -457,8 +428,8 @@ def leaderboard_event_to_player_entities(event: dict, sport: str) -> list[dict]:
     -- its two golfers live in `roster` instead ([{"playerId", "athlete":
     {...}}, ...]), each nested athlete dict carrying the same
     displayName/flag/amateur fields a Medal competitor's own `athlete`
-    dict does (confirmed live, 2026-08-26), so both shapes are handled
-    below rather than only the flat one.
+    dict does, so both shapes are handled below rather than only the
+    flat one.
 
     Raises ValueError up front for a non-flat-stroke-play event, same
     defense-in-depth guard as leaderboard_event_to_event_item -- without

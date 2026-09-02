@@ -2,10 +2,8 @@
 NBA ESPN client. Extends EspnBaseClient with the basketball/nba sport path.
 
 No depth-chart method, unlike NFLClient -- basketball has no equivalent
-concept (position-ranked QB1/RB1-style depth), so there's nothing to
-mirror there. No bulk box-score-by-date endpoint exists (confirmed live,
-2026-08-13, see project-nba-onboarding memory) -- get_summary is strictly
-per-game, same as NFL's.
+concept (position-ranked QB1/RB1-style depth). No bulk box-score-by-date
+endpoint exists -- get_summary is strictly per-game, same as NFL's.
 """
 from library.http.espn import EspnBaseClient
 
@@ -29,7 +27,7 @@ class NBAClient(EspnBaseClient):
         return self._get("summary", params={"event": event_id})
 
     def get_roster(self, team_id: str) -> dict:
-        """One team's full current roster -- confirmed live, 2026-08-14.
+        """One team's full current roster.
         Unlike NFLClient.get_roster's `athletes` (grouped by position group:
         offense/defense/specialTeam/...), NBA's `athletes` is a FLAT list of
         player objects (no grouping) -- normalize must not assume NFL's

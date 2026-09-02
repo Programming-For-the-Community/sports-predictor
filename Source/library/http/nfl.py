@@ -41,6 +41,5 @@ class NFLClient(EspnBaseClient):
         tracks (offense/defense/specialTeam/injuredReserveOrOut/suspended/
         practiceSquad), not just the depth chart's skill-position subset.
         `athletes` groups players by position: [{"position": "offense",
-        "items": [athlete, ...]}, ...] -- confirmed live on this same
-        site.api.espn.com host as every other method here."""
+        "items": [athlete, ...]}, ...]."""
         return self._get(f"teams/{team_id}/roster", params={})

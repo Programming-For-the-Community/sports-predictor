@@ -8,21 +8,18 @@ specific wrapper needed).
 No week/day-bucketing the way nba_reads.py's own list_events has -- PGA's
 grouping unit is already one tournament (one event_key), not one calendar
 date, so there's no smaller bucket to group multiple events into.
-status=completed still bounds to the single MOST RECENT tournament
+status=completed still bounds to the single most recent tournament
 (library.serving.common.most_recent_event) rather than returning every
-completed tournament ever backfilled -- unbounded history here was a real
-production 504 (up to ~150 golfers x every historical tournament,
-sequential entity GetItems with no cache; real complaint 2026-09-01).
-status=scheduled stays unbounded -- there are only ever a handful of
-future tournaments in the registry at once, so it's never shown the same
-symptom.
+completed tournament ever backfilled -- unbounded history here doesn't
+scale (up to ~150 golfers x every historical tournament, sequential
+entity GetItems with no cache). status=scheduled stays unbounded -- there
+are only ever a handful of future tournaments in the registry at once,
+so it's never shown the same symptom.
 
-No prediction_comparison/leaders_comparison block yet (nba_reads.py's own
-predicted-vs-actual audit-trail comparison for a completed event) -- a
-field-wide version of that (predicted-vs-actual across ~150 golfers) is a
-materially bigger, separately-scoped problem than this pass's serving
-Lambda covers; list_events here only returns each event's own stored
-shape plus entity enrichment.
+No prediction_comparison/leaders_comparison block (nba_reads.py's own
+predicted-vs-actual audit-trail comparison for a completed event) --
+list_events here only returns each event's own stored shape plus entity
+enrichment.
 
 Also holds the PGA model-name constants (FIELD_EVENT_MODELS etc.) --
 deliberately here, not in aws-lambdas/pga/predict/event_prediction.py,
@@ -178,15 +175,14 @@ def list_events(storage, sport: str, status: str) -> dict:
     the single most recent tournament -- see this module's own docstring.
 
     limit=1 on the query itself for status=completed, not just
-    most_recent_event's own post-hoc narrowing -- the real production 504
-    this module's own docstring describes persisted after the entity-
-    enrichment fix below because the unbounded get_all_events call was
-    itself the bottleneck once completed-event count grew large enough
-    (1186 PGA events, confirmed live 2026-09-02): every historical
-    completed event paginated in from DynamoDB before most_recent_event
-    ever got to discard all but one. get_all_events already sorts
-    most-recent-first by default, so Limit=1 returns exactly the same row
-    most_recent_event's own max() would have picked out of the full set."""
+    most_recent_event's own post-hoc narrowing -- the unbounded
+    get_all_events call itself is the bottleneck once completed-event
+    count grows large (PGA has 1000+ historical events): every historical
+    completed event would paginate in from DynamoDB before
+    most_recent_event ever got to discard all but one. get_all_events
+    already sorts most-recent-first by default, so Limit=1 returns
+    exactly the same row most_recent_event's own max() would have picked
+    out of the full set."""
     if status == "completed":
         events = storage.get_all_events(sport, status=status, limit=1)
         events = most_recent_event(events)

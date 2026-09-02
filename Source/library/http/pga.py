@@ -5,8 +5,7 @@ golfers only appear as leaderboard competitors, so entity data is derived
 from the same leaderboard fetch normalize already needs for event/result
 data (see library/normalize/pga.py's leaderboard_event_to_player_entities).
 
-Two distinct ESPN endpoints, confirmed live 2026-08-24 (see
-project-pga-onboarding memory): the scoreboard endpoint under this
+Two distinct ESPN endpoints: the scoreboard endpoint under this
 client's own "golf/pga" path (same shape/purpose as every other sport's
 get_scoreboard_for_date -- discovers which event id(s) are active/recently
 finished for a given date, plus the full season's tournament calendar via
@@ -30,9 +29,9 @@ class PGAClient(EspnBaseClient):
         """Fetch (YYYYMMDD) -- discovers which tournament id(s) are
         active/recently finished around this date, and (via
         response["leagues"][0]["calendar"]) the full season's tournament
-        schedule in the same call. Confirmed live: a date the day after a
-        tournament's own endDate still returns that tournament, so daily
-        ingest doesn't need to guess exactly when a result becomes final."""
+        schedule in the same call. A date the day after a tournament's own
+        endDate still returns that tournament, so daily ingest doesn't
+        need to guess exactly when a result becomes final."""
         return self._get("pga/scoreboard", params={"dates": date})
 
     def get_leaderboard(self, event_id: str) -> dict:
@@ -46,12 +45,12 @@ class PGAClient(EspnBaseClient):
     def get_statistics(self) -> dict:
         """Season-to-date per-player statistical leaders (driving
         distance/accuracy, greens in regulation, putts per hole, birdies
-        per round, scoring average, etc. -- ~12 categories, confirmed
-        live 2026-08-25), a genuinely different endpoint (`pga/statistics`)
-        from the tournament-scoped ones above.
+        per round, scoring average, etc. -- ~12 categories), a genuinely
+        different endpoint (`pga/statistics`) from the tournament-scoped
+        ones above.
 
-        CURRENT-SNAPSHOT-ONLY -- confirmed live that this endpoint's
-        `season`/`year` query params are silently ignored (a request with
+        Current-snapshot-only -- this endpoint's `season`/`year` query
+        params are silently ignored (a request with
         either set returns a byte-identical response to one with neither,
         regardless of value). There is no way to retrieve a past season's
         stats retroactively; the only way this project can ever have a

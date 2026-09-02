@@ -4,56 +4,41 @@ basketball equivalent of library.features.nba. Same split as every other
 sport's feature module: no AWS calls here, every function takes
 already-fetched rows and returns numbers, and train-time
 (Source/feature-engineering/ncaambb/build_dataset.py) and live-serve-time
-feature computation share these same functions once inference lands
-(step 6).
+feature computation share these same functions.
 
 Genuinely different from NBA, not just renamed:
-- avg_total_rebounds is read DIRECTLY off box_stats, not derived from
+- avg_total_rebounds is read directly off box_stats, not derived from
   offensive+defensive the way NBA's own _total_rebounds works around a
-  real data gap. ESPN's NCAA MBB box score DOES carry a raw combined
-  rebounds stat alongside offensiveRebounds/defensiveRebounds, unlike
-  NBA's, where "avg_rebounds" came back null -- but its own raw label is
-  "Total Rebounds", snake-cased to total_rebounds, not "rebounds"
-  (confirmed against a real stored team_game_stats row, 2026-08-21, after
-  home_avg_rebounds/away_avg_rebounds turned out to be silently None in
-  every row -- see project-ncaambb-onboarding memory). Trusting the raw
-  stat here rather than porting NBA's derivation workaround into a sport
-  that doesn't need it.
+  data gap NBA's box score has and NCAA MBB's doesn't. ESPN's NCAA MBB
+  box score carries a raw combined rebounds stat alongside
+  offensiveRebounds/defensiveRebounds, labeled "Total Rebounds"
+  (snake-cased to total_rebounds, not "rebounds").
 - is_conference_game replaces NBA's is_divisional_game -- ESPN's own
   conferenceCompetition flag (library/normalize/espn.py's
-  scoreboard_event_to_event_item, confirmed live 2026-08-20), true for
-  both a regular-season conference game and a conference-tournament game.
-  No static division/conference table needed, unlike NBA's
-  library.features.nba_teams (real yearly conference realignment makes a
-  hand-maintained table the wrong tool here -- same reasoning
-  project-phase3-nba-ncaambb-plan already flagged for conference
-  membership generally).
-- No travel_km/is_international_game -- confirmed live, 2026-08-20: ESPN
-  has NO geo-coordinates anywhere for NCAA MBB teams/venues (checked both
-  the site API's team resource and the core API's team/venue resources --
-  only city/state text, never lat/long), unlike NCAAFB's CFBD source
-  (which embeds each team's home-stadium coordinates directly) or NBA's
-  own static 30-team table (a small enough, low-realignment set to hand-
-  maintain safely). Hand-typing coordinates for ~362 teams would repeat
-  the exact "2 of NBA's 30 hand-typed ids were wrong until checked
-  individually" risk the plan already flagged, at 12x the scale -- dropped
-  rather than guessed, same "don't feature-engineer something you can't
-  reliably compute" discipline as every other omission in this docstring.
+  scoreboard_event_to_event_item), true for both a regular-season
+  conference game and a conference-tournament game. No static
+  division/conference table needed, unlike NBA's
+  library.features.nba_teams -- yearly conference realignment makes a
+  hand-maintained table the wrong tool here.
+- No travel_km/is_international_game -- ESPN has no geo-coordinates
+  anywhere for NCAA MBB teams/venues (checked both the site API's team
+  resource and the core API's team/venue resources -- only city/state
+  text, never lat/long), unlike NCAAFB's CFBD source (which embeds each
+  team's home-stadium coordinates directly) or NBA's own static 30-team
+  table.
 - No National Ranking model features here -- build_team_week_features
-  (the AP-poll-labeled national-ranking model's own feature builder) is a
-  separate, later addition (see project-ncaambb-onboarding memory);
-  build_event_features/build_player_features below are the 4 core
-  training targets (win-probability, score margin/home/away, 6
-  player-props) shared by every sport's step-5 build.
+  (the AP-poll-labeled national-ranking model's own feature builder) is
+  separate; build_event_features/build_player_features below are the 4
+  core training targets (win-probability, score margin/home/away, 6
+  player-props) shared by every sport.
 - No coach-tenure features, no venue_indoor -- same reasoning as NBA's
   own docstring (no coach data source; every arena is indoor, so the
   field would be a constant with no discriminating value).
 - home_team_injury_count/away_team_injury_count only, no per-player
   injury-status equivalent -- same "no single dominant position the way
   a starting QB is" reasoning as NBA's own docstring. Sourced from
-  aws-lambdas/ncaambb/ingest/handler.py's _attach_injuries, confirmed
-  live that NCAA MBB's roster response embeds injuries the same shape as
-  NBA's.
+  aws-lambdas/ncaambb/ingest/handler.py's _attach_injuries -- NCAA MBB's
+  roster response embeds injuries the same shape as NBA's.
 - No season_type/week columns in build_player_features -- NCAA MBB's
   schedule is date-based, not week-based, same as NBA's.
 """

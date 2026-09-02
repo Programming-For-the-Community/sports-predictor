@@ -197,10 +197,10 @@ def list_events(storage, predictions_table, sport: str, status: str) -> dict:
 
     Bounded to RECENT_EVENTS_LIMIT rows on the query itself, most-recent-
     or soonest-first to match whichever bucket status narrows down to
-    below -- an unbounded get_all_events call here paginates through the
-    sport's entire completed/scheduled history before ever discarding
-    everything but one date, a real production 504 confirmed live
-    2026-09-02 (see pga_reads.py's own list_events docstring)."""
+    below -- an unbounded get_all_events call here would paginate through
+    the sport's entire completed/scheduled history before ever discarding
+    everything but one date (see pga_reads.py's own list_events
+    docstring)."""
     if status == "completed":
         events = storage.get_all_events(sport, status=status, limit=RECENT_EVENTS_LIMIT)
         events = _previous_day_events(events)

@@ -75,16 +75,9 @@ _EARLY_STOP_MIN_RELATIVE_IMPROVEMENT = 0.0005
 # dataset, but a fold from a genuinely tiny one (see _time_series_splits'
 # own docstring: PGA's cup-win-probability has only 6 training rows total)
 # can easily land on a single class, and sklearn's default log_loss raises
-# rather than guessing the other label ("ValueError: y_true contains only
-# one label (0)... provide the list of all expected class labels
-# explicitly" -- real crash 2026-09-02, PGA cup-win-probability, a
-# TimeSeriesSplit validation fold degenerate even after
-# _time_series_splits' own clamp already fixed the earlier, different
-# crash on this same dataset). Passing labels=[0, 1] explicitly is exactly
-# what sklearn's own error message asks for. Every classifier adapter
-# below is binary, so this is safe everywhere it's used, not just for PGA
-# cup specifically -- any other sport/target with a similarly small or
-# rare dataset would hit the identical crash otherwise.
+# rather than guessing the other label. Passing labels=[0, 1] explicitly
+# is what sklearn's own error message asks for. Every classifier adapter
+# below is binary, so this applies everywhere it's used.
 _BINARY_LOG_LOSS_SCORER = make_scorer(log_loss, response_method="predict_proba", greater_is_better=False, labels=[0, 1])
 
 
@@ -93,9 +86,8 @@ def _time_series_splits(n_splits: int, n_samples: int) -> int:
     (8) sized for every target's typical, much larger training set can
     still exceed a genuinely tiny target's own row count -- e.g. PGA's
     cup-win-probability (one Ryder/Presidents Cup a year, 6 training
-    rows after the chronological split; real crash 2026-08-27:
-    ValueError: Cannot have number of folds=9 greater than the number
-    of samples=6). Clamps down to the largest split count the data can
+    rows after the chronological split). Clamps down to the largest
+    split count the data can
     actually support. Floored at 2 -- TimeSeriesSplit's own minimum,
     and the smallest split count that still means anything as
     cross-validation. A caller with fewer than 3 samples can't satisfy
@@ -456,14 +448,10 @@ class ElasticNetAdapter(_JoblibSerializedAdapter):
 # is pure cost with no variance-reduction benefit.
 _RF_PARAM_DISTRIBUTIONS = {
     "model__n_estimators": [100, 200, 300, 400, 500, 600],
-    # No None option -- same reasoning as max_features just below already
-    # states and already applies there (an uncapped draw is pure cost with
-    # no variance-reduction benefit), just not previously carried through
-    # to max_depth too. Confirmed a real cost, not just a theoretical one:
-    # a live run (2026-08-22, NCAA MBB player-prop-assists) drew
-    # max_depth=None + n_estimators=600 on TimeSeriesSplit's largest fold
-    # and took 17.6 minutes for that ONE fold alone, and was the direct
-    # trigger of a genuine Fargate OOM kill at 64GB.
+    # No None option -- same reasoning as max_features below: an uncapped
+    # draw is pure cost with no variance-reduction benefit. An uncapped
+    # max_depth combined with a high n_estimators can OOM-kill the
+    # training task on its largest TimeSeriesSplit fold.
     "model__max_depth": [4, 6, 8, 10, 15, 20, 30],
     "model__min_samples_leaf": [1, 2, 4, 8],
     "model__max_features": ["sqrt", "log2"],

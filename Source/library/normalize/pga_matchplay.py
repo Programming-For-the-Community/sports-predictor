@@ -45,9 +45,9 @@ def _flatten_sessions(competitions: list) -> list[dict]:
 def _is_cup_summary(entry: dict) -> bool:
     """The one entry (Ryder Cup/Presidents Cup only) carrying the
     tournament-wide team score -- `description: "tournament"` /
-    `scoringSystem.name: "Cup"`, confirmed live 2026-08-26. Distinct from
-    the event's own top-level `tournament.scoringSystem` ("Match"), which
-    is a different field at a different nesting level."""
+    `scoringSystem.name: "Cup"`. Distinct from the event's own top-level
+    `tournament.scoringSystem` ("Match"), which is a different field at a
+    different nesting level."""
     return (entry.get("scoringSystem") or {}).get("name") == "Cup"
 
 
@@ -104,11 +104,10 @@ def is_exhibition(event: dict) -> bool:
     """The Match -- Match-scored, team-based (same team+roster shape as
     Ryder Cup/Presidents Cup), but with no Cup-level summary entry (it's
     a single one-off session, not a multi-day team competition with an
-    aggregate score). Structural, not name-based -- confirmed live on two
-    real editions, 2026-08-26, including one (401430881) whose
-    "athletes" aren't reliably PGA Tour golfers at all (Tom Brady/Aaron
-    Rodgers vs. Patrick Mahomes/Josh Allen), which is exactly why this
-    project excludes it permanently rather than normalizing it: no
+    aggregate score). Structural, not name-based -- The Match's own
+    "athletes" aren't reliably PGA Tour golfers at all (e.g. Tom
+    Brady/Aaron Rodgers vs. Patrick Mahomes/Josh Allen), which is why
+    this project excludes it permanently rather than normalizing it: no
     competitive/predictive value, and a real risk of polluting the
     golfer entities table with non-golfers. A future exhibition sharing
     this same "team layer, no Cup summary" shape is caught here too; one
@@ -146,15 +145,14 @@ def _competitor_golfers(competitor: dict) -> list[tuple[str, dict]]:
 
 
 def _match_result(competitor: dict) -> dict:
-    """won/halved/margin come from `score` -- confirmed live across every
-    real session type: a winning side has `displayValue` "N & M" (won
-    early, e.g. "6 & 5") or "N Up" (won on the 18th), `winner: true`,
-    `value` = N; the losing side has an EMPTY displayValue, `winner:
-    false`, `value: 0.0`; a halved (tied) match has `displayValue:
-    "Halved"`, `draw: true` on BOTH sides, `value: 0.0`. A tied Ryder Cup/
-    Presidents Cup itself (both sides finishing 14-14 or similar) hasn't
-    been observed live in this project's 2017-2026 window, but is handled
-    the same defensive way (won=False, halved=True) if it ever occurs."""
+    """won/halved/margin come from `score`: a winning side has
+    `displayValue` "N & M" (won early, e.g. "6 & 5") or "N Up" (won on
+    the 18th), `winner: true`, `value` = N; the losing side has an empty
+    displayValue, `winner: false`, `value: 0.0`; a halved (tied) match
+    has `displayValue: "Halved"`, `draw: true` on both sides, `value:
+    0.0`. A tied Ryder Cup/Presidents Cup itself (both sides finishing
+    14-14 or similar) is handled the same defensive way (won=False,
+    halved=True) if it ever occurs."""
     score = competitor.get("score") or {}
     status = competitor.get("status", {})
     won = bool(score.get("winner", False))
@@ -221,23 +219,22 @@ def leaderboard_event_to_match_event_items(event: dict, sport: str) -> list[dict
             "event_id": match_event_id,
             "sport": sport,
             "event_type": "match_play",
-            # Each match carries its own `date` (confirmed live -- a
-            # Sunday singles match's date is genuinely later than a
-            # Thursday foursomes match's), not the tournament's own
-            # top-level start date -- correct chronological placement
-            # matters for feature-engineering's history walk (a Sunday
-            # match must not see Thursday's own match result as "future"
-            # relative to the tournament, and vice versa).
+            # Each match carries its own `date` (a Sunday singles match's
+            # date is genuinely later than a Thursday foursomes match's),
+            # not the tournament's own top-level start date -- correct
+            # chronological placement matters for feature-engineering's
+            # history walk (a Sunday match must not see Thursday's own
+            # match result as "future" relative to the tournament, and
+            # vice versa).
             "event_date": (entry.get("date") or event.get("date") or "")[:10],
-            # match_time -- the FULL, untruncated per-match timestamp
-            # (unlike event_date). Confirmed live: unlike the event-level
-            # `date` field (a static midnight-UTC placeholder -- see
-            # library/normalize/pga.py's next_tee_time docstring), each
-            # match's own `date` is a genuine staggered tee-off-style time
-            # (e.g. two same-session matches 12 minutes apart). Needed by
+            # match_time -- the full, untruncated per-match timestamp
+            # (unlike event_date). Unlike the event-level `date` field (a
+            # static midnight-UTC placeholder -- see library/normalize/
+            # pga.py's next_tee_time docstring), each match's own `date`
+            # is a genuine staggered tee-off-style time (e.g. two
+            # same-session matches 12 minutes apart). Needed by
             # pga-live-scores' poll-window logic to know when this
-            # specific match starts, without a next-tee-time-style
-            # derivation trick -- the raw value already IS the real signal.
+            # specific match starts.
             "match_time": entry.get("date"),
             "status": pga.event_status(entry.get("status", {})),
             "parent_event_id": tournament_event_id,
