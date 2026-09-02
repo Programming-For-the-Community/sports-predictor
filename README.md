@@ -7,7 +7,7 @@ Built for a single user, not a public product — the frontend and API sit at a 
 ## Documentation
 
 **[design/](design/)** — architecture and design decisions, both target-state rationale and as-built reference in one place:
-- [Architecture](design/ARCHITECTURE.md) — why each piece exists, the no-NAT-Gateway networking constraint and its S3-relay workaround, access control design, a plain-text walkthrough of the client request path and scheduled pipeline. **[architecture.html](design/architecture.html)** is the companion visual diagram (open it in a browser) — client request path, scheduled data pipeline, and observability/cost guardrails, AWS-category-colored.
+- [Architecture](design/ARCHITECTURE.md) — why each piece exists, the no-NAT-Gateway networking constraint and its S3-relay workaround, access control design, a plain-text walkthrough of the client request path and scheduled pipeline. The companion visual diagram — client request path, scheduled data pipeline, and observability/cost guardrails, AWS-category-colored — is rendered live at <a href="https://programming-for-the-community.github.io/sports-predictor/design/architecture.html" target="_blank" rel="noopener">architecture.html</a> (opens in a new tab; source lives at `design/architecture.html`).
 - [Data Schema](design/DATA_SCHEMA.md) — entity/event/prediction schema, DynamoDB table design, sport registry shape, S3 key conventions
 - [Data Sources](design/DATA_SOURCES.md) — free data source per sport, update cadence, auth requirements, API key handling
 - [Tagging Strategy](design/TAGGING_STRATEGY.md) — AWS resource tagging convention for cost tracking in Billing/Cost Explorer

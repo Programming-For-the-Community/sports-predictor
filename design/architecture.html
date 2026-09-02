@@ -24,6 +24,7 @@
   --observability:#0891b2; --observability-bg:#e3f4f7;
   --external:#5b6470; --external-bg:#eceef1;
   --client:#374151; --client-bg:#eceef1;
+  --ec2:#f08c00; --ec2-bg:#fff3d6;
   --shadow: 0 1px 2px rgba(22,27,34,.04), 0 6px 16px -8px rgba(22,27,34,.12);
   --radius: 14px;
 }
@@ -36,6 +37,7 @@
     --compute-bg:#3a2408; --storage-bg:#233007; --database-bg:#1c1f4a;
     --network-bg:#2c1f4d; --security-bg:#3d1620; --integration-bg:#3d1128;
     --observability-bg:#0b3038; --external-bg:#242b34; --client-bg:#242b34;
+    --ec2-bg:#3d2900;
     --shadow: 0 1px 2px rgba(0,0,0,.3), 0 10px 24px -12px rgba(0,0,0,.5);
   }
 }
@@ -47,6 +49,7 @@
   --compute-bg:#3a2408; --storage-bg:#233007; --database-bg:#1c1f4a;
   --network-bg:#2c1f4d; --security-bg:#3d1620; --integration-bg:#3d1128;
   --observability-bg:#0b3038; --external-bg:#242b34; --client-bg:#242b34;
+  --ec2-bg:#3d2900;
   --shadow: 0 1px 2px rgba(0,0,0,.3), 0 10px 24px -12px rgba(0,0,0,.5);
 }
 *{box-sizing:border-box;}
@@ -202,7 +205,9 @@ section.panel.active{display:block; animation:fade .25s ease;}
   letter-spacing:.06em; color:var(--ink-faint); font-weight:700;
 }
 .groupbox.warm{border-color:#e8b800; background:color-mix(in srgb, #fff3bf 55%, var(--surface));}
-.groupbox.gold{border-color:#f08c00; background:color-mix(in srgb, #fff9db 55%, var(--surface));}
+.groupbox.gold{border-color:var(--ec2); background:color-mix(in srgb, var(--ec2-bg) 55%, var(--surface));}
+.badge.ec2{background:var(--ec2);}
+.card.ec2{border-left:3px solid var(--ec2);}
 
 /* satellite mini-notes for dotted/supporting deps */
 .satellite{
@@ -225,6 +230,24 @@ section.panel.active{display:block; animation:fade .25s ease;}
 .note + .note{margin-top:12px;}
 .grid2{display:grid; grid-template-columns:1fr 1fr; gap:12px;}
 @media (max-width:820px){.grid2{grid-template-columns:1fr;}}
+
+/* ---------- lane headers (separates ingestion vs. training visually) ---------- */
+.lane-head{
+  display:flex; align-items:center; gap:12px; margin:30px 0 16px; padding:11px 16px;
+  border-radius:10px; border-left:4px solid;
+}
+.lane-head:first-of-type{margin-top:6px;}
+.lane-head .lane-badge{
+  flex:none; width:32px; height:32px; border-radius:8px; display:flex; align-items:center;
+  justify-content:center; color:#fff;
+}
+.lane-head .lane-badge svg{width:18px; height:18px; stroke:#fff; fill:none; stroke-width:1.7; stroke-linecap:round; stroke-linejoin:round;}
+.lane-head h3{font-size:15.5px; font-weight:700; margin:0; color:var(--ink);}
+.lane-head p{font-size:12px; color:var(--ink-soft); margin:2px 0 0;}
+.lane-head.ingest{border-color:var(--integration); background:var(--integration-bg);}
+.lane-head.ingest .lane-badge{background:var(--integration);}
+.lane-head.train{border-color:var(--ec2); background:var(--ec2-bg);}
+.lane-head.train .lane-badge{background:var(--ec2);}
 
 .stat-strip{display:flex; gap:10px; flex-wrap:wrap; margin:4px 0 24px;}
 .stat{
@@ -249,11 +272,11 @@ footer{
 <symbol id="i-lambda" viewBox="0 0 24 24"><path d="M6 5 L11 12.2 L6 19 M9.6 19 H19 M11.5 12 L16 19"/></symbol>
 <symbol id="i-ecs" viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="4.5" rx="1"/><rect x="4" y="10" width="16" height="4.5" rx="1"/><rect x="4" y="16" width="16" height="4" rx="1"/><circle cx="7" cy="6.2" r=".4" fill="#fff" stroke="none"/><circle cx="7" cy="12.2" r=".4" fill="#fff" stroke="none"/></symbol>
 <symbol id="i-fargate" viewBox="0 0 24 24"><rect x="5" y="9" width="14" height="11" rx="1.4"/><path d="M8 9 V6.5 A4 4 0 0 1 16 6.5 V9"/></symbol>
-<symbol id="i-s3" viewBox="0 0 24 24"><path d="M5 7 C5 5.3 8.1 4 12 4 S19 5.3 19 7 15.9 10 12 10 5 8.7 5 7Z"/><path d="M5 7 V17 C5 18.7 8.1 20 12 20 S19 18.7 19 17 V7"/><path d="M5 12 C5 13.7 8.1 15 12 15 S19 13.7 19 12"/></symbol>
-<symbol id="i-ddb" viewBox="0 0 24 24"><ellipse cx="12" cy="6" rx="7.5" ry="2.6"/><path d="M4.5 6 V18 C4.5 19.4 7.9 20.6 12 20.6 S19.5 19.4 19.5 18 V6"/><path d="M4.5 12 C4.5 13.4 7.9 14.6 12 14.6 S19.5 13.4 19.5 12"/></symbol>
-<symbol id="i-cloudfront" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><ellipse cx="12" cy="12" rx="3.4" ry="8"/><path d="M4.2 9.3 H19.8 M4.2 14.7 H19.8"/></symbol>
-<symbol id="i-route53" viewBox="0 0 24 24"><circle cx="10" cy="10" r="6.4"/><path d="M6.3 8 H13.7 M6.3 12 H13.7 M10 3.6 V16.4"/><path d="M13 13 L20 20 M20 20 V15 M20 20 H15"/></symbol>
-<symbol id="i-apigw" viewBox="0 0 24 24"><path d="M5 20 V9 L12 4 L19 9 V20"/><path d="M9 20 V13 H15 V20"/></symbol>
+<symbol id="i-s3" viewBox="0 0 24 24"><ellipse cx="12" cy="6" rx="7" ry="2.2"/><path d="M5 6 L7.2 18.6 A5.5 1.3 0 0 0 16.8 18.6 L19 6"/></symbol>
+<symbol id="i-ddb" viewBox="0 0 24 24"><circle cx="12" cy="12" r="7.2"/><circle cx="12" cy="12" r="2.8"/></symbol>
+<symbol id="i-cloudfront" viewBox="0 0 24 24"><circle cx="12" cy="12" r="7.2"/><ellipse cx="12" cy="12" rx="3" ry="7.2"/><path d="M5.2 9.5 H18.8 M5.2 14.5 H18.8"/><circle cx="12" cy="3.4" r="1.1" fill="currentColor" stroke="none"/><circle cx="20.6" cy="12" r="1.1" fill="currentColor" stroke="none"/><circle cx="12" cy="20.6" r="1.1" fill="currentColor" stroke="none"/><circle cx="3.4" cy="12" r="1.1" fill="currentColor" stroke="none"/></symbol>
+<symbol id="i-route53" viewBox="0 0 24 24"><circle cx="12" cy="12" r="2"/><path d="M12 8.4 V3.5 M12 15.6 V20.5 M8.4 12 H3.5 M15.6 12 H20.5"/><path d="M9.6 9.6 L6.3 6.3 M14.4 9.6 L17.7 6.3 M9.6 14.4 L6.3 17.7 M14.4 14.4 L17.7 17.7"/></symbol>
+<symbol id="i-apigw" viewBox="0 0 24 24"><path d="M6.5 3.5 V20.5 M17.5 3.5 V20.5"/><path d="M2.5 12 H19 M13.5 7.5 L19 12 L13.5 16.5"/></symbol>
 <symbol id="i-acm" viewBox="0 0 24 24"><circle cx="12" cy="9" r="6"/><path d="M9.2 9 L11 10.8 L14.8 6.8"/><path d="M9 14 L7.3 20 L12 17.6 L16.7 20 L15 14"/></symbol>
 <symbol id="i-vpcgw" viewBox="0 0 24 24"><path d="M12 3 L20 7.5 V16.5 L12 21 L4 16.5 V7.5 Z"/><circle cx="12" cy="12" r="2.6"/></symbol>
 <symbol id="i-cognito" viewBox="0 0 24 24"><path d="M12 3 L19.5 6.2 V12 C19.5 16.5 16.4 19.8 12 21.2 C7.6 19.8 4.5 16.5 4.5 12 V6.2 Z"/><circle cx="12" cy="10.6" r="2.3"/><path d="M8.3 16 C8.9 14 10.2 13 12 13 S15.1 14 15.7 16"/></symbol>
@@ -300,6 +323,13 @@ footer{
   <div class="panel-head">
     <h2>Client Request Path</h2>
     <p>Numbered 1&ndash;8 in request order &mdash; the one path worth tracing end-to-end. A browser hits one public domain; CloudFront splits static assets from API traffic; only the model-scoring Lambda sits inside the VPC.</p>
+  </div>
+
+  <div class="stat-strip">
+    <div class="stat"><b>18</b><span>serving Lambdas (3 &times; 6 sports)</span></div>
+    <div class="stat"><b>1</b><span>public domain, 6 routed path prefixes</span></div>
+    <div class="stat"><b>60s</b><span>live-scores poll near kickoff</span></div>
+    <div class="stat"><b>5 min</b><span>predict / predict-read warmup</span></div>
   </div>
 
   <div class="legend">
@@ -402,7 +432,15 @@ footer{
         <div class="card storage compact"><div class="badge storage sm"><svg><use href="#i-s3"/></svg></div><div class="card-txt"><div class="name">7. Model Artifacts</div></div></div>
         <div class="card database compact"><div class="badge database sm"><svg><use href="#i-ddb"/></svg></div><div class="card-txt"><div class="name">8. predictions (write-only)</div></div></div>
         <div class="satellite"><svg><use href="#i-vpcgw"/></svg>via VPC Gateway Endpoints (predict only)</div>
-        <div class="satellite"><svg><use href="#i-ecr"/></svg>predict pulls image from ECR</div>
+      </div>
+    </div>
+
+    <div class="connector dotted"><svg viewBox="0 0 26 16"><path d="M0 8H22M16 2L22 8L16 14" stroke="currentColor" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" stroke-dasharray="4 3"/></svg></div>
+
+    <div class="stage">
+      <div class="stage-label">External / Registry</div>
+      <div class="stage-body">
+        <div class="card external compact"><div class="badge external sm"><svg><use href="#i-ecr"/></svg></div><div class="card-txt"><div class="name">ECR</div><div class="desc">predict pulls its container image; pre-existing, shared across projects</div></div></div>
       </div>
     </div>
   </div>
@@ -429,72 +467,115 @@ footer{
 
   <div class="legend">
     <span class="item"><span class="swatch" style="background:var(--integration)"></span><b>Orchestration</b></span>
-    <span class="item"><span class="swatch" style="background:var(--compute)"></span><b>Lambda pipeline</b></span>
-    <span class="item"><span class="swatch" style="background:var(--storage)"></span><b>Fargate</b></span>
-    <span class="item"><span class="swatch" style="background:#f08c00"></span><b>EC2 training fleet</b></span>
-    <span class="item"><span class="swatch" style="background:var(--database)"></span><b>Storage</b></span>
+    <span class="item"><span class="swatch" style="background:var(--compute)"></span><b>Compute (Lambda / Fargate)</b></span>
+    <span class="item"><span class="swatch" style="background:var(--ec2)"></span><b>EC2 training fleet</b></span>
+    <span class="item"><span class="swatch" style="background:var(--storage)"></span><b>S3</b></span>
+    <span class="item"><span class="swatch" style="background:var(--database)"></span><b>DynamoDB</b></span>
     <span class="item"><span class="swatch" style="background:var(--external)"></span><b>External API</b></span>
+  </div>
+
+  <!-- ============ LANE A: DAILY INGESTION ============ -->
+  <div class="lane-head ingest">
+    <div class="lane-badge"><svg><use href="#i-eventbridge"/></svg></div>
+    <div><h3>Daily Ingestion</h3><p>Fresh data in, every day, regardless of whether anything trains this month.</p></div>
   </div>
 
   <div class="flow">
     <div class="stage">
-      <div class="stage-label">Triggers</div>
+      <div class="stage-label">Trigger</div>
       <div class="stage-body">
-        <div class="card integration compact"><div class="badge integration sm"><svg><use href="#i-eventbridge"/></svg></div><div class="card-txt"><div class="name">ingest-orchestrator</div><div class="desc mono">daily</div></div></div>
-        <div class="card integration compact"><div class="badge integration sm"><svg><use href="#i-eventbridge"/></svg></div><div class="card-txt"><div class="name">training-orchestrator</div><div class="desc mono">monthly</div></div></div>
-        <div class="card integration compact"><div class="badge integration sm"><svg><use href="#i-eventbridge"/></svg></div><div class="card-txt"><div class="name">{sport}-schedule-sync</div><div class="desc mono">&times;6, own cadence</div></div></div>
-        <div class="card integration compact"><div class="badge integration sm"><svg><use href="#i-eventbridge"/></svg></div><div class="card-txt"><div class="name">ec2-training-reaper</div><div class="desc mono">every 10 min</div></div></div>
+        <div class="card integration compact"><div class="badge integration sm"><svg><use href="#i-eventbridge"/></svg></div><div class="card-txt"><div class="name">EventBridge Scheduler</div><div class="desc mono">daily</div></div></div>
       </div>
     </div>
 
     <div class="connector"><svg viewBox="0 0 26 16"><path d="M0 8H22M16 2L22 8L16 14" stroke="currentColor" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
 
-    <div class="stage" style="min-width:260px;">
+    <div class="stage" style="min-width:230px;">
       <div class="stage-label">Orchestration (X-Ray traced)</div>
       <div class="stage-body">
         <div class="groupbox">
           <span class="glabel">Step Functions</span>
           <div class="card integration compact"><div class="badge integration sm"><svg><use href="#i-sfn"/></svg></div><div class="card-txt"><div class="name">ingest-orchestrator</div><div class="desc">Map over registry sports</div></div></div>
-          <div class="card integration compact" style="margin-top:8px"><div class="badge integration sm"><svg><use href="#i-sfn"/></svg></div><div class="card-txt"><div class="name">training-orchestrator</div><div class="desc">Map per sport &rarr; Distributed Map per target</div><div class="tagrow"><span class="tag">X-Ray</span></div></div></div>
-          <div class="card security compact" style="margin-top:8px"><div class="badge security sm"><svg><use href="#i-cognito"/></svg></div><div class="card-txt"><div class="name">season-gate Lambda</div><div class="desc">shared season_start/end check</div><div class="tagrow"><span class="tag">X-Ray</span></div></div></div>
+          <div class="card compute compact" style="margin-top:8px"><div class="badge compute sm"><svg><use href="#i-lambda"/></svg></div><div class="card-txt"><div class="name">season-gate</div><div class="desc">season_start/end check</div><div class="tagrow"><span class="tag">X-Ray</span></div></div></div>
         </div>
-        <div class="satellite"><svg><use href="#i-ddb"/></svg>scans Sport Registry (season window, training_targets)</div>
+        <div class="satellite"><svg><use href="#i-ddb"/></svg>reads Sport Registry (season window)</div>
       </div>
     </div>
 
     <div class="connector"><svg viewBox="0 0 26 16"><path d="M0 8H22M16 2L22 8L16 14" stroke="currentColor" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
 
     <div class="stage">
-      <div class="stage-label">Ingest &rarr; normalize</div>
+      <div class="stage-label">Fetch &amp; land raw</div>
       <div class="stage-body">
-        <div class="card compute compact"><div class="badge compute sm"><svg><use href="#i-lambda"/></svg></div><div class="card-txt"><div class="name mono">{sport}-ingest</div><div class="tagrow"><span class="tag x6">&times;6</span></div></div></div>
-        <div class="satellite"><svg><use href="#i-globe"/></svg>ESPN / CFBD / Jolpica-F1 / etc.</div>
-        <div class="card storage compact"><div class="badge storage sm"><svg><use href="#i-s3"/></svg></div><div class="card-txt"><div class="name">S3: Raw Data Lake</div></div></div>
+        <div class="card compute compact"><div class="badge compute sm"><svg><use href="#i-lambda"/></svg></div><div class="card-txt"><div class="name mono">{sport}-ingest</div><div class="desc">invoked by naming convention</div><div class="tagrow"><span class="tag x6">&times;6</span></div></div></div>
+        <div class="card external compact">
+          <div class="badge external sm"><svg><use href="#i-globe"/></svg></div>
+          <div class="card-txt"><div class="name">Upstream sport APIs</div>
+            <div class="tagrow"><span class="tag">ESPN &times;4</span><span class="tag">CFBD</span><span class="tag">Jolpica-F1</span></div>
+          </div>
+        </div>
+        <div class="card storage compact"><div class="badge storage sm"><svg><use href="#i-s3"/></svg></div><div class="card-txt"><div class="name">S3: Raw Data Lake</div><div class="desc">per-sport prefix</div></div></div>
+      </div>
+    </div>
+
+    <div class="connector"><svg viewBox="0 0 26 16"><path d="M0 8H22M16 2L22 8L16 14" stroke="currentColor" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+
+    <div class="stage">
+      <div class="stage-label">Normalize &amp; store</div>
+      <div class="stage-body">
         <div class="card compute compact"><div class="badge compute sm"><svg><use href="#i-lambda"/></svg></div><div class="card-txt"><div class="name mono">{sport}-normalize</div><div class="desc">S3 ObjectCreated trigger</div><div class="tagrow"><span class="tag x6">&times;6</span></div></div></div>
+        <div class="card database compact"><div class="badge database sm"><svg><use href="#i-ddb"/></svg></div><div class="card-txt"><div class="name">entities / events /<br>*_game_stats</div></div></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="grid2" style="margin-top:14px;">
+    <div class="card integration compact">
+      <div class="badge integration sm"><svg><use href="#i-eventbridge"/></svg></div>
+      <div class="card-txt"><div class="name">{sport}-schedule-sync <span class="mono" style="font-weight:400;color:var(--ink-faint)">&times;6, own cadence</span></div><div class="desc">Invokes {sport}-ingest directly (bypasses the orchestrator) to refresh the <em>entire</em> season's calendar, not just today.</div></div>
+    </div>
+    <div class="card compute compact">
+      <div class="badge compute sm"><svg><use href="#i-fargate"/></svg></div>
+      <div class="card-txt"><div class="name">{sport}-backfill <span class="mono" style="font-weight:400;color:var(--ink-faint)">&times;6, manual</span></div><div class="desc">One-time historical load, run via <span class="mono">aws ecs run-task</span> in a public subnet. Not orchestrated.</div></div>
+    </div>
+  </div>
+
+  <!-- ============ LANE B: MONTHLY TRAINING ============ -->
+  <div class="lane-head train">
+    <div class="lane-badge"><svg><use href="#i-eventbridge"/></svg></div>
+    <div><h3>Monthly Training</h3><p>A separate schedule, a separate state machine, a separate compute pool &mdash; only shares the sport registry and DynamoDB history with ingestion above.</p></div>
+  </div>
+
+  <div class="flow">
+    <div class="stage">
+      <div class="stage-label">Trigger</div>
+      <div class="stage-body">
+        <div class="card integration compact"><div class="badge integration sm"><svg><use href="#i-eventbridge"/></svg></div><div class="card-txt"><div class="name">EventBridge Scheduler</div><div class="desc mono">1st of month, 12:00 UTC</div></div></div>
       </div>
     </div>
 
     <div class="connector"><svg viewBox="0 0 26 16"><path d="M0 8H22M16 2L22 8L16 14" stroke="currentColor" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
 
-    <div class="stage">
-      <div class="stage-label">Core storage</div>
+    <div class="stage" style="min-width:230px;">
+      <div class="stage-label">Orchestration (X-Ray traced)</div>
       <div class="stage-body">
-        <div class="card database compact"><div class="badge database sm"><svg><use href="#i-ddb"/></svg></div><div class="card-txt"><div class="name">entities / events /<br>*_game_stats</div></div></div>
-        <div class="satellite"><svg><use href="#i-fargate"/></svg>{sport}-backfill &times;6 (manual, historical only)</div>
+        <div class="groupbox">
+          <span class="glabel">Step Functions</span>
+          <div class="card integration compact"><div class="badge integration sm"><svg><use href="#i-sfn"/></svg></div><div class="card-txt"><div class="name">training-orchestrator</div><div class="desc">Map per sport &rarr; Distributed Map per target</div><div class="tagrow"><span class="tag">X-Ray</span></div></div></div>
+          <div class="card compute compact" style="margin-top:8px"><div class="badge compute sm"><svg><use href="#i-lambda"/></svg></div><div class="card-txt"><div class="name">season-gate</div><div class="desc">season_start/end check</div><div class="tagrow"><span class="tag">X-Ray</span></div></div></div>
+        </div>
+        <div class="satellite"><svg><use href="#i-ddb"/></svg>reads Sport Registry (training_targets)</div>
       </div>
     </div>
-  </div>
 
-  <div class="panel-head" style="margin-top:34px;">
-    <h3 style="font-size:15px;font-weight:650;">Scheduled training, once in-season</h3>
-  </div>
-  <div class="flow">
+    <div class="connector"><svg viewBox="0 0 26 16"><path d="M0 8H22M16 2L22 8L16 14" stroke="currentColor" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+
     <div class="stage">
       <div class="stage-label">Feature engineering</div>
       <div class="stage-body">
         <div class="groupbox">
           <span class="glabel">Fargate, public subnet, on-demand</span>
-          <div class="card storage compact"><div class="badge storage sm"><svg><use href="#i-fargate"/></svg></div><div class="card-txt"><div class="name mono">{sport}-feature-engineering</div><div class="tagrow"><span class="tag x6">&times;6</span></div></div></div>
+          <div class="card compute compact"><div class="badge compute sm"><svg><use href="#i-fargate"/></svg></div><div class="card-txt"><div class="name mono">{sport}-feature-engineering</div><div class="tagrow"><span class="tag x6">&times;6</span></div></div></div>
         </div>
         <div class="card database compact"><div class="badge database sm"><svg><use href="#i-ddb"/></svg></div><div class="card-txt"><div class="name">reads full history</div></div></div>
         <div class="card storage compact"><div class="badge storage sm"><svg><use href="#i-s3"/></svg></div><div class="card-txt"><div class="name">writes training Parquet</div></div></div>
@@ -509,13 +590,12 @@ footer{
         <div class="groupbox gold">
           <span class="glabel">ECS, EC2 launch type</span>
           <div style="display:flex; gap:8px;">
-            <div class="card compact" style="border-left:3px solid #f08c00; flex:1;"><div class="badge sm" style="background:#f08c00"><svg><use href="#i-ecs"/></svg></div><div class="card-txt"><div class="name">ASG: ec2-training-spot</div><div class="desc">primary</div></div></div>
-            <div class="card compact" style="border-left:3px solid #f08c00; flex:1;"><div class="badge sm" style="background:#f08c00"><svg><use href="#i-ecs"/></svg></div><div class="card-txt"><div class="name">ASG: ondemand</div><div class="desc">fallback</div></div></div>
+            <div class="card ec2 compact" style="flex:1;"><div class="badge ec2 sm"><svg><use href="#i-ecs"/></svg></div><div class="card-txt"><div class="name">ASG: Spot</div><div class="desc">primary</div></div></div>
+            <div class="card ec2 compact" style="flex:1;"><div class="badge ec2 sm"><svg><use href="#i-ecs"/></svg></div><div class="card-txt"><div class="name">ASG: on-demand</div><div class="desc">fallback</div></div></div>
           </div>
-          <div class="card compact" style="border-left:3px solid #f08c00; margin-top:8px;"><div class="badge sm" style="background:#f08c00"><svg><use href="#i-ecs"/></svg></div><div class="card-txt"><div class="name">win-prob / score / ranking /<br>player-prop / sport-specific</div><div class="desc">~35 targets across 6 sports</div></div></div>
+          <div class="card ec2 compact" style="margin-top:8px;"><div class="badge ec2 sm"><svg><use href="#i-ecs"/></svg></div><div class="card-txt"><div class="name">win-prob / score / ranking /<br>player-prop / sport-specific</div><div class="desc">~35 targets across 6 sports</div></div></div>
         </div>
         <div class="satellite"><svg><use href="#i-reaper"/></svg>explicit scale-to-0 on ForEachSport completion</div>
-        <div class="satellite"><svg><use href="#i-reaper"/></svg>ec2-training-reaper: idle-instance backstop (X-Ray)</div>
       </div>
     </div>
 
@@ -527,6 +607,11 @@ footer{
         <div class="card storage compact"><div class="badge storage sm"><svg><use href="#i-s3"/></svg></div><div class="card-txt"><div class="name">S3: Model Artifacts</div><div class="desc">versioned model + model_card per candidate, best promoted</div></div></div>
       </div>
     </div>
+  </div>
+
+  <div class="card integration compact" style="margin-top:14px; max-width:480px;">
+    <div class="badge integration sm"><svg><use href="#i-eventbridge"/></svg></div>
+    <div class="card-txt"><div class="name">ec2-training-reaper <span class="mono" style="font-weight:400;color:var(--ink-faint)">every 10 min</span></div><div class="desc">Independent idle-instance backstop (X-Ray traced) &mdash; catches a manually-stopped execution the state machine's own scale-to-0 states never run for.</div></div>
   </div>
 
   <div class="note">
@@ -547,6 +632,16 @@ footer{
     <div class="stat"><b>25</b><span>alarms, 18 concerns</span></div>
     <div class="stat"><b>3</b><span>X-Ray traced resources</span></div>
     <div class="stat"><b>2</b><span>AWS Budgets (total + per-sport)</span></div>
+  </div>
+
+  <div class="legend">
+    <span class="item"><span class="swatch" style="background:var(--observability)"></span><b>Monitoring / tracing / cost</b></span>
+    <span class="item"><span class="swatch" style="background:var(--integration)"></span><b>SNS</b></span>
+    <span class="item"><span class="swatch" style="background:var(--external)"></span><b>Notification target</b></span>
+    <span class="arrow-key">
+      <span class="arrow-sample"><span class="line"></span> metrics/logs/traces in</span>
+      <span class="arrow-sample"><span class="line dotted"></span> alarm notification</span>
+    </span>
   </div>
 
   <div class="grid2">
@@ -583,7 +678,7 @@ footer{
     <div class="stage" style="min-width:280px;">
       <div class="stage-label">25 alarms, 18 concerns</div>
       <div class="stage-body">
-        <div class="card security compact"><div class="badge security sm"><svg><use href="#i-cloudwatch"/></svg></div><div class="card-txt"><div class="desc">Lambda errors / throttles / duration &middot; DynamoDB throttles &middot; orchestrator failed/timed-out &middot; API Gateway 4xx/5xx/latency &middot; CloudFront 5xx</div></div></div>
+        <div class="card observability compact"><div class="badge observability sm"><svg><use href="#i-cloudwatch"/></svg></div><div class="card-txt"><div class="desc">Lambda errors / throttles / duration &middot; DynamoDB throttles &middot; orchestrator failed/timed-out &middot; API Gateway 4xx/5xx/latency &middot; CloudFront 5xx</div></div></div>
       </div>
     </div>
     <div class="connector"><svg viewBox="0 0 26 16"><path d="M0 8H22M16 2L22 8L16 14" stroke="currentColor" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" stroke-dasharray="4 3"/></svg></div>
