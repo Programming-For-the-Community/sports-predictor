@@ -528,22 +528,28 @@ resource "aws_cloudwatch_metric_alarm" "schedule_sync_throttles" {
 # ── 8a-8b. Predict / predict-read Duration p99 (Warning) ────────────────────
 # Originally one alarm covering both stages (12 functions) -- also hit the
 # 10-metric_query cap (see the Throttles comment above), so split by stage
-# the same way. Worst-of-N is still MAX, not SUM/AVG (durations aren't
-# additive), but a real apply confirmed CloudWatch's N-ary
-# "MAX(m1,m2,...,m6)" form isn't valid on 6 individually-named metrics
-# ("ValidationError: ... Unsupported operand type(s) for MAX:
-# '[TimeSeries, TimeSeries, ...]'" -- MAX() only accepts an array produced
-# by METRICS()/SEARCH(), both of which are themselves unsupported in
-# alarms, or exactly 2 scalar operands). Nesting MAX two at a time (a
-# left-fold, "MAX(MAX(MAX(MAX(MAX(m1,m2),m3),m4),m5),m6)") sidesteps
-# both restrictions -- every call site only ever sees 2 scalar operands.
+# the same way. Two real apply failures ruled out MAX() entirely for
+# combining named metrics in an alarm context: the N-ary form
+# "MAX(m1,...,m6)" failed ("Unsupported operand type(s) for MAX:
+# '[TimeSeries, TimeSeries, ...]'"), and so did the pairwise-nested
+# workaround "MAX(MAX(...,m2),m3)..." on just 2 operands -- MAX() only
+# ever accepts an array from METRICS()/SEARCH(), both themselves
+# unsupported in alarms (see this file's top comment), never 1+ named
+# TimeSeries arguments. Since the actual goal is just "did ANY sport's
+# p99 cross the threshold," not the numeric max itself, the fix skips
+# computing a max value at all -- each per-sport comparison (m1>24000,
+# a pointwise boolean 0/1 series, CloudWatch's documented comparison-
+# operator support) is OR'd together into one boolean series, and the
+# alarm's own threshold moves from 24000 down to 0 (comparing that
+# boolean series, not a duration) since the ms threshold now lives
+# inside the expression itself.
 
 resource "aws_cloudwatch_metric_alarm" "predict_duration_p99" {
   alarm_name          = "${var.project}-predict-duration-p99"
-  alarm_description   = "p99 duration across predict Lambdas (any sport) exceeded 80% of their configured timeout."
+  alarm_description   = "p99 duration on at least one predict Lambda exceeded 80% of its configured timeout (24000ms) in the last 5 minutes."
   comparison_operator = "GreaterThanThreshold"
   evaluation_periods  = 2
-  threshold           = 24000 # ms -- 80% of the 30s timeout every predict/predict-read Lambda shares
+  threshold           = 0 # boolean expression below (0 = no sport over threshold, 1 = at least one is)
   treat_missing_data  = "notBreaching"
 
   dynamic "metric_query" {
@@ -565,8 +571,8 @@ resource "aws_cloudwatch_metric_alarm" "predict_duration_p99" {
 
   metric_query {
     id          = "total"
-    expression  = "MAX(MAX(MAX(MAX(MAX(m1,m2),m3),m4),m5),m6)"
-    label       = "predict Duration p99 (worst of any sport)"
+    expression  = "m1>24000 OR m2>24000 OR m3>24000 OR m4>24000 OR m5>24000 OR m6>24000"
+    label       = "Any predict Lambda over 24000ms p99"
     return_data = true
   }
 
@@ -578,10 +584,10 @@ resource "aws_cloudwatch_metric_alarm" "predict_duration_p99" {
 
 resource "aws_cloudwatch_metric_alarm" "predict_read_duration_p99" {
   alarm_name          = "${var.project}-predict-read-duration-p99"
-  alarm_description   = "p99 duration across predict-read Lambdas (any sport) exceeded 80% of their configured timeout."
+  alarm_description   = "p99 duration on at least one predict-read Lambda exceeded 80% of its configured timeout (24000ms) in the last 5 minutes."
   comparison_operator = "GreaterThanThreshold"
   evaluation_periods  = 2
-  threshold           = 24000 # ms -- 80% of the 30s timeout every predict/predict-read Lambda shares
+  threshold           = 0 # boolean expression below (0 = no sport over threshold, 1 = at least one is)
   treat_missing_data  = "notBreaching"
 
   dynamic "metric_query" {
@@ -603,8 +609,8 @@ resource "aws_cloudwatch_metric_alarm" "predict_read_duration_p99" {
 
   metric_query {
     id          = "total"
-    expression  = "MAX(MAX(MAX(MAX(MAX(m1,m2),m3),m4),m5),m6)"
-    label       = "predict-read Duration p99 (worst of any sport)"
+    expression  = "m1>24000 OR m2>24000 OR m3>24000 OR m4>24000 OR m5>24000 OR m6>24000"
+    label       = "Any predict-read Lambda over 24000ms p99"
     return_data = true
   }
 
