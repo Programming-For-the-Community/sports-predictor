@@ -61,8 +61,16 @@ data "aws_iam_policy_document" "lambda_inference_permissions" {
   }
 
   statement {
-    sid     = "ReadFeatureData"
-    actions = ["dynamodb:GetItem", "dynamodb:Query", "dynamodb:Scan"]
+    sid = "ReadFeatureData"
+    # BatchGetItem -- library.serving.common.prefetch_entities' own batched
+    # entity lookup (DynamoDBTable.batch_get_items), called from every
+    # sport's own list_events. Missing here since that path was added,
+    # confirmed a real production 500 (AccessDeniedException) 2026-09-02 --
+    # it only started firing once list_events' own get_all_events query
+    # was bounded (this same session's fix) and actually finished fast
+    # enough to reach prefetch_entities at all; before that it reliably
+    # hit its own 29s Lambda timeout first, so this gap was never exercised.
+    actions = ["dynamodb:GetItem", "dynamodb:BatchGetItem", "dynamodb:Query", "dynamodb:Scan"]
     resources = [
       "arn:aws:dynamodb:${var.region}:${var.account_id}:table/${local.entities_table}",
       "arn:aws:dynamodb:${var.region}:${var.account_id}:table/${local.events_table}",
