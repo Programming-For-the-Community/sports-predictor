@@ -27,6 +27,13 @@ resource "aws_iam_role_policy_attachment" "lambda_ec2_training_reaper_logs" {
   policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
 }
 
+# For the function's own tracing_config (mode = "Active", lambda-ec2-
+# training-reaper.tf).
+resource "aws_iam_role_policy_attachment" "lambda_ec2_training_reaper_xray" {
+  role       = aws_iam_role.lambda_ec2_training_reaper.name
+  policy_arn = "arn:aws:iam::aws:policy/AWSXRayDaemonWriteAccess"
+}
+
 data "aws_iam_policy_document" "lambda_ec2_training_reaper_permissions" {
   statement {
     sid       = "DescribeTrainingInstances"

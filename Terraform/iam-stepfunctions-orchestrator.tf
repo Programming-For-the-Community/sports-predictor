@@ -115,6 +115,20 @@ data "aws_iam_policy_document" "stepfunctions_orchestrator_permissions" {
     ]
     resources = ["*"]
   }
+
+  # training_orchestrator's own tracing_configuration (sfn-training-
+  # orchestrator.tf) so its executions show up in the CloudWatch
+  # Application Map/X-Ray Service Map alongside season_gate and
+  # ec2_training_reaper. X-Ray's write actions have no resource-level
+  # scoping -- "*" is the only option, same as the log-delivery statement
+  # above. Granted here even though this role is shared with
+  # sfn-ingest-orchestrator.tf, which has no tracing_configuration block
+  # and so never actually calls these.
+  statement {
+    sid       = "WriteXRayTraces"
+    actions   = ["xray:PutTraceSegments", "xray:PutTelemetryRecords", "xray:GetSamplingRules", "xray:GetSamplingTargets"]
+    resources = ["*"]
+  }
 }
 
 resource "aws_iam_role_policy" "stepfunctions_orchestrator_permissions" {

@@ -79,6 +79,16 @@ resource "aws_sfn_state_machine" "training_orchestrator" {
     level                  = "ALL"
   }
 
+  # Surfaces this state machine (and, via propagated trace headers, the
+  # season_gate/ec2_training_reaper Lambdas it invokes) in the CloudWatch
+  # Application Map alongside the existing sports-predictor-api and
+  # standalone-Lambda nodes. Cheap at this cadence: a monthly execution is
+  # a handful of traces/month, nowhere near X-Ray's 100k-traces-recorded
+  # free tier.
+  tracing_configuration {
+    enabled = true
+  }
+
   definition = <<EOF
 {
   "Comment": "Scans the sport registry, rebuilds each in-season sport's training dataset on Fargate on-demand, then trains every target on EC2 (Spot-primary, on-demand fallback). Monthly, via scheduler-training-orchestrator.tf.",

@@ -6,6 +6,7 @@ player_game_stats become three DynamoDBTable instances, not three bespoke
 modules.
 """
 import logging
+import time
 from decimal import Decimal
 
 import boto3
@@ -16,6 +17,12 @@ logger = logging.getLogger(__name__)
 
 # Raised above botocore's default (10) to support concurrent writers.
 _CONFIG = Config(max_pool_connections=25)
+
+# batch_get_item's UnprocessedKeys is throttling, not an error -- retry with
+# the same backoff shape library/http/client.py uses for external APIs,
+# rather than resubmitting immediately in a tight loop.
+_BATCH_GET_MAX_RETRIES = 5
+_BATCH_GET_BACKOFF_BASE_SECONDS = 1.5
 
 
 def _to_dynamodb_safe(value):
@@ -92,10 +99,26 @@ class DynamoDBTable:
         items: list[dict] = []
         for i in range(0, len(keys), 100):
             request_items = {self.table_name: {"Keys": [_to_dynamodb_safe(key) for key in keys[i:i + 100]]}}
+            attempt = 0
             while request_items:
                 response = self._resource.batch_get_item(RequestItems=request_items)
                 items.extend(response.get("Responses", {}).get(self.table_name, []))
                 request_items = response.get("UnprocessedKeys") or {}
+                if not request_items:
+                    break
+                attempt += 1
+                if attempt > _BATCH_GET_MAX_RETRIES:
+                    remaining = len(request_items[self.table_name]["Keys"])
+                    raise RuntimeError(
+                        f"batch_get_item on {self.table_name} still had {remaining} unprocessed key(s) "
+                        f"after {_BATCH_GET_MAX_RETRIES} retries"
+                    )
+                sleep_for = _BATCH_GET_BACKOFF_BASE_SECONDS * (2 ** (attempt - 1))
+                logger.warning(
+                    "batch_get_item on %s has unprocessed keys (attempt %d/%d) -- retrying in %.1fs",
+                    self.table_name, attempt, _BATCH_GET_MAX_RETRIES, sleep_for,
+                )
+                time.sleep(sleep_for)
         return [_from_dynamodb_safe(item) for item in items]
 
     def batch_write(self, items: list[dict], key_names: list[str]) -> None:

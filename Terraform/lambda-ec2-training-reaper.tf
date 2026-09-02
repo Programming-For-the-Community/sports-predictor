@@ -49,6 +49,14 @@ resource "aws_lambda_function" "ec2_training_reaper" {
     log_group  = aws_cloudwatch_log_group.ec2_training_reaper.name
   }
 
+  # Same reasoning as lambda-season-gate.tf's tracing_config -- puts this
+  # Lambda on the CloudWatch Application Map too. At a rate(10 minutes)
+  # schedule (scheduler-ec2-training-reaper.tf) that's ~4,300 traces/month,
+  # still well inside X-Ray's 100k-traces-recorded free tier.
+  tracing_config {
+    mode = "Active"
+  }
+
   lifecycle {
     ignore_changes = [filename, source_code_hash]
   }

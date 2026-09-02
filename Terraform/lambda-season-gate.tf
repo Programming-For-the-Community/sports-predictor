@@ -43,6 +43,15 @@ resource "aws_lambda_function" "season_gate" {
     log_group  = aws_cloudwatch_log_group.season_gate.name
   }
 
+  # Puts season_gate on the CloudWatch Application Map alongside the
+  # training_orchestrator state machine that invokes it (sfn-training-
+  # orchestrator.tf's own tracing_configuration) -- "Active" means the
+  # Lambda runtime samples and emits its own trace segments rather than
+  # only relying on an upstream caller's trace header.
+  tracing_config {
+    mode = "Active"
+  }
+
   lifecycle {
     ignore_changes = [filename, source_code_hash]
   }

@@ -187,10 +187,47 @@ class TestBatchGetItems:
             {"Responses": {"test-table": [{"entity_id": "LAC"}]}},
         ])
 
-        result = table.batch_get_items([{"entity_id": "KC"}, {"entity_id": "LAC"}])
+        with patch("library.aws.dynamodb_table.time.sleep") as mock_sleep:
+            result = table.batch_get_items([{"entity_id": "KC"}, {"entity_id": "LAC"}])
 
         assert result == [{"entity_id": "KC"}, {"entity_id": "LAC"}]
         assert mock_resource.batch_get_item.call_count == 2
+        mock_sleep.assert_called_once_with(1.5)  # _BATCH_GET_BACKOFF_BASE_SECONDS * 2**0
+
+    def test_retry_backoff_doubles_each_attempt(self):
+        # Never resolves -- forces every retry up to the cap so all of the
+        # backoff sequence's sleeps are observable in one test.
+        table, mock_resource = _make_table_for_batch_get([
+            {"UnprocessedKeys": {"test-table": {"Keys": [{"entity_id": "LAC"}]}}},
+        ] * 6)
+
+        with patch("library.aws.dynamodb_table.time.sleep") as mock_sleep:
+            try:
+                table.batch_get_items([{"entity_id": "LAC"}])
+                assert False, "expected RuntimeError once retries are exhausted"
+            except RuntimeError:
+                pass
+
+        assert [call.args[0] for call in mock_sleep.call_args_list] == [1.5, 3.0, 6.0, 12.0, 24.0]
+
+    def test_raises_after_exhausting_retries_with_keys_still_unprocessed(self):
+        # A persistently-throttled batch must not retry forever -- confirms
+        # the real bug (an unbounded `while request_items:` loop with no
+        # cap) is fixed.
+        table, mock_resource = _make_table_for_batch_get([
+            {"UnprocessedKeys": {"test-table": {"Keys": [{"entity_id": "LAC"}]}}},
+        ] * 6)
+
+        with patch("library.aws.dynamodb_table.time.sleep"):
+            try:
+                table.batch_get_items([{"entity_id": "LAC"}])
+                assert False, "expected RuntimeError once retries are exhausted"
+            except RuntimeError as exc:
+                assert "test-table" in str(exc)
+                assert "5 retries" in str(exc)
+
+        # Initial attempt + 5 retries = 6 calls, then it gives up.
+        assert mock_resource.batch_get_item.call_count == 6
 
     def test_chunks_into_batches_of_100_keys(self):
         keys = [{"entity_id": str(i)} for i in range(150)]
