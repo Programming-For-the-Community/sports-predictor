@@ -200,12 +200,13 @@ env:
   TF_VAR_training_vcpu_budget_fraction: ${{ vars.VCPU_BUDGET_FRACTION }}
   TF_VAR_training_task_vcpu: ${{ vars.TRAINING_TASK_VCPU_LIMIT }}
   TF_VAR_ec2_spot_account_vcpu_limit: ${{ vars.EC2_SPOT_VCPU_LIMIT }}
-  # Left side renamed with the Terraform variable (training_ec2_sport_
-  # concurrency -> training_sport_concurrency, now that EC2 is the only
-  # training path); right side is the existing GitHub Actions variable,
-  # unchanged -- renaming that too would mean recreating it under a new
-  # name, a separate action left to the user rather than done silently here.
-  TF_VAR_training_sport_concurrency: ${{ vars.TRAINING_EC2_SPORT_CONCURRENCY }}
+  # Both sides renamed (training_ec2_sport_concurrency -> training_sport_
+  # concurrency, now that EC2 is the only training path) -- the GitHub
+  # Actions variable itself was renamed TRAINING_EC2_SPORT_CONCURRENCY ->
+  # TRAINING_SPORT_CONCURRENCY too, so this must match or the old name
+  # resolves to empty and Terraform rejects it as "a number is required"
+  # (real CI failure, 2026-09-02).
+  TF_VAR_training_sport_concurrency: ${{ vars.TRAINING_SPORT_CONCURRENCY }}
 
 jobs:
   terraform:
