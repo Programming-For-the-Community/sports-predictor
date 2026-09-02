@@ -5,6 +5,8 @@ import 'package:front_end/core/models/f1_live_score.dart';
 import 'package:front_end/core/models/f1_prediction.dart';
 import 'package:front_end/features/events/f1_leaderboard_table.dart';
 
+import '../../support/mobile_viewport.dart';
+
 F1ModelValue _mv(double value, {int? rank}) => F1ModelValue(value: value, modelVersion: 1, rank: rank);
 
 F1DriverPrediction _driver(
@@ -182,5 +184,69 @@ void main() {
     final dnfPos = tester.getTopLeft(find.text('DNF Driver'));
     expect(aPos.dy, lessThan(dnfPos.dy));
     expect(find.text('P3'), findsNothing);
+  });
+
+  group('narrow (mobile) viewport', () {
+    testWidgets('STATUS/FINISH/QUALIFYING/DNF% are dropped from the collapsed columns below the compact breakpoint', (tester) async {
+      final field = [_driver('a', name: 'Driver A', projectedFinishPosition: 1.0, projectedQualifyingPosition: 1.0)];
+
+      await tester.pumpWidget(_wrap(F1LeaderboardTable(field: field, isSprint: false), width: 360));
+
+      expect(find.text('#'), findsOneWidget);
+      expect(find.text('DRIVER'), findsOneWidget);
+      expect(find.text('WIN%'), findsOneWidget);
+      expect(find.text('STATUS'), findsNothing);
+      expect(find.text('FINISH'), findsNothing);
+      expect(find.text('QUALIFYING'), findsNothing);
+      expect(find.text('DNF%'), findsNothing);
+    });
+
+    testWidgets('every column is still present at a wide (non-compact) width', (tester) async {
+      final field = [_driver('a', name: 'Driver A', projectedFinishPosition: 1.0, projectedQualifyingPosition: 1.0)];
+
+      await tester.pumpWidget(_wrap(F1LeaderboardTable(field: field, isSprint: false), width: 900));
+
+      expect(find.text('STATUS'), findsOneWidget);
+      expect(find.text('FINISH'), findsOneWidget);
+      expect(find.text('QUALIFYING'), findsOneWidget);
+      expect(find.text('DNF%'), findsOneWidget);
+    });
+
+    testWidgets('tapping a compact row reveals STATUS/FINISH/QUALIFYING/DNF% in an expanded detail', (tester) async {
+      final field = [_driver('a', name: 'Driver A', projectedFinishPosition: 1.0, projectedQualifyingPosition: 1.0)];
+
+      await tester.pumpWidget(_wrap(F1LeaderboardTable(field: field, isSprint: false), width: 360));
+      expect(find.text('QUALIFYING'), findsNothing);
+
+      await tester.tap(find.text('Driver A'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('STATUS'), findsOneWidget);
+      expect(find.text('QUALIFYING'), findsOneWidget);
+      expect(find.text('DNF%'), findsOneWidget);
+    });
+
+    testWidgets('a realistic full field renders with no overflow at every mobile width, field and sprint', (tester) async {
+      for (final width in mobileViewportWidths) {
+        final field = [
+          _driver(
+            'max_verstappen', name: 'Max Emilian Verstappen', constructorEntityId: 'red_bull_racing', constructorName: 'Oracle Red Bull Racing',
+            projectedFinishPosition: 1.0, projectedGridPosition: 1.0, projectedQualifyingPosition: 1.0, projectedQualifyingRank: 1,
+          ),
+          _driver(
+            'lando_norris', name: 'Lando Norris', constructorEntityId: 'mclaren', constructorName: 'McLaren Formula 1 Team',
+            projectedFinishPosition: 2.0, projectedGridPosition: 2.0, projectedQualifyingPosition: 2.0, projectedQualifyingRank: 2,
+            actual: const F1ActualResult(finishPosition: 2, gridPosition: 2, status: 'finished', points: 18, qualifyingPosition: 2),
+          ),
+        ];
+        final live = {'max_verstappen': const F1DriverLiveResult(order: 1, winner: true)};
+
+        await pumpAtWidth(tester, width, _wrap(F1LeaderboardTable(field: field, isSprint: false, liveResults: live), width: width));
+        expect(tester.takeException(), isNull);
+
+        await pumpAtWidth(tester, width, _wrap(F1LeaderboardTable(field: field, isSprint: true), width: width));
+        expect(tester.takeException(), isNull);
+      }
+    });
   });
 }

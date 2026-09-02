@@ -149,7 +149,7 @@ class _ActualResultLine extends StatelessWidget {
       children: [
         Icon(halved ? Icons.remove_circle_outline : Icons.check_circle, color: halved ? AppColors.inkMute : AppColors.live, size: 18),
         const SizedBox(width: 8),
-        Text(label, style: AppTextStyles.body(color: AppColors.inkSub)),
+        Expanded(child: Text(label, style: AppTextStyles.body(color: AppColors.inkSub), maxLines: 1, overflow: TextOverflow.ellipsis)),
       ],
     );
   }
