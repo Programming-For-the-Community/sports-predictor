@@ -44,4 +44,4 @@ In **AWS Budgets** (`Terraform/budgets.tf`, IaC-managed), a budget is already sc
 3. Add a widget grouped by the `Sport` tag, and a second grouped by `Component`.
 4. Re-check after a day — like Cost Explorer, newly tagged resources can take up to 24 hours to show up in grouped reports.
 
-This tag-grouped cost view is intentionally separate from the 7 operational CloudWatch dashboards (`docs/AWS_ARCHITECTURE.md`'s observability diagram) — those cover request volume/errors/latency/throttling, not spend; CloudWatch billing metrics can't group by tag at all, so cost visibility stays in Cost Explorer/Budgets/the console Dashboards tab above, not a CloudWatch dashboard.
+This tag-grouped cost view is intentionally separate from the 7 operational CloudWatch dashboards (`design/architecture.html`'s observability diagram) — those cover request volume/errors/latency/throttling, not spend; CloudWatch billing metrics can't group by tag at all, so cost visibility stays in Cost Explorer/Budgets/the console Dashboards tab above, not a CloudWatch dashboard.

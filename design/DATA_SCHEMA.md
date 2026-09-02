@@ -129,7 +129,7 @@ One row per event per model per version for event-level outcomes, or one row per
 
 ## Serving layer
 
-Three Lambda types sit behind API Gateway per sport (`Terraform/api-gateway-{sport}-predict.tf`, `api-gateway-{sport}-live-scores.tf` — identical shape for all 6 sports), all authenticated by the same Cognito authorizer (see `docs/AWS_ARCHITECTURE.md`'s client-request-path diagram). `predict` and `predict-read` are split for cold-start isolation — `predict-read` never imports the ML dependency chain, so its two routes stay light and, unlike `predict`, isn't VPC-attached at all (see that same doc for why). Most predictions are computed live from current DynamoDB/S3 state on each request; `GET /{sport}/season` is the one exception, serving a cached S3 object that `predict` recomputes weekly rather than per-request.
+Three Lambda types sit behind API Gateway per sport (`Terraform/api-gateway-{sport}-predict.tf`, `api-gateway-{sport}-live-scores.tf` — identical shape for all 6 sports), all authenticated by the same Cognito authorizer (see `design/ARCHITECTURE.md`'s client-request-path walkthrough). `predict` and `predict-read` are split for cold-start isolation — `predict-read` never imports the ML dependency chain, so its two routes stay light and, unlike `predict`, isn't VPC-attached at all (see that same doc's "Networking" section for why). Most predictions are computed live from current DynamoDB/S3 state on each request; `GET /{sport}/season` is the one exception, serving a cached S3 object that `predict` recomputes weekly rather than per-request.
 
 | Route | Lambda | Returns |
 |---|---|---|

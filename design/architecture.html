@@ -1,0 +1,642 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Sports Predictor Cloud Map</title>
+<meta name="description" content="Current-state AWS architecture across all six sports: client request path, scheduled data pipeline, and observability/cost guardrails.">
+<style>
+  :root{ color-scheme: light dark; }
+  [hidden]{ display: none !important; }
+  img{ max-width: 100%; }
+:root{
+  --bg:#f4f6f8; --surface:#ffffff; --surface-2:#eef1f4;
+  --ink:#161b22; --ink-soft:#57606e; --ink-faint:#8a94a3;
+  --line:#d7dce2; --line-soft:#e6e9ed;
+  --navy:#232f3e; --navy-soft:#33475b;
+  --aws-orange:#ff9900;
+  --compute:#ed7100; --compute-bg:#fff1e2;
+  --storage:#7aa116; --storage-bg:#eef7e0;
+  --database:#3b48cc; --database-bg:#eaebfb;
+  --network:#8c4fff; --network-bg:#f2eaff;
+  --security:#dd344c; --security-bg:#fdeaed;
+  --integration:#e7157b; --integration-bg:#fdeaf3;
+  --observability:#0891b2; --observability-bg:#e3f4f7;
+  --external:#5b6470; --external-bg:#eceef1;
+  --client:#374151; --client-bg:#eceef1;
+  --shadow: 0 1px 2px rgba(22,27,34,.04), 0 6px 16px -8px rgba(22,27,34,.12);
+  --radius: 14px;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#12161c; --surface:#1a2029; --surface-2:#212934;
+    --ink:#e8ecf1; --ink-soft:#a7b0bd; --ink-faint:#727d8c;
+    --line:#2c3542; --line-soft:#242c37;
+    --navy:#0d1420; --navy-soft:#1c2836;
+    --compute-bg:#3a2408; --storage-bg:#233007; --database-bg:#1c1f4a;
+    --network-bg:#2c1f4d; --security-bg:#3d1620; --integration-bg:#3d1128;
+    --observability-bg:#0b3038; --external-bg:#242b34; --client-bg:#242b34;
+    --shadow: 0 1px 2px rgba(0,0,0,.3), 0 10px 24px -12px rgba(0,0,0,.5);
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#12161c; --surface:#1a2029; --surface-2:#212934;
+  --ink:#e8ecf1; --ink-soft:#a7b0bd; --ink-faint:#727d8c;
+  --line:#2c3542; --line-soft:#242c37;
+  --navy:#0d1420; --navy-soft:#1c2836;
+  --compute-bg:#3a2408; --storage-bg:#233007; --database-bg:#1c1f4a;
+  --network-bg:#2c1f4d; --security-bg:#3d1620; --integration-bg:#3d1128;
+  --observability-bg:#0b3038; --external-bg:#242b34; --client-bg:#242b34;
+  --shadow: 0 1px 2px rgba(0,0,0,.3), 0 10px 24px -12px rgba(0,0,0,.5);
+}
+*{box-sizing:border-box;}
+body{
+  margin:0; background:var(--bg); color:var(--ink);
+  font-family:"IBM Plex Sans",-apple-system,"Segoe UI",sans-serif;
+  -webkit-font-smoothing:antialiased;
+}
+.mono{font-family:"IBM Plex Mono",ui-monospace,"SF Mono",Consolas,monospace;}
+h1,h2,h3{text-wrap:balance; margin:0;}
+
+/* ---------- header ---------- */
+header.top{
+  background:linear-gradient(165deg,var(--navy),var(--navy-soft));
+  color:#fff; padding:38px clamp(18px,4vw,56px) 30px;
+  border-bottom:3px solid var(--aws-orange);
+}
+.eyebrow{
+  font-family:"IBM Plex Mono",monospace; font-size:12.5px; letter-spacing:.12em;
+  text-transform:uppercase; color:var(--aws-orange); font-weight:600;
+  display:flex; align-items:center; gap:8px; margin-bottom:10px;
+}
+.eyebrow .dot{width:6px;height:6px;border-radius:50%;background:var(--aws-orange);}
+h1.title{font-size:clamp(24px,3.4vw,34px); font-weight:650; letter-spacing:-.01em; color:#fff;}
+.subtitle{color:#c7d0dc; max-width:64ch; margin-top:10px; font-size:14.5px; line-height:1.6;}
+.top-meta{
+  display:flex; flex-wrap:wrap; gap:10px 26px; margin-top:20px;
+  font-family:"IBM Plex Mono",monospace; font-size:12px; color:#9fb0c3;
+}
+.top-meta b{color:#e8ecf1; font-weight:600;}
+
+/* ---------- tabs ---------- */
+nav.tabs{
+  position:sticky; top:0; z-index:20; background:var(--bg);
+  border-bottom:1px solid var(--line); backdrop-filter:blur(6px);
+}
+.tabs-inner{
+  display:flex; gap:2px; padding:0 clamp(18px,4vw,56px); overflow-x:auto;
+}
+.tab-btn{
+  appearance:none; border:none; background:transparent; cursor:pointer;
+  padding:14px 18px 12px; font:600 13.5px/1 "IBM Plex Sans",sans-serif;
+  color:var(--ink-soft); border-bottom:3px solid transparent; white-space:nowrap;
+  display:flex; align-items:center; gap:8px; transition:color .15s;
+}
+.tab-btn:hover{color:var(--ink);}
+.tab-btn[aria-selected="true"]{color:var(--ink); border-bottom-color:var(--aws-orange);}
+.tab-btn .n{
+  font-family:"IBM Plex Mono",monospace; font-size:10.5px; color:#fff; background:var(--ink-faint);
+  border-radius:99px; padding:1px 7px;
+}
+.tab-btn[aria-selected="true"] .n{background:var(--aws-orange);}
+
+main{max-width:1520px; margin:0 auto; padding:28px clamp(18px,4vw,56px) 80px;}
+section.panel{display:none;}
+section.panel.active{display:block; animation:fade .25s ease;}
+@keyframes fade{from{opacity:0; transform:translateY(4px);} to{opacity:1; transform:translateY(0);}}
+
+.panel-head{margin-bottom:18px;}
+.panel-head h2{font-size:20px; font-weight:650;}
+.panel-head p{color:var(--ink-soft); font-size:13.5px; max-width:80ch; line-height:1.65; margin-top:6px;}
+
+/* ---------- legend ---------- */
+.legend{
+  display:flex; flex-wrap:wrap; gap:8px 16px; padding:12px 16px; margin-bottom:22px;
+  background:var(--surface); border:1px solid var(--line); border-radius:10px;
+  font-size:12px; color:var(--ink-soft);
+}
+.legend b{color:var(--ink); font-weight:600; margin-right:2px;}
+.legend .item{display:flex; align-items:center; gap:6px;}
+.legend .swatch{width:11px; height:11px; border-radius:3px; flex:none;}
+.legend .arrow-key{display:flex; align-items:center; gap:14px; margin-left:auto;}
+.legend .arrow-sample{display:inline-flex; align-items:center; gap:5px;}
+.legend .line{width:22px; height:0; border-top:2px solid var(--ink-faint);}
+.legend .line.dotted{border-top-style:dashed;}
+
+/* ---------- flow layout ---------- */
+.flow{
+  display:flex; align-items:stretch; gap:0; overflow-x:auto; padding-bottom:14px;
+  scrollbar-width:thin;
+}
+.stage{
+  display:flex; flex-direction:column; gap:10px; min-width:200px; flex:1 1 200px;
+  padding:4px 6px;
+}
+.stage-label{
+  font-family:"IBM Plex Mono",monospace; font-size:10.5px; letter-spacing:.08em;
+  text-transform:uppercase; color:var(--ink-faint); font-weight:600;
+  padding:0 2px 8px; border-bottom:1px dashed var(--line); margin-bottom:2px;
+}
+.connector{
+  flex:0 0 34px; display:flex; align-items:center; justify-content:center; position:relative;
+  color:var(--ink-faint); padding-top:26px;
+}
+.connector svg{width:26px; height:16px;}
+.connector.dotted svg path{stroke-dasharray:4 3;}
+
+.stage-body{display:flex; flex-direction:column; gap:10px; flex:1; justify-content:center;}
+
+/* ---------- cards ---------- */
+.card{
+  background:var(--surface); border:1px solid var(--line); border-radius:var(--radius);
+  padding:11px 12px; box-shadow:var(--shadow); display:flex; gap:10px; align-items:flex-start;
+  position:relative;
+}
+.card.compact{padding:8px 10px;}
+.badge{
+  flex:none; width:34px; height:34px; border-radius:9px; display:flex; align-items:center;
+  justify-content:center; color:#fff;
+}
+.badge svg{width:19px; height:19px; stroke:#fff; fill:none; stroke-width:1.7; stroke-linecap:round; stroke-linejoin:round;}
+.badge.sm{width:26px; height:26px; border-radius:7px;}
+.badge.sm svg{width:14px; height:14px; stroke-width:1.9;}
+.card-txt{min-width:0;}
+.card-txt .name{font-size:12.8px; font-weight:650; line-height:1.35; color:var(--ink);}
+.card-txt .name .mono{font-weight:650;}
+.card-txt .desc{font-size:11.3px; color:var(--ink-soft); line-height:1.5; margin-top:2px;}
+.tagrow{display:flex; gap:5px; flex-wrap:wrap; margin-top:6px;}
+.tag{
+  font-family:"IBM Plex Mono",monospace; font-size:9.5px; padding:1.5px 6px; border-radius:99px;
+  border:1px solid var(--line); color:var(--ink-soft); background:var(--surface-2); font-weight:600;
+  letter-spacing:.02em;
+}
+.tag.x6{color:var(--aws-orange); border-color:var(--aws-orange); background:transparent;}
+
+.badge.compute{background:var(--compute);}
+.badge.storage{background:var(--storage);}
+.badge.database{background:var(--database);}
+.badge.network{background:var(--network);}
+.badge.security{background:var(--security);}
+.badge.integration{background:var(--integration);}
+.badge.observability{background:var(--observability);}
+.badge.external{background:var(--external);}
+.badge.client{background:var(--client);}
+
+.card.compute{border-left:3px solid var(--compute);}
+.card.storage{border-left:3px solid var(--storage);}
+.card.database{border-left:3px solid var(--database);}
+.card.network{border-left:3px solid var(--network);}
+.card.security{border-left:3px solid var(--security);}
+.card.integration{border-left:3px solid var(--integration);}
+.card.observability{border-left:3px solid var(--observability);}
+.card.external{border-left:3px solid var(--external); border-style:dashed;}
+
+/* group boxes (VPC, cluster, ASG etc.) */
+.groupbox{
+  border:1.5px dashed var(--line); border-radius:12px; padding:12px 10px 10px; position:relative;
+  background:var(--surface-2);
+}
+.groupbox > .glabel{
+  position:absolute; top:-9px; left:10px; background:var(--bg); padding:0 6px;
+  font-family:"IBM Plex Mono",monospace; font-size:9.5px; text-transform:uppercase;
+  letter-spacing:.06em; color:var(--ink-faint); font-weight:700;
+}
+.groupbox.warm{border-color:#e8b800; background:color-mix(in srgb, #fff3bf 55%, var(--surface));}
+.groupbox.gold{border-color:#f08c00; background:color-mix(in srgb, #fff9db 55%, var(--surface));}
+
+/* satellite mini-notes for dotted/supporting deps */
+.satellite{
+  display:flex; align-items:center; gap:6px; font-size:10.5px; color:var(--ink-faint);
+  padding:4px 8px; border:1px dashed var(--line); border-radius:99px; margin-top:2px; width:fit-content;
+}
+.satellite svg{width:11px; height:11px; stroke:var(--ink-faint); fill:none; stroke-width:1.8;}
+
+.numbered{
+  position:absolute; top:-8px; right:-8px; width:19px; height:19px; border-radius:50%;
+  background:var(--aws-orange); color:#fff; font:700 10px/19px "IBM Plex Mono",monospace; text-align:center;
+}
+
+/* section note / prose */
+.note{
+  font-size:12.5px; color:var(--ink-soft); line-height:1.7; background:var(--surface);
+  border:1px solid var(--line); border-radius:12px; padding:14px 16px; margin-top:20px;
+}
+.note h4{font-size:12.5px; color:var(--ink); margin:0 0 6px; font-weight:650;}
+.note + .note{margin-top:12px;}
+.grid2{display:grid; grid-template-columns:1fr 1fr; gap:12px;}
+@media (max-width:820px){.grid2{grid-template-columns:1fr;}}
+
+.stat-strip{display:flex; gap:10px; flex-wrap:wrap; margin:4px 0 24px;}
+.stat{
+  background:var(--surface); border:1px solid var(--line); border-radius:10px;
+  padding:9px 14px; text-align:left; min-width:110px;
+}
+.stat b{display:block; font-size:19px; font-family:"IBM Plex Mono",monospace; color:var(--ink);}
+.stat span{font-size:10.5px; color:var(--ink-faint); text-transform:uppercase; letter-spacing:.05em;}
+
+footer{
+  padding:20px clamp(18px,4vw,56px) 40px; font-size:11px; color:var(--ink-faint);
+  border-top:1px solid var(--line); margin-top:20px; font-family:"IBM Plex Mono",monospace;
+}
+</style>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;650;700&family=IBM+Plex+Mono:wght@400;500;600;700&display=swap">
+</head>
+<body>
+
+<!-- ============ ICON LIBRARY ============ -->
+<svg width="0" height="0" style="position:absolute">
+<defs>
+<symbol id="i-lambda" viewBox="0 0 24 24"><path d="M6 5 L11 12.2 L6 19 M9.6 19 H19 M11.5 12 L16 19"/></symbol>
+<symbol id="i-ecs" viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="4.5" rx="1"/><rect x="4" y="10" width="16" height="4.5" rx="1"/><rect x="4" y="16" width="16" height="4" rx="1"/><circle cx="7" cy="6.2" r=".4" fill="#fff" stroke="none"/><circle cx="7" cy="12.2" r=".4" fill="#fff" stroke="none"/></symbol>
+<symbol id="i-fargate" viewBox="0 0 24 24"><rect x="5" y="9" width="14" height="11" rx="1.4"/><path d="M8 9 V6.5 A4 4 0 0 1 16 6.5 V9"/></symbol>
+<symbol id="i-s3" viewBox="0 0 24 24"><path d="M5 7 C5 5.3 8.1 4 12 4 S19 5.3 19 7 15.9 10 12 10 5 8.7 5 7Z"/><path d="M5 7 V17 C5 18.7 8.1 20 12 20 S19 18.7 19 17 V7"/><path d="M5 12 C5 13.7 8.1 15 12 15 S19 13.7 19 12"/></symbol>
+<symbol id="i-ddb" viewBox="0 0 24 24"><ellipse cx="12" cy="6" rx="7.5" ry="2.6"/><path d="M4.5 6 V18 C4.5 19.4 7.9 20.6 12 20.6 S19.5 19.4 19.5 18 V6"/><path d="M4.5 12 C4.5 13.4 7.9 14.6 12 14.6 S19.5 13.4 19.5 12"/></symbol>
+<symbol id="i-cloudfront" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><ellipse cx="12" cy="12" rx="3.4" ry="8"/><path d="M4.2 9.3 H19.8 M4.2 14.7 H19.8"/></symbol>
+<symbol id="i-route53" viewBox="0 0 24 24"><circle cx="10" cy="10" r="6.4"/><path d="M6.3 8 H13.7 M6.3 12 H13.7 M10 3.6 V16.4"/><path d="M13 13 L20 20 M20 20 V15 M20 20 H15"/></symbol>
+<symbol id="i-apigw" viewBox="0 0 24 24"><path d="M5 20 V9 L12 4 L19 9 V20"/><path d="M9 20 V13 H15 V20"/></symbol>
+<symbol id="i-acm" viewBox="0 0 24 24"><circle cx="12" cy="9" r="6"/><path d="M9.2 9 L11 10.8 L14.8 6.8"/><path d="M9 14 L7.3 20 L12 17.6 L16.7 20 L15 14"/></symbol>
+<symbol id="i-vpcgw" viewBox="0 0 24 24"><path d="M12 3 L20 7.5 V16.5 L12 21 L4 16.5 V7.5 Z"/><circle cx="12" cy="12" r="2.6"/></symbol>
+<symbol id="i-cognito" viewBox="0 0 24 24"><path d="M12 3 L19.5 6.2 V12 C19.5 16.5 16.4 19.8 12 21.2 C7.6 19.8 4.5 16.5 4.5 12 V6.2 Z"/><circle cx="12" cy="10.6" r="2.3"/><path d="M8.3 16 C8.9 14 10.2 13 12 13 S15.1 14 15.7 16"/></symbol>
+<symbol id="i-waf" viewBox="0 0 24 24"><path d="M12 3 L19.5 6.2 V12 C19.5 16.5 16.4 19.8 12 21.2 C7.6 19.8 4.5 16.5 4.5 12 V6.2 Z"/><path d="M9 12 L11 14 L15.5 9.2"/></symbol>
+<symbol id="i-iam" viewBox="0 0 24 24"><circle cx="8.5" cy="8.5" r="4"/><path d="M11.2 11.2 L20 20 M20 20 V16 M20 20 H16"/></symbol>
+<symbol id="i-sfn" viewBox="0 0 24 24"><rect x="3.5" y="10" width="4.4" height="4.4" rx=".9"/><rect x="16.1" y="3.5" width="4.4" height="4.4" rx=".9"/><rect x="16.1" y="16.1" width="4.4" height="4.4" rx=".9"/><path d="M8 12.2 H12 M12 12.2 V5.7 H16.1 M12 12.2 V18.3 H16.1"/></symbol>
+<symbol id="i-eventbridge" viewBox="0 0 24 24"><circle cx="12" cy="12" r="2.6"/><path d="M12 4 V9.4 M12 14.6 V20 M4 12 H9.4 M14.6 12 H20 M6.5 6.5 L9.8 9.8 M14.2 14.2 L17.5 17.5 M17.5 6.5 L14.2 9.8 M9.8 14.2 L6.5 17.5"/></symbol>
+<symbol id="i-sns" viewBox="0 0 24 24"><path d="M6 10 V16 H9 L14 20 V6 L9 10 Z"/><path d="M17 9 C18.4 10.2 18.4 13.8 17 15"/><path d="M19.3 6.6 C22 9 22 15 19.3 17.4"/></symbol>
+<symbol id="i-cloudwatch" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M7 14 L9.5 9 L12 13 L14.5 8 L17 14"/></symbol>
+<symbol id="i-xray" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><circle cx="12" cy="12" r="3.4"/><path d="M12 3.5 V7 M12 17 V20.5 M3.5 12 H7 M17 12 H20.5"/></symbol>
+<symbol id="i-ecr" viewBox="0 0 24 24"><path d="M12 3 L20 7 V17 L12 21 L4 17 V7 Z"/><path d="M4 7 L12 11 L20 7 M12 11 V21"/></symbol>
+<symbol id="i-budget" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M12 6.5 V17.5 M9.3 9.4 C9.3 8 10.5 7.4 12 7.4 C13.7 7.4 14.7 8.2 14.7 9.3 C14.7 12 9.3 10.6 9.3 13.4 C9.3 14.7 10.5 15.4 12 15.4 C13.5 15.4 14.7 14.8 14.7 13.4"/></symbol>
+<symbol id="i-browser" viewBox="0 0 24 24"><rect x="3.5" y="5" width="17" height="14" rx="1.6"/><path d="M3.5 8.6 H20.5"/><circle cx="6" cy="6.8" r=".5" fill="#fff" stroke="none"/><circle cx="7.7" cy="6.8" r=".5" fill="#fff" stroke="none"/></symbol>
+<symbol id="i-globe" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><ellipse cx="12" cy="12" rx="3.4" ry="8"/><path d="M4.2 9.3 H19.8 M4.2 14.7 H19.8"/></symbol>
+<symbol id="i-reaper" viewBox="0 0 24 24"><path d="M12 3 V6 M6 6 H18 L16 10 H8 Z"/><path d="M9 10 V17 A3 3 0 0 0 15 17 V10"/><path d="M12 13 V17"/></symbol>
+</defs>
+</svg>
+
+<header class="top">
+  <div class="eyebrow"><span class="dot"></span>sports-predictor &middot; infrastructure reference</div>
+  <h1 class="title">Cloud Architecture — All Six Sports, Current State</h1>
+  <p class="subtitle">Every request path, scheduled job, and guardrail actually deployed today — NFL, NCAA FB, NBA, NCAA MBB, PGA Tour, and F1 all run the identical shape below, differing only in which upstream data source each sport's ingest adapter calls.</p>
+  <div class="top-meta">
+    <span><b>6</b> sports live</span>
+    <span><b>3</b> serving Lambda types &times; sport</span>
+    <span><b>EC2</b> Spot/on-demand training fleet</span>
+    <span><b>7</b> CloudWatch dashboards</span>
+    <span><b>25</b> alarms</span>
+  </div>
+</header>
+
+<nav class="tabs">
+  <div class="tabs-inner" role="tablist">
+    <button class="tab-btn" role="tab" aria-selected="true" data-tab="client"><span class="n">01</span> Client Request Path</button>
+    <button class="tab-btn" role="tab" aria-selected="false" data-tab="pipeline"><span class="n">02</span> Scheduled Data Pipeline</button>
+    <button class="tab-btn" role="tab" aria-selected="false" data-tab="observability"><span class="n">03</span> Observability &amp; Cost Guardrails</button>
+  </div>
+</nav>
+
+<main>
+
+<!-- ================= TAB 1: CLIENT REQUEST PATH ================= -->
+<section class="panel active" id="panel-client">
+  <div class="panel-head">
+    <h2>Client Request Path</h2>
+    <p>Numbered 1&ndash;8 in request order &mdash; the one path worth tracing end-to-end. A browser hits one public domain; CloudFront splits static assets from API traffic; only the model-scoring Lambda sits inside the VPC.</p>
+  </div>
+
+  <div class="legend">
+    <span class="item"><span class="swatch" style="background:var(--client)"></span><b>Client</b></span>
+    <span class="item"><span class="swatch" style="background:var(--network)"></span><b>Networking &amp; CDN</b></span>
+    <span class="item"><span class="swatch" style="background:var(--security)"></span><b>Auth / Security</b></span>
+    <span class="item"><span class="swatch" style="background:var(--compute)"></span><b>Compute</b></span>
+    <span class="item"><span class="swatch" style="background:var(--database)"></span><b>Database</b></span>
+    <span class="item"><span class="swatch" style="background:var(--storage)"></span><b>Storage</b></span>
+    <span class="item"><span class="swatch" style="background:var(--external)"></span><b>External / Registry</b></span>
+    <span class="arrow-key">
+      <span class="arrow-sample"><span class="line"></span> data flow</span>
+      <span class="arrow-sample"><span class="line dotted"></span> supporting dep.</span>
+    </span>
+  </div>
+
+  <div class="flow">
+    <div class="stage">
+      <div class="stage-label">Client</div>
+      <div class="stage-body">
+        <div class="card client">
+          <div class="badge client"><svg><use href="#i-browser"/></svg></div>
+          <div class="card-txt"><div class="name">Browser</div><div class="desc">Cognito-authenticated user</div></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="connector"><svg viewBox="0 0 26 16"><path d="M0 8H22M16 2L22 8L16 14" stroke="currentColor" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+
+    <div class="stage">
+      <div class="stage-label">Edge</div>
+      <div class="stage-body">
+        <div class="card network" style="position:relative">
+          <span class="numbered">1</span>
+          <div class="badge network"><svg><use href="#i-cloudfront"/></svg></div>
+          <div class="card-txt">
+            <div class="name">CloudFront Distribution</div>
+            <div class="desc">Single public domain, geo-restricted (whitelist)</div>
+            <div class="satellite"><svg><use href="#i-route53"/></svg>Route&nbsp;53 alias</div>
+            <div class="satellite"><svg><use href="#i-acm"/></svg>ACM cert (us-east-1)</div>
+            <div class="satellite"><svg><use href="#i-waf"/></svg>WAF: AWS IP-reputation rule</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="connector"><svg viewBox="0 0 26 16"><path d="M0 8H22M16 2L22 8L16 14" stroke="currentColor" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+
+    <div class="stage">
+      <div class="stage-label">Origin split &mdash; by path</div>
+      <div class="stage-body">
+        <div class="card storage compact"><div class="badge storage sm"><svg><use href="#i-s3"/></svg></div><div class="card-txt"><div class="name mono">/* &rarr; S3: Frontend</div><div class="desc">Flutter web build</div></div></div>
+        <div class="card network" style="position:relative">
+          <span class="numbered">2</span>
+          <div class="badge network"><svg><use href="#i-apigw"/></svg></div>
+          <div class="card-txt">
+            <div class="name mono">/{sport}/* &rarr; API Gateway</div>
+            <div class="desc">Custom regional domain, TLS 1.2 floor &mdash; default execute-api endpoint disabled</div>
+            <div class="tagrow"><span class="tag x6">&times;6 sports</span></div>
+          </div>
+        </div>
+        <div class="card security compact">
+          <div class="badge security sm"><svg><use href="#i-cognito"/></svg></div>
+          <div class="card-txt"><div class="name">3. Cognito authorizer</div><div class="desc">JWT validated against cached JWKS, 5 min cache</div></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="connector"><svg viewBox="0 0 26 16"><path d="M0 8H22M16 2L22 8L16 14" stroke="currentColor" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+
+    <div class="stage" style="min-width:300px;">
+      <div class="stage-label">Serving compute &mdash; one type per route</div>
+      <div class="stage-body">
+        <div class="card compute compact">
+          <div class="badge compute sm"><svg><use href="#i-lambda"/></svg></div>
+          <div class="card-txt"><div class="name mono">4a. {sport}-predict-read</div><div class="desc">zip, no VPC &mdash; /events, /models</div><div class="tagrow"><span class="tag x6">&times;6</span><span class="tag">no VPC</span></div></div>
+        </div>
+        <div class="groupbox warm">
+          <span class="glabel">VPC private subnets, 3 AZs &middot; no NAT gateway</span>
+          <div class="card compute compact" style="position:relative">
+            <span class="numbered" style="background:var(--compute)">4b</span>
+            <div class="badge compute sm"><svg><use href="#i-lambda"/></svg></div>
+            <div class="card-txt"><div class="name mono">{sport}-predict</div><div class="desc">container image (xgboost/sklearn/pandas) &mdash; /season, /predictions/*</div><div class="tagrow"><span class="tag x6">&times;6</span><span class="tag">VPC-attached</span></div></div>
+          </div>
+        </div>
+        <div class="card compute compact">
+          <div class="badge compute sm"><svg><use href="#i-lambda"/></svg></div>
+          <div class="card-txt"><div class="name mono">4c. {sport}-live-scores</div><div class="desc">zip, cache-only, no VPC &mdash; never writes predictions</div><div class="tagrow"><span class="tag x6">&times;6</span><span class="tag">no VPC</span></div></div>
+        </div>
+        <div class="satellite"><svg><use href="#i-eventbridge"/></svg>warmup schedule, 5 min &rarr; predict + predict-read</div>
+      </div>
+    </div>
+
+    <div class="connector"><svg viewBox="0 0 26 16"><path d="M0 8H22M16 2L22 8L16 14" stroke="currentColor" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+
+    <div class="stage">
+      <div class="stage-label">Storage &mdash; partitioned by sport</div>
+      <div class="stage-body">
+        <div class="card database compact"><div class="badge database sm"><svg><use href="#i-ddb"/></svg></div><div class="card-txt"><div class="name">6. entities / events / *_game_stats</div></div></div>
+        <div class="card storage compact"><div class="badge storage sm"><svg><use href="#i-s3"/></svg></div><div class="card-txt"><div class="name">7. Model Artifacts</div></div></div>
+        <div class="card database compact"><div class="badge database sm"><svg><use href="#i-ddb"/></svg></div><div class="card-txt"><div class="name">8. predictions (write-only)</div></div></div>
+        <div class="satellite"><svg><use href="#i-vpcgw"/></svg>via VPC Gateway Endpoints (predict only)</div>
+        <div class="satellite"><svg><use href="#i-ecr"/></svg>predict pulls image from ECR</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="note">
+    <h4>Why only <span class="mono">predict</span> is VPC-attached</h4>
+    Only the model-scoring Lambda is VPC-attached (private subnets, no public IP) as a defense-in-depth boundary, reaching DynamoDB/S3 only through Gateway Endpoints &mdash; no NAT Gateway needed (saves ~$32/mo per AZ this single-user project doesn't need). <span class="mono">predict-read</span> and <span class="mono">live-scores</span> deliberately skip the VPC hop entirely: neither ever calls anything but DynamoDB/S3 over the plain AWS API path, so the extra network hop would only add cold-start latency with no security benefit.
+  </div>
+</section>
+
+<!-- ================= TAB 2: SCHEDULED PIPELINE ================= -->
+<section class="panel" id="panel-pipeline">
+  <div class="panel-head">
+    <h2>Scheduled Data Pipeline</h2>
+    <p>Registry-driven and shared across every sport &mdash; two Step Functions state machines fan out to whichever sports are currently in-season, rather than one EventBridge rule per sport per job.</p>
+  </div>
+
+  <div class="stat-strip">
+    <div class="stat"><b>1&times;/day</b><span>ingest-orchestrator</span></div>
+    <div class="stat"><b>1&times;/mo</b><span>training-orchestrator</span></div>
+    <div class="stat"><b>10 min</b><span>ec2-training-reaper</span></div>
+    <div class="stat"><b>~35</b><span>training targets, all sports</span></div>
+  </div>
+
+  <div class="legend">
+    <span class="item"><span class="swatch" style="background:var(--integration)"></span><b>Orchestration</b></span>
+    <span class="item"><span class="swatch" style="background:var(--compute)"></span><b>Lambda pipeline</b></span>
+    <span class="item"><span class="swatch" style="background:var(--storage)"></span><b>Fargate</b></span>
+    <span class="item"><span class="swatch" style="background:#f08c00"></span><b>EC2 training fleet</b></span>
+    <span class="item"><span class="swatch" style="background:var(--database)"></span><b>Storage</b></span>
+    <span class="item"><span class="swatch" style="background:var(--external)"></span><b>External API</b></span>
+  </div>
+
+  <div class="flow">
+    <div class="stage">
+      <div class="stage-label">Triggers</div>
+      <div class="stage-body">
+        <div class="card integration compact"><div class="badge integration sm"><svg><use href="#i-eventbridge"/></svg></div><div class="card-txt"><div class="name">ingest-orchestrator</div><div class="desc mono">daily</div></div></div>
+        <div class="card integration compact"><div class="badge integration sm"><svg><use href="#i-eventbridge"/></svg></div><div class="card-txt"><div class="name">training-orchestrator</div><div class="desc mono">monthly</div></div></div>
+        <div class="card integration compact"><div class="badge integration sm"><svg><use href="#i-eventbridge"/></svg></div><div class="card-txt"><div class="name">{sport}-schedule-sync</div><div class="desc mono">&times;6, own cadence</div></div></div>
+        <div class="card integration compact"><div class="badge integration sm"><svg><use href="#i-eventbridge"/></svg></div><div class="card-txt"><div class="name">ec2-training-reaper</div><div class="desc mono">every 10 min</div></div></div>
+      </div>
+    </div>
+
+    <div class="connector"><svg viewBox="0 0 26 16"><path d="M0 8H22M16 2L22 8L16 14" stroke="currentColor" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+
+    <div class="stage" style="min-width:260px;">
+      <div class="stage-label">Orchestration (X-Ray traced)</div>
+      <div class="stage-body">
+        <div class="groupbox">
+          <span class="glabel">Step Functions</span>
+          <div class="card integration compact"><div class="badge integration sm"><svg><use href="#i-sfn"/></svg></div><div class="card-txt"><div class="name">ingest-orchestrator</div><div class="desc">Map over registry sports</div></div></div>
+          <div class="card integration compact" style="margin-top:8px"><div class="badge integration sm"><svg><use href="#i-sfn"/></svg></div><div class="card-txt"><div class="name">training-orchestrator</div><div class="desc">Map per sport &rarr; Distributed Map per target</div><div class="tagrow"><span class="tag">X-Ray</span></div></div></div>
+          <div class="card security compact" style="margin-top:8px"><div class="badge security sm"><svg><use href="#i-cognito"/></svg></div><div class="card-txt"><div class="name">season-gate Lambda</div><div class="desc">shared season_start/end check</div><div class="tagrow"><span class="tag">X-Ray</span></div></div></div>
+        </div>
+        <div class="satellite"><svg><use href="#i-ddb"/></svg>scans Sport Registry (season window, training_targets)</div>
+      </div>
+    </div>
+
+    <div class="connector"><svg viewBox="0 0 26 16"><path d="M0 8H22M16 2L22 8L16 14" stroke="currentColor" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+
+    <div class="stage">
+      <div class="stage-label">Ingest &rarr; normalize</div>
+      <div class="stage-body">
+        <div class="card compute compact"><div class="badge compute sm"><svg><use href="#i-lambda"/></svg></div><div class="card-txt"><div class="name mono">{sport}-ingest</div><div class="tagrow"><span class="tag x6">&times;6</span></div></div></div>
+        <div class="satellite"><svg><use href="#i-globe"/></svg>ESPN / CFBD / Jolpica-F1 / etc.</div>
+        <div class="card storage compact"><div class="badge storage sm"><svg><use href="#i-s3"/></svg></div><div class="card-txt"><div class="name">S3: Raw Data Lake</div></div></div>
+        <div class="card compute compact"><div class="badge compute sm"><svg><use href="#i-lambda"/></svg></div><div class="card-txt"><div class="name mono">{sport}-normalize</div><div class="desc">S3 ObjectCreated trigger</div><div class="tagrow"><span class="tag x6">&times;6</span></div></div></div>
+      </div>
+    </div>
+
+    <div class="connector"><svg viewBox="0 0 26 16"><path d="M0 8H22M16 2L22 8L16 14" stroke="currentColor" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+
+    <div class="stage">
+      <div class="stage-label">Core storage</div>
+      <div class="stage-body">
+        <div class="card database compact"><div class="badge database sm"><svg><use href="#i-ddb"/></svg></div><div class="card-txt"><div class="name">entities / events /<br>*_game_stats</div></div></div>
+        <div class="satellite"><svg><use href="#i-fargate"/></svg>{sport}-backfill &times;6 (manual, historical only)</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="panel-head" style="margin-top:34px;">
+    <h3 style="font-size:15px;font-weight:650;">Scheduled training, once in-season</h3>
+  </div>
+  <div class="flow">
+    <div class="stage">
+      <div class="stage-label">Feature engineering</div>
+      <div class="stage-body">
+        <div class="groupbox">
+          <span class="glabel">Fargate, public subnet, on-demand</span>
+          <div class="card storage compact"><div class="badge storage sm"><svg><use href="#i-fargate"/></svg></div><div class="card-txt"><div class="name mono">{sport}-feature-engineering</div><div class="tagrow"><span class="tag x6">&times;6</span></div></div></div>
+        </div>
+        <div class="card database compact"><div class="badge database sm"><svg><use href="#i-ddb"/></svg></div><div class="card-txt"><div class="name">reads full history</div></div></div>
+        <div class="card storage compact"><div class="badge storage sm"><svg><use href="#i-s3"/></svg></div><div class="card-txt"><div class="name">writes training Parquet</div></div></div>
+      </div>
+    </div>
+
+    <div class="connector"><svg viewBox="0 0 26 16"><path d="M0 8H22M16 2L22 8L16 14" stroke="currentColor" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+
+    <div class="stage" style="min-width:320px;">
+      <div class="stage-label">EC2 training fleet &mdash; sole training path</div>
+      <div class="stage-body">
+        <div class="groupbox gold">
+          <span class="glabel">ECS, EC2 launch type</span>
+          <div style="display:flex; gap:8px;">
+            <div class="card compact" style="border-left:3px solid #f08c00; flex:1;"><div class="badge sm" style="background:#f08c00"><svg><use href="#i-ecs"/></svg></div><div class="card-txt"><div class="name">ASG: ec2-training-spot</div><div class="desc">primary</div></div></div>
+            <div class="card compact" style="border-left:3px solid #f08c00; flex:1;"><div class="badge sm" style="background:#f08c00"><svg><use href="#i-ecs"/></svg></div><div class="card-txt"><div class="name">ASG: ondemand</div><div class="desc">fallback</div></div></div>
+          </div>
+          <div class="card compact" style="border-left:3px solid #f08c00; margin-top:8px;"><div class="badge sm" style="background:#f08c00"><svg><use href="#i-ecs"/></svg></div><div class="card-txt"><div class="name">win-prob / score / ranking /<br>player-prop / sport-specific</div><div class="desc">~35 targets across 6 sports</div></div></div>
+        </div>
+        <div class="satellite"><svg><use href="#i-reaper"/></svg>explicit scale-to-0 on ForEachSport completion</div>
+        <div class="satellite"><svg><use href="#i-reaper"/></svg>ec2-training-reaper: idle-instance backstop (X-Ray)</div>
+      </div>
+    </div>
+
+    <div class="connector"><svg viewBox="0 0 26 16"><path d="M0 8H22M16 2L22 8L16 14" stroke="currentColor" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+
+    <div class="stage">
+      <div class="stage-label">Model storage</div>
+      <div class="stage-body">
+        <div class="card storage compact"><div class="badge storage sm"><svg><use href="#i-s3"/></svg></div><div class="card-txt"><div class="name">S3: Model Artifacts</div><div class="desc">versioned model + model_card per candidate, best promoted</div></div></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="note">
+    <h4>Fargate training retired &mdash; EC2 is the sole training path</h4>
+    A real canary run validated EC2 Spot/on-demand as both cheaper (~20% on verified active-training-time cost) and reliable, after three real bugs were found and fixed live. Feature engineering is untouched &mdash; still Fargate on-demand in public subnets. The reaper Lambda is an <em>independent</em> backstop against orphaned instances: the state machine's own scale-to-0 states only run on a clean completion, so the reaper's 10-minute poll is what catches a manually-stopped execution.
+  </div>
+</section>
+
+<!-- ================= TAB 3: OBSERVABILITY ================= -->
+<section class="panel" id="panel-observability">
+  <div class="panel-head">
+    <h2>Observability &amp; Cost Guardrails</h2>
+    <p>Cuts across both diagrams above rather than sitting on either's request/pipeline path &mdash; every compute and storage resource on both feeds this layer.</p>
+  </div>
+
+  <div class="stat-strip">
+    <div class="stat"><b>7</b><span>CloudWatch dashboards</span></div>
+    <div class="stat"><b>25</b><span>alarms, 18 concerns</span></div>
+    <div class="stat"><b>3</b><span>X-Ray traced resources</span></div>
+    <div class="stat"><b>2</b><span>AWS Budgets (total + per-sport)</span></div>
+  </div>
+
+  <div class="grid2">
+    <div>
+      <div class="groupbox">
+        <span class="glabel">Tracing</span>
+        <div class="card observability compact"><div class="badge observability sm"><svg><use href="#i-xray"/></svg></div><div class="card-txt"><div class="name">X-Ray active tracing</div><div class="desc">training-orchestrator state machine + season-gate + ec2-training-reaper Lambdas</div></div></div>
+        <div class="card observability compact" style="margin-top:8px"><div class="badge observability sm"><svg><use href="#i-cloudwatch"/></svg></div><div class="card-txt"><div class="name">CloudWatch Application Map</div><div class="desc">Service Map built from the traces above</div></div></div>
+      </div>
+    </div>
+    <div>
+      <div class="groupbox">
+        <span class="glabel">Sources feeding everything below</span>
+        <div style="display:flex; flex-wrap:wrap; gap:6px;">
+          <span class="tag">30+ Lambdas</span><span class="tag">ECS tasks</span><span class="tag">API Gateway</span>
+          <span class="tag">CloudFront</span><span class="tag">DynamoDB &times;6</span><span class="tag">Step Functions &times;2</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="panel-head" style="margin-top:22px;"><h3 style="font-size:15px;font-weight:650;">7 CloudWatch dashboards</h3></div>
+  <div style="display:grid; grid-template-columns:repeat(auto-fill,minmax(210px,1fr)); gap:10px;">
+    <div class="card observability compact"><div class="badge observability sm"><svg><use href="#i-cloudwatch"/></svg></div><div class="card-txt"><div class="name">Alert-state</div><div class="desc">all 25 alarms at a glance</div></div></div>
+    <div class="card observability compact"><div class="badge observability sm"><svg><use href="#i-cloudwatch"/></svg></div><div class="card-txt"><div class="name">API Gateway</div><div class="desc">volume / errors / latency</div></div></div>
+    <div class="card observability compact"><div class="badge observability sm"><svg><use href="#i-cloudwatch"/></svg></div><div class="card-txt"><div class="name">DynamoDB</div><div class="desc">capacity / throttling, &times;6 tables</div></div></div>
+    <div class="card observability compact"><div class="badge observability sm"><svg><use href="#i-cloudwatch"/></svg></div><div class="card-txt"><div class="name">ECS / Fargate</div><div class="desc">cluster + per-task-family utilization</div></div></div>
+    <div class="card observability compact"><div class="badge observability sm"><svg><use href="#i-cloudwatch"/></svg></div><div class="card-txt"><div class="name">Lambda observability</div><div class="desc">invocations / errors / duration / throttles</div></div></div>
+    <div class="card observability compact"><div class="badge observability sm"><svg><use href="#i-cloudwatch"/></svg></div><div class="card-txt"><div class="name">Step Functions</div><div class="desc">execution outcomes / duration</div></div></div>
+    <div class="card observability compact"><div class="badge observability sm"><svg><use href="#i-cloudwatch"/></svg></div><div class="card-txt"><div class="name">Viewer analytics</div><div class="desc">Logs Insights: location/browser/device</div></div></div>
+  </div>
+
+  <div class="flow" style="margin-top:26px;">
+    <div class="stage" style="min-width:280px;">
+      <div class="stage-label">25 alarms, 18 concerns</div>
+      <div class="stage-body">
+        <div class="card security compact"><div class="badge security sm"><svg><use href="#i-cloudwatch"/></svg></div><div class="card-txt"><div class="desc">Lambda errors / throttles / duration &middot; DynamoDB throttles &middot; orchestrator failed/timed-out &middot; API Gateway 4xx/5xx/latency &middot; CloudFront 5xx</div></div></div>
+      </div>
+    </div>
+    <div class="connector"><svg viewBox="0 0 26 16"><path d="M0 8H22M16 2L22 8L16 14" stroke="currentColor" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" stroke-dasharray="4 3"/></svg></div>
+    <div class="stage">
+      <div class="stage-label">Critical only</div>
+      <div class="stage-body">
+        <div class="card integration compact"><div class="badge integration sm"><svg><use href="#i-sns"/></svg></div><div class="card-txt"><div class="name">SNS: ops-alerts</div></div></div>
+      </div>
+    </div>
+    <div class="connector dotted"><svg viewBox="0 0 26 16"><path d="M0 8H22M16 2L22 8L16 14" stroke="currentColor" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" stroke-dasharray="4 3"/></svg></div>
+    <div class="stage">
+      <div class="stage-label">Notification</div>
+      <div class="stage-body">
+        <div class="card external compact"><div class="badge external sm"><svg><use href="#i-sns"/></svg></div><div class="card-txt"><div class="name">Email</div><div class="desc">Warning-tier: dashboard only, no email</div></div></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="flow" style="margin-top:18px;">
+    <div class="stage">
+      <div class="stage-label">Cost guardrail</div>
+      <div class="stage-body">
+        <div class="card observability compact"><div class="badge observability sm"><svg><use href="#i-budget"/></svg></div><div class="card-txt"><div class="name">AWS Budgets</div><div class="desc">project total + per-sport</div></div></div>
+      </div>
+    </div>
+    <div class="connector dotted"><svg viewBox="0 0 26 16"><path d="M0 8H22M16 2L22 8L16 14" stroke="currentColor" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" stroke-dasharray="4 3"/></svg></div>
+    <div class="stage">
+      <div class="stage-label">Thresholds</div>
+      <div class="stage-body">
+        <div class="card external compact"><div class="badge external sm"><svg><use href="#i-sns"/></svg></div><div class="card-txt"><div class="name">Email</div><div class="desc">80%/100% actual, 100% forecast</div></div></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="note">
+    <h4>Not shown here or on the other two diagrams</h4>
+    IAM roles &mdash; every compute resource runs under its own least-privilege role (<span class="mono">lambda_pipeline</span>, <span class="mono">lambda_inference</span> shared by predict + predict-read, <span class="mono">lambda_live_scores</span>, per-sport backfill roles, <span class="mono">ecs_pipeline</span>, <span class="mono">stepfunctions_orchestrator</span>) rather than one shared role. Not drawn as nodes since IAM is a cross-cutting permissions concern, not a data-flow hop.
+  </div>
+</section>
+
+</main>
+
+<footer>sports-predictor &middot; hand-maintained against Terraform &middot; update alongside design/ARCHITECTURE.md whenever the infrastructure changes shape</footer>
+
+<script>
+document.querySelectorAll('.tab-btn').forEach(btn=>{
+  btn.addEventListener('click',()=>{
+    document.querySelectorAll('.tab-btn').forEach(b=>b.setAttribute('aria-selected','false'));
+    document.querySelectorAll('.panel').forEach(p=>p.classList.remove('active'));
+    btn.setAttribute('aria-selected','true');
+    document.getElementById('panel-'+btn.dataset.tab).classList.add('active');
+  });
+});
+</script>
+</body>
+</html>

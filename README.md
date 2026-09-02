@@ -6,15 +6,14 @@ Built for a single user, not a public product — the frontend and API sit at a 
 
 ## Documentation
 
-**[design/](design/)** — architecture and design decisions, not day-to-day operational detail:
-- [Architecture](design/ARCHITECTURE.md) — system diagrams (single-sport and multi-sport), the no-NAT-Gateway networking constraint and its S3-relay workaround, access control design, service rationale
+**[design/](design/)** — architecture and design decisions, both target-state rationale and as-built reference in one place:
+- [Architecture](design/ARCHITECTURE.md) — why each piece exists, the no-NAT-Gateway networking constraint and its S3-relay workaround, access control design, a plain-text walkthrough of the client request path and scheduled pipeline. **[architecture.html](design/architecture.html)** is the companion visual diagram (open it in a browser) — client request path, scheduled data pipeline, and observability/cost guardrails, AWS-category-colored.
 - [Data Schema](design/DATA_SCHEMA.md) — entity/event/prediction schema, DynamoDB table design, sport registry shape, S3 key conventions
 - [Data Sources](design/DATA_SOURCES.md) — free data source per sport, update cadence, auth requirements, API key handling
 - [Tagging Strategy](design/TAGGING_STRATEGY.md) — AWS resource tagging convention for cost tracking in Billing/Cost Explorer
 - [Frontend Style](design/FRONTEND_STYLE.md) — the Flutter Web app's "Arena" visual language (design tokens, components, data-viz conventions)
 
-**[docs/](docs/)** — as-built reference for what's actually deployed:
-- [AWS Architecture](docs/AWS_ARCHITECTURE.md) — current-state AWS architecture diagrams: client request path, scheduled data pipeline, observability/cost guardrails
+**[docs/](docs/)** — as-built reference for the API contract and per-sport model details:
 - [Sport Predictor API](docs/SPORT_PREDICTOR_API.md) — every live API Gateway route and request/response shape, per sport
 - Feature engineering, one doc per sport — what each sport's trained-model features are and where they come from: [NFL](docs/NFL_FEATURE_ENGINEERING.md), [NCAAFB](docs/NCAAFB_FEATURE_ENGINEERING.md), [NBA](docs/NBA_FEATURE_ENGINEERING.md), [NCAAMBB](docs/NCAAMBB_FEATURE_ENGINEERING.md), [PGA](docs/PGA_FEATURE_ENGINEERING.md), [F1](docs/F1_FEATURE_ENGINEERING.md)
 
