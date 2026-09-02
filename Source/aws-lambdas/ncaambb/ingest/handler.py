@@ -51,8 +51,7 @@ fails box-score/roster ingest, a genuinely secondary data source.
 
 VOLUME: unlike NBA's ~30 teams/~15 games-a-night, D1 has ~362 teams (every
 one of which gets its roster re-fetched every run) and a single busy
-Saturday can carry ~150-155 games (confirmed live, 2026-08-19) -- exactly
-the stress case this sub-phase was scoped to handle. A plain sequential
+Saturday can carry ~150-155 games. A plain sequential
 per-item loop (NBA's own shape) would serialize each item's full
 request-plus-network-latency cost instead of just its share of the shared
 rate limiter's floor, and at this volume that difference is real wall-
@@ -248,10 +247,8 @@ def lambda_handler(event: dict, context) -> dict:
 
     # Filtered up front so the thread pool below is only ever sized to the
     # events actually worth an ESPN round-trip -- a quiet weeknight (a
-    # handful of games) doesn't pay for _INGEST_MAX_WORKERS threads it has
-    # no work for, and a full Saturday (~150 games, confirmed live -- see
-    # this module's own VOLUME docstring section) is exactly the case the
-    # pool exists for.
+    # handful of games) doesn't pay for _INGEST_MAX_WORKERS threads it
+    # has no work for (see this module's own VOLUME docstring section).
     to_fetch = []
     skipped = 0
     for evt in events:

@@ -135,12 +135,10 @@ class FeatureStorage:
         entity_type), ...]. Returns {(entity_id, entity_type): entity},
         one BatchGetItem round trip per 100 refs instead of one GetItem
         per ref -- the fix behind library.serving.common's own
-        enrich_participants(..., entity_cache=...) fast path (real
-        production 504 serving PGA's completed-tournaments list: up to
-        ~150 golfers x every historical tournament, sequential GetItems,
-        real complaint 2026-09-01). A ref with no matching entity is
-        simply absent from the result, same "no error on a miss" contract
-        get_entity already has. Deduplicates entity_refs internally --
+        enrich_participants(..., entity_cache=...) fast path. A ref with
+        no matching entity is simply absent from the result, same "no
+        error on a miss" contract get_entity already has. Deduplicates
+        entity_refs internally --
         the same (entity_id, entity_type) pair repeated across many
         events' participant lists is fetched once."""
         unique_refs = list(dict.fromkeys(entity_refs))

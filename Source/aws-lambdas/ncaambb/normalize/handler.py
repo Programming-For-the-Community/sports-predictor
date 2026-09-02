@@ -22,13 +22,12 @@ dicts per object (ESPN's site API), same shape as NBA's:
 
 Reuses library.normalize.espn's shared normalizers directly (no separate
 library/normalize/ncaambb.py module): roster_to_player_entities handles
-NCAA MBB's flat (ungrouped) athletes list (confirmed live, 2026-08-19 --
-same shape as NBA's, not NFL's grouped shape), and
-boxscore_to_player_game_stats handles NCAA MBB's single unnamed stat
-category without fabricating a "misc" prefix that would otherwise corrupt
-TARGET_STAT field names like "points"/"rebounds". compound_key_splits
-below is NCAA MBB's own map -- confirmed live, 2026-08-19, to use the
-exact same raw ESPN stat keys as NBA's own box score
+NCAA MBB's flat (ungrouped) athletes list (same shape as NBA's, not
+NFL's grouped shape), and boxscore_to_player_game_stats handles NCAA
+MBB's single unnamed stat category without fabricating a "misc" prefix
+that would otherwise corrupt TARGET_STAT field names like
+"points"/"rebounds". compound_key_splits below is NCAA MBB's own map --
+uses the exact same raw ESPN stat keys as NBA's own box score
 ("fieldGoalsMade-fieldGoalsAttempted" etc.), so the values are identical
 to NBA's, but this stays its own dict (not imported from nba/normalize)
 per this project's per-sport duplication convention for sport-specific
@@ -55,8 +54,8 @@ logger = logging.getLogger("ncaambb-normalize")
 SPORT = "ncaambb"
 
 # One shared map for both team- and player-level box scores -- NCAA MBB's
-# "made-attempted" compound stat keys are identical strings to NBA's own
-# (confirmed live, 2026-08-19). three_pointers_made/three_point_attempts
+# "made-attempted" compound stat keys are identical strings to NBA's own.
+# three_pointers_made/three_point_attempts
 # match the sport registry's own player-prop TARGET_STAT name exactly
 # (Terraform/dynamodb-sport-registry.tf) -- this is what makes that model
 # trainable without a separate field-name translation step.

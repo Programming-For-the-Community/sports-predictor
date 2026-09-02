@@ -26,8 +26,8 @@ def filter_depth_chart(raw_depth_chart: dict) -> dict:
     variant) this project never uses.
 
     raw_depth_chart's own top level is `depthchart`, a list of formation-
-    specific groups (e.g. "Base 3-4 D", "Special Teams", "3WR 1TE" --
-    confirmed live), each with its OWN `positions` dict -- QB/RB/WR/TE
+    specific groups (e.g. "Base 3-4 D", "Special Teams", "3WR 1TE"), each
+    with its OWN `positions` dict -- QB/RB/WR/TE
     only ever appear in one offensive-formation group, so merging every
     group's positions into one flat result never collides for the
     positions this project keeps. Filters on each entry's
@@ -56,12 +56,10 @@ def home_away_team_ids(event: dict) -> tuple[str, str] | None:
     raw ESPN scoreboard event. None for a malformed event, AND for an
     undetermined playoff bracket slot -- ESPN represents a postseason
     matchup nobody's qualified for yet with a placeholder team
-    (name/abbreviation "TBD", id "-1"/"-2", confirmed live against an
-    early-season postseason scoreboard), not a real team either
+    (name/abbreviation "TBD", id "-1"/"-2"), not a real team either
     enrichment (coach/injury/depth chart) or serving code has anything
     meaningful to fetch or predict for. Every real ESPN team id is a
-    positive integer (confirmed via NFLClient.get_teams), so a
-    non-digit id is never a real team."""
+    positive integer, so a non-digit id is never a real team."""
     try:
         competitors = event["competitions"][0]["competitors"]
         home = next(c for c in competitors if c.get("homeAway") == "home")

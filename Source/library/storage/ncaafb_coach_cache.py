@@ -5,8 +5,8 @@ left inside aws-lambdas/ncaafb/ingest/enrichment.py) for the same reason
 library/storage/ncaafb_team_cache.py already is: Lambda deployment
 packages are built per-function, and data-backfills/ncaafb/backfill.py
 (an ECS task, not a Lambda) needs this exact same season-scoped
-coach/rank resolution to enrich 10 seasons of historical games, so it can
-no longer stay a sibling Lambda's local file.
+coach/rank resolution to enrich 10 seasons of historical games, so it
+lives here rather than inside a single Lambda's own package.
 
 enrich_games itself (the per-week orchestration that calls these) stays
 in aws-lambdas/ncaafb/ingest/enrichment.py -- only the school-keyed

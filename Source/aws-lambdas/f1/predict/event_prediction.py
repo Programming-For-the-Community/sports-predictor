@@ -109,12 +109,11 @@ def _field_sort_key(entry: dict):
     then to win_probability descending if neither is promoted.
 
     The frontend's own leaderboard relies on this exact order to display
-    a driver's ROW RANK as their projected position instead of the raw
+    a driver's row rank as their projected position instead of the raw
     regression value rounded independently per row -- two close-but-
-    distinct floats can round to the SAME integer, which reads as an
-    impossible shared finishing/grid slot (real complaint 2026-08-31).
-    Row rank is always unique by construction; see f1_leaderboard_table.
-    dart's own _PositionCell."""
+    distinct floats can round to the same integer, which would read as
+    an impossible shared finishing/grid slot. Row rank is always unique
+    by construction; see f1_leaderboard_table.dart's own _PositionCell."""
     finish = entry["predictions"].get("projected_finish_position")
     if finish is not None:
         return (0, finish["value"])
@@ -131,12 +130,10 @@ def _assign_qualifying_ranks(field: list[dict]) -> None:
     """Mutates each entry's own predictions["projected_qualifying_position"]
     in place, adding a "rank" alongside "value" -- the same "row rank
     instead of independently-rounded raw value" fix _field_sort_key/
-    f1_leaderboard_table.dart's _PositionCell already apply to FINISH/GRID,
-    now extended to QUALIFYING (real complaint 2026-09-01: two close-but-
-    distinct projected_qualifying_position values rounding to the same
-    integer showed as duplicate qualifying positions). Qualifying isn't
-    the field's own sort key (see _field_sort_key -- FINISH takes
-    priority), so this ranks independently of field's own row order rather
+    f1_leaderboard_table.dart's _PositionCell apply to FINISH/GRID,
+    extended to QUALIFYING. Qualifying isn't the field's own sort key
+    (see _field_sort_key -- FINISH takes priority), so this ranks
+    independently of field's own row order rather
     than reusing it. Ties broken by entity_id for a fully deterministic
     order across repeat computations, not just an incidental stable-sort
     artifact."""

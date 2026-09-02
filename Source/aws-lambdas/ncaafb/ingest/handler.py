@@ -143,12 +143,9 @@ def _roster_needs_refresh(season: int, season_kickoff: datetime | None) -> bool:
     monthly rather than daily -- but fall-camp cuts/walk-on promotions/
     late portal moves cluster right before kickoff, so a snapshot taken
     during camp can still read as "fresh" under the TTL alone for weeks
-    into the season it predates entirely (real complaint 2026-09-02:
-    fetched 2026-08-12, season started 2026-08-23, still "fresh" per TTL
-    through week 1, Sep 3-7 -- USC's own roster-derived stat leaders
-    still showed players who'd already been cut/transferred out).
-    Marker-file pattern, kept local to this Lambda since the roster
-    payload has to be written to S3 for normalize to pick up."""
+    into the season it predates entirely. Marker-file pattern, kept
+    local to this Lambda since the roster payload has to be written to
+    S3 for normalize to pick up."""
     try:
         response = _s3.get_object(Bucket=RAW_BUCKET, Key=_roster_marker_key(season))
         fetched_at = datetime.fromisoformat(json.loads(response["Body"].read())["fetched_at"])

@@ -131,12 +131,12 @@ def _process_leaderboard(payload: dict, key: str) -> None:
         )
         return
 
-    # A real, confirmed ESPN gap distinct from the above -- a Medal/
-    # Teamstroke event whose own competition object has no "competitors"
-    # key at all (confirmed live, 2026-08-26, on a small cluster of 2020
-    # COVID-canceled tournaments plus a few real completed ones ESPN never
-    # populated -- see data-backfills/pga/backfill.py's matching check and
-    # design/DATA_SCHEMA.md for the full writeup). Writing this event
+    # A real ESPN gap distinct from the above -- a Medal/Teamstroke event
+    # whose own competition object has no "competitors" key at all (a
+    # small cluster of COVID-canceled tournaments plus a few real
+    # completed ones ESPN never populated -- see data-backfills/pga/
+    # backfill.py's matching check and design/DATA_SCHEMA.md for the full
+    # writeup). Writing this event
     # anyway would corrupt the cutline dataset's field_size feature
     # (len(participants)) to 0 for a real full field, so it's skipped
     # entirely -- same treatment as the no-events-in-payload case above.

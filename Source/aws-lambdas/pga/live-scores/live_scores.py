@@ -19,23 +19,19 @@ one.
 Poll-window design (field events): gated on library/normalize/pga.py's
 own `next_tee_time` field -- the earliest known upcoming tee time across
 still-in-the-tournament competitors, taken from ESPN's own
-status.teeTime (confirmed live 2026-08-27/28 on the real in-progress TOUR
-Championship). An EARLIER version of this module tried to derive a
-"tournament start time" from the leaderboard event's own top-level `date`
-field instead; that field turned out to be a static midnight-UTC
-placeholder on the real response, not a tee time at all, and was
-discarded once found -- see next_tee_time's own docstring. Because
+status.teeTime (see next_tee_time's own docstring for why this is used
+rather than the leaderboard event's own top-level `date` field, a
+static midnight-UTC placeholder, not a tee time at all). Because
 next_tee_time is refreshed by BOTH the daily pga-normalize path and this
 Lambda's own poll, a day's real tee times are typically already sitting
 in DynamoDB before the scheduler ever needs to gate on them that day.
 
-Poll-window design (match_play/cup events, added this pass): genuinely
-different shape from field events, not a variant of the same logic --
-library/normalize/pga_matchplay.py's own `match_time` field (confirmed
-live against a real historical Presidents Cup: each match carries its
-own real, distinct start timestamp, e.g. two same-session matches 12
-minutes apart -- NOT the same fake-placeholder problem field's top-level
-`date` had) is the direct per-match signal, no derivation trick needed.
+Poll-window design (match_play/cup events): genuinely different shape
+from field events, not a variant of the same logic -- library/normalize/
+pga_matchplay.py's own `match_time` field (each match carries its own
+real, distinct start timestamp, e.g. two same-session matches 12 minutes
+apart -- not a placeholder the way the event's own top-level `date` is)
+is the direct per-match signal, no derivation trick needed.
 The structural wrinkle unique to this event shape: a match_play event's
 own `event_id` is SYNTHESIZED (f"{tournament_event_id}-match-{match_id}"),
 not a real ESPN id get_leaderboard() accepts -- refresh() fetches by the

@@ -90,9 +90,8 @@ def _fetch_and_write_round(client: JolpicaClient, season: int, round_: int) -> N
     _put_json(f"f1/qualifying/{season}/{round_}.json", qualifying)
 
     # Only written when this round actually was a Sprint weekend --
-    # get_sprint returns an empty Races list for a normal weekend
-    # (confirmed live, library/http/f1.py's own docstring), and writing
-    # an empty file every round would just be noise.
+    # get_sprint returns an empty Races list for a normal weekend, and
+    # writing an empty file every round would just be noise.
     sprint = client.get_sprint(season, round_)
     sprint_races = sprint.get("MRData", {}).get("RaceTable", {}).get("Races", [])
     if sprint_races and sprint_races[0].get("SprintResults"):

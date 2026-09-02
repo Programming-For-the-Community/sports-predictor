@@ -13,9 +13,9 @@ NFL/NCAAFB/NCAAMBB all walk ~200-270 individual calendar dates because
 their schedules aren't otherwise discoverable in one call. PGA's
 scoreboard endpoint returns its ENTIRE season's tournament list --
 `response["leagues"][0]["calendar"]`, ~45-51 entries -- from a single
-call regardless of which date is queried (confirmed live, 2026-08-24: a
-date in the middle of an off week, with zero "current" events, still
-returned the full season calendar). So this Lambda makes one scoreboard
+call regardless of which date is queried (even a date in the middle of
+an off week, with zero "current" events, still returns the full season
+calendar). So this Lambda makes one scoreboard
 call to discover event ids, then up to one leaderboard call per
 tournament -- never a per-date walk.
 

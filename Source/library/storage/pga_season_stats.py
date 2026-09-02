@@ -1,15 +1,14 @@
 """
-PGA season-stats snapshot reading -- extracted, unchanged, from
-feature-engineering/pga/build_dataset.py 2026-08-27 so aws-lambdas/pga/
-predict/live_features.py can resolve the same live-season-stats signal
-training already reads, without importing a Fargate-task module.
+PGA season-stats snapshot reading, shared by feature-engineering/pga/
+build_dataset.py and aws-lambdas/pga/predict/live_features.py so both
+read the same live-season-stats signal without live_features.py
+importing a Fargate-task module.
 
-ESPN's own golf/pga/statistics endpoint is CURRENT-SNAPSHOT-ONLY (its
-season/year query params are silently ignored, confirmed live
-2026-08-25) -- pga-ingest's own daily raw snapshot (pga/statistics/
-{date}.json) is the ONLY source of historical values for these
-categories, there is no backfill path for it at all (design/
-DATA_SCHEMA.md).
+ESPN's own golf/pga/statistics endpoint is current-snapshot-only (its
+season/year query params are silently ignored) -- pga-ingest's own daily
+raw snapshot (pga/statistics/{date}.json) is the only source of
+historical values for these categories; there is no backfill path for it
+at all (design/DATA_SCHEMA.md).
 """
 import re
 

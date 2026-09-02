@@ -64,9 +64,9 @@ def attach_venue_indoor(games: list[dict], season: int, client, s3, bucket: str)
     place, from the home team's own venue -- CFBD's own /games response
     carries only a bare venue name string, no city/state breakdown (a
     separate /venues-by-id endpoint has that, but the home team's own
-    /teams `location` is already this same Venue object -- confirmed live
-    via CFBD's own OpenAPI schema -- so no second endpoint/cache is
-    needed). Same "home team's own listed venue" approximation
+    /teams `location` is already this same Venue object, so no second
+    endpoint/cache is needed). Same "home team's own listed venue"
+    approximation
     venue_indoor already made (not exact for a real neutral-site game),
     same reasoning. Cheap enough (one TTL-cached bulk call) to run
     unconditionally from schedule-sync's season-wide walk, unlike coach/

@@ -28,8 +28,7 @@ date -- every one of this run's own ESPN requests is paced by the SAME
 RateLimiter instance, so nothing here can burst past ESPN's rate limit
 regardless of how many dates are being synced.
 
-There is no preseason concept to skip here -- confirmed live, 2026-08-19
-(see project-ncaambb-onboarding memory and ingest/handler.py's own
+There is no preseason concept to skip here (see ingest/handler.py's own
 docstring): ESPN's NCAA MBB scoreboard has zero events before the real
 regular-season start date, and the earliest games of a season already
 carry season.type=2/"regular-season".

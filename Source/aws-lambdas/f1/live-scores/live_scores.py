@@ -29,10 +29,9 @@ have no relationship to Jolpica's at all:
 
   2. EVENT: ESPN's own event name is sponsor-prefixed ("Pirelli Italian
      Grand Prix") and never matches Jolpica's own bare race_name
-     ("Italian Grand Prix") exactly. Matched by CALENDAR DATE instead --
-     confirmed live 2026-08-31 that ESPN's own "Race" competition date
-     and Jolpica's own event_date agree EXACTLY for the same real race
-     (2026 Australian GP, both "2026-03-08"), since both sources describe
+     ("Italian Grand Prix") exactly. Matched by calendar date instead --
+     ESPN's own "Race" competition date and Jolpica's own event_date
+     agree exactly for the same real race, since both sources describe
      the same real-world event. Only "Race" and "Sprint" competitions are
      ever joined -- FP1/FP2/FP3/Qual have no corresponding stored event
      of their own at all (qualifying is MERGED into the race event, see
