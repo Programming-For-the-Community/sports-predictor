@@ -49,6 +49,18 @@
 # variance (m7i/m6i/m7a/m6a) without giving back more of the RF-model's
 # own OOM-driven 64GB budget (ec2-training-launch-template.tf's own
 # comment) than this constraint actually forces.
+#
+# Both states' own NetworkConfiguration.Subnets are the PRIVATE subnets
+# (aws_subnet.private_a/b/c), not the public ones RunFeatureEngineering
+# above still uses -- for EC2 launch type + awsvpc mode, the task's own
+# network interface is independent of the underlying EC2 host's own subnet
+# (ec2-training-asg.tf's ASGs still launch into the public subnets, needed
+# for ECR pull/agent registration), so the task's own data-plane traffic
+# never needs to touch a public route at all. It only ever calls S3/
+# DynamoDB (vpc-endpoints.tf's Gateway Endpoints, private route table
+# only) -- putting it in a public subnet earlier bought it nothing and
+# cost a real, avoidable public-IPv4 charge on top of the genuinely-needed
+# host-level one.
 resource "aws_cloudwatch_log_group" "training_orchestrator_ec2" {
   name              = "/aws/vendedlogs/states/${var.project}-training-orchestrator-ec2"
   retention_in_days = 30
@@ -208,7 +220,7 @@ resource "aws_sfn_state_machine" "training_orchestrator_ec2" {
                     "PropagateTags": "TASK_DEFINITION",
                     "NetworkConfiguration": {
                       "AwsvpcConfiguration": {
-                        "Subnets": ["${aws_subnet.public_1.id}", "${aws_subnet.public_2.id}", "${aws_subnet.public_3.id}"],
+                        "Subnets": ["${aws_subnet.private_a.id}", "${aws_subnet.private_b.id}", "${aws_subnet.private_c.id}"],
                         "SecurityGroups": ["${aws_security_group.fargate_internet_egress.id}"]
                       }
                     },
@@ -263,7 +275,7 @@ resource "aws_sfn_state_machine" "training_orchestrator_ec2" {
                     "PropagateTags": "TASK_DEFINITION",
                     "NetworkConfiguration": {
                       "AwsvpcConfiguration": {
-                        "Subnets": ["${aws_subnet.public_1.id}", "${aws_subnet.public_2.id}", "${aws_subnet.public_3.id}"],
+                        "Subnets": ["${aws_subnet.private_a.id}", "${aws_subnet.private_b.id}", "${aws_subnet.private_c.id}"],
                         "SecurityGroups": ["${aws_security_group.fargate_internet_egress.id}"]
                       }
                     },
