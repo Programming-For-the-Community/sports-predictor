@@ -4,17 +4,24 @@ and their supporting comparison/round-label helpers. NOT a port of
 test_nfl_reads_*.py's file split -- consolidated here since ncaafb_reads
 is a smaller module. storage/predictions_table/s3 are MagicMocks.
 """
-from datetime import date, timedelta
+from datetime import datetime, timedelta, timezone
 from unittest.mock import MagicMock
 
+from library.parsing import us_eastern_date
 from library.serving import ncaafb_reads
 
 # "scheduled" event_dates are relative to today, not hardcoded -- list_events'
 # soonest-upcoming-week scoping ignores anything more than a few days in the
 # past (see ncaafb_reads._STALE_SCHEDULED_GRACE_DAYS), so a fixed past date
 # would silently drop out of the result as real time moves forward.
+#
+# Anchored via us_eastern_date, the same basis list_events itself derives
+# "today" from -- date.today() is the *system* local date, UTC on a CI
+# runner, which is a day ahead of Eastern for several hours every evening
+# (any time after ~8pm Eastern) and would make a "yesterday" fixture
+# collide with what list_events considers "today" during that window.
 def _future(days: int) -> str:
-    return (date.today() + timedelta(days=days)).isoformat()
+    return us_eastern_date(datetime.now(timezone.utc) + timedelta(days=days))
 
 
 def _event(event_key, event_date, home_id, away_id, status="scheduled", season=2025, season_type="regular", week=5,
@@ -78,7 +85,7 @@ class TestListEvents:
     def test_a_stale_never_played_scheduled_event_does_not_mask_a_real_upcoming_week(self):
         storage = MagicMock()
         predictions_table = MagicMock()
-        stale_date = (date.today() - timedelta(days=400)).isoformat()
+        stale_date = us_eastern_date(datetime.now(timezone.utc) - timedelta(days=400))
         storage.get_all_events.return_value = [
             _event("stale", stale_date, "61", "52", week=1, season=2024),
             _event("e2", _future(4), "61", "70", week=5),
@@ -96,7 +103,7 @@ class TestListEvents:
         # the final result while e2 (same week, future-dated) stays.
         storage = MagicMock()
         predictions_table = MagicMock()
-        yesterday = (date.today() - timedelta(days=1)).isoformat()
+        yesterday = us_eastern_date(datetime.now(timezone.utc) - timedelta(days=1))
         storage.get_all_events.return_value = [
             _event("e1", yesterday, "61", "52", week=5),
             _event("e2", _future(2), "61", "70", week=5),

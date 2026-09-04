@@ -9,9 +9,10 @@ No TestRoundLabel here, unlike test_ncaafb_reads.py -- NCAA MBB has no
 postseason-round concept in the events feed (see ncaambb_reads.py's own
 docstring).
 """
-from datetime import date, timedelta
+from datetime import datetime, timedelta, timezone
 from unittest.mock import MagicMock
 
+from library.parsing import us_eastern_date
 from library.serving import ncaambb_reads
 
 
@@ -19,8 +20,14 @@ from library.serving import ncaambb_reads
 # soonest-upcoming-date scoping filters straight to today-or-later (see
 # ncaambb_reads._next_day_events), so a fixed past date would silently drop
 # out of the result as real time moves forward.
+#
+# Anchored via us_eastern_date, the same basis list_events itself derives
+# "today" from -- date.today() is the *system* local date, UTC on a CI
+# runner, which is a day ahead of Eastern for several hours every evening
+# (any time after ~8pm Eastern) and would make a "yesterday" fixture
+# collide with what list_events considers "today" during that window.
 def _future(days: int) -> str:
-    return (date.today() + timedelta(days=days)).isoformat()
+    return us_eastern_date(datetime.now(timezone.utc) + timedelta(days=days))
 
 
 def _event(event_key, event_date, home_id, away_id, status="scheduled", season=2026, home_score=None, away_score=None):
@@ -94,7 +101,7 @@ class TestListEvents:
     def test_a_stale_never_played_scheduled_event_does_not_mask_a_real_upcoming_date(self):
         storage = MagicMock()
         predictions_table = MagicMock()
-        stale_date = (date.today() - timedelta(days=400)).isoformat()
+        stale_date = us_eastern_date(datetime.now(timezone.utc) - timedelta(days=400))
         storage.get_all_events.return_value = [
             _event("stale", stale_date, "13", "2", season=2024),
             _event("e2", _future(4), "13", "17"),
@@ -108,7 +115,7 @@ class TestListEvents:
     def test_a_past_dated_scheduled_event_is_excluded_even_when_another_event_is_upcoming(self):
         storage = MagicMock()
         predictions_table = MagicMock()
-        yesterday = (date.today() - timedelta(days=1)).isoformat()
+        yesterday = us_eastern_date(datetime.now(timezone.utc) - timedelta(days=1))
         storage.get_all_events.return_value = [
             _event("e1", yesterday, "13", "2"),
             _event("e2", _future(2), "13", "17"),

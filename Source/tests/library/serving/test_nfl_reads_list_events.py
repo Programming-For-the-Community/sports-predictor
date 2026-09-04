@@ -10,9 +10,10 @@ test_nfl_reads_season_projection.py for this file's siblings, one per
 concern. Shared fixtures live in _nfl_reads_test_helpers.py (not
 test_-prefixed, so pytest never collects it as a test module itself).
 """
-from datetime import date, timedelta
+from datetime import datetime, timedelta, timezone
 from unittest.mock import MagicMock
 
+from library.parsing import us_eastern_date
 from library.serving import nfl_reads
 
 from _nfl_reads_test_helpers import completed_event as _completed_event
@@ -23,8 +24,13 @@ from _nfl_reads_test_helpers import scheduled_event as _scheduled_event
 # soonest-upcoming-week scoping ignores anything more than a few days in the
 # past (see nfl_reads._STALE_SCHEDULED_GRACE_DAYS), so a fixed past date
 # would silently drop out of the result as real time moves forward.
+#
+# Anchored via us_eastern_date, the same basis list_events itself derives
+# its cutoff from -- date.today() is the *system* local date, UTC on a CI
+# runner, which is a day ahead of Eastern for several hours every evening
+# (any time after ~8pm Eastern).
 def _future(days: int) -> str:
-    return (date.today() + timedelta(days=days)).isoformat()
+    return us_eastern_date(datetime.now(timezone.utc) + timedelta(days=days))
 
 
 class TestListEvents:
@@ -138,7 +144,7 @@ class TestListEvents:
 
     def test_a_stale_never_played_scheduled_event_does_not_mask_a_real_upcoming_week(self):
         storage = MagicMock()
-        stale_date = (date.today() - timedelta(days=400)).isoformat()
+        stale_date = us_eastern_date(datetime.now(timezone.utc) - timedelta(days=400))
         storage.get_all_events.return_value = [
             _scheduled_event("STALE", 2024, stale_date, "12", "13", week=1),
             _scheduled_event("EVT#1", 2025, _future(4), "12", "13", week=2),
