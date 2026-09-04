@@ -1,11 +1,20 @@
 """
 Unit tests for library.http.espn -- the ESPN_API_ROOT_URL/ESPN_USER_AGENT
-env-var override resolution and EspnBaseClient's constructor wiring.
+env-var override resolution, EspnBaseClient's constructor wiring, and
+espn_scoreboard_date's UTC-to-Eastern bucketing.
 """
 import os
+from datetime import datetime, timezone
 from unittest.mock import MagicMock, patch
 
-from library.http.espn import DEFAULT_ESPN_API_ROOT_URL, DEFAULT_ESPN_USER_AGENT, EspnBaseClient, _espn_root_url, _espn_user_agent
+from library.http.espn import (
+    DEFAULT_ESPN_API_ROOT_URL,
+    DEFAULT_ESPN_USER_AGENT,
+    EspnBaseClient,
+    _espn_root_url,
+    _espn_user_agent,
+    espn_scoreboard_date,
+)
 
 
 class TestEspnRootUrl:
@@ -55,3 +64,19 @@ class TestEspnBaseClient:
                 EspnBaseClient(sport_path="football/nfl")
 
         assert mock_init.call_args.kwargs["user_agent"] == DEFAULT_ESPN_USER_AGENT
+
+
+class TestEspnScoreboardDate:
+    def test_daytime_utc_matches_utc_date(self):
+        # Midday UTC is well inside the same Eastern calendar date.
+        assert espn_scoreboard_date(datetime(2026, 9, 3, 18, 0, tzinfo=timezone.utc)) == "20260903"
+
+    def test_early_utc_morning_is_still_the_previous_eastern_date(self):
+        # 01:00 UTC is 9pm Eastern the day before -- a live game that
+        # kicked off in Eastern-evening prime time is still being played
+        # under ESPN's *previous* UTC-date scoreboard bucket.
+        assert espn_scoreboard_date(datetime(2026, 9, 4, 1, 0, tzinfo=timezone.utc)) == "20260903"
+
+    def test_late_utc_evening_matches_utc_date(self):
+        # 23:00 UTC is 7pm Eastern the same day.
+        assert espn_scoreboard_date(datetime(2026, 9, 3, 23, 0, tzinfo=timezone.utc)) == "20260903"

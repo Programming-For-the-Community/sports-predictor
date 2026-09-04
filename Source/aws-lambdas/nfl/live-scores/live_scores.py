@@ -11,6 +11,7 @@ from datetime import datetime, timedelta, timezone
 
 from botocore.exceptions import ClientError
 
+from library.http.espn import espn_scoreboard_date
 from library.normalize.espn import boxscore_to_player_game_stats
 from library.parsing import parse_number
 
@@ -127,7 +128,7 @@ def refresh(storage, s3, bucket: str, client, sport: str) -> dict:
         logger.info("No events in a live-poll window -- skipping ESPN call")
         return {"polled": 0}
 
-    scoreboard = client.get_scoreboard_for_date(now.strftime("%Y%m%d"))
+    scoreboard = client.get_scoreboard_for_date(espn_scoreboard_date(now))
     espn_events_by_id = {e["id"]: e for e in scoreboard.get("events", [])}
 
     events_out = {}
