@@ -17,6 +17,7 @@ from datetime import datetime, timedelta, timezone
 from boto3.dynamodb.conditions import Key
 
 from library.features.nfl_teams import is_real_franchise_matchup
+from library.parsing import us_eastern_date
 from library.serving.common import RECENT_EVENTS_LIMIT, enrich_participants
 from library.storage.model_artifacts import current_version_key, model_artifact_key
 from library.storage.season_projections import season_projection_key
@@ -95,7 +96,11 @@ def _next_week_events(scheduled: list[dict]) -> list[dict]:
     Ignores any "scheduled" event dated more than _STALE_SCHEDULED_GRACE_DAYS
     in the past -- a game whose status was never updated would otherwise
     win min() permanently and mask every real upcoming week behind it."""
-    cutoff = (datetime.now(timezone.utc).date() - timedelta(days=_STALE_SCHEDULED_GRACE_DAYS)).isoformat()
+    # event_date is a calendar day in ESPN's own U.S.-Eastern bucketing
+    # (see library/parsing.py's us_eastern_date), not a UTC date --
+    # deriving the cutoff the same Eastern way keeps it on the same
+    # calendar as the event_date values it's compared against.
+    cutoff = us_eastern_date(datetime.now(timezone.utc) - timedelta(days=_STALE_SCHEDULED_GRACE_DAYS))
     plausible = [e for e in scheduled if e.get("event_date", "") >= cutoff]
     if not plausible:
         return []

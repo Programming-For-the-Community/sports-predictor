@@ -56,6 +56,7 @@ import boto3
 
 import normalize
 from library.http.cfbd import CFBDClient
+from library.parsing import us_eastern_date_from_iso
 from library.storage.ncaafb_coach_cache import coach_lookup_by_school, get_cached_coaches, rank_lookup_by_school
 from library.storage.ncaafb_team_cache import get_cached_teams, teams_by_id
 from library.storage.pipeline_storage import PipelineStorage
@@ -133,14 +134,16 @@ def _attach_enrichment(
 
 def _annotate_box_scores(box_scores: list[dict], games_by_id: dict[str, dict]) -> None:
     """Injects home_id/away_id/event_date into each per-game box score
-    entry from that week's /games response."""
+    entry from that week's /games response. Kept in sync with
+    aws-lambdas/ncaafb/ingest/handler.py's own copy."""
     for entry in box_scores:
         game = games_by_id.get(str(entry.get("id")))
         if game is None:
             continue
         entry["home_id"] = str(game["homeId"])
         entry["away_id"] = str(game["awayId"])
-        entry["event_date"] = (game.get("startDate") or "")[:10] or None
+        start_date = game.get("startDate")
+        entry["event_date"] = us_eastern_date_from_iso(start_date) if start_date else None
 
 
 def process_week(

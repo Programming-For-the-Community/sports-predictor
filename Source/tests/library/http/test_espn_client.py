@@ -1,7 +1,9 @@
 """
 Unit tests for library.http.espn -- the ESPN_API_ROOT_URL/ESPN_USER_AGENT
 env-var override resolution, EspnBaseClient's constructor wiring, and
-espn_scoreboard_date's UTC-to-Eastern bucketing.
+espn_scoreboard_date's UTC-to-Eastern bucketing. The underlying tz
+conversion itself (library.parsing.us_eastern_date) is tested in
+tests/library/test_parsing.py.
 """
 import os
 from datetime import datetime, timezone

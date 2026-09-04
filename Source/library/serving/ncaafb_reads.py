@@ -14,6 +14,7 @@ from datetime import date, datetime, timedelta, timezone
 from boto3.dynamodb.conditions import Key
 
 from library.features.ncaafb import is_bowl_game, is_playoff_game
+from library.parsing import us_eastern_date
 from library.serving.common import RECENT_EVENTS_LIMIT, enrich_participants
 from library.storage.model_artifacts import current_version_key, model_artifact_key
 from library.storage.season_projections import season_projection_key
@@ -111,8 +112,15 @@ def _next_week_events(scheduled: list[dict]) -> list[dict]:
     from the start) correctly isolates just the soonest cluster -- Aug 30
     -> Sep 3 is a 3-day gap, past the 2-day threshold -- without merging
     a normal week's own internal 1-2 day gaps between game days."""
-    today = datetime.now(timezone.utc).date().isoformat()
-    cutoff = (datetime.now(timezone.utc).date() - timedelta(days=_STALE_SCHEDULED_GRACE_DAYS)).isoformat()
+    # event_date is a calendar day in ESPN/CFBD's own U.S.-Eastern
+    # bucketing (see library/parsing.py's us_eastern_date), not a
+    # UTC date -- comparing it against a raw UTC "today" drops the whole
+    # day's games from this list the moment the server clock crosses UTC
+    # midnight, which for a 6pm+ Eastern kickoff is while it's still being
+    # played. Deriving "today" the same Eastern way keeps both sides on
+    # the same calendar.
+    today = us_eastern_date(datetime.now(timezone.utc))
+    cutoff = us_eastern_date(datetime.now(timezone.utc) - timedelta(days=_STALE_SCHEDULED_GRACE_DAYS))
     plausible = [e for e in scheduled if e.get("event_date", "") >= cutoff]
     if not plausible:
         return []

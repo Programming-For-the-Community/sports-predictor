@@ -29,8 +29,15 @@ def _game(game_id="401520281", home_id="2", away_id="52", **extra):
 
 
 class TestGameToEventItem:
-    def test_event_date_is_truncated_to_the_date(self):
+    def test_event_date_is_the_us_eastern_calendar_date(self):
         item = game_to_event_item(_game(), "ncaafb")
+        assert item["event_date"] == "2025-09-28"
+
+    def test_event_date_for_a_late_kickoff_is_not_the_raw_utc_date(self):
+        # 00:00 UTC is 8pm Eastern the day before -- event_date must stay
+        # on the Eastern calendar date the game is actually played on, not
+        # the UTC date a raw [:10] truncation would give ("2025-09-29").
+        item = game_to_event_item(_game(startDate="2025-09-29T00:00:00.000Z"), "ncaafb")
         assert item["event_date"] == "2025-09-28"
 
     def test_kickoff_time_keeps_the_full_timestamp(self):

@@ -7,7 +7,7 @@ Sport-specific behaviour -- such as which stat keys pack two numbers into
 one string -- is passed in by the caller via compound_key_splits rather
 than hardcoded here.
 """
-from library.parsing import parse_clock_to_seconds, parse_number, snake_case
+from library.parsing import parse_clock_to_seconds, parse_number, snake_case, us_eastern_date_from_iso
 from library.schema.keys import entity_key, entity_team_key, event_key, player_key, team_key
 
 
@@ -72,7 +72,11 @@ def scoreboard_event_to_event_item(event: dict, sport: str) -> dict:
         "event_id": event_id,
         "sport": sport,
         "event_type": "head_to_head",
-        "event_date": event["date"][:10],
+        # US-Eastern calendar date, matching how ESPN's own scoreboard
+        # buckets/displays this event -- a raw event["date"][:10] truncation
+        # is off by one day for anything starting at/after 8pm Eastern
+        # (see library.parsing.us_eastern_date_from_iso).
+        "event_date": us_eastern_date_from_iso(event["date"]),
         # Full ISO 8601 timestamp, unlike event_date above -- kickoff time
         # of day is a feature input and lets the frontend sort/group by
         # actual kickoff, not just calendar day.
@@ -243,7 +247,7 @@ def boxscore_to_player_game_stats(
     event_date = None
     for competition in header.get("competitions", []):
         if competition.get("date"):
-            event_date = competition["date"][:10]
+            event_date = us_eastern_date_from_iso(competition["date"])
             break
 
     stat_lines: dict[str, dict] = {}
@@ -363,7 +367,7 @@ def boxscore_to_team_game_stats(
     event_date = None
     for competition in header.get("competitions", []):
         if competition.get("date"):
-            event_date = competition["date"][:10]
+            event_date = us_eastern_date_from_iso(competition["date"])
             break
 
     items = []

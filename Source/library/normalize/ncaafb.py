@@ -8,7 +8,7 @@ Each function is a pure transform (no S3/DynamoDB/HTTP calls of its own)
 enrichment, this module only ever maps one already-fetched dict/list into
 project schema items.
 """
-from library.parsing import parse_clock_to_seconds, parse_number, snake_case
+from library.parsing import parse_clock_to_seconds, parse_number, snake_case, us_eastern_date_from_iso
 from library.schema.keys import entity_key, entity_team_key, event_key, player_key, team_key
 
 # CFBD's box-score stat "types" are terse, already-uppercase abbreviations
@@ -161,7 +161,12 @@ def game_to_event_item(game: dict, sport: str) -> dict:
         "event_id": event_id,
         "sport": sport,
         "event_type": "head_to_head",
-        "event_date": game["startDate"][:10],
+        # US-Eastern calendar date, matching how ESPN/CFBD bucket this same
+        # game (their ids/timestamps line up exactly -- see aws-lambdas/
+        # ncaafb/live-scores/live_scores.py's own docstring) -- a raw
+        # startDate[:10] truncation is off by one day for anything starting
+        # at/after 8pm Eastern (see library.parsing.us_eastern_date_from_iso).
+        "event_date": us_eastern_date_from_iso(game["startDate"]),
         "kickoff_time": game["startDate"],
         "status": "completed" if game.get("completed") else "scheduled",
         "participants": participants,

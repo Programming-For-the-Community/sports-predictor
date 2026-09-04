@@ -42,6 +42,7 @@ from botocore.exceptions import ClientError
 
 import enrichment
 from library.http.cfbd import CFBDClient
+from library.parsing import us_eastern_date_from_iso
 from library.storage.ncaafb_team_cache import get_cached_teams, teams_by_school
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s", force=True)  # AWS Lambda pre-attaches a root handler, so basicConfig() is otherwise a silent no-op
@@ -97,7 +98,12 @@ def _annotate_box_scores(box_scores: list[dict], games_by_id: dict[str, dict]) -
             continue
         entry["home_id"] = str(game["homeId"])
         entry["away_id"] = str(game["awayId"])
-        entry["event_date"] = (game.get("startDate") or "")[:10] or None
+        # US-Eastern calendar date -- must match game_to_event_item's own
+        # event_date (library/normalize/ncaafb.py) for the same game, not a
+        # raw startDate[:10] truncation (off by one day for anything
+        # starting at/after 8pm Eastern).
+        start_date = game.get("startDate")
+        entry["event_date"] = us_eastern_date_from_iso(start_date) if start_date else None
 
 
 def _put_json(key: str, payload) -> None:

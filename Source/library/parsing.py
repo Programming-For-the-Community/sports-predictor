@@ -5,8 +5,33 @@ sport data APIs) into the snake_case, typed values this project's schema
 uses.
 """
 import re
+from datetime import datetime
+from zoneinfo import ZoneInfo
 
 _CAMEL_RE = re.compile(r"(?<!^)(?=[A-Z])")
+
+# ESPN and CFBD both report/bucket every event under the U.S.-Eastern
+# calendar date it's actually played on, not UTC -- a 00:00 UTC kickoff is
+# 8pm Eastern the day before. This project's own event_date fields are
+# meant to be that same real-world game day, so every normalizer derives
+# it through US_EASTERN_TZ rather than truncating a raw UTC timestamp
+# (event["date"][:10]/game["startDate"][:10]), which is off by one day
+# for any event that starts at/after 8pm Eastern.
+US_EASTERN_TZ = ZoneInfo("America/New_York")
+
+
+def us_eastern_date(moment: datetime) -> str:
+    """Dashed-ISO (YYYY-MM-DD) calendar date for `moment` (must be
+    timezone-aware) in US_EASTERN_TZ -- this project's event_date fields'
+    own basis."""
+    return moment.astimezone(US_EASTERN_TZ).date().isoformat()
+
+
+def us_eastern_date_from_iso(timestamp: str) -> str:
+    """us_eastern_date, for a raw ESPN/CFBD UTC timestamp string (e.g.
+    "2026-09-04T00:00Z") straight off a JSON response -- what every
+    normalizer should call instead of timestamp[:10]."""
+    return us_eastern_date(datetime.fromisoformat(timestamp.replace("Z", "+00:00")))
 
 
 def snake_case(name: str) -> str:

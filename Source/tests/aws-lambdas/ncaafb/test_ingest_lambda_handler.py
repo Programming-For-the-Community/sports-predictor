@@ -203,6 +203,29 @@ class TestLambdaHandlerBoxScores:
         assert b'"away_id": "52"' in boxscore_body
         assert b'"event_date": "2025-09-28"' in boxscore_body
 
+    def test_box_score_event_date_for_a_late_kickoff_is_not_the_raw_utc_date(self):
+        # 00:00 UTC is 8pm Eastern the day before -- must match
+        # game_to_event_item's own event_date for the same game
+        # ("2025-09-28"), not the raw UTC date ("2025-09-29").
+        mock_client = MagicMock()
+        mock_client.get_games.return_value = [
+            _game(game_id="1", home_id="2", away_id="52", completed=True, start_date="2025-09-29T00:00:00.000Z"),
+        ]
+        mock_client.get_game_player_stats.return_value = [{"id": "1"}]
+        mock_client.get_game_team_stats.return_value = [{"id": "1"}]
+        mock_s3 = MagicMock()
+
+        with patch.object(ncaafb_ingest, "CFBDClient", return_value=mock_client), \
+             patch.object(ncaafb_ingest, "_s3", mock_s3), \
+             patch.object(ncaafb_ingest, "get_cached_teams"), \
+             patch.object(ncaafb_ingest.enrichment, "get_cached_coaches"), \
+             patch.object(ncaafb_ingest.enrichment, "enrich_games"):
+            ncaafb_ingest.lambda_handler({"season": 2025, "week": 4, "season_type": "regular"}, None)
+
+        written = {c.kwargs["Key"]: c.kwargs["Body"] for c in mock_s3.put_object.call_args_list}
+        boxscore_body = written["ncaafb/boxscore/2025/regular/4.json"]
+        assert b'"event_date": "2025-09-28"' in boxscore_body
+
     def test_player_box_score_failure_does_not_block_team_box_score(self):
         mock_client = MagicMock()
         mock_client.get_games.return_value = [_game(completed=True)]

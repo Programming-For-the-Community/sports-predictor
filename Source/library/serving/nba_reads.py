@@ -21,6 +21,7 @@ from datetime import datetime, timezone
 
 from boto3.dynamodb.conditions import Key
 
+from library.parsing import us_eastern_date
 from library.serving.common import RECENT_EVENTS_LIMIT, enrich_participants
 from library.storage.model_artifacts import current_version_key, model_artifact_key
 from library.storage.season_projections import season_projection_key
@@ -64,7 +65,13 @@ def _next_day_events(scheduled: list[dict]) -> list[dict]:
     needed: grouping by single calendar date means filtering straight to
     today-or-later before picking the earliest date is both simpler and
     correct."""
-    today = datetime.now(timezone.utc).date().isoformat()
+    # event_date is a calendar day in ESPN's own U.S.-Eastern bucketing
+    # (see library/parsing.py's us_eastern_date), not a UTC date --
+    # comparing it against a raw UTC "today" drops today's games from this
+    # list the moment the server clock crosses UTC midnight, which for a
+    # 6pm+ Eastern tip-off is while it's still being played. Deriving
+    # "today" the same Eastern way keeps both sides on the same calendar.
+    today = us_eastern_date(datetime.now(timezone.utc))
     plausible = [e for e in scheduled if e.get("event_date", "") >= today]
     if not plausible:
         return []
