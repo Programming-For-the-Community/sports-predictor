@@ -66,13 +66,13 @@ def _parse_kickoff(kickoff_time: str) -> datetime:
     return datetime.fromisoformat(kickoff_time.replace("Z", "+00:00"))
 
 
-def _candidate_events(storage, sport: str, now: datetime, already_completed: set[str]) -> list[dict]:
+def _candidate_events(scheduled_events: list[dict], now: datetime, already_completed: set[str]) -> list[dict]:
     """Events worth checking against ESPN's live scoreboard this cycle --
     status "scheduled" per the once-daily batch ingest (not literally
     "hasn't started"), within the plausible live window, and not already
     confirmed completed by a prior refresh cycle (already_completed)."""
     candidates = []
-    for event in storage.get_all_events(sport, status="scheduled"):
+    for event in scheduled_events:
         event_id = event["event_id"]
         if event_id in already_completed:
             continue
@@ -115,23 +115,42 @@ def _live_player_stats(client, sport: str, event_id: str) -> dict[str, dict]:
 def refresh(storage, s3, bucket: str, client, sport: str) -> dict:
     """Called on every LiveScoreRefresh tick (every 60s). Reads
     already-ingested events from DynamoDB and only reaches out to ESPN
-    once _candidate_events finds something worth checking."""
+    once _candidate_events finds something worth checking.
+
+    A completed event's cached state is carried forward here past its own
+    active poll window, not just left to fall out of candidates -- ingest
+    only re-fetches this sport once a day, so DynamoDB's own event status
+    can lag the real result by up to 24h. Until that catches up (this
+    event drops out of get_all_events(status="scheduled") on its own once
+    it does), this cache is the only place the frontend can still get the
+    game's final score/stats from -- without carrying it forward,
+    "completed" state was being overwritten out of the cache on the very
+    next tick, ~60s after the game actually ended, and the event reverted
+    to looking unplayed."""
     now = datetime.now(timezone.utc)
 
     previous = _get_cache(s3, bucket) or {}
-    already_completed = {
-        event_id for event_id, state in previous.get("events", {}).items() if state.get("completed")
+    previous_events = previous.get("events", {})
+    already_completed = {event_id for event_id, state in previous_events.items() if state.get("completed")}
+
+    scheduled_events = storage.get_all_events(sport, status="scheduled")
+    scheduled_event_ids = {event["event_id"] for event in scheduled_events}
+    carried_over = {
+        event_id: previous_events[event_id] for event_id in already_completed if event_id in scheduled_event_ids
     }
 
-    candidates = _candidate_events(storage, sport, now, already_completed)
+    candidates = _candidate_events(scheduled_events, now, already_completed)
     if not candidates:
-        logger.info("No events in a live-poll window -- skipping ESPN call")
-        return {"polled": 0}
+        if carried_over:
+            _put_cache(s3, bucket, {"fetched_at": now.isoformat(), "events": carried_over})
+        else:
+            logger.info("No events in a live-poll window -- skipping ESPN call")
+        return {"polled": len(carried_over)}
 
     scoreboard = client.get_scoreboard_for_date(espn_scoreboard_date(now))
     espn_events_by_id = {e["id"]: e for e in scoreboard.get("events", [])}
 
-    events_out = {}
+    events_out = dict(carried_over)
     live_event_ids = []
     for event in candidates:
         espn_event = espn_events_by_id.get(event["event_id"])
