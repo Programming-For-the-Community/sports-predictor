@@ -33,10 +33,19 @@ resource "aws_lambda_function" "ncaafb_normalize" {
   role          = aws_iam_role.lambda_pipeline.arn
   runtime       = "python3.12"
   handler       = "handler.lambda_handler"
-  # Sized for CFBD's full-season roster write (~16k rows) parallelized
-  # across ncaafb/normalize/handler.py's WRITE_WORKERS; 1024MB gives more
-  # network throughput for those concurrent connections.
-  timeout     = 300
+  # Sized for CFBD's full-season roster write, parallelized across
+  # ncaafb/normalize/handler.py's WRITE_WORKERS; 1024MB gives more network
+  # throughput for those concurrent connections. 900 (Lambda's max) not a
+  # smaller number: confirmed live 2026-09-06 hitting a hard 300s timeout
+  # (Status: timeout, no exception, no log line -- CloudWatch's Errors
+  # metric was the only trace) mid-roster-refresh -- the real payload is
+  # ~30.6k raw rows now (double the ~16k this was originally sized for),
+  # and _clear_departed_players' own team-index GSI scan across every
+  # team's full historical roster (added after this timeout was chosen)
+  # adds a second, comparably expensive pass on top of the write phase. A
+  # since-successful retry still finished in 293.75s -- 6s of margin on a
+  # 300s budget for a once-a-month batch job is not a safety margin.
+  timeout     = 900
   memory_size = 1024
 
   filename         = data.archive_file.ncaafb_normalize_placeholder.output_path
