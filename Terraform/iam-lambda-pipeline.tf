@@ -48,6 +48,16 @@ data "aws_iam_policy_document" "lambda_pipeline_permissions" {
       # needed for PipelineStorage.get_events_by_status's sport-status-index
       # Query.
       "arn:aws:dynamodb:${var.region}:${var.account_id}:table/${local.events_table}/index/*",
+      # Same distinct-resource requirement as the events GSI above --
+      # PipelineStorage.get_team_entities' team-index Query (added by
+      # ncaafb/normalize's _clear_departed_players). Confirmed missing
+      # live 2026-09-06: AccessDeniedException on dynamodb:Query against
+      # .../table/sports-predictor-entities/index/team-index, which
+      # aborted roster processing before it could clear any departed
+      # player's stale team_id -- the entity-write phase above it in
+      # _process_roster still succeeded, so this only ever blocked the
+      # clear-departed-players step, not the whole roster refresh.
+      "arn:aws:dynamodb:${var.region}:${var.account_id}:table/${local.entities_table}/index/*",
     ]
   }
 
