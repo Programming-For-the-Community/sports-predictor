@@ -100,7 +100,7 @@ class TestDispatch:
              caplog.at_level("INFO"):
             ncaafb_normalize._dispatch("test-bucket", "ncaafb/roster/2025.json")
 
-        assert "Wrote 1 player entities (1 rejected by the staleness guard)" in caplog.text
+        assert "Wrote 1 player entities (1 rejected by the staleness guard, 0 cleared as no longer rostered)" in caplog.text
 
     def test_routes_teamstats_key_to_teamstats_processor(self):
         payload = [{"id": "1", "teams": []}]
@@ -200,6 +200,79 @@ class TestPreserveRosterPosition:
         ncaafb_normalize._preserve_roster_position(mock_storage, entity)  # does not raise
 
         assert entity["metadata"]["position"] is None
+
+
+class TestClearDepartedPlayers:
+    def test_clears_a_player_missing_from_the_fresh_roster_for_their_own_team(self):
+        # Regression: a player who's since left the program (drafted,
+        # transferred, quit) but is simply absent from a fresh CFBD
+        # /roster fetch previously kept whatever team_id their last
+        # confirmation set, forever -- roster_to_player_entities' own
+        # upserts only ever add/refresh players actually present in the
+        # new payload, never remove one who's disappeared from it.
+        storage = MagicMock()
+        storage.get_team_entities.return_value = [
+            {"entity_id": "101", "name": "Still Here", "metadata": {"team_id": "87", "team_id_as_of": "2026-08-12", "position": "RB"}},
+            {"entity_id": "102", "name": "Departed Player", "team_key": "SPORT#NCAAFB#TEAM#87",
+             "metadata": {"team_id": "87", "team_id_as_of": "2026-08-12", "position": "RB"}},
+        ]
+        storage.upsert_player_entity.return_value = True
+        entities = [{"entity_id": "101", "metadata": {"team_id": "87"}}]  # only 101 is in the fresh roster
+
+        cleared = ncaafb_normalize._clear_departed_players(storage, entities, "2026-09-06")
+
+        assert cleared == 1
+        storage.get_team_entities.assert_called_once_with("ncaafb", "87")
+        written = storage.upsert_player_entity.call_args.args[0]
+        assert written["entity_id"] == "102"
+        assert "team_key" not in written  # dropped out of the team-index GSI entirely
+        assert "team_id" not in written["metadata"]
+        assert written["metadata"]["team_id_as_of"] == "2026-09-06"
+
+    def test_does_not_touch_a_player_still_present_in_the_fresh_roster(self):
+        storage = MagicMock()
+        storage.get_team_entities.return_value = [
+            {"entity_id": "101", "name": "Still Here", "metadata": {"team_id": "87", "team_id_as_of": "2026-08-12"}},
+        ]
+        entities = [{"entity_id": "101", "metadata": {"team_id": "87"}}]
+
+        cleared = ncaafb_normalize._clear_departed_players(storage, entities, "2026-09-06")
+
+        assert cleared == 0
+        storage.upsert_player_entity.assert_not_called()
+
+    def test_never_touches_a_team_the_fresh_payload_has_zero_players_for(self):
+        # A team CFBD's response happens to have no rows for this run is
+        # left alone rather than treated as "everyone left" -- a
+        # transient CFBD gap shouldn't wipe a whole team's roster.
+        storage = MagicMock()
+        entities: list[dict] = []
+
+        cleared = ncaafb_normalize._clear_departed_players(storage, entities, "2026-09-06")
+
+        assert cleared == 0
+        storage.get_team_entities.assert_not_called()
+
+    def test_skips_entities_with_no_team_id_of_their_own(self):
+        storage = MagicMock()
+        entities = [{"entity_id": "1", "metadata": {}}]
+
+        cleared = ncaafb_normalize._clear_departed_players(storage, entities, "2026-09-06")
+
+        assert cleared == 0
+        storage.get_team_entities.assert_not_called()
+
+    def test_a_write_rejected_by_the_staleness_guard_does_not_count_as_cleared(self):
+        storage = MagicMock()
+        storage.get_team_entities.return_value = [
+            {"entity_id": "102", "team_key": "SPORT#NCAAFB#TEAM#87", "metadata": {"team_id": "87", "team_id_as_of": "2026-08-12"}},
+        ]
+        storage.upsert_player_entity.return_value = False  # something else already wrote a newer confirmation
+        entities = [{"entity_id": "101", "metadata": {"team_id": "87"}}]
+
+        cleared = ncaafb_normalize._clear_departed_players(storage, entities, "2026-09-06")
+
+        assert cleared == 0
 
 
 class TestCancelStaleScheduledEvents:

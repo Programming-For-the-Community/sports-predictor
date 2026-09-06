@@ -7,7 +7,7 @@ from boto3.dynamodb.conditions import Attr, Key
 
 from library.aws.dynamodb_table import DynamoDBTable
 from library.aws.s3_manager import S3Manager
-from library.schema.keys import entity_key
+from library.schema.keys import entity_key, entity_team_key
 
 
 def _require_env(name: str) -> str:
@@ -88,6 +88,21 @@ class PipelineStorage:
         """One entity by id, via a direct GetItem. entity_type ("team" or
         "player") is required to build the key."""
         return self._entities_table.get_item({"entity_key": entity_key(sport, entity_id, entity_type)})
+
+    def get_team_entities(self, sport: str, team_id: str) -> list[dict]:
+        """Every player entity currently on file as rostered to team_id,
+        via the entities table's team-index GSI -- same query
+        library.storage.feature_storage.FeatureStorage's own
+        get_team_entities makes read-side for NFL's live_features.py, just
+        exposed here on the write-side storage class too. Used by a
+        sport's own roster ingestion to detect a player who's dropped off
+        a freshly-fetched roster entirely (see e.g.
+        aws-lambdas/ncaafb/normalize/handler.py's own
+        _clear_departed_players) -- upserting only ever adds/refreshes
+        players actually present in a new roster payload, never removes
+        one who's disappeared from it, so a departed player otherwise
+        keeps their last-confirmed team_id forever."""
+        return self._entities_table.query(Key("team_key").eq(entity_team_key(sport, team_id)), index_name="team-index")
 
     def write_player_game_stats(self, items: list[dict]) -> None:
         self._player_game_stats_table.batch_write(items, key_names=["event_key", "player_key"])

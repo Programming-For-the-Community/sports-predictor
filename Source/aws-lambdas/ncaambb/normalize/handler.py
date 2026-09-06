@@ -93,12 +93,56 @@ def _process_scoreboard(payload: dict, key: str) -> None:
     logger.info("Upserted %d events from %s", len(events), key)
 
 
+def _clear_departed_players(storage: PipelineStorage, team_id: str, entities: list[dict], as_of_date: str) -> int:
+    """Clears metadata.team_id (and drops the entity out of the
+    team-index GSI entirely, by omitting team_key from the rewritten
+    item) for any player currently on file for team_id that this fresh
+    ESPN roster snapshot no longer lists.
+
+    Same fix, and the same real case that surfaced the need for it
+    (2026-09-xx, NCAAFB), as ncaafb/normalize/handler.py's own
+    _clear_departed_players -- see that one's docstring for the full
+    story. ESPN's own roster response only ever says who IS on the team
+    right now; upserting only ever adds/refreshes players actually
+    present in a fresh fetch, never removes one who's disappeared from
+    it, so a departed player otherwise keeps their last-confirmed team_id
+    forever. NCAA MBB already re-fetches every team's own roster daily
+    (see ingest/handler.py's own docstring), so this closes the gap on
+    essentially the very next run, unlike NCAAFB's ~monthly cadence.
+
+    A genuinely empty `entities` list is left alone entirely (returns 0
+    without querying anything) -- a transient ESPN API gap for this one
+    team is far more likely than every player on a real D1 roster leaving
+    at once, and treating it as "everyone left" would wipe the whole
+    team's roster attribution over one bad fetch instead of just sitting
+    stale until tomorrow's re-fetch corrects it."""
+    if not entities:
+        return 0
+    present_ids = {entity["entity_id"] for entity in entities}
+    cleared = 0
+    for on_file in storage.get_team_entities(SPORT, team_id):
+        entity_id = on_file.get("entity_id")
+        if entity_id is None or entity_id in present_ids:
+            continue
+        metadata = dict(on_file.get("metadata") or {})
+        metadata.pop("team_id", None)
+        metadata["team_id_as_of"] = as_of_date
+        cleared_entity = {k: v for k, v in on_file.items() if k != "team_key"}
+        cleared_entity["metadata"] = metadata
+        if storage.upsert_player_entity(cleared_entity):
+            cleared += 1
+    return cleared
+
+
 def _process_roster(payload: dict, key: str) -> None:
     storage = _get_storage()
     entities = roster_to_player_entities(payload, SPORT)
     for entity in entities:
         storage.upsert_player_entity(entity)
-    logger.info("Upserted %d player entities from %s", len(entities), key)
+    team_id = str(payload["team"]["id"])
+    as_of_date = payload["timestamp"][:10]
+    cleared = _clear_departed_players(storage, team_id, entities, as_of_date)
+    logger.info("Upserted %d player entities (%d cleared as no longer rostered) from %s", len(entities), cleared, key)
 
 
 def _process_boxscore(payload: dict, key: str) -> None:

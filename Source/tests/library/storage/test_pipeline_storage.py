@@ -148,6 +148,26 @@ class TestUpsertEvent:
         assert "sport_status" not in written
 
 
+class TestGetTeamEntities:
+    def test_queries_the_team_index(self, storage_env):
+        storage, mock_entities = _make_storage(storage_env)
+        mock_entities.query.return_value = []
+
+        storage.get_team_entities("ncaafb", "87")
+
+        call = mock_entities.query.call_args
+        assert call.args[0] == Key("team_key").eq("SPORT#NCAAFB#TEAM#87")
+        assert call.kwargs["index_name"] == "team-index"
+
+    def test_returns_whatever_the_index_query_returns(self, storage_env):
+        storage, mock_entities = _make_storage(storage_env)
+        mock_entities.query.return_value = [{"entity_id": "101", "name": "QB One"}]
+
+        result = storage.get_team_entities("ncaafb", "87")
+
+        assert [e["entity_id"] for e in result] == ["101"]
+
+
 class TestGetEntity:
     def test_reads_by_entity_key(self, storage_env):
         storage, mock_entities = _make_storage(storage_env)

@@ -134,6 +134,62 @@ def _process_boxscore(payload: list, key: str) -> None:
     logger.info("Wrote %d player stat lines and %d player entities from %s", total_stats, len(all_entities), key)
 
 
+def _clear_departed_players(storage: PipelineStorage, entities: list[dict], as_of_date: str) -> int:
+    """Clears metadata.team_id (and drops the entity out of the
+    team-index GSI entirely, by omitting team_key from the rewritten
+    item) for any player currently on file for a team that this fresh
+    CFBD roster snapshot no longer lists them under.
+
+    CFBD's /roster payload only ever says who IS on a team right now --
+    roster_to_player_entities' own upserts above only add/refresh
+    entities for players actually present in it, so a player who's gone
+    pro, transferred out, or otherwise dropped off CFBD's list entirely
+    just keeps whatever team_id their last confirmation (a prior roster
+    sync, or a box score) set, forever, since nothing else ever touches
+    their entity again. A real case found 2026-09-xx: two Notre Dame RBs
+    already drafted to the NFL were still showing up as Notre Dame's own
+    roster-current leader candidates -- CFBD's OWN data had already
+    dropped them by the time this was investigated, but our own entity
+    for each still carried a team_id_as_of from three weeks earlier, when
+    CFBD's data was itself still (temporarily) stale, and nothing had
+    ever gone back to correct it once CFBD did.
+
+    Grouped per team_id present in `entities` (CFBD's /roster is one bulk
+    call covering every team at once, unlike NCAA MBB's own per-team
+    fetch) and run concurrently, same reasoning the entity-write pass
+    above already threads across workers. Only touches a team this
+    snapshot actually has >=1 player for -- a team CFBD's response
+    happens to have zero rows for this run is left alone rather than
+    treated as "everyone left", in case that's a transient CFBD gap
+    rather than a real (impossible) fully-empty roster."""
+    present_ids_by_team: dict[str, set[str]] = {}
+    for entity in entities:
+        team_id = (entity.get("metadata") or {}).get("team_id")
+        if team_id is None:
+            continue
+        present_ids_by_team.setdefault(team_id, set()).add(entity["entity_id"])
+
+    def clear_team(team_id: str, present_ids: set[str]) -> int:
+        cleared = 0
+        for on_file in storage.get_team_entities(SPORT, team_id):
+            entity_id = on_file.get("entity_id")
+            if entity_id is None or entity_id in present_ids:
+                continue
+            metadata = dict(on_file.get("metadata") or {})
+            metadata.pop("team_id", None)
+            metadata["team_id_as_of"] = as_of_date
+            cleared_entity = {k: v for k, v in on_file.items() if k != "team_key"}
+            cleared_entity["metadata"] = metadata
+            if storage.upsert_player_entity(cleared_entity):
+                cleared += 1
+        return cleared
+
+    if not present_ids_by_team:
+        return 0
+    with concurrent.futures.ThreadPoolExecutor(max_workers=WRITE_WORKERS) as pool:
+        return sum(pool.map(lambda item: clear_team(*item), present_ids_by_team.items()))
+
+
 def _process_roster(payload: dict, key: str) -> None:
     # Split written vs. rejected -- roster's own team_id_as_of is always
     # today's fetch date, so a rejection here means something else
@@ -148,9 +204,11 @@ def _process_roster(payload: dict, key: str) -> None:
     with concurrent.futures.ThreadPoolExecutor(max_workers=WRITE_WORKERS) as pool:
         written = sum(pool.map(storage.upsert_player_entity, entities))
     rejected = len(entities) - written
+    cleared = _clear_departed_players(storage, entities, as_of_date)
     logger.info(
-        "Wrote %d player entities (%d rejected by the staleness guard) from %s -- %d candidates from %d raw roster rows",
-        written, rejected, key, len(entities), len(payload.get("data", [])),
+        "Wrote %d player entities (%d rejected by the staleness guard, %d cleared as no longer rostered) "
+        "from %s -- %d candidates from %d raw roster rows",
+        written, rejected, cleared, key, len(entities), len(payload.get("data", [])),
     )
 
 
