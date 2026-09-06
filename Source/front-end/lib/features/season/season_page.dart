@@ -1755,9 +1755,18 @@ class _HorizontalScrollableBracketState extends State<_HorizontalScrollableBrack
   // A cap, not a fixed size -- a bracket shorter than this (most
   // conference tournaments, NFL/NBA's own non-March-Madness brackets)
   // renders with no inner scroll region/overlay at all (see build()).
-  static const double _maxPaneHeightFraction = 0.65;
+  // _maxPaneHeight is a ceiling on top of the fraction, not a target --
+  // it used to sit at 720px, which is SHORTER than a typical combined
+  // NFL conference bracket's own natural height (~900px), so every NFL
+  // bracket tripped the capped-pane path unconditionally regardless of
+  // how tall the real viewport was (a real complaint 2026-09-xx: a large
+  // screen still forced an inner vertical scroll for a bracket that
+  // would otherwise have fit). Raised well above every conference-style
+  // bracket's real height so only genuinely oversized ones (March
+  // Madness) still get the capped, pinned-scrollbar treatment.
+  static const double _maxPaneHeightFraction = 0.8;
   static const double _minPaneHeight = 360;
-  static const double _maxPaneHeight = 720;
+  static const double _maxPaneHeight = 1600;
   static const double _barHeight = 14;
   static const double _barGap = 8;
 
@@ -1787,41 +1796,56 @@ class _HorizontalScrollableBracketState extends State<_HorizontalScrollableBrack
 
   @override
   Widget build(BuildContext context) {
-    final content = SingleChildScrollView(
-      controller: _contentController,
-      scrollDirection: Axis.horizontal,
-      child: SizedBox(width: widget.width, height: widget.height, child: widget.child),
-    );
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final content = SingleChildScrollView(
+          controller: _contentController,
+          scrollDirection: Axis.horizontal,
+          child: SizedBox(width: widget.width, height: widget.height, child: widget.child),
+        );
 
-    final bar = Scrollbar(
-      controller: _barController,
-      thumbVisibility: true,
-      child: SingleChildScrollView(
-        controller: _barController,
-        scrollDirection: Axis.horizontal,
-        child: SizedBox(width: widget.width, height: _barHeight),
-      ),
-    );
+        // The overlay scrollbar is only worth showing (and reserving
+        // _barHeight + _barGap of vertical space for) when the bracket
+        // is actually wider than the space it has to render in --
+        // previously always rendered regardless, so a bracket narrow
+        // enough to need no horizontal scroll at all (most conference
+        // brackets on a normal-or-wider viewport) still showed an inert,
+        // permanently-full-width bar under it that did nothing --
+        // a real complaint 2026-09-xx ("placeholder bar").
+        final needsHorizontalScroll = widget.width > constraints.maxWidth;
+        final bar = needsHorizontalScroll
+            ? Scrollbar(
+                controller: _barController,
+                thumbVisibility: true,
+                child: SingleChildScrollView(
+                  controller: _barController,
+                  scrollDirection: Axis.horizontal,
+                  child: SizedBox(width: widget.width, height: _barHeight),
+                ),
+              )
+            : null;
 
-    final viewportCap = (MediaQuery.sizeOf(context).height * _maxPaneHeightFraction).clamp(_minPaneHeight, _maxPaneHeight);
-    if (widget.height <= viewportCap) {
-      return Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [content, const SizedBox(height: _barGap), bar],
-      );
-    }
+        final viewportCap = (MediaQuery.sizeOf(context).height * _maxPaneHeightFraction).clamp(_minPaneHeight, _maxPaneHeight);
+        if (widget.height <= viewportCap) {
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [content, if (bar != null) ...[const SizedBox(height: _barGap), bar]],
+          );
+        }
 
-    return SizedBox(
-      height: viewportCap,
-      child: Stack(
-        children: [
-          Positioned.fill(
-            bottom: _barHeight + _barGap,
-            child: SingleChildScrollView(controller: _verticalController, child: content),
+        return SizedBox(
+          height: viewportCap,
+          child: Stack(
+            children: [
+              Positioned.fill(
+                bottom: bar != null ? _barHeight + _barGap : 0,
+                child: SingleChildScrollView(controller: _verticalController, child: content),
+              ),
+              if (bar != null) Positioned(left: 0, right: 0, bottom: 0, child: bar),
+            ],
           ),
-          Positioned(left: 0, right: 0, bottom: 0, child: bar),
-        ],
-      ),
+        );
+      },
     );
   }
 }

@@ -256,6 +256,41 @@ class TestLeadersComparison:
         assert result["home"]["scoring"] == []
         assert result["away"]["scoring"] == []
 
+    def test_a_star_player_scored_in_all_three_categories_gets_a_separate_correctly_scoped_entry_in_each(self):
+        # Regression: a player who's a genuine candidate for scoring AND
+        # rebounding AND assists (routine for a star) previously collapsed
+        # into one entity_id keyed entry -- the whole merged {points,
+        # rebounds, assists} dict got filed under whichever category won
+        # an arbitrary dict-iteration-order tiebreak, so e.g. the scoring-
+        # leaders row showed his rebounding/assists lines appended after
+        # his own points one.
+        storage = MagicMock()
+        storage.get_entity.return_value = {"metadata": {"team_id": "13"}, "name": "Star Player"}
+        storage.get_player_game_stats_for_event.return_value = [
+            {"entity_id": "p1", "stat_line": {"points": 31, "rebounds": 11, "assists": 9}},
+        ]
+        predictions_table = MagicMock()
+        predictions_table.query.return_value = [
+            {"model_key": "MODEL#player-prop-points#v1#PLAYER#p1", "predicted_value": {"value": 27.0}},
+            {"model_key": "MODEL#player-prop-rebounds#v1#PLAYER#p1", "predicted_value": {"value": 8.0}},
+            {"model_key": "MODEL#player-prop-assists#v1#PLAYER#p1", "predicted_value": {"value": 6.0}},
+        ]
+        event = _event("e1", "2025-11-11", "13", "2")
+
+        result = nba_reads._leaders_comparison(storage, predictions_table.query.return_value, "nba", event)
+
+        [scoring_entry] = result["home"]["scoring"]
+        assert scoring_entry["predicted"] == {"points": 27.0}
+        assert scoring_entry["actual"] == {"points": 31}
+
+        [rebounding_entry] = result["home"]["rebounding"]
+        assert rebounding_entry["predicted"] == {"rebounds": 8.0}
+        assert rebounding_entry["actual"] == {"rebounds": 11}
+
+        [assists_entry] = result["home"]["assists"]
+        assert assists_entry["predicted"] == {"assists": 6.0}
+        assert assists_entry["actual"] == {"assists": 9}
+
 
 class TestListModels:
     def test_empty_when_no_models_promoted(self):

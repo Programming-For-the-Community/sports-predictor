@@ -183,24 +183,76 @@ class _PlayerRow extends StatelessWidget {
         .whereType<String>()
         .join(' · ');
 
+    return _PlayerStatRow(
+      name: player.displayName,
+      spans: [TextSpan(text: values, style: AppTextStyles.metricValue(color: AppColors.cyan))],
+    );
+  }
+}
+
+// Below this width, a player row stacks its own name above its stat
+// value(s) instead of splitting them side by side on one line -- the
+// value text (predicted-only here, up to 2 stat pairs per category once
+// _ComparisonPlayerRow's own predicted-vs-actual values are folded in)
+// needs real room to stay legible. Splitting it 50/50 against a player
+// name in a Row (both Expanded/Flexible with equal flex) on a narrow
+// per-team column silently ellipsis-clipped part of the very numbers
+// this panel exists to show -- a real complaint 2026-09-xx (NCAAFB
+// mobile, "can't see live and predicted very well"), but this row is
+// shared by every head-to-head sport's leaders panel (nfl/nba/ncaafb/
+// ncaambb all route through _categoriesFor + this same row), so the fix
+// lives once, here, rather than per sport. Independent of
+// _ResponsiveTeamColumns' own away/home stack breakpoint above (560px)
+// -- this measures the ROW's own actual available width, which can
+// still be narrow even once the two team columns are already stacked
+// full-width on a genuinely small phone.
+const _rowStackBreakpoint = 280.0;
+
+/// Shared by _PlayerRow (predicted-only) and _ComparisonPlayerRow
+/// (predicted-vs-actual) -- name + value spans, laid out side by side
+/// above _rowStackBreakpoint (value right-aligned against the name) or
+/// stacked full-width below it (value left-aligned, natural reading
+/// order under the name) so neither ever has to share horizontal room
+/// it doesn't have.
+class _PlayerStatRow extends StatelessWidget {
+  const _PlayerStatRow({required this.name, required this.spans});
+
+  final String name;
+  final List<InlineSpan> spans;
+
+  @override
+  Widget build(BuildContext context) {
+    final nameText = Text(name, style: AppTextStyles.body(), maxLines: 1, overflow: TextOverflow.ellipsis);
+
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 3),
-      child: Row(
-        children: [
-          Expanded(
-            child: Text(player.displayName, style: AppTextStyles.body(), maxLines: 1, overflow: TextOverflow.ellipsis),
-          ),
-          const SizedBox(width: 8),
-          Flexible(
-            child: Text(
-              values,
-              style: AppTextStyles.metricValue(color: AppColors.cyan),
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              textAlign: TextAlign.end,
-            ),
-          ),
-        ],
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          if (constraints.maxWidth < _rowStackBreakpoint) {
+            return Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                nameText,
+                const SizedBox(height: 2),
+                Text.rich(TextSpan(children: spans), maxLines: 1, overflow: TextOverflow.ellipsis),
+              ],
+            );
+          }
+          return Row(
+            children: [
+              Expanded(child: nameText),
+              const SizedBox(width: 8),
+              Flexible(
+                child: Text.rich(
+                  TextSpan(children: spans),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  textAlign: TextAlign.end,
+                ),
+              ),
+            ],
+          );
+        },
       ),
     );
   }
@@ -323,24 +375,6 @@ class _ComparisonPlayerRow extends StatelessWidget {
       spans.add(TextSpan(text: entry.value.toStringAsFixed(0), style: AppTextStyles.metricValue(color: AppColors.cyan)));
     }
 
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 3),
-      child: Row(
-        children: [
-          Expanded(
-            child: Text(player.displayName, style: AppTextStyles.body(), maxLines: 1, overflow: TextOverflow.ellipsis),
-          ),
-          const SizedBox(width: 8),
-          Flexible(
-            child: Text.rich(
-              TextSpan(children: spans),
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              textAlign: TextAlign.end,
-            ),
-          ),
-        ],
-      ),
-    );
+    return _PlayerStatRow(name: player.displayName, spans: spans);
   }
 }

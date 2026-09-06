@@ -93,7 +93,7 @@ class EventListPage extends ConsumerStatefulWidget {
   ConsumerState<EventListPage> createState() => _EventListPageState();
 }
 
-class _EventListPageState extends ConsumerState<EventListPage> {
+class _EventListPageState extends ConsumerState<EventListPage> with WidgetsBindingObserver {
   String _status = EventStatus.scheduled;
   String _conferenceFilter = '';
   Timer? _liveScoresTimer;
@@ -101,13 +101,32 @@ class _EventListPageState extends ConsumerState<EventListPage> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _scheduleLiveScoresPoll();
   }
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _liveScoresTimer?.cancel();
     super.dispose();
+  }
+
+  // Browsers (and mobile OSes) throttle -- or outright pause -- a
+  // backgrounded tab's own timers, so Timer.periodic below can silently
+  // stop firing at its real 30s cadence the moment this tab loses focus,
+  // with nothing bringing it back on its own once the tab is foregrounded
+  // again. Without this, an event that actually went live while the tab
+  // sat in the background kept showing its pre-game state for a while
+  // after coming back -- a real complaint 2026-09-xx ("leave the site
+  // open a while before events start... doesn't register it right
+  // away"). AppLifecycleState.resumed fires on Flutter Web too, driven by
+  // the page's own visibility state, not just a native app switch.
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed && _status == EventStatus.scheduled) {
+      ref.invalidate(liveScoresProvider(widget.sportId));
+    }
   }
 
   // Only while showing Upcoming. Torn down and rebuilt on every status

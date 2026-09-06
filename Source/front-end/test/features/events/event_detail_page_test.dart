@@ -77,6 +77,37 @@ void main() {
     expect(liveScoreCalls, greaterThan(initialCalls));
   });
 
+  testWidgets('polls immediately on resume, not just on the 30s timer', (tester) async {
+    // Regression: a backgrounded tab's own Timer.periodic can silently
+    // stop firing (browser/OS throttling) with nothing bringing it back
+    // once the tab is foregrounded again -- a real complaint 2026-09-xx
+    // ("leave the site open a while before events start... doesn't
+    // register it right away"). AppLifecycleState.resumed should trigger
+    // an immediate poll on its own, independent of the timer.
+    var liveScoreCalls = 0;
+
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          eventsListProvider.overrideWith((ref, query) async => query.status == 'scheduled' ? [_scheduledEvent('2026-09-14T17:00:00Z')] : []),
+          eventPredictionProvider.overrideWith((ref, query) async => _prediction),
+          liveScoresProvider.overrideWith((ref, sport) async {
+            liveScoreCalls++;
+            return const <String, LiveEventState>{};
+          }),
+        ],
+        child: const MaterialApp(home: Scaffold(body: EventDetailPage(sportId: 'nfl', eventId: '401547417'))),
+      ),
+    );
+    await tester.pumpAndSettle();
+    final initialCalls = liveScoreCalls;
+
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+    await tester.pumpAndSettle();
+
+    expect(liveScoreCalls, greaterThan(initialCalls));
+  });
+
   testWidgets('does not poll the prediction for a kickoff far in the future', (tester) async {
     var predictionCalls = 0;
 

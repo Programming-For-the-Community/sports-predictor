@@ -44,19 +44,29 @@ class F1EventDetailPage extends ConsumerStatefulWidget {
   ConsumerState<F1EventDetailPage> createState() => _F1EventDetailPageState();
 }
 
-class _F1EventDetailPageState extends ConsumerState<F1EventDetailPage> {
+class _F1EventDetailPageState extends ConsumerState<F1EventDetailPage> with WidgetsBindingObserver {
   Timer? _pollTimer;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _pollTimer = Timer.periodic(_pollInterval, (_) => _poll());
   }
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _pollTimer?.cancel();
     super.dispose();
+  }
+
+  // Same "a backgrounded tab's own timers get throttled/paused, with
+  // nothing catching back up on return" reasoning event_detail_page.dart's
+  // own didChangeAppLifecycleState carries in full.
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) _poll();
   }
 
   void _poll() {

@@ -201,22 +201,39 @@ def _leaders_comparison(storage, rows: list[dict], sport: str, event: dict) -> d
     `sacks` are lists.
 
     rows: same already-fetched predictions-table rows _prediction_
-    comparison takes."""
+    comparison takes.
+
+    Grouped by (entity_id, category), not entity_id alone -- a versatile
+    player (e.g. a receiving back) can be a genuine candidate in more than
+    one category, scored separately per category by predict_event_leaders
+    (a distinct MODEL#player-prop-<stat># row per stat). Keying only on
+    entity_id previously merged every category's stats for that player
+    into one dict, then filed the WHOLE merged dict under whichever single
+    category won an arbitrary dict-iteration-order tiebreak -- a real
+    complaint 2026-09-xx: a running back's receiving-leaders row was
+    showing his rushing line appended after his (near-zero) receiving one.
+    Each (entity_id, category) pair now gets its own entry, correctly
+    scoped to just that category's own stats, and can appear in more than
+    one category's own list, same as the predicted-only leaders panel
+    already allows."""
     home_away = _home_and_away(event)
     if home_away is None:
         return None
     home_id, away_id = home_away
 
-    predicted_by_entity: dict[str, dict[str, float]] = {}
+    predicted_by_entity_category: dict[tuple[str, str], dict[str, float]] = {}
     for row in rows:
         match = _PLAYER_PROP_MODEL_KEY_RE.match(row["model_key"])
         if match is None:
             continue
         stat = match.group(1).replace("-", "_")
+        category = _STAT_CATEGORY.get(stat)
+        if category is None:
+            continue
         entity_id = match.group(2)
-        predicted_by_entity.setdefault(entity_id, {})[stat] = row["predicted_value"]["value"]
+        predicted_by_entity_category.setdefault((entity_id, category), {})[stat] = row["predicted_value"]["value"]
 
-    if not predicted_by_entity:
+    if not predicted_by_entity_category:
         return None
 
     actual_by_entity = {
@@ -227,11 +244,11 @@ def _leaders_comparison(storage, rows: list[dict], sport: str, event: dict) -> d
     home: dict[str, list[dict] | dict | None] = {"passing": None, "rushing": [], "receiving": [], "sacks": []}
     away: dict[str, list[dict] | dict | None] = {"passing": None, "rushing": [], "receiving": [], "sacks": []}
 
-    for entity_id, predicted_stats in predicted_by_entity.items():
-        category = next((_STAT_CATEGORY[stat] for stat in predicted_stats if stat in _STAT_CATEGORY), None)
-        if category is None:
-            continue
-        entity = storage.get_entity(sport, entity_id, "player")
+    entity_cache: dict[str, dict | None] = {}
+    for (entity_id, category), predicted_stats in predicted_by_entity_category.items():
+        if entity_id not in entity_cache:
+            entity_cache[entity_id] = storage.get_entity(sport, entity_id, "player")
+        entity = entity_cache[entity_id]
         team_id = (entity.get("metadata") or {}).get("team_id") if entity else None
         if team_id == home_id:
             bucket = home

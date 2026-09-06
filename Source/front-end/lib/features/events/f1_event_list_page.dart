@@ -27,20 +27,32 @@ class F1EventListPage extends ConsumerStatefulWidget {
   ConsumerState<F1EventListPage> createState() => _F1EventListPageState();
 }
 
-class _F1EventListPageState extends ConsumerState<F1EventListPage> {
+class _F1EventListPageState extends ConsumerState<F1EventListPage> with WidgetsBindingObserver {
   String _status = EventStatus.scheduled;
   Timer? _liveScoresTimer;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _scheduleLiveScoresPoll();
   }
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _liveScoresTimer?.cancel();
     super.dispose();
+  }
+
+  // Same "a backgrounded tab's own timers get throttled/paused, with
+  // nothing catching back up on return" reasoning event_list_page.dart's
+  // own didChangeAppLifecycleState carries in full.
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed && _status == EventStatus.scheduled) {
+      ref.invalidate(f1LiveScoresProvider(widget.sportId));
+    }
   }
 
   // Only while showing Upcoming -- same split event_list_page.dart's own

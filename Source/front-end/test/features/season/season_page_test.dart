@@ -219,6 +219,74 @@ void main() {
         );
     // ignore: avoid_dynamic_calls
     expect((painter as dynamic).championshipShift, greaterThan(0));
+
+    // Regression: the horizontal-scroll overlay bar used to render
+    // unconditionally, even for a bracket this narrow (one Wild Card
+    // matchup per conference) that comfortably fits the 800px test
+    // viewport with no horizontal scrolling needed at all -- a real
+    // complaint 2026-09-xx ("placeholder bar" sitting under a bracket
+    // that never actually needed to scroll).
+    expect(find.byType(Scrollbar), findsNothing);
+  });
+
+  testWidgets('a full-size NFL bracket fits without an inner scroll pane on a tall enough viewport', (tester) async {
+    // Regression: the inner scroll pane's own height cap used to sit at
+    // 720px regardless of the real viewport size -- shorter than a
+    // combined 2-conference, 3-round NFL bracket's own natural height, so
+    // every NFL bracket forced this capped, separately-scrolling pane
+    // even on a tall screen that had plenty of room to show the whole
+    // thing inline. 1400px is comfortably taller than any real browser
+    // chrome would leave for this page, so a correctly-sized cap should
+    // never engage here.
+    await tester.binding.setSurfaceSize(const Size(1400, 1400));
+    tester.view.physicalSize = const Size(1400, 1400);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.reset);
+
+    BracketRound round(String name, List<BracketMatchup> matchups) => BracketRound(round: name, matchups: matchups);
+    BracketMatchup matchup(String a, String b) =>
+        BracketMatchup(teamA: a, teamB: b, status: 'projected', predictedWinner: a, winProbability: 0.55);
+
+    final projection = SeasonProjection(
+      sport: 'nfl',
+      season: 2026,
+      standings: [_nbaStanding('2')],
+      leaderboards: null,
+      bracket: BracketProjection(
+        conferences: {
+          'AFC': [
+            round('Wild Card', [matchup('12', '13'), matchup('2', '17'), matchup('1', '4')]),
+            round('Divisional', [matchup('1', '12'), matchup('2', '5')]),
+            round('Conference Championship', [matchup('1', '2')]),
+          ],
+          'NFC': [
+            round('Wild Card', [matchup('19', '24'), matchup('21', '25'), matchup('18', '20')]),
+            round('Divisional', [matchup('19', '21'), matchup('18', '20')]),
+            round('Conference Championship', [matchup('19', '18')]),
+          ],
+        },
+        rounds: null,
+        teamNames: const {},
+        finalMatchup: matchup('1', '19'),
+        champion: '1',
+      ),
+    );
+
+    await pumpSeasonPage(tester, 'nfl', projection);
+    await tester.tap(find.text('Playoff Bracket'));
+    await tester.pumpAndSettle();
+
+    expect(tester.takeException(), isNull);
+    expect(find.text('SUPER BOWL'), findsOneWidget);
+    // No overlay scrollbar (bracket fits the viewport's own width) and,
+    // critically, exactly the 3 SingleChildScrollViews this page always
+    // has regardless of bracket content -- the page's own outer scroll,
+    // the tab-toggle row's horizontal scroll, and the bracket's own
+    // horizontal content scroll. A 4th would mean the capped path's own
+    // extra vertical-scroll wrapper engaged even though the viewport had
+    // plenty of room, silently reintroducing the bug this test guards.
+    expect(find.byType(Scrollbar), findsNothing);
+    expect(find.byType(SingleChildScrollView), findsNWidgets(3));
   });
 
   testWidgets('a flat (NCAAFB-shaped) bracket renders its rounds with no conference headers', (tester) async {

@@ -357,6 +357,38 @@ class TestLeadersComparison:
         assert result["home"]["passing"] is None
         assert result["away"]["passing"] is None
 
+    def test_a_versatile_player_scored_in_two_categories_gets_a_separate_correctly_scoped_entry_in_each(self):
+        # Regression: a receiving back scored for BOTH rushing_yards and
+        # receiving_yards props previously collapsed into one entity_id
+        # keyed entry -- the whole merged {rushing_yards, receiving_yards,
+        # ...} dict got filed under whichever category won an arbitrary
+        # dict-iteration-order tiebreak, so e.g. the receiving-leaders row
+        # showed his rushing line appended after his own receiving one.
+        storage = MagicMock()
+        storage.get_entity.return_value = {"metadata": {"team_id": "61"}, "name": "Jadan Baugh"}
+        storage.get_player_game_stats_for_event.return_value = [
+            {"entity_id": "rb1", "stat_line": {"rushing_yards": 160, "rushing_touchdowns": 3, "receiving_yards": 28}},
+        ]
+        predictions_table = MagicMock()
+        predictions_table.query.return_value = [
+            {"model_key": "MODEL#player-prop-rushing-yards#v1#PLAYER#rb1", "predicted_value": {"value": 41.0}},
+            {"model_key": "MODEL#player-prop-rushing-touchdowns#v1#PLAYER#rb1", "predicted_value": {"value": 1.0}},
+            {"model_key": "MODEL#player-prop-receiving-yards#v1#PLAYER#rb1", "predicted_value": {"value": 28.0}},
+        ]
+        event = _event("e1", "2025-10-11", "61", "52")
+
+        result = ncaafb_reads._leaders_comparison(storage, predictions_table.query.return_value, "ncaafb", event)
+
+        [rushing_entry] = result["home"]["rushing"]
+        assert rushing_entry["entity_id"] == "rb1"
+        assert rushing_entry["predicted"] == {"rushing_yards": 41.0, "rushing_touchdowns": 1.0}
+        assert rushing_entry["actual"] == {"rushing_yards": 160, "rushing_touchdowns": 3}
+
+        [receiving_entry] = result["home"]["receiving"]
+        assert receiving_entry["entity_id"] == "rb1"
+        assert receiving_entry["predicted"] == {"receiving_yards": 28.0}
+        assert receiving_entry["actual"] == {"receiving_yards": 28}
+
 
 class TestListModels:
     def test_empty_when_no_models_promoted(self):
