@@ -169,6 +169,46 @@ void main() {
     expect(find.textContaining('pred'), findsNothing);
   });
 
+  testWidgets(
+      'a finished-but-not-yet-completed event shows the FINAL leaders panel with the live-so-far (now final) '
+      'stats, not the predicted-only panel', (tester) async {
+    // event.status is still "scheduled" (_scheduledEvent) -- the
+    // once-daily batch ingest hasn't flipped it to "completed" yet --
+    // but liveState.completed (ESPN's own signal) says the game is
+    // over. Regression: previously `live` alone (now false, the instant
+    // the game ends) gated the comparison panel, reverting this page to
+    // the predicted-only view right when the game finished, and staying
+    // that way until DynamoDB's own status caught up (up to 24h later).
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          eventsListProvider.overrideWith((ref, query) async => query.status == 'scheduled' ? [_scheduledEvent('2026-09-14T17:00:00Z')] : []),
+          eventPredictionProvider.overrideWith((ref, query) async => _predictionWithLeaders),
+          liveScoresProvider.overrideWith((ref, sport) async => const {
+                '401547417': LiveEventState(
+                  live: false,
+                  completed: true,
+                  detail: 'Final',
+                  homeScore: 24,
+                  awayScore: 7,
+                  playerStats: {
+                    '100': {'passing_yards': 310},
+                  },
+                ),
+              }),
+        ],
+        child: const MaterialApp(home: Scaffold(body: EventDetailPage(sportId: 'nfl', eventId: '401547417'))),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('PLAYER LEADERS -- FINAL'), findsOneWidget);
+    expect(find.text('PLAYER LEADERS -- LIVE'), findsNothing);
+    expect(find.text('PLAYER LEADERS'), findsNothing);
+    expect(find.textContaining('310'), findsOneWidget);
+    expect(find.textContaining('250'), findsOneWidget);
+  });
+
   testWidgets('a scheduled (not yet live) event with predicted leaders still shows the predicted-only panel', (tester) async {
     await tester.pumpWidget(
       ProviderScope(

@@ -132,6 +132,49 @@ void main() {
     });
 
     testWidgets(
+        'a finished-but-not-yet-completed event shows the FINAL pill and the final score, not the '
+        'pre-live view', (tester) async {
+      // event.status is still "scheduled" -- the once-daily batch ingest
+      // hasn't flipped it to "completed" yet -- but liveState.completed
+      // (ESPN's own signal) says the game is over.
+      await tester.pumpWidget(ProviderScope(
+        overrides: [
+          eventPredictionProvider.overrideWith(
+            (ref, query) async => const EventPrediction(
+              homeWinProbability: 0.68,
+              homeWinProbabilityModelVersion: 3,
+              margin: 6.5,
+              homeScore: 27.4,
+              awayScore: 20.9,
+              leaders: null,
+            ),
+          ),
+        ],
+        child: MaterialApp(
+          home: Scaffold(
+            body: GameRow(
+              sport: 'nfl',
+              event: _scheduledEvent(),
+              liveState: const LiveEventState(live: false, completed: true, detail: 'Final', homeScore: 31, awayScore: 17),
+            ),
+          ),
+        ),
+      ));
+      await tester.pumpAndSettle();
+
+      // Regression: previously `isLive` alone (now false, since ESPN
+      // itself reports the game over) gated everything here -- the row
+      // reverted to looking pre-game: the final score vanished
+      // (event.home.result is still null, since this event's own status
+      // hasn't caught up) and no FINAL pill ever appeared (that only
+      // ever checked event.status == "completed").
+      expect(find.text('FINAL'), findsOneWidget);
+      expect(_textStyled('31', AppColors.ink), findsOneWidget);
+      expect(_textStyled('17', AppColors.ink), findsOneWidget);
+      expect(find.byType(WinProbabilityBar), findsNothing);
+    });
+
+    testWidgets(
         'a live event keeps the pick/margin/confidence summary, with the LIVE pill/clock taking the pre-game '
         'win-probability bar\'s own slot on the same row rather than staggering onto a separate line', (tester) async {
       // A wide desktop viewport -- SizedBox(width: ...) alone gets

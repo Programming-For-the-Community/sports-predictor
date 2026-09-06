@@ -9,6 +9,7 @@ itself. FeatureStorage is mocked throughout.
 The ncaambb_predict module (and this directory's own sys.path entry for
 predict/) is registered by conftest.py.
 """
+from datetime import date
 from unittest.mock import MagicMock
 
 import pytest
@@ -37,25 +38,60 @@ def _player_game(entity_id, team_id, event_key, event_date, stat_line):
     }
 
 
-def _entity(team_id):
-    return {"metadata": {"team_id": team_id}}
+def _entity(team_id, team_id_as_of=None):
+    # Fresh as of right now by default -- tests that thread their own
+    # reference_date through _still_on_team/_box_score_candidate_ids pass
+    # a matching team_id_as_of explicitly; everything else (including
+    # callers that don't thread reference_date at all, like
+    # build_live_event_leader_candidates) still sees a freshly-confirmed
+    # entity regardless of real-world "today".
+    return {"metadata": {"team_id": team_id, "team_id_as_of": team_id_as_of or date.today().isoformat()}}
 
 
 class TestStillOnTeam:
     def test_true_when_entity_team_matches(self):
         storage = MagicMock()
-        storage.get_entity.return_value = _entity("13")
-        assert live_features._still_on_team(storage, "ncaambb", "101", "13") is True
+        storage.get_entity.return_value = _entity("13", team_id_as_of="2026-01-18")
+        assert live_features._still_on_team(storage, "ncaambb", "101", "13", "2026-01-18") is True
 
     def test_false_when_entity_team_differs(self):
         storage = MagicMock()
-        storage.get_entity.return_value = _entity("2")
-        assert live_features._still_on_team(storage, "ncaambb", "101", "13") is False
+        storage.get_entity.return_value = _entity("2", team_id_as_of="2026-01-18")
+        assert live_features._still_on_team(storage, "ncaambb", "101", "13", "2026-01-18") is False
 
     def test_false_when_entity_missing(self):
         storage = MagicMock()
         storage.get_entity.return_value = None
-        assert live_features._still_on_team(storage, "ncaambb", "101", "13") is False
+        assert live_features._still_on_team(storage, "ncaambb", "101", "13", "2026-01-18") is False
+
+    def test_false_when_team_id_as_of_is_stale(self):
+        # Team matches, but this player hasn't been reconfirmed there (no
+        # box score appearance, no roster re-fetch) in
+        # _ROSTER_STALENESS_DAYS -- they've likely left the program even
+        # though nothing ever explicitly removed them.
+        storage = MagicMock()
+        storage.get_entity.return_value = _entity("13", team_id_as_of="2025-11-01")
+        assert live_features._still_on_team(storage, "ncaambb", "101", "13", "2026-01-18") is False
+
+    def test_false_when_team_id_as_of_is_missing(self):
+        storage = MagicMock()
+        storage.get_entity.return_value = {"metadata": {"team_id": "13"}}
+        assert live_features._still_on_team(storage, "ncaambb", "101", "13", "2026-01-18") is False
+
+    def test_true_at_the_staleness_boundary(self):
+        storage = MagicMock()
+        storage.get_entity.return_value = _entity("13", team_id_as_of="2026-01-04")  # exactly 14 days before
+        assert live_features._still_on_team(storage, "ncaambb", "101", "13", "2026-01-18") is True
+
+    def test_false_one_day_past_the_staleness_boundary(self):
+        storage = MagicMock()
+        storage.get_entity.return_value = _entity("13", team_id_as_of="2026-01-03")  # 15 days before
+        assert live_features._still_on_team(storage, "ncaambb", "101", "13", "2026-01-18") is False
+
+    def test_defaults_reference_date_to_today(self):
+        storage = MagicMock()
+        storage.get_entity.return_value = _entity("13")
+        assert live_features._still_on_team(storage, "ncaambb", "101", "13") is True
 
 
 class TestBoxScoreCandidateIds:

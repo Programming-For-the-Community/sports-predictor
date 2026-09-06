@@ -3,8 +3,10 @@ import 'package:go_router/go_router.dart';
 
 import '../models/event_status.dart';
 import '../models/f1_event.dart';
+import '../models/f1_live_score.dart';
 import '../theme/app_colors.dart';
 import '../theme/app_text_styles.dart';
+import 'live_status_pill.dart';
 import 'sprint_badge.dart';
 
 const _months = [
@@ -26,14 +28,23 @@ String _dateLabel(F1Event event) {
 /// only by a small SPRINT badge; the full driver/constructor breakdown
 /// only appears on the detail page (f1_event_detail_page.dart).
 class F1EventRow extends StatelessWidget {
-  const F1EventRow({super.key, required this.sport, required this.event});
+  const F1EventRow({super.key, required this.sport, required this.event, this.liveState});
 
   final String sport;
   final F1Event event;
+  // From f1LiveScoresProvider -- null for the vast majority of rows (any
+  // race not currently live or recently finished). event.status alone
+  // can lag the real result by up to ~24h (ingest only re-fetches Jolpica
+  // once a day -- see live_scores.py's own refresh() docstring), so
+  // liveState.isFinished is checked alongside isCompleted below rather
+  // than trusting event.status on its own; without it, a race that had
+  // already run showed the same "UPCOMING" pill as one that hadn't.
+  final F1LiveEventState? liveState;
 
   @override
   Widget build(BuildContext context) {
-    final isCompleted = event.status == EventStatus.completed;
+    final isCompleted = event.status == EventStatus.completed || (liveState?.isFinished ?? false);
+    final isLive = liveState?.isLive ?? false;
     return InkWell(
       onTap: () => context.go('/$sport/events/${event.eventId}'),
       borderRadius: BorderRadius.circular(16),
@@ -96,17 +107,23 @@ class F1EventRow extends StatelessWidget {
                     ),
                   ),
                   const SizedBox(width: 12),
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                    decoration: BoxDecoration(
-                      color: (isCompleted ? AppColors.inkMute : AppColors.violet).withValues(alpha: 0.15),
-                      borderRadius: BorderRadius.circular(999),
+                  // LIVE (the session is actually running right now)
+                  // takes priority over FINAL/UPCOMING -- a race can't be
+                  // both, and isLive already implies !isCompleted.
+                  if (isLive)
+                    const LiveStatusPill()
+                  else
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: (isCompleted ? AppColors.inkMute : AppColors.violet).withValues(alpha: 0.15),
+                        borderRadius: BorderRadius.circular(999),
+                      ),
+                      child: Text(
+                        isCompleted ? 'FINAL' : 'UPCOMING',
+                        style: AppTextStyles.microLabel(color: isCompleted ? AppColors.inkMute : AppColors.violet),
+                      ),
                     ),
-                    child: Text(
-                      isCompleted ? 'FINAL' : 'UPCOMING',
-                      style: AppTextStyles.microLabel(color: isCompleted ? AppColors.inkMute : AppColors.violet),
-                    ),
-                  ),
                 ],
               ),
             ),

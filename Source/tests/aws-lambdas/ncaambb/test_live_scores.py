@@ -311,6 +311,56 @@ class TestLivePlayerStats:
         assert cached["events"]["1"]["live"] is True
         assert cached["events"]["1"]["player_stats"] == {}
 
+    def test_the_transition_tick_carries_forward_the_last_live_player_stats(self):
+        # Regression: the tick a game flips from live to completed, ESPN's
+        # own state is no longer "in" so this event isn't in
+        # live_event_ids and gets no fresh boxscore fetch -- the freshly
+        # extracted state has no player_stats key at all. Without
+        # carrying the previous tick's player_stats forward here, that
+        # gets baked into this tick's cache entry permanently (every
+        # later tick just carries THIS entry forward unchanged via
+        # already_completed), silently losing the final box score forever
+        # even though the event's own completed/live/score fields are
+        # carried forward correctly.
+        storage = MagicMock()
+        storage.get_all_events.return_value = [_event("1", datetime.now(timezone.utc).isoformat())]
+        client = MagicMock()
+        client.get_scoreboard_for_date.return_value = {
+            "events": [_espn_event("1", state="post", completed=True, detail="Final", home_score="78", away_score="70")],
+        }
+        s3 = _make_s3()
+        s3._store[live_scores.LIVE_SCORES_CACHE_KEY] = json.dumps({
+            "fetched_at": datetime.now(timezone.utc).isoformat(),
+            "events": {"1": {
+                "live": True, "completed": False, "detail": "2nd 00:12", "home_score": 76, "away_score": 70,
+                "player_stats": {"100": {"points": 27}},
+            }},
+        }).encode("utf-8")
+
+        live_scores.refresh(storage, s3, BUCKET, client, SPORT)
+
+        client.get_summary.assert_not_called()  # not live this tick -- no fresh fetch to expect
+        cached = json.loads(s3._store[live_scores.LIVE_SCORES_CACHE_KEY])
+        assert cached["events"]["1"]["completed"] is True
+        assert cached["events"]["1"]["player_stats"] == {"100": {"points": 27}}
+
+    def test_a_transition_tick_with_no_previous_player_stats_stays_empty(self):
+        # No prior live tick ever ran (e.g. the game was already over the
+        # first time it entered the poll window) -- nothing to carry
+        # forward, so this just stays absent/empty rather than erroring.
+        storage = MagicMock()
+        storage.get_all_events.return_value = [_event("1", datetime.now(timezone.utc).isoformat())]
+        client = MagicMock()
+        client.get_scoreboard_for_date.return_value = {
+            "events": [_espn_event("1", state="post", completed=True, detail="Final", home_score="78", away_score="70")],
+        }
+        s3 = _make_s3()
+
+        live_scores.refresh(storage, s3, BUCKET, client, SPORT)
+
+        cached = json.loads(s3._store[live_scores.LIVE_SCORES_CACHE_KEY])
+        assert cached["events"]["1"].get("player_stats", {}) == {}
+
 
 class TestGetLiveScores:
     def test_returns_empty_when_nothing_cached_yet(self):

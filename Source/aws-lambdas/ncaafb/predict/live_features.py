@@ -12,14 +12,21 @@ for a past game whose box score identifies a starter
 identify_lead_receiver), bounded to the current season plus
 SEASON_LOOKBACK prior seasons. The candidate is cross-checked against
 their entity record's current team_id so a transfer isn't attributed to
-their old team. Known gap: a player who left the program but hasn't
-played for a new team yet still shows their old team_id.
+their old team -- see _still_on_team/_is_roster_entry_fresh. Residual
+gap: a player who left the program for a new team that hasn't yet
+played (or re-fetched its roster) since the transfer still shows their
+old team_id until that catches up.
 
 Leaders panel (build_live_event_leader_candidates): a separate, multi-
 candidate version of the same idea -- no depth chart/roster position
 data exists for NCAAFB, so candidates are every still-rostered player
 credited with the category's volume stat anywhere in the team's recent
-box scores, ranked by recent volume.
+box scores, ranked by recent volume. "Still-rostered" (_still_on_team)
+means both matches team_id AND was recently reconfirmed there --
+matching team_id alone isn't enough, since a player who's simply
+stopped appearing anywhere (box scores or roster sync -- graduated,
+quit, went pro) never gets an explicit removal write; nothing ever
+un-sets their last-known team_id. See _is_roster_entry_fresh.
 
 `events` (an already-fetched get_all_events(sport) result) is an
 optional pass-through accepted by every public function here and threaded
@@ -27,6 +34,7 @@ into get_team_events/_live_elo_ratings calls, so one event-prediction
 request can share a single fetch instead of each function re-querying.
 """
 from concurrent.futures import ThreadPoolExecutor
+from datetime import date
 
 from library.features.common import DEFAULT_STARTING_RATING, compute_elo_ratings
 from library.features.ncaafb import (
@@ -40,6 +48,16 @@ from library.schema.keys import player_key
 
 DEFAULT_ROLLING_WINDOW = 5
 SEASON_LOOKBACK = 1
+
+# A player entity's metadata.team_id_as_of older than this many days is
+# treated as "not recently confirmed on this team" rather than trusted
+# indefinitely -- see _is_roster_entry_fresh. CFBD's own bulk roster is
+# only re-fetched every ROSTER_CACHE_TTL_DAYS=30 (ingest/handler.py), so
+# this needs real slack above that for a player who simply hasn't played
+# since the last refresh; nfl/predict/live_features.py's own
+# _ROSTER_STALENESS_DAYS=14 is tighter only because NFL's roster/injury
+# feed refreshes far more often.
+_ROSTER_STALENESS_DAYS = 45
 
 LEADER_IDENTIFIERS = {
     "passing": identify_starting_qb,
@@ -112,17 +130,46 @@ def _team_player_games_for_event(storage, team_id: str, event_key: str) -> list[
     return [row for row in storage.get_player_game_stats_for_event(event_key) if row.get("team_id") == team_id]
 
 
-def _still_on_team(storage, sport: str, entity_id: str, team_id: str) -> bool:
+def _is_roster_entry_fresh(entity: dict, reference_date: str) -> bool:
+    """reference_date is today (the default -- see _still_on_team), not
+    the target event's own date: roster sync only ever writes "today's"
+    team_id_as_of, so comparing against a far-future scheduled event's
+    date would fail this check regardless of how fresh the confirmation
+    actually is. Same shape as nfl/predict/live_features.py's own
+    function of this name."""
+    as_of = (entity.get("metadata") or {}).get("team_id_as_of")
+    if as_of is None:
+        return False
+    try:
+        return abs((date.fromisoformat(reference_date) - date.fromisoformat(as_of)).days) <= _ROSTER_STALENESS_DAYS
+    except ValueError:
+        return False
+
+
+def _still_on_team(storage, sport: str, entity_id: str, team_id: str, reference_date: str | None = None) -> bool:
+    """True only if entity_id's own team_id metadata both matches team_id
+    AND was reconfirmed there recently (_is_roster_entry_fresh) -- a
+    team_id match alone isn't enough, since nothing ever explicitly
+    un-sets a player's last-known team_id once they stop appearing
+    anywhere (see this module's own docstring)."""
     entity = storage.get_entity(sport, entity_id, "player")
-    return bool(entity) and (entity.get("metadata") or {}).get("team_id") == team_id
+    if not entity or (entity.get("metadata") or {}).get("team_id") != team_id:
+        return False
+    return _is_roster_entry_fresh(entity, reference_date or date.today().isoformat())
 
 
 def _presumptive_leader(
     storage, sport: str, team_id: str, before_date: str, current_season: int | None, category: str, window: int,
-    events: list[dict] | None = None,
+    events: list[dict] | None = None, reference_date: str | None = None,
 ) -> tuple[str, list[dict]] | None:
     """(entity_id, their own recent game history) for team_id's presumptive category leader,
-    or None if no still-rostered leader is found within the lookback bound."""
+    or None if no still-rostered leader is found within the lookback bound.
+
+    reference_date is today by default (see _still_on_team) -- passed
+    through explicitly rather than resolved inside the loop so a caller
+    computing several leaders for the same request shares one moment in
+    time, and so tests can pin it instead of depending on real
+    wall-clock time."""
     identify_fn = LEADER_IDENTIFIERS[category]
     team_events = storage.get_team_events(sport, team_id, before_date=before_date, events=events)
     for event in team_events:
@@ -133,7 +180,7 @@ def _presumptive_leader(
         if candidate is None:
             continue
         entity_id = candidate["entity_id"]
-        if _still_on_team(storage, sport, entity_id, team_id):
+        if _still_on_team(storage, sport, entity_id, team_id, reference_date):
             return entity_id, storage.get_player_game_stats(entity_id, before_date=before_date, limit=window)
     return None
 
@@ -223,7 +270,7 @@ def build_live_player_features(
 
 def _box_score_candidate_ids(
     storage, sport: str, team_id: str, before_date: str, current_season: int | None, stat_key: str,
-    events: list[dict] | None = None,
+    events: list[dict] | None = None, reference_date: str | None = None,
 ) -> list[str]:
     """Every still-rostered entity_id credited with stat_key at least once in team_id's box
     score history, walking most-recent-first, bounded the same as _presumptive_leader
@@ -232,7 +279,10 @@ def _box_score_candidate_ids(
     Two phases: first collect every distinct candidate id from box scores,
     then check roster membership (_still_on_team, one GetItem each)
     concurrently, since a team's SEASON_LOOKBACK-bounded box-score history
-    can hold dozens of distinct candidates for a single category."""
+    can hold dozens of distinct candidates for a single category.
+    reference_date is today by default (see _still_on_team) -- threaded
+    through so every candidate in one request is judged against the same
+    moment, and so tests can pin it."""
     team_events = storage.get_team_events(sport, team_id, before_date=before_date, events=events)
     seen: set[str] = set()
     ordered_ids: list[str] = []
@@ -252,7 +302,7 @@ def _box_score_candidate_ids(
     with ThreadPoolExecutor(max_workers=min(len(ordered_ids), 16)) as executor:
         still_rostered = dict(zip(
             ordered_ids,
-            executor.map(lambda entity_id: _still_on_team(storage, sport, entity_id, team_id), ordered_ids),
+            executor.map(lambda entity_id: _still_on_team(storage, sport, entity_id, team_id, reference_date), ordered_ids),
         ))
     return [entity_id for entity_id in ordered_ids if still_rostered[entity_id]]
 

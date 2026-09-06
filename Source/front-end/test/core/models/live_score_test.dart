@@ -54,4 +54,39 @@ void main() {
 
     expect(state.playerStats, isEmpty);
   });
+
+  test('parses a finished event -- completed true even though live has already gone back to false', () {
+    // live_scores.py deliberately keeps serving a completed event's frozen
+    // final state (score/detail/player_stats) through this same cache
+    // past the moment ESPN itself stops reporting `live: true` -- see that
+    // module's own refresh() docstring. `completed` is how a caller tells
+    // "the game is over" apart from "the game just hasn't kicked off yet"
+    // (also live: false).
+    final state = LiveEventState.fromJson({
+      'live': false,
+      'completed': true,
+      'detail': 'Final',
+      'home_score': 24,
+      'away_score': 17,
+      'player_stats': {
+        '100': {'passing_yards': 310},
+      },
+    });
+
+    expect(state.live, isFalse);
+    expect(state.completed, isTrue);
+    expect(state.homeScore, 24.0);
+    expect(state.playerStats['100'], {'passing_yards': 310.0});
+  });
+
+  test('completed defaults to false when absent -- an event ingested before the field existed', () {
+    final state = LiveEventState.fromJson({
+      'live': false,
+      'detail': null,
+      'home_score': null,
+      'away_score': null,
+    });
+
+    expect(state.completed, isFalse);
+  });
 }

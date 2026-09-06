@@ -199,18 +199,13 @@ class TestRefresh:
 
         assert result == {"polled": 0}
 
-    def test_a_just_finished_race_stays_cached_through_the_end_buffer_tail(self):
+    def test_a_just_finished_race_stays_cached_while_our_own_storage_is_still_scheduled(self):
         roster_event = _field_event("2026-1", "2026-03-01", [{"entity_id": "max_verstappen"}])
         this_race = _field_event("2026-2", "2026-03-08", [], status="scheduled")
         storage = self._storage(roster_event, [this_race])
 
-        recent = (datetime.now(timezone.utc) - timedelta(minutes=10)).isoformat()
         s3 = MagicMock()
-        s3.get_object.return_value = {
-            "Body": MagicMock(read=lambda: json.dumps({
-                "fetched_at": recent, "events": {"2026-2": {"last_active_at": recent}},
-            }).encode()),
-        }
+        s3.get_object.side_effect = _NO_CACHE_YET
         client = MagicMock()
         client.get_scoreboard.return_value = {"events": [
             _espn_event("Australian Grand Prix", [
@@ -221,23 +216,68 @@ class TestRefresh:
         result = live_scores.refresh(storage, s3, "bucket", client, "f1", 2026)
 
         assert result == {"polled": 1}
+        cached_body = json.loads(s3.put_object.call_args.kwargs["Body"])
+        assert cached_body["events"]["2026-2"]["participants"]["max_verstappen"] == {"order": 1, "winner": True}
 
-    def test_a_long_finished_race_past_the_end_buffer_is_no_longer_cached(self):
+    def test_a_race_finished_long_ago_but_still_scheduled_on_our_own_side_stays_cached(self):
+        # Regression: ingest only re-fetches Jolpica's real results once a
+        # day, so a race that finished hours ago can easily still be
+        # "scheduled" in our own storage well past any short fixed
+        # post-race buffer -- previously that meant the live cache
+        # (the only real signal the frontend had left) dropped the event
+        # entirely, and the whole page reverted to looking like the race
+        # -- and even qualifying -- hadn't happened yet.
         roster_event = _field_event("2026-1", "2026-03-01", [{"entity_id": "max_verstappen"}])
         this_race = _field_event("2026-2", "2026-03-08", [], status="scheduled")
         storage = self._storage(roster_event, [this_race])
 
-        long_ago = (datetime.now(timezone.utc) - timedelta(hours=5)).isoformat()
         s3 = MagicMock()
-        s3.get_object.return_value = {
-            "Body": MagicMock(read=lambda: json.dumps({
-                "fetched_at": long_ago, "events": {"2026-2": {"last_active_at": long_ago}},
-            }).encode()),
-        }
+        s3.get_object.side_effect = _NO_CACHE_YET  # no previous cache needed -- always re-derived from ESPN live
         client = MagicMock()
         client.get_scoreboard.return_value = {"events": [
             _espn_event("Australian Grand Prix", [
                 _espn_competition("999", "Race", "2026-03-08T04:00Z", "post", [_espn_competitor(1, "Max Verstappen", winner=True)]),
+            ]),
+        ]}
+
+        result = live_scores.refresh(storage, s3, "bucket", client, "f1", 2026)
+
+        assert result == {"polled": 1}
+        cached_body = json.loads(s3.put_object.call_args.kwargs["Body"])
+        assert cached_body["events"]["2026-2"]["state"] == "post"
+
+    def test_a_race_our_own_storage_has_already_completed_is_no_longer_cached(self):
+        # Once ingest catches up (this event drops out of
+        # get_all_events(status="scheduled") on its own), the frontend's
+        # own real result takes over -- no need to keep serving ESPN's
+        # copy through this cache any longer.
+        roster_event = _field_event("2026-1", "2026-03-01", [{"entity_id": "max_verstappen"}])
+        storage = self._storage(roster_event)  # this_race NOT in scheduled_events -- already completed on our side
+
+        s3 = MagicMock()
+        s3.get_object.side_effect = _NO_CACHE_YET
+        client = MagicMock()
+        client.get_scoreboard.return_value = {"events": [
+            _espn_event("Australian Grand Prix", [
+                _espn_competition("999", "Race", "2026-03-08T04:00Z", "post", [_espn_competitor(1, "Max Verstappen", winner=True)]),
+            ]),
+        ]}
+
+        result = live_scores.refresh(storage, s3, "bucket", client, "f1", 2026)
+
+        assert result == {"polled": 0}
+
+    def test_a_not_yet_started_session_is_not_cached_even_though_our_own_side_is_still_scheduled(self):
+        roster_event = _field_event("2026-1", "2026-03-01", [{"entity_id": "max_verstappen"}])
+        this_race = _field_event("2026-2", "2026-03-08", [], status="scheduled")
+        storage = self._storage(roster_event, [this_race])
+
+        s3 = MagicMock()
+        s3.get_object.side_effect = _NO_CACHE_YET
+        client = MagicMock()
+        client.get_scoreboard.return_value = {"events": [
+            _espn_event("Australian Grand Prix", [
+                _espn_competition("999", "Race", "2026-03-08T04:00Z", "pre", [_espn_competitor(None, "Max Verstappen")]),
             ]),
         ]}
 

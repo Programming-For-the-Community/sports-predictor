@@ -143,13 +143,21 @@ class _EventDetailPageState extends ConsumerState<EventDetailPage> {
               final leaders = prediction.leaders;
               final liveScores = ref.watch(liveScoresProvider(widget.sportId)).value ?? const {};
               final liveState = liveScores[widget.eventId];
-              // Once the game is live, swap to the same predicted-vs-actual
-              // panel a completed event uses, fed this event's live
-              // (so-far) stat lines. Falls back to the predicted-only
+              // Once the game is live OR finished (liveState.completed --
+              // ESPN's own signal, independent of this event's own
+              // SportEvent.status, which can lag up to 24h behind the
+              // real result), swap to the same predicted-vs-actual panel
+              // a completed event uses, fed this event's live (or final)
+              // stat lines. Without the `completed` check, this panel
+              // would revert to the predicted-only one the instant the
+              // game ends (liveState.live flips back to false right
+              // then) and stay that way until DynamoDB's own status
+              // finally catches up. Falls back to the predicted-only
               // panel before kickoff or before the live poll has produced
               // any player stats.
-              final liveComparison =
-                  leaders != null && liveState != null && liveState.live ? leaders.toLiveComparison(liveState.playerStats) : null;
+              final liveComparison = leaders != null && liveState != null && (liveState.live || liveState.completed)
+                  ? leaders.toLiveComparison(liveState.playerStats)
+                  : null;
               return Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
@@ -170,7 +178,7 @@ class _EventDetailPageState extends ConsumerState<EventDetailPage> {
                       homeAbbr: teamDisplay(widget.sportId, event.home).abbreviation,
                       awayAbbr: teamDisplay(widget.sportId, event.away).abbreviation,
                       comparison: liveComparison,
-                      title: 'PLAYER LEADERS -- LIVE',
+                      title: liveState!.live ? 'PLAYER LEADERS -- LIVE' : 'PLAYER LEADERS -- FINAL',
                     ),
                   ] else if (leaders != null) ...[
                     const SizedBox(height: 20),

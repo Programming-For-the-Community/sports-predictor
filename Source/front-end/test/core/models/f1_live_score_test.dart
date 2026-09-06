@@ -31,7 +31,9 @@ void main() {
     expect(state.isLive, isFalse);
   });
 
-  test('isLive is false once ESPN flips state to post, even with participants still cached (end-buffer tail)', () {
+  test(
+      'isLive is false but isFinished is true once ESPN flips state to post, even with participants still '
+      'cached (kept fresh until our own storage catches up -- see live_scores.py refresh())', () {
     final state = F1LiveEventState.fromJson({
       'event_type': 'field',
       'state': 'post',
@@ -41,7 +43,13 @@ void main() {
     });
 
     expect(state.isLive, isFalse);
+    expect(state.isFinished, isTrue);
     expect(state.participants['max_verstappen']!.winner, isTrue);
+  });
+
+  test('isFinished is false while state is in or pre', () {
+    expect(F1LiveEventState.fromJson({'event_type': 'field', 'state': 'in'}).isFinished, isFalse);
+    expect(F1LiveEventState.fromJson({'event_type': 'field', 'state': 'pre'}).isFinished, isFalse);
   });
 
   test('winner defaults to false and order to null when a competitor has neither yet', () {

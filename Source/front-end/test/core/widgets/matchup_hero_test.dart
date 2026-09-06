@@ -143,6 +143,29 @@ void main() {
       // No live numeral, no smaller companion value either.
       expect(_textStyled('27', AppColors.cyan), findsNothing);
     });
+
+    testWidgets(
+        'a finished-but-not-yet-completed event shows the final score and a FINAL pill, not the '
+        'pre-live view', (tester) async {
+      // event.status is still "scheduled" (_scheduledEvent) -- the
+      // once-daily batch ingest hasn't flipped it to "completed" yet --
+      // but liveState.completed (ESPN's own signal) says the game is
+      // over. Regression: previously `live` alone (now false) gated the
+      // real score entirely, reverting this card to looking pre-game the
+      // instant the game ended.
+      const liveState = LiveEventState(live: false, completed: true, detail: 'Final', homeScore: 31, awayScore: 17);
+
+      await tester.pumpWidget(MaterialApp(
+        home: Scaffold(body: MatchupHero(sport: 'nfl', event: _scheduledEvent(), prediction: prediction, liveState: liveState)),
+      ));
+
+      expect(find.textContaining('31 PTS'), findsOneWidget);
+      expect(find.textContaining('17 PTS'), findsOneWidget);
+      expect(_textStyled('27', AppColors.cyan), findsOneWidget);
+      expect(_textStyled('23', AppColors.cyan), findsOneWidget);
+      expect(find.text('FINAL'), findsOneWidget);
+      expect(find.text('LIVE'), findsNothing);
+    });
   });
   testWidgets('MatchupResultHero shows -- for a missing predicted margin instead of dropping the trio', (tester) async {
     const comparison = PredictionComparison(

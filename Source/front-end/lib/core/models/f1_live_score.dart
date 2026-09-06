@@ -37,12 +37,23 @@ class F1LiveEventState {
   final Map<String, F1DriverLiveResult> participants; // entity_id -> live result
 
   // Session is actually running right now, per ESPN. A cache entry can
-  // still be present with state == 'post' for a while after the checkered
-  // flag (live_scores.py's own END_BUFFER tail) -- callers wanting "still
-  // worth showing a live overlay for" should check presence in the map,
-  // not just this flag; callers wanting "put a LIVE badge on it" should
-  // check this flag specifically.
+  // still be present with state == 'post' well after the checkered flag
+  // -- live_scores.py's own refresh() keeps this entry current for as
+  // long as our own storage still has the event as "scheduled" (ingest
+  // only re-fetches real results once a day, so that gap can run up to
+  // ~24h) -- callers wanting "still worth showing a live overlay for"
+  // should check presence in the map, not just this flag; callers
+  // wanting "put a LIVE badge on it" should check this flag
+  // specifically.
   bool get isLive => state == 'in';
+
+  // The session is over per ESPN, but our own storage hasn't caught up
+  // with the real result yet (that's exactly why this entry is still
+  // present at all -- see isLive's own doc comment). Distinct from
+  // isLive: a finished session shows a FINAL badge instead of LIVE, but
+  // still has real (if not-yet-official) running order/winner data worth
+  // showing.
+  bool get isFinished => state == 'post';
 
   factory F1LiveEventState.fromJson(Map<String, dynamic> json) {
     final participantsJson = json['participants'] as Map<String, dynamic>? ?? {};

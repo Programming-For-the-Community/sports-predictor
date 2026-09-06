@@ -108,6 +108,16 @@ class GameRow extends ConsumerWidget {
     final away = teamDisplay(sport, event.away);
     final isCompleted = event.status == EventStatus.completed;
     final isLive = liveState?.live ?? false;
+    // True once ESPN itself reports the game over, even though this
+    // event's own status can still say "scheduled" for up to 24h (the
+    // once-daily batch ingest hasn't caught up yet) -- see
+    // LiveEventState.completed's own doc comment. Distinct from
+    // isCompleted (this event's own DynamoDB-backed status, which gates
+    // predictionComparison/_ComparisonSummary below -- not available
+    // yet): a row in this state still shows FINAL/the final score, just
+    // via _LivePredictionSummary's own live-prediction fetch rather than
+    // the logged predictionComparison.
+    final liveFinished = liveState?.completed ?? false;
     // Fetched for any not-yet-completed event, live included -- watched
     // here (not inside _LivePredictionSummary) because _MatchupLine below
     // needs this same resolved value too, for the predicted score shown
@@ -144,10 +154,10 @@ class GameRow extends ConsumerWidget {
     );
     final matchup = _MatchupLine(
       awayColor: away.primary, awayAbbr: away.abbreviation,
-      awayScore: isLive ? liveState!.awayScore : event.away.result?.score,
+      awayScore: (isLive || liveFinished) ? liveState!.awayScore : event.away.result?.score,
       awayPredictedScore: awayPredictedScore,
       homeColor: home.primary, homeAbbr: home.abbreviation,
-      homeScore: isLive ? liveState!.homeScore : event.home.result?.score,
+      homeScore: (isLive || liveFinished) ? liveState!.homeScore : event.home.result?.score,
       homePredictedScore: homePredictedScore,
     );
     // Stadium name/city/state -- renders nothing when absent rather than
@@ -174,7 +184,7 @@ class GameRow extends ConsumerWidget {
         : _LivePredictionSummary(
             prediction: prediction!, homeAbbr: home.abbreviation, awayAbbr: away.abbreviation,
             sport: sport, eventId: event.eventId, compact: compact,
-            isLive: isLive, liveDetail: liveState?.detail,
+            isLive: isLive, isFinal: liveFinished, liveDetail: liveState?.detail,
           );
 
     return InkWell(
@@ -230,7 +240,8 @@ class GameRow extends ConsumerWidget {
 class _LivePredictionSummary extends StatelessWidget {
   const _LivePredictionSummary({
     required this.prediction, required this.homeAbbr, required this.awayAbbr,
-    required this.sport, required this.eventId, required this.compact, required this.isLive, this.liveDetail,
+    required this.sport, required this.eventId, required this.compact, required this.isLive,
+    this.isFinal = false, this.liveDetail,
   });
   final AsyncValue<EventPrediction> prediction;
   final String homeAbbr;
@@ -248,23 +259,30 @@ class _LivePredictionSummary extends StatelessWidget {
   // confidence on the same aligned baseline as the status pill rather
   // than staggering across two rows.
   final bool isLive;
+  // True once ESPN reports the game over but this event's own status
+  // hasn't caught up to "completed" yet (GameRow's own liveFinished) --
+  // shows the same FINAL pill _ComparisonSummary uses for a DB-completed
+  // event, still in this same slot, rather than reverting to the
+  // pre-game win-probability bar the instant isLive goes false.
+  final bool isFinal;
   final String? liveDetail;
 
   @override
   Widget build(BuildContext context) {
     // The leading slot: the pre-game win-probability bar (Expanded, fills
-    // the row), or -- once live -- the LIVE pill/clock. Also Flexible
-    // (not just naturally sized) once live: on a narrow card, the LIVE
-    // pill + pick/margin + confidence can together be wider than the
-    // available space, and this is the one piece with room to actually
-    // shrink (the game-clock text already ellipsizes; LiveStatusPill
-    // itself never shrinks below its own dot/pill size).
-    Widget leading(double homeWinProbability) => isLive
+    // the row), or -- once live or finished -- the LIVE/FINAL pill(+
+    // ESPN's own game-clock text). Also Flexible (not just naturally
+    // sized) once live/final: on a narrow card, the pill + pick/margin +
+    // confidence can together be wider than the available space, and
+    // this is the one piece with room to actually shrink (the game-clock
+    // text already ellipsizes; the pill itself never shrinks below its
+    // own dot/pill size).
+    Widget leading(double homeWinProbability) => (isLive || isFinal)
         ? Flexible(
             child: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
-                LiveStatusPill(dotOnly: compact),
+                isLive ? LiveStatusPill(dotOnly: compact) : FinalStatusPill(dotOnly: compact),
                 if (liveDetail != null && liveDetail!.isNotEmpty) ...[
                   const SizedBox(width: 8),
                   Flexible(

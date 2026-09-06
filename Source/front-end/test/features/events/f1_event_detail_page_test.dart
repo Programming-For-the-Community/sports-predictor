@@ -3,6 +3,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:front_end/core/data/f1_events_repository.dart';
+import 'package:front_end/core/data/live_scores_repository.dart';
+import 'package:front_end/core/models/f1_live_score.dart';
 import 'package:front_end/core/models/f1_prediction.dart';
 import 'package:front_end/features/events/f1_event_detail_page.dart';
 
@@ -61,5 +63,27 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('Red Bull'), findsOneWidget);
+  });
+
+  testWidgets(
+      'shows a FINAL pill once ESPN reports the session over, even though our own storage hasn\'t caught up '
+      'with the real result yet', (tester) async {
+    // Regression: previously the page gave no visual signal at all that
+    // the session had happened -- the LIVE pill only ever appeared while
+    // state == "in", so it (correctly) never showed, but nothing took
+    // its place once the race actually finished.
+    await tester.pumpWidget(ProviderScope(
+      overrides: [
+        f1EventPredictionProvider.overrideWith((ref, query) async => _fieldPrediction()),
+        f1LiveScoresProvider.overrideWith(
+          (ref, sport) async => const {'2026-5': F1LiveEventState(eventType: 'field', state: 'post')},
+        ),
+      ],
+      child: const MaterialApp(home: Scaffold(body: F1EventDetailPage(sportId: 'f1', eventId: '2026-5'))),
+    ));
+    await tester.pumpAndSettle();
+
+    expect(find.text('FINAL'), findsOneWidget);
+    expect(find.text('LIVE'), findsNothing);
   });
 }

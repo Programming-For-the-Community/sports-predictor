@@ -11,6 +11,7 @@ import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_text_styles.dart';
 import '../../core/widgets/f1_prediction_computing_retry.dart';
 import '../../core/widgets/f1_prediction_freshness_badge.dart';
+import '../../core/widgets/final_status_pill.dart';
 import '../../core/widgets/live_status_pill.dart';
 import '../../core/widgets/sprint_badge.dart';
 import 'f1_leaderboard_table.dart';
@@ -130,6 +131,14 @@ class _PredictionViewState extends State<_PredictionView> {
               ),
             ),
             if (widget.liveState?.isLive ?? false) const LiveStatusPill(),
+            // Shown once ESPN reports the session over but our own
+            // storage hasn't caught up with the real result yet (up to
+            // ~24h -- see F1LiveEventState.isFinished's own doc comment)
+            // -- without this, the page gave no visual signal at all
+            // that the session had actually happened, on top of the
+            // leaderboard itself still only showing pre-race
+            // projections.
+            if (widget.liveState?.isFinished ?? false) const FinalStatusPill(),
             if (prediction.isSprint) ...[
               const SizedBox(width: 8),
               const SprintBadge(),

@@ -45,6 +45,14 @@ this Lambda just fetches that one response every tick and reads
 status.type.state directly off it, instead of first discovering which
 tournaments are in range and then fetching each one's own leaderboard
 separately the way PGA's live-scores has to.
+
+A session's cache entry is kept fresh for as long as our own storage
+still calls this event "scheduled" -- not just for a fixed buffer after
+ESPN's own state flips to "post" (see refresh()'s own docstring for why
+a fixed buffer isn't enough here: ingest only re-fetches Jolpica's real
+results once a day, so the real gap between "race over" and "our own
+stored result lands" can run up to ~24h, not the couple of minutes a
+fixed post-race buffer was sized for).
 """
 import json
 import logging
@@ -62,12 +70,6 @@ LIVE_SCORES_CACHE_KEY = "f1/cache/live-scores/latest.json"
 # "tolerate a couple of missed/late ticks" reasoning PGA's own STALE_AFTER
 # uses.
 STALE_AFTER = timedelta(minutes=10)
-
-# Keep a just-finished race's own final live state visible for a while
-# after ESPN itself flips state to "post" -- same tail-buffer idea PGA's
-# own END_BUFFER uses, so the UI doesn't lose the live view the instant
-# the checkered flag falls.
-END_BUFFER = timedelta(hours=1)
 
 # Only these ESPN competition types have a corresponding stored event of
 # our own at all -- see this module's own docstring.
@@ -134,15 +136,6 @@ def _put_cache(s3, bucket: str, payload: dict) -> None:
     s3.put_object(Bucket=bucket, Key=LIVE_SCORES_CACHE_KEY, Body=json.dumps(payload), ContentType="application/json")
 
 
-def _parse_datetime(value: str | None) -> datetime | None:
-    if not value:
-        return None
-    try:
-        return datetime.fromisoformat(value.replace("Z", "+00:00"))
-    except ValueError:
-        return None
-
-
 def _competition_participants(competition: dict, roster_by_name: dict[str, str]) -> dict[str, dict]:
     participants = {}
     for competitor in competition.get("competitors", []):
@@ -162,14 +155,26 @@ def refresh(storage, s3, bucket: str, client, sport: str, season: int) -> dict:
     """Called on every LiveScoreRefresh tick (scheduler-f1-live-scores.tf).
     Always fetches the full-season scoreboard -- see this module's own
     docstring for why there's no cheaper candidate-discovery step to skip
-    that call with, the way PGA's own refresh() has."""
-    now = datetime.now(timezone.utc)
+    that call with, the way PGA's own refresh() has.
 
-    previous = _get_cache(s3, bucket) or {}
-    previous_events = previous.get("events", {})
-    last_active_at = {
-        event_id: state["last_active_at"] for event_id, state in previous_events.items() if state.get("last_active_at")
-    }
+    A session's cache entry is kept up to date for as long as our own
+    storage still has this event as "scheduled" -- NOT just for a fixed
+    tail buffer after ESPN's own state flips to "post". Ingest only
+    re-fetches Jolpica's real results once a day (the shared registry-
+    driven orchestrator), so a race that just finished can go up to ~24h
+    before normalize actually writes its real result and flips the
+    stored event to "completed" (library/normalize/f1.py's own
+    _event_item_from_race: "completed" if participants else "scheduled").
+    A short fixed buffer here previously meant the
+    leaderboard reverted to looking pre-race for that whole gap, ~1h
+    after the checkered flag fell -- this refetches ESPN's own already-
+    final classification (order/winner) every tick regardless of how long
+    ago the session ended, right up until our own storage catches up on
+    its own. Once it does, this event drops out of scheduled_event_ids
+    and out of events_out with it -- the frontend's own real result
+    (from the stored event itself) takes over from there, so this cache
+    doesn't need to keep serving ESPN's copy any longer."""
+    now = datetime.now(timezone.utc)
 
     scoreboard = client.get_scoreboard(season)
     espn_events = scoreboard.get("events", [])
@@ -179,6 +184,7 @@ def refresh(storage, s3, bucket: str, client, sport: str, season: int) -> dict:
 
     roster_by_name = _current_roster_by_name(storage, sport)
     event_ids = _event_ids_by_date_and_type(storage, sport)
+    scheduled_event_ids = {event["event_id"] for event in storage.get_all_events(sport, status="scheduled")}
 
     events_out = {}
     for espn_event in espn_events:
@@ -195,26 +201,18 @@ def refresh(storage, s3, bucket: str, client, sport: str, season: int) -> dict:
 
             status = (competition.get("status") or {}).get("type", {})
             state = status.get("state")
-            is_live = state == "in"
-            was_recently_live = (
-                (last_active := _parse_datetime(last_active_at.get(our_event_id))) is not None
-                and now <= last_active + END_BUFFER
-            )
-            if not is_live and not was_recently_live:
-                continue
+            if state == "pre":
+                continue  # hasn't started yet -- nothing live to show
+            if state != "in" and our_event_id not in scheduled_event_ids:
+                continue  # our own storage already has the real result
 
-            entry = {
+            events_out[our_event_id] = {
                 "event_type": our_event_type,
                 "status": status.get("name"),
                 "state": state,
                 "race_name": espn_event.get("name"),
                 "participants": _competition_participants(competition, roster_by_name),
             }
-            if is_live:
-                entry["last_active_at"] = now.isoformat()
-            elif our_event_id in last_active_at:
-                entry["last_active_at"] = last_active_at[our_event_id]  # preserve through the end-buffer tail
-            events_out[our_event_id] = entry
 
     _put_cache(s3, bucket, {"fetched_at": now.isoformat(), "events": events_out})
     logger.info("Refreshed F1 live state for %d event(s)", len(events_out))

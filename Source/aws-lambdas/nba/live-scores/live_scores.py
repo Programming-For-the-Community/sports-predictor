@@ -154,6 +154,18 @@ def refresh(storage, s3, bucket: str, client, sport: str) -> dict:
             logger.warning("Candidate event %s not found in today's ESPN scoreboard -- skipping", event["event_id"])
             continue
         state = _extract_live_state(espn_event)
+        if state["completed"] and not state["live"]:
+            # The tick a game finishes, ESPN's own state is no longer
+            # "in" -- this event won't land in live_event_ids below, so
+            # it gets no fresh boxscore fetch this cycle. Carry forward
+            # its last-fetched player_stats rather than silently losing
+            # the final box score the moment the game ends: this state
+            # dict is what `carried_over` copies forward on every future
+            # tick once already_completed picks it up next cycle, so this
+            # transition tick is the only chance to attach it at all.
+            previous_state = previous_events.get(event["event_id"])
+            if previous_state and previous_state.get("player_stats"):
+                state["player_stats"] = previous_state["player_stats"]
         events_out[event["event_id"]] = state
         if state["live"]:
             live_event_ids.append(event["event_id"])

@@ -1,8 +1,12 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/data/f1_events_repository.dart';
+import '../../core/data/live_scores_repository.dart';
 import '../../core/models/event_status.dart';
+import '../../core/models/f1_live_score.dart';
 import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_text_styles.dart';
 import '../../core/widgets/f1_event_row.dart';
@@ -25,12 +29,48 @@ class F1EventListPage extends ConsumerStatefulWidget {
 
 class _F1EventListPageState extends ConsumerState<F1EventListPage> {
   String _status = EventStatus.scheduled;
+  Timer? _liveScoresTimer;
 
-  void _setStatus(String status) => setState(() => _status = status);
+  @override
+  void initState() {
+    super.initState();
+    _scheduleLiveScoresPoll();
+  }
+
+  @override
+  void dispose() {
+    _liveScoresTimer?.cancel();
+    super.dispose();
+  }
+
+  // Only while showing Upcoming -- same split event_list_page.dart's own
+  // _scheduleLiveScoresPoll uses. Torn down and rebuilt on every status
+  // change so switching to Completed actually stops the ticking.
+  void _scheduleLiveScoresPoll() {
+    _liveScoresTimer?.cancel();
+    if (_status != EventStatus.scheduled) return;
+    _liveScoresTimer = Timer.periodic(const Duration(seconds: 30), (_) {
+      ref.invalidate(f1LiveScoresProvider(widget.sportId));
+    });
+  }
+
+  void _setStatus(String status) {
+    setState(() => _status = status);
+    _scheduleLiveScoresPoll();
+  }
 
   @override
   Widget build(BuildContext context) {
     final events = ref.watch(f1EventsListProvider((sport: widget.sportId, status: _status)));
+    // Only fetched/watched for the Upcoming tab -- same split
+    // event_list_page.dart's own liveScores local uses. A race whose real
+    // result our own storage hasn't caught up with yet (ingest lag -- see
+    // live_scores.py's own refresh() docstring) is still status
+    // "scheduled" here, which is exactly why F1EventRow needs this to
+    // show FINAL/LIVE instead of a stale "UPCOMING".
+    final liveScores = _status == EventStatus.scheduled
+        ? ref.watch(f1LiveScoresProvider(widget.sportId)).value ?? const <String, F1LiveEventState>{}
+        : const <String, F1LiveEventState>{};
 
     return RefreshIndicator(
       onRefresh: () => ref.refresh(f1EventsListProvider((sport: widget.sportId, status: _status)).future),
@@ -76,7 +116,7 @@ class _F1EventListPageState extends ConsumerState<F1EventListPage> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     for (final event in sorted) ...[
-                      F1EventRow(sport: widget.sportId, event: event),
+                      F1EventRow(sport: widget.sportId, event: event, liveState: liveScores[event.eventId]),
                       const SizedBox(height: 12),
                     ],
                   ],

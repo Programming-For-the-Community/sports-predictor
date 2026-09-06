@@ -7,6 +7,7 @@ import '../theme/app_colors.dart';
 import '../theme/app_text_styles.dart';
 import '../../static/nfl_team_colors.dart';
 import 'confidence_pill.dart';
+import 'final_status_pill.dart';
 import 'live_status_pill.dart';
 import 'team_color_dot.dart';
 import 'win_probability_bar.dart';
@@ -15,21 +16,28 @@ import 'win_probability_bar.dart';
 /// columns of team + score (win probability % small underneath), a split
 /// bar, then the big PICK (with its own confidence pill right under it),
 /// then a Pred total / home margin duo. liveState (from
-/// liveScoresProvider) adds its own LIVE status/game-clock line between
-/// the win-probability bar and PICK once set and live -- confidence and
-/// the spread (PRED TOTAL/HOME MARGIN below) stay visible either way,
-/// live or not, since both describe the pre-game pick, not the live game
-/// state.
+/// liveScoresProvider) adds its own LIVE/FINAL status/game-clock line
+/// between the win-probability bar and PICK once set and live or
+/// finished (LiveEventState.completed) -- confidence and the spread
+/// (PRED TOTAL/HOME MARGIN below) stay visible either way, live or not,
+/// since both describe the pre-game pick, not the live game state.
+/// `completed` (ESPN's own signal, via the live-scores cache) is checked
+/// independently of this event's own SportEvent.status/`live` here --
+/// `live` flips back to false the moment the game ends, and
+/// SportEvent.status can lag the real result by up to 24h (the
+/// once-daily batch ingest) -- see LiveEventState.completed's own doc
+/// comment.
 ///
 /// Pre-game, each column's only number is the model's own predicted
-/// score, gradient-clipped cyan for the favored side. Once live, each
-/// column shows its real in-progress score (gradient-clipped violet for
-/// whichever side is currently ahead) with the same pre-game predicted
-/// score still visible right below it in cyan -- live/actual and
-/// predicted stay two distinctly colored numbers rather than one
-/// swapping value, same convention game_row.dart's list rows use
-/// (ink/cyan there; violet here since this big numeral doubles as the
-/// "who's currently winning" signal, distinct from the pre-game favorite).
+/// score, gradient-clipped cyan for the favored side. Once live or
+/// finished, each column shows its real (in-progress, or final) score
+/// (gradient-clipped violet for whichever side is currently ahead/won)
+/// with the same pre-game predicted score still visible right below it
+/// in cyan -- live/actual and predicted stay two distinctly colored
+/// numbers rather than one swapping value, same convention game_row.dart's
+/// list rows use (ink/cyan there; violet here since this big numeral
+/// doubles as the "who's currently winning" signal, distinct from the
+/// pre-game favorite).
 // Same breakpoint as game_row.dart's own _stackBreakpoint/
 // field_leaderboard_table.dart's own _compactBreakpoint -- collapses the
 // LIVE/confidence pills to just their colored dots on a phone-width card.
@@ -49,8 +57,15 @@ class MatchupHero extends StatelessWidget {
     final away = teamDisplay(sport, event.away);
     final homeFavored = prediction.homeWinProbability >= 0.5;
     final isLive = liveState?.live ?? false;
-    final homeLiveScore = isLive ? liveState!.homeScore : null;
-    final awayLiveScore = isLive ? liveState!.awayScore : null;
+    // True once ESPN itself reports the game over, even though this
+    // event's own SportEvent.status can still say "scheduled" for up to
+    // 24h (the once-daily batch ingest hasn't caught up yet -- see
+    // LiveEventState.completed's own doc comment). Kept distinct from
+    // isLive: a finished game shows the FINAL pill instead of LIVE, but
+    // still needs the real (now final, not still-updating) score below.
+    final isFinished = liveState?.completed ?? false;
+    final homeLiveScore = (isLive || isFinished) ? liveState!.homeScore : null;
+    final awayLiveScore = (isLive || isFinished) ? liveState!.awayScore : null;
     // Who's ahead right now -- null pre-game (no live score yet) or on a
     // live tie, when neither side is "winning". Distinct from
     // homeFavored, which is the pre-game win-probability pick and stays
@@ -111,17 +126,18 @@ class MatchupHero extends StatelessWidget {
               ],
               const SizedBox(height: 20),
               WinProbabilityBar(homeWinProbability: prediction.homeWinProbability, height: 12),
-              // Live status (game clock) is its own line, only present
-              // once live -- separate from confidence, which lives with
+              // Live/final status (game clock, or FINAL once the game's
+              // over) is its own line, only present once live or
+              // finished -- separate from confidence, which lives with
               // the PICK below instead of next to the game clock (that
               // pairing read as describing the live game itself, not the
               // model's own pre-game pick).
-              if (isLive) ...[
+              if (isLive || isFinished) ...[
                 const SizedBox(height: 12),
                 Row(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
-                    LiveStatusPill(dotOnly: compact),
+                    isLive ? LiveStatusPill(dotOnly: compact) : FinalStatusPill(dotOnly: compact),
                     if (liveState!.detail != null) ...[
                       const SizedBox(width: 8),
                       // Flexible + ellipsis -- ESPN's own detail text isn't
