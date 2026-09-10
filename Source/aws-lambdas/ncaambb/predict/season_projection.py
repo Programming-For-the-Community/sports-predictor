@@ -34,6 +34,7 @@ one round/one pair at a time and doesn't care how many rounds total there
 are, or how many separate brackets call it).
 """
 import logging
+import re
 from datetime import date, datetime, timezone
 
 import pandas as pd
@@ -43,6 +44,7 @@ import event_prediction
 import model_loader
 import season_simulation
 from library.features.common import DEFAULT_HOME_ADVANTAGE, compute_elo_ratings, current_streak, average_opponent_elo, rolling_team_scoring_averages
+from library.http.ncaambb_core import ap_poll_to_rank_by_team
 from library.ml.model_types import ADAPTERS
 from library.serving.common import enrich_bracket_team_names, enrich_team_standings
 from library.serving.ncaambb_reads import WIN_PROBABILITY_MODEL, _actual_result, _home_and_away
@@ -234,6 +236,7 @@ def _season_standings_inputs(storage: FeatureStorage, raw_bucket) -> dict:
         "strength_of_schedule": strength_of_schedule,
         "scheduled": scheduled,
         "completed": completed,
+        "real_current_rank": _latest_ap_poll_ranks(raw_bucket, current_season),
     }
 
 
@@ -281,18 +284,49 @@ def _current_model_scores(estimator, model_card: dict, teams: list[str], season_
     SAME model/feature row simulate_season's own score_teams callable
     uses to pick each simulated season's March Madness field, scored once
     against real current wins/losses/ratings instead of a simulated
-    future. Lower is better. Used by _current_rankings (standings'
-    current_rank column) and by both real bracket payloads (seeding)."""
+    future. Lower is better. Used by _model_rankings (standings'
+    model_rank column) and by both real bracket payloads (seeding)."""
     return _batch_score_teams(
         estimator, model_card, teams, season_inputs,
         season_inputs["wins"], season_inputs["losses"], season_inputs["current_ratings"],
     )
 
 
-def _current_rankings(estimator, model_card: dict, teams: list[str], season_inputs: dict) -> dict[str, int]:
+def _model_rankings(estimator, model_card: dict, teams: list[str], season_inputs: dict) -> dict[str, int]:
+    """The national-ranking model's own opinion of today's ranking --
+    shown alongside the real AP poll rank (_latest_ap_poll_ranks) for
+    comparison, not in place of it."""
     scores = _current_model_scores(estimator, model_card, teams, season_inputs)
     ranked = sorted(teams, key=lambda team_id: scores[team_id])
     return {team_id: rank for rank, team_id in enumerate(ranked, start=1)}
+
+
+_RANKINGS_CACHE_KEY_RE = re.compile(r"^ncaambb/rankings/\d+/(\d+)/(\d+)\.json$")
+
+
+def _latest_ap_poll_ranks(raw_bucket, season: int | None) -> dict[str, int]:
+    """The real current AP Top 25 rank per team, from the most recently
+    ingest-cached weekly poll for this season (ingest/handler.py's own
+    _fetch_current_ap_poll writes one ncaambb/rankings/{season}/{type}/
+    {week}.json object per week -- this Lambda has no route to ESPN
+    itself, see this module's own docstring). Picks the highest (type,
+    week) key present, since a later season_type (postseason) always
+    follows every regular-season week chronologically. Empty if nothing's
+    been cached yet for this season."""
+    if season is None:
+        return {}
+    latest_key = None
+    latest_sort_key = None
+    for key in raw_bucket.list_keys(f"ncaambb/rankings/{season}/"):
+        match = _RANKINGS_CACHE_KEY_RE.match(key)
+        if not match:
+            continue
+        sort_key = (int(match.group(1)), int(match.group(2)))
+        if latest_sort_key is None or sort_key > latest_sort_key:
+            latest_sort_key, latest_key = sort_key, key
+    if latest_key is None:
+        return {}
+    return ap_poll_to_rank_by_team(raw_bucket.get_json(latest_key))
 
 
 def _real_postseason_matchups(storage: FeatureStorage, current_season: int | None, predicate) -> dict[frozenset, dict]:
@@ -542,7 +576,7 @@ def build_season_projection(storage: FeatureStorage, s3, predictions_table, raw_
     current_season = season_inputs["current_season"]
 
     simulation: dict[str, dict] = {}
-    current_rankings: dict[str, int] = {}
+    model_rankings: dict[str, int] = {}
     conference_brackets: list[dict] = []
     march_madness_bracket = None
 
@@ -568,9 +602,9 @@ def build_season_projection(storage: FeatureStorage, s3, predictions_table, raw_
                 logger.exception("Failed running the Monte Carlo season simulation -- standings will omit projected/probability columns this run")
 
             try:
-                current_rankings = _current_rankings(estimator, model_card, teams, season_inputs)
+                model_rankings = _model_rankings(estimator, model_card, teams, season_inputs)
             except Exception:
-                logger.exception("Failed to compute current_rank -- standings will omit it this run")
+                logger.exception("Failed to compute model_rank -- standings will omit it this run")
 
             try:
                 conference_brackets = _conference_bracket_payloads(storage, s3, predictions_table, season_inputs, current_season)
@@ -593,7 +627,8 @@ def build_season_projection(storage: FeatureStorage, s3, predictions_table, raw_
                 "conference": season_inputs["team_conference"].get(team_id),
                 "wins": season_inputs["wins"].get(team_id, 0),
                 "losses": season_inputs["losses"].get(team_id, 0),
-                "current_rank": current_rankings.get(team_id),
+                "current_rank": season_inputs["real_current_rank"].get(team_id),
+                "model_rank": model_rankings.get(team_id),
                 **simulation.get(team_id, {}),
             }
             for team_id in teams

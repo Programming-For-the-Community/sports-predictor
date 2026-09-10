@@ -140,7 +140,7 @@ class TestSeasonStandingsInputs:
         assert inputs["games_remaining"]["12"] == 2
 
 
-class TestCurrentRankings:
+class TestModelRankings:
     def test_ranks_teams_by_ascending_score_lower_is_better(self):
         season_inputs = {
             "wins": {"a": 5, "b": 5, "c": 5}, "losses": {"a": 0, "b": 0, "c": 0},
@@ -148,9 +148,34 @@ class TestCurrentRankings:
             "avg_points_scored": {}, "avg_points_allowed": {}, "win_streak": {}, "strength_of_schedule": {},
         }
         with patch.object(season_projection, "_batch_score_teams", return_value={"a": 2.0, "b": 0.5, "c": 1.0}):
-            rankings = season_projection._current_rankings(MagicMock(), _model_card(1), ["a", "b", "c"], season_inputs)
+            rankings = season_projection._model_rankings(MagicMock(), _model_card(1), ["a", "b", "c"], season_inputs)
 
         assert rankings == {"b": 1, "c": 2, "a": 3}
+
+
+class TestRealCurrentRanks:
+    def test_uses_the_most_recently_dated_ranked_event_per_team(self):
+        events = [
+            _completed_event("E1", 2025, "12", "24", 27, 20, event_date="2025-09-14"),
+            _completed_event("E2", 2025, "12", "36", 30, 10, event_date="2025-09-21"),
+        ]
+        events[0]["home_current_rank"] = 8
+        events[1]["home_current_rank"] = 5
+
+        assert season_projection._real_current_ranks(events) == {"12": 5}
+
+    def test_an_unranked_teams_events_never_carry_a_rank_field(self):
+        events = [_completed_event("E1", 2025, "12", "24", 27, 20)]
+
+        assert season_projection._real_current_ranks(events) == {}
+
+    def test_a_scheduled_event_can_carry_the_latest_known_rank(self):
+        completed = _completed_event("E1", 2025, "12", "24", 27, 20, event_date="2025-09-14")
+        completed["away_current_rank"] = 9
+        scheduled = _scheduled_event("E2", 2025, "2025-09-21", "24", "36")
+        scheduled["home_current_rank"] = 7
+
+        assert season_projection._real_current_ranks([completed, scheduled]) == {"24": 7}
 
 
 class TestScheduledSeasonProjection:
@@ -240,7 +265,7 @@ class TestScheduledSeasonProjection:
         }[status]
 
         simulated = {f"t{i}": {"projected_wins": 8.0, "conference_champion_probability": 0.1, "bowl_probability": 0.6, "playoff_probability": 0.2, "championship_probability": 0.01} for i in range(12)}
-        # _batch_score_teams is also what powers _current_rankings' own
+        # _batch_score_teams is also what powers _model_rankings' own
         # extra (non-simulated) scoring pass -- mocked directly rather
         # than routed through a real adapter/estimator, same reasoning
         # simulate_season itself is mocked here.
@@ -256,14 +281,40 @@ class TestScheduledSeasonProjection:
         assert body["standings"][0]["projected_wins"] == 8.0
         # t0 has the lowest (best) score -- rank 1.
         by_team = {row["team_id"]: row for row in body["standings"]}
-        assert by_team["t0"]["current_rank"] == 1
-        assert by_team["t11"]["current_rank"] == 12
+        assert by_team["t0"]["model_rank"] == 1
+        assert by_team["t11"]["model_rank"] == 12
 
-    def test_a_current_rankings_failure_does_not_lose_the_rest_of_the_run(self):
-        # Regression: current_rank is computed in its own try/except,
+    def test_current_rank_comes_from_the_real_ingested_rank_not_the_model(self):
+        events = [
+            _completed_event(f"E{i}", 2025, f"t{2*i}", f"t{2*i+1}", 27, 20, home_conference=f"C{i % 3}", away_conference=f"C{(i + 1) % 3}")
+            for i in range(6)
+        ]
+        events[0]["home_current_rank"] = 3
+        ncaafb_predict._storage = MagicMock()
+        ncaafb_predict._model_bucket = MagicMock()
+        ncaafb_predict._predictions_table = MagicMock()
+        ncaafb_predict._predictions_table.query.return_value = []
+        ncaafb_predict._storage.get_all_events.side_effect = lambda sport, status: {
+            "completed": events,
+            "scheduled": [],
+        }[status]
+
+        with patch.object(model_loader, "load_current_model", side_effect=model_loader.NoPromotedModelError("nope")):
+            ncaafb_predict.lambda_handler({"detail-type": "ScheduledSeasonProjection"}, None)
+
+        body = ncaafb_predict._model_bucket.put_json.call_args[0][1]
+        by_team = {row["team_id"]: row for row in body["standings"]}
+        assert by_team["t0"]["current_rank"] == 3
+        # No promoted model this run -- the model's own opinion is absent,
+        # independent of the real rank above.
+        assert by_team["t0"]["model_rank"] is None
+        assert by_team["t1"]["current_rank"] is None
+
+    def test_a_model_rankings_failure_does_not_lose_the_rest_of_the_run(self):
+        # Regression: model_rank is computed in its own try/except,
         # separate from simulate_season above it -- a bug here shouldn't
         # cost the run its already-working simulation output, and
-        # standings should still get written (just without current_rank)
+        # standings should still get written (just without model_rank)
         # rather than the whole invocation failing.
         ncaafb_predict._storage = MagicMock()
         ncaafb_predict._model_bucket = MagicMock()
@@ -277,10 +328,10 @@ class TestScheduledSeasonProjection:
 
         with patch.object(model_loader, "load_current_model", return_value=(MagicMock(), _model_card(1))), \
              patch.object(season_simulation, "simulate_season", return_value=simulated), \
-             patch.object(season_projection, "_current_rankings", side_effect=KeyError("boom")):
+             patch.object(season_projection, "_model_rankings", side_effect=KeyError("boom")):
             response = ncaafb_predict.lambda_handler({"detail-type": "ScheduledSeasonProjection"}, None)
 
         assert response == {"status": "ok"}
         body = ncaafb_predict._model_bucket.put_json.call_args[0][1]
         assert body["standings"][0]["projected_wins"] == 8.0
-        assert body["standings"][0]["current_rank"] is None
+        assert body["standings"][0]["model_rank"] is None

@@ -61,8 +61,12 @@ def _raw_bucket(team_conference: dict[str, str] | None, season: int = 2026):
     """A stand-in for the S3Manager instance season_projection.py reads
     schedule-sync's own conference-membership cache through. None means
     "cache object doesn't exist yet" (a brand-new season, or a transient
-    write failure)."""
+    write failure). list_keys defaults to empty -- no cached AP poll --
+    since get_json's own return_value is already claimed by the
+    conference-membership object above; tests exercising the real
+    current-rank path set list_keys/get_json up themselves."""
     bucket = MagicMock()
+    bucket.list_keys.return_value = []
     if team_conference is None:
         bucket.object_exists.return_value = False
     else:
@@ -325,7 +329,7 @@ class TestMarchMadnessBracketPayload:
         assert result is None
 
 
-class TestCurrentRankings:
+class TestModelRankings:
     def test_ranks_teams_by_ascending_score_lower_is_better(self):
         season_inputs = {
             "wins": {"a": 5, "b": 5, "c": 5}, "losses": {"a": 0, "b": 0, "c": 0},
@@ -333,9 +337,39 @@ class TestCurrentRankings:
             "avg_points_scored": {}, "avg_points_allowed": {}, "win_streak": {}, "strength_of_schedule": {},
         }
         with patch.object(season_projection, "_batch_score_teams", return_value={"a": 2.0, "b": 0.5, "c": 1.0}):
-            rankings = season_projection._current_rankings(MagicMock(), _model_card(1), ["a", "b", "c"], season_inputs)
+            rankings = season_projection._model_rankings(MagicMock(), _model_card(1), ["a", "b", "c"], season_inputs)
 
         assert rankings == {"b": 1, "c": 2, "a": 3}
+
+
+class TestLatestApPollRanks:
+    def test_no_season_returns_empty(self):
+        assert season_projection._latest_ap_poll_ranks(MagicMock(), None) == {}
+
+    def test_no_cached_poll_returns_empty(self):
+        bucket = MagicMock()
+        bucket.list_keys.return_value = []
+
+        assert season_projection._latest_ap_poll_ranks(bucket, 2026) == {}
+
+    def test_picks_the_highest_week_within_the_same_season_type(self):
+        bucket = MagicMock()
+        bucket.list_keys.return_value = ["ncaambb/rankings/2026/2/3.json", "ncaambb/rankings/2026/2/10.json"]
+        bucket.get_json.return_value = {"ranks": [{"team": {"$ref": ".../teams/12?lang=en"}, "current": 1}]}
+
+        result = season_projection._latest_ap_poll_ranks(bucket, 2026)
+
+        bucket.get_json.assert_called_once_with("ncaambb/rankings/2026/2/10.json")
+        assert result == {"12": 1}
+
+    def test_a_postseason_type_outranks_any_regular_season_week(self):
+        bucket = MagicMock()
+        bucket.list_keys.return_value = ["ncaambb/rankings/2026/2/18.json", "ncaambb/rankings/2026/3/1.json"]
+        bucket.get_json.return_value = {"ranks": []}
+
+        season_projection._latest_ap_poll_ranks(bucket, 2026)
+
+        bucket.get_json.assert_called_once_with("ncaambb/rankings/2026/3/1.json")
 
 
 class TestResolveMatchup:
@@ -410,6 +444,27 @@ class TestScheduledSeasonProjection:
         # Team outcomes only -- no player-prop leaderboard.
         assert "leaderboards" not in body
 
+    def test_current_rank_comes_from_the_cached_ap_poll_not_the_model(self):
+        self._rig([_completed_event("E1", 2026, "12", "24", 70, 60)], [])
+        ncaambb_predict._raw_bucket = _raw_bucket({"12": "ACC", "24": "ACC"})
+        ncaambb_predict._raw_bucket.list_keys.return_value = ["ncaambb/rankings/2026/2/5.json"]
+        ncaambb_predict._raw_bucket.get_json.side_effect = lambda key: {
+            "ncaambb/conference-membership/2026.json": {"season": 2026, "team_conference": {"12": "ACC", "24": "ACC"}},
+            "ncaambb/rankings/2026/2/5.json": {"ranks": [{"team": {"$ref": ".../teams/12?lang=en"}, "current": 4}]},
+        }[key]
+
+        with patch.object(model_loader, "load_current_model", side_effect=model_loader.NoPromotedModelError("nope")):
+            response = ncaambb_predict.lambda_handler({"detail-type": "ScheduledSeasonProjection"}, None)
+
+        assert response == {"status": "ok"}
+        body = ncaambb_predict._model_bucket.put_json.call_args[0][1]
+        by_team = {row["team_id"]: row for row in body["standings"]}
+        assert by_team["12"]["current_rank"] == 4
+        assert by_team["24"]["current_rank"] is None
+        # No promoted model this run -- the model's own opinion is absent,
+        # independent of the real rank above.
+        assert by_team["12"]["model_rank"] is None
+
     def test_no_tracked_teams_skips_simulation_but_still_writes_an_empty_projection(self):
         self._rig([], [])
         ncaambb_predict._raw_bucket = _raw_bucket(None)
@@ -473,14 +528,14 @@ class TestScheduledSeasonProjection:
         assert body["conference_brackets"] == [{"conference": "ACC", "bracket": {"rounds": [], "champion": "12"}}]
         assert body["march_madness_bracket"] == {"rounds": [], "champion": "12"}
 
-    def test_a_current_rankings_failure_does_not_lose_the_rest_of_the_run(self):
+    def test_a_model_rankings_failure_does_not_lose_the_rest_of_the_run(self):
         self._rig([_completed_event("E1", 2026, "12", "24", 70, 60)], [])
         ncaambb_predict._raw_bucket = _raw_bucket({"12": "ACC", "24": "ACC"})
         simulated = {"12": {"projected_wins": 20.0}, "24": {"projected_wins": 15.0}}
 
         with patch.object(model_loader, "load_current_model", return_value=(MagicMock(), _model_card(1))), \
              patch.object(season_simulation, "simulate_season", return_value=simulated), \
-             patch.object(season_projection, "_current_rankings", side_effect=KeyError("boom")), \
+             patch.object(season_projection, "_model_rankings", side_effect=KeyError("boom")), \
              patch.object(season_projection, "_conference_bracket_payloads", return_value=[]), \
              patch.object(season_projection, "_march_madness_bracket_payload", return_value=None):
             response = ncaambb_predict.lambda_handler({"detail-type": "ScheduledSeasonProjection"}, None)
@@ -488,4 +543,4 @@ class TestScheduledSeasonProjection:
         assert response == {"status": "ok"}
         body = ncaambb_predict._model_bucket.put_json.call_args[0][1]
         assert body["standings"][0]["projected_wins"] == 20.0
-        assert body["standings"][0]["current_rank"] is None
+        assert body["standings"][0]["model_rank"] is None

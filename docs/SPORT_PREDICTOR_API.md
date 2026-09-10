@@ -274,6 +274,7 @@ Same route, **different standings shape** -- reflects a 12-team CFP field instea
       "losses": 1,
       "ties": 0,
       "current_rank": 3,
+      "model_rank": 5,
       "projected_wins": 11.2,
       "projected_losses": 1.8,
       "conference_champion_probability": 0.44,
@@ -288,7 +289,7 @@ Same route, **different standings shape** -- reflects a 12-team CFP field instea
 }
 ```
 
-`current_rank` and every `*_probability` field are `null`/absent if no `national-ranking` model has been promoted yet (season simulation still runs off real win/loss records in that case, just without a ranking-informed CFP field score). `playoff_probability` here means "makes the 12-team CFP field" (auto-bid conference champions plus at-large teams ranked by the model), not NFL's division/wild-card structure.
+`current_rank` is CFBD's own real weekly poll rank, stamped onto a team's most recently ingested game -- `null`/absent for an unranked team. `model_rank` is the national-ranking model's own opinion of today's ranking, shown alongside `current_rank` for comparison (not a substitute for it) -- `null`/absent if no `national-ranking` model has been promoted yet. Every `*_probability` field is likewise `null`/absent with no promoted model (season simulation still runs off real win/loss records in that case, just without a ranking-informed CFP field score). `playoff_probability` here means "makes the 12-team CFP field" (auto-bid conference champions plus at-large teams ranked by the model), not NFL's division/wild-card structure.
 
 ### `GET /ncaafb/live-scores`
 
@@ -388,6 +389,7 @@ Recomputed **daily** (not weekly, like every other sport) -- NCAA MBB's much hig
       "wins": 24,
       "losses": 6,
       "current_rank": 8,
+      "model_rank": 11,
       "projected_wins": 26.1,
       "projected_losses": 6.9,
       "conference_tournament_champion_probability": 0.31,
@@ -422,7 +424,7 @@ Recomputed **daily** (not weekly, like every other sport) -- NCAA MBB's much hig
 }
 ```
 
-`conference_brackets` has one entry per conference with at least 2 tracked members, seeded by conference-only record + point differential (no real head-to-head/RPI tiebreakers, same honest simplification NCAAFB's own conference-champion picking accepts). Each conference bracket's champion becomes that conference's automatic March Madness bid -- the one place the two brackets connect, so an auto-bid updates from "the model's pick" to "the real winner" the moment that conference's tournament finishes. `march_madness_bracket` is the 68-team field (one auto-bid per conference, at-large teams filled by the national-ranking model) flattened into one bracket -- First Four winners splice into their Round-of-64 slots (the same skip-connector UI pattern as NBA's Play-In), then 4 S-curve-seeded 16-team regions feed a neutral-site Final Four and Championship. Both bracket types are real-vs-projected reconciled the same 3-state way as every other bracket in this project. `standings`/`conference_brackets`/`march_madness_bracket` all omit their probability/bracket data (rather than erroring) on a day the conference-membership cache hasn't been refreshed yet or no `national-ranking` model is promoted -- see `NCAAMBB_FEATURE_ENGINEERING.md`'s "Conference membership" section.
+`conference_brackets` has one entry per conference with at least 2 tracked members, seeded by conference-only record + point differential (no real head-to-head/RPI tiebreakers, same honest simplification NCAAFB's own conference-champion picking accepts). Each conference bracket's champion becomes that conference's automatic March Madness bid -- the one place the two brackets connect, so an auto-bid updates from "the model's pick" to "the real winner" the moment that conference's tournament finishes. `march_madness_bracket` is the 68-team field (one auto-bid per conference, at-large teams filled by the national-ranking model) flattened into one bracket -- First Four winners splice into their Round-of-64 slots (the same skip-connector UI pattern as NBA's Play-In), then 4 S-curve-seeded 16-team regions feed a neutral-site Final Four and Championship. Both bracket types are real-vs-projected reconciled the same 3-state way as every other bracket in this project. `standings`/`conference_brackets`/`march_madness_bracket` all omit their probability/bracket data (rather than erroring) on a day the conference-membership cache hasn't been refreshed yet or no `national-ranking` model is promoted -- see `NCAAMBB_FEATURE_ENGINEERING.md`'s "Conference membership" section. `current_rank` is the real AP Top 25 poll rank (from the most recently ingest-cached weekly poll); `model_rank` is the national-ranking model's own opinion of today's ranking, shown alongside it for comparison, not a substitute for it -- both are `null`/absent for an unranked team, and `model_rank` is additionally `null`/absent with no promoted model.
 
 ### `GET /ncaambb/live-scores`
 

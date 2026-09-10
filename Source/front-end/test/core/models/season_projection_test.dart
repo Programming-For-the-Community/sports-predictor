@@ -67,6 +67,16 @@ void main() {
     expect(standing.championshipProbability, 0.0);
   });
 
+  test('current_rank (real) and model_rank (the ranking model) parse as separate fields', () {
+    final standing = TeamStanding.fromJson({
+      'team_id': '333', 'conference': 'SEC', 'wins': 8, 'losses': 1,
+      'current_rank': 3, 'model_rank': 5,
+    });
+
+    expect(standing.currentRank, 3);
+    expect(standing.modelRank, 5);
+  });
+
   test('conference_champion_probability (NCAAFB) is read the same as division_winner_probability (NFL)', () {
     final standing = TeamStanding.fromJson({
       'team_id': '333', 'conference': 'SEC', 'wins': 8, 'losses': 1,

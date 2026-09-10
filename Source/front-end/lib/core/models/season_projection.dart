@@ -14,6 +14,7 @@ class TeamStanding {
     this.playInProbability,
     this.abbreviation,
     this.currentRank,
+    this.modelRank,
     this.color,
   });
 
@@ -21,10 +22,14 @@ class TeamStanding {
   // Off the team entity; null for an unseeded entity.
   final String? abbreviation;
   final String? color;
-  // NCAAFB only -- today's actual (not simulated) National Ranking
-  // position, 1-based. Null for NFL and for NCAAFB before the ranking
-  // model is promoted or fewer than CFP_FIELD_SIZE teams are tracked.
+  // NCAAFB/NCAA MBB only -- the real current national ranking (CFBD's
+  // weekly rankings for NCAAFB, the AP Top 25 poll for NCAA MBB), 1-based.
+  // Null for NFL/NBA and for an unranked team.
   final int? currentRank;
+  // NCAAFB/NCAA MBB only -- the national-ranking model's own opinion of
+  // today's ranking, shown alongside currentRank for comparison. Null for
+  // NFL/NBA and for NCAAFB/NCAA MBB before the ranking model is promoted.
+  final int? modelRank;
   // "AFC East"/"NFC West"/etc for NFL, or the team's conference for every
   // other sport (NCAAFB has no division concept). Used to group standings
   // (see season_page.dart's _groupByDivision).
@@ -80,6 +85,7 @@ class TeamStanding {
         playInProbability: (json['play_in_probability'] as num?)?.toDouble(),
         abbreviation: json['abbreviation'] as String?,
         currentRank: json['current_rank'] as int?,
+        modelRank: json['model_rank'] as int?,
         color: json['color'] as String?,
       );
 }

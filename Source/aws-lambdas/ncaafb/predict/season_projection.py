@@ -127,6 +127,7 @@ def _season_standings_inputs(storage: FeatureStorage) -> dict:
         "remaining_games": remaining_games,
         "team_next_event": team_next_event,
         "team_last_completed_date": team_last_completed_date,
+        "real_current_rank": _real_current_ranks(completed + scheduled),
         "games_remaining": Counter(team_id for pair in remaining_games for team_id in pair),
         "avg_points_scored": avg_points_scored,
         "avg_points_allowed": avg_points_allowed,
@@ -178,8 +179,8 @@ def _current_model_scores(estimator, model_card: dict, teams: list[str], season_
     the SAME model/feature row simulate_season's own score_teams callable
     uses to pick each simulated season's CFP field, scored once against
     real current wins/losses/ratings instead of a simulated future. Lower
-    is better (see _batch_score_teams). Used both by _current_rankings
-    (below, for the standings table's current_rank column) and by
+    is better (see _batch_score_teams). Used both by _model_rankings
+    (below, for the standings table's model_rank column) and by
     _bracket_payload (for real bracket seeding)."""
     return _batch_score_teams(
         estimator, model_card, teams, season_inputs,
@@ -187,14 +188,37 @@ def _current_model_scores(estimator, model_card: dict, teams: list[str], season_
     )
 
 
-def _current_rankings(estimator, model_card: dict, teams: list[str], season_inputs: dict) -> dict[str, int]:
-    """Today's actual National Ranking per team -- rank is just each
-    team's 1-based position once sorted by _current_model_scores, not
-    limited to the top 25, standings itself displays whatever's
-    meaningful per row."""
+def _model_rankings(estimator, model_card: dict, teams: list[str], season_inputs: dict) -> dict[str, int]:
+    """The national-ranking model's own opinion of today's ranking --
+    rank is each team's 1-based position once sorted by
+    _current_model_scores, not limited to the top 25, standings itself
+    displays whatever's meaningful per row. Shown alongside the real
+    polled rank (_real_current_ranks) for comparison, not in place of
+    it."""
     scores = _current_model_scores(estimator, model_card, teams, season_inputs)
     ranked = sorted(teams, key=lambda team_id: scores[team_id])
     return {team_id: rank for rank, team_id in enumerate(ranked, start=1)}
+
+
+def _real_current_ranks(events: list[dict]) -> dict[str, int]:
+    """Each team's real current national ranking -- CFBD's own weekly
+    poll, stamped onto a game's home_current_rank/away_current_rank at
+    ingest time (see ingest/enrichment.py), not computed here. The most
+    recently dated event carrying a rank wins per team; a team with no
+    ranked game this season is simply absent (unranked, not an error)."""
+    latest: dict[str, tuple[str, int]] = {}
+    for event in events:
+        home_away = _home_and_away(event)
+        if home_away is None:
+            continue
+        home_id, away_id = home_away
+        event_date = event.get("event_date", "")
+        for team_id, rank in ((home_id, event.get("home_current_rank")), (away_id, event.get("away_current_rank"))):
+            if rank is None:
+                continue
+            if team_id not in latest or event_date > latest[team_id][0]:
+                latest[team_id] = (event_date, rank)
+    return {team_id: rank for team_id, (_, rank) in latest.items()}
 
 
 def _real_postseason_matchups(storage: FeatureStorage, current_season: int | None) -> dict[frozenset, dict]:
@@ -386,7 +410,7 @@ def build_season_projection(storage: FeatureStorage, s3, predictions_table) -> d
     teams = list(season_inputs["team_conference"])
 
     simulation: dict[str, dict] = {}
-    current_rankings: dict[str, int] = {}
+    model_rankings: dict[str, int] = {}
     bracket = None
     if len(teams) >= season_simulation.CFP_FIELD_SIZE:
         try:
@@ -406,9 +430,9 @@ def build_season_projection(storage: FeatureStorage, s3, predictions_table) -> d
             # Separate try/except from simulate_season above -- a bug here
             # shouldn't cost the whole run its already-computed simulation.
             try:
-                current_rankings = _current_rankings(estimator, model_card, teams, season_inputs)
+                model_rankings = _model_rankings(estimator, model_card, teams, season_inputs)
             except Exception:
-                logger.exception("Failed to compute current_rank for %s -- standings will omit it this run", SPORT)
+                logger.exception("Failed to compute model_rank for %s -- standings will omit it this run", SPORT)
 
             try:
                 bracket = _bracket_payload(storage, s3, predictions_table, season_inputs, estimator, model_card, teams, simulation)
@@ -423,7 +447,8 @@ def build_season_projection(storage: FeatureStorage, s3, predictions_table) -> d
                 "wins": season_inputs["wins"].get(team_id, 0),
                 "losses": season_inputs["losses"].get(team_id, 0),
                 "ties": season_inputs["ties"].get(team_id, 0),
-                "current_rank": current_rankings.get(team_id),
+                "current_rank": season_inputs["real_current_rank"].get(team_id),
+                "model_rank": model_rankings.get(team_id),
                 **simulation.get(team_id, {}),
             }
             for team_id in teams

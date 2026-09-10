@@ -252,6 +252,7 @@ class _StandingsColumn {
 // _standingsColumns below.
 abstract final class _StandingsLabels {
   static const rank = 'RANK';
+  static const modelRank = 'MDL RANK'; // The ranking model's own opinion, shown alongside the real RANK.
   static const team = 'TEAM';
   static const proj = 'PROJ';
   static const rec = 'REC';
@@ -272,8 +273,9 @@ List<_StandingsColumn> _standingsColumns(String sport) {
   final isNba = sport == SportIds.nba;
   final isNcaambb = sport == SportIds.ncaambb;
   return [
-    // NCAAFB/NCAA MBB only -- both have a live national-ranking model.
-    if (isNcaafb || isNcaambb)
+    // NCAAFB/NCAA MBB only -- both have a live national-ranking model,
+    // shown alongside the real current rank for comparison.
+    if (isNcaafb || isNcaambb) ...[
       _StandingsColumn(_StandingsLabels.rank, 2, (context, sport, team) {
         final rank = team.currentRank;
         return Text(
@@ -285,6 +287,18 @@ List<_StandingsColumn> _standingsColumns(String sport) {
           overflow: TextOverflow.ellipsis,
         );
       }),
+      _StandingsColumn(_StandingsLabels.modelRank, 2, (context, sport, team) {
+        final rank = team.modelRank;
+        return Text(
+          rank != null ? '#$rank' : '--',
+          style: AppTextStyles.metricValue(color: AppColors.cyan),
+          textAlign: TextAlign.center,
+          maxLines: 1,
+          softWrap: false,
+          overflow: TextOverflow.ellipsis,
+        );
+      }),
+    ],
     _StandingsColumn(_StandingsLabels.team, 3, (context, sport, team) {
       final info = teamDisplayFor(sport, team.teamId, team.abbreviation, apiColor: team.color);
       return Row(
