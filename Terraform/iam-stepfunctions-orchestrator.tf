@@ -55,6 +55,8 @@ data "aws_iam_policy_document" "stepfunctions_orchestrator_permissions" {
     resources = [aws_lambda_function.ec2_training_reaper.arn]
   }
 
+  # Covers backfill's own task definitions too (sfn-backfill-orchestrator.tf)
+  # -- name pattern is the same ${var.project}-* family for every sport.
   statement {
     sid       = "RunTrainingTasks"
     actions   = ["ecs:RunTask", "ecs:StopTask", "ecs:DescribeTasks"]
@@ -65,6 +67,24 @@ data "aws_iam_policy_document" "stepfunctions_orchestrator_permissions" {
     sid       = "PassEcsPipelineRole"
     actions   = ["iam:PassRole"]
     resources = [aws_iam_role.ecs_pipeline.arn]
+  }
+
+  # sfn-backfill-orchestrator.tf's RunBackfillTask -- unlike feature
+  # engineering/training, each sport's backfill task uses its own
+  # dedicated execution/task role (iam-<sport>-backfill.tf) rather than
+  # the shared ecs_pipeline role above, so each needs its own PassRole
+  # grant here.
+  statement {
+    sid     = "PassBackfillRoles"
+    actions = ["iam:PassRole"]
+    resources = [
+      aws_iam_role.nfl_backfill.arn,
+      aws_iam_role.ncaafb_backfill.arn,
+      aws_iam_role.nba_backfill.arn,
+      aws_iam_role.ncaambb_backfill.arn,
+      aws_iam_role.pga_backfill.arn,
+      aws_iam_role.f1_backfill.arn,
+    ]
   }
 
   # The ecs:RunTask.sync integration (used so a Map iteration waits for

@@ -9,10 +9,13 @@ resource "aws_cloudwatch_log_group" "ncaafb_backfill" {
   })
 }
 
-# Standalone Fargate task (launched via `aws ecs run-task`, not a Service).
-# Pass --propagate-tags TASK_DEFINITION on that command or the running
-# task won't carry these tags for cost allocation -- RunTask doesn't
-# propagate them by default. Runs in a public subnet
+# Standalone Fargate task -- no ECS Service wraps it, runs to completion
+# and stops. Launch it via sfn-backfill-orchestrator.tf's state machine,
+# not a raw `aws ecs run-task`: RunTask doesn't propagate a task
+# definition's own tags to the running task unless the caller passes
+# --propagate-tags TASK_DEFINITION, and that's easy to forget by hand (see
+# that state machine's own comment for the real cost this caused). Runs in
+# a public subnet
 # (fargate_internet_egress) to reach CFBD's public API.
 #
 # Uses the dedicated CFBD_API_KEY_SECRET_FIELD "ncaa_fb_backfill_key",

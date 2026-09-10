@@ -138,6 +138,21 @@ resource "aws_autoscaling_group" "ec2_training_ondemand" {
   }
 }
 
+# managed_scaling below (on both capacity providers) makes AWS Application
+# Auto Scaling create a target-tracking scaling policy behind the scenes,
+# which in turn auto-creates 2 CloudWatch alarms per capacity provider
+# (TargetTracking-<capacity-provider-name>-Alarm{High,Low}-<random-uuid>).
+# There's no Terraform resource for these at all -- they're a side effect
+# of managed_scaling, and their name's random suffix means there's no
+# stable ARN to reference declaratively even via a separate resource, so
+# neither aws_ecs_capacity_provider resource below can carry a tags block
+# that reaches them. scripts/tag_capacity_provider_alarms.py (run via the
+# local-exec provisioners right below, once per capacity provider) finds
+# them by name prefix instead and tags them with the same common_tags
+# every other resource in this file gets -- so a fresh `terraform apply`
+# keeps them tagged with no manual step, including after either capacity
+# provider is replaced and gets a new pair of alarms with fresh random
+# suffixes. Found untagged in a CloudWatch tag audit (2026-09-09).
 resource "aws_ecs_capacity_provider" "ec2_training_spot" {
   name = "${var.project}-ec2-training-spot"
 
@@ -178,4 +193,30 @@ resource "aws_ecs_capacity_provider" "ec2_training_ondemand" {
     Sport     = "shared"
     Component = "training"
   })
+}
+
+# Tags the 2 auto-created scaling alarms for each capacity provider above
+# (see its own comment) -- runs scripts/tag_capacity_provider_alarms.py as
+# part of `terraform apply` itself, not a separate manual step.
+# triggers_replace ties each to its own capacity provider's id, so a
+# replacement (which regenerates both alarms with fresh random-suffixed
+# names) re-runs this and re-tags the new pair; an in-place update that
+# leaves the capacity provider's id unchanged does not, since the existing
+# alarms and their tags are untouched by that kind of update anyway.
+resource "terraform_data" "tag_ec2_training_scaling_alarms" {
+  for_each = {
+    ec2_training_spot     = aws_ecs_capacity_provider.ec2_training_spot
+    ec2_training_ondemand = aws_ecs_capacity_provider.ec2_training_ondemand
+  }
+
+  triggers_replace = [each.value.id]
+
+  provisioner "local-exec" {
+    command = join(" ", [
+      "python3", "${path.module}/scripts/tag_capacity_provider_alarms.py",
+      each.value.name, var.region,
+      "Project=${var.project}", "Owner=${var.owner}", "Environment=${var.environment}",
+      "Sport=shared", "Component=training",
+    ])
+  }
 }
