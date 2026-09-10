@@ -32,6 +32,22 @@ bool _fieldEntryIsLive(PgaLiveEventState state) => switch (state) {
           : state.participants.values.any((p) => p.status == PgaParticipantStatus.inProgress),
     };
 
+/// Invalidates whichever live-scores provider family `sport` actually
+/// uses -- the same per-shape branch SportCard.build reads from below,
+/// kept in one place so a poller (home_page.dart) can force a refetch
+/// without re-deriving that branch itself. No-op for an inactive sport
+/// (no live-scores route to call at all, same guard build uses).
+void invalidateLiveScoresFor(WidgetRef ref, SportConfig sport) {
+  if (!sport.active) return;
+  if (sport.eventShape == EventShape.headToHead) {
+    ref.invalidate(liveScoresProvider(sport.id));
+  } else if (sport.id == SportIds.f1) {
+    ref.invalidate(f1LiveScoresProvider(sport.id));
+  } else {
+    ref.invalidate(pgaLiveScoresProvider(sport.id));
+  }
+}
+
 /// design/FRONTEND_STYLE.md's "Sport card" component. Inactive (not yet
 /// live on the backend) sport cards are non-interactive with a muted
 /// "VIEW-ONLY"/"SOON" treatment. An active sport's own status badge/dot

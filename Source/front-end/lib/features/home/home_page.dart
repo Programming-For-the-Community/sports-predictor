@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -10,11 +12,48 @@ import '../../core/widgets/page_glow.dart';
 import '../../core/widgets/responsive.dart';
 import '../../core/widgets/sport_card.dart';
 
-class HomePage extends ConsumerWidget {
+class HomePage extends ConsumerStatefulWidget {
   const HomePage({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<HomePage> createState() => _HomePageState();
+}
+
+class _HomePageState extends ConsumerState<HomePage> with WidgetsBindingObserver {
+  Timer? _liveScoresTimer;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    _liveScoresTimer = Timer.periodic(const Duration(seconds: 30), (_) => _refreshLiveScores());
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _liveScoresTimer?.cancel();
+    super.dispose();
+  }
+
+  // Same "a backgrounded tab's own timers get throttled/paused, with
+  // nothing catching back up on return" reasoning event_list_page.dart's
+  // own didChangeAppLifecycleState carries in full -- every sport card's
+  // LIVE dot is watched here for as long as this page stays open, with no
+  // per-sport Events page ever mounted to run that page's own poll.
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) _refreshLiveScores();
+  }
+
+  void _refreshLiveScores() {
+    for (final sport in kSports) {
+      invalidateLiveScoresFor(ref, sport);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: AppColors.bg,
       body: Stack(
