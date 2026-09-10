@@ -44,6 +44,23 @@ final _season = SeasonProjection(
   },
 );
 
+// NCAAFB standings with both rank fields populated (double digits, the
+// widest the "real -> model" cell renders) -- _season above is NFL-only
+// and never exercises the RANK column at all.
+final _ncaafbRankSeason = SeasonProjection(
+  sport: 'ncaafb',
+  season: 2026,
+  standings: const [
+    TeamStanding(
+      teamId: '333', division: 'SEC', wins: 9, losses: 1, ties: 0,
+      projectedWins: 11.2, projectedLosses: 1.8,
+      divisionWinnerProbability: 0.44, playoffProbability: 0.61, championshipProbability: 0.09,
+      currentRank: 12, modelRank: 25,
+    ),
+  ],
+  leaderboards: null,
+);
+
 // Full 2-conference Cup knockout bracket (Semifinals -> Conference Final
 // -> Championship), same shared _BracketSection/_BracketTree code path
 // the main Playoff Bracket test below exercises.
@@ -253,6 +270,19 @@ void main() {
         ProviderScope(
           overrides: [seasonProjectionProvider.overrideWith((ref, sport) async => _season)],
           child: const MaterialApp(home: Scaffold(body: SeasonPage(sportId: 'nfl'))),
+        ),
+      );
+
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('ncaafb standings tab renders the RANK column with no overflow at ${width}px wide', (tester) async {
+      await pumpAtWidth(
+        tester,
+        width,
+        ProviderScope(
+          overrides: [seasonProjectionProvider.overrideWith((ref, sport) async => _ncaafbRankSeason)],
+          child: const MaterialApp(home: Scaffold(body: SeasonPage(sportId: 'ncaafb'))),
         ),
       );
 

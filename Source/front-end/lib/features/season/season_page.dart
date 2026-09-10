@@ -252,7 +252,6 @@ class _StandingsColumn {
 // _standingsColumns below.
 abstract final class _StandingsLabels {
   static const rank = 'RANK';
-  static const modelRank = 'MDL RANK'; // The ranking model's own opinion, shown alongside the real RANK.
   static const team = 'TEAM';
   static const proj = 'PROJ';
   static const rec = 'REC';
@@ -273,32 +272,30 @@ List<_StandingsColumn> _standingsColumns(String sport) {
   final isNba = sport == SportIds.nba;
   final isNcaambb = sport == SportIds.ncaambb;
   return [
-    // NCAAFB/NCAA MBB only -- both have a live national-ranking model,
-    // shown alongside the real current rank for comparison.
-    if (isNcaafb || isNcaambb) ...[
-      _StandingsColumn(_StandingsLabels.rank, 2, (context, sport, team) {
-        final rank = team.currentRank;
-        return Text(
-          rank != null ? '#$rank' : '--',
-          style: AppTextStyles.metricValue(color: AppColors.inkMute),
+    // NCAAFB/NCAA MBB only -- one column carries both the real rank and
+    // the ranking model's own opinion (real -> model, same arrow
+    // convention _LeaderboardCard uses for current -> projected), rather
+    // than spending a whole extra column on the comparison.
+    if (isNcaafb || isNcaambb)
+      _StandingsColumn(_StandingsLabels.rank, 3, (context, sport, team) {
+        final real = team.currentRank;
+        final model = team.modelRank;
+        return RichText(
           textAlign: TextAlign.center,
           maxLines: 1,
           softWrap: false,
           overflow: TextOverflow.ellipsis,
+          text: TextSpan(
+            children: [
+              TextSpan(text: real != null ? '#$real' : '--', style: AppTextStyles.metricValue(color: AppColors.inkMute)),
+              if (model != null) ...[
+                TextSpan(text: ' → ', style: AppTextStyles.microLabel(color: AppColors.inkMute)),
+                TextSpan(text: '#$model', style: AppTextStyles.metricValue(color: AppColors.cyan)),
+              ],
+            ],
+          ),
         );
       }),
-      _StandingsColumn(_StandingsLabels.modelRank, 2, (context, sport, team) {
-        final rank = team.modelRank;
-        return Text(
-          rank != null ? '#$rank' : '--',
-          style: AppTextStyles.metricValue(color: AppColors.cyan),
-          textAlign: TextAlign.center,
-          maxLines: 1,
-          softWrap: false,
-          overflow: TextOverflow.ellipsis,
-        );
-      }),
-    ],
     _StandingsColumn(_StandingsLabels.team, 3, (context, sport, team) {
       final info = teamDisplayFor(sport, team.teamId, team.abbreviation, apiColor: team.color);
       return Row(
