@@ -1,12 +1,10 @@
-# NCAAFB normalize Lambda. Triggered by S3 PutObject events on the raw data
-# lake, filtered to the ncaafb/ prefix so only NCAAFB raw files invoke it.
-# Reads the raw CFBD JSON written by ncaafb-ingest from S3, maps it to the
-# project schema, and upserts entities/events/player_game_stats/
-# team_game_stats. No CFBD calls of its own, so it needs no secretsmanager
-# grant even though it shares a role with ingest, which does.
+# NCAAFB normalize Lambda. Triggered by S3 PutObject on the ncaafb/ prefix.
+# Reads raw CFBD JSON from S3 and upserts entities/events/player_game_stats/
+# team_game_stats. No CFBD calls of its own, so no secretsmanager grant
+# despite sharing a role with ingest.
 #
-# Code is deployed by the ncaafb_data_pipeline GitHub Actions workflow,
-# not by Terraform, using a placeholder ZIP with lifecycle.ignore_changes.
+# Deployed by the ncaafb_data_pipeline GitHub Actions workflow, not
+# Terraform (placeholder ZIP, lifecycle.ignore_changes).
 
 resource "aws_cloudwatch_log_group" "ncaafb_normalize" {
   name              = "/aws/lambda/${var.project}-ncaafb-normalize"
@@ -33,18 +31,8 @@ resource "aws_lambda_function" "ncaafb_normalize" {
   role          = aws_iam_role.lambda_pipeline.arn
   runtime       = "python3.12"
   handler       = "handler.lambda_handler"
-  # Sized for CFBD's full-season roster write, parallelized across
-  # ncaafb/normalize/handler.py's WRITE_WORKERS; 1024MB gives more network
-  # throughput for those concurrent connections. 900 (Lambda's max) not a
-  # smaller number: confirmed live 2026-09-06 hitting a hard 300s timeout
-  # (Status: timeout, no exception, no log line -- CloudWatch's Errors
-  # metric was the only trace) mid-roster-refresh -- the real payload is
-  # ~30.6k raw rows now (double the ~16k this was originally sized for),
-  # and _clear_departed_players' own team-index GSI scan across every
-  # team's full historical roster (added after this timeout was chosen)
-  # adds a second, comparably expensive pass on top of the write phase. A
-  # since-successful retry still finished in 293.75s -- 6s of margin on a
-  # 300s budget for a once-a-month batch job is not a safety margin.
+  # 900 (Lambda's max) -- full roster write (~30k rows) plus
+  # _clear_departed_players' team-index GSI scan per team.
   timeout     = 900
   memory_size = 1024
 

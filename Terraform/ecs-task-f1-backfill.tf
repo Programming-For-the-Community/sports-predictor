@@ -1,5 +1,3 @@
-# 30-day retention so logs don't grow unbounded; a backfill run's logs are
-# only useful for debugging a recent failure, not as a long-term record.
 resource "aws_cloudwatch_log_group" "f1_backfill" {
   name              = "/ecs/${var.project}-f1-backfill"
   retention_in_days = 30
@@ -10,31 +8,18 @@ resource "aws_cloudwatch_log_group" "f1_backfill" {
   })
 }
 
-# Standalone Fargate task -- no ECS Service wraps it, runs to completion
-# and stops, no always-on cost. Launch it via sfn-backfill-orchestrator.tf's
-# state machine, not a raw `aws ecs run-task`: RunTask doesn't propagate a
-# task definition's own tags to the running task unless the caller passes
-# --propagate-tags TASK_DEFINITION, and that's easy to forget by hand (see
-# that state machine's own comment for the real cost this caused). Runs in
-# a public subnet with a public IP to reach Jolpica-F1's public API.
+# Launch via sfn-backfill-orchestrator.tf, not `aws ecs run-task` directly.
+# Public subnet/IP to reach Jolpica-F1's public API.
 #
-# PLAYER_GAME_STATS_TABLE_NAME/TEAM_GAME_STATS_TABLE_NAME ARE still set
-# below even though F1's PipelineStorage usage never touches either table
-# (see iam-f1-backfill.tf's own header comment, which is why neither table
-# gets an IAM grant here) -- PipelineStorage.__init__ requires both env
-# vars unconditionally just to construct the (unused) DynamoDBTable
-# wrappers, same reason ecs-task-f1-feature-engineering.tf sets all four
-# FeatureStorage table vars regardless of which ones build_dataset.py
-# actually reads.
+# PLAYER_GAME_STATS_TABLE_NAME/TEAM_GAME_STATS_TABLE_NAME are set even
+# though F1 never uses either table -- PipelineStorage.__init__ requires
+# both env vars unconditionally.
 #
-# START_SEASON defaults to 2010 (not just "the usual ~10 years") --
-# library/features/f1_points.py only implements F1's CURRENT points
-# table, which took effect in 2010; see data-backfills/f1/backfill.py's
-# own module docstring for the full reasoning. REQUEST_DELAY_SECONDS
-# defaults to Jolpica's own stricter sustained-rate bound (7.2s/request,
-# library/http/f1.py's DEFAULT_MIN_INTERVAL_SECONDS) -- override these
-# per-run via ECS "Run Task" -> Container overrides -> Environment
-# variables.
+# START_SEASON defaults to 2010 -- library/features/f1_points.py only
+# implements the points table that took effect that year. REQUEST_DELAY_SECONDS
+# defaults to Jolpica's sustained-rate bound (library/http/f1.py's
+# DEFAULT_MIN_INTERVAL_SECONDS). Override via the orchestrator's
+# container_overrides.
 resource "aws_ecs_task_definition" "f1_backfill" {
   family                   = "${var.project}-f1-backfill"
   requires_compatibilities = ["FARGATE"]

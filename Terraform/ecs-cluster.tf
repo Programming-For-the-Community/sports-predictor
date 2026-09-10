@@ -6,8 +6,12 @@ resource "aws_ecs_cluster" "main" {
   name = "${var.project}-cluster"
 
   setting {
+    # "enabled", not "enhanced" -- enhanced mints per-task-ID-dimensioned
+    # metrics for every task run, which never get reused and drive up
+    # custom-metric cost. "enabled" keeps cluster/service-level
+    # utilization only (cloudwatch-dashboard-ecs-fargate.tf).
     name  = "containerInsights"
-    value = "enhanced" # task/container-level CPU/memory/network/storage metrics in CloudWatch
+    value = "enabled"
   }
 
   tags = merge(local.common_tags, {

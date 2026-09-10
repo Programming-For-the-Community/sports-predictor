@@ -1,5 +1,3 @@
-# 30-day retention so logs don't grow unbounded; a backfill run's logs are
-# only useful for debugging a recent failure, not as a long-term record.
 resource "aws_cloudwatch_log_group" "ncaambb_backfill" {
   name              = "/ecs/${var.project}-ncaambb-backfill"
   retention_in_days = 30
@@ -10,23 +8,14 @@ resource "aws_cloudwatch_log_group" "ncaambb_backfill" {
   })
 }
 
-# Standalone Fargate task -- no ECS Service wraps it, runs to completion
-# and stops, no always-on cost. Launch it via sfn-backfill-orchestrator.tf's
-# state machine, not a raw `aws ecs run-task`: RunTask doesn't propagate a
-# task definition's own tags to the running task unless the caller passes
-# --propagate-tags TASK_DEFINITION, and that's easy to forget by hand (see
-# that state machine's own comment for the real cost this caused). Runs in
-# a public subnet with a public IP to reach ESPN's public API.
+# Launch via sfn-backfill-orchestrator.tf, not `aws ecs run-task` directly.
+# Public subnet/IP to reach ESPN's public API.
 #
-# 2048 CPU / 4096 memory -- double NBA's own 1024/2048. D1's ~362 teams
-# and up to ~150-155 games on a single date give backfill.py's own
-# ThreadPoolExecutor concurrency (both the season-batch level and the
-# per-date event level -- see backfill.py's own VOLUME docstring section)
-# real, simultaneous JSON parsing/normalization work to do.
+# 2048 CPU / 4096 memory -- double NBA's, for D1's ~362 teams / ~150-155
+# games per date (backfill.py's ThreadPoolExecutor concurrency).
 #
 # START_SEASON/END_SEASON/BATCH_SIZE/REQUEST_DELAY_SECONDS default to a
-# full historical run here; override them per-run via ECS "Run Task" ->
-# Container overrides -> Environment variables.
+# full historical run; override via the orchestrator's container_overrides.
 resource "aws_ecs_task_definition" "ncaambb_backfill" {
   family                   = "${var.project}-ncaambb-backfill"
   requires_compatibilities = ["FARGATE"]
@@ -50,10 +39,6 @@ resource "aws_ecs_task_definition" "ncaambb_backfill" {
         { name = "AWS_REGION", value = var.region },
         { name = "ESPN_API_ROOT_URL", value = var.espn_api_root_url },
         { name = "ESPN_USER_AGENT", value = var.espn_user_agent },
-        # library/http/ncaambb_core.py's own env var, read directly (not
-        # via EspnBaseClient) -- see that module's docstring for why it's
-        # not var.espn_core_api_root_url (that variable's default is
-        # hardcoded to NFL's league path).
         { name = "NCAAMBB_ESPN_CORE_API_ROOT_URL", value = var.ncaambb_espn_core_api_root_url },
         { name = "START_SEASON", value = "2016" },
         { name = "END_SEASON", value = "2026" },

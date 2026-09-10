@@ -1,5 +1,3 @@
-# 30-day retention so logs don't grow unbounded; a backfill run's logs are
-# only useful for debugging a recent failure, not as a long-term record.
 resource "aws_cloudwatch_log_group" "nfl_backfill" {
   name              = "/ecs/${var.project}-nfl-backfill"
   retention_in_days = 30
@@ -10,19 +8,11 @@ resource "aws_cloudwatch_log_group" "nfl_backfill" {
   })
 }
 
-# Standalone Fargate task -- no ECS Service wraps it, runs to completion
-# and stops, no always-on cost. Launch it via sfn-backfill-orchestrator.tf's
-# state machine, not a raw `aws ecs run-task`: RunTask doesn't propagate a
-# task definition's own tags to the running task unless the caller passes
-# --propagate-tags TASK_DEFINITION, and that's easy to forget by hand (see
-# that state machine's own comment for the real cost this caused). Runs in
-# a public subnet with a public IP rather than a private subnet + NAT
-# Gateway to reach ESPN's public API.
+# Launch via sfn-backfill-orchestrator.tf, not `aws ecs run-task` directly.
+# Public subnet/IP to reach ESPN's public API.
 #
 # START_SEASON/END_SEASON/BATCH_SIZE/REQUEST_DELAY_SECONDS default to a
-# full historical run here; override them per-run via ECS "Run Task" ->
-# Container overrides -> Environment variables to backfill a narrower
-# range without touching this definition.
+# full historical run; override via the orchestrator's container_overrides.
 resource "aws_ecs_task_definition" "nfl_backfill" {
   family                   = "${var.project}-nfl-backfill"
   requires_compatibilities = ["FARGATE"]

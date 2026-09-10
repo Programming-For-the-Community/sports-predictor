@@ -1,5 +1,3 @@
-# 30-day retention so logs don't grow unbounded; a backfill run's logs are
-# only useful for debugging a recent failure, not as a long-term record.
 resource "aws_cloudwatch_log_group" "pga_backfill" {
   name              = "/ecs/${var.project}-pga-backfill"
   retention_in_days = 30
@@ -10,23 +8,15 @@ resource "aws_cloudwatch_log_group" "pga_backfill" {
   })
 }
 
-# Standalone Fargate task -- no ECS Service wraps it, runs to completion
-# and stops, no always-on cost. Launch it via sfn-backfill-orchestrator.tf's
-# state machine, not a raw `aws ecs run-task`: RunTask doesn't propagate a
-# task definition's own tags to the running task unless the caller passes
-# --propagate-tags TASK_DEFINITION, and that's easy to forget by hand (see
-# that state machine's own comment for the real cost this caused). Runs in
-# a public subnet with a public IP to reach ESPN's public API.
+# Launch via sfn-backfill-orchestrator.tf, not `aws ecs run-task` directly.
+# Public subnet/IP to reach ESPN's public API.
 #
-# PLAYER_GAME_STATS_TABLE_NAME/TEAM_GAME_STATS_TABLE_NAME are set below
-# even though PGA's PipelineStorage usage never touches either table
-# (see iam-pga-backfill.tf's own header comment, which is why neither
-# table gets an IAM grant here) -- PipelineStorage.__init__ requires both
-# env vars unconditionally just to construct the DynamoDBTable wrappers.
+# PLAYER_GAME_STATS_TABLE_NAME/TEAM_GAME_STATS_TABLE_NAME are set even
+# though PGA never uses either table -- PipelineStorage.__init__ requires
+# both env vars unconditionally.
 #
 # START_SEASON/END_SEASON/BATCH_SIZE/REQUEST_DELAY_SECONDS default to a
-# full historical run here; override them per-run via ECS "Run Task" ->
-# Container overrides -> Environment variables.
+# full historical run; override via the orchestrator's container_overrides.
 resource "aws_ecs_task_definition" "pga_backfill" {
   family                   = "${var.project}-pga-backfill"
   requires_compatibilities = ["FARGATE"]

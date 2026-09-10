@@ -1,12 +1,7 @@
-# Viewer analytics dashboard: location/browser/device/endpoint breakdown,
-# built from Logs Insights queries against each sport's predict-read
-# Lambda log group. CloudFront's AllViewerExceptHostHeader origin request
-# policy forwards device-type/viewer-location headers to the API origin,
-# which predict-read logs directly.
-#
-# Logs Insights `parse` patterns below match by substring, not field
-# order. Fields that can be null for some IPs (city, region_name) are
-# excluded from that row's stats rather than mislabeled "Unknown".
+# Application-level activity: Lambda invocations/errors/duration/
+# concurrency/throttles (AWS/Lambda metrics) and viewer analytics
+# (Logs Insights against predict-read log groups). Merges what were 2
+# separate dashboards (lambda-observability, viewer-analytics) into one.
 locals {
   viewer_analytics_log_group_names = [
     aws_cloudwatch_log_group.nfl_predict_read.name,
@@ -17,23 +12,106 @@ locals {
     aws_cloudwatch_log_group.f1_predict_read.name,
   ]
 
-  # Dashboard-widget queries have no separate "log group" field for a
-  # multi-source query -- SOURCE has to be embedded in the query text
-  # itself, chained with `|`. lambda-cloudwatch-geo-widget.tf's own
-  # StartQuery calls pass viewer_analytics_log_group_names directly via
-  # the API's logGroupNames parameter instead, no embedded SOURCE clause.
+  # Dashboard-widget queries have no separate log-group field for a
+  # multi-source query -- SOURCE is embedded in the query text itself.
+  # lambda-cloudwatch-geo-widget.tf's own StartQuery calls pass
+  # viewer_analytics_log_group_names directly instead.
   viewer_analytics_log_sources = join(" | ", [for lg in local.viewer_analytics_log_group_names : "SOURCE '${lg}'"])
 }
 
-resource "aws_cloudwatch_dashboard" "viewer_analytics" {
-  dashboard_name = "${var.project}-viewer-analytics"
+resource "aws_cloudwatch_dashboard" "application" {
+  dashboard_name = "${var.project}-application"
 
   dashboard_body = jsonencode({
     widgets = [
+      # --- Lambda ---
+      {
+        type       = "text", x = 0, y = 0, width = 24, height = 1
+        properties = { markdown = "## Lambda" }
+      },
+      {
+        type   = "metric"
+        x      = 0
+        y      = 1
+        width  = 24
+        height = 6
+        properties = {
+          region  = var.region
+          title   = "Invocations by function"
+          view    = "timeSeries"
+          stacked = false
+          period  = 300
+          metrics = [[{ expression = "SEARCH('{AWS/Lambda,FunctionName} Invocations ${var.project}-', 'Sum', 300)", id = "inv_all" }]]
+        }
+      },
+      {
+        type   = "metric"
+        x      = 0
+        y      = 7
+        width  = 24
+        height = 6
+        properties = {
+          region  = var.region
+          title   = "Errors by function"
+          view    = "bar"
+          period  = 300
+          metrics = [[{ expression = "SEARCH('{AWS/Lambda,FunctionName} Errors ${var.project}-', 'Sum', 300)", id = "err_all" }]]
+        }
+      },
+      {
+        type   = "metric"
+        x      = 0
+        y      = 13
+        width  = 24
+        height = 6
+        properties = {
+          region  = var.region
+          title   = "Average duration by function (ms)"
+          view    = "timeSeries"
+          stacked = false
+          period  = 300
+          metrics = [[{ expression = "SEARCH('{AWS/Lambda,FunctionName} Duration ${var.project}-', 'Average', 300)", id = "dur_all" }]]
+        }
+      },
+      {
+        type   = "metric"
+        x      = 0
+        y      = 19
+        width  = 24
+        height = 6
+        properties = {
+          region  = var.region
+          title   = "Concurrent executions by function"
+          view    = "timeSeries"
+          stacked = false
+          period  = 300
+          metrics = [[{ expression = "SEARCH('{AWS/Lambda,FunctionName} ConcurrentExecutions ${var.project}-', 'Maximum', 300)", id = "conc_all" }]]
+        }
+      },
+      {
+        type   = "metric"
+        x      = 0
+        y      = 25
+        width  = 24
+        height = 6
+        properties = {
+          region  = var.region
+          title   = "Throttles by function"
+          view    = "bar"
+          period  = 300
+          metrics = [[{ expression = "SEARCH('{AWS/Lambda,FunctionName} Throttles ${var.project}-', 'Sum', 300)", id = "thr_all" }]]
+        }
+      },
+
+      # --- Viewer analytics ---
+      {
+        type       = "text", x = 0, y = 31, width = 24, height = 1
+        properties = { markdown = "## Viewer analytics" }
+      },
       {
         type   = "log"
         x      = 0
-        y      = 0
+        y      = 32
         width  = 12
         height = 6
         properties = {
@@ -51,7 +129,7 @@ resource "aws_cloudwatch_dashboard" "viewer_analytics" {
       {
         type   = "log"
         x      = 12
-        y      = 0
+        y      = 32
         width  = 12
         height = 6
         properties = {
@@ -70,7 +148,7 @@ resource "aws_cloudwatch_dashboard" "viewer_analytics" {
       {
         type   = "log"
         x      = 0
-        y      = 6
+        y      = 38
         width  = 12
         height = 6
         properties = {
@@ -91,7 +169,7 @@ resource "aws_cloudwatch_dashboard" "viewer_analytics" {
       {
         type   = "log"
         x      = 12
-        y      = 6
+        y      = 38
         width  = 12
         height = 6
         properties = {
@@ -110,28 +188,8 @@ resource "aws_cloudwatch_dashboard" "viewer_analytics" {
       {
         type   = "log"
         x      = 0
-        y      = 12
-        width  = 12
-        height = 6
-        properties = {
-          region = var.region
-          title  = "Top raw User-Agent strings"
-          view   = "table"
-          query  = <<-QUERY
-            ${local.viewer_analytics_log_sources}
-            | filter @message like /viewer_analytics/
-            | parse @message '"user_agent": "*"' as user_agent
-            | stats count(*) as requests by user_agent
-            | sort requests desc
-            | limit 20
-          QUERY
-        }
-      },
-      {
-        type   = "log"
-        x      = 12
-        y      = 12
-        width  = 12
+        y      = 44
+        width  = 24
         height = 6
         properties = {
           region = var.region
@@ -151,7 +209,7 @@ resource "aws_cloudwatch_dashboard" "viewer_analytics" {
       {
         type   = "log"
         x      = 0
-        y      = 18
+        y      = 50
         width  = 24
         height = 10
         properties = {
@@ -171,28 +229,19 @@ resource "aws_cloudwatch_dashboard" "viewer_analytics" {
         }
       },
       # Everything below is sourced from CloudFront's own edge logs
-      # (cloudfront-standard-logging.tf) -- requests blocked by
-      # geo-restriction, which never reach any Lambda. No city field;
-      # CloudFront only resolves country for a blocked request.
+      # (cloudfront-standard-logging.tf), not a Lambda.
       {
-        type   = "text"
-        x      = 0
-        y      = 28
-        width  = 24
-        height = 2
-        properties = {
-          markdown = "## Turned away (blocked) traffic\nSourced from CloudFront's own edge logs, not a Lambda -- includes requests blocked by geo-restriction before they ever reached the app."
-        }
+        type       = "text", x = 0, y = 60, width = 24, height = 2
+        properties = { markdown = "## Turned away (blocked) traffic\nSourced from CloudFront's own edge logs -- includes requests blocked by geo-restriction before they ever reached the app." }
       },
       {
         type   = "log"
         x      = 0
-        y      = 30
+        y      = 62
         width  = 12
         height = 6
         properties = {
-          # us-east-1, where cloudfront_edge_access_logs lives
-          region = "us-east-1"
+          region = "us-east-1" # where cloudfront_edge_access_logs lives
           title  = "Blocked requests by country"
           view   = "bar"
           query  = <<-QUERY
@@ -206,11 +255,11 @@ resource "aws_cloudwatch_dashboard" "viewer_analytics" {
       {
         type   = "log"
         x      = 12
-        y      = 30
+        y      = 62
         width  = 12
         height = 6
         properties = {
-          region = "us-east-1" # where cloudfront_edge_access_logs lives
+          region = "us-east-1"
           title  = "Blocked requests by attempted path"
           view   = "table"
           query  = <<-QUERY
@@ -225,11 +274,11 @@ resource "aws_cloudwatch_dashboard" "viewer_analytics" {
       {
         type   = "log"
         x      = 0
-        y      = 36
+        y      = 68
         width  = 24
         height = 8
         properties = {
-          region = "us-east-1" # where cloudfront_edge_access_logs lives
+          region = "us-east-1"
           title  = "Recent blocked requests"
           view   = "table"
           query  = <<-QUERY
@@ -241,28 +290,16 @@ resource "aws_cloudwatch_dashboard" "viewer_analytics" {
           QUERY
         }
       },
-      # Custom-widget geo panels (Terraform/lambda-cloudwatch-geo-widget.tf)
-      # -- CloudWatch dashboards have no native map widget type, so these
-      # render locally with Pillow (real state/country boundary lines,
-      # no topography) instead of calling a mapping service; see the
-      # Lambda's own handler.py docstring for why (no client-side
-      # rendering is possible inside a custom widget at all). Appended
-      # here rather than interleaved with the bar/table panels above so
-      # every existing widget's y-position stays untouched.
+      # Custom-widget geo panels (lambda-cloudwatch-geo-widget.tf) -- no
+      # native map widget type, so these render locally with Pillow.
       {
-        type   = "text"
-        x      = 0
-        y      = 44
-        width  = 24
-        height = 1
-        properties = {
-          markdown = "## Geo panels"
-        }
+        type       = "text", x = 0, y = 76, width = 24, height = 1
+        properties = { markdown = "## Geo panels" }
       },
       {
         type   = "custom"
         x      = 0
-        y      = 45
+        y      = 77
         width  = 12
         height = 9
         properties = {
@@ -275,7 +312,7 @@ resource "aws_cloudwatch_dashboard" "viewer_analytics" {
       {
         type   = "custom"
         x      = 12
-        y      = 45
+        y      = 77
         width  = 12
         height = 9
         properties = {

@@ -1,4 +1,3 @@
-# 30-day retention so logs don't grow unbounded.
 resource "aws_cloudwatch_log_group" "ncaafb_backfill" {
   name              = "/ecs/${var.project}-ncaafb-backfill"
   retention_in_days = 30
@@ -9,22 +8,15 @@ resource "aws_cloudwatch_log_group" "ncaafb_backfill" {
   })
 }
 
-# Standalone Fargate task -- no ECS Service wraps it, runs to completion
-# and stops. Launch it via sfn-backfill-orchestrator.tf's state machine,
-# not a raw `aws ecs run-task`: RunTask doesn't propagate a task
-# definition's own tags to the running task unless the caller passes
-# --propagate-tags TASK_DEFINITION, and that's easy to forget by hand (see
-# that state machine's own comment for the real cost this caused). Runs in
-# a public subnet
-# (fargate_internet_egress) to reach CFBD's public API.
+# Launch via sfn-backfill-orchestrator.tf, not `aws ecs run-task` directly.
+# Public subnet (fargate_internet_egress) to reach CFBD's public API.
 #
-# Uses the dedicated CFBD_API_KEY_SECRET_FIELD "ncaa_fb_backfill_key",
-# separate from ingest/schedule-sync's "ncaa_fb_ingest_key", so a
-# long-running backfill never competes with production ingest for the
-# same CFBD free-tier call budget.
+# CFBD_API_KEY_SECRET_FIELD "ncaa_fb_backfill_key" is separate from
+# ingest/schedule-sync's "ncaa_fb_ingest_key" so backfill doesn't compete
+# with production ingest for CFBD's free-tier call budget.
 #
-# START_SEASON/END_SEASON default to a full historical run; override
-# per-run via ECS "Run Task" -> Container overrides.
+# START_SEASON/END_SEASON default to a full historical run; override via
+# the orchestrator's container_overrides.
 resource "aws_ecs_task_definition" "ncaafb_backfill" {
   family                   = "${var.project}-ncaafb-backfill"
   requires_compatibilities = ["FARGATE"]

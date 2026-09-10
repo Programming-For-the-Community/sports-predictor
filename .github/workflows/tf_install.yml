@@ -334,15 +334,8 @@ jobs:
     - name: Terraform Apply
       run: terraform -chdir=Terraform apply -auto-approve
 
-    # Tags the 2 CloudWatch alarms AWS Application Auto Scaling
-    # auto-creates for each EC2 training capacity provider's own
-    # managed_scaling target-tracking policy (Terraform/ec2-training-asg.tf) --
-    # these have no aws_ecs_capacity_provider `tags` block that reaches
-    # them (see that file's own comment), so Terraform can't tag them
-    # itself. Runs after every apply, not just when the capacity providers
-    # change -- tag-resource is idempotent, and this is the only place that
-    # re-tags them if either capacity provider is ever replaced and gets a
-    # fresh pair of alarms with new random-suffixed names.
+    # Tags the auto-created scaling alarms Terraform can't tag itself
+    # (see Terraform/ec2-training-asg.tf).
     - name: Tag EC2 training capacity provider scaling alarms
       run: |
         for capacity_provider in "$TF_VAR_project-ec2-training-spot" "$TF_VAR_project-ec2-training-ondemand"; do
