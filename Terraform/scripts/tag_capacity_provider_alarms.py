@@ -2,11 +2,11 @@
 Scaling auto-creates for an ECS capacity provider's own managed_scaling
 target-tracking policy -- see ec2-training-asg.tf's own comment on
 aws_ecs_capacity_provider.ec2_training_spot for why these have no
-Terraform resource of their own to attach a tags block to. Invoked as a
-local-exec provisioner from ec2-training-asg.tf, once per capacity
-provider, so `terraform apply` keeps them tagged declaratively instead of
-relying on someone remembering to run `aws cloudwatch tag-resource` by
-hand.
+Terraform resource of their own to attach a tags block to. Run as its own
+step in .github/workflows/tf_install.yml right after `terraform apply`,
+once per capacity provider -- not a Terraform local-exec provisioner, so a
+script failure here can't taint/fail the capacity provider resource
+itself, and it stays visible as a plain, independently-retriable CI step.
 
 Shells out to the `aws` CLI rather than boto3 -- the same tool `terraform
 apply` itself already needs credentials for, so nothing extra to install

@@ -195,28 +195,12 @@ resource "aws_ecs_capacity_provider" "ec2_training_ondemand" {
   })
 }
 
-# Tags the 2 auto-created scaling alarms for each capacity provider above
-# (see its own comment) -- runs scripts/tag_capacity_provider_alarms.py as
-# part of `terraform apply` itself, not a separate manual step.
-# triggers_replace ties each to its own capacity provider's id, so a
-# replacement (which regenerates both alarms with fresh random-suffixed
-# names) re-runs this and re-tags the new pair; an in-place update that
-# leaves the capacity provider's id unchanged does not, since the existing
-# alarms and their tags are untouched by that kind of update anyway.
-resource "terraform_data" "tag_ec2_training_scaling_alarms" {
-  for_each = {
-    ec2_training_spot     = aws_ecs_capacity_provider.ec2_training_spot
-    ec2_training_ondemand = aws_ecs_capacity_provider.ec2_training_ondemand
-  }
-
-  triggers_replace = [each.value.id]
-
-  provisioner "local-exec" {
-    command = join(" ", [
-      "python3", "${path.module}/scripts/tag_capacity_provider_alarms.py",
-      each.value.name, var.region,
-      "Project=${var.project}", "Owner=${var.owner}", "Environment=${var.environment}",
-      "Sport=shared", "Component=training",
-    ])
-  }
-}
+# The 2 auto-created scaling alarms for each capacity provider above (see
+# its own comment) get tagged by scripts/tag_capacity_provider_alarms.py,
+# run as its own step in .github/workflows/tf_install.yml right after
+# Terraform Apply -- not a Terraform resource/provisioner here. A
+# local-exec provisioner would run the same script, but as a side effect
+# tucked inside this resource's own apply, invisible in `terraform plan`
+# and able to taint/fail the resource itself if the script errors; a
+# separate CI step keeps it a plain, visible, independently-retriable step
+# instead, same as every other post-apply action in that workflow.
