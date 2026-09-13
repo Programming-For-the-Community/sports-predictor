@@ -155,6 +155,28 @@ class TestListEvents:
 
         assert [e["event_id"] for e in result["events"]] == ["EVT#1", "EVT#2"]
 
+    def test_an_already_played_game_stays_in_its_own_week_past_the_stale_grace_window(self):
+        # Regression, confirmed live 2026-09-13: a Wednesday-dated week-1
+        # game (kickoff already 4 days past, outside
+        # _STALE_SCHEDULED_GRACE_DAYS) whose DynamoDB status hadn't yet
+        # flipped from "scheduled" to "completed" (once-daily ingest lag)
+        # was dropping out of the scheduled-events response entirely --
+        # invisible on Upcoming/Current (this query) and on Completed
+        # (still "scheduled", so excluded from that query too) -- even
+        # though the rest of its own week was still very much upcoming.
+        # The grace window should only decide which week is "next", not
+        # which of that week's own games get returned.
+        storage = MagicMock()
+        stale_in_week_date = us_eastern_date(datetime.now(timezone.utc) - timedelta(days=4))
+        storage.get_all_events.return_value = [
+            _scheduled_event("WEDNESDAY", 2026, stale_in_week_date, "12", "13", week=1),
+            _scheduled_event("SUNDAY", 2026, _future(0), "1", "2", week=1),
+        ]
+
+        result = nfl_reads.list_events(storage, MagicMock(), "nfl", "scheduled")
+
+        assert {e["event_id"] for e in result["events"]} == {"WEDNESDAY", "SUNDAY"}
+
     def test_completed_events_include_prediction_comparison_when_one_was_logged(self):
         storage = MagicMock()
         predictions_table = MagicMock()

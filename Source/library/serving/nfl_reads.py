@@ -93,9 +93,15 @@ def _next_week_events(scheduled: list[dict]) -> list[dict]:
     shows a "coming soon" state for that case instead of an empty list
     that looks like a data problem.
 
-    Ignores any "scheduled" event dated more than _STALE_SCHEDULED_GRACE_DAYS
-    in the past -- a game whose status was never updated would otherwise
-    win min() permanently and mask every real upcoming week behind it."""
+    _STALE_SCHEDULED_GRACE_DAYS only gates which week counts as "next" --
+    it ignores any "scheduled" event dated further back than that when
+    picking the target week, so a game whose status was never updated
+    can't win min() permanently and mask every real upcoming week behind
+    it. It does NOT gate the returned events themselves: once the target
+    week is picked, every event in that week is included even if its own
+    date has aged past the grace window -- e.g. a mid-week game whose
+    played-but-not-yet-flipped-to-completed status would otherwise vanish
+    from this list days before the rest of its own week is done."""
     # event_date is a calendar day in ESPN's own U.S.-Eastern bucketing
     # (see library/parsing.py's us_eastern_date), not a UTC date --
     # deriving the cutoff the same Eastern way keeps it on the same
@@ -106,7 +112,7 @@ def _next_week_events(scheduled: list[dict]) -> list[dict]:
         return []
     earliest = min(plausible, key=lambda e: e.get("event_date", ""))
     target = _week_key(earliest)
-    return [e for e in plausible if _week_key(e) == target]
+    return [e for e in scheduled if _week_key(e) == target]
 
 
 def _actual_result(event: dict) -> dict | None:

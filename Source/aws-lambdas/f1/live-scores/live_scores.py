@@ -106,6 +106,21 @@ def _current_roster_by_name(storage, sport: str) -> dict[str, str]:
     return lookup
 
 
+def _current_roster_by_last_name(roster_by_name: dict[str, str]) -> dict[str, str]:
+    """{last_name: entity_id}, only for last names that are unique within
+    the current roster -- a fallback for ESPN's own shorter display name
+    (e.g. "Kimi Antonelli" for our own Jolpica-sourced "Andrea Kimi
+    Antonelli") that never exact-matches _normalize_name's full-name
+    output. Confirmed live 2026-09-13: this dropped that race's own
+    winner out of the leaderboard for the whole race. A last name shared
+    by two current drivers is deliberately left out rather than guessed
+    at -- exact full-name matching already covers that case."""
+    by_last_name: dict[str, list[str]] = {}
+    for normalized_name, entity_id in roster_by_name.items():
+        by_last_name.setdefault(normalized_name.rsplit(" ", 1)[-1], []).append(entity_id)
+    return {last_name: ids[0] for last_name, ids in by_last_name.items() if len(ids) == 1}
+
+
 def _event_ids_by_date_and_type(storage, sport: str) -> dict[tuple[str, str], str]:
     """{(event_date, event_type): event_id} for EVERY stored F1 event
     (both "field" and "sprint", any status) -- the join key back to
@@ -136,14 +151,17 @@ def _put_cache(s3, bucket: str, payload: dict) -> None:
     s3.put_object(Bucket=bucket, Key=LIVE_SCORES_CACHE_KEY, Body=json.dumps(payload), ContentType="application/json")
 
 
-def _competition_participants(competition: dict, roster_by_name: dict[str, str]) -> dict[str, dict]:
+def _competition_participants(
+    competition: dict, roster_by_name: dict[str, str], roster_by_last_name: dict[str, str],
+) -> dict[str, dict]:
     participants = {}
     for competitor in competition.get("competitors", []):
         athlete = competitor.get("athlete") or {}
         full_name = athlete.get("fullName") or athlete.get("displayName")
         if not full_name:
             continue
-        entity_id = roster_by_name.get(_normalize_name(full_name))
+        normalized = _normalize_name(full_name)
+        entity_id = roster_by_name.get(normalized) or roster_by_last_name.get(normalized.rsplit(" ", 1)[-1])
         if entity_id is None:
             logger.info("No known F1 driver matches ESPN competitor name %r -- skipping", full_name)
             continue
@@ -183,6 +201,7 @@ def refresh(storage, s3, bucket: str, client, sport: str, season: int) -> dict:
         return {"polled": 0}
 
     roster_by_name = _current_roster_by_name(storage, sport)
+    roster_by_last_name = _current_roster_by_last_name(roster_by_name)
     event_ids = _event_ids_by_date_and_type(storage, sport)
     scheduled_event_ids = {event["event_id"] for event in storage.get_all_events(sport, status="scheduled")}
 
@@ -211,7 +230,7 @@ def refresh(storage, s3, bucket: str, client, sport: str, season: int) -> dict:
                 "status": status.get("name"),
                 "state": state,
                 "race_name": espn_event.get("name"),
-                "participants": _competition_participants(competition, roster_by_name),
+                "participants": _competition_participants(competition, roster_by_name, roster_by_last_name),
             }
 
     _put_cache(s3, bucket, {"fetched_at": now.isoformat(), "events": events_out})

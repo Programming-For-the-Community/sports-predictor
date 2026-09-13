@@ -74,6 +74,18 @@ class TestCurrentRosterByName:
         assert live_scores._current_roster_by_name(storage, "f1") == {}
 
 
+class TestCurrentRosterByLastName:
+    def test_keeps_a_last_name_unique_within_the_current_roster(self):
+        roster_by_name = {"andrea kimi antonelli": "antonelli", "max verstappen": "max_verstappen"}
+        assert live_scores._current_roster_by_last_name(roster_by_name) == {
+            "antonelli": "antonelli", "verstappen": "max_verstappen",
+        }
+
+    def test_drops_a_last_name_shared_by_two_current_drivers(self):
+        roster_by_name = {"mick schumacher": "mick_schumacher", "michael schumacher": "michael_schumacher"}
+        assert live_scores._current_roster_by_last_name(roster_by_name) == {}
+
+
 class TestEventIdsByDateAndType:
     def test_builds_from_both_completed_and_scheduled_events(self):
         completed = _field_event("2026-1", "2026-03-08", [])
@@ -143,6 +155,31 @@ class TestRefresh:
         assert entry["event_type"] == "field"
         assert entry["state"] == "in"
         assert entry["participants"]["max_verstappen"] == {"order": 1, "winner": True}
+
+    def test_espns_shorter_display_name_still_matches_via_last_name(self):
+        # Regression, confirmed live 2026-09-13: ESPN reported the race
+        # winner as "Kimi Antonelli", never matching our own Jolpica-
+        # sourced full name "Andrea Kimi Antonelli" -- the race's own
+        # winner was missing from the leaderboard for the entire race.
+        roster_event = _field_event("2026-1", "2026-03-01", [{"entity_id": "antonelli"}])
+        this_race = _field_event("2026-2", "2026-03-08", [], status="scheduled")
+        storage = self._storage(roster_event, [this_race])
+        storage.get_entity.return_value = {"name": "Andrea Kimi Antonelli"}
+
+        s3 = MagicMock()
+        s3.get_object.side_effect = _NO_CACHE_YET
+        client = MagicMock()
+        client.get_scoreboard.return_value = {"events": [
+            _espn_event("Spanish Grand Prix", [
+                _espn_competition("999", "Race", "2026-03-08T04:00Z", "post", [_espn_competitor(1, "Kimi Antonelli", winner=True)]),
+            ]),
+        ]}
+
+        result = live_scores.refresh(storage, s3, "bucket", client, "f1", 2026)
+
+        assert result == {"polled": 1}
+        cached_body = json.loads(s3.put_object.call_args.kwargs["Body"])
+        assert cached_body["events"]["2026-2"]["participants"]["antonelli"] == {"order": 1, "winner": True}
 
     def test_an_unmatched_espn_competitor_name_is_skipped_not_a_crash(self):
         roster_event = _field_event("2026-1", "2026-03-01", [{"entity_id": "max_verstappen"}])

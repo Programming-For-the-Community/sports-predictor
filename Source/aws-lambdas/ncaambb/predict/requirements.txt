@@ -20,9 +20,20 @@
 # actually won any given target's tournament can change from one retrain
 # to the next. Needs libgomp at runtime too -- see this directory's own
 # Dockerfile.
+#
+# requests: season_projection.py imports library.http.ncaambb_core (for
+# ap_poll_to_rank_by_team, a pure JSON-parsing helper -- this Lambda never
+# actually makes an HTTP call itself), which imports library.http.client,
+# which imports requests unconditionally at module load time. Without
+# this, every invocation failed cold: "Unable to import module 'handler':
+# No module named 'requests'" -- confirmed live 2026-09-13, broken since
+# the ap_poll_to_rank_by_team import landed 2026-09-10 (136e331). Same
+# pin every ingest/live-scores/schedule-sync Lambda's own requirements.txt
+# already uses.
 numpy
 scipy
 scikit-learn
 joblib
 pandas
 lightgbm>=4.3
+requests>=2.31

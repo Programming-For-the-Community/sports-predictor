@@ -8,13 +8,25 @@ style spec supports one).
 
 Renders the whole image locally with Pillow instead of calling a mapping
 service: real state/country boundary lines (boundaries.json -- extracted
-once, offline, from bokeh_sampledata's US state polygons and geopandas'
-bundled Natural Earth lowres world shapefile, both real lon/lat data, no
-topographic/terrain detail) drawn as thin reference strokes on a plain
+once, offline, states from the Census Bureau's own cb_2022_us_state_20m
+cartographic boundary shapefile, countries from geopandas' bundled
+Natural Earth lowres world shapefile, both real lon/lat (EPSG:4326) data,
+no topographic/terrain detail) drawn as thin reference strokes on a plain
 dark canvas, then one small Gaussian-blurred glow per hotspot on top.
 There's no external basemap image to align our own drawing against, so
 this carries none of the projection-guessing risk a compositing
 approach against a real map-tile API would.
+
+States were originally sourced from bokeh_sampledata's own us_states
+demo dataset, replaced 2026-09-13: that dataset stores Michigan as a
+single ring spanning the whole state's bounding box, welding the Upper
+and Lower Peninsulas into one shape across Lake Michigan/Huron -- a real
+complaint confirmed live ("state ... boundaries are a bit off"). The
+Census Bureau's own file gives Michigan its real 6 parts (both
+peninsulas plus 4 islands), confirmed against bokeh_sampledata's own
+county-level dataset too: unioning its 83 Michigan counties still
+produces one welded shape, so the defect is in bokeh's underlying source
+geometry, not a one-off bad extraction.
 
 Two render modes, via the widget's `mode` custom-widget parameter, each
 matched to its own data's real granularity:
