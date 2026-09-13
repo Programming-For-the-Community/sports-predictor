@@ -81,9 +81,29 @@ class _EventDetailPageState extends ConsumerState<EventDetailPage> with WidgetsB
   // open a while before events start... doesn't register it right
   // away"). AppLifecycleState.resumed fires on Flutter Web too, driven by
   // the page's own visibility state, not just a native app switch.
+  //
+  // Also invalidates both eventsListProvider buckets, not just
+  // liveScoresProvider (_poll's own call) -- a real complaint confirmed
+  // live 2026-09-13 ("live-scores aren't always up-to-date" after locking
+  // the machine/switching tabs a while, same root cause as
+  // event_list_page.dart's own identical fix). This page's whole layout
+  // branches on event.status (build's own `event.status == completed`
+  // check) sourced from these two cached lists, not from liveScoresProvider
+  // directly -- once our own storage's status catches up to "completed"
+  // (up to ~24h after the real game ends) and the event drops out of the
+  // live-scores cache, a stale `scheduled` list here still shows this
+  // event mid-game/pre-game and never flips this page over to the
+  // completed recap, no matter how many times _poll's own liveScoresProvider
+  // invalidation fires. Called after _poll(), not before, so _poll's own
+  // synchronous read of the (about-to-be-refreshed) scheduled list isn't
+  // disturbed by an invalidation racing ahead of it on the same tick.
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state == AppLifecycleState.resumed) _poll();
+    if (state == AppLifecycleState.resumed) {
+      _poll();
+      ref.invalidate(eventsListProvider((sport: widget.sportId, status: EventStatus.scheduled)));
+      ref.invalidate(eventsListProvider((sport: widget.sportId, status: EventStatus.completed)));
+    }
   }
 
   SportEvent? _findEvent(List<SportEvent> events) {

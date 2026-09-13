@@ -122,10 +122,26 @@ class _EventListPageState extends ConsumerState<EventListPage> with WidgetsBindi
   // open a while before events start... doesn't register it right
   // away"). AppLifecycleState.resumed fires on Flutter Web too, driven by
   // the page's own visibility state, not just a native app switch.
+  //
+  // Also invalidates eventsListProvider itself, not just liveScoresProvider
+  // -- a real complaint confirmed live 2026-09-13 ("live-scores aren't
+  // always up-to-date" after locking the machine/switching tabs a while).
+  // GameRow falls back to this event's own stored result (event.home/
+  // away.result?.score) once liveState stops carrying it (see GameRow's
+  // own isLive/liveFinished comment: the live-scores cache lets go of an
+  // event once our own storage's status catches up to "completed", up to
+  // ~24h after the real game ends). Refreshing liveScoresProvider alone
+  // then returns nothing for that event id, but the event list itself was
+  // still the OLD "scheduled, not yet played" snapshot fetched at page
+  // load -- so a game that fully finished while this tab sat backgrounded
+  // could revert to looking like it hadn't started at all (score and
+  // FINAL pill both gone) the moment it aged out of the live cache,
+  // instead of picking up its own now-completed result.
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed && _status == EventStatus.scheduled) {
       ref.invalidate(liveScoresProvider(widget.sportId));
+      ref.invalidate(eventsListProvider((sport: widget.sportId, status: EventStatus.scheduled)));
     }
   }
 

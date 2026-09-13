@@ -108,6 +108,46 @@ void main() {
     expect(liveScoreCalls, greaterThan(initialCalls));
   });
 
+  testWidgets('refreshes both event-list buckets on resume, not just live scores', (tester) async {
+    // Regression, confirmed live 2026-09-13 ("live-scores aren't always
+    // up-to-date" after locking the machine/switching tabs a while): this
+    // page's whole layout branches on event.status, sourced from
+    // eventsListProvider, not from liveScoresProvider directly. Once our
+    // own storage's status catches up to "completed" and the event drops
+    // out of the live-scores cache, a stale cached event list here could
+    // never flip this page over to its own completed recap no matter how
+    // many times liveScoresProvider alone got invalidated.
+    var scheduledCalls = 0;
+    var completedCalls = 0;
+
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          eventsListProvider.overrideWith((ref, query) async {
+            if (query.status == 'scheduled') {
+              scheduledCalls++;
+              return [_scheduledEvent('2026-09-14T17:00:00Z')];
+            }
+            completedCalls++;
+            return [];
+          }),
+          eventPredictionProvider.overrideWith((ref, query) async => _prediction),
+          liveScoresProvider.overrideWith((ref, sport) async => const <String, LiveEventState>{}),
+        ],
+        child: const MaterialApp(home: Scaffold(body: EventDetailPage(sportId: 'nfl', eventId: '401547417'))),
+      ),
+    );
+    await tester.pumpAndSettle();
+    final initialScheduledCalls = scheduledCalls;
+    final initialCompletedCalls = completedCalls;
+
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+    await tester.pumpAndSettle();
+
+    expect(scheduledCalls, greaterThan(initialScheduledCalls));
+    expect(completedCalls, greaterThan(initialCompletedCalls));
+  });
+
   testWidgets('does not poll the prediction for a kickoff far in the future', (tester) async {
     var predictionCalls = 0;
 
