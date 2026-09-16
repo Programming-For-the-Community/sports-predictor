@@ -1,7 +1,6 @@
 # Reusable workflow: builds a Docker image (build only, no push -- see
 # docker_push.yml for that) and uploads it as a workflow artifact for a
-# downstream job to push to ECR. Split out of what used to be a single
-# combined docker_build_push.yml job so a Scan stage can sit strictly
+# downstream job to push to ECR. Split out so a Scan stage can sit strictly
 # between Test and Build, and Build strictly before Push.
 #
 # --provenance=false --sbom=false: buildx attaches these as attestations by

@@ -1,0 +1,68 @@
+# Reusable workflow: points a container-image Lambda at an already-pushed
+# image. Runs standalone (workflow_dispatch, defaulting to the given
+# sport's current -predict-latest tag) or called from a sport's own
+# _deploy.yml / app_deploy.yml with a specific versioned tag.
+#
+# No test/scan/build here -- the image was already tested, scanned, and
+# built by ai_hosting.yml (or whichever workflow pushed it) earlier in the
+# same pipeline run. This is a pure deploy step, the container-image
+# counterpart to python_lambda_deploy.yml. Named generically (not
+# "predict_deploy") since nothing about it is predict-Lambda-specific --
+# every container-image Lambda today happens to be a predict Lambda, but
+# this file doesn't assume that.
+
+name: Docker Image Lambda Deploy
+
+on:
+  workflow_dispatch:
+    inputs: &inputs
+      function_name:
+        description: 'Lambda function name'
+        required: true
+        type: string
+      image_uri:
+        description: 'Image URI to deploy (leave blank to use default_image_tag)'
+        required: false
+        type: string
+      default_image_tag:
+        description: 'Fallback ECR tag (e.g. nfl-predict-latest) used when image_uri is blank'
+        required: true
+        type: string
+  workflow_call:
+    inputs: *inputs
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  deploy:
+    name: Point ${{ inputs.function_name }} Lambda at the image
+    runs-on: ubuntu-latest
+    steps:
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_DEPLOY_SVC_ACCT_ARN }}
+          aws-region: ${{ vars.AWS_RESOURCE_REGION }}
+          role-session-name: GitHubActions-${{ github.run_id }}
+
+      - name: Update function code
+        env:
+          FUNCTION_NAME: ${{ inputs.function_name }}
+          IMAGE_URI: ${{ inputs.image_uri }}
+          ECR_URI: ${{ secrets.ECR_URI }}
+          DEFAULT_IMAGE_TAG: ${{ inputs.default_image_tag }}
+        run: |
+          if [ -z "$IMAGE_URI" ]; then
+            IMAGE_URI="$ECR_URI:$DEFAULT_IMAGE_TAG"
+          fi
+
+          aws lambda update-function-code \
+            --function-name "$FUNCTION_NAME" \
+            --image-uri "$IMAGE_URI"
+
+          aws lambda wait function-updated \
+            --function-name "$FUNCTION_NAME"
+
+          echo "Deployed $FUNCTION_NAME -> $IMAGE_URI"

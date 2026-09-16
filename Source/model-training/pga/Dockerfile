@@ -1,8 +1,8 @@
 # Build context is Source/ (not this directory) -- see
 # Source/model-training/nba/Dockerfile's own comment for the full
-# reasoning, identical here. .github/workflows/pga_ai_training.yml builds
+# reasoning, identical here. .github/workflows/ai_training.yml (called from pga_deploy.yml) builds
 # this with `docker build -f Source/model-training/pga/Dockerfile
-# Source`, same convention as nba_ai_training.yml.
+# Source`, same convention as ai_training.yml's NBA call.
 #
 # One image, seven entrypoint scripts (train_top10_model.py,
 # train_top5_model.py, train_score_model.py, train_cutline_model.py,

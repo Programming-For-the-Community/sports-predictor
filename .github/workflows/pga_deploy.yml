@@ -3,10 +3,12 @@
 # configure this in Settings > Environments, it can't be set from this
 # file) before doing anything.
 #
-# ai_hosting/deploy_predict_lambda/predict_read_deploy added 2026-08-27,
-# mirroring nba_deploy.yml's exact shape, now that predict/predict-read
-# actually exist (Phase 5 step 4's serving Lambda pair). live_scores_deploy
-# added the same day, alongside the PGA frontend work.
+# Calls the generic per-category workflows (backfill.yml, ai_training.yml,
+# etc. -- shared across every sport) with PGA's own paths/test lists/image
+# versions as inputs, rather than a dedicated pga_*.yml file per category --
+# keeps GitHub's cap on how many distinct reusable workflows one workflow
+# run can reference from ballooning as sports are added (app_deploy.yml
+# bundles every sport into one run).
 #
 # Both this job's `approval` step AND tf_install.yml's own terraform job
 # gate on the `development`/`production` environment, so a run through
@@ -19,7 +21,6 @@ on:
   push:
     branches:
       - 'pga*'
-      - 'pga/*'
   workflow_call:
 
 # Shared group across every workflow that can reach tf_install.yml's
@@ -43,46 +44,118 @@ jobs:
       - name: Approved
         run: echo "Deployment approved -- proceeding."
 
-  # approval is intentionally skipped (not failed) when called via
-  # workflow_call -- without this, a skipped `needs` job would cause
-  # everything downstream to be skipped too. Each build job below repeats
-  # this same tolerant check against `approval` directly.
   backfill:
     name: Historical backfill (build)
     needs: approval
     if: |
       always() &&
       (needs.approval.result == 'success' || needs.approval.result == 'skipped')
-    uses: ./.github/workflows/pga_backfill.yml
+    uses: ./.github/workflows/docker_image_deploy.yml
     secrets: inherit
+    with:
+      sport: 'PGA'
+      test_path: 'Source/tests/data-backfills/pga/'
+      requirements_files: 'Source/data-backfills/pga/requirements-dev.txt'
+      dockerfile_path: 'Source/data-backfills/pga/Dockerfile'
+      image_name: 'pga-backfill'
+      # library/normalize/pga.py: event_status now keys off state=="post"
+      # not type.completed -- a match-play session's own status object
+      # never carries "completed" (real crash: every match_play event
+      # silently stored as "scheduled", 0 ever loaded as completed).
+      image_version: '1.1.2'
 
-  # Pushes pga-feature-engineering-latest and pga-train-top10-model-latest.
-  # infra never runs without both already in ECR -- same reasoning as
-  # NBA's own ai_training job (its images are what the training ECS task
-  # definitions' `image` field points at; RunTask fails at runtime, not
-  # at `terraform apply`, if the tag doesn't exist yet).
+  # Builds Feature Engineering and Train Top-10 Model (the latter also
+  # serves train_top5_model.py/train_score_model.py/train_cutline_model.py/
+  # train_round_model.py/train_match_winprob_model.py/
+  # train_cup_winprob_model.py -- Terraform/ecs-task-pga-train-{top5,score,
+  # cutline,round,match-winprob,cup-winprob}-model.tf all point at this
+  # same image tag and override `command` to run their own script instead,
+  # same shared-image/command-override pattern NBA's own
+  # train-win-probability-model image uses for score/player-prop).
   ai_training:
     name: AI training (build)
     needs: approval
     if: |
       always() &&
       (needs.approval.result == 'success' || needs.approval.result == 'skipped')
-    uses: ./.github/workflows/pga_ai_training.yml
+    uses: ./.github/workflows/ai_training.yml
     secrets: inherit
+    with:
+      sport: 'PGA'
+      feature_engineering_test_path: 'Source/tests/library/ Source/tests/feature-engineering/pga/ --ignore=Source/tests/library/ml'
+      feature_engineering_requirements_files: 'Source/feature-engineering/pga/requirements.txt'
+      feature_engineering_dockerfile_path: 'Source/feature-engineering/pga/Dockerfile'
+      feature_engineering_image_name: 'pga-feature-engineering'
+      # Bumped 2026-08-27, two real live crashes in one afternoon: (1)
+      # TypeError: int + str in rolling_golfer_averages' sum() -- a
+      # withdrawn golfer's non-numeric score ("WD") reached it unguarded,
+      # fixed at the source (library/normalize/pga.py's _parse_score) plus
+      # a type-check here matching library/features/common.py's existing
+      # rolling_player_stat_averages discipline; (2) pyarrow.lib.ArrowInvalid
+      # on the Parquet write itself -- a row already in DynamoDB from
+      # BEFORE fix (1) shipped (a real empty-string score_to_par) still
+      # crashed the ENTIRE dataset write (one bad value poisons the whole
+      # column, not just its row), so every raw passthrough field in
+      # library/features/pga.py (purse, cut_score, cut_count,
+      # finish_position, every label_*, season_stats values) now goes
+      # through a new _as_number() coercion -- a normalizer fix alone
+      # can't protect against data already written before it existed.
+      feature_engineering_image_version: '1.1.1'
+      train_model_test_path: 'Source/tests/library/ Source/tests/model-training/pga/'
+      train_model_requirements_files: 'Source/model-training/pga/requirements.txt'
+      train_model_dockerfile_path: 'Source/model-training/pga/Dockerfile'
+      train_model_image_name: 'pga-train-top10-model'
+      # Bumped 2026-08-27, same afternoon: the _as_number() coercion above
+      # means label_round_score_to_par/label_cut_score can now be a real
+      # None for a dirty stored row, same as train_score_model.py's own
+      # label (label_remaining_score_to_par) already could be -- but
+      # unlike train_score_model.py's own _filter_to_scored_rows,
+      # train_round_model.py/train_cutline_model.py had no notna() filter
+      # before handing y_train/y_test to run_backtest, so a dirty row
+      # would reach .fit() and crash every non-XGBoost candidate (sklearn
+      # regressors reject a NaN target) instead of feature-engineering.
+      # Found by auditing every train_*.py's own label-nullity handling
+      # after the match/cup status bug above, not from a live crash --
+      # both scripts now filter the same way train_score_model.py already
+      # did.
+      #
+      # Bumped again 2026-08-27, real live crash: ValueError: Cannot have
+      # number of folds=9 greater than the number of samples=6, in
+      # train_cup_winprob_model -- cup-win-probability's real dataset is
+      # only 8 rows total (one Ryder/Presidents Cup a year), 6 after the
+      # chronological train/test split, and library/ml/model_types.py
+      # hardcoded every adapter's TimeSeriesSplit at n_splits=8 (needs 9+
+      # samples) with no accommodation for a target this small. Fixed with
+      # a new shared _time_series_splits() helper (clamps down to what the
+      # data can support, floored at 2) applied to all 8
+      # cv=TimeSeriesSplit(...) call sites in that file, not just XGBoost
+      # (the one that happened to crash first in the candidate
+      # tournament) -- behaviorally a no-op for every other target/sport,
+      # since none of them have ever had fewer than 9 training rows.
+      train_model_image_version: '1.1.2'
 
-  # Pushes pga-predict-latest. infra never runs without it already in
-  # ECR -- aws_lambda_function.pga_predict is a container-image Lambda,
-  # and CreateFunction validates its image tag already exists in ECR
-  # before Terraform can create it, same reasoning as ai_training's own
-  # comment above for the training ECS task images.
   ai_hosting:
     name: AI hosting (build)
     needs: approval
     if: |
       always() &&
       (needs.approval.result == 'success' || needs.approval.result == 'skipped')
-    uses: ./.github/workflows/pga_ai_hosting.yml
+    uses: ./.github/workflows/docker_image_deploy.yml
     secrets: inherit
+    with:
+      sport: 'PGA'
+      test_path: >-
+        Source/tests/library/
+        Source/tests/aws-lambdas/pga/test_live_features.py
+        Source/tests/aws-lambdas/pga/test_event_prediction.py
+        Source/tests/aws-lambdas/pga/test_predict_handler.py
+        Source/tests/aws-lambdas/pga/test_season_simulation.py
+        Source/tests/aws-lambdas/pga/test_season_projection.py
+      requirements_files: 'Source/aws-lambdas/pga/predict/requirements.txt Source/aws-lambdas/pga/predict/requirements-nodeps.txt'
+      dockerfile_path: 'Source/aws-lambdas/pga/predict/Dockerfile'
+      image_name: 'pga-predict'
+      image_version: '1.0.0'
+      platform: 'linux/arm64'
 
   infra:
     name: Apply shared infrastructure
@@ -98,11 +171,12 @@ jobs:
   deploy_predict_lambda:
     name: AI hosting (deploy)
     needs: [infra, ai_hosting]
-    uses: ./.github/workflows/pga_predict_deploy.yml
+    uses: ./.github/workflows/docker_lambda_deploy.yml
     secrets: inherit
     with:
       function_name: ${{ needs.infra.outputs.pga_predict_function_name }}
-      image_uri: ${{ needs.ai_hosting.outputs.predict_image_uri }}
+      image_uri: ${{ needs.ai_hosting.outputs.image_uri }}
+      default_image_tag: 'pga-predict-latest'
 
   predict_read_deploy:
     name: PGA predict-read (test + deploy)
@@ -110,20 +184,14 @@ jobs:
     if: |
       always() &&
       (needs.approval.result == 'success' || needs.approval.result == 'skipped')
-    uses: ./.github/workflows/pga_predict_read_deploy.yml
+    uses: ./.github/workflows/zip_lambda_deploy.yml
     secrets: inherit
     with:
+      sport: 'PGA'
       function_name: ${{ needs.infra.outputs.pga_predict_read_function_name }}
-
-  data_pipeline:
-    name: Data pipeline
-    needs: infra
-    uses: ./.github/workflows/pga_data_pipeline.yml
-    secrets: inherit
-    with:
-      ingest_function_name: ${{ needs.infra.outputs.pga_ingest_function_name }}
-      normalize_function_name: ${{ needs.infra.outputs.pga_normalize_function_name }}
-      schedule_sync_function_name: ${{ needs.infra.outputs.pga_schedule_sync_function_name }}
+      test_path: 'Source/tests/aws-lambdas/pga/test_predict_read_handler.py Source/tests/library/serving/test_pga_reads.py Source/tests/library/serving/test_common.py Source/tests/library/storage/test_prediction_cache.py Source/tests/library/storage/test_model_artifacts.py Source/tests/library/aws/test_lambda_invoker.py'
+      requirements_files: 'Source/aws-lambdas/pga/predict-read/requirements.txt'
+      handler_dir: 'Source/aws-lambdas/pga/predict-read'
 
   live_scores_deploy:
     name: PGA live-scores (test + deploy)
@@ -131,7 +199,36 @@ jobs:
     if: |
       always() &&
       (needs.approval.result == 'success' || needs.approval.result == 'skipped')
-    uses: ./.github/workflows/pga_live_scores_deploy.yml
+    uses: ./.github/workflows/zip_lambda_deploy.yml
     secrets: inherit
     with:
+      sport: 'PGA'
       function_name: ${{ needs.infra.outputs.pga_live_scores_function_name }}
+      test_path: >-
+        Source/tests/aws-lambdas/pga/test_live_scores.py
+        Source/tests/aws-lambdas/pga/test_live_scores_handler.py
+        Source/tests/library/normalize/test_pga_event.py
+        Source/tests/library/normalize/test_pga_matchplay.py
+      requirements_files: 'Source/aws-lambdas/pga/live-scores/requirements.txt'
+      handler_dir: 'Source/aws-lambdas/pga/live-scores'
+      extra_source_files: 'Source/aws-lambdas/pga/live-scores/live_scores.py'
+
+  data_pipeline:
+    name: Data pipeline
+    needs: infra
+    uses: ./.github/workflows/data_pipeline.yml
+    secrets: inherit
+    with:
+      sport: 'PGA'
+      ingest_function_name: ${{ needs.infra.outputs.pga_ingest_function_name }}
+      ingest_test_path: 'Source/tests/aws-lambdas/pga/test_ingest.py'
+      ingest_requirements_files: 'Source/aws-lambdas/pga/ingest/requirements.txt'
+      ingest_handler_dir: 'Source/aws-lambdas/pga/ingest'
+      normalize_function_name: ${{ needs.infra.outputs.pga_normalize_function_name }}
+      normalize_test_path: 'Source/tests/aws-lambdas/pga/test_normalize.py'
+      normalize_requirements_files: 'Source/aws-lambdas/pga/normalize/requirements.txt'
+      normalize_handler_dir: 'Source/aws-lambdas/pga/normalize'
+      schedule_sync_function_name: ${{ needs.infra.outputs.pga_schedule_sync_function_name }}
+      schedule_sync_test_path: 'Source/tests/aws-lambdas/pga/test_schedule_sync.py'
+      schedule_sync_requirements_files: 'Source/aws-lambdas/pga/schedule-sync/requirements.txt'
+      schedule_sync_handler_dir: 'Source/aws-lambdas/pga/schedule-sync'

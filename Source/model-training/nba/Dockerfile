@@ -1,10 +1,10 @@
 # Build context is Source/ (not this directory) -- see
 # Source/model-training/nfl/Dockerfile's own comment for the full
-# reasoning, identical here. .github/workflows/nba_ai_training.yml (step
-# 5's own CI wiring, not yet built as of this writing -- see
-# project-nba-onboarding memory) builds this with `docker build -f
-# Source/model-training/nba/Dockerfile Source`, same convention as
-# nfl_ai_training.yml/ncaafb_ai_training.yml.
+# reasoning, identical here. .github/workflows/ai_training.yml's NBA call
+# (nba_deploy.yml, step 5's own CI wiring, not yet built as of this
+# writing -- see project-nba-onboarding memory) builds this with
+# `docker build -f Source/model-training/nba/Dockerfile Source`, same
+# convention as ai_training.yml's NFL/NCAAFB calls.
 #
 # One image, three entrypoint scripts (train_win_probability_model.py,
 # train_score_model.py, train_player_prop_model.py) -- same reasoning as

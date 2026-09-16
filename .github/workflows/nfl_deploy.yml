@@ -6,6 +6,13 @@
 # they don't depend on Terraform-managed resources; infra's CreateFunction
 # call for the nfl-predict Lambda requires the image to already exist in
 # ECR. Deploy steps that need a Terraform-created resource run after infra.
+#
+# Calls the generic per-category workflows (backfill.yml, ai_training.yml,
+# etc. -- shared across every sport) with NFL's own paths/test lists/image
+# versions as inputs, rather than a dedicated nfl_*.yml file per category --
+# keeps GitHub's cap on how many distinct reusable workflows one workflow
+# run can reference from ballooning as sports are added (app_deploy.yml
+# bundles every sport into one run).
 
 name: NFL Deploy
 
@@ -42,8 +49,15 @@ jobs:
     if: |
       always() &&
       (needs.approval.result == 'success' || needs.approval.result == 'skipped')
-    uses: ./.github/workflows/nfl_backfill.yml
+    uses: ./.github/workflows/docker_image_deploy.yml
     secrets: inherit
+    with:
+      sport: 'NFL'
+      test_path: 'Source/tests/data-backfills/nfl/'
+      requirements_files: 'Source/data-backfills/nfl/requirements-dev.txt'
+      dockerfile_path: 'Source/data-backfills/nfl/Dockerfile'
+      image_name: 'nfl-backfill'
+      image_version: '1.0.0'
 
   ai_training:
     name: AI training (build)
@@ -51,8 +65,20 @@ jobs:
     if: |
       always() &&
       (needs.approval.result == 'success' || needs.approval.result == 'skipped')
-    uses: ./.github/workflows/nfl_ai_training.yml
+    uses: ./.github/workflows/ai_training.yml
     secrets: inherit
+    with:
+      sport: 'NFL'
+      feature_engineering_test_path: 'Source/tests/library/ Source/tests/feature-engineering/nfl/ --ignore=Source/tests/library/ml'
+      feature_engineering_requirements_files: 'Source/feature-engineering/nfl/requirements.txt'
+      feature_engineering_dockerfile_path: 'Source/feature-engineering/nfl/Dockerfile'
+      feature_engineering_image_name: 'nfl-feature-engineering'
+      feature_engineering_image_version: '1.0.0'
+      train_model_test_path: 'Source/tests/library/ Source/tests/model-training/nfl/'
+      train_model_requirements_files: 'Source/model-training/nfl/requirements.txt'
+      train_model_dockerfile_path: 'Source/model-training/nfl/Dockerfile'
+      train_model_image_name: 'nfl-train-win-probability-model'
+      train_model_image_version: '1.0.0'
 
   ai_hosting:
     name: AI hosting (build)
@@ -60,8 +86,33 @@ jobs:
     if: |
       always() &&
       (needs.approval.result == 'success' || needs.approval.result == 'skipped')
-    uses: ./.github/workflows/nfl_ai_hosting.yml
+    uses: ./.github/workflows/docker_image_deploy.yml
     secrets: inherit
+    with:
+      sport: 'NFL'
+      test_path: >-
+        Source/tests/library/
+        Source/tests/aws-lambdas/nfl/test_predict_event_outcome.py
+        Source/tests/aws-lambdas/nfl/test_predict_player_props.py
+        Source/tests/aws-lambdas/nfl/test_predict_routing.py
+        Source/tests/aws-lambdas/nfl/test_predict_compute_and_cache.py
+        Source/tests/aws-lambdas/nfl/test_predict_leaders.py
+        Source/tests/aws-lambdas/nfl/test_predict_receiving_props.py
+        Source/tests/aws-lambdas/nfl/test_predict_rushing_props.py
+        Source/tests/aws-lambdas/nfl/test_predict_season_simulation.py
+        Source/tests/aws-lambdas/nfl/test_live_features_event.py
+        Source/tests/aws-lambdas/nfl/test_live_features_player.py
+        Source/tests/aws-lambdas/nfl/test_live_features_leader_candidates.py
+        Source/tests/aws-lambdas/nfl/test_live_features_depth_chart.py
+        Source/tests/aws-lambdas/nfl/test_live_features_roster.py
+        Source/tests/aws-lambdas/nfl/test_model_loader.py
+      # Both requirements files are installed so xgboost is importable in this test job.
+      requirements_files: 'Source/aws-lambdas/nfl/predict/requirements.txt Source/aws-lambdas/nfl/predict/requirements-nodeps.txt'
+      dockerfile_path: 'Source/aws-lambdas/nfl/predict/Dockerfile'
+      image_name: 'nfl-predict'
+      image_version: '1.0.0'
+      # Matches the nfl-predict Lambda's arm64 architecture.
+      platform: 'linux/arm64'
 
   infra:
     name: Apply shared infrastructure
@@ -85,11 +136,12 @@ jobs:
   deploy_predict_lambda:
     name: AI hosting (deploy)
     needs: [infra, ai_hosting]
-    uses: ./.github/workflows/nfl_predict_deploy.yml
+    uses: ./.github/workflows/docker_lambda_deploy.yml
     secrets: inherit
     with:
       function_name: ${{ needs.infra.outputs.nfl_predict_function_name }}
-      image_uri: ${{ needs.ai_hosting.outputs.predict_image_uri }}
+      image_uri: ${{ needs.ai_hosting.outputs.image_uri }}
+      default_image_tag: 'nfl-predict-latest'
 
   predict_read_deploy:
     name: NFL predict-read (test + deploy)
@@ -97,10 +149,14 @@ jobs:
     if: |
       always() &&
       (needs.approval.result == 'success' || needs.approval.result == 'skipped')
-    uses: ./.github/workflows/nfl_predict_read_deploy.yml
+    uses: ./.github/workflows/zip_lambda_deploy.yml
     secrets: inherit
     with:
+      sport: 'NFL'
       function_name: ${{ needs.infra.outputs.nfl_predict_read_function_name }}
+      test_path: 'Source/tests/aws-lambdas/nfl/test_predict_read.py Source/tests/library/serving/ Source/tests/library/storage/test_prediction_cache.py Source/tests/library/storage/test_model_artifacts.py Source/tests/library/aws/test_lambda_invoker.py'
+      requirements_files: 'Source/aws-lambdas/nfl/predict-read/requirements.txt'
+      handler_dir: 'Source/aws-lambdas/nfl/predict-read'
 
   live_scores_deploy:
     name: NFL live-scores (test + deploy)
@@ -108,17 +164,39 @@ jobs:
     if: |
       always() &&
       (needs.approval.result == 'success' || needs.approval.result == 'skipped')
-    uses: ./.github/workflows/nfl_live_scores_deploy.yml
+    uses: ./.github/workflows/zip_lambda_deploy.yml
     secrets: inherit
     with:
+      sport: 'NFL'
       function_name: ${{ needs.infra.outputs.nfl_live_scores_function_name }}
+      test_path: 'Source/tests/aws-lambdas/nfl/test_live_scores.py Source/tests/aws-lambdas/nfl/test_live_scores_handler.py'
+      requirements_files: 'Source/aws-lambdas/nfl/live-scores/requirements.txt'
+      handler_dir: 'Source/aws-lambdas/nfl/live-scores'
+      extra_source_files: 'Source/aws-lambdas/nfl/live-scores/live_scores.py'
 
   data_pipeline:
     name: Data pipeline
     needs: infra
-    uses: ./.github/workflows/nfl_data_pipeline.yml
+    uses: ./.github/workflows/data_pipeline.yml
     secrets: inherit
     with:
+      sport: 'NFL'
       ingest_function_name: ${{ needs.infra.outputs.nfl_ingest_function_name }}
+      ingest_test_path: >-
+        Source/tests/aws-lambdas/nfl/test_ingest_lambda_handler.py
+        Source/tests/aws-lambdas/nfl/test_ingest_helpers.py
+        Source/tests/aws-lambdas/nfl/test_ingest_rosters.py
+        Source/tests/aws-lambdas/nfl/test_ingest_depth_charts.py
+        Source/tests/aws-lambdas/nfl/test_ingest_coaches.py
+        Source/tests/aws-lambdas/nfl/test_enrichment.py
+      ingest_requirements_files: 'Source/aws-lambdas/nfl/ingest/requirements.txt'
+      ingest_handler_dir: 'Source/aws-lambdas/nfl/ingest'
+      ingest_extra_source_files: 'Source/aws-lambdas/nfl/ingest/enrichment.py'
       normalize_function_name: ${{ needs.infra.outputs.nfl_normalize_function_name }}
+      normalize_test_path: 'Source/tests/aws-lambdas/nfl/test_normalize.py'
+      normalize_requirements_files: 'Source/aws-lambdas/nfl/normalize/requirements.txt'
+      normalize_handler_dir: 'Source/aws-lambdas/nfl/normalize'
       schedule_sync_function_name: ${{ needs.infra.outputs.nfl_schedule_sync_function_name }}
+      schedule_sync_test_path: 'Source/tests/aws-lambdas/nfl/test_schedule_sync.py'
+      schedule_sync_requirements_files: 'Source/aws-lambdas/nfl/schedule-sync/requirements.txt'
+      schedule_sync_handler_dir: 'Source/aws-lambdas/nfl/schedule-sync'

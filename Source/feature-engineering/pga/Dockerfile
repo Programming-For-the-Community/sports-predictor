@@ -1,10 +1,10 @@
 # Build context is Source/ (not this directory) -- the image needs both
 # this job's code and the sibling library/ package, and Docker can't COPY
 # anything from outside its build context. See .github/workflows/
-# pga_ai_training.yml (not yet built as of this writing -- see
-# project-pga-onboarding memory) for the `docker build -f
+# ai_training.yml's PGA call (pga_deploy.yml, not yet built as of this
+# writing -- see project-pga-onboarding memory) for the `docker build -f
 # Source/feature-engineering/pga/Dockerfile Source` invocation, same
-# convention as nba_ai_training.yml/ncaafb_ai_training.yml.
+# convention as ai_training.yml's NBA/NCAAFB calls.
 #
 # Multi-stage, identical shape to Source/feature-engineering/nba/Dockerfile
 # -- see that file's own comment.

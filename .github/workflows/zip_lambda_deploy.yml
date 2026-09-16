@@ -1,0 +1,78 @@
+# Reusable workflow: tests, scans with SonarQube Cloud, builds, and
+# deploys a single zip-packaged Lambda. Each stage only runs if the one
+# before it passed. Generic single-Lambda pattern -- used for any Lambda
+# that gets its own dedicated test suite and doesn't share a scan with
+# sibling Lambdas (predict-read, live-scores today). Multi-Lambda files
+# that deliberately share ONE scan across several Lambdas (data_pipeline.yml,
+# shared_lambdas_deploy.yml) call python_lambda_build.yml/
+# python_lambda_deploy.yml directly instead of this file, so as not to
+# triple their scan count.
+
+name: Zip Lambda Deploy
+
+on:
+  workflow_dispatch:
+    inputs: &inputs
+      sport:
+        description: 'Sport display name for job labels (e.g. NFL, PGA)'
+        required: true
+        type: string
+      function_name:
+        description: 'Lambda function name'
+        required: true
+        type: string
+      test_path:
+        required: true
+        type: string
+      requirements_files:
+        required: false
+        type: string
+        default: ''
+      handler_dir:
+        description: 'Relative path to the directory containing handler.py and requirements.txt'
+        required: true
+        type: string
+      extra_source_files:
+        description: 'Space-separated list of extra source files to copy into the ZIP root (e.g. live_scores.py) -- leave blank if none'
+        required: false
+        type: string
+        default: ''
+  workflow_call:
+    inputs: *inputs
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  test:
+    name: Run ${{ inputs.sport }} tests
+    uses: ./.github/workflows/run_python_tests.yml
+    with:
+      test_path: ${{ inputs.test_path }}
+      requirements_files: ${{ inputs.requirements_files }}
+
+  scan:
+    name: SonarQube Cloud scan
+    needs: test
+    uses: ./.github/workflows/sonar_scan.yml
+    secrets: inherit
+
+  build:
+    name: Build ${{ inputs.sport }} Lambda
+    needs: scan
+    uses: ./.github/workflows/python_lambda_build.yml
+    with:
+      function_name: ${{ inputs.function_name }}
+      handler_dir: ${{ inputs.handler_dir }}
+      library_path: 'Source/library'
+      extra_source_files: ${{ inputs.extra_source_files }}
+
+  deploy:
+    name: Deploy ${{ inputs.sport }} Lambda
+    needs: build
+    uses: ./.github/workflows/python_lambda_deploy.yml
+    secrets: inherit
+    with:
+      function_name: ${{ inputs.function_name }}
+      artifact_name: ${{ needs.build.outputs.artifact_name }}

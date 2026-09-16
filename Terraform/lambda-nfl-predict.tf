@@ -31,7 +31,7 @@ resource "aws_lambda_function" "nfl_predict" {
   package_type  = "Image"
   image_uri     = "${var.ecr_repo_url}:nfl-predict-latest"
   # Graviton (arm64) -- better price/performance for inference. Image is
-  # built for arm64 by nfl_ai_hosting.yml's docker_build.yml call (platform:
+  # built for arm64 by ai_hosting.yml's NFL call (nfl_deploy.yml, platform:
   # linux/arm64); a mismatch between this setting and the pushed image's
   # platform fails at invoke time, not at `terraform apply`.
   architectures = ["arm64"]

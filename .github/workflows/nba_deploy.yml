@@ -3,27 +3,12 @@
 # configure this in Settings > Environments, it can't be set from this
 # file) before doing anything.
 #
-# aws_lambda_function.nba_predict (Terraform/lambda-nba-predict.tf) is a
-# container-image Lambda -- CreateFunction validates its image tag
-# already exists in ECR, and Terraform can't fabricate a placeholder
-# image the way it does a placeholder ZIP, so `infra` depends on
-# `ai_hosting` completing first.
-#
-# Once approved, backfill, ai_training, and ai_hosting (build) run BEFORE
-# infra -- all three only need the ECR repo URL and AWS push credentials
-# (plain GitHub variables/secrets), not anything Terraform manages, and
-# infra's own `needs` list below depends on all three for exactly that
-# reason -- the feature-engineering/train-win-probability-model images
-# ai_training pushes must exist in ECR before the training ECS task
-# definitions infra applies could ever actually run (RunTask pulls the
-# image by tag; a missing tag fails at runtime, not at `terraform apply`).
-# tf_install then applies infra (including the NBA ECS task definition's
-# env vars -- see Terraform/ecs-task-nba-backfill.tf -- and, for
-# nba-predict specifically, its CreateFunction call, which now finds
-# ai_hosting's just-pushed image). Only after infra do
-# deploy_predict_lambda, predict_read_deploy, data_pipeline, and
-# live_scores_deploy run, since they deploy code into functions/point
-# Lambdas at images Terraform just created.
+# Calls the generic per-category workflows (backfill.yml, ai_training.yml,
+# etc. -- shared across every sport) with NBA's own paths/test lists/image
+# versions as inputs, rather than a dedicated nba_*.yml file per category --
+# keeps GitHub's cap on how many distinct reusable workflows one workflow
+# run can reference from ballooning as sports are added (app_deploy.yml
+# bundles every sport into one run).
 #
 # Both this job's `approval` step AND tf_install.yml's own terraform job
 # gate on the `development`/`production` environment, so a run through
@@ -36,7 +21,6 @@ on:
   push:
     branches:
       - 'nba*'
-      - 'nba/*'
   workflow_call:
 
 # Shared group across every workflow that can reach tf_install.yml's
@@ -60,40 +44,69 @@ jobs:
       - name: Approved
         run: echo "Deployment approved -- proceeding."
 
-  # approval is intentionally skipped (not failed) when called via
-  # workflow_call -- without this, a skipped `needs` job would cause
-  # everything downstream to be skipped too. Each build job below repeats
-  # this same tolerant check against `approval` directly.
   backfill:
     name: Historical backfill (build)
     needs: approval
     if: |
       always() &&
       (needs.approval.result == 'success' || needs.approval.result == 'skipped')
-    uses: ./.github/workflows/nba_backfill.yml
+    uses: ./.github/workflows/docker_image_deploy.yml
     secrets: inherit
+    with:
+      sport: 'NBA'
+      test_path: 'Source/tests/data-backfills/nba/'
+      requirements_files: 'Source/data-backfills/nba/requirements-dev.txt'
+      dockerfile_path: 'Source/data-backfills/nba/Dockerfile'
+      image_name: 'nba-backfill'
+      image_version: '1.0.0'
 
-  # Ensures infra never runs without nba-predict-latest already in ECR.
-  ai_hosting:
-    name: AI hosting (build)
-    needs: approval
-    if: |
-      always() &&
-      (needs.approval.result == 'success' || needs.approval.result == 'skipped')
-    uses: ./.github/workflows/nba_ai_hosting.yml
-    secrets: inherit
-
-  # Pushes nba-feature-engineering-latest and
-  # nba-train-win-probability-model-latest. infra never runs without both
-  # already in ECR.
   ai_training:
     name: AI training (build)
     needs: approval
     if: |
       always() &&
       (needs.approval.result == 'success' || needs.approval.result == 'skipped')
-    uses: ./.github/workflows/nba_ai_training.yml
+    uses: ./.github/workflows/ai_training.yml
     secrets: inherit
+    with:
+      sport: 'NBA'
+      feature_engineering_test_path: 'Source/tests/library/ Source/tests/feature-engineering/nba/ --ignore=Source/tests/library/ml'
+      feature_engineering_requirements_files: 'Source/feature-engineering/nba/requirements.txt'
+      feature_engineering_dockerfile_path: 'Source/feature-engineering/nba/Dockerfile'
+      feature_engineering_image_name: 'nba-feature-engineering'
+      feature_engineering_image_version: '1.0.0'
+      train_model_test_path: 'Source/tests/library/ Source/tests/model-training/nba/'
+      train_model_requirements_files: 'Source/model-training/nba/requirements.txt'
+      train_model_dockerfile_path: 'Source/model-training/nba/Dockerfile'
+      train_model_image_name: 'nba-train-win-probability-model'
+      train_model_image_version: '1.0.0'
+
+  # Pushes nba-predict-latest. infra never runs without it already in ECR
+  # -- aws_lambda_function.nba_predict is a container-image Lambda, and
+  # CreateFunction validates its image tag already exists in ECR before
+  # Terraform can create it.
+  ai_hosting:
+    name: AI hosting (build)
+    needs: approval
+    if: |
+      always() &&
+      (needs.approval.result == 'success' || needs.approval.result == 'skipped')
+    uses: ./.github/workflows/docker_image_deploy.yml
+    secrets: inherit
+    with:
+      sport: 'NBA'
+      test_path: >-
+        Source/tests/library/
+        Source/tests/aws-lambdas/nba/test_live_features.py
+        Source/tests/aws-lambdas/nba/test_event_prediction.py
+        Source/tests/aws-lambdas/nba/test_predict_handler.py
+        Source/tests/aws-lambdas/nba/test_season_simulation.py
+        Source/tests/aws-lambdas/nba/test_predict_season_simulation.py
+      requirements_files: 'Source/aws-lambdas/nba/predict/requirements.txt Source/aws-lambdas/nba/predict/requirements-nodeps.txt'
+      dockerfile_path: 'Source/aws-lambdas/nba/predict/Dockerfile'
+      image_name: 'nba-predict'
+      image_version: '1.0.0'
+      platform: 'linux/arm64'
 
   infra:
     name: Apply shared infrastructure
@@ -106,49 +119,63 @@ jobs:
     uses: ./.github/workflows/tf_install.yml
     secrets: inherit
 
-  # Points nba-predict at whatever ai_hosting just pushed.
   deploy_predict_lambda:
     name: AI hosting (deploy)
     needs: [infra, ai_hosting]
-    uses: ./.github/workflows/nba_predict_deploy.yml
+    uses: ./.github/workflows/docker_lambda_deploy.yml
     secrets: inherit
     with:
       function_name: ${{ needs.infra.outputs.nba_predict_function_name }}
-      image_uri: ${{ needs.ai_hosting.outputs.predict_image_uri }}
+      image_uri: ${{ needs.ai_hosting.outputs.image_uri }}
+      default_image_tag: 'nba-predict-latest'
 
-  # nba-predict-read -- the light GET /nba/events + GET /nba/models Lambda
-  # split out of nba-predict for cold start (see
-  # Terraform/lambda-nba-predict-read.tf).
   predict_read_deploy:
     name: NBA predict-read (test + deploy)
     needs: [approval, infra]
     if: |
       always() &&
       (needs.approval.result == 'success' || needs.approval.result == 'skipped')
-    uses: ./.github/workflows/nba_predict_read_deploy.yml
+    uses: ./.github/workflows/zip_lambda_deploy.yml
     secrets: inherit
     with:
+      sport: 'NBA'
       function_name: ${{ needs.infra.outputs.nba_predict_read_function_name }}
+      test_path: 'Source/tests/aws-lambdas/nba/test_predict_read_handler.py Source/tests/library/serving/test_nba_reads.py Source/tests/library/storage/test_prediction_cache.py Source/tests/library/storage/test_model_artifacts.py Source/tests/library/aws/test_lambda_invoker.py'
+      requirements_files: 'Source/aws-lambdas/nba/predict-read/requirements.txt'
+      handler_dir: 'Source/aws-lambdas/nba/predict-read'
 
-  data_pipeline:
-    name: Data pipeline
-    needs: infra
-    uses: ./.github/workflows/nba_data_pipeline.yml
-    secrets: inherit
-    with:
-      ingest_function_name: ${{ needs.infra.outputs.nba_ingest_function_name }}
-      normalize_function_name: ${{ needs.infra.outputs.nba_normalize_function_name }}
-      schedule_sync_function_name: ${{ needs.infra.outputs.nba_schedule_sync_function_name }}
-
-  # nba-live-scores -- GET /nba/live-scores + the EventBridge-triggered
-  # cache refresh (see Terraform/lambda-nba-live-scores.tf).
   live_scores_deploy:
     name: NBA live-scores (test + deploy)
     needs: [approval, infra]
     if: |
       always() &&
       (needs.approval.result == 'success' || needs.approval.result == 'skipped')
-    uses: ./.github/workflows/nba_live_scores_deploy.yml
+    uses: ./.github/workflows/zip_lambda_deploy.yml
     secrets: inherit
     with:
+      sport: 'NBA'
       function_name: ${{ needs.infra.outputs.nba_live_scores_function_name }}
+      test_path: 'Source/tests/aws-lambdas/nba/test_live_scores.py Source/tests/aws-lambdas/nba/test_live_scores_handler.py'
+      requirements_files: 'Source/aws-lambdas/nba/live-scores/requirements.txt'
+      handler_dir: 'Source/aws-lambdas/nba/live-scores'
+      extra_source_files: 'Source/aws-lambdas/nba/live-scores/live_scores.py'
+
+  data_pipeline:
+    name: Data pipeline
+    needs: infra
+    uses: ./.github/workflows/data_pipeline.yml
+    secrets: inherit
+    with:
+      sport: 'NBA'
+      ingest_function_name: ${{ needs.infra.outputs.nba_ingest_function_name }}
+      ingest_test_path: 'Source/tests/aws-lambdas/nba/test_ingest.py'
+      ingest_requirements_files: 'Source/aws-lambdas/nba/ingest/requirements.txt'
+      ingest_handler_dir: 'Source/aws-lambdas/nba/ingest'
+      normalize_function_name: ${{ needs.infra.outputs.nba_normalize_function_name }}
+      normalize_test_path: 'Source/tests/aws-lambdas/nba/test_normalize.py'
+      normalize_requirements_files: 'Source/aws-lambdas/nba/normalize/requirements.txt'
+      normalize_handler_dir: 'Source/aws-lambdas/nba/normalize'
+      schedule_sync_function_name: ${{ needs.infra.outputs.nba_schedule_sync_function_name }}
+      schedule_sync_test_path: 'Source/tests/aws-lambdas/nba/test_schedule_sync.py'
+      schedule_sync_requirements_files: 'Source/aws-lambdas/nba/schedule-sync/requirements.txt'
+      schedule_sync_handler_dir: 'Source/aws-lambdas/nba/schedule-sync'

@@ -2,7 +2,7 @@
 # Source/aws-lambdas/nfl/predict/Dockerfile: this image needs both this
 # function's code and the sibling library/ package, and Docker can't COPY
 # anything from outside its build context. See
-# .github/workflows/nba_ai_hosting.yml for the `docker build -f
+# .github/workflows/ai_hosting.yml (called from nba_deploy.yml) for the `docker build -f
 # Source/aws-lambdas/nba/predict/Dockerfile Source` invocation.
 #
 # Container image, not the zip packaging every other Lambda in this repo

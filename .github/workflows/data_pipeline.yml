@@ -1,0 +1,178 @@
+# Reusable workflow: tests, scans with SonarQube Cloud, builds, and
+# deploys a sport's recurring data pipeline Lambdas: ingest (writes raw
+# JSON to S3), normalize (S3-triggered, writes to DynamoDB), and an
+# optional schedule-sync (EventBridge-triggered schedule discovery -- leave
+# schedule_sync_function_name blank for a sport with no separate
+# schedule-sync Lambda, e.g. F1, which resolves its whole season from
+# within ingest itself). One scan gates all three builds -- SonarQube
+# Cloud analyzes the whole repo either way, so there's no value in
+# scanning per Lambda. Each of the (up to) three chains is otherwise
+# independent -- a failure in one does not block the others.
+#
+# One generic file shared by every sport instead of a near-identical copy
+# per sport -- keeps GitHub's cap on how many distinct reusable workflows
+# one workflow run can reference from ballooning as sports are added
+# (app_deploy.yml bundles every sport into one run).
+#
+# Terraform (tf_install.yml) creates each Lambda function with a placeholder
+# ZIP and lifecycle { ignore_changes } so it never overwrites what this
+# workflow deploys. This workflow owns all subsequent code updates.
+
+name: Sport Data Pipeline
+
+on:
+  workflow_dispatch:
+    inputs: &inputs
+      sport:
+        description: 'Sport display name for job labels (e.g. NFL, PGA)'
+        required: true
+        type: string
+      ingest_function_name:
+        required: true
+        type: string
+      ingest_test_path:
+        required: true
+        type: string
+      ingest_requirements_files:
+        required: false
+        type: string
+        default: ''
+      ingest_handler_dir:
+        required: true
+        type: string
+      ingest_extra_source_files:
+        description: 'e.g. enrichment.py for sports whose ingest Lambda has one (NFL, NCAAFB)'
+        required: false
+        type: string
+        default: ''
+      normalize_function_name:
+        required: true
+        type: string
+      normalize_test_path:
+        required: true
+        type: string
+      normalize_requirements_files:
+        required: false
+        type: string
+        default: ''
+      normalize_handler_dir:
+        required: true
+        type: string
+      schedule_sync_function_name:
+        description: 'Leave blank for a sport with no schedule-sync Lambda (e.g. F1)'
+        required: false
+        type: string
+        default: ''
+      schedule_sync_test_path:
+        required: false
+        type: string
+        default: ''
+      schedule_sync_requirements_files:
+        required: false
+        type: string
+        default: ''
+      schedule_sync_handler_dir:
+        required: false
+        type: string
+        default: ''
+  workflow_call:
+    inputs: *inputs
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  # Each Lambda gets its own upstream test job, pointed at its own
+  # specific test file(s) -- not the whole Source/tests/aws-lambdas/<sport>/
+  # directory. A failing normalize test shouldn't fail the ingest deploy,
+  # or vice versa, purely because both deploys pointed at the same shared
+  # directory.
+  test-ingest:
+    name: Run ${{ inputs.sport }}-ingest tests
+    uses: ./.github/workflows/run_python_tests.yml
+    with:
+      test_path: ${{ inputs.ingest_test_path }}
+      requirements_files: ${{ inputs.ingest_requirements_files }}
+
+  test-normalize:
+    name: Run ${{ inputs.sport }}-normalize tests
+    uses: ./.github/workflows/run_python_tests.yml
+    with:
+      test_path: ${{ inputs.normalize_test_path }}
+      requirements_files: ${{ inputs.normalize_requirements_files }}
+
+  test-schedule-sync:
+    name: Run ${{ inputs.sport }}-schedule-sync tests
+    if: inputs.schedule_sync_function_name != ''
+    uses: ./.github/workflows/run_python_tests.yml
+    with:
+      test_path: ${{ inputs.schedule_sync_test_path }}
+      requirements_files: ${{ inputs.schedule_sync_requirements_files }}
+
+  scan:
+    name: SonarQube Cloud scan
+    needs: [test-ingest, test-normalize, test-schedule-sync]
+    if: |
+      always() &&
+      needs.test-ingest.result == 'success' &&
+      needs.test-normalize.result == 'success' &&
+      (needs.test-schedule-sync.result == 'success' || needs.test-schedule-sync.result == 'skipped')
+    uses: ./.github/workflows/sonar_scan.yml
+    secrets: inherit
+
+  build-ingest:
+    name: Build ${{ inputs.sport }}-ingest Lambda
+    needs: scan
+    uses: ./.github/workflows/python_lambda_build.yml
+    with:
+      function_name: ${{ inputs.ingest_function_name }}
+      handler_dir: ${{ inputs.ingest_handler_dir }}
+      library_path: 'Source/library'
+      extra_source_files: ${{ inputs.ingest_extra_source_files }}
+
+  deploy-ingest:
+    name: Deploy ${{ inputs.sport }}-ingest Lambda
+    needs: build-ingest
+    uses: ./.github/workflows/python_lambda_deploy.yml
+    secrets: inherit
+    with:
+      function_name: ${{ inputs.ingest_function_name }}
+      artifact_name: ${{ needs.build-ingest.outputs.artifact_name }}
+
+  build-normalize:
+    name: Build ${{ inputs.sport }}-normalize Lambda
+    needs: scan
+    uses: ./.github/workflows/python_lambda_build.yml
+    with:
+      function_name: ${{ inputs.normalize_function_name }}
+      handler_dir: ${{ inputs.normalize_handler_dir }}
+      library_path: 'Source/library'
+
+  deploy-normalize:
+    name: Deploy ${{ inputs.sport }}-normalize Lambda
+    needs: build-normalize
+    uses: ./.github/workflows/python_lambda_deploy.yml
+    secrets: inherit
+    with:
+      function_name: ${{ inputs.normalize_function_name }}
+      artifact_name: ${{ needs.build-normalize.outputs.artifact_name }}
+
+  build-schedule-sync:
+    name: Build ${{ inputs.sport }}-schedule-sync Lambda
+    if: inputs.schedule_sync_function_name != ''
+    needs: scan
+    uses: ./.github/workflows/python_lambda_build.yml
+    with:
+      function_name: ${{ inputs.schedule_sync_function_name }}
+      handler_dir: ${{ inputs.schedule_sync_handler_dir }}
+      library_path: 'Source/library'
+
+  deploy-schedule-sync:
+    name: Deploy ${{ inputs.sport }}-schedule-sync Lambda
+    needs: build-schedule-sync
+    uses: ./.github/workflows/python_lambda_deploy.yml
+    secrets: inherit
+    with:
+      function_name: ${{ inputs.schedule_sync_function_name }}
+      artifact_name: ${{ needs.build-schedule-sync.outputs.artifact_name }}

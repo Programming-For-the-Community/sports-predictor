@@ -1,6 +1,6 @@
 ﻿# Build context is Source/ (not this directory) -- the image needs both
 # this job's code and the sibling library/ package, and Docker can't COPY
-# anything from outside its build context. See .github/workflows/nfl_backfill.yml
+# anything from outside its build context. See .github/workflows/backfill.yml (called from nfl_deploy.yml)
 # for the `docker build -f Source/data-backfills/nfl/Dockerfile Source` invocation.
 #
 # Multi-stage: dependencies are resolved and installed in `builder`, then

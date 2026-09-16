@@ -1,0 +1,169 @@
+# Reusable workflow: runs tests, scans with SonarQube Cloud, then builds
+# and pushes a sport's training images -- feature engineering, a primary
+# training model (win-probability for most sports, top-10 for PGA), and an
+# optional third ranking-model image (NCAAFB/NCAA MBB only -- leave
+# ranking_model_dockerfile_path blank for every other sport, which skips
+# that image's build/push jobs entirely).
+#
+# One scan gates every image's build -- SonarQube Cloud analyzes the whole
+# repo either way, so there's no value in scanning per image. The primary
+# training model and ranking model share one upstream test job
+# (train_model_test_path) since both train_*.py scripts live under the
+# same model-training/<sport>/ test path.
+#
+# One generic file shared by every sport instead of a near-identical copy
+# per sport -- keeps GitHub's cap on how many distinct reusable workflows
+# one workflow run can reference from ballooning as sports are added
+# (app_deploy.yml bundles every sport into one run). Each image's version
+# constant is supplied by the caller (each sport's own _deploy.yml and
+# app_deploy.yml) rather than living in this file, so it stays
+# git-blameable per sport -- bump it at the call site, with a comment
+# there explaining why, same as before consolidation.
+
+name: Sport AI Training
+
+on:
+  workflow_dispatch:
+    inputs: &inputs
+      sport:
+        description: 'Sport display name for job labels (e.g. NFL, PGA)'
+        required: true
+        type: string
+      feature_engineering_test_path:
+        required: true
+        type: string
+      feature_engineering_requirements_files:
+        required: false
+        type: string
+        default: ''
+      feature_engineering_dockerfile_path:
+        required: true
+        type: string
+      feature_engineering_image_name:
+        required: true
+        type: string
+      feature_engineering_image_version:
+        required: true
+        type: string
+      train_model_test_path:
+        description: 'Test path covering every model-training/<sport>/*.py script, including the ranking model script when this sport has one'
+        required: true
+        type: string
+      train_model_requirements_files:
+        required: false
+        type: string
+        default: ''
+      train_model_dockerfile_path:
+        required: true
+        type: string
+      train_model_image_name:
+        description: 'e.g. nfl-train-win-probability-model, pga-train-top10-model'
+        required: true
+        type: string
+      train_model_image_version:
+        required: true
+        type: string
+      ranking_model_dockerfile_path:
+        description: 'Dockerfile for the optional third (ranking) training image -- leave blank for a sport with no ranking model'
+        required: false
+        type: string
+        default: ''
+      ranking_model_image_name:
+        required: false
+        type: string
+        default: ''
+      ranking_model_image_version:
+        required: false
+        type: string
+        default: ''
+  workflow_call:
+    inputs: *inputs
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  test-feature-engineering:
+    name: Run ${{ inputs.sport }} feature engineering tests
+    uses: ./.github/workflows/run_python_tests.yml
+    with:
+      test_path: ${{ inputs.feature_engineering_test_path }}
+      requirements_files: ${{ inputs.feature_engineering_requirements_files }}
+
+  test-train-models:
+    name: Run ${{ inputs.sport }} training model tests
+    uses: ./.github/workflows/run_python_tests.yml
+    with:
+      test_path: ${{ inputs.train_model_test_path }}
+      requirements_files: ${{ inputs.train_model_requirements_files }}
+
+  scan:
+    name: SonarQube Cloud scan
+    needs: [test-feature-engineering, test-train-models]
+    uses: ./.github/workflows/sonar_scan.yml
+    secrets: inherit
+
+  build-feature-engineering-image:
+    name: Build ${{ inputs.sport }} feature engineering image
+    needs: scan
+    uses: ./.github/workflows/docker_build.yml
+    secrets: inherit
+    with:
+      dockerfile_path: ${{ inputs.feature_engineering_dockerfile_path }}
+      docker_context: 'Source'
+      image_name: ${{ inputs.feature_engineering_image_name }}
+      image_version: ${{ inputs.feature_engineering_image_version }}
+
+  push-feature-engineering-image:
+    name: Push ${{ inputs.sport }} feature engineering image
+    needs: build-feature-engineering-image
+    uses: ./.github/workflows/docker_push.yml
+    secrets: inherit
+    with:
+      artifact_name: ${{ needs.build-feature-engineering-image.outputs.artifact_name }}
+      versioned_tag: ${{ needs.build-feature-engineering-image.outputs.versioned_tag }}
+      latest_tag: ${{ needs.build-feature-engineering-image.outputs.latest_tag }}
+
+  build-train-model-image:
+    name: Build ${{ inputs.sport }} train model image
+    needs: scan
+    uses: ./.github/workflows/docker_build.yml
+    secrets: inherit
+    with:
+      dockerfile_path: ${{ inputs.train_model_dockerfile_path }}
+      docker_context: 'Source'
+      image_name: ${{ inputs.train_model_image_name }}
+      image_version: ${{ inputs.train_model_image_version }}
+
+  push-train-model-image:
+    name: Push ${{ inputs.sport }} train model image
+    needs: build-train-model-image
+    uses: ./.github/workflows/docker_push.yml
+    secrets: inherit
+    with:
+      artifact_name: ${{ needs.build-train-model-image.outputs.artifact_name }}
+      versioned_tag: ${{ needs.build-train-model-image.outputs.versioned_tag }}
+      latest_tag: ${{ needs.build-train-model-image.outputs.latest_tag }}
+
+  build-ranking-model-image:
+    name: Build ${{ inputs.sport }} ranking model image
+    if: inputs.ranking_model_dockerfile_path != ''
+    needs: scan
+    uses: ./.github/workflows/docker_build.yml
+    secrets: inherit
+    with:
+      dockerfile_path: ${{ inputs.ranking_model_dockerfile_path }}
+      docker_context: 'Source'
+      image_name: ${{ inputs.ranking_model_image_name }}
+      image_version: ${{ inputs.ranking_model_image_version }}
+
+  push-ranking-model-image:
+    name: Push ${{ inputs.sport }} ranking model image
+    needs: build-ranking-model-image
+    uses: ./.github/workflows/docker_push.yml
+    secrets: inherit
+    with:
+      artifact_name: ${{ needs.build-ranking-model-image.outputs.artifact_name }}
+      versioned_tag: ${{ needs.build-ranking-model-image.outputs.versioned_tag }}
+      latest_tag: ${{ needs.build-ranking-model-image.outputs.latest_tag }}

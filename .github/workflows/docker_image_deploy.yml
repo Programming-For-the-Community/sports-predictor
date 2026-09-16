@@ -1,0 +1,91 @@
+# Reusable workflow: tests, scans with SonarQube Cloud, then builds and
+# pushes a single Docker image. Each stage only runs if the one before it
+# passed. Generic single-image pattern -- used for any image that gets
+# its own dedicated test suite and doesn't share a scan with sibling
+# images (backfill and ai_hosting today, one image each). ai_training.yml
+# deliberately shares ONE scan across 2-3 images, so it calls
+# docker_build.yml/docker_push.yml directly instead of this file, so as
+# not to triple its scan count.
+#
+# The `image_uri` output is only consumed by callers whose image feeds a
+# Lambda (ai_hosting.yml's own callers, via docker_lambda_deploy.yml) --
+# harmless to ignore for an image that only feeds an ECS/Fargate task
+# (backfill), which reads the floating "-latest" tag directly instead.
+
+name: Docker Image Deploy
+
+on:
+  workflow_dispatch:
+    inputs: &inputs
+      sport:
+        description: 'Sport display name for job labels (e.g. NFL, PGA)'
+        required: true
+        type: string
+      test_path:
+        required: true
+        type: string
+      requirements_files:
+        required: false
+        type: string
+        default: ''
+      dockerfile_path:
+        required: true
+        type: string
+      image_name:
+        description: 'e.g. nfl-backfill, nfl-predict'
+        required: true
+        type: string
+      image_version:
+        required: true
+        type: string
+      platform:
+        description: 'linux/amd64 (the default) for every ECS/Fargate-consumed image, linux/arm64 to match a Graviton inference Lambda'
+        required: false
+        type: string
+        default: 'linux/amd64'
+  workflow_call:
+    inputs: *inputs
+    outputs:
+      image_uri:
+        description: 'Versioned tag of the pushed image, for docker_lambda_deploy.yml to point a Lambda at (unused by ECS/Fargate-only images)'
+        value: ${{ jobs.push.outputs.versioned_tag }}
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  test:
+    name: Run ${{ inputs.sport }} tests
+    uses: ./.github/workflows/run_python_tests.yml
+    with:
+      test_path: ${{ inputs.test_path }}
+      requirements_files: ${{ inputs.requirements_files }}
+
+  scan:
+    name: SonarQube Cloud scan
+    needs: test
+    uses: ./.github/workflows/sonar_scan.yml
+    secrets: inherit
+
+  build:
+    name: Build ${{ inputs.sport }} image
+    needs: scan
+    uses: ./.github/workflows/docker_build.yml
+    secrets: inherit
+    with:
+      dockerfile_path: ${{ inputs.dockerfile_path }}
+      docker_context: 'Source'
+      image_name: ${{ inputs.image_name }}
+      image_version: ${{ inputs.image_version }}
+      platform: ${{ inputs.platform }}
+
+  push:
+    name: Push ${{ inputs.sport }} image
+    needs: build
+    uses: ./.github/workflows/docker_push.yml
+    secrets: inherit
+    with:
+      artifact_name: ${{ needs.build.outputs.artifact_name }}
+      versioned_tag: ${{ needs.build.outputs.versioned_tag }}
+      latest_tag: ${{ needs.build.outputs.latest_tag }}

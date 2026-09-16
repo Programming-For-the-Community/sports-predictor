@@ -8,6 +8,13 @@
 # ai_hosting/deploy_predict_lambda/predict_read_deploy joined in step 6
 # (inference); live_scores_deploy joined in step 7.
 #
+# Calls the generic per-category workflows (backfill.yml, ai_training.yml,
+# etc. -- shared across every sport) with NCAA MBB's own paths/test
+# lists/image versions as inputs, rather than a dedicated ncaambb_*.yml
+# file per category -- keeps GitHub's cap on how many distinct reusable
+# workflows one workflow run can reference from ballooning as sports are
+# added (app_deploy.yml bundles every sport into one run).
+#
 # aws_lambda_function.ncaambb_predict is a container-image Lambda (same
 # reasoning as nba_predict -- CreateFunction validates its image tag
 # already exists in ECR, and Terraform can't fabricate a placeholder image
@@ -63,17 +70,42 @@ jobs:
     if: |
       always() &&
       (needs.approval.result == 'success' || needs.approval.result == 'skipped')
-    uses: ./.github/workflows/ncaambb_backfill.yml
+    uses: ./.github/workflows/docker_image_deploy.yml
     secrets: inherit
+    with:
+      sport: 'NCAA MBB'
+      test_path: 'Source/tests/data-backfills/ncaambb/'
+      requirements_files: 'Source/data-backfills/ncaambb/requirements-dev.txt'
+      dockerfile_path: 'Source/data-backfills/ncaambb/Dockerfile'
+      image_name: 'ncaambb-backfill'
+      image_version: '1.0.0'
 
+  # Builds feature engineering, win-probability/score/player-prop training
+  # (shared image), and national-ranking training (separate image).
   ai_training:
     name: AI training (build)
     needs: approval
     if: |
       always() &&
       (needs.approval.result == 'success' || needs.approval.result == 'skipped')
-    uses: ./.github/workflows/ncaambb_ai_training.yml
+    uses: ./.github/workflows/ai_training.yml
     secrets: inherit
+    with:
+      sport: 'NCAA MBB'
+      feature_engineering_test_path: 'Source/tests/library/ Source/tests/feature-engineering/ncaambb/ --ignore=Source/tests/library/ml'
+      feature_engineering_requirements_files: 'Source/feature-engineering/ncaambb/requirements.txt'
+      feature_engineering_dockerfile_path: 'Source/feature-engineering/ncaambb/Dockerfile'
+      feature_engineering_image_name: 'ncaambb-feature-engineering'
+      feature_engineering_image_version: '1.0.0'
+      # Also used by train_score_model.py/train_player_prop_model.py via a container command override.
+      train_model_test_path: 'Source/tests/library/ Source/tests/model-training/ncaambb/'
+      train_model_requirements_files: 'Source/model-training/ncaambb/requirements.txt'
+      train_model_dockerfile_path: 'Source/model-training/ncaambb/Dockerfile'
+      train_model_image_name: 'ncaambb-train-win-probability-model'
+      train_model_image_version: '1.0.0'
+      ranking_model_dockerfile_path: 'Source/model-training/ncaambb/Dockerfile.ranking'
+      ranking_model_image_name: 'ncaambb-train-ranking-model'
+      ranking_model_image_version: '1.0.0'
 
   # Ensures infra never runs without ncaambb-predict-latest already in ECR.
   ai_hosting:
@@ -82,8 +114,20 @@ jobs:
     if: |
       always() &&
       (needs.approval.result == 'success' || needs.approval.result == 'skipped')
-    uses: ./.github/workflows/ncaambb_ai_hosting.yml
+    uses: ./.github/workflows/docker_image_deploy.yml
     secrets: inherit
+    with:
+      sport: 'NCAA MBB'
+      test_path: >-
+        Source/tests/library/
+        Source/tests/aws-lambdas/ncaambb/test_live_features.py
+        Source/tests/aws-lambdas/ncaambb/test_event_prediction.py
+        Source/tests/aws-lambdas/ncaambb/test_predict_handler.py
+      requirements_files: 'Source/aws-lambdas/ncaambb/predict/requirements.txt Source/aws-lambdas/ncaambb/predict/requirements-nodeps.txt'
+      dockerfile_path: 'Source/aws-lambdas/ncaambb/predict/Dockerfile'
+      image_name: 'ncaambb-predict'
+      image_version: '1.0.0'
+      platform: 'linux/arm64'
 
   infra:
     name: Apply shared infrastructure
@@ -100,11 +144,12 @@ jobs:
   deploy_predict_lambda:
     name: AI hosting (deploy)
     needs: [infra, ai_hosting]
-    uses: ./.github/workflows/ncaambb_predict_deploy.yml
+    uses: ./.github/workflows/docker_lambda_deploy.yml
     secrets: inherit
     with:
       function_name: ${{ needs.infra.outputs.ncaambb_predict_function_name }}
-      image_uri: ${{ needs.ai_hosting.outputs.predict_image_uri }}
+      image_uri: ${{ needs.ai_hosting.outputs.image_uri }}
+      default_image_tag: 'ncaambb-predict-latest'
 
   # ncaambb-predict-read -- the light GET /ncaambb/events + GET
   # /ncaambb/models Lambda split out of ncaambb-predict for cold start
@@ -115,20 +160,34 @@ jobs:
     if: |
       always() &&
       (needs.approval.result == 'success' || needs.approval.result == 'skipped')
-    uses: ./.github/workflows/ncaambb_predict_read_deploy.yml
+    uses: ./.github/workflows/zip_lambda_deploy.yml
     secrets: inherit
     with:
+      sport: 'NCAA MBB'
       function_name: ${{ needs.infra.outputs.ncaambb_predict_read_function_name }}
+      test_path: 'Source/tests/aws-lambdas/ncaambb/test_predict_read_handler.py Source/tests/library/serving/test_ncaambb_reads.py Source/tests/library/storage/test_prediction_cache.py Source/tests/library/storage/test_model_artifacts.py Source/tests/library/aws/test_lambda_invoker.py'
+      requirements_files: 'Source/aws-lambdas/ncaambb/predict-read/requirements.txt'
+      handler_dir: 'Source/aws-lambdas/ncaambb/predict-read'
 
   data_pipeline:
     name: Data pipeline
     needs: infra
-    uses: ./.github/workflows/ncaambb_data_pipeline.yml
+    uses: ./.github/workflows/data_pipeline.yml
     secrets: inherit
     with:
+      sport: 'NCAA MBB'
       ingest_function_name: ${{ needs.infra.outputs.ncaambb_ingest_function_name }}
+      ingest_test_path: 'Source/tests/aws-lambdas/ncaambb/test_ingest.py'
+      ingest_requirements_files: 'Source/aws-lambdas/ncaambb/ingest/requirements.txt'
+      ingest_handler_dir: 'Source/aws-lambdas/ncaambb/ingest'
       normalize_function_name: ${{ needs.infra.outputs.ncaambb_normalize_function_name }}
+      normalize_test_path: 'Source/tests/aws-lambdas/ncaambb/test_normalize.py'
+      normalize_requirements_files: 'Source/aws-lambdas/ncaambb/normalize/requirements.txt'
+      normalize_handler_dir: 'Source/aws-lambdas/ncaambb/normalize'
       schedule_sync_function_name: ${{ needs.infra.outputs.ncaambb_schedule_sync_function_name }}
+      schedule_sync_test_path: 'Source/tests/aws-lambdas/ncaambb/test_schedule_sync.py'
+      schedule_sync_requirements_files: 'Source/aws-lambdas/ncaambb/schedule-sync/requirements.txt'
+      schedule_sync_handler_dir: 'Source/aws-lambdas/ncaambb/schedule-sync'
 
   # ncaambb-live-scores -- GET /ncaambb/live-scores + the EventBridge-
   # triggered cache refresh (see Terraform/lambda-ncaambb-live-scores.tf).
@@ -138,7 +197,12 @@ jobs:
     if: |
       always() &&
       (needs.approval.result == 'success' || needs.approval.result == 'skipped')
-    uses: ./.github/workflows/ncaambb_live_scores_deploy.yml
+    uses: ./.github/workflows/zip_lambda_deploy.yml
     secrets: inherit
     with:
+      sport: 'NCAA MBB'
       function_name: ${{ needs.infra.outputs.ncaambb_live_scores_function_name }}
+      test_path: 'Source/tests/aws-lambdas/ncaambb/test_live_scores.py Source/tests/aws-lambdas/ncaambb/test_live_scores_handler.py'
+      requirements_files: 'Source/aws-lambdas/ncaambb/live-scores/requirements.txt'
+      handler_dir: 'Source/aws-lambdas/ncaambb/live-scores'
+      extra_source_files: 'Source/aws-lambdas/ncaambb/live-scores/live_scores.py'

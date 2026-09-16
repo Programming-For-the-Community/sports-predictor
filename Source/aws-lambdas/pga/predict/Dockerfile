@@ -2,7 +2,7 @@
 # Source/aws-lambdas/nba/predict/Dockerfile: this image needs both this
 # function's code and the sibling library/ package, and Docker can't COPY
 # anything from outside its build context. See
-# .github/workflows/pga_ai_hosting.yml for the `docker build -f
+# .github/workflows/ai_hosting.yml (called from pga_deploy.yml) for the `docker build -f
 # Source/aws-lambdas/pga/predict/Dockerfile Source` invocation.
 #
 # Container image, not the zip packaging every other PGA Lambda in this

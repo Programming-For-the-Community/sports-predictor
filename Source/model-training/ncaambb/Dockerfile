@@ -1,8 +1,8 @@
 # Build context is Source/ (not this directory) -- see
 # Source/model-training/nba/Dockerfile's own comment for the full
-# reasoning, identical here. .github/workflows/ncaambb_ai_training.yml
+# reasoning, identical here. .github/workflows/ai_training.yml (called from ncaambb_deploy.yml)
 # builds this with `docker build -f Source/model-training/ncaambb/Dockerfile
-# Source`, same convention as nfl_ai_training.yml/nba_ai_training.yml.
+# Source`, same convention as ai_training.yml's NFL/NBA calls.
 #
 # One image, three entrypoint scripts (train_win_probability_model.py,
 # train_score_model.py, train_player_prop_model.py) -- same reasoning as

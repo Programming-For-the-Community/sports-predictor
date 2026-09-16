@@ -1,9 +1,9 @@
 # Build context is Source/ (not this directory) -- the image needs both
 # this job's code and the sibling library/ package, and Docker can't COPY
 # anything from outside its build context. See
-# .github/workflows/ncaambb_ai_training.yml for the
+# .github/workflows/ai_training.yml (called from ncaambb_deploy.yml) for the
 # `docker build -f Source/feature-engineering/ncaambb/Dockerfile Source`
-# invocation, same convention as nfl_ai_training.yml/nba_ai_training.yml.
+# invocation, same convention as ai_training.yml's NFL/NBA calls.
 #
 # Multi-stage, identical shape to Source/feature-engineering/nba/Dockerfile
 # -- see that file's own comment.
