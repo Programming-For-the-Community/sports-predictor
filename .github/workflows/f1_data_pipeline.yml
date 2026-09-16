@@ -1,10 +1,12 @@
-# Builds and deploys the F1 recurring data pipeline Lambdas: f1-ingest
-# (EventBridge-orchestrator-triggered, discovers which race round(s) fall
-# in today's trailing window and writes raw results/qualifying/sprint/
-# pitstops JSON to S3) and f1-normalize (S3-triggered, writes to
-# DynamoDB). Both are deployed in parallel since they are independent -- a
-# failure in one does not block the other. Unlike PGA, there is no
-# f1-schedule-sync -- Jolpica's own season schedule call
+# Tests, scans with SonarQube Cloud, builds, and deploys the F1 recurring
+# data pipeline Lambdas: f1-ingest (EventBridge-orchestrator-triggered,
+# discovers which race round(s) fall in today's trailing window and writes
+# raw results/qualifying/sprint/pitstops JSON to S3) and f1-normalize
+# (S3-triggered, writes to DynamoDB). One scan gates both builds --
+# SonarQube Cloud analyzes the whole repo either way, so there's no value
+# in scanning twice per pipeline run. The two chains are otherwise
+# independent -- a failure in one does not block the other. Unlike PGA,
+# there is no f1-schedule-sync -- Jolpica's own season schedule call
 # (JolpicaClient.get_races) already resolves the whole season in one shot
 # from within f1-ingest itself (see Source/aws-lambdas/f1/ingest/
 # handler.py's own docstring), so no separate discovery Lambda is needed.
@@ -59,22 +61,44 @@ jobs:
       test_path: 'Source/tests/aws-lambdas/f1/test_normalize.py'
       requirements_files: 'Source/aws-lambdas/f1/normalize/requirements.txt'
 
-  deploy-ingest:
-    name: Deploy f1-ingest Lambda
-    needs: test-ingest
-    uses: ./.github/workflows/python_lambda_build.yml
+  scan:
+    name: SonarQube Cloud scan
+    needs: [test-ingest, test-normalize]
+    uses: ./.github/workflows/sonar_scan.yml
     secrets: inherit
+
+  build-ingest:
+    name: Build f1-ingest Lambda
+    needs: scan
+    uses: ./.github/workflows/python_lambda_build.yml
     with:
       function_name: ${{ inputs.ingest_function_name || 'sports-predictor-f1-ingest' }}
       handler_dir: 'Source/aws-lambdas/f1/ingest'
       library_path: 'Source/library'
 
-  deploy-normalize:
-    name: Deploy f1-normalize Lambda
-    needs: test-normalize
-    uses: ./.github/workflows/python_lambda_build.yml
+  deploy-ingest:
+    name: Deploy f1-ingest Lambda
+    needs: build-ingest
+    uses: ./.github/workflows/python_lambda_deploy.yml
     secrets: inherit
+    with:
+      function_name: ${{ inputs.ingest_function_name || 'sports-predictor-f1-ingest' }}
+      artifact_name: ${{ needs.build-ingest.outputs.artifact_name }}
+
+  build-normalize:
+    name: Build f1-normalize Lambda
+    needs: scan
+    uses: ./.github/workflows/python_lambda_build.yml
     with:
       function_name: ${{ inputs.normalize_function_name || 'sports-predictor-f1-normalize' }}
       handler_dir: 'Source/aws-lambdas/f1/normalize'
       library_path: 'Source/library'
+
+  deploy-normalize:
+    name: Deploy f1-normalize Lambda
+    needs: build-normalize
+    uses: ./.github/workflows/python_lambda_deploy.yml
+    secrets: inherit
+    with:
+      function_name: ${{ inputs.normalize_function_name || 'sports-predictor-f1-normalize' }}
+      artifact_name: ${{ needs.build-normalize.outputs.artifact_name }}

@@ -1,6 +1,10 @@
-# Tests and deploys the season-gate Lambda (Terraform/lambda-season-gate.tf),
-# shared across every sport's orchestrator state machine. Zip-packaged,
-# deployed via python_lambda_build.yml.
+# Tests, scans with SonarQube Cloud, builds, and deploys the season-gate
+# Lambda (Terraform/lambda-season-gate.tf, shared across every sport's
+# orchestrator state machine), the cloudwatch-geo-widget Lambda, and the
+# ec2-training-reaper Lambda. One scan gates all three builds -- SonarQube
+# Cloud analyzes the whole repo either way, so there's no value in scanning
+# three times per pipeline run. Each of the three chains is otherwise
+# independent -- a failure in one does not block the others.
 
 name: Shared Lambdas Deploy
 
@@ -35,16 +39,6 @@ jobs:
     with:
       test_path: 'Source/tests/library/test_season.py Source/tests/aws-lambdas/shared/test_season_gate.py'
 
-  deploy_season_gate:
-    name: Deploy season-gate Lambda
-    needs: test_season_gate
-    uses: ./.github/workflows/python_lambda_build.yml
-    secrets: inherit
-    with:
-      function_name: ${{ inputs.season_gate_function_name || 'sports-predictor-season-gate' }}
-      handler_dir: 'Source/aws-lambdas/shared/season-gate'
-      library_path: 'Source/library'
-
   test_cloudwatch_geo_widget:
     name: Run cloudwatch-geo-widget tests
     uses: ./.github/workflows/run_python_tests.yml
@@ -52,27 +46,67 @@ jobs:
       test_path: 'Source/tests/aws-lambdas/shared/test_cloudwatch_geo_widget.py'
       requirements_files: 'Source/aws-lambdas/shared/cloudwatch-geo-widget/requirements.txt'
 
-  deploy_cloudwatch_geo_widget:
-    name: Deploy cloudwatch-geo-widget Lambda
-    needs: test_cloudwatch_geo_widget
-    uses: ./.github/workflows/python_lambda_build.yml
-    secrets: inherit
-    with:
-      function_name: ${{ inputs.cloudwatch_geo_widget_function_name || 'sports-predictor-cloudwatch-geo-widget' }}
-      handler_dir: 'Source/aws-lambdas/shared/cloudwatch-geo-widget'
-      extra_source_files: 'Source/aws-lambdas/shared/cloudwatch-geo-widget/boundaries.json'
-
   test_ec2_training_reaper:
     name: Run ec2-training-reaper tests
     uses: ./.github/workflows/run_python_tests.yml
     with:
       test_path: 'Source/tests/aws-lambdas/shared/test_ec2_training_reaper.py'
 
-  deploy_ec2_training_reaper:
-    name: Deploy ec2-training-reaper Lambda
-    needs: test_ec2_training_reaper
-    uses: ./.github/workflows/python_lambda_build.yml
+  scan:
+    name: SonarQube Cloud scan
+    needs: [test_season_gate, test_cloudwatch_geo_widget, test_ec2_training_reaper]
+    uses: ./.github/workflows/sonar_scan.yml
     secrets: inherit
+
+  build_season_gate:
+    name: Build season-gate Lambda
+    needs: scan
+    uses: ./.github/workflows/python_lambda_build.yml
+    with:
+      function_name: ${{ inputs.season_gate_function_name || 'sports-predictor-season-gate' }}
+      handler_dir: 'Source/aws-lambdas/shared/season-gate'
+      library_path: 'Source/library'
+
+  deploy_season_gate:
+    name: Deploy season-gate Lambda
+    needs: build_season_gate
+    uses: ./.github/workflows/python_lambda_deploy.yml
+    secrets: inherit
+    with:
+      function_name: ${{ inputs.season_gate_function_name || 'sports-predictor-season-gate' }}
+      artifact_name: ${{ needs.build_season_gate.outputs.artifact_name }}
+
+  build_cloudwatch_geo_widget:
+    name: Build cloudwatch-geo-widget Lambda
+    needs: scan
+    uses: ./.github/workflows/python_lambda_build.yml
+    with:
+      function_name: ${{ inputs.cloudwatch_geo_widget_function_name || 'sports-predictor-cloudwatch-geo-widget' }}
+      handler_dir: 'Source/aws-lambdas/shared/cloudwatch-geo-widget'
+      extra_source_files: 'Source/aws-lambdas/shared/cloudwatch-geo-widget/boundaries.json'
+
+  deploy_cloudwatch_geo_widget:
+    name: Deploy cloudwatch-geo-widget Lambda
+    needs: build_cloudwatch_geo_widget
+    uses: ./.github/workflows/python_lambda_deploy.yml
+    secrets: inherit
+    with:
+      function_name: ${{ inputs.cloudwatch_geo_widget_function_name || 'sports-predictor-cloudwatch-geo-widget' }}
+      artifact_name: ${{ needs.build_cloudwatch_geo_widget.outputs.artifact_name }}
+
+  build_ec2_training_reaper:
+    name: Build ec2-training-reaper Lambda
+    needs: scan
+    uses: ./.github/workflows/python_lambda_build.yml
     with:
       function_name: ${{ inputs.ec2_training_reaper_function_name || 'sports-predictor-ec2-training-reaper' }}
       handler_dir: 'Source/aws-lambdas/shared/ec2-training-reaper'
+
+  deploy_ec2_training_reaper:
+    name: Deploy ec2-training-reaper Lambda
+    needs: build_ec2_training_reaper
+    uses: ./.github/workflows/python_lambda_deploy.yml
+    secrets: inherit
+    with:
+      function_name: ${{ inputs.ec2_training_reaper_function_name || 'sports-predictor-ec2-training-reaper' }}
+      artifact_name: ${{ needs.build_ec2_training_reaper.outputs.artifact_name }}

@@ -1,0 +1,73 @@
+# Reusable workflow: downloads a docker_build.yml image-tarball artifact and
+# pushes it to the shared ECR repo under both tags it was built with. ECS
+# task definitions and Lambda's image_uri reference only the floating
+# "-latest" tag, so a new push takes effect on the next `aws ecs run-task`
+# or Lambda deploy with no task-definition update or terraform apply
+# required.
+
+name: Push Docker Image to ECR
+
+on:
+  workflow_call:
+    inputs:
+      artifact_name:
+        description: 'Name of the image-tarball artifact produced by docker_build.yml'
+        required: true
+        type: string
+      versioned_tag:
+        description: 'Full URI (immutable version tag) to push, from docker_build.yml'
+        required: true
+        type: string
+      latest_tag:
+        description: 'Full URI (floating -latest tag) to push, from docker_build.yml'
+        required: true
+        type: string
+    outputs:
+      versioned_tag:
+        description: 'Full URI of the pushed, version-tagged image (passthrough of the input)'
+        value: ${{ inputs.versioned_tag }}
+      latest_tag:
+        description: 'Full URI of the pushed, floating-latest-tagged image (passthrough of the input)'
+        value: ${{ inputs.latest_tag }}
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  push:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Configure AWS credentials from OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_DEPLOY_SVC_ACCT_ARN }}
+          aws-region: ${{ vars.AWS_RESOURCE_REGION }}
+          role-session-name: GitHubActions-${{ github.run_id }}
+
+      - name: Verify AWS identity
+        run: aws sts get-caller-identity
+
+      - name: Download image artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ inputs.artifact_name }}
+
+      - name: Load and push image to Amazon ECR
+        env:
+          URI: ${{ secrets.ECR_URI }}
+          VERSIONED_TAG: ${{ inputs.versioned_tag }}
+          LATEST_TAG: ${{ inputs.latest_tag }}
+          ARTIFACT_NAME: ${{ inputs.artifact_name }}
+        run: |
+          ECR_REGISTRY=${URI%/*}
+
+          docker load -i "${ARTIFACT_NAME}.tar"
+
+          aws ecr get-login-password --region ${{ vars.AWS_RESOURCE_REGION }} \
+            | docker login --username AWS --password-stdin "$ECR_REGISTRY"
+
+          docker push "$VERSIONED_TAG"
+          docker push "$LATEST_TAG"
+
+          echo "Pushed: $VERSIONED_TAG and $LATEST_TAG"

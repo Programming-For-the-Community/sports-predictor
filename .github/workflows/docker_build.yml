@@ -1,11 +1,21 @@
-# Reusable workflow: builds a Docker image and pushes it to the shared
-# ECR repo under two tags -- an immutable version tag (for traceability/
-# rollback) and a floating "-latest" tag. ECS task definitions reference
-# only the floating tag, so a new push takes effect on the next
-# `aws ecs run-task` with no task definition update or terraform apply
-# required.
+# Reusable workflow: builds a Docker image (build only, no push -- see
+# docker_push.yml for that) and uploads it as a workflow artifact for a
+# downstream job to push to ECR. Split out of what used to be a single
+# combined docker_build_push.yml job so a Scan stage can sit strictly
+# between Test and Build, and Build strictly before Push.
+#
+# --provenance=false --sbom=false: buildx attaches these as attestations by
+# default on a build, which wraps the image in an OCI image index (manifest
+# list) even for one platform. ECR/ECS tolerate that, but Lambda's
+# UpdateFunctionCode rejects it outright ("image manifest, config or layer
+# media type ... is not supported") -- these two flags keep the image a
+# plain single-manifest image.
+#
+# No AWS credentials needed here at all -- tagging with the final ECR URI
+# is just string formatting (secrets.ECR_URI is a plain secret string, not
+# paired with AWS auth), and nothing is pushed yet.
 
-name: Build and Push Docker Image to ECR
+name: Build Docker Image
 
 on:
   workflow_call:
@@ -32,37 +42,30 @@ on:
         type: string
         default: 'linux/amd64'
     outputs:
+      artifact_name:
+        description: 'Name of the uploaded image-tarball artifact, for docker_push.yml to download'
+        value: ${{ jobs.build.outputs.artifact_name }}
       versioned_tag:
-        description: 'Full URI of the pushed, version-tagged image'
-        value: ${{ jobs.build-push.outputs.versioned_tag }}
+        description: 'Full URI the image was tagged with (immutable version tag)'
+        value: ${{ jobs.build.outputs.versioned_tag }}
       latest_tag:
-        description: 'Full URI of the pushed, floating-latest-tagged image'
-        value: ${{ jobs.build-push.outputs.latest_tag }}
+        description: 'Full URI the image was tagged with (floating -latest tag)'
+        value: ${{ jobs.build.outputs.latest_tag }}
 
 permissions:
-  id-token: write
   contents: read
 
 jobs:
-  build-push:
+  build:
     runs-on: ubuntu-latest
     outputs:
+      artifact_name: ${{ steps.build-image.outputs.artifact_name }}
       versioned_tag: ${{ steps.build-image.outputs.versioned_tag }}
       latest_tag: ${{ steps.build-image.outputs.latest_tag }}
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
-
-      - name: Configure AWS credentials from OIDC
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          role-to-assume: ${{ secrets.AWS_DEPLOY_SVC_ACCT_ARN }}
-          aws-region: ${{ vars.AWS_RESOURCE_REGION }}
-          role-session-name: GitHubActions-${{ github.run_id }}
-
-      - name: Verify AWS identity
-        run: aws sts get-caller-identity
 
       # QEMU lets buildx cross-build linux/arm64 on this runner's native
       # x86_64.
@@ -72,26 +75,15 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      # --provenance=false --sbom=false: buildx attaches these as
-      # attestations by default on a --push build, which wraps the pushed
-      # image in an OCI image index (manifest list) even for one
-      # platform. ECR/ECS tolerate that, but Lambda's UpdateFunctionCode
-      # rejects it outright ("image manifest, config or layer media type
-      # ... is not supported") -- these two flags keep the push a plain
-      # single-manifest image.
-      - name: Build, tag, and push image to Amazon ECR
+      - name: Build and tag image
         id: build-image
         env:
           URI: ${{ secrets.ECR_URI }}
           VERSIONED_TAG: ${{ inputs.image_name }}-${{ inputs.image_version }}
           LATEST_TAG: ${{ inputs.image_name }}-latest
           PLATFORM: ${{ inputs.platform }}
+          ARTIFACT_NAME: ${{ inputs.image_name }}-image
         run: |
-          ECR_REGISTRY=${URI%/*}
-
-          aws ecr get-login-password --region ${{ vars.AWS_RESOURCE_REGION }} \
-            | docker login --username AWS --password-stdin "$ECR_REGISTRY"
-
           docker buildx build \
             --platform "$PLATFORM" \
             --provenance=false \
@@ -99,9 +91,19 @@ jobs:
             -t "$URI:$VERSIONED_TAG" \
             -t "$URI:$LATEST_TAG" \
             -f "${{ inputs.dockerfile_path }}" \
-            --push \
+            --load \
             "${{ inputs.docker_context }}"
 
-          echo "Built and pushed: $URI:$VERSIONED_TAG and $URI:$LATEST_TAG"
+          docker save -o "${ARTIFACT_NAME}.tar" "$URI:$VERSIONED_TAG" "$URI:$LATEST_TAG"
+
+          echo "Built: $URI:$VERSIONED_TAG and $URI:$LATEST_TAG"
+          echo "artifact_name=$ARTIFACT_NAME" >> "$GITHUB_OUTPUT"
           echo "versioned_tag=$URI:$VERSIONED_TAG" >> "$GITHUB_OUTPUT"
           echo "latest_tag=$URI:$LATEST_TAG" >> "$GITHUB_OUTPUT"
+
+      - name: Upload image artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.build-image.outputs.artifact_name }}
+          path: ${{ steps.build-image.outputs.artifact_name }}.tar
+          retention-days: 1

@@ -1,8 +1,11 @@
-# Builds and deploys the NFL recurring data pipeline Lambdas: nfl-ingest
-# (EventBridge-triggered, writes raw JSON to S3), nfl-normalize
-# (S3-triggered, writes to DynamoDB), and nfl-schedule-sync (EventBridge-
-# triggered, writes raw schedule JSON to S3). Deployed in parallel; each
-# is independent.
+# Tests, scans with SonarQube Cloud, builds, and deploys the NFL recurring
+# data pipeline Lambdas: nfl-ingest (EventBridge-triggered, writes raw JSON
+# to S3), nfl-normalize (S3-triggered, writes to DynamoDB), and
+# nfl-schedule-sync (EventBridge-triggered, writes raw schedule JSON to S3).
+# One scan gates all three builds -- SonarQube Cloud analyzes the whole repo
+# either way, so there's no value in scanning three times per pipeline run.
+# Each of the three ingest/normalize/schedule-sync chains is otherwise
+# independent -- a failure in one does not block the others.
 #
 # Lambda function names come from the caller (nfl_deploy.yml) via
 # Terraform outputs, with defaults for standalone workflow_dispatch runs.
@@ -54,27 +57,6 @@ jobs:
       test_path: 'Source/tests/aws-lambdas/nfl/test_normalize.py'
       requirements_files: 'Source/aws-lambdas/nfl/normalize/requirements.txt'
 
-  deploy-ingest:
-    name: Deploy nfl-ingest Lambda
-    needs: test-ingest
-    uses: ./.github/workflows/python_lambda_build.yml
-    secrets: inherit
-    with:
-      function_name: ${{ inputs.ingest_function_name || 'sports-predictor-nfl-ingest' }}
-      handler_dir: 'Source/aws-lambdas/nfl/ingest'
-      library_path: 'Source/library'
-      extra_source_files: 'Source/aws-lambdas/nfl/ingest/enrichment.py'
-
-  deploy-normalize:
-    name: Deploy nfl-normalize Lambda
-    needs: test-normalize
-    uses: ./.github/workflows/python_lambda_build.yml
-    secrets: inherit
-    with:
-      function_name: ${{ inputs.normalize_function_name || 'sports-predictor-nfl-normalize' }}
-      handler_dir: 'Source/aws-lambdas/nfl/normalize'
-      library_path: 'Source/library'
-
   test-schedule-sync:
     name: Run nfl-schedule-sync tests
     uses: ./.github/workflows/run_python_tests.yml
@@ -82,12 +64,63 @@ jobs:
       test_path: 'Source/tests/aws-lambdas/nfl/test_schedule_sync.py'
       requirements_files: 'Source/aws-lambdas/nfl/schedule-sync/requirements.txt'
 
-  deploy-schedule-sync:
-    name: Deploy nfl-schedule-sync Lambda
-    needs: test-schedule-sync
-    uses: ./.github/workflows/python_lambda_build.yml
+  scan:
+    name: SonarQube Cloud scan
+    needs: [test-ingest, test-normalize, test-schedule-sync]
+    uses: ./.github/workflows/sonar_scan.yml
     secrets: inherit
+
+  build-ingest:
+    name: Build nfl-ingest Lambda
+    needs: scan
+    uses: ./.github/workflows/python_lambda_build.yml
+    with:
+      function_name: ${{ inputs.ingest_function_name || 'sports-predictor-nfl-ingest' }}
+      handler_dir: 'Source/aws-lambdas/nfl/ingest'
+      library_path: 'Source/library'
+      extra_source_files: 'Source/aws-lambdas/nfl/ingest/enrichment.py'
+
+  deploy-ingest:
+    name: Deploy nfl-ingest Lambda
+    needs: build-ingest
+    uses: ./.github/workflows/python_lambda_deploy.yml
+    secrets: inherit
+    with:
+      function_name: ${{ inputs.ingest_function_name || 'sports-predictor-nfl-ingest' }}
+      artifact_name: ${{ needs.build-ingest.outputs.artifact_name }}
+
+  build-normalize:
+    name: Build nfl-normalize Lambda
+    needs: scan
+    uses: ./.github/workflows/python_lambda_build.yml
+    with:
+      function_name: ${{ inputs.normalize_function_name || 'sports-predictor-nfl-normalize' }}
+      handler_dir: 'Source/aws-lambdas/nfl/normalize'
+      library_path: 'Source/library'
+
+  deploy-normalize:
+    name: Deploy nfl-normalize Lambda
+    needs: build-normalize
+    uses: ./.github/workflows/python_lambda_deploy.yml
+    secrets: inherit
+    with:
+      function_name: ${{ inputs.normalize_function_name || 'sports-predictor-nfl-normalize' }}
+      artifact_name: ${{ needs.build-normalize.outputs.artifact_name }}
+
+  build-schedule-sync:
+    name: Build nfl-schedule-sync Lambda
+    needs: scan
+    uses: ./.github/workflows/python_lambda_build.yml
     with:
       function_name: ${{ inputs.schedule_sync_function_name || 'sports-predictor-nfl-schedule-sync' }}
       handler_dir: 'Source/aws-lambdas/nfl/schedule-sync'
       library_path: 'Source/library'
+
+  deploy-schedule-sync:
+    name: Deploy nfl-schedule-sync Lambda
+    needs: build-schedule-sync
+    uses: ./.github/workflows/python_lambda_deploy.yml
+    secrets: inherit
+    with:
+      function_name: ${{ inputs.schedule_sync_function_name || 'sports-predictor-nfl-schedule-sync' }}
+      artifact_name: ${{ needs.build-schedule-sync.outputs.artifact_name }}

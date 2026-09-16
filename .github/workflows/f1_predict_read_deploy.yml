@@ -1,7 +1,8 @@
-# Tests and deploys the F1 predict-read Lambda -- GET /f1/events, GET
-# /f1/models, GET /f1/season, split out of f1-predict for cold start (see
+# Tests, scans with SonarQube Cloud, builds, and deploys the F1
+# predict-read Lambda -- GET /f1/events, GET /f1/models, GET /f1/season,
+# split out of f1-predict for cold start (see
 # Terraform/lambda-f1-predict-read.tf). Zip-packaged like ingest/normalize,
-# not a container image.
+# not a container image. Each stage only runs if the one before it passed.
 
 name: F1 Predict Read Deploy
 
@@ -27,12 +28,26 @@ jobs:
       test_path: 'Source/tests/aws-lambdas/f1/test_predict_read_handler.py Source/tests/library/serving/test_f1_reads.py Source/tests/library/serving/test_common.py Source/tests/library/storage/test_prediction_cache.py Source/tests/library/storage/test_model_artifacts.py Source/tests/library/aws/test_lambda_invoker.py'
       requirements_files: 'Source/aws-lambdas/f1/predict-read/requirements.txt'
 
-  deploy:
-    name: Deploy f1-predict-read Lambda
+  scan:
+    name: SonarQube Cloud scan
     needs: test
-    uses: ./.github/workflows/python_lambda_build.yml
+    uses: ./.github/workflows/sonar_scan.yml
     secrets: inherit
+
+  build:
+    name: Build f1-predict-read Lambda
+    needs: scan
+    uses: ./.github/workflows/python_lambda_build.yml
     with:
       function_name: ${{ inputs.function_name || 'sports-predictor-f1-predict-read' }}
       handler_dir: 'Source/aws-lambdas/f1/predict-read'
       library_path: 'Source/library'
+
+  deploy:
+    name: Deploy f1-predict-read Lambda
+    needs: build
+    uses: ./.github/workflows/python_lambda_deploy.yml
+    secrets: inherit
+    with:
+      function_name: ${{ inputs.function_name || 'sports-predictor-f1-predict-read' }}
+      artifact_name: ${{ needs.build.outputs.artifact_name }}

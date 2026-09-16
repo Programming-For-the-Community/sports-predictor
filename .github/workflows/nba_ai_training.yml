@@ -1,6 +1,7 @@
 # Builds, packages, and deploys the NBA AI training code. Runs standalone
 # (workflow_dispatch) or called from nba_deploy.yml (workflow_call) --
-# either way the work is identical: build and push image(s).
+# either way the work is identical: run tests, scan with SonarQube Cloud,
+# then build and push image(s) only if both passed.
 #
 # This stage builds two images: Feature Engineering and Train
 # Win-Probability Model (the latter also serves the score and player-prop
@@ -15,6 +16,9 @@
 # force a version bump (and a new image tag/deploy) of the other. Bump
 # only the constant for whichever image actually changed, never both just
 # to keep them in sync.
+#
+# One scan gates both images' builds -- SonarQube Cloud analyzes the whole
+# repo either way, so there's no value in scanning twice per pipeline run.
 
 name: NBA AI Training
 
@@ -56,6 +60,12 @@ jobs:
       test_path: 'Source/tests/library/ Source/tests/model-training/nba/'
       requirements_files: 'Source/model-training/nba/requirements.txt'
 
+  scan:
+    name: SonarQube Cloud scan
+    needs: [test-feature-engineering, test-train-win-probability-model]
+    uses: ./.github/workflows/sonar_scan.yml
+    secrets: inherit
+
   set-versions:
     name: Resolve image versions
     runs-on: ubuntu-latest
@@ -69,9 +79,9 @@ jobs:
           echo "train_win_probability_model_version=${{ env.TRAIN_WIN_PROBABILITY_MODEL_IMAGE_VERSION }}" >> "$GITHUB_OUTPUT"
 
   build-feature-engineering-image:
-    name: Build and push feature engineering image
-    needs: [set-versions, test-feature-engineering]
-    uses: ./.github/workflows/docker_build_push.yml
+    name: Build feature engineering image
+    needs: [set-versions, scan]
+    uses: ./.github/workflows/docker_build.yml
     secrets: inherit
     with:
       dockerfile_path: 'Source/feature-engineering/nba/Dockerfile'
@@ -79,13 +89,33 @@ jobs:
       image_name: 'nba-feature-engineering'
       image_version: ${{ needs.set-versions.outputs.feature_engineering_version }}
 
+  push-feature-engineering-image:
+    name: Push feature engineering image
+    needs: build-feature-engineering-image
+    uses: ./.github/workflows/docker_push.yml
+    secrets: inherit
+    with:
+      artifact_name: ${{ needs.build-feature-engineering-image.outputs.artifact_name }}
+      versioned_tag: ${{ needs.build-feature-engineering-image.outputs.versioned_tag }}
+      latest_tag: ${{ needs.build-feature-engineering-image.outputs.latest_tag }}
+
   build-train-win-probability-model-image:
-    name: Build and push train win-probability model image
-    needs: [set-versions, test-train-win-probability-model]
-    uses: ./.github/workflows/docker_build_push.yml
+    name: Build train win-probability model image
+    needs: [set-versions, scan]
+    uses: ./.github/workflows/docker_build.yml
     secrets: inherit
     with:
       dockerfile_path: 'Source/model-training/nba/Dockerfile'
       docker_context: 'Source'
       image_name: 'nba-train-win-probability-model'
       image_version: ${{ needs.set-versions.outputs.train_win_probability_model_version }}
+
+  push-train-win-probability-model-image:
+    name: Push train win-probability model image
+    needs: build-train-win-probability-model-image
+    uses: ./.github/workflows/docker_push.yml
+    secrets: inherit
+    with:
+      artifact_name: ${{ needs.build-train-win-probability-model-image.outputs.artifact_name }}
+      versioned_tag: ${{ needs.build-train-win-probability-model-image.outputs.versioned_tag }}
+      latest_tag: ${{ needs.build-train-win-probability-model-image.outputs.latest_tag }}

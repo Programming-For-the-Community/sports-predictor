@@ -1,6 +1,7 @@
 # Builds, packages, and deploys the PGA AI training code. Runs standalone
 # (workflow_dispatch) or called from pga_deploy.yml (workflow_call) --
-# either way the work is identical: build and push image(s).
+# either way the work is identical: run tests, scan with SonarQube Cloud,
+# then build and push image(s) only if both passed.
 #
 # This stage builds two images: Feature Engineering and Train Top-10
 # Model (the latter also serves train_top5_model.py/train_score_model.py/
@@ -17,6 +18,9 @@
 # version bump (and a new image tag/deploy) of the other. Bump only the
 # constant for whichever image actually changed, never both just to keep
 # them in sync.
+#
+# One scan gates both images' builds -- SonarQube Cloud analyzes the whole
+# repo either way, so there's no value in scanning twice per pipeline run.
 
 name: PGA AI Training
 
@@ -98,6 +102,12 @@ jobs:
       test_path: 'Source/tests/library/ Source/tests/model-training/pga/'
       requirements_files: 'Source/model-training/pga/requirements.txt'
 
+  scan:
+    name: SonarQube Cloud scan
+    needs: [test-feature-engineering, test-train-top10-model]
+    uses: ./.github/workflows/sonar_scan.yml
+    secrets: inherit
+
   set-versions:
     name: Resolve image versions
     runs-on: ubuntu-latest
@@ -111,9 +121,9 @@ jobs:
           echo "train_top10_model_version=${{ env.TRAIN_TOP10_MODEL_IMAGE_VERSION }}" >> "$GITHUB_OUTPUT"
 
   build-feature-engineering-image:
-    name: Build and push feature engineering image
-    needs: [set-versions, test-feature-engineering]
-    uses: ./.github/workflows/docker_build_push.yml
+    name: Build feature engineering image
+    needs: [set-versions, scan]
+    uses: ./.github/workflows/docker_build.yml
     secrets: inherit
     with:
       dockerfile_path: 'Source/feature-engineering/pga/Dockerfile'
@@ -121,13 +131,33 @@ jobs:
       image_name: 'pga-feature-engineering'
       image_version: ${{ needs.set-versions.outputs.feature_engineering_version }}
 
+  push-feature-engineering-image:
+    name: Push feature engineering image
+    needs: build-feature-engineering-image
+    uses: ./.github/workflows/docker_push.yml
+    secrets: inherit
+    with:
+      artifact_name: ${{ needs.build-feature-engineering-image.outputs.artifact_name }}
+      versioned_tag: ${{ needs.build-feature-engineering-image.outputs.versioned_tag }}
+      latest_tag: ${{ needs.build-feature-engineering-image.outputs.latest_tag }}
+
   build-train-top10-model-image:
-    name: Build and push train top-10-probability model image
-    needs: [set-versions, test-train-top10-model]
-    uses: ./.github/workflows/docker_build_push.yml
+    name: Build train top-10-probability model image
+    needs: [set-versions, scan]
+    uses: ./.github/workflows/docker_build.yml
     secrets: inherit
     with:
       dockerfile_path: 'Source/model-training/pga/Dockerfile'
       docker_context: 'Source'
       image_name: 'pga-train-top10-model'
       image_version: ${{ needs.set-versions.outputs.train_top10_model_version }}
+
+  push-train-top10-model-image:
+    name: Push train top-10-probability model image
+    needs: build-train-top10-model-image
+    uses: ./.github/workflows/docker_push.yml
+    secrets: inherit
+    with:
+      artifact_name: ${{ needs.build-train-top10-model-image.outputs.artifact_name }}
+      versioned_tag: ${{ needs.build-train-top10-model-image.outputs.versioned_tag }}
+      latest_tag: ${{ needs.build-train-top10-model-image.outputs.latest_tag }}

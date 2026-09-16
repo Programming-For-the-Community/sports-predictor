@@ -1,7 +1,7 @@
 # Launch template shared by both EC2 training ASGs (ec2-training-asg.tf).
 # Always resolves to the latest ECS-optimized AMI at apply time rather
 # than pinning a stale one -- same reasoning training's container images
-# already use a floating "-latest" tag for (docker_build_push.yml).
+# already use a floating "-latest" tag for (docker_build.yml/docker_push.yml).
 data "aws_ssm_parameter" "ecs_optimized_ami" {
   name = "/aws/service/ecs/optimized-ami/amazon-linux-2023/recommended"
 }

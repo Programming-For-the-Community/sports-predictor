@@ -1,8 +1,8 @@
-# Reusable workflow: builds a Python Lambda deployment ZIP and updates the
-# live function code. Terraform owns the function infrastructure (created
-# with a placeholder ZIP); this workflow owns every subsequent code
-# deployment. Callers run tests upstream via run_python_tests.yml and gate
-# this workflow's invocation on that via `needs:`.
+# Reusable workflow: builds a Python Lambda deployment ZIP and uploads it as
+# a workflow artifact. Deploying it (updating the live function code) is
+# python_lambda_deploy.yml's job -- split out of what used to be a single
+# combined build+deploy job so a Scan stage can sit strictly between Test
+# and Build, and Build strictly before Deploy.
 #
 # Build layout inside the ZIP:
 #   library/   <- shared library, installed via pip --no-deps
@@ -13,14 +13,16 @@
 # boto3 is intentionally excluded from requirements.txt for every Lambda
 # because it is pre-installed in the Lambda Python runtime. Bundle only
 # what the runtime doesn't already provide.
+#
+# No AWS credentials needed here at all -- nothing is deployed yet.
 
-name: Build and Deploy Python Lambda
+name: Build Python Lambda
 
 on:
   workflow_call:
     inputs:
       function_name:
-        description: 'Exact Lambda function name in AWS (e.g. sports-predictor-nfl-ingest)'
+        description: 'Exact Lambda function name in AWS (e.g. sports-predictor-nfl-ingest) -- used only to name the build artifact/ZIP here, not to deploy anything'
         required: true
         type: string
       handler_dir:
@@ -42,15 +44,20 @@ on:
         required: false
         type: string
         default: '3.12'
+    outputs:
+      artifact_name:
+        description: 'Name of the uploaded ZIP artifact, for python_lambda_deploy.yml to download'
+        value: ${{ jobs.build.outputs.artifact_name }}
 
 permissions:
-  id-token: write
   contents: read
 
 jobs:
-  build-deploy:
-    name: Build and deploy ${{ inputs.function_name }}
+  build:
+    name: Build ${{ inputs.function_name }}
     runs-on: ubuntu-latest
+    outputs:
+      artifact_name: ${{ steps.build-zip.outputs.artifact_name }}
 
     steps:
       - name: Checkout code
@@ -61,17 +68,8 @@ jobs:
         with:
           python-version: ${{ inputs.python_version }}
 
-      - name: Configure AWS credentials (OIDC)
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          role-to-assume: ${{ secrets.AWS_DEPLOY_SVC_ACCT_ARN }}
-          aws-region: ${{ vars.AWS_RESOURCE_REGION }}
-          role-session-name: GitHubActions-${{ github.run_id }}
-
-      - name: Verify AWS identity
-        run: aws sts get-caller-identity
-
       - name: Build deployment ZIP
+        id: build-zip
         env:
           HANDLER_DIR: ${{ inputs.handler_dir }}
           LIBRARY_PATH: ${{ inputs.library_path }}
@@ -104,13 +102,11 @@ jobs:
           cd ..
 
           echo "Built ${FUNCTION_NAME}.zip ($(du -sh ${FUNCTION_NAME}.zip | cut -f1))"
+          echo "artifact_name=${FUNCTION_NAME}-zip" >> "$GITHUB_OUTPUT"
 
-      - name: Deploy to Lambda
-        env:
-          FUNCTION_NAME: ${{ inputs.function_name }}
-        run: |
-          aws lambda update-function-code \
-            --function-name "$FUNCTION_NAME" \
-            --zip-file "fileb://${FUNCTION_NAME}.zip"
-
-          echo "Deployed $FUNCTION_NAME"
+      - name: Upload ZIP artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.build-zip.outputs.artifact_name }}
+          path: ${{ inputs.function_name }}.zip
+          retention-days: 1

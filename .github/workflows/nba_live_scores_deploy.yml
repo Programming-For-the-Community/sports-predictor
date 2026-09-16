@@ -1,5 +1,6 @@
-# Tests and deploys the NBA live-scores Lambda -- GET /nba/live-scores
-# plus the EventBridge-triggered cache refresh.
+# Tests, scans with SonarQube Cloud, builds, and deploys the NBA
+# live-scores Lambda -- GET /nba/live-scores plus the EventBridge-triggered
+# cache refresh. Each stage only runs if the one before it passed.
 #
 # Function name is supplied by the caller from a Terraform output, with a
 # default so workflow_dispatch (manual, standalone run) still works
@@ -29,13 +30,27 @@ jobs:
       test_path: 'Source/tests/aws-lambdas/nba/test_live_scores.py Source/tests/aws-lambdas/nba/test_live_scores_handler.py'
       requirements_files: 'Source/aws-lambdas/nba/live-scores/requirements.txt'
 
-  deploy:
-    name: Deploy nba-live-scores Lambda
+  scan:
+    name: SonarQube Cloud scan
     needs: test
-    uses: ./.github/workflows/python_lambda_build.yml
+    uses: ./.github/workflows/sonar_scan.yml
     secrets: inherit
+
+  build:
+    name: Build nba-live-scores Lambda
+    needs: scan
+    uses: ./.github/workflows/python_lambda_build.yml
     with:
       function_name: ${{ inputs.function_name || 'sports-predictor-nba-live-scores' }}
       handler_dir: 'Source/aws-lambdas/nba/live-scores'
       library_path: 'Source/library'
       extra_source_files: 'Source/aws-lambdas/nba/live-scores/live_scores.py'
+
+  deploy:
+    name: Deploy nba-live-scores Lambda
+    needs: build
+    uses: ./.github/workflows/python_lambda_deploy.yml
+    secrets: inherit
+    with:
+      function_name: ${{ inputs.function_name || 'sports-predictor-nba-live-scores' }}
+      artifact_name: ${{ needs.build.outputs.artifact_name }}

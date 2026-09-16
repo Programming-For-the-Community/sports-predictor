@@ -1,6 +1,7 @@
 # Builds, tests, and pushes the NBA AI hosting/inference image. Runs
 # standalone (workflow_dispatch) or called from nba_deploy.yml
-# (workflow_call).
+# (workflow_call). Each stage -- test, scan, build, push -- only runs if
+# the one before it passed.
 #
 # aws_lambda_function.nba_predict is a container-image Lambda --
 # CreateFunction validates its image tag already exists in ECR before
@@ -18,7 +19,7 @@ on:
     outputs:
       predict_image_uri:
         description: 'Versioned tag of the pushed nba-predict image, for nba_predict_deploy.yml to point the Lambda at'
-        value: ${{ jobs.build-predict-image.outputs.versioned_tag }}
+        value: ${{ jobs.push-predict-image.outputs.versioned_tag }}
 
 env:
   PREDICT_IMAGE_VERSION: '1.0.0'
@@ -45,6 +46,12 @@ jobs:
       # for xgboost itself to be importable at all in this test job.
       requirements_files: 'Source/aws-lambdas/nba/predict/requirements.txt Source/aws-lambdas/nba/predict/requirements-nodeps.txt'
 
+  scan:
+    name: SonarQube Cloud scan
+    needs: test-predict
+    uses: ./.github/workflows/sonar_scan.yml
+    secrets: inherit
+
   set-versions:
     name: Resolve image versions
     runs-on: ubuntu-latest
@@ -55,9 +62,9 @@ jobs:
         run: echo "predict_version=${{ env.PREDICT_IMAGE_VERSION }}" >> "$GITHUB_OUTPUT"
 
   build-predict-image:
-    name: Build and push predict image
-    needs: [set-versions, test-predict]
-    uses: ./.github/workflows/docker_build_push.yml
+    name: Build predict image
+    needs: [set-versions, scan]
+    uses: ./.github/workflows/docker_build.yml
     secrets: inherit
     with:
       dockerfile_path: 'Source/aws-lambdas/nba/predict/Dockerfile'
@@ -67,3 +74,13 @@ jobs:
       # arm64 -- matches aws_lambda_function.nba_predict's own
       # architectures = ["arm64"] (Terraform/lambda-nba-predict.tf).
       platform: 'linux/arm64'
+
+  push-predict-image:
+    name: Push predict image
+    needs: build-predict-image
+    uses: ./.github/workflows/docker_push.yml
+    secrets: inherit
+    with:
+      artifact_name: ${{ needs.build-predict-image.outputs.artifact_name }}
+      versioned_tag: ${{ needs.build-predict-image.outputs.versioned_tag }}
+      latest_tag: ${{ needs.build-predict-image.outputs.latest_tag }}

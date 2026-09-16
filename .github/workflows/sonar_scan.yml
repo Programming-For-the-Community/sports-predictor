@@ -1,0 +1,40 @@
+# Reusable workflow: runs a SonarQube Cloud analysis against the whole repo
+# (single repo-wide project -- see sonar-project.properties at the repo
+# root). Called once per component pipeline, between that pipeline's Test
+# and Build jobs, deliberately re-analyzing the full repo every time rather
+# than trying to scope the scan to just the calling component.
+#
+# sonar.qualitygate.wait=true makes this one action call block on and fail
+# the job if the quality gate fails, so callers just need a plain
+# `needs: scan` -- no separate quality-gate-polling step required.
+#
+# Requires the SonarQube Cloud project's Analysis Method to be set to
+# CI-based (Administration > Analysis Method) -- Automatic Analysis, the
+# default for new projects, rejects CI-submitted reports.
+
+name: SonarQube Cloud Scan
+
+on:
+  workflow_dispatch:
+  workflow_call:
+
+jobs:
+  scan:
+    name: SonarQube Cloud scan
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          # Full history -- SonarQube's blame/new-code analysis needs it.
+          fetch-depth: 0
+
+      - name: SonarQube Cloud Scan
+        uses: SonarSource/sonarqube-scan-action@v5
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+        with:
+          args: >
+            -Dsonar.organization=${{ vars.SONAR_ORGANIZATION }}
+            -Dsonar.projectKey=${{ vars.SONAR_PROJECT_KEY }}
+            -Dsonar.qualitygate.wait=true

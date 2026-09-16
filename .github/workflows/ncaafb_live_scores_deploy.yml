@@ -1,5 +1,7 @@
-# Tests and deploys the NCAAFB live-scores Lambda -- GET /ncaafb/live-scores
-# plus the EventBridge-triggered cache refresh.
+# Tests, scans with SonarQube Cloud, builds, and deploys the NCAAFB
+# live-scores Lambda -- GET /ncaafb/live-scores plus the
+# EventBridge-triggered cache refresh. Each stage only runs if the one
+# before it passed.
 
 name: NCAAFB Live Scores Deploy
 
@@ -25,13 +27,27 @@ jobs:
       test_path: 'Source/tests/aws-lambdas/ncaafb/test_live_scores.py Source/tests/aws-lambdas/ncaafb/test_live_scores_handler.py'
       requirements_files: 'Source/aws-lambdas/ncaafb/live-scores/requirements.txt'
 
-  deploy:
-    name: Deploy ncaafb-live-scores Lambda
+  scan:
+    name: SonarQube Cloud scan
     needs: test
-    uses: ./.github/workflows/python_lambda_build.yml
+    uses: ./.github/workflows/sonar_scan.yml
     secrets: inherit
+
+  build:
+    name: Build ncaafb-live-scores Lambda
+    needs: scan
+    uses: ./.github/workflows/python_lambda_build.yml
     with:
       function_name: ${{ inputs.function_name || 'sports-predictor-ncaafb-live-scores' }}
       handler_dir: 'Source/aws-lambdas/ncaafb/live-scores'
       library_path: 'Source/library'
       extra_source_files: 'Source/aws-lambdas/ncaafb/live-scores/live_scores.py'
+
+  deploy:
+    name: Deploy ncaafb-live-scores Lambda
+    needs: build
+    uses: ./.github/workflows/python_lambda_deploy.yml
+    secrets: inherit
+    with:
+      function_name: ${{ inputs.function_name || 'sports-predictor-ncaafb-live-scores' }}
+      artifact_name: ${{ needs.build.outputs.artifact_name }}

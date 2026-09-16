@@ -1,5 +1,6 @@
-# Runs tests, then builds and pushes the NFL historical backfill image
-# (Source/data-backfills/nfl) only if they pass. Tests hit ESPN's real API.
+# Runs tests, scans with SonarQube Cloud, then builds and pushes the NFL
+# historical backfill image (Source/data-backfills/nfl) -- each stage only
+# runs if the one before it passed. Tests hit ESPN's real API.
 #
 # `set-version` exposes the IMAGE_VERSION env constant as a job output since
 # a `uses:` job cannot read workflow-level `env:` directly in its `with:`.
@@ -25,6 +26,12 @@ jobs:
       test_path: 'Source/tests/data-backfills/nfl/'
       requirements_files: 'Source/data-backfills/nfl/requirements-dev.txt'
 
+  scan:
+    name: SonarQube Cloud scan
+    needs: test
+    uses: ./.github/workflows/sonar_scan.yml
+    secrets: inherit
+
   set-version:
     name: Resolve image version
     runs-on: ubuntu-latest
@@ -35,12 +42,22 @@ jobs:
         run: echo "version=${{ env.IMAGE_VERSION }}" >> "$GITHUB_OUTPUT"
 
   build-backfill-image:
-    name: Build and push backfill image
-    needs: [set-version, test]
-    uses: ./.github/workflows/docker_build_push.yml
+    name: Build backfill image
+    needs: [set-version, scan]
+    uses: ./.github/workflows/docker_build.yml
     secrets: inherit
     with:
       dockerfile_path: 'Source/data-backfills/nfl/Dockerfile'
       docker_context: 'Source'
       image_name: 'nfl-backfill'
       image_version: ${{ needs.set-version.outputs.version }}
+
+  push-backfill-image:
+    name: Push backfill image
+    needs: build-backfill-image
+    uses: ./.github/workflows/docker_push.yml
+    secrets: inherit
+    with:
+      artifact_name: ${{ needs.build-backfill-image.outputs.artifact_name }}
+      versioned_tag: ${{ needs.build-backfill-image.outputs.versioned_tag }}
+      latest_tag: ${{ needs.build-backfill-image.outputs.latest_tag }}

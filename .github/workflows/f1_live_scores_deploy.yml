@@ -1,5 +1,6 @@
-# Tests and deploys the F1 live-scores Lambda -- GET /f1/live-scores plus
-# the EventBridge-triggered cache refresh.
+# Tests, scans with SonarQube Cloud, builds, and deploys the F1
+# live-scores Lambda -- GET /f1/live-scores plus the EventBridge-triggered
+# cache refresh. Each stage only runs if the one before it passed.
 #
 # Function name is supplied by the caller from a Terraform output, with a
 # default so workflow_dispatch (manual, standalone run) still works
@@ -31,13 +32,27 @@ jobs:
         Source/tests/aws-lambdas/f1/test_live_scores_handler.py
       requirements_files: 'Source/aws-lambdas/f1/live-scores/requirements.txt'
 
-  deploy:
-    name: Deploy f1-live-scores Lambda
+  scan:
+    name: SonarQube Cloud scan
     needs: test
-    uses: ./.github/workflows/python_lambda_build.yml
+    uses: ./.github/workflows/sonar_scan.yml
     secrets: inherit
+
+  build:
+    name: Build f1-live-scores Lambda
+    needs: scan
+    uses: ./.github/workflows/python_lambda_build.yml
     with:
       function_name: ${{ inputs.function_name || 'sports-predictor-f1-live-scores' }}
       handler_dir: 'Source/aws-lambdas/f1/live-scores'
       library_path: 'Source/library'
       extra_source_files: 'Source/aws-lambdas/f1/live-scores/live_scores.py'
+
+  deploy:
+    name: Deploy f1-live-scores Lambda
+    needs: build
+    uses: ./.github/workflows/python_lambda_deploy.yml
+    secrets: inherit
+    with:
+      function_name: ${{ inputs.function_name || 'sports-predictor-f1-live-scores' }}
+      artifact_name: ${{ needs.build.outputs.artifact_name }}

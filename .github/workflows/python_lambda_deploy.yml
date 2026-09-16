@@ -1,0 +1,56 @@
+# Reusable workflow: downloads a python_lambda_build.yml ZIP artifact and
+# updates the live Lambda function code. Terraform owns the function
+# infrastructure (created with a placeholder ZIP); this workflow owns every
+# subsequent code deployment.
+
+name: Deploy Python Lambda
+
+on:
+  workflow_call:
+    inputs:
+      function_name:
+        description: 'Exact Lambda function name in AWS (e.g. sports-predictor-nfl-ingest)'
+        required: true
+        type: string
+      artifact_name:
+        description: 'Name of the ZIP artifact produced by python_lambda_build.yml'
+        required: true
+        type: string
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  deploy:
+    name: Deploy ${{ inputs.function_name }}
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_DEPLOY_SVC_ACCT_ARN }}
+          aws-region: ${{ vars.AWS_RESOURCE_REGION }}
+          role-session-name: GitHubActions-${{ github.run_id }}
+
+      - name: Verify AWS identity
+        run: aws sts get-caller-identity
+
+      - name: Download ZIP artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ inputs.artifact_name }}
+
+      - name: Deploy to Lambda
+        env:
+          FUNCTION_NAME: ${{ inputs.function_name }}
+        run: |
+          aws lambda update-function-code \
+            --function-name "$FUNCTION_NAME" \
+            --zip-file "fileb://${FUNCTION_NAME}.zip"
+
+          aws lambda wait function-updated \
+            --function-name "$FUNCTION_NAME"
+
+          echo "Deployed $FUNCTION_NAME"

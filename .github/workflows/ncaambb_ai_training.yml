@@ -1,7 +1,7 @@
 # Builds, packages, and deploys the NCAA MBB AI training code. Runs
 # standalone (workflow_dispatch) or called from ncaambb_deploy.yml
-# (workflow_call) -- either way the work is identical: build and push
-# image(s).
+# (workflow_call) -- either way the work is identical: run tests, scan
+# with SonarQube Cloud, then build and push image(s) only if both passed.
 #
 # This stage builds three images: Feature Engineering, Train
 # Win-Probability Model (also serves the score and player-prop Fargate
@@ -17,6 +17,10 @@
 # one has no reason to force a version bump (and a new image tag/deploy)
 # of the others. Bump only the constant for whichever image actually
 # changed, never all three just to keep them in sync.
+#
+# One scan gates all three builds -- SonarQube Cloud analyzes the whole
+# repo either way, so there's no value in scanning three times per
+# pipeline run.
 
 name: NCAA MBB AI Training
 
@@ -62,6 +66,12 @@ jobs:
       test_path: 'Source/tests/library/ Source/tests/model-training/ncaambb/'
       requirements_files: 'Source/model-training/ncaambb/requirements.txt'
 
+  scan:
+    name: SonarQube Cloud scan
+    needs: [test-feature-engineering, test-train-models]
+    uses: ./.github/workflows/sonar_scan.yml
+    secrets: inherit
+
   set-versions:
     name: Resolve image versions
     runs-on: ubuntu-latest
@@ -77,9 +87,9 @@ jobs:
           echo "train_ranking_model_version=${{ env.TRAIN_RANKING_MODEL_IMAGE_VERSION }}" >> "$GITHUB_OUTPUT"
 
   build-feature-engineering-image:
-    name: Build and push feature engineering image
-    needs: [set-versions, test-feature-engineering]
-    uses: ./.github/workflows/docker_build_push.yml
+    name: Build feature engineering image
+    needs: [set-versions, scan]
+    uses: ./.github/workflows/docker_build.yml
     secrets: inherit
     with:
       dockerfile_path: 'Source/feature-engineering/ncaambb/Dockerfile'
@@ -87,11 +97,21 @@ jobs:
       image_name: 'ncaambb-feature-engineering'
       image_version: ${{ needs.set-versions.outputs.feature_engineering_version }}
 
+  push-feature-engineering-image:
+    name: Push feature engineering image
+    needs: build-feature-engineering-image
+    uses: ./.github/workflows/docker_push.yml
+    secrets: inherit
+    with:
+      artifact_name: ${{ needs.build-feature-engineering-image.outputs.artifact_name }}
+      versioned_tag: ${{ needs.build-feature-engineering-image.outputs.versioned_tag }}
+      latest_tag: ${{ needs.build-feature-engineering-image.outputs.latest_tag }}
+
   # Also used by train_score_model.py/train_player_prop_model.py via a container command override.
   build-train-win-probability-model-image:
-    name: Build and push train win-probability/score/player-prop model image
-    needs: [set-versions, test-train-models]
-    uses: ./.github/workflows/docker_build_push.yml
+    name: Build train win-probability/score/player-prop model image
+    needs: [set-versions, scan]
+    uses: ./.github/workflows/docker_build.yml
     secrets: inherit
     with:
       dockerfile_path: 'Source/model-training/ncaambb/Dockerfile'
@@ -99,13 +119,33 @@ jobs:
       image_name: 'ncaambb-train-win-probability-model'
       image_version: ${{ needs.set-versions.outputs.train_win_probability_model_version }}
 
+  push-train-win-probability-model-image:
+    name: Push train win-probability/score/player-prop model image
+    needs: build-train-win-probability-model-image
+    uses: ./.github/workflows/docker_push.yml
+    secrets: inherit
+    with:
+      artifact_name: ${{ needs.build-train-win-probability-model-image.outputs.artifact_name }}
+      versioned_tag: ${{ needs.build-train-win-probability-model-image.outputs.versioned_tag }}
+      latest_tag: ${{ needs.build-train-win-probability-model-image.outputs.latest_tag }}
+
   build-train-ranking-model-image:
-    name: Build and push train ranking model image
-    needs: [set-versions, test-train-models]
-    uses: ./.github/workflows/docker_build_push.yml
+    name: Build train ranking model image
+    needs: [set-versions, scan]
+    uses: ./.github/workflows/docker_build.yml
     secrets: inherit
     with:
       dockerfile_path: 'Source/model-training/ncaambb/Dockerfile.ranking'
       docker_context: 'Source'
       image_name: 'ncaambb-train-ranking-model'
       image_version: ${{ needs.set-versions.outputs.train_ranking_model_version }}
+
+  push-train-ranking-model-image:
+    name: Push train ranking model image
+    needs: build-train-ranking-model-image
+    uses: ./.github/workflows/docker_push.yml
+    secrets: inherit
+    with:
+      artifact_name: ${{ needs.build-train-ranking-model-image.outputs.artifact_name }}
+      versioned_tag: ${{ needs.build-train-ranking-model-image.outputs.versioned_tag }}
+      latest_tag: ${{ needs.build-train-ranking-model-image.outputs.latest_tag }}
