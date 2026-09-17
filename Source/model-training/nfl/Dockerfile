@@ -35,8 +35,9 @@ WORKDIR /build
 COPY library/ ./library/
 COPY model-training/nfl/requirements.txt ./requirements.txt
 
-RUN pip install --no-cache-dir --target=/install ./library && \
-    pip install --no-cache-dir --only-binary :all: --target=/install -r requirements.txt
+RUN pip install --no-cache-dir --only-binary :all: --target=/install ./library && \
+    pip install --no-cache-dir --only-binary :all: --require-hashes \
+        --target=/install -r requirements.txt
 
 # --- Runtime: installed packages + application source, nothing else ---
 FROM python:3.12-slim AS runtime

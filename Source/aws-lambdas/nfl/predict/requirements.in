@@ -2,14 +2,6 @@
 # The shared library (Source/library) is installed separately by the build
 # workflow.
 #
-# Installed normally (pip resolves transitive deps itself) -- unlike
-# xgboost (see requirements-nodeps.txt, installed --no-deps specifically
-# to dodge its unconditional nvidia-nccl-cu12 GPU dependency), nothing
-# here needs dodging anything, so there's no reason to hand-maintain a
-# transitive dependency list ourselves and risk missing one (e.g. pandas'
-# own python-dateutil/pytz/tzdata, scikit-learn's threadpoolctl) the way
-# a --no-deps install would require.
-#
 # numpy/scipy: xgboost's own real runtime deps (xgboost.core imports
 # scipy.sparse unconditionally) -- listed here since xgboost itself
 # installs --no-deps and won't pull them in on its own.

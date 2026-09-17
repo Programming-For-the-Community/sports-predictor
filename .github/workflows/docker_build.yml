@@ -66,6 +66,70 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      # Regenerates this component's own hash-locked requirements.txt
+      # fresh every build from its committed requirements.in, so
+      # --require-hashes in the Dockerfile's pip install never needs a
+      # locally-generated file committed to the repo. requirements.in
+      # itself is unpinned/loosely-pinned direct dependencies only;
+      # pip-compile resolves and hashes the full transitive closure,
+      # across every published platform, which is why this step needs no
+      # platform-specific handling.
+      #
+      # requirements-nodeps.in (only present for predict Lambdas that
+      # install xgboost with --no-deps to dodge its unconditional
+      # nvidia-nccl-cu12 GPU dependency) is handled separately: pip-compile
+      # can't be used there since it would resolve and hash that same
+      # transitive closure pip-compile is normally relied on for, which
+      # --no-deps at install time would then still pull in (every line in
+      # a requirements file is installed regardless of --no-deps, which
+      # only suppresses fetching EACH line's own further dependencies) --
+      # so each package is downloaded individually for the build's own
+      # target platform/arch and hashed directly instead.
+      - name: Lock Python dependencies for this build
+        env:
+          PLATFORM: ${{ inputs.platform }}
+        run: |
+          set -e
+          pip install --no-cache-dir --quiet pip-tools
+          DOCKERFILE_DIR="$(dirname "${{ inputs.dockerfile_path }}")"
+
+          if [ -f "$DOCKERFILE_DIR/requirements.in" ]; then
+            pip-compile --quiet --generate-hashes --allow-unsafe \
+              --output-file="$DOCKERFILE_DIR/requirements.txt" \
+              "$DOCKERFILE_DIR/requirements.in"
+          fi
+
+          if [ -f "$DOCKERFILE_DIR/requirements-nodeps.in" ]; then
+            case "$PLATFORM" in
+              linux/arm64) WHEEL_ARCH=aarch64 ;;
+              *)           WHEEL_ARCH=x86_64 ;;
+            esac
+
+            rm -rf /tmp/nodeps_wheels && mkdir -p /tmp/nodeps_wheels
+            pip download --no-cache-dir --no-deps --only-binary :all: \
+              --platform "manylinux_2_28_${WHEEL_ARCH}" --python-version 312 \
+              --implementation cp --abi cp312 \
+              -d /tmp/nodeps_wheels -r "$DOCKERFILE_DIR/requirements-nodeps.in"
+
+            : > "$DOCKERFILE_DIR/requirements-nodeps.txt"
+            while IFS= read -r pin; do
+              pin="${pin%$'\r'}"
+              case "$pin" in ''|'#'*) continue ;; esac
+              pkg="$(echo "$pin" | cut -d= -f1 | tr '-' '_')"
+              wheel="$(ls "/tmp/nodeps_wheels/${pkg}"*.whl)"
+              hash="$(pip hash "$wheel" | grep -oP '(?<=--hash=)\S+')"
+              {
+                echo "$pin \\"
+                echo "    --hash=$hash"
+              } >> "$DOCKERFILE_DIR/requirements-nodeps.txt"
+            done < "$DOCKERFILE_DIR/requirements-nodeps.in"
+          fi
+
       # QEMU lets buildx cross-build linux/arm64 on this runner's native
       # x86_64.
       - name: Set up QEMU

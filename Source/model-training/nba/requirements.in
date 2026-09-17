@@ -10,10 +10,8 @@ pandas==2.2.3
 pyarrow==16.1.0
 scikit-learn==1.4.2
 scikit-learn-intelex==2024.0.1
-# Pinned to the EXACT version aws-lambdas/nba/predict/requirements-nodeps.txt
-# also pins -- xgboost's raw model format is not guaranteed compatible
-# across major versions; letting each side resolve `>=2.0` independently
-# let a real prod bug through, where an older predict-side xgboost
-# silently mispredicted a model this image had trained under a newer one.
+# Pinned to the EXACT version every other sport's training/serving images
+# pin -- xgboost's raw model format is not guaranteed compatible across
+# major versions (see project-xgboost-version-skew-bug memory).
 xgboost==3.3.0
 lightgbm==4.3.0

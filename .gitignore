@@ -24,3 +24,11 @@ sports_predictor_library.egg-info/
 dist/
 build/
 *.zip
+
+# Hash-locked requirements.txt regenerated from requirements.in by
+# docker_build.yml's own lock step on every build -- never committed.
+/Source/aws-lambdas/*/predict/requirements.txt
+/Source/aws-lambdas/*/predict/requirements-nodeps.txt
+/Source/model-training/*/requirements.txt
+/Source/feature-engineering/*/requirements.txt
+/Source/data-backfills/*/requirements.txt

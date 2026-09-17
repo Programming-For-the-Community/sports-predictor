@@ -19,7 +19,6 @@
 # model-training/pga/train_top10_model.py) -- unconditional here for the
 # same reason scikit-learn is, since which algorithm actually won any
 # given target's tournament can change from one retrain to the next.
-# Needs libgomp at runtime too -- see this directory's own Dockerfile.
 numpy==1.26.4
 scipy==1.12.0
 scikit-learn==1.4.2
