@@ -1,24 +1,16 @@
-# Reusable workflow: runs tests, scans with SonarQube Cloud, then builds
-# and pushes a sport's training images -- feature engineering, a primary
-# training model (win-probability for most sports, top-10 for PGA), and an
-# optional third ranking-model image (NCAAFB/NCAA MBB only -- leave
-# ranking_model_dockerfile_path blank for every other sport, which skips
-# that image's build/push jobs entirely).
-#
-# One scan gates every image's build -- SonarQube Cloud analyzes the whole
-# repo either way, so there's no value in scanning per image. The primary
-# training model and ranking model share one upstream test job
-# (train_model_test_path) since both train_*.py scripts live under the
-# same model-training/<sport>/ test path.
-#
-# One generic file shared by every sport instead of a near-identical copy
-# per sport -- keeps GitHub's cap on how many distinct reusable workflows
-# one workflow run can reference from ballooning as sports are added
-# (app_deploy.yml bundles every sport into one run). Each image's version
-# constant is supplied by the caller (each sport's own _deploy.yml and
-# app_deploy.yml) rather than living in this file, so it stays
-# git-blameable per sport -- bump it at the call site, with a comment
-# there explaining why, same as before consolidation.
+# Reusable workflow: builds and pushes a sport's training images -- feature
+# engineering, a primary training model (win-probability for most sports,
+# top-10 for PGA), and an optional third ranking-model image (NCAAFB/NCAA
+# MBB only -- leave ranking_model_dockerfile_path blank for every other
+# sport, which skips that image's build/push jobs entirely). Build-only --
+# no test, no scan. The caller is responsible for testing the relevant
+# code and running exactly one SonarQube Cloud scan per pipeline run
+# (gating this job on that scan via `needs:`), since a scan job can't
+# depend on jobs nested inside a called reusable workflow -- only a
+# sibling job in the SAME calling file can be a `needs:` target. See
+# nfl_deploy.yml/app_deploy.yml for the pattern: explicit `test-*` jobs,
+# one shared `scan` job needing all of them, then this workflow needing
+# `scan`.
 
 name: Sport AI Training
 
@@ -29,13 +21,6 @@ on:
         description: 'Sport display name for job labels (e.g. NFL, PGA)'
         required: true
         type: string
-      feature_engineering_test_path:
-        required: true
-        type: string
-      feature_engineering_requirements_files:
-        required: false
-        type: string
-        default: ''
       feature_engineering_dockerfile_path:
         required: true
         type: string
@@ -45,14 +30,6 @@ on:
       feature_engineering_image_version:
         required: true
         type: string
-      train_model_test_path:
-        description: 'Test path covering every model-training/<sport>/*.py script, including the ranking model script when this sport has one'
-        required: true
-        type: string
-      train_model_requirements_files:
-        required: false
-        type: string
-        default: ''
       train_model_dockerfile_path:
         required: true
         type: string
@@ -84,29 +61,8 @@ permissions:
   contents: read
 
 jobs:
-  test-feature-engineering:
-    name: Run ${{ inputs.sport }} feature engineering tests
-    uses: ./.github/workflows/run_python_tests.yml
-    with:
-      test_path: ${{ inputs.feature_engineering_test_path }}
-      requirements_files: ${{ inputs.feature_engineering_requirements_files }}
-
-  test-train-models:
-    name: Run ${{ inputs.sport }} training model tests
-    uses: ./.github/workflows/run_python_tests.yml
-    with:
-      test_path: ${{ inputs.train_model_test_path }}
-      requirements_files: ${{ inputs.train_model_requirements_files }}
-
-  scan:
-    name: SonarQube Cloud scan
-    needs: [test-feature-engineering, test-train-models]
-    uses: ./.github/workflows/sonar_scan.yml
-    secrets: inherit
-
   build-feature-engineering-image:
     name: Build ${{ inputs.sport }} feature engineering image
-    needs: scan
     uses: ./.github/workflows/docker_build.yml
     secrets: inherit
     with:
@@ -127,7 +83,6 @@ jobs:
 
   build-train-model-image:
     name: Build ${{ inputs.sport }} train model image
-    needs: scan
     uses: ./.github/workflows/docker_build.yml
     secrets: inherit
     with:
@@ -149,7 +104,6 @@ jobs:
   build-ranking-model-image:
     name: Build ${{ inputs.sport }} ranking model image
     if: inputs.ranking_model_dockerfile_path != ''
-    needs: scan
     uses: ./.github/workflows/docker_build.yml
     secrets: inherit
     with:

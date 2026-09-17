@@ -3,16 +3,12 @@
 # configure this in Settings > Environments, it can't be set from this
 # file) before doing anything.
 #
-# Calls the generic per-category workflows (backfill.yml, ai_training.yml,
-# etc. -- shared across every sport) with F1's own paths/test lists/image
-# versions as inputs, rather than a dedicated f1_*.yml file per category --
-# keeps GitHub's cap on how many distinct reusable workflows one workflow
-# run can reference from ballooning as sports are added (app_deploy.yml
-# bundles every sport into one run).
-#
-# Both this job's `approval` step AND tf_install.yml's own terraform job
-# gate on the `development`/`production` environment, so a run through
-# this pipeline prompts for approval twice.
+# Exactly one SonarQube Cloud scan for this whole pipeline: every
+# component's own test job runs directly against run_python_tests.yml
+# (not nested inside a category workflow, since a scan job can't depend on
+# jobs nested inside a called reusable workflow -- only a sibling job in
+# the SAME file), `scan` needs all of them, and every build/deploy job
+# needs `scan`.
 
 name: F1 Deploy
 
@@ -45,18 +41,133 @@ jobs:
       - name: Approved
         run: echo "Deployment approved -- proceeding."
 
-  backfill:
-    name: Historical backfill (build)
+  # Each test job below repeats the same tolerant check against `approval`
+  # directly -- approval is intentionally skipped (not failed) when called
+  # via workflow_call, and without this tolerant check a skipped `needs`
+  # job would cause everything downstream to be skipped too.
+  test-backfill:
+    name: Run F1 backfill tests
     needs: approval
     if: |
       always() &&
       (needs.approval.result == 'success' || needs.approval.result == 'skipped')
+    uses: ./.github/workflows/run_python_tests.yml
+    with:
+      test_path: 'Source/tests/data-backfills/f1/'
+      requirements_files: 'Source/data-backfills/f1/requirements-dev.txt'
+
+  test-feature-engineering:
+    name: Run F1 feature engineering tests
+    needs: approval
+    if: |
+      always() &&
+      (needs.approval.result == 'success' || needs.approval.result == 'skipped')
+    uses: ./.github/workflows/run_python_tests.yml
+    with:
+      test_path: 'Source/tests/library/ Source/tests/feature-engineering/f1/ --ignore=Source/tests/library/ml'
+      requirements_files: 'Source/feature-engineering/f1/requirements.txt'
+
+  test-train-winprob-model:
+    name: Run F1 train win-probability model tests
+    needs: approval
+    if: |
+      always() &&
+      (needs.approval.result == 'success' || needs.approval.result == 'skipped')
+    uses: ./.github/workflows/run_python_tests.yml
+    with:
+      test_path: 'Source/tests/library/ Source/tests/model-training/f1/'
+      requirements_files: 'Source/model-training/f1/requirements.txt'
+
+  test-predict:
+    name: Run F1 predict tests
+    needs: approval
+    if: |
+      always() &&
+      (needs.approval.result == 'success' || needs.approval.result == 'skipped')
+    uses: ./.github/workflows/run_python_tests.yml
+    with:
+      test_path: >-
+        Source/tests/library/
+        Source/tests/aws-lambdas/f1/test_live_features.py
+        Source/tests/aws-lambdas/f1/test_event_prediction.py
+        Source/tests/aws-lambdas/f1/test_predict_handler.py
+        Source/tests/aws-lambdas/f1/test_season_simulation.py
+        Source/tests/aws-lambdas/f1/test_season_projection.py
+      requirements_files: 'Source/aws-lambdas/f1/predict/requirements.txt Source/aws-lambdas/f1/predict/requirements-nodeps.txt'
+
+  test-predict-read:
+    name: Run F1 predict-read tests
+    needs: approval
+    if: |
+      always() &&
+      (needs.approval.result == 'success' || needs.approval.result == 'skipped')
+    uses: ./.github/workflows/run_python_tests.yml
+    with:
+      test_path: 'Source/tests/aws-lambdas/f1/test_predict_read_handler.py Source/tests/library/serving/test_f1_reads.py Source/tests/library/serving/test_common.py Source/tests/library/storage/test_prediction_cache.py Source/tests/library/storage/test_model_artifacts.py Source/tests/library/aws/test_lambda_invoker.py'
+      requirements_files: 'Source/aws-lambdas/f1/predict-read/requirements.txt'
+
+  test-live-scores:
+    name: Run F1 live-scores tests
+    needs: approval
+    if: |
+      always() &&
+      (needs.approval.result == 'success' || needs.approval.result == 'skipped')
+    uses: ./.github/workflows/run_python_tests.yml
+    with:
+      test_path: >-
+        Source/tests/aws-lambdas/f1/test_live_scores.py
+        Source/tests/aws-lambdas/f1/test_live_scores_handler.py
+      requirements_files: 'Source/aws-lambdas/f1/live-scores/requirements.txt'
+
+  test-ingest:
+    name: Run F1 ingest tests
+    needs: approval
+    if: |
+      always() &&
+      (needs.approval.result == 'success' || needs.approval.result == 'skipped')
+    uses: ./.github/workflows/run_python_tests.yml
+    with:
+      test_path: 'Source/tests/aws-lambdas/f1/test_ingest.py'
+      requirements_files: 'Source/aws-lambdas/f1/ingest/requirements.txt'
+
+  test-normalize:
+    name: Run F1 normalize tests
+    needs: approval
+    if: |
+      always() &&
+      (needs.approval.result == 'success' || needs.approval.result == 'skipped')
+    uses: ./.github/workflows/run_python_tests.yml
+    with:
+      test_path: 'Source/tests/aws-lambdas/f1/test_normalize.py'
+      requirements_files: 'Source/aws-lambdas/f1/normalize/requirements.txt'
+
+  # No f1-schedule-sync test -- see data_pipeline job's own comment below.
+  scan:
+    name: SonarQube Cloud scan
+    needs: [
+      test-backfill, test-feature-engineering, test-train-winprob-model, test-predict,
+      test-predict-read, test-live-scores, test-ingest, test-normalize,
+    ]
+    if: |
+      always() &&
+      (needs.test-backfill.result == 'success' || needs.test-backfill.result == 'skipped') &&
+      (needs.test-feature-engineering.result == 'success' || needs.test-feature-engineering.result == 'skipped') &&
+      (needs.test-train-winprob-model.result == 'success' || needs.test-train-winprob-model.result == 'skipped') &&
+      (needs.test-predict.result == 'success' || needs.test-predict.result == 'skipped') &&
+      (needs.test-predict-read.result == 'success' || needs.test-predict-read.result == 'skipped') &&
+      (needs.test-live-scores.result == 'success' || needs.test-live-scores.result == 'skipped') &&
+      (needs.test-ingest.result == 'success' || needs.test-ingest.result == 'skipped') &&
+      (needs.test-normalize.result == 'success' || needs.test-normalize.result == 'skipped')
+    uses: ./.github/workflows/sonar_scan.yml
+    secrets: inherit
+
+  backfill:
+    name: Historical backfill (build)
+    needs: scan
     uses: ./.github/workflows/docker_image_deploy.yml
     secrets: inherit
     with:
       sport: 'F1'
-      test_path: 'Source/tests/data-backfills/f1/'
-      requirements_files: 'Source/data-backfills/f1/requirements-dev.txt'
       dockerfile_path: 'Source/data-backfills/f1/Dockerfile'
       image_name: 'f1-backfill'
       image_version: '1.0.0'
@@ -74,21 +185,14 @@ jobs:
   # winprob/cup-winprob).
   ai_training:
     name: AI training (build)
-    needs: approval
-    if: |
-      always() &&
-      (needs.approval.result == 'success' || needs.approval.result == 'skipped')
+    needs: scan
     uses: ./.github/workflows/ai_training.yml
     secrets: inherit
     with:
       sport: 'F1'
-      feature_engineering_test_path: 'Source/tests/library/ Source/tests/feature-engineering/f1/ --ignore=Source/tests/library/ml'
-      feature_engineering_requirements_files: 'Source/feature-engineering/f1/requirements.txt'
       feature_engineering_dockerfile_path: 'Source/feature-engineering/f1/Dockerfile'
       feature_engineering_image_name: 'f1-feature-engineering'
       feature_engineering_image_version: '1.0.0'
-      train_model_test_path: 'Source/tests/library/ Source/tests/model-training/f1/'
-      train_model_requirements_files: 'Source/model-training/f1/requirements.txt'
       train_model_dockerfile_path: 'Source/model-training/f1/Dockerfile'
       train_model_image_name: 'f1-train-winprob-model'
       train_model_image_version: '1.0.0'
@@ -100,22 +204,11 @@ jobs:
   # comment above for the training ECS task images.
   ai_hosting:
     name: AI hosting (build)
-    needs: approval
-    if: |
-      always() &&
-      (needs.approval.result == 'success' || needs.approval.result == 'skipped')
+    needs: scan
     uses: ./.github/workflows/docker_image_deploy.yml
     secrets: inherit
     with:
       sport: 'F1'
-      test_path: >-
-        Source/tests/library/
-        Source/tests/aws-lambdas/f1/test_live_features.py
-        Source/tests/aws-lambdas/f1/test_event_prediction.py
-        Source/tests/aws-lambdas/f1/test_predict_handler.py
-        Source/tests/aws-lambdas/f1/test_season_simulation.py
-        Source/tests/aws-lambdas/f1/test_season_projection.py
-      requirements_files: 'Source/aws-lambdas/f1/predict/requirements.txt Source/aws-lambdas/f1/predict/requirements-nodeps.txt'
       dockerfile_path: 'Source/aws-lambdas/f1/predict/Dockerfile'
       image_name: 'f1-predict'
       image_version: '1.0.0'
@@ -143,34 +236,25 @@ jobs:
       default_image_tag: 'f1-predict-latest'
 
   predict_read_deploy:
-    name: F1 predict-read (test + deploy)
-    needs: [approval, infra]
-    if: |
-      always() &&
-      (needs.approval.result == 'success' || needs.approval.result == 'skipped')
+    name: F1 predict-read (deploy)
+    needs: [scan, infra]
     uses: ./.github/workflows/zip_lambda_deploy.yml
     secrets: inherit
     with:
       sport: 'F1'
       function_name: ${{ needs.infra.outputs.f1_predict_read_function_name }}
-      test_path: 'Source/tests/aws-lambdas/f1/test_predict_read_handler.py Source/tests/library/serving/test_f1_reads.py Source/tests/library/serving/test_common.py Source/tests/library/storage/test_prediction_cache.py Source/tests/library/storage/test_model_artifacts.py Source/tests/library/aws/test_lambda_invoker.py'
-      requirements_files: 'Source/aws-lambdas/f1/predict-read/requirements.txt'
       handler_dir: 'Source/aws-lambdas/f1/predict-read'
 
   data_pipeline:
     name: Data pipeline
-    needs: infra
+    needs: [scan, infra]
     uses: ./.github/workflows/data_pipeline.yml
     secrets: inherit
     with:
       sport: 'F1'
       ingest_function_name: ${{ needs.infra.outputs.f1_ingest_function_name }}
-      ingest_test_path: 'Source/tests/aws-lambdas/f1/test_ingest.py'
-      ingest_requirements_files: 'Source/aws-lambdas/f1/ingest/requirements.txt'
       ingest_handler_dir: 'Source/aws-lambdas/f1/ingest'
       normalize_function_name: ${{ needs.infra.outputs.f1_normalize_function_name }}
-      normalize_test_path: 'Source/tests/aws-lambdas/f1/test_normalize.py'
-      normalize_requirements_files: 'Source/aws-lambdas/f1/normalize/requirements.txt'
       normalize_handler_dir: 'Source/aws-lambdas/f1/normalize'
       # Unlike PGA, there is no f1-schedule-sync -- Jolpica's own season
       # schedule call (JolpicaClient.get_races) already resolves the whole
@@ -180,19 +264,12 @@ jobs:
       # is left blank, which skips that chain entirely.
 
   live_scores_deploy:
-    name: F1 live-scores (test + deploy)
-    needs: [approval, infra]
-    if: |
-      always() &&
-      (needs.approval.result == 'success' || needs.approval.result == 'skipped')
+    name: F1 live-scores (deploy)
+    needs: [scan, infra]
     uses: ./.github/workflows/zip_lambda_deploy.yml
     secrets: inherit
     with:
       sport: 'F1'
       function_name: ${{ needs.infra.outputs.f1_live_scores_function_name }}
-      test_path: >-
-        Source/tests/aws-lambdas/f1/test_live_scores.py
-        Source/tests/aws-lambdas/f1/test_live_scores_handler.py
-      requirements_files: 'Source/aws-lambdas/f1/live-scores/requirements.txt'
       handler_dir: 'Source/aws-lambdas/f1/live-scores'
       extra_source_files: 'Source/aws-lambdas/f1/live-scores/live_scores.py'

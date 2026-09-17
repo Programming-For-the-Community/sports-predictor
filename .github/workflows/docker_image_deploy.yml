@@ -1,14 +1,15 @@
-# Reusable workflow: tests, scans with SonarQube Cloud, then builds and
-# pushes a single Docker image. Each stage only runs if the one before it
-# passed. Generic single-image pattern -- used for any image that gets
-# its own dedicated test suite and doesn't share a scan with sibling
-# images (backfill and ai_hosting today, one image each). ai_training.yml
-# deliberately shares ONE scan across 2-3 images, so it calls
-# docker_build.yml/docker_push.yml directly instead of this file, so as
-# not to triple its scan count.
+# Reusable workflow: builds and pushes a single Docker image. Build-only --
+# no test, no scan. The caller is responsible for testing the relevant
+# code and running exactly one SonarQube Cloud scan per pipeline run
+# (gating this job on that scan via `needs:`), since a scan job can't
+# depend on jobs nested inside a called reusable workflow -- only a
+# sibling job in the SAME calling file can be a `needs:` target. See
+# nfl_deploy.yml/app_deploy.yml for the pattern: explicit `test-*` jobs,
+# one shared `scan` job needing all of them, then this workflow needing
+# `scan`.
 #
 # The `image_uri` output is only consumed by callers whose image feeds a
-# Lambda (ai_hosting.yml's own callers, via docker_lambda_deploy.yml) --
+# Lambda (ai_hosting's own callers, via docker_lambda_deploy.yml) --
 # harmless to ignore for an image that only feeds an ECS/Fargate task
 # (backfill), which reads the floating "-latest" tag directly instead.
 
@@ -21,13 +22,6 @@ on:
         description: 'Sport display name for job labels (e.g. NFL, PGA)'
         required: true
         type: string
-      test_path:
-        required: true
-        type: string
-      requirements_files:
-        required: false
-        type: string
-        default: ''
       dockerfile_path:
         required: true
         type: string
@@ -55,22 +49,8 @@ permissions:
   contents: read
 
 jobs:
-  test:
-    name: Run ${{ inputs.sport }} tests
-    uses: ./.github/workflows/run_python_tests.yml
-    with:
-      test_path: ${{ inputs.test_path }}
-      requirements_files: ${{ inputs.requirements_files }}
-
-  scan:
-    name: SonarQube Cloud scan
-    needs: test
-    uses: ./.github/workflows/sonar_scan.yml
-    secrets: inherit
-
   build:
     name: Build ${{ inputs.sport }} image
-    needs: scan
     uses: ./.github/workflows/docker_build.yml
     secrets: inherit
     with:

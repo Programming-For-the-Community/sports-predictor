@@ -4,20 +4,19 @@
 # Calls `tf_install.yml` exactly ONCE, not once per component, fed from
 # one shared `infra` job.
 #
+# Exactly ONE SonarQube Cloud scan for this entire run, covering every
+# sport plus shared lambdas plus the frontend: every component's own test
+# job runs directly against run_python_tests.yml/flutter test (not nested
+# inside a category workflow, since a scan job can't depend on jobs nested
+# inside a called reusable workflow -- only a sibling job in the SAME
+# file), the one `scan` job needs all of them, and every build/deploy job
+# needs `scan`.
+#
 # Anything that only builds/pushes an artifact (no Terraform-created
 # resource to read or write) runs BEFORE infra; anything that needs a
 # Terraform-created resource to already exist (pointing a Lambda at an
 # image, deploying zip code to a function, syncing to a bucket, or reading
 # Terraform outputs directly for the frontend build) runs AFTER.
-#
-# Calls the generic per-category workflows (backfill.yml, ai_training.yml,
-# etc. -- shared across every sport) with each sport's own paths/test
-# lists/image versions as inputs, duplicating the same per-sport `with:`
-# blocks each sport's own _deploy.yml uses (this file intentionally does
-# NOT call nfl_deploy.yml/etc. directly -- doing so would re-run
-# tf_install.yml once per sport instead of once total). Keeps GitHub's cap
-# on how many distinct reusable workflows one workflow run can reference
-# from ballooning as sports are added.
 
 name: App Deploy
 
@@ -41,43 +40,36 @@ permissions:
   contents: read
   actions: read
 
+env:
+  FLUTTER_VERSION: '3.29.3'
+
 jobs:
-  # --- Before infra: build/push only, no Terraform dependency ---
-  nfl_backfill_build:
-    name: NFL backfill (build)
-    uses: ./.github/workflows/docker_image_deploy.yml
-    secrets: inherit
+  # ============================== NFL tests ==============================
+  test-nfl-backfill:
+    name: Run NFL backfill tests
+    uses: ./.github/workflows/run_python_tests.yml
     with:
-      sport: 'NFL'
       test_path: 'Source/tests/data-backfills/nfl/'
       requirements_files: 'Source/data-backfills/nfl/requirements-dev.txt'
-      dockerfile_path: 'Source/data-backfills/nfl/Dockerfile'
-      image_name: 'nfl-backfill'
-      image_version: '1.0.0'
 
-  nfl_ai_training_build:
-    name: NFL AI training (build)
-    uses: ./.github/workflows/ai_training.yml
-    secrets: inherit
+  test-nfl-feature-engineering:
+    name: Run NFL feature engineering tests
+    uses: ./.github/workflows/run_python_tests.yml
     with:
-      sport: 'NFL'
-      feature_engineering_test_path: 'Source/tests/library/ Source/tests/feature-engineering/nfl/ --ignore=Source/tests/library/ml'
-      feature_engineering_requirements_files: 'Source/feature-engineering/nfl/requirements.txt'
-      feature_engineering_dockerfile_path: 'Source/feature-engineering/nfl/Dockerfile'
-      feature_engineering_image_name: 'nfl-feature-engineering'
-      feature_engineering_image_version: '1.0.0'
-      train_model_test_path: 'Source/tests/library/ Source/tests/model-training/nfl/'
-      train_model_requirements_files: 'Source/model-training/nfl/requirements.txt'
-      train_model_dockerfile_path: 'Source/model-training/nfl/Dockerfile'
-      train_model_image_name: 'nfl-train-win-probability-model'
-      train_model_image_version: '1.0.0'
+      test_path: 'Source/tests/library/ Source/tests/feature-engineering/nfl/ --ignore=Source/tests/library/ml'
+      requirements_files: 'Source/feature-engineering/nfl/requirements.txt'
 
-  nfl_ai_hosting_build:
-    name: NFL AI hosting (build)
-    uses: ./.github/workflows/docker_image_deploy.yml
-    secrets: inherit
+  test-nfl-train-model:
+    name: Run NFL training model tests
+    uses: ./.github/workflows/run_python_tests.yml
     with:
-      sport: 'NFL'
+      test_path: 'Source/tests/library/ Source/tests/model-training/nfl/'
+      requirements_files: 'Source/model-training/nfl/requirements.txt'
+
+  test-nfl-predict:
+    name: Run NFL predict tests
+    uses: ./.github/workflows/run_python_tests.yml
+    with:
       test_path: >-
         Source/tests/library/
         Source/tests/aws-lambdas/nfl/test_predict_event_outcome.py
@@ -95,6 +87,558 @@ jobs:
         Source/tests/aws-lambdas/nfl/test_live_features_roster.py
         Source/tests/aws-lambdas/nfl/test_model_loader.py
       requirements_files: 'Source/aws-lambdas/nfl/predict/requirements.txt Source/aws-lambdas/nfl/predict/requirements-nodeps.txt'
+
+  test-nfl-predict-read:
+    name: Run NFL predict-read tests
+    uses: ./.github/workflows/run_python_tests.yml
+    with:
+      test_path: 'Source/tests/aws-lambdas/nfl/test_predict_read.py Source/tests/library/serving/ Source/tests/library/storage/test_prediction_cache.py Source/tests/library/storage/test_model_artifacts.py Source/tests/library/aws/test_lambda_invoker.py'
+      requirements_files: 'Source/aws-lambdas/nfl/predict-read/requirements.txt'
+
+  test-nfl-live-scores:
+    name: Run NFL live-scores tests
+    uses: ./.github/workflows/run_python_tests.yml
+    with:
+      test_path: 'Source/tests/aws-lambdas/nfl/test_live_scores.py Source/tests/aws-lambdas/nfl/test_live_scores_handler.py'
+      requirements_files: 'Source/aws-lambdas/nfl/live-scores/requirements.txt'
+
+  test-nfl-ingest:
+    name: Run NFL ingest tests
+    uses: ./.github/workflows/run_python_tests.yml
+    with:
+      test_path: >-
+        Source/tests/aws-lambdas/nfl/test_ingest_lambda_handler.py
+        Source/tests/aws-lambdas/nfl/test_ingest_helpers.py
+        Source/tests/aws-lambdas/nfl/test_ingest_rosters.py
+        Source/tests/aws-lambdas/nfl/test_ingest_depth_charts.py
+        Source/tests/aws-lambdas/nfl/test_ingest_coaches.py
+        Source/tests/aws-lambdas/nfl/test_enrichment.py
+      requirements_files: 'Source/aws-lambdas/nfl/ingest/requirements.txt'
+
+  test-nfl-normalize:
+    name: Run NFL normalize tests
+    uses: ./.github/workflows/run_python_tests.yml
+    with:
+      test_path: 'Source/tests/aws-lambdas/nfl/test_normalize.py'
+      requirements_files: 'Source/aws-lambdas/nfl/normalize/requirements.txt'
+
+  test-nfl-schedule-sync:
+    name: Run NFL schedule-sync tests
+    uses: ./.github/workflows/run_python_tests.yml
+    with:
+      test_path: 'Source/tests/aws-lambdas/nfl/test_schedule_sync.py'
+      requirements_files: 'Source/aws-lambdas/nfl/schedule-sync/requirements.txt'
+
+  # ============================ NCAAFB tests ============================
+  test-ncaafb-backfill:
+    name: Run NCAAFB backfill tests
+    uses: ./.github/workflows/run_python_tests.yml
+    with:
+      test_path: 'Source/tests/data-backfills/ncaafb/'
+      requirements_files: 'Source/data-backfills/ncaafb/requirements-dev.txt'
+
+  test-ncaafb-feature-engineering:
+    name: Run NCAAFB feature engineering tests
+    uses: ./.github/workflows/run_python_tests.yml
+    with:
+      test_path: 'Source/tests/library/ Source/tests/feature-engineering/ncaafb/ --ignore=Source/tests/library/ml'
+      requirements_files: 'Source/feature-engineering/ncaafb/requirements.txt'
+
+  test-ncaafb-train-models:
+    name: Run NCAAFB training model tests
+    uses: ./.github/workflows/run_python_tests.yml
+    with:
+      test_path: 'Source/tests/library/ Source/tests/model-training/ncaafb/'
+      requirements_files: 'Source/model-training/ncaafb/requirements.txt'
+
+  test-ncaafb-predict:
+    name: Run NCAAFB predict tests
+    uses: ./.github/workflows/run_python_tests.yml
+    with:
+      test_path: >-
+        Source/tests/library/
+        Source/tests/aws-lambdas/ncaafb/test_live_features.py
+        Source/tests/aws-lambdas/ncaafb/test_event_prediction.py
+        Source/tests/aws-lambdas/ncaafb/test_predict_handler.py
+        Source/tests/aws-lambdas/ncaafb/test_season_simulation.py
+        Source/tests/aws-lambdas/ncaafb/test_season_projection.py
+      requirements_files: 'Source/aws-lambdas/ncaafb/predict/requirements.txt Source/aws-lambdas/ncaafb/predict/requirements-nodeps.txt'
+
+  test-ncaafb-predict-read:
+    name: Run NCAAFB predict-read tests
+    uses: ./.github/workflows/run_python_tests.yml
+    with:
+      test_path: 'Source/tests/aws-lambdas/ncaafb/test_predict_read_handler.py Source/tests/library/serving/test_ncaafb_reads.py Source/tests/library/storage/test_prediction_cache.py Source/tests/library/storage/test_model_artifacts.py Source/tests/library/aws/test_lambda_invoker.py'
+      requirements_files: 'Source/aws-lambdas/ncaafb/predict-read/requirements.txt'
+
+  test-ncaafb-live-scores:
+    name: Run NCAAFB live-scores tests
+    uses: ./.github/workflows/run_python_tests.yml
+    with:
+      test_path: 'Source/tests/aws-lambdas/ncaafb/test_live_scores.py Source/tests/aws-lambdas/ncaafb/test_live_scores_handler.py'
+      requirements_files: 'Source/aws-lambdas/ncaafb/live-scores/requirements.txt'
+
+  test-ncaafb-ingest:
+    name: Run NCAAFB ingest tests
+    uses: ./.github/workflows/run_python_tests.yml
+    with:
+      test_path: >-
+        Source/tests/aws-lambdas/ncaafb/test_ingest_lambda_handler.py
+        Source/tests/aws-lambdas/ncaafb/test_ingest_enrichment.py
+      requirements_files: 'Source/aws-lambdas/ncaafb/ingest/requirements.txt'
+
+  test-ncaafb-normalize:
+    name: Run NCAAFB normalize tests
+    uses: ./.github/workflows/run_python_tests.yml
+    with:
+      test_path: 'Source/tests/aws-lambdas/ncaafb/test_normalize.py'
+      requirements_files: 'Source/aws-lambdas/ncaafb/normalize/requirements.txt'
+
+  test-ncaafb-schedule-sync:
+    name: Run NCAAFB schedule-sync tests
+    uses: ./.github/workflows/run_python_tests.yml
+    with:
+      test_path: 'Source/tests/aws-lambdas/ncaafb/test_schedule_sync.py'
+      requirements_files: 'Source/aws-lambdas/ncaafb/schedule-sync/requirements.txt'
+
+  # ============================== NBA tests ==============================
+  test-nba-backfill:
+    name: Run NBA backfill tests
+    uses: ./.github/workflows/run_python_tests.yml
+    with:
+      test_path: 'Source/tests/data-backfills/nba/'
+      requirements_files: 'Source/data-backfills/nba/requirements-dev.txt'
+
+  test-nba-feature-engineering:
+    name: Run NBA feature engineering tests
+    uses: ./.github/workflows/run_python_tests.yml
+    with:
+      test_path: 'Source/tests/library/ Source/tests/feature-engineering/nba/ --ignore=Source/tests/library/ml'
+      requirements_files: 'Source/feature-engineering/nba/requirements.txt'
+
+  test-nba-train-model:
+    name: Run NBA training model tests
+    uses: ./.github/workflows/run_python_tests.yml
+    with:
+      test_path: 'Source/tests/library/ Source/tests/model-training/nba/'
+      requirements_files: 'Source/model-training/nba/requirements.txt'
+
+  test-nba-predict:
+    name: Run NBA predict tests
+    uses: ./.github/workflows/run_python_tests.yml
+    with:
+      test_path: >-
+        Source/tests/library/
+        Source/tests/aws-lambdas/nba/test_live_features.py
+        Source/tests/aws-lambdas/nba/test_event_prediction.py
+        Source/tests/aws-lambdas/nba/test_predict_handler.py
+        Source/tests/aws-lambdas/nba/test_season_simulation.py
+        Source/tests/aws-lambdas/nba/test_predict_season_simulation.py
+      requirements_files: 'Source/aws-lambdas/nba/predict/requirements.txt Source/aws-lambdas/nba/predict/requirements-nodeps.txt'
+
+  test-nba-predict-read:
+    name: Run NBA predict-read tests
+    uses: ./.github/workflows/run_python_tests.yml
+    with:
+      test_path: 'Source/tests/aws-lambdas/nba/test_predict_read_handler.py Source/tests/library/serving/test_nba_reads.py Source/tests/library/storage/test_prediction_cache.py Source/tests/library/storage/test_model_artifacts.py Source/tests/library/aws/test_lambda_invoker.py'
+      requirements_files: 'Source/aws-lambdas/nba/predict-read/requirements.txt'
+
+  test-nba-live-scores:
+    name: Run NBA live-scores tests
+    uses: ./.github/workflows/run_python_tests.yml
+    with:
+      test_path: 'Source/tests/aws-lambdas/nba/test_live_scores.py Source/tests/aws-lambdas/nba/test_live_scores_handler.py'
+      requirements_files: 'Source/aws-lambdas/nba/live-scores/requirements.txt'
+
+  test-nba-ingest:
+    name: Run NBA ingest tests
+    uses: ./.github/workflows/run_python_tests.yml
+    with:
+      test_path: 'Source/tests/aws-lambdas/nba/test_ingest.py'
+      requirements_files: 'Source/aws-lambdas/nba/ingest/requirements.txt'
+
+  test-nba-normalize:
+    name: Run NBA normalize tests
+    uses: ./.github/workflows/run_python_tests.yml
+    with:
+      test_path: 'Source/tests/aws-lambdas/nba/test_normalize.py'
+      requirements_files: 'Source/aws-lambdas/nba/normalize/requirements.txt'
+
+  test-nba-schedule-sync:
+    name: Run NBA schedule-sync tests
+    uses: ./.github/workflows/run_python_tests.yml
+    with:
+      test_path: 'Source/tests/aws-lambdas/nba/test_schedule_sync.py'
+      requirements_files: 'Source/aws-lambdas/nba/schedule-sync/requirements.txt'
+
+  # ============================ NCAA MBB tests ============================
+  test-ncaambb-backfill:
+    name: Run NCAA MBB backfill tests
+    uses: ./.github/workflows/run_python_tests.yml
+    with:
+      test_path: 'Source/tests/data-backfills/ncaambb/'
+      requirements_files: 'Source/data-backfills/ncaambb/requirements-dev.txt'
+
+  test-ncaambb-feature-engineering:
+    name: Run NCAA MBB feature engineering tests
+    uses: ./.github/workflows/run_python_tests.yml
+    with:
+      test_path: 'Source/tests/library/ Source/tests/feature-engineering/ncaambb/ --ignore=Source/tests/library/ml'
+      requirements_files: 'Source/feature-engineering/ncaambb/requirements.txt'
+
+  test-ncaambb-train-models:
+    name: Run NCAA MBB training model tests
+    uses: ./.github/workflows/run_python_tests.yml
+    with:
+      test_path: 'Source/tests/library/ Source/tests/model-training/ncaambb/'
+      requirements_files: 'Source/model-training/ncaambb/requirements.txt'
+
+  test-ncaambb-predict:
+    name: Run NCAA MBB predict tests
+    uses: ./.github/workflows/run_python_tests.yml
+    with:
+      test_path: >-
+        Source/tests/library/
+        Source/tests/aws-lambdas/ncaambb/test_live_features.py
+        Source/tests/aws-lambdas/ncaambb/test_event_prediction.py
+        Source/tests/aws-lambdas/ncaambb/test_predict_handler.py
+      requirements_files: 'Source/aws-lambdas/ncaambb/predict/requirements.txt Source/aws-lambdas/ncaambb/predict/requirements-nodeps.txt'
+
+  test-ncaambb-predict-read:
+    name: Run NCAA MBB predict-read tests
+    uses: ./.github/workflows/run_python_tests.yml
+    with:
+      test_path: 'Source/tests/aws-lambdas/ncaambb/test_predict_read_handler.py Source/tests/library/serving/test_ncaambb_reads.py Source/tests/library/storage/test_prediction_cache.py Source/tests/library/storage/test_model_artifacts.py Source/tests/library/aws/test_lambda_invoker.py'
+      requirements_files: 'Source/aws-lambdas/ncaambb/predict-read/requirements.txt'
+
+  test-ncaambb-live-scores:
+    name: Run NCAA MBB live-scores tests
+    uses: ./.github/workflows/run_python_tests.yml
+    with:
+      test_path: 'Source/tests/aws-lambdas/ncaambb/test_live_scores.py Source/tests/aws-lambdas/ncaambb/test_live_scores_handler.py'
+      requirements_files: 'Source/aws-lambdas/ncaambb/live-scores/requirements.txt'
+
+  test-ncaambb-ingest:
+    name: Run NCAA MBB ingest tests
+    uses: ./.github/workflows/run_python_tests.yml
+    with:
+      test_path: 'Source/tests/aws-lambdas/ncaambb/test_ingest.py'
+      requirements_files: 'Source/aws-lambdas/ncaambb/ingest/requirements.txt'
+
+  test-ncaambb-normalize:
+    name: Run NCAA MBB normalize tests
+    uses: ./.github/workflows/run_python_tests.yml
+    with:
+      test_path: 'Source/tests/aws-lambdas/ncaambb/test_normalize.py'
+      requirements_files: 'Source/aws-lambdas/ncaambb/normalize/requirements.txt'
+
+  test-ncaambb-schedule-sync:
+    name: Run NCAA MBB schedule-sync tests
+    uses: ./.github/workflows/run_python_tests.yml
+    with:
+      test_path: 'Source/tests/aws-lambdas/ncaambb/test_schedule_sync.py'
+      requirements_files: 'Source/aws-lambdas/ncaambb/schedule-sync/requirements.txt'
+
+  # ============================== PGA tests ==============================
+  test-pga-backfill:
+    name: Run PGA backfill tests
+    uses: ./.github/workflows/run_python_tests.yml
+    with:
+      test_path: 'Source/tests/data-backfills/pga/'
+      requirements_files: 'Source/data-backfills/pga/requirements-dev.txt'
+
+  test-pga-feature-engineering:
+    name: Run PGA feature engineering tests
+    uses: ./.github/workflows/run_python_tests.yml
+    with:
+      test_path: 'Source/tests/library/ Source/tests/feature-engineering/pga/ --ignore=Source/tests/library/ml'
+      requirements_files: 'Source/feature-engineering/pga/requirements.txt'
+
+  test-pga-train-top10-model:
+    name: Run PGA train top-10-probability model tests
+    uses: ./.github/workflows/run_python_tests.yml
+    with:
+      test_path: 'Source/tests/library/ Source/tests/model-training/pga/'
+      requirements_files: 'Source/model-training/pga/requirements.txt'
+
+  test-pga-predict:
+    name: Run PGA predict tests
+    uses: ./.github/workflows/run_python_tests.yml
+    with:
+      test_path: >-
+        Source/tests/library/
+        Source/tests/aws-lambdas/pga/test_live_features.py
+        Source/tests/aws-lambdas/pga/test_event_prediction.py
+        Source/tests/aws-lambdas/pga/test_predict_handler.py
+        Source/tests/aws-lambdas/pga/test_season_simulation.py
+        Source/tests/aws-lambdas/pga/test_season_projection.py
+      requirements_files: 'Source/aws-lambdas/pga/predict/requirements.txt Source/aws-lambdas/pga/predict/requirements-nodeps.txt'
+
+  test-pga-predict-read:
+    name: Run PGA predict-read tests
+    uses: ./.github/workflows/run_python_tests.yml
+    with:
+      test_path: 'Source/tests/aws-lambdas/pga/test_predict_read_handler.py Source/tests/library/serving/test_pga_reads.py Source/tests/library/serving/test_common.py Source/tests/library/storage/test_prediction_cache.py Source/tests/library/storage/test_model_artifacts.py Source/tests/library/aws/test_lambda_invoker.py'
+      requirements_files: 'Source/aws-lambdas/pga/predict-read/requirements.txt'
+
+  test-pga-live-scores:
+    name: Run PGA live-scores tests
+    uses: ./.github/workflows/run_python_tests.yml
+    with:
+      test_path: >-
+        Source/tests/aws-lambdas/pga/test_live_scores.py
+        Source/tests/aws-lambdas/pga/test_live_scores_handler.py
+        Source/tests/library/normalize/test_pga_event.py
+        Source/tests/library/normalize/test_pga_matchplay.py
+      requirements_files: 'Source/aws-lambdas/pga/live-scores/requirements.txt'
+
+  test-pga-ingest:
+    name: Run PGA ingest tests
+    uses: ./.github/workflows/run_python_tests.yml
+    with:
+      test_path: 'Source/tests/aws-lambdas/pga/test_ingest.py'
+      requirements_files: 'Source/aws-lambdas/pga/ingest/requirements.txt'
+
+  test-pga-normalize:
+    name: Run PGA normalize tests
+    uses: ./.github/workflows/run_python_tests.yml
+    with:
+      test_path: 'Source/tests/aws-lambdas/pga/test_normalize.py'
+      requirements_files: 'Source/aws-lambdas/pga/normalize/requirements.txt'
+
+  test-pga-schedule-sync:
+    name: Run PGA schedule-sync tests
+    uses: ./.github/workflows/run_python_tests.yml
+    with:
+      test_path: 'Source/tests/aws-lambdas/pga/test_schedule_sync.py'
+      requirements_files: 'Source/aws-lambdas/pga/schedule-sync/requirements.txt'
+
+  # ============================== F1 tests ==============================
+  test-f1-backfill:
+    name: Run F1 backfill tests
+    uses: ./.github/workflows/run_python_tests.yml
+    with:
+      test_path: 'Source/tests/data-backfills/f1/'
+      requirements_files: 'Source/data-backfills/f1/requirements-dev.txt'
+
+  test-f1-feature-engineering:
+    name: Run F1 feature engineering tests
+    uses: ./.github/workflows/run_python_tests.yml
+    with:
+      test_path: 'Source/tests/library/ Source/tests/feature-engineering/f1/ --ignore=Source/tests/library/ml'
+      requirements_files: 'Source/feature-engineering/f1/requirements.txt'
+
+  test-f1-train-winprob-model:
+    name: Run F1 train win-probability model tests
+    uses: ./.github/workflows/run_python_tests.yml
+    with:
+      test_path: 'Source/tests/library/ Source/tests/model-training/f1/'
+      requirements_files: 'Source/model-training/f1/requirements.txt'
+
+  test-f1-predict:
+    name: Run F1 predict tests
+    uses: ./.github/workflows/run_python_tests.yml
+    with:
+      test_path: >-
+        Source/tests/library/
+        Source/tests/aws-lambdas/f1/test_live_features.py
+        Source/tests/aws-lambdas/f1/test_event_prediction.py
+        Source/tests/aws-lambdas/f1/test_predict_handler.py
+        Source/tests/aws-lambdas/f1/test_season_simulation.py
+        Source/tests/aws-lambdas/f1/test_season_projection.py
+      requirements_files: 'Source/aws-lambdas/f1/predict/requirements.txt Source/aws-lambdas/f1/predict/requirements-nodeps.txt'
+
+  test-f1-predict-read:
+    name: Run F1 predict-read tests
+    uses: ./.github/workflows/run_python_tests.yml
+    with:
+      test_path: 'Source/tests/aws-lambdas/f1/test_predict_read_handler.py Source/tests/library/serving/test_f1_reads.py Source/tests/library/serving/test_common.py Source/tests/library/storage/test_prediction_cache.py Source/tests/library/storage/test_model_artifacts.py Source/tests/library/aws/test_lambda_invoker.py'
+      requirements_files: 'Source/aws-lambdas/f1/predict-read/requirements.txt'
+
+  test-f1-live-scores:
+    name: Run F1 live-scores tests
+    uses: ./.github/workflows/run_python_tests.yml
+    with:
+      test_path: >-
+        Source/tests/aws-lambdas/f1/test_live_scores.py
+        Source/tests/aws-lambdas/f1/test_live_scores_handler.py
+      requirements_files: 'Source/aws-lambdas/f1/live-scores/requirements.txt'
+
+  test-f1-ingest:
+    name: Run F1 ingest tests
+    uses: ./.github/workflows/run_python_tests.yml
+    with:
+      test_path: 'Source/tests/aws-lambdas/f1/test_ingest.py'
+      requirements_files: 'Source/aws-lambdas/f1/ingest/requirements.txt'
+
+  test-f1-normalize:
+    name: Run F1 normalize tests
+    uses: ./.github/workflows/run_python_tests.yml
+    with:
+      test_path: 'Source/tests/aws-lambdas/f1/test_normalize.py'
+      requirements_files: 'Source/aws-lambdas/f1/normalize/requirements.txt'
+  # No f1-schedule-sync test -- see f1_data_pipeline job's own comment below.
+
+  # ========================= shared lambdas tests =========================
+  test-season-gate:
+    name: Run season-gate tests
+    uses: ./.github/workflows/run_python_tests.yml
+    with:
+      test_path: 'Source/tests/library/test_season.py Source/tests/aws-lambdas/shared/test_season_gate.py'
+
+  test-cloudwatch-geo-widget:
+    name: Run cloudwatch-geo-widget tests
+    uses: ./.github/workflows/run_python_tests.yml
+    with:
+      test_path: 'Source/tests/aws-lambdas/shared/test_cloudwatch_geo_widget.py'
+      requirements_files: 'Source/aws-lambdas/shared/cloudwatch-geo-widget/requirements.txt'
+
+  test-ec2-training-reaper:
+    name: Run ec2-training-reaper tests
+    uses: ./.github/workflows/run_python_tests.yml
+    with:
+      test_path: 'Source/tests/aws-lambdas/shared/test_ec2_training_reaper.py'
+
+  # ============================ frontend tests ============================
+  test-frontend:
+    name: Run frontend tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+
+      - name: Install dependencies
+        working-directory: Source/front-end
+        run: flutter pub get
+
+      - name: Analyze
+        working-directory: Source/front-end
+        run: flutter analyze
+
+      - name: Test
+        working-directory: Source/front-end
+        run: flutter test
+
+  # =========================== the one scan job ===========================
+  scan:
+    name: SonarQube Cloud scan
+    needs: [
+      test-nfl-backfill, test-nfl-feature-engineering, test-nfl-train-model, test-nfl-predict,
+      test-nfl-predict-read, test-nfl-live-scores, test-nfl-ingest, test-nfl-normalize, test-nfl-schedule-sync,
+      test-ncaafb-backfill, test-ncaafb-feature-engineering, test-ncaafb-train-models, test-ncaafb-predict,
+      test-ncaafb-predict-read, test-ncaafb-live-scores, test-ncaafb-ingest, test-ncaafb-normalize, test-ncaafb-schedule-sync,
+      test-nba-backfill, test-nba-feature-engineering, test-nba-train-model, test-nba-predict,
+      test-nba-predict-read, test-nba-live-scores, test-nba-ingest, test-nba-normalize, test-nba-schedule-sync,
+      test-ncaambb-backfill, test-ncaambb-feature-engineering, test-ncaambb-train-models, test-ncaambb-predict,
+      test-ncaambb-predict-read, test-ncaambb-live-scores, test-ncaambb-ingest, test-ncaambb-normalize, test-ncaambb-schedule-sync,
+      test-pga-backfill, test-pga-feature-engineering, test-pga-train-top10-model, test-pga-predict,
+      test-pga-predict-read, test-pga-live-scores, test-pga-ingest, test-pga-normalize, test-pga-schedule-sync,
+      test-f1-backfill, test-f1-feature-engineering, test-f1-train-winprob-model, test-f1-predict,
+      test-f1-predict-read, test-f1-live-scores, test-f1-ingest, test-f1-normalize,
+      test-season-gate, test-cloudwatch-geo-widget, test-ec2-training-reaper,
+      test-frontend,
+    ]
+    if: |
+      always() &&
+      (needs.test-nfl-backfill.result == 'success' || needs.test-nfl-backfill.result == 'skipped') &&
+      (needs.test-nfl-feature-engineering.result == 'success' || needs.test-nfl-feature-engineering.result == 'skipped') &&
+      (needs.test-nfl-train-model.result == 'success' || needs.test-nfl-train-model.result == 'skipped') &&
+      (needs.test-nfl-predict.result == 'success' || needs.test-nfl-predict.result == 'skipped') &&
+      (needs.test-nfl-predict-read.result == 'success' || needs.test-nfl-predict-read.result == 'skipped') &&
+      (needs.test-nfl-live-scores.result == 'success' || needs.test-nfl-live-scores.result == 'skipped') &&
+      (needs.test-nfl-ingest.result == 'success' || needs.test-nfl-ingest.result == 'skipped') &&
+      (needs.test-nfl-normalize.result == 'success' || needs.test-nfl-normalize.result == 'skipped') &&
+      (needs.test-nfl-schedule-sync.result == 'success' || needs.test-nfl-schedule-sync.result == 'skipped') &&
+      (needs.test-ncaafb-backfill.result == 'success' || needs.test-ncaafb-backfill.result == 'skipped') &&
+      (needs.test-ncaafb-feature-engineering.result == 'success' || needs.test-ncaafb-feature-engineering.result == 'skipped') &&
+      (needs.test-ncaafb-train-models.result == 'success' || needs.test-ncaafb-train-models.result == 'skipped') &&
+      (needs.test-ncaafb-predict.result == 'success' || needs.test-ncaafb-predict.result == 'skipped') &&
+      (needs.test-ncaafb-predict-read.result == 'success' || needs.test-ncaafb-predict-read.result == 'skipped') &&
+      (needs.test-ncaafb-live-scores.result == 'success' || needs.test-ncaafb-live-scores.result == 'skipped') &&
+      (needs.test-ncaafb-ingest.result == 'success' || needs.test-ncaafb-ingest.result == 'skipped') &&
+      (needs.test-ncaafb-normalize.result == 'success' || needs.test-ncaafb-normalize.result == 'skipped') &&
+      (needs.test-ncaafb-schedule-sync.result == 'success' || needs.test-ncaafb-schedule-sync.result == 'skipped') &&
+      (needs.test-nba-backfill.result == 'success' || needs.test-nba-backfill.result == 'skipped') &&
+      (needs.test-nba-feature-engineering.result == 'success' || needs.test-nba-feature-engineering.result == 'skipped') &&
+      (needs.test-nba-train-model.result == 'success' || needs.test-nba-train-model.result == 'skipped') &&
+      (needs.test-nba-predict.result == 'success' || needs.test-nba-predict.result == 'skipped') &&
+      (needs.test-nba-predict-read.result == 'success' || needs.test-nba-predict-read.result == 'skipped') &&
+      (needs.test-nba-live-scores.result == 'success' || needs.test-nba-live-scores.result == 'skipped') &&
+      (needs.test-nba-ingest.result == 'success' || needs.test-nba-ingest.result == 'skipped') &&
+      (needs.test-nba-normalize.result == 'success' || needs.test-nba-normalize.result == 'skipped') &&
+      (needs.test-nba-schedule-sync.result == 'success' || needs.test-nba-schedule-sync.result == 'skipped') &&
+      (needs.test-ncaambb-backfill.result == 'success' || needs.test-ncaambb-backfill.result == 'skipped') &&
+      (needs.test-ncaambb-feature-engineering.result == 'success' || needs.test-ncaambb-feature-engineering.result == 'skipped') &&
+      (needs.test-ncaambb-train-models.result == 'success' || needs.test-ncaambb-train-models.result == 'skipped') &&
+      (needs.test-ncaambb-predict.result == 'success' || needs.test-ncaambb-predict.result == 'skipped') &&
+      (needs.test-ncaambb-predict-read.result == 'success' || needs.test-ncaambb-predict-read.result == 'skipped') &&
+      (needs.test-ncaambb-live-scores.result == 'success' || needs.test-ncaambb-live-scores.result == 'skipped') &&
+      (needs.test-ncaambb-ingest.result == 'success' || needs.test-ncaambb-ingest.result == 'skipped') &&
+      (needs.test-ncaambb-normalize.result == 'success' || needs.test-ncaambb-normalize.result == 'skipped') &&
+      (needs.test-ncaambb-schedule-sync.result == 'success' || needs.test-ncaambb-schedule-sync.result == 'skipped') &&
+      (needs.test-pga-backfill.result == 'success' || needs.test-pga-backfill.result == 'skipped') &&
+      (needs.test-pga-feature-engineering.result == 'success' || needs.test-pga-feature-engineering.result == 'skipped') &&
+      (needs.test-pga-train-top10-model.result == 'success' || needs.test-pga-train-top10-model.result == 'skipped') &&
+      (needs.test-pga-predict.result == 'success' || needs.test-pga-predict.result == 'skipped') &&
+      (needs.test-pga-predict-read.result == 'success' || needs.test-pga-predict-read.result == 'skipped') &&
+      (needs.test-pga-live-scores.result == 'success' || needs.test-pga-live-scores.result == 'skipped') &&
+      (needs.test-pga-ingest.result == 'success' || needs.test-pga-ingest.result == 'skipped') &&
+      (needs.test-pga-normalize.result == 'success' || needs.test-pga-normalize.result == 'skipped') &&
+      (needs.test-pga-schedule-sync.result == 'success' || needs.test-pga-schedule-sync.result == 'skipped') &&
+      (needs.test-f1-backfill.result == 'success' || needs.test-f1-backfill.result == 'skipped') &&
+      (needs.test-f1-feature-engineering.result == 'success' || needs.test-f1-feature-engineering.result == 'skipped') &&
+      (needs.test-f1-train-winprob-model.result == 'success' || needs.test-f1-train-winprob-model.result == 'skipped') &&
+      (needs.test-f1-predict.result == 'success' || needs.test-f1-predict.result == 'skipped') &&
+      (needs.test-f1-predict-read.result == 'success' || needs.test-f1-predict-read.result == 'skipped') &&
+      (needs.test-f1-live-scores.result == 'success' || needs.test-f1-live-scores.result == 'skipped') &&
+      (needs.test-f1-ingest.result == 'success' || needs.test-f1-ingest.result == 'skipped') &&
+      (needs.test-f1-normalize.result == 'success' || needs.test-f1-normalize.result == 'skipped') &&
+      (needs.test-season-gate.result == 'success' || needs.test-season-gate.result == 'skipped') &&
+      (needs.test-cloudwatch-geo-widget.result == 'success' || needs.test-cloudwatch-geo-widget.result == 'skipped') &&
+      (needs.test-ec2-training-reaper.result == 'success' || needs.test-ec2-training-reaper.result == 'skipped') &&
+      (needs.test-frontend.result == 'success' || needs.test-frontend.result == 'skipped')
+    uses: ./.github/workflows/sonar_scan.yml
+    secrets: inherit
+
+  # --- Before infra: build/push only, no Terraform dependency ---
+  nfl_backfill_build:
+    name: NFL backfill (build)
+    needs: scan
+    uses: ./.github/workflows/docker_image_deploy.yml
+    secrets: inherit
+    with:
+      sport: 'NFL'
+      dockerfile_path: 'Source/data-backfills/nfl/Dockerfile'
+      image_name: 'nfl-backfill'
+      image_version: '1.0.0'
+
+  nfl_ai_training_build:
+    name: NFL AI training (build)
+    needs: scan
+    uses: ./.github/workflows/ai_training.yml
+    secrets: inherit
+    with:
+      sport: 'NFL'
+      feature_engineering_dockerfile_path: 'Source/feature-engineering/nfl/Dockerfile'
+      feature_engineering_image_name: 'nfl-feature-engineering'
+      feature_engineering_image_version: '1.0.0'
+      train_model_dockerfile_path: 'Source/model-training/nfl/Dockerfile'
+      train_model_image_name: 'nfl-train-win-probability-model'
+      train_model_image_version: '1.0.0'
+
+  nfl_ai_hosting_build:
+    name: NFL AI hosting (build)
+    needs: scan
+    uses: ./.github/workflows/docker_image_deploy.yml
+    secrets: inherit
+    with:
+      sport: 'NFL'
       dockerfile_path: 'Source/aws-lambdas/nfl/predict/Dockerfile'
       image_name: 'nfl-predict'
       image_version: '1.0.0'
@@ -102,29 +646,25 @@ jobs:
 
   ncaafb_backfill_build:
     name: NCAAFB backfill (build)
+    needs: scan
     uses: ./.github/workflows/docker_image_deploy.yml
     secrets: inherit
     with:
       sport: 'NCAAFB'
-      test_path: 'Source/tests/data-backfills/ncaafb/'
-      requirements_files: 'Source/data-backfills/ncaafb/requirements-dev.txt'
       dockerfile_path: 'Source/data-backfills/ncaafb/Dockerfile'
       image_name: 'ncaafb-backfill'
       image_version: '1.0.0'
 
   ncaafb_ai_training_build:
     name: NCAAFB AI training (build)
+    needs: scan
     uses: ./.github/workflows/ai_training.yml
     secrets: inherit
     with:
       sport: 'NCAAFB'
-      feature_engineering_test_path: 'Source/tests/library/ Source/tests/feature-engineering/ncaafb/ --ignore=Source/tests/library/ml'
-      feature_engineering_requirements_files: 'Source/feature-engineering/ncaafb/requirements.txt'
       feature_engineering_dockerfile_path: 'Source/feature-engineering/ncaafb/Dockerfile'
       feature_engineering_image_name: 'ncaafb-feature-engineering'
       feature_engineering_image_version: '1.0.0'
-      train_model_test_path: 'Source/tests/library/ Source/tests/model-training/ncaafb/'
-      train_model_requirements_files: 'Source/model-training/ncaafb/requirements.txt'
       train_model_dockerfile_path: 'Source/model-training/ncaafb/Dockerfile'
       train_model_image_name: 'ncaafb-train-win-probability-model'
       train_model_image_version: '1.0.0'
@@ -134,18 +674,11 @@ jobs:
 
   ncaafb_ai_hosting_build:
     name: NCAAFB AI hosting (build)
+    needs: scan
     uses: ./.github/workflows/docker_image_deploy.yml
     secrets: inherit
     with:
       sport: 'NCAAFB'
-      test_path: >-
-        Source/tests/library/
-        Source/tests/aws-lambdas/ncaafb/test_live_features.py
-        Source/tests/aws-lambdas/ncaafb/test_event_prediction.py
-        Source/tests/aws-lambdas/ncaafb/test_predict_handler.py
-        Source/tests/aws-lambdas/ncaafb/test_season_simulation.py
-        Source/tests/aws-lambdas/ncaafb/test_season_projection.py
-      requirements_files: 'Source/aws-lambdas/ncaafb/predict/requirements.txt Source/aws-lambdas/ncaafb/predict/requirements-nodeps.txt'
       dockerfile_path: 'Source/aws-lambdas/ncaafb/predict/Dockerfile'
       image_name: 'ncaafb-predict'
       image_version: '1.0.0'
@@ -153,47 +686,36 @@ jobs:
 
   nba_backfill_build:
     name: NBA backfill (build)
+    needs: scan
     uses: ./.github/workflows/docker_image_deploy.yml
     secrets: inherit
     with:
       sport: 'NBA'
-      test_path: 'Source/tests/data-backfills/nba/'
-      requirements_files: 'Source/data-backfills/nba/requirements-dev.txt'
       dockerfile_path: 'Source/data-backfills/nba/Dockerfile'
       image_name: 'nba-backfill'
       image_version: '1.0.0'
 
   nba_ai_training_build:
     name: NBA AI training (build)
+    needs: scan
     uses: ./.github/workflows/ai_training.yml
     secrets: inherit
     with:
       sport: 'NBA'
-      feature_engineering_test_path: 'Source/tests/library/ Source/tests/feature-engineering/nba/ --ignore=Source/tests/library/ml'
-      feature_engineering_requirements_files: 'Source/feature-engineering/nba/requirements.txt'
       feature_engineering_dockerfile_path: 'Source/feature-engineering/nba/Dockerfile'
       feature_engineering_image_name: 'nba-feature-engineering'
       feature_engineering_image_version: '1.0.0'
-      train_model_test_path: 'Source/tests/library/ Source/tests/model-training/nba/'
-      train_model_requirements_files: 'Source/model-training/nba/requirements.txt'
       train_model_dockerfile_path: 'Source/model-training/nba/Dockerfile'
       train_model_image_name: 'nba-train-win-probability-model'
       train_model_image_version: '1.0.0'
 
   nba_ai_hosting_build:
     name: NBA AI hosting (build)
+    needs: scan
     uses: ./.github/workflows/docker_image_deploy.yml
     secrets: inherit
     with:
       sport: 'NBA'
-      test_path: >-
-        Source/tests/library/
-        Source/tests/aws-lambdas/nba/test_live_features.py
-        Source/tests/aws-lambdas/nba/test_event_prediction.py
-        Source/tests/aws-lambdas/nba/test_predict_handler.py
-        Source/tests/aws-lambdas/nba/test_season_simulation.py
-        Source/tests/aws-lambdas/nba/test_predict_season_simulation.py
-      requirements_files: 'Source/aws-lambdas/nba/predict/requirements.txt Source/aws-lambdas/nba/predict/requirements-nodeps.txt'
       dockerfile_path: 'Source/aws-lambdas/nba/predict/Dockerfile'
       image_name: 'nba-predict'
       image_version: '1.0.0'
@@ -201,29 +723,25 @@ jobs:
 
   ncaambb_backfill_build:
     name: NCAA MBB backfill (build)
+    needs: scan
     uses: ./.github/workflows/docker_image_deploy.yml
     secrets: inherit
     with:
       sport: 'NCAA MBB'
-      test_path: 'Source/tests/data-backfills/ncaambb/'
-      requirements_files: 'Source/data-backfills/ncaambb/requirements-dev.txt'
       dockerfile_path: 'Source/data-backfills/ncaambb/Dockerfile'
       image_name: 'ncaambb-backfill'
       image_version: '1.0.0'
 
   ncaambb_ai_training_build:
     name: NCAA MBB AI training (build)
+    needs: scan
     uses: ./.github/workflows/ai_training.yml
     secrets: inherit
     with:
       sport: 'NCAA MBB'
-      feature_engineering_test_path: 'Source/tests/library/ Source/tests/feature-engineering/ncaambb/ --ignore=Source/tests/library/ml'
-      feature_engineering_requirements_files: 'Source/feature-engineering/ncaambb/requirements.txt'
       feature_engineering_dockerfile_path: 'Source/feature-engineering/ncaambb/Dockerfile'
       feature_engineering_image_name: 'ncaambb-feature-engineering'
       feature_engineering_image_version: '1.0.0'
-      train_model_test_path: 'Source/tests/library/ Source/tests/model-training/ncaambb/'
-      train_model_requirements_files: 'Source/model-training/ncaambb/requirements.txt'
       train_model_dockerfile_path: 'Source/model-training/ncaambb/Dockerfile'
       train_model_image_name: 'ncaambb-train-win-probability-model'
       train_model_image_version: '1.0.0'
@@ -233,16 +751,11 @@ jobs:
 
   ncaambb_ai_hosting_build:
     name: NCAA MBB AI hosting (build)
+    needs: scan
     uses: ./.github/workflows/docker_image_deploy.yml
     secrets: inherit
     with:
       sport: 'NCAA MBB'
-      test_path: >-
-        Source/tests/library/
-        Source/tests/aws-lambdas/ncaambb/test_live_features.py
-        Source/tests/aws-lambdas/ncaambb/test_event_prediction.py
-        Source/tests/aws-lambdas/ncaambb/test_predict_handler.py
-      requirements_files: 'Source/aws-lambdas/ncaambb/predict/requirements.txt Source/aws-lambdas/ncaambb/predict/requirements-nodeps.txt'
       dockerfile_path: 'Source/aws-lambdas/ncaambb/predict/Dockerfile'
       image_name: 'ncaambb-predict'
       image_version: '1.0.0'
@@ -250,47 +763,36 @@ jobs:
 
   pga_backfill_build:
     name: PGA backfill (build)
+    needs: scan
     uses: ./.github/workflows/docker_image_deploy.yml
     secrets: inherit
     with:
       sport: 'PGA'
-      test_path: 'Source/tests/data-backfills/pga/'
-      requirements_files: 'Source/data-backfills/pga/requirements-dev.txt'
       dockerfile_path: 'Source/data-backfills/pga/Dockerfile'
       image_name: 'pga-backfill'
       image_version: '1.1.2'
 
   pga_ai_training_build:
     name: PGA AI training (build)
+    needs: scan
     uses: ./.github/workflows/ai_training.yml
     secrets: inherit
     with:
       sport: 'PGA'
-      feature_engineering_test_path: 'Source/tests/library/ Source/tests/feature-engineering/pga/ --ignore=Source/tests/library/ml'
-      feature_engineering_requirements_files: 'Source/feature-engineering/pga/requirements.txt'
       feature_engineering_dockerfile_path: 'Source/feature-engineering/pga/Dockerfile'
       feature_engineering_image_name: 'pga-feature-engineering'
       feature_engineering_image_version: '1.1.1'
-      train_model_test_path: 'Source/tests/library/ Source/tests/model-training/pga/'
-      train_model_requirements_files: 'Source/model-training/pga/requirements.txt'
       train_model_dockerfile_path: 'Source/model-training/pga/Dockerfile'
       train_model_image_name: 'pga-train-top10-model'
       train_model_image_version: '1.1.2'
 
   pga_ai_hosting_build:
     name: PGA AI hosting (build)
+    needs: scan
     uses: ./.github/workflows/docker_image_deploy.yml
     secrets: inherit
     with:
       sport: 'PGA'
-      test_path: >-
-        Source/tests/library/
-        Source/tests/aws-lambdas/pga/test_live_features.py
-        Source/tests/aws-lambdas/pga/test_event_prediction.py
-        Source/tests/aws-lambdas/pga/test_predict_handler.py
-        Source/tests/aws-lambdas/pga/test_season_simulation.py
-        Source/tests/aws-lambdas/pga/test_season_projection.py
-      requirements_files: 'Source/aws-lambdas/pga/predict/requirements.txt Source/aws-lambdas/pga/predict/requirements-nodeps.txt'
       dockerfile_path: 'Source/aws-lambdas/pga/predict/Dockerfile'
       image_name: 'pga-predict'
       image_version: '1.0.0'
@@ -298,47 +800,36 @@ jobs:
 
   f1_backfill_build:
     name: F1 backfill (build)
+    needs: scan
     uses: ./.github/workflows/docker_image_deploy.yml
     secrets: inherit
     with:
       sport: 'F1'
-      test_path: 'Source/tests/data-backfills/f1/'
-      requirements_files: 'Source/data-backfills/f1/requirements-dev.txt'
       dockerfile_path: 'Source/data-backfills/f1/Dockerfile'
       image_name: 'f1-backfill'
       image_version: '1.0.0'
 
   f1_ai_training_build:
     name: F1 AI training (build)
+    needs: scan
     uses: ./.github/workflows/ai_training.yml
     secrets: inherit
     with:
       sport: 'F1'
-      feature_engineering_test_path: 'Source/tests/library/ Source/tests/feature-engineering/f1/ --ignore=Source/tests/library/ml'
-      feature_engineering_requirements_files: 'Source/feature-engineering/f1/requirements.txt'
       feature_engineering_dockerfile_path: 'Source/feature-engineering/f1/Dockerfile'
       feature_engineering_image_name: 'f1-feature-engineering'
       feature_engineering_image_version: '1.0.0'
-      train_model_test_path: 'Source/tests/library/ Source/tests/model-training/f1/'
-      train_model_requirements_files: 'Source/model-training/f1/requirements.txt'
       train_model_dockerfile_path: 'Source/model-training/f1/Dockerfile'
       train_model_image_name: 'f1-train-winprob-model'
       train_model_image_version: '1.0.0'
 
   f1_ai_hosting_build:
     name: F1 AI hosting (build)
+    needs: scan
     uses: ./.github/workflows/docker_image_deploy.yml
     secrets: inherit
     with:
       sport: 'F1'
-      test_path: >-
-        Source/tests/library/
-        Source/tests/aws-lambdas/f1/test_live_features.py
-        Source/tests/aws-lambdas/f1/test_event_prediction.py
-        Source/tests/aws-lambdas/f1/test_predict_handler.py
-        Source/tests/aws-lambdas/f1/test_season_simulation.py
-        Source/tests/aws-lambdas/f1/test_season_projection.py
-      requirements_files: 'Source/aws-lambdas/f1/predict/requirements.txt Source/aws-lambdas/f1/predict/requirements-nodeps.txt'
       dockerfile_path: 'Source/aws-lambdas/f1/predict/Dockerfile'
       image_name: 'f1-predict'
       image_version: '1.0.0'
@@ -382,7 +873,7 @@ jobs:
   # --- After infra: needs a Terraform-created resource to already exist ---
   shared_lambdas_deploy:
     name: Shared lambdas (deploy)
-    needs: infra
+    needs: [scan, infra]
     uses: ./.github/workflows/shared_lambdas_deploy.yml
     secrets: inherit
     with:
@@ -401,53 +892,37 @@ jobs:
 
   nfl_data_pipeline:
     name: NFL data pipeline (deploy)
-    needs: infra
+    needs: [scan, infra]
     uses: ./.github/workflows/data_pipeline.yml
     secrets: inherit
     with:
       sport: 'NFL'
       ingest_function_name: ${{ needs.infra.outputs.nfl_ingest_function_name }}
-      ingest_test_path: >-
-        Source/tests/aws-lambdas/nfl/test_ingest_lambda_handler.py
-        Source/tests/aws-lambdas/nfl/test_ingest_helpers.py
-        Source/tests/aws-lambdas/nfl/test_ingest_rosters.py
-        Source/tests/aws-lambdas/nfl/test_ingest_depth_charts.py
-        Source/tests/aws-lambdas/nfl/test_ingest_coaches.py
-        Source/tests/aws-lambdas/nfl/test_enrichment.py
-      ingest_requirements_files: 'Source/aws-lambdas/nfl/ingest/requirements.txt'
       ingest_handler_dir: 'Source/aws-lambdas/nfl/ingest'
       ingest_extra_source_files: 'Source/aws-lambdas/nfl/ingest/enrichment.py'
       normalize_function_name: ${{ needs.infra.outputs.nfl_normalize_function_name }}
-      normalize_test_path: 'Source/tests/aws-lambdas/nfl/test_normalize.py'
-      normalize_requirements_files: 'Source/aws-lambdas/nfl/normalize/requirements.txt'
       normalize_handler_dir: 'Source/aws-lambdas/nfl/normalize'
       schedule_sync_function_name: ${{ needs.infra.outputs.nfl_schedule_sync_function_name }}
-      schedule_sync_test_path: 'Source/tests/aws-lambdas/nfl/test_schedule_sync.py'
-      schedule_sync_requirements_files: 'Source/aws-lambdas/nfl/schedule-sync/requirements.txt'
       schedule_sync_handler_dir: 'Source/aws-lambdas/nfl/schedule-sync'
 
   nfl_predict_read_deploy:
     name: NFL predict-read (deploy)
-    needs: infra
+    needs: [scan, infra]
     uses: ./.github/workflows/zip_lambda_deploy.yml
     secrets: inherit
     with:
       sport: 'NFL'
       function_name: ${{ needs.infra.outputs.nfl_predict_read_function_name }}
-      test_path: 'Source/tests/aws-lambdas/nfl/test_predict_read.py Source/tests/library/serving/ Source/tests/library/storage/test_prediction_cache.py Source/tests/library/storage/test_model_artifacts.py Source/tests/library/aws/test_lambda_invoker.py'
-      requirements_files: 'Source/aws-lambdas/nfl/predict-read/requirements.txt'
       handler_dir: 'Source/aws-lambdas/nfl/predict-read'
 
   nfl_live_scores_deploy:
     name: NFL live-scores (deploy)
-    needs: infra
+    needs: [scan, infra]
     uses: ./.github/workflows/zip_lambda_deploy.yml
     secrets: inherit
     with:
       sport: 'NFL'
       function_name: ${{ needs.infra.outputs.nfl_live_scores_function_name }}
-      test_path: 'Source/tests/aws-lambdas/nfl/test_live_scores.py Source/tests/aws-lambdas/nfl/test_live_scores_handler.py'
-      requirements_files: 'Source/aws-lambdas/nfl/live-scores/requirements.txt'
       handler_dir: 'Source/aws-lambdas/nfl/live-scores'
       extra_source_files: 'Source/aws-lambdas/nfl/live-scores/live_scores.py'
 
@@ -463,49 +938,37 @@ jobs:
 
   ncaafb_data_pipeline:
     name: NCAAFB data pipeline (deploy)
-    needs: infra
+    needs: [scan, infra]
     uses: ./.github/workflows/data_pipeline.yml
     secrets: inherit
     with:
       sport: 'NCAAFB'
       ingest_function_name: ${{ needs.infra.outputs.ncaafb_ingest_function_name }}
-      ingest_test_path: >-
-        Source/tests/aws-lambdas/ncaafb/test_ingest_lambda_handler.py
-        Source/tests/aws-lambdas/ncaafb/test_ingest_enrichment.py
-      ingest_requirements_files: 'Source/aws-lambdas/ncaafb/ingest/requirements.txt'
       ingest_handler_dir: 'Source/aws-lambdas/ncaafb/ingest'
       ingest_extra_source_files: 'Source/aws-lambdas/ncaafb/ingest/enrichment.py'
       normalize_function_name: ${{ needs.infra.outputs.ncaafb_normalize_function_name }}
-      normalize_test_path: 'Source/tests/aws-lambdas/ncaafb/test_normalize.py'
-      normalize_requirements_files: 'Source/aws-lambdas/ncaafb/normalize/requirements.txt'
       normalize_handler_dir: 'Source/aws-lambdas/ncaafb/normalize'
       schedule_sync_function_name: ${{ needs.infra.outputs.ncaafb_schedule_sync_function_name }}
-      schedule_sync_test_path: 'Source/tests/aws-lambdas/ncaafb/test_schedule_sync.py'
-      schedule_sync_requirements_files: 'Source/aws-lambdas/ncaafb/schedule-sync/requirements.txt'
       schedule_sync_handler_dir: 'Source/aws-lambdas/ncaafb/schedule-sync'
 
   ncaafb_predict_read_deploy:
     name: NCAAFB predict-read (deploy)
-    needs: infra
+    needs: [scan, infra]
     uses: ./.github/workflows/zip_lambda_deploy.yml
     secrets: inherit
     with:
       sport: 'NCAAFB'
       function_name: ${{ needs.infra.outputs.ncaafb_predict_read_function_name }}
-      test_path: 'Source/tests/aws-lambdas/ncaafb/test_predict_read_handler.py Source/tests/library/serving/test_ncaafb_reads.py Source/tests/library/storage/test_prediction_cache.py Source/tests/library/storage/test_model_artifacts.py Source/tests/library/aws/test_lambda_invoker.py'
-      requirements_files: 'Source/aws-lambdas/ncaafb/predict-read/requirements.txt'
       handler_dir: 'Source/aws-lambdas/ncaafb/predict-read'
 
   ncaafb_live_scores_deploy:
     name: NCAAFB live-scores (deploy)
-    needs: infra
+    needs: [scan, infra]
     uses: ./.github/workflows/zip_lambda_deploy.yml
     secrets: inherit
     with:
       sport: 'NCAAFB'
       function_name: ${{ needs.infra.outputs.ncaafb_live_scores_function_name }}
-      test_path: 'Source/tests/aws-lambdas/ncaafb/test_live_scores.py Source/tests/aws-lambdas/ncaafb/test_live_scores_handler.py'
-      requirements_files: 'Source/aws-lambdas/ncaafb/live-scores/requirements.txt'
       handler_dir: 'Source/aws-lambdas/ncaafb/live-scores'
       extra_source_files: 'Source/aws-lambdas/ncaafb/live-scores/live_scores.py'
 
@@ -521,46 +984,36 @@ jobs:
 
   nba_data_pipeline:
     name: NBA data pipeline (deploy)
-    needs: infra
+    needs: [scan, infra]
     uses: ./.github/workflows/data_pipeline.yml
     secrets: inherit
     with:
       sport: 'NBA'
       ingest_function_name: ${{ needs.infra.outputs.nba_ingest_function_name }}
-      ingest_test_path: 'Source/tests/aws-lambdas/nba/test_ingest.py'
-      ingest_requirements_files: 'Source/aws-lambdas/nba/ingest/requirements.txt'
       ingest_handler_dir: 'Source/aws-lambdas/nba/ingest'
       normalize_function_name: ${{ needs.infra.outputs.nba_normalize_function_name }}
-      normalize_test_path: 'Source/tests/aws-lambdas/nba/test_normalize.py'
-      normalize_requirements_files: 'Source/aws-lambdas/nba/normalize/requirements.txt'
       normalize_handler_dir: 'Source/aws-lambdas/nba/normalize'
       schedule_sync_function_name: ${{ needs.infra.outputs.nba_schedule_sync_function_name }}
-      schedule_sync_test_path: 'Source/tests/aws-lambdas/nba/test_schedule_sync.py'
-      schedule_sync_requirements_files: 'Source/aws-lambdas/nba/schedule-sync/requirements.txt'
       schedule_sync_handler_dir: 'Source/aws-lambdas/nba/schedule-sync'
 
   nba_predict_read_deploy:
     name: NBA predict-read (deploy)
-    needs: infra
+    needs: [scan, infra]
     uses: ./.github/workflows/zip_lambda_deploy.yml
     secrets: inherit
     with:
       sport: 'NBA'
       function_name: ${{ needs.infra.outputs.nba_predict_read_function_name }}
-      test_path: 'Source/tests/aws-lambdas/nba/test_predict_read_handler.py Source/tests/library/serving/test_nba_reads.py Source/tests/library/storage/test_prediction_cache.py Source/tests/library/storage/test_model_artifacts.py Source/tests/library/aws/test_lambda_invoker.py'
-      requirements_files: 'Source/aws-lambdas/nba/predict-read/requirements.txt'
       handler_dir: 'Source/aws-lambdas/nba/predict-read'
 
   nba_live_scores_deploy:
     name: NBA live-scores (deploy)
-    needs: infra
+    needs: [scan, infra]
     uses: ./.github/workflows/zip_lambda_deploy.yml
     secrets: inherit
     with:
       sport: 'NBA'
       function_name: ${{ needs.infra.outputs.nba_live_scores_function_name }}
-      test_path: 'Source/tests/aws-lambdas/nba/test_live_scores.py Source/tests/aws-lambdas/nba/test_live_scores_handler.py'
-      requirements_files: 'Source/aws-lambdas/nba/live-scores/requirements.txt'
       handler_dir: 'Source/aws-lambdas/nba/live-scores'
       extra_source_files: 'Source/aws-lambdas/nba/live-scores/live_scores.py'
 
@@ -579,34 +1032,26 @@ jobs:
 
   ncaambb_predict_read_deploy:
     name: NCAA MBB predict-read (deploy)
-    needs: infra
+    needs: [scan, infra]
     uses: ./.github/workflows/zip_lambda_deploy.yml
     secrets: inherit
     with:
       sport: 'NCAA MBB'
       function_name: ${{ needs.infra.outputs.ncaambb_predict_read_function_name }}
-      test_path: 'Source/tests/aws-lambdas/ncaambb/test_predict_read_handler.py Source/tests/library/serving/test_ncaambb_reads.py Source/tests/library/storage/test_prediction_cache.py Source/tests/library/storage/test_model_artifacts.py Source/tests/library/aws/test_lambda_invoker.py'
-      requirements_files: 'Source/aws-lambdas/ncaambb/predict-read/requirements.txt'
       handler_dir: 'Source/aws-lambdas/ncaambb/predict-read'
 
   ncaambb_data_pipeline:
     name: NCAA MBB data pipeline (deploy)
-    needs: infra
+    needs: [scan, infra]
     uses: ./.github/workflows/data_pipeline.yml
     secrets: inherit
     with:
       sport: 'NCAA MBB'
       ingest_function_name: ${{ needs.infra.outputs.ncaambb_ingest_function_name }}
-      ingest_test_path: 'Source/tests/aws-lambdas/ncaambb/test_ingest.py'
-      ingest_requirements_files: 'Source/aws-lambdas/ncaambb/ingest/requirements.txt'
       ingest_handler_dir: 'Source/aws-lambdas/ncaambb/ingest'
       normalize_function_name: ${{ needs.infra.outputs.ncaambb_normalize_function_name }}
-      normalize_test_path: 'Source/tests/aws-lambdas/ncaambb/test_normalize.py'
-      normalize_requirements_files: 'Source/aws-lambdas/ncaambb/normalize/requirements.txt'
       normalize_handler_dir: 'Source/aws-lambdas/ncaambb/normalize'
       schedule_sync_function_name: ${{ needs.infra.outputs.ncaambb_schedule_sync_function_name }}
-      schedule_sync_test_path: 'Source/tests/aws-lambdas/ncaambb/test_schedule_sync.py'
-      schedule_sync_requirements_files: 'Source/aws-lambdas/ncaambb/schedule-sync/requirements.txt'
       schedule_sync_handler_dir: 'Source/aws-lambdas/ncaambb/schedule-sync'
 
   pga_predict_deploy:
@@ -621,50 +1066,36 @@ jobs:
 
   pga_data_pipeline:
     name: PGA data pipeline (deploy)
-    needs: infra
+    needs: [scan, infra]
     uses: ./.github/workflows/data_pipeline.yml
     secrets: inherit
     with:
       sport: 'PGA'
       ingest_function_name: ${{ needs.infra.outputs.pga_ingest_function_name }}
-      ingest_test_path: 'Source/tests/aws-lambdas/pga/test_ingest.py'
-      ingest_requirements_files: 'Source/aws-lambdas/pga/ingest/requirements.txt'
       ingest_handler_dir: 'Source/aws-lambdas/pga/ingest'
       normalize_function_name: ${{ needs.infra.outputs.pga_normalize_function_name }}
-      normalize_test_path: 'Source/tests/aws-lambdas/pga/test_normalize.py'
-      normalize_requirements_files: 'Source/aws-lambdas/pga/normalize/requirements.txt'
       normalize_handler_dir: 'Source/aws-lambdas/pga/normalize'
       schedule_sync_function_name: ${{ needs.infra.outputs.pga_schedule_sync_function_name }}
-      schedule_sync_test_path: 'Source/tests/aws-lambdas/pga/test_schedule_sync.py'
-      schedule_sync_requirements_files: 'Source/aws-lambdas/pga/schedule-sync/requirements.txt'
       schedule_sync_handler_dir: 'Source/aws-lambdas/pga/schedule-sync'
 
   pga_predict_read_deploy:
     name: PGA predict-read (deploy)
-    needs: infra
+    needs: [scan, infra]
     uses: ./.github/workflows/zip_lambda_deploy.yml
     secrets: inherit
     with:
       sport: 'PGA'
       function_name: ${{ needs.infra.outputs.pga_predict_read_function_name }}
-      test_path: 'Source/tests/aws-lambdas/pga/test_predict_read_handler.py Source/tests/library/serving/test_pga_reads.py Source/tests/library/serving/test_common.py Source/tests/library/storage/test_prediction_cache.py Source/tests/library/storage/test_model_artifacts.py Source/tests/library/aws/test_lambda_invoker.py'
-      requirements_files: 'Source/aws-lambdas/pga/predict-read/requirements.txt'
       handler_dir: 'Source/aws-lambdas/pga/predict-read'
 
   pga_live_scores_deploy:
     name: PGA live-scores (deploy)
-    needs: infra
+    needs: [scan, infra]
     uses: ./.github/workflows/zip_lambda_deploy.yml
     secrets: inherit
     with:
       sport: 'PGA'
       function_name: ${{ needs.infra.outputs.pga_live_scores_function_name }}
-      test_path: >-
-        Source/tests/aws-lambdas/pga/test_live_scores.py
-        Source/tests/aws-lambdas/pga/test_live_scores_handler.py
-        Source/tests/library/normalize/test_pga_event.py
-        Source/tests/library/normalize/test_pga_matchplay.py
-      requirements_files: 'Source/aws-lambdas/pga/live-scores/requirements.txt'
       handler_dir: 'Source/aws-lambdas/pga/live-scores'
       extra_source_files: 'Source/aws-lambdas/pga/live-scores/live_scores.py'
 
@@ -680,45 +1111,35 @@ jobs:
 
   f1_data_pipeline:
     name: F1 data pipeline (deploy)
-    needs: infra
+    needs: [scan, infra]
     uses: ./.github/workflows/data_pipeline.yml
     secrets: inherit
     with:
       sport: 'F1'
       ingest_function_name: ${{ needs.infra.outputs.f1_ingest_function_name }}
-      ingest_test_path: 'Source/tests/aws-lambdas/f1/test_ingest.py'
-      ingest_requirements_files: 'Source/aws-lambdas/f1/ingest/requirements.txt'
       ingest_handler_dir: 'Source/aws-lambdas/f1/ingest'
       normalize_function_name: ${{ needs.infra.outputs.f1_normalize_function_name }}
-      normalize_test_path: 'Source/tests/aws-lambdas/f1/test_normalize.py'
-      normalize_requirements_files: 'Source/aws-lambdas/f1/normalize/requirements.txt'
       normalize_handler_dir: 'Source/aws-lambdas/f1/normalize'
       # No f1-schedule-sync -- see f1_deploy.yml's own comment.
 
   f1_predict_read_deploy:
     name: F1 predict-read (deploy)
-    needs: infra
+    needs: [scan, infra]
     uses: ./.github/workflows/zip_lambda_deploy.yml
     secrets: inherit
     with:
       sport: 'F1'
       function_name: ${{ needs.infra.outputs.f1_predict_read_function_name }}
-      test_path: 'Source/tests/aws-lambdas/f1/test_predict_read_handler.py Source/tests/library/serving/test_f1_reads.py Source/tests/library/serving/test_common.py Source/tests/library/storage/test_prediction_cache.py Source/tests/library/storage/test_model_artifacts.py Source/tests/library/aws/test_lambda_invoker.py'
-      requirements_files: 'Source/aws-lambdas/f1/predict-read/requirements.txt'
       handler_dir: 'Source/aws-lambdas/f1/predict-read'
 
   f1_live_scores_deploy:
     name: F1 live-scores (deploy)
-    needs: infra
+    needs: [scan, infra]
     uses: ./.github/workflows/zip_lambda_deploy.yml
     secrets: inherit
     with:
       sport: 'F1'
       function_name: ${{ needs.infra.outputs.f1_live_scores_function_name }}
-      test_path: >-
-        Source/tests/aws-lambdas/f1/test_live_scores.py
-        Source/tests/aws-lambdas/f1/test_live_scores_handler.py
-      requirements_files: 'Source/aws-lambdas/f1/live-scores/requirements.txt'
       handler_dir: 'Source/aws-lambdas/f1/live-scores'
       extra_source_files: 'Source/aws-lambdas/f1/live-scores/live_scores.py'
 
@@ -727,7 +1148,7 @@ jobs:
   # `needs: infra` still enforces ordering.
   frontend_build:
     name: Frontend hosting (build)
-    needs: infra
+    needs: [scan, infra]
     uses: ./.github/workflows/frontend_hosting.yml
     secrets: inherit
 

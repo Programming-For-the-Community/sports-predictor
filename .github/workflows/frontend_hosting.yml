@@ -1,9 +1,12 @@
-# Builds, tests, and packages the Flutter Web frontend. Runs standalone
-# (workflow_dispatch) or called from frontend_deploy.yml (workflow_call) --
-# either way the work is identical: run tests, scan with SonarQube Cloud,
-# then build only if both passed, and upload the built site as an artifact.
-#
-# Build-only -- no deploy step here. Deploying (syncing to S3 +
+# Builds and packages the Flutter Web frontend. Runs standalone
+# (workflow_dispatch) or called from frontend_deploy.yml/app_deploy.yml
+# (workflow_call). Build-only -- no test, no scan, no deploy step here.
+# The caller runs `flutter test` directly and folds it into that
+# pipeline's own single SonarQube Cloud scan (see frontend_deploy.yml/
+# app_deploy.yml for the pattern) -- a scan job can't depend on jobs
+# nested inside a called reusable workflow, only a sibling job in the
+# SAME calling file, so the test step can't live inside this file if
+# every caller is to have exactly one scan. Deploying (syncing to S3 +
 # invalidating CloudFront) is frontend_sync_deploy.yml's job.
 #
 # The build job reads its config (API URL, Cognito IDs) directly from
@@ -31,40 +34,8 @@ permissions:
   contents: read
 
 jobs:
-  test-frontend:
-    name: Run frontend tests
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Set up Flutter
-        uses: subosito/flutter-action@v2
-        with:
-          flutter-version: ${{ env.FLUTTER_VERSION }}
-          channel: stable
-
-      - name: Install dependencies
-        working-directory: Source/front-end
-        run: flutter pub get
-
-      - name: Analyze
-        working-directory: Source/front-end
-        run: flutter analyze
-
-      - name: Test
-        working-directory: Source/front-end
-        run: flutter test
-
-  scan:
-    name: SonarQube Cloud scan
-    needs: test-frontend
-    uses: ./.github/workflows/sonar_scan.yml
-    secrets: inherit
-
   build-frontend:
     name: Build frontend
-    needs: scan
     runs-on: ubuntu-latest
     outputs:
       artifact_name: frontend-build

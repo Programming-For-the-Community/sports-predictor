@@ -1,17 +1,20 @@
-# Tests, scans with SonarQube Cloud, builds, and deploys the season-gate
-# Lambda (Terraform/lambda-season-gate.tf, shared across every sport's
-# orchestrator state machine), the cloudwatch-geo-widget Lambda, and the
-# ec2-training-reaper Lambda. One scan gates all three builds -- SonarQube
-# Cloud analyzes the whole repo either way, so there's no value in scanning
-# three times per pipeline run. Each of the three chains is otherwise
-# independent -- a failure in one does not block the others.
+# Builds and deploys the season-gate Lambda (Terraform/lambda-season-gate.tf,
+# shared across every sport's orchestrator state machine), the
+# cloudwatch-geo-widget Lambda, and the ec2-training-reaper Lambda.
+# Build+deploy only -- no test, no scan. The caller (each sport's own
+# _deploy.yml and app_deploy.yml) is responsible for testing
+# Source/tests/library/test_season.py, test_season_gate.py,
+# test_cloudwatch_geo_widget.py, and test_ec2_training_reaper.py directly
+# and folding them into that pipeline's own single SonarQube Cloud scan --
+# a scan job can't depend on jobs nested inside a called reusable
+# workflow, only a sibling job in the SAME calling file, so those tests
+# can't live inside this file if every caller is to have exactly one scan.
 
 name: Shared Lambdas Deploy
 
 on:
   workflow_dispatch:
-  workflow_call:
-    inputs:
+    inputs: &inputs
       season_gate_function_name:
         description: 'season-gate Lambda function name (from Terraform output season_gate_function_name)'
         required: false
@@ -27,40 +30,16 @@ on:
         required: false
         type: string
         default: 'sports-predictor-ec2-training-reaper'
+  workflow_call:
+    inputs: *inputs
 
 permissions:
   id-token: write
   contents: read
 
 jobs:
-  test_season_gate:
-    name: Run season-gate tests
-    uses: ./.github/workflows/run_python_tests.yml
-    with:
-      test_path: 'Source/tests/library/test_season.py Source/tests/aws-lambdas/shared/test_season_gate.py'
-
-  test_cloudwatch_geo_widget:
-    name: Run cloudwatch-geo-widget tests
-    uses: ./.github/workflows/run_python_tests.yml
-    with:
-      test_path: 'Source/tests/aws-lambdas/shared/test_cloudwatch_geo_widget.py'
-      requirements_files: 'Source/aws-lambdas/shared/cloudwatch-geo-widget/requirements.txt'
-
-  test_ec2_training_reaper:
-    name: Run ec2-training-reaper tests
-    uses: ./.github/workflows/run_python_tests.yml
-    with:
-      test_path: 'Source/tests/aws-lambdas/shared/test_ec2_training_reaper.py'
-
-  scan:
-    name: SonarQube Cloud scan
-    needs: [test_season_gate, test_cloudwatch_geo_widget, test_ec2_training_reaper]
-    uses: ./.github/workflows/sonar_scan.yml
-    secrets: inherit
-
   build_season_gate:
     name: Build season-gate Lambda
-    needs: scan
     uses: ./.github/workflows/python_lambda_build.yml
     with:
       function_name: ${{ inputs.season_gate_function_name || 'sports-predictor-season-gate' }}
@@ -78,7 +57,6 @@ jobs:
 
   build_cloudwatch_geo_widget:
     name: Build cloudwatch-geo-widget Lambda
-    needs: scan
     uses: ./.github/workflows/python_lambda_build.yml
     with:
       function_name: ${{ inputs.cloudwatch_geo_widget_function_name || 'sports-predictor-cloudwatch-geo-widget' }}
@@ -96,7 +74,6 @@ jobs:
 
   build_ec2_training_reaper:
     name: Build ec2-training-reaper Lambda
-    needs: scan
     uses: ./.github/workflows/python_lambda_build.yml
     with:
       function_name: ${{ inputs.ec2_training_reaper_function_name || 'sports-predictor-ec2-training-reaper' }}

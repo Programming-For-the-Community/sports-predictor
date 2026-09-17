@@ -1,12 +1,19 @@
-# Reusable workflow: tests, scans with SonarQube Cloud, builds, and
-# deploys a single zip-packaged Lambda. Each stage only runs if the one
-# before it passed. Generic single-Lambda pattern -- used for any Lambda
-# that gets its own dedicated test suite and doesn't share a scan with
-# sibling Lambdas (predict-read, live-scores today). Multi-Lambda files
-# that deliberately share ONE scan across several Lambdas (data_pipeline.yml,
+# Reusable workflow: builds and deploys a single zip-packaged Lambda.
+# Build+deploy only -- no test, no scan. The caller is responsible for
+# testing the relevant code and running exactly one SonarQube Cloud scan
+# per pipeline run (gating this job on that scan via `needs:`), since a
+# scan job can't depend on jobs nested inside a called reusable workflow --
+# only a sibling job in the SAME calling file can be a `needs:` target.
+# See nfl_deploy.yml/app_deploy.yml for the pattern: explicit `test-*`
+# jobs, one shared `scan` job needing all of them, then this workflow
+# needing `scan`.
+#
+# Generic single-Lambda pattern -- used for any Lambda that gets its own
+# dedicated test suite and doesn't share a scan with sibling Lambdas
+# (predict-read, live-scores today). Multi-Lambda files that deliberately
+# share ONE scan across several Lambdas (data_pipeline.yml,
 # shared_lambdas_deploy.yml) call python_lambda_build.yml/
-# python_lambda_deploy.yml directly instead of this file, so as not to
-# triple their scan count.
+# python_lambda_deploy.yml directly instead of this file.
 
 name: Zip Lambda Deploy
 
@@ -21,13 +28,6 @@ on:
         description: 'Lambda function name'
         required: true
         type: string
-      test_path:
-        required: true
-        type: string
-      requirements_files:
-        required: false
-        type: string
-        default: ''
       handler_dir:
         description: 'Relative path to the directory containing handler.py and requirements.txt'
         required: true
@@ -45,22 +45,8 @@ permissions:
   contents: read
 
 jobs:
-  test:
-    name: Run ${{ inputs.sport }} tests
-    uses: ./.github/workflows/run_python_tests.yml
-    with:
-      test_path: ${{ inputs.test_path }}
-      requirements_files: ${{ inputs.requirements_files }}
-
-  scan:
-    name: SonarQube Cloud scan
-    needs: test
-    uses: ./.github/workflows/sonar_scan.yml
-    secrets: inherit
-
   build:
     name: Build ${{ inputs.sport }} Lambda
-    needs: scan
     uses: ./.github/workflows/python_lambda_build.yml
     with:
       function_name: ${{ inputs.function_name }}

@@ -2,17 +2,20 @@
 # pausing for manual approval (via the environment's required reviewers,
 # configured in Settings > Environments) before doing anything.
 #
+# Exactly one SonarQube Cloud scan for this whole pipeline: every
+# component's own test job runs directly against run_python_tests.yml
+# (not nested inside a category workflow, since a scan job can't depend on
+# jobs nested inside a called reusable workflow -- only a sibling job in
+# the SAME file), `scan` needs all of them, and every build/deploy job
+# needs `scan`. NFL also owns shared_lambdas_deploy (season-gate/
+# cloudwatch-geo-widget/ec2-training-reaper), so its three tests are
+# folded into this same scan too, rather than shared_lambdas_deploy.yml
+# running its own separate one.
+#
 # Build jobs (backfill, ai_training, ai_hosting) run before infra since
 # they don't depend on Terraform-managed resources; infra's CreateFunction
 # call for the nfl-predict Lambda requires the image to already exist in
 # ECR. Deploy steps that need a Terraform-created resource run after infra.
-#
-# Calls the generic per-category workflows (backfill.yml, ai_training.yml,
-# etc. -- shared across every sport) with NFL's own paths/test lists/image
-# versions as inputs, rather than a dedicated nfl_*.yml file per category --
-# keeps GitHub's cap on how many distinct reusable workflows one workflow
-# run can reference from ballooning as sports are added (app_deploy.yml
-# bundles every sport into one run).
 
 name: NFL Deploy
 
@@ -43,53 +46,51 @@ jobs:
       - name: Approved
         run: echo "Deployment approved -- proceeding."
 
-  backfill:
-    name: Historical backfill (build)
+  # Each test job below repeats the same tolerant check against `approval`
+  # directly -- approval is intentionally skipped (not failed) when called
+  # via workflow_call, and without this tolerant check a skipped `needs`
+  # job would cause everything downstream to be skipped too.
+  test-backfill:
+    name: Run NFL backfill tests
     needs: approval
     if: |
       always() &&
       (needs.approval.result == 'success' || needs.approval.result == 'skipped')
-    uses: ./.github/workflows/docker_image_deploy.yml
-    secrets: inherit
+    uses: ./.github/workflows/run_python_tests.yml
     with:
-      sport: 'NFL'
       test_path: 'Source/tests/data-backfills/nfl/'
       requirements_files: 'Source/data-backfills/nfl/requirements-dev.txt'
-      dockerfile_path: 'Source/data-backfills/nfl/Dockerfile'
-      image_name: 'nfl-backfill'
-      image_version: '1.0.0'
 
-  ai_training:
-    name: AI training (build)
+  test-feature-engineering:
+    name: Run NFL feature engineering tests
     needs: approval
     if: |
       always() &&
       (needs.approval.result == 'success' || needs.approval.result == 'skipped')
-    uses: ./.github/workflows/ai_training.yml
-    secrets: inherit
+    uses: ./.github/workflows/run_python_tests.yml
     with:
-      sport: 'NFL'
-      feature_engineering_test_path: 'Source/tests/library/ Source/tests/feature-engineering/nfl/ --ignore=Source/tests/library/ml'
-      feature_engineering_requirements_files: 'Source/feature-engineering/nfl/requirements.txt'
-      feature_engineering_dockerfile_path: 'Source/feature-engineering/nfl/Dockerfile'
-      feature_engineering_image_name: 'nfl-feature-engineering'
-      feature_engineering_image_version: '1.0.0'
-      train_model_test_path: 'Source/tests/library/ Source/tests/model-training/nfl/'
-      train_model_requirements_files: 'Source/model-training/nfl/requirements.txt'
-      train_model_dockerfile_path: 'Source/model-training/nfl/Dockerfile'
-      train_model_image_name: 'nfl-train-win-probability-model'
-      train_model_image_version: '1.0.0'
+      test_path: 'Source/tests/library/ Source/tests/feature-engineering/nfl/ --ignore=Source/tests/library/ml'
+      requirements_files: 'Source/feature-engineering/nfl/requirements.txt'
 
-  ai_hosting:
-    name: AI hosting (build)
+  test-train-model:
+    name: Run NFL training model tests
     needs: approval
     if: |
       always() &&
       (needs.approval.result == 'success' || needs.approval.result == 'skipped')
-    uses: ./.github/workflows/docker_image_deploy.yml
-    secrets: inherit
+    uses: ./.github/workflows/run_python_tests.yml
     with:
-      sport: 'NFL'
+      test_path: 'Source/tests/library/ Source/tests/model-training/nfl/'
+      requirements_files: 'Source/model-training/nfl/requirements.txt'
+
+  test-predict:
+    name: Run NFL predict tests
+    needs: approval
+    if: |
+      always() &&
+      (needs.approval.result == 'success' || needs.approval.result == 'skipped')
+    uses: ./.github/workflows/run_python_tests.yml
+    with:
       test_path: >-
         Source/tests/library/
         Source/tests/aws-lambdas/nfl/test_predict_event_outcome.py
@@ -108,6 +109,157 @@ jobs:
         Source/tests/aws-lambdas/nfl/test_model_loader.py
       # Both requirements files are installed so xgboost is importable in this test job.
       requirements_files: 'Source/aws-lambdas/nfl/predict/requirements.txt Source/aws-lambdas/nfl/predict/requirements-nodeps.txt'
+
+  test-predict-read:
+    name: Run NFL predict-read tests
+    needs: approval
+    if: |
+      always() &&
+      (needs.approval.result == 'success' || needs.approval.result == 'skipped')
+    uses: ./.github/workflows/run_python_tests.yml
+    with:
+      test_path: 'Source/tests/aws-lambdas/nfl/test_predict_read.py Source/tests/library/serving/ Source/tests/library/storage/test_prediction_cache.py Source/tests/library/storage/test_model_artifacts.py Source/tests/library/aws/test_lambda_invoker.py'
+      requirements_files: 'Source/aws-lambdas/nfl/predict-read/requirements.txt'
+
+  test-live-scores:
+    name: Run NFL live-scores tests
+    needs: approval
+    if: |
+      always() &&
+      (needs.approval.result == 'success' || needs.approval.result == 'skipped')
+    uses: ./.github/workflows/run_python_tests.yml
+    with:
+      test_path: 'Source/tests/aws-lambdas/nfl/test_live_scores.py Source/tests/aws-lambdas/nfl/test_live_scores_handler.py'
+      requirements_files: 'Source/aws-lambdas/nfl/live-scores/requirements.txt'
+
+  test-ingest:
+    name: Run NFL ingest tests
+    needs: approval
+    if: |
+      always() &&
+      (needs.approval.result == 'success' || needs.approval.result == 'skipped')
+    uses: ./.github/workflows/run_python_tests.yml
+    with:
+      test_path: >-
+        Source/tests/aws-lambdas/nfl/test_ingest_lambda_handler.py
+        Source/tests/aws-lambdas/nfl/test_ingest_helpers.py
+        Source/tests/aws-lambdas/nfl/test_ingest_rosters.py
+        Source/tests/aws-lambdas/nfl/test_ingest_depth_charts.py
+        Source/tests/aws-lambdas/nfl/test_ingest_coaches.py
+        Source/tests/aws-lambdas/nfl/test_enrichment.py
+      requirements_files: 'Source/aws-lambdas/nfl/ingest/requirements.txt'
+
+  test-normalize:
+    name: Run NFL normalize tests
+    needs: approval
+    if: |
+      always() &&
+      (needs.approval.result == 'success' || needs.approval.result == 'skipped')
+    uses: ./.github/workflows/run_python_tests.yml
+    with:
+      test_path: 'Source/tests/aws-lambdas/nfl/test_normalize.py'
+      requirements_files: 'Source/aws-lambdas/nfl/normalize/requirements.txt'
+
+  test-schedule-sync:
+    name: Run NFL schedule-sync tests
+    needs: approval
+    if: |
+      always() &&
+      (needs.approval.result == 'success' || needs.approval.result == 'skipped')
+    uses: ./.github/workflows/run_python_tests.yml
+    with:
+      test_path: 'Source/tests/aws-lambdas/nfl/test_schedule_sync.py'
+      requirements_files: 'Source/aws-lambdas/nfl/schedule-sync/requirements.txt'
+
+  # NFL owns shared_lambdas_deploy -- its tests are folded into this same
+  # scan rather than shared_lambdas_deploy.yml running its own.
+  test-season-gate:
+    name: Run season-gate tests
+    needs: approval
+    if: |
+      always() &&
+      (needs.approval.result == 'success' || needs.approval.result == 'skipped')
+    uses: ./.github/workflows/run_python_tests.yml
+    with:
+      test_path: 'Source/tests/library/test_season.py Source/tests/aws-lambdas/shared/test_season_gate.py'
+
+  test-cloudwatch-geo-widget:
+    name: Run cloudwatch-geo-widget tests
+    needs: approval
+    if: |
+      always() &&
+      (needs.approval.result == 'success' || needs.approval.result == 'skipped')
+    uses: ./.github/workflows/run_python_tests.yml
+    with:
+      test_path: 'Source/tests/aws-lambdas/shared/test_cloudwatch_geo_widget.py'
+      requirements_files: 'Source/aws-lambdas/shared/cloudwatch-geo-widget/requirements.txt'
+
+  test-ec2-training-reaper:
+    name: Run ec2-training-reaper tests
+    needs: approval
+    if: |
+      always() &&
+      (needs.approval.result == 'success' || needs.approval.result == 'skipped')
+    uses: ./.github/workflows/run_python_tests.yml
+    with:
+      test_path: 'Source/tests/aws-lambdas/shared/test_ec2_training_reaper.py'
+
+  scan:
+    name: SonarQube Cloud scan
+    needs: [
+      test-backfill, test-feature-engineering, test-train-model, test-predict,
+      test-predict-read, test-live-scores, test-ingest, test-normalize, test-schedule-sync,
+      test-season-gate, test-cloudwatch-geo-widget, test-ec2-training-reaper,
+    ]
+    if: |
+      always() &&
+      (needs.test-backfill.result == 'success' || needs.test-backfill.result == 'skipped') &&
+      (needs.test-feature-engineering.result == 'success' || needs.test-feature-engineering.result == 'skipped') &&
+      (needs.test-train-model.result == 'success' || needs.test-train-model.result == 'skipped') &&
+      (needs.test-predict.result == 'success' || needs.test-predict.result == 'skipped') &&
+      (needs.test-predict-read.result == 'success' || needs.test-predict-read.result == 'skipped') &&
+      (needs.test-live-scores.result == 'success' || needs.test-live-scores.result == 'skipped') &&
+      (needs.test-ingest.result == 'success' || needs.test-ingest.result == 'skipped') &&
+      (needs.test-normalize.result == 'success' || needs.test-normalize.result == 'skipped') &&
+      (needs.test-schedule-sync.result == 'success' || needs.test-schedule-sync.result == 'skipped') &&
+      (needs.test-season-gate.result == 'success' || needs.test-season-gate.result == 'skipped') &&
+      (needs.test-cloudwatch-geo-widget.result == 'success' || needs.test-cloudwatch-geo-widget.result == 'skipped') &&
+      (needs.test-ec2-training-reaper.result == 'success' || needs.test-ec2-training-reaper.result == 'skipped')
+    uses: ./.github/workflows/sonar_scan.yml
+    secrets: inherit
+
+  backfill:
+    name: Historical backfill (build)
+    needs: scan
+    uses: ./.github/workflows/docker_image_deploy.yml
+    secrets: inherit
+    with:
+      sport: 'NFL'
+      dockerfile_path: 'Source/data-backfills/nfl/Dockerfile'
+      image_name: 'nfl-backfill'
+      image_version: '1.0.0'
+
+  ai_training:
+    name: AI training (build)
+    needs: scan
+    uses: ./.github/workflows/ai_training.yml
+    secrets: inherit
+    with:
+      sport: 'NFL'
+      feature_engineering_dockerfile_path: 'Source/feature-engineering/nfl/Dockerfile'
+      feature_engineering_image_name: 'nfl-feature-engineering'
+      feature_engineering_image_version: '1.0.0'
+      train_model_dockerfile_path: 'Source/model-training/nfl/Dockerfile'
+      train_model_image_name: 'nfl-train-win-probability-model'
+      train_model_image_version: '1.0.0'
+
+  ai_hosting:
+    name: AI hosting (build)
+    needs: scan
+    uses: ./.github/workflows/docker_image_deploy.yml
+    secrets: inherit
+    with:
+      sport: 'NFL'
       dockerfile_path: 'Source/aws-lambdas/nfl/predict/Dockerfile'
       image_name: 'nfl-predict'
       image_version: '1.0.0'
@@ -127,7 +279,7 @@ jobs:
 
   shared_lambdas_deploy:
     name: Shared lambdas (deploy)
-    needs: infra
+    needs: [scan, infra]
     uses: ./.github/workflows/shared_lambdas_deploy.yml
     secrets: inherit
     with:
@@ -144,59 +296,37 @@ jobs:
       default_image_tag: 'nfl-predict-latest'
 
   predict_read_deploy:
-    name: NFL predict-read (test + deploy)
-    needs: [approval, infra]
-    if: |
-      always() &&
-      (needs.approval.result == 'success' || needs.approval.result == 'skipped')
+    name: NFL predict-read (deploy)
+    needs: [scan, infra]
     uses: ./.github/workflows/zip_lambda_deploy.yml
     secrets: inherit
     with:
       sport: 'NFL'
       function_name: ${{ needs.infra.outputs.nfl_predict_read_function_name }}
-      test_path: 'Source/tests/aws-lambdas/nfl/test_predict_read.py Source/tests/library/serving/ Source/tests/library/storage/test_prediction_cache.py Source/tests/library/storage/test_model_artifacts.py Source/tests/library/aws/test_lambda_invoker.py'
-      requirements_files: 'Source/aws-lambdas/nfl/predict-read/requirements.txt'
       handler_dir: 'Source/aws-lambdas/nfl/predict-read'
 
   live_scores_deploy:
-    name: NFL live-scores (test + deploy)
-    needs: [approval, infra]
-    if: |
-      always() &&
-      (needs.approval.result == 'success' || needs.approval.result == 'skipped')
+    name: NFL live-scores (deploy)
+    needs: [scan, infra]
     uses: ./.github/workflows/zip_lambda_deploy.yml
     secrets: inherit
     with:
       sport: 'NFL'
       function_name: ${{ needs.infra.outputs.nfl_live_scores_function_name }}
-      test_path: 'Source/tests/aws-lambdas/nfl/test_live_scores.py Source/tests/aws-lambdas/nfl/test_live_scores_handler.py'
-      requirements_files: 'Source/aws-lambdas/nfl/live-scores/requirements.txt'
       handler_dir: 'Source/aws-lambdas/nfl/live-scores'
       extra_source_files: 'Source/aws-lambdas/nfl/live-scores/live_scores.py'
 
   data_pipeline:
     name: Data pipeline
-    needs: infra
+    needs: [scan, infra]
     uses: ./.github/workflows/data_pipeline.yml
     secrets: inherit
     with:
       sport: 'NFL'
       ingest_function_name: ${{ needs.infra.outputs.nfl_ingest_function_name }}
-      ingest_test_path: >-
-        Source/tests/aws-lambdas/nfl/test_ingest_lambda_handler.py
-        Source/tests/aws-lambdas/nfl/test_ingest_helpers.py
-        Source/tests/aws-lambdas/nfl/test_ingest_rosters.py
-        Source/tests/aws-lambdas/nfl/test_ingest_depth_charts.py
-        Source/tests/aws-lambdas/nfl/test_ingest_coaches.py
-        Source/tests/aws-lambdas/nfl/test_enrichment.py
-      ingest_requirements_files: 'Source/aws-lambdas/nfl/ingest/requirements.txt'
       ingest_handler_dir: 'Source/aws-lambdas/nfl/ingest'
       ingest_extra_source_files: 'Source/aws-lambdas/nfl/ingest/enrichment.py'
       normalize_function_name: ${{ needs.infra.outputs.nfl_normalize_function_name }}
-      normalize_test_path: 'Source/tests/aws-lambdas/nfl/test_normalize.py'
-      normalize_requirements_files: 'Source/aws-lambdas/nfl/normalize/requirements.txt'
       normalize_handler_dir: 'Source/aws-lambdas/nfl/normalize'
       schedule_sync_function_name: ${{ needs.infra.outputs.nfl_schedule_sync_function_name }}
-      schedule_sync_test_path: 'Source/tests/aws-lambdas/nfl/test_schedule_sync.py'
-      schedule_sync_requirements_files: 'Source/aws-lambdas/nfl/schedule-sync/requirements.txt'
       schedule_sync_handler_dir: 'Source/aws-lambdas/nfl/schedule-sync'

@@ -3,16 +3,12 @@
 # reviewers -- configure this in Settings > Environments, it can't be set
 # from this file) before doing anything.
 #
-# Calls the generic per-category workflows (backfill.yml, ai_training.yml,
-# etc. -- shared across every sport) with NCAAFB's own paths/test
-# lists/image versions as inputs, rather than a dedicated ncaafb_*.yml
-# file per category -- keeps GitHub's cap on how many distinct reusable
-# workflows one workflow run can reference from ballooning as sports are
-# added (app_deploy.yml bundles every sport into one run).
-#
-# Both this job's `approval` step AND tf_install.yml's own terraform job
-# gate on the `development`/`production` environment, so a run through
-# this pipeline prompts for approval twice.
+# Exactly one SonarQube Cloud scan for this whole pipeline: every
+# component's own test job runs directly against run_python_tests.yml
+# (not nested inside a category workflow, since a scan job can't depend on
+# jobs nested inside a called reusable workflow -- only a sibling job in
+# the SAME file), `scan` needs all of them, and every build/deploy job
+# needs `scan`.
 
 name: NCAAFB Deploy
 
@@ -44,18 +40,147 @@ jobs:
       - name: Approved
         run: echo "Deployment approved -- proceeding."
 
-  backfill:
-    name: Historical backfill (build)
+  # Each test job below repeats the same tolerant check against `approval`
+  # directly -- approval is intentionally skipped (not failed) when called
+  # via workflow_call, and without this tolerant check a skipped `needs`
+  # job would cause everything downstream to be skipped too.
+  test-backfill:
+    name: Run NCAAFB backfill tests
     needs: approval
     if: |
       always() &&
       (needs.approval.result == 'success' || needs.approval.result == 'skipped')
+    uses: ./.github/workflows/run_python_tests.yml
+    with:
+      test_path: 'Source/tests/data-backfills/ncaafb/'
+      requirements_files: 'Source/data-backfills/ncaafb/requirements-dev.txt'
+
+  test-feature-engineering:
+    name: Run NCAAFB feature engineering tests
+    needs: approval
+    if: |
+      always() &&
+      (needs.approval.result == 'success' || needs.approval.result == 'skipped')
+    uses: ./.github/workflows/run_python_tests.yml
+    with:
+      test_path: 'Source/tests/library/ Source/tests/feature-engineering/ncaafb/ --ignore=Source/tests/library/ml'
+      requirements_files: 'Source/feature-engineering/ncaafb/requirements.txt'
+
+  # Covers every model-training/ncaafb/*.py script, including the ranking
+  # model script -- feeds both build-train-model-image and
+  # build-ranking-model-image below.
+  test-train-models:
+    name: Run NCAAFB training model tests
+    needs: approval
+    if: |
+      always() &&
+      (needs.approval.result == 'success' || needs.approval.result == 'skipped')
+    uses: ./.github/workflows/run_python_tests.yml
+    with:
+      test_path: 'Source/tests/library/ Source/tests/model-training/ncaafb/'
+      requirements_files: 'Source/model-training/ncaafb/requirements.txt'
+
+  test-predict:
+    name: Run NCAAFB predict tests
+    needs: approval
+    if: |
+      always() &&
+      (needs.approval.result == 'success' || needs.approval.result == 'skipped')
+    uses: ./.github/workflows/run_python_tests.yml
+    with:
+      test_path: >-
+        Source/tests/library/
+        Source/tests/aws-lambdas/ncaafb/test_live_features.py
+        Source/tests/aws-lambdas/ncaafb/test_event_prediction.py
+        Source/tests/aws-lambdas/ncaafb/test_predict_handler.py
+        Source/tests/aws-lambdas/ncaafb/test_season_simulation.py
+        Source/tests/aws-lambdas/ncaafb/test_season_projection.py
+      requirements_files: 'Source/aws-lambdas/ncaafb/predict/requirements.txt Source/aws-lambdas/ncaafb/predict/requirements-nodeps.txt'
+
+  test-predict-read:
+    name: Run NCAAFB predict-read tests
+    needs: approval
+    if: |
+      always() &&
+      (needs.approval.result == 'success' || needs.approval.result == 'skipped')
+    uses: ./.github/workflows/run_python_tests.yml
+    with:
+      test_path: 'Source/tests/aws-lambdas/ncaafb/test_predict_read_handler.py Source/tests/library/serving/test_ncaafb_reads.py Source/tests/library/storage/test_prediction_cache.py Source/tests/library/storage/test_model_artifacts.py Source/tests/library/aws/test_lambda_invoker.py'
+      requirements_files: 'Source/aws-lambdas/ncaafb/predict-read/requirements.txt'
+
+  test-live-scores:
+    name: Run NCAAFB live-scores tests
+    needs: approval
+    if: |
+      always() &&
+      (needs.approval.result == 'success' || needs.approval.result == 'skipped')
+    uses: ./.github/workflows/run_python_tests.yml
+    with:
+      test_path: 'Source/tests/aws-lambdas/ncaafb/test_live_scores.py Source/tests/aws-lambdas/ncaafb/test_live_scores_handler.py'
+      requirements_files: 'Source/aws-lambdas/ncaafb/live-scores/requirements.txt'
+
+  test-ingest:
+    name: Run NCAAFB ingest tests
+    needs: approval
+    if: |
+      always() &&
+      (needs.approval.result == 'success' || needs.approval.result == 'skipped')
+    uses: ./.github/workflows/run_python_tests.yml
+    with:
+      test_path: >-
+        Source/tests/aws-lambdas/ncaafb/test_ingest_lambda_handler.py
+        Source/tests/aws-lambdas/ncaafb/test_ingest_enrichment.py
+      requirements_files: 'Source/aws-lambdas/ncaafb/ingest/requirements.txt'
+
+  test-normalize:
+    name: Run NCAAFB normalize tests
+    needs: approval
+    if: |
+      always() &&
+      (needs.approval.result == 'success' || needs.approval.result == 'skipped')
+    uses: ./.github/workflows/run_python_tests.yml
+    with:
+      test_path: 'Source/tests/aws-lambdas/ncaafb/test_normalize.py'
+      requirements_files: 'Source/aws-lambdas/ncaafb/normalize/requirements.txt'
+
+  test-schedule-sync:
+    name: Run NCAAFB schedule-sync tests
+    needs: approval
+    if: |
+      always() &&
+      (needs.approval.result == 'success' || needs.approval.result == 'skipped')
+    uses: ./.github/workflows/run_python_tests.yml
+    with:
+      test_path: 'Source/tests/aws-lambdas/ncaafb/test_schedule_sync.py'
+      requirements_files: 'Source/aws-lambdas/ncaafb/schedule-sync/requirements.txt'
+
+  scan:
+    name: SonarQube Cloud scan
+    needs: [
+      test-backfill, test-feature-engineering, test-train-models, test-predict,
+      test-predict-read, test-live-scores, test-ingest, test-normalize, test-schedule-sync,
+    ]
+    if: |
+      always() &&
+      (needs.test-backfill.result == 'success' || needs.test-backfill.result == 'skipped') &&
+      (needs.test-feature-engineering.result == 'success' || needs.test-feature-engineering.result == 'skipped') &&
+      (needs.test-train-models.result == 'success' || needs.test-train-models.result == 'skipped') &&
+      (needs.test-predict.result == 'success' || needs.test-predict.result == 'skipped') &&
+      (needs.test-predict-read.result == 'success' || needs.test-predict-read.result == 'skipped') &&
+      (needs.test-live-scores.result == 'success' || needs.test-live-scores.result == 'skipped') &&
+      (needs.test-ingest.result == 'success' || needs.test-ingest.result == 'skipped') &&
+      (needs.test-normalize.result == 'success' || needs.test-normalize.result == 'skipped') &&
+      (needs.test-schedule-sync.result == 'success' || needs.test-schedule-sync.result == 'skipped')
+    uses: ./.github/workflows/sonar_scan.yml
+    secrets: inherit
+
+  backfill:
+    name: Historical backfill (build)
+    needs: scan
     uses: ./.github/workflows/docker_image_deploy.yml
     secrets: inherit
     with:
       sport: 'NCAAFB'
-      test_path: 'Source/tests/data-backfills/ncaafb/'
-      requirements_files: 'Source/data-backfills/ncaafb/requirements-dev.txt'
       dockerfile_path: 'Source/data-backfills/ncaafb/Dockerfile'
       image_name: 'ncaafb-backfill'
       image_version: '1.0.0'
@@ -64,22 +189,15 @@ jobs:
   # (shared image), and national-ranking training (separate image).
   ai_training:
     name: AI training (build)
-    needs: approval
-    if: |
-      always() &&
-      (needs.approval.result == 'success' || needs.approval.result == 'skipped')
+    needs: scan
     uses: ./.github/workflows/ai_training.yml
     secrets: inherit
     with:
       sport: 'NCAAFB'
-      feature_engineering_test_path: 'Source/tests/library/ Source/tests/feature-engineering/ncaafb/ --ignore=Source/tests/library/ml'
-      feature_engineering_requirements_files: 'Source/feature-engineering/ncaafb/requirements.txt'
       feature_engineering_dockerfile_path: 'Source/feature-engineering/ncaafb/Dockerfile'
       feature_engineering_image_name: 'ncaafb-feature-engineering'
       feature_engineering_image_version: '1.0.0'
       # Also used by train_score_model.py/train_player_prop_model.py via a container command override.
-      train_model_test_path: 'Source/tests/library/ Source/tests/model-training/ncaafb/'
-      train_model_requirements_files: 'Source/model-training/ncaafb/requirements.txt'
       train_model_dockerfile_path: 'Source/model-training/ncaafb/Dockerfile'
       train_model_image_name: 'ncaafb-train-win-probability-model'
       train_model_image_version: '1.0.0'
@@ -89,22 +207,11 @@ jobs:
 
   ai_hosting:
     name: AI hosting (build)
-    needs: approval
-    if: |
-      always() &&
-      (needs.approval.result == 'success' || needs.approval.result == 'skipped')
+    needs: scan
     uses: ./.github/workflows/docker_image_deploy.yml
     secrets: inherit
     with:
       sport: 'NCAAFB'
-      test_path: >-
-        Source/tests/library/
-        Source/tests/aws-lambdas/ncaafb/test_live_features.py
-        Source/tests/aws-lambdas/ncaafb/test_event_prediction.py
-        Source/tests/aws-lambdas/ncaafb/test_predict_handler.py
-        Source/tests/aws-lambdas/ncaafb/test_season_simulation.py
-        Source/tests/aws-lambdas/ncaafb/test_season_projection.py
-      requirements_files: 'Source/aws-lambdas/ncaafb/predict/requirements.txt Source/aws-lambdas/ncaafb/predict/requirements-nodeps.txt'
       dockerfile_path: 'Source/aws-lambdas/ncaafb/predict/Dockerfile'
       image_name: 'ncaafb-predict'
       image_version: '1.0.0'
@@ -132,55 +239,37 @@ jobs:
       default_image_tag: 'ncaafb-predict-latest'
 
   predict_read_deploy:
-    name: NCAAFB predict-read (test + deploy)
-    needs: [approval, infra]
-    if: |
-      always() &&
-      (needs.approval.result == 'success' || needs.approval.result == 'skipped')
+    name: NCAAFB predict-read (deploy)
+    needs: [scan, infra]
     uses: ./.github/workflows/zip_lambda_deploy.yml
     secrets: inherit
     with:
       sport: 'NCAAFB'
       function_name: ${{ needs.infra.outputs.ncaafb_predict_read_function_name }}
-      test_path: 'Source/tests/aws-lambdas/ncaafb/test_predict_read_handler.py Source/tests/library/serving/test_ncaafb_reads.py Source/tests/library/storage/test_prediction_cache.py Source/tests/library/storage/test_model_artifacts.py Source/tests/library/aws/test_lambda_invoker.py'
-      requirements_files: 'Source/aws-lambdas/ncaafb/predict-read/requirements.txt'
       handler_dir: 'Source/aws-lambdas/ncaafb/predict-read'
 
   live_scores_deploy:
-    name: NCAAFB live-scores (test + deploy)
-    needs: [approval, infra]
-    if: |
-      always() &&
-      (needs.approval.result == 'success' || needs.approval.result == 'skipped')
+    name: NCAAFB live-scores (deploy)
+    needs: [scan, infra]
     uses: ./.github/workflows/zip_lambda_deploy.yml
     secrets: inherit
     with:
       sport: 'NCAAFB'
       function_name: ${{ needs.infra.outputs.ncaafb_live_scores_function_name }}
-      test_path: 'Source/tests/aws-lambdas/ncaafb/test_live_scores.py Source/tests/aws-lambdas/ncaafb/test_live_scores_handler.py'
-      requirements_files: 'Source/aws-lambdas/ncaafb/live-scores/requirements.txt'
       handler_dir: 'Source/aws-lambdas/ncaafb/live-scores'
       extra_source_files: 'Source/aws-lambdas/ncaafb/live-scores/live_scores.py'
 
   data_pipeline:
     name: Data pipeline
-    needs: infra
+    needs: [scan, infra]
     uses: ./.github/workflows/data_pipeline.yml
     secrets: inherit
     with:
       sport: 'NCAAFB'
       ingest_function_name: ${{ needs.infra.outputs.ncaafb_ingest_function_name }}
-      ingest_test_path: >-
-        Source/tests/aws-lambdas/ncaafb/test_ingest_lambda_handler.py
-        Source/tests/aws-lambdas/ncaafb/test_ingest_enrichment.py
-      ingest_requirements_files: 'Source/aws-lambdas/ncaafb/ingest/requirements.txt'
       ingest_handler_dir: 'Source/aws-lambdas/ncaafb/ingest'
       ingest_extra_source_files: 'Source/aws-lambdas/ncaafb/ingest/enrichment.py'
       normalize_function_name: ${{ needs.infra.outputs.ncaafb_normalize_function_name }}
-      normalize_test_path: 'Source/tests/aws-lambdas/ncaafb/test_normalize.py'
-      normalize_requirements_files: 'Source/aws-lambdas/ncaafb/normalize/requirements.txt'
       normalize_handler_dir: 'Source/aws-lambdas/ncaafb/normalize'
       schedule_sync_function_name: ${{ needs.infra.outputs.ncaafb_schedule_sync_function_name }}
-      schedule_sync_test_path: 'Source/tests/aws-lambdas/ncaafb/test_schedule_sync.py'
-      schedule_sync_requirements_files: 'Source/aws-lambdas/ncaafb/schedule-sync/requirements.txt'
       schedule_sync_handler_dir: 'Source/aws-lambdas/ncaafb/schedule-sync'

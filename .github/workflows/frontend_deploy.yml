@@ -5,7 +5,13 @@
 # to a front-end branch applies the full config via tf_install.yml.
 #
 # S3/CloudFront have no build-before-infra ordering requirement, so here
-# `infra` runs first, and build_frontend/deploy_frontend both run after.
+# `infra` runs first, and test/scan/build_frontend/deploy_frontend all run
+# after.
+#
+# Exactly one SonarQube Cloud scan for this whole pipeline -- test-frontend
+# runs `flutter test` directly (frontend_hosting.yml itself is build-only,
+# since a scan job can't depend on jobs nested inside a called reusable
+# workflow) and `scan` gates build_frontend on it.
 
 name: Frontend Deploy
 
@@ -18,9 +24,6 @@ on:
       - 'front-end/**'
   workflow_call:
 
-# Shared group across every workflow that can reach tf_install.yml's
-# terraform apply, since Terraform/main.tf's S3 backend has no state
-# locking configured.
 concurrency:
   group: terraform-deploy-pipeline
   cancel-in-progress: false
@@ -29,6 +32,9 @@ permissions:
   id-token: write
   contents: read
   actions: read
+
+env:
+  FLUTTER_VERSION: '3.29.3'
 
 jobs:
   approval:
@@ -40,8 +46,6 @@ jobs:
       - name: Approved
         run: echo "Deployment approved -- proceeding."
 
-  # approval is intentionally skipped (not failed) when called via
-  # workflow_call.
   infra:
     name: Apply shared infrastructure
     needs: approval
@@ -51,13 +55,40 @@ jobs:
     uses: ./.github/workflows/tf_install.yml
     secrets: inherit
 
-  # No `with:` block -- frontend_hosting.yml/frontend_sync_deploy.yml read
-  # their own config directly from Terraform state. `needs: infra` still
-  # enforces the ordering (S3 bucket/CloudFront distribution must exist
-  # first).
+  test-frontend:
+    name: Run frontend tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+
+      - name: Install dependencies
+        working-directory: Source/front-end
+        run: flutter pub get
+
+      - name: Analyze
+        working-directory: Source/front-end
+        run: flutter analyze
+
+      - name: Test
+        working-directory: Source/front-end
+        run: flutter test
+
+  scan:
+    name: SonarQube Cloud scan
+    needs: test-frontend
+    uses: ./.github/workflows/sonar_scan.yml
+    secrets: inherit
+
   build_frontend:
     name: Frontend hosting (build)
-    needs: infra
+    needs: [infra, scan]
     uses: ./.github/workflows/frontend_hosting.yml
     secrets: inherit
 

@@ -1,18 +1,16 @@
-# Reusable workflow: tests, scans with SonarQube Cloud, builds, and
-# deploys a sport's recurring data pipeline Lambdas: ingest (writes raw
-# JSON to S3), normalize (S3-triggered, writes to DynamoDB), and an
-# optional schedule-sync (EventBridge-triggered schedule discovery -- leave
-# schedule_sync_function_name blank for a sport with no separate
-# schedule-sync Lambda, e.g. F1, which resolves its whole season from
-# within ingest itself). One scan gates all three builds -- SonarQube
-# Cloud analyzes the whole repo either way, so there's no value in
-# scanning per Lambda. Each of the (up to) three chains is otherwise
-# independent -- a failure in one does not block the others.
-#
-# One generic file shared by every sport instead of a near-identical copy
-# per sport -- keeps GitHub's cap on how many distinct reusable workflows
-# one workflow run can reference from ballooning as sports are added
-# (app_deploy.yml bundles every sport into one run).
+# Reusable workflow: builds and deploys a sport's recurring data pipeline
+# Lambdas: ingest (writes raw JSON to S3), normalize (S3-triggered, writes
+# to DynamoDB), and an optional schedule-sync (EventBridge-triggered
+# schedule discovery -- leave schedule_sync_function_name blank for a
+# sport with no separate schedule-sync Lambda, e.g. F1, which resolves its
+# whole season from within ingest itself). Build+deploy only -- no test,
+# no scan. The caller is responsible for testing the relevant code and
+# running exactly one SonarQube Cloud scan per pipeline run (gating these
+# jobs on that scan via `needs:`), since a scan job can't depend on jobs
+# nested inside a called reusable workflow -- only a sibling job in the
+# SAME calling file can be a `needs:` target. See nfl_deploy.yml/
+# app_deploy.yml for the pattern: explicit `test-*` jobs, one shared
+# `scan` job needing all of them, then this workflow needing `scan`.
 #
 # Terraform (tf_install.yml) creates each Lambda function with a placeholder
 # ZIP and lifecycle { ignore_changes } so it never overwrites what this
@@ -30,13 +28,6 @@ on:
       ingest_function_name:
         required: true
         type: string
-      ingest_test_path:
-        required: true
-        type: string
-      ingest_requirements_files:
-        required: false
-        type: string
-        default: ''
       ingest_handler_dir:
         required: true
         type: string
@@ -48,26 +39,11 @@ on:
       normalize_function_name:
         required: true
         type: string
-      normalize_test_path:
-        required: true
-        type: string
-      normalize_requirements_files:
-        required: false
-        type: string
-        default: ''
       normalize_handler_dir:
         required: true
         type: string
       schedule_sync_function_name:
         description: 'Leave blank for a sport with no schedule-sync Lambda (e.g. F1)'
-        required: false
-        type: string
-        default: ''
-      schedule_sync_test_path:
-        required: false
-        type: string
-        default: ''
-      schedule_sync_requirements_files:
         required: false
         type: string
         default: ''
@@ -83,47 +59,8 @@ permissions:
   contents: read
 
 jobs:
-  # Each Lambda gets its own upstream test job, pointed at its own
-  # specific test file(s) -- not the whole Source/tests/aws-lambdas/<sport>/
-  # directory. A failing normalize test shouldn't fail the ingest deploy,
-  # or vice versa, purely because both deploys pointed at the same shared
-  # directory.
-  test-ingest:
-    name: Run ${{ inputs.sport }}-ingest tests
-    uses: ./.github/workflows/run_python_tests.yml
-    with:
-      test_path: ${{ inputs.ingest_test_path }}
-      requirements_files: ${{ inputs.ingest_requirements_files }}
-
-  test-normalize:
-    name: Run ${{ inputs.sport }}-normalize tests
-    uses: ./.github/workflows/run_python_tests.yml
-    with:
-      test_path: ${{ inputs.normalize_test_path }}
-      requirements_files: ${{ inputs.normalize_requirements_files }}
-
-  test-schedule-sync:
-    name: Run ${{ inputs.sport }}-schedule-sync tests
-    if: inputs.schedule_sync_function_name != ''
-    uses: ./.github/workflows/run_python_tests.yml
-    with:
-      test_path: ${{ inputs.schedule_sync_test_path }}
-      requirements_files: ${{ inputs.schedule_sync_requirements_files }}
-
-  scan:
-    name: SonarQube Cloud scan
-    needs: [test-ingest, test-normalize, test-schedule-sync]
-    if: |
-      always() &&
-      needs.test-ingest.result == 'success' &&
-      needs.test-normalize.result == 'success' &&
-      (needs.test-schedule-sync.result == 'success' || needs.test-schedule-sync.result == 'skipped')
-    uses: ./.github/workflows/sonar_scan.yml
-    secrets: inherit
-
   build-ingest:
     name: Build ${{ inputs.sport }}-ingest Lambda
-    needs: scan
     uses: ./.github/workflows/python_lambda_build.yml
     with:
       function_name: ${{ inputs.ingest_function_name }}
@@ -142,7 +79,6 @@ jobs:
 
   build-normalize:
     name: Build ${{ inputs.sport }}-normalize Lambda
-    needs: scan
     uses: ./.github/workflows/python_lambda_build.yml
     with:
       function_name: ${{ inputs.normalize_function_name }}
@@ -161,7 +97,6 @@ jobs:
   build-schedule-sync:
     name: Build ${{ inputs.sport }}-schedule-sync Lambda
     if: inputs.schedule_sync_function_name != ''
-    needs: scan
     uses: ./.github/workflows/python_lambda_build.yml
     with:
       function_name: ${{ inputs.schedule_sync_function_name }}
