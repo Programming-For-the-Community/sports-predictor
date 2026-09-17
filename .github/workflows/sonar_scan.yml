@@ -91,6 +91,10 @@ jobs:
         run: |
           pip install --no-cache-dir --only-binary :all: coverage==7.4.4
 
+          echo "::group::Downloaded coverage artifacts"
+          find coverage-artifacts -type f 2>/dev/null || echo "(coverage-artifacts directory not present)"
+          echo "::endgroup::"
+
           mkdir -p merged_coverage
           found=false
           if [ -d coverage-artifacts ]; then
@@ -103,10 +107,15 @@ jobs:
               fi
             done
           fi
+          echo "Merged $i coverage data file(s)"
 
           if [ "$found" = true ]; then
             coverage combine merged_coverage
+            coverage report -m || true
             coverage xml -o coverage.xml
+            echo "::group::coverage.xml"
+            head -c 2000 coverage.xml
+            echo "::endgroup::"
             echo "report_path=coverage.xml" >> "$GITHUB_OUTPUT"
           else
             echo "report_path=" >> "$GITHUB_OUTPUT"
@@ -121,7 +130,15 @@ jobs:
           # into a stray argument and the CLI rejects it.
           PARENT_WORKFLOW="${{ inputs.parent_workflow }}"
           PARENT_WORKFLOW="${PARENT_WORKFLOW// /_}"
-          ARGS="-Dsonar.organization=${{ vars.SONAR_ORGANIZATION }} -Dsonar.projectKey=${{ vars.SONAR_PROJECT_KEY }} -Dsonar.qualitygate.wait=${{ inputs.wait_for_quality_gate }} -Dsonar.analysis.environment=${{ inputs.environment }} -Dsonar.analysis.parentWorkflow=$PARENT_WORKFLOW"
+          ENVIRONMENT="${{ inputs.environment }}"
+          ENVIRONMENT="${ENVIRONMENT// /_}"
+          # sonar.analysis.* custom properties aren't rendered anywhere in
+          # the SonarQube Cloud UI (only retrievable via the
+          # api/project_analyses/search Web API) -- sonar.buildString is
+          # the property that actually shows up per-analysis on the
+          # project's Activity page, so that's the one used for anything
+          # meant to be human-visible on the dashboard.
+          ARGS="-Dsonar.organization=${{ vars.SONAR_ORGANIZATION }} -Dsonar.projectKey=${{ vars.SONAR_PROJECT_KEY }} -Dsonar.qualitygate.wait=${{ inputs.wait_for_quality_gate }} -Dsonar.buildString=${ENVIRONMENT}-${PARENT_WORKFLOW} -Dsonar.analysis.environment=$ENVIRONMENT -Dsonar.analysis.parentWorkflow=$PARENT_WORKFLOW"
           if [ -n "${{ steps.merge_coverage.outputs.report_path }}" ]; then
             ARGS="$ARGS -Dsonar.python.coverage.reportPaths=${{ steps.merge_coverage.outputs.report_path }}"
           fi
