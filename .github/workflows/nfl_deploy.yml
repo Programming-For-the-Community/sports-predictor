@@ -227,6 +227,9 @@ jobs:
       (needs.test-ec2-training-reaper.result == 'success' || needs.test-ec2-training-reaper.result == 'skipped')
     uses: ./.github/workflows/sonar_scan.yml
     secrets: inherit
+    with:
+      environment: ${{ github.event.inputs.environment || 'development' }}
+      parent_workflow: ${{ github.workflow }}
 
   backfill:
     name: Historical backfill (build)

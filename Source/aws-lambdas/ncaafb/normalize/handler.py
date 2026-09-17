@@ -30,6 +30,8 @@ from datetime import datetime, timedelta, timezone
 
 import boto3
 
+from library.aws.account import get_account_id
+from library.aws.boto_config import DEFAULT_CONFIG
 from library.normalize.ncaafb import (
     game_player_stats_to_player_game_stats,
     game_team_stats_to_team_game_stats,
@@ -43,7 +45,7 @@ logger = logging.getLogger("ncaafb-normalize")
 
 SPORT = "ncaafb"
 
-_s3 = boto3.client("s3")
+_s3 = boto3.client("s3", config=DEFAULT_CONFIG)
 _storage: PipelineStorage | None = None
 
 
@@ -223,7 +225,7 @@ def _process_teamstats(payload: list, key: str) -> None:
 
 
 def _dispatch(bucket: str, key: str) -> None:
-    response = _s3.get_object(Bucket=bucket, Key=key)
+    response = _s3.get_object(Bucket=bucket, Key=key, ExpectedBucketOwner=get_account_id())
     payload = json.loads(response["Body"].read())
 
     if "/games/" in key:

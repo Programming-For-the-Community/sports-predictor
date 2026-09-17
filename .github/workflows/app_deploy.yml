@@ -605,6 +605,13 @@ jobs:
       (needs.test-frontend.result == 'success' || needs.test-frontend.result == 'skipped')
     uses: ./.github/workflows/sonar_scan.yml
     secrets: inherit
+    with:
+      # The one pipeline where a failing quality gate actually halts the
+      # deployment -- every sport's own _deploy.yml scan stays advisory
+      # (see sonar_scan.yml's own comment).
+      wait_for_quality_gate: true
+      environment: ${{ github.event.inputs.environment || 'development' }}
+      parent_workflow: ${{ github.workflow }}
 
   # --- Before infra: build/push only, no Terraform dependency ---
   nfl_backfill_build:

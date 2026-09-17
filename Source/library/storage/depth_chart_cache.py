@@ -10,6 +10,8 @@ from datetime import datetime, timedelta, timezone
 
 from botocore.exceptions import ClientError
 
+from library.aws.account import get_account_id
+
 logger = logging.getLogger(__name__)
 
 DEPTH_CHART_POSITIONS = {"QB", "RB", "WR", "TE"}
@@ -109,7 +111,7 @@ def get_cached_depth_chart(
     propagates rather than falling back to a stale entry."""
     key = _cache_key(team_id)
     try:
-        response = s3.get_object(Bucket=bucket, Key=key)
+        response = s3.get_object(Bucket=bucket, Key=key, ExpectedBucketOwner=get_account_id())
         cached = json.loads(response["Body"].read())
         fetched_at = datetime.fromisoformat(cached["fetched_at"])
         if datetime.now(timezone.utc) - fetched_at < timedelta(days=ttl_days):
@@ -122,5 +124,6 @@ def get_cached_depth_chart(
         Bucket=bucket, Key=key,
         Body=json.dumps({"fetched_at": datetime.now(timezone.utc).isoformat(), "data": data}),
         ContentType="application/json",
+        ExpectedBucketOwner=get_account_id(),
     )
     return data

@@ -60,6 +60,8 @@ import boto3
 from botocore.exceptions import ClientError
 
 import enrichment
+from library.aws.account import get_account_id
+from library.aws.boto_config import DEFAULT_CONFIG
 from library.http.espn_core import EspnCoreApiClient
 from library.http.nfl import NFLClient
 from library.storage.depth_chart_cache import get_cached_depth_chart
@@ -70,7 +72,7 @@ logger = logging.getLogger("nfl-ingest")
 RAW_BUCKET = os.environ["RAW_BUCKET_NAME"]
 PRESEASON_TYPE = 1
 
-_s3 = boto3.client("s3")
+_s3 = boto3.client("s3", config=DEFAULT_CONFIG)
 
 
 def _most_recent_sunday(today: date | None = None) -> str:
@@ -84,7 +86,7 @@ def _most_recent_sunday(today: date | None = None) -> str:
 
 def _object_exists(key: str) -> bool:
     try:
-        _s3.head_object(Bucket=RAW_BUCKET, Key=key)
+        _s3.head_object(Bucket=RAW_BUCKET, Key=key, ExpectedBucketOwner=get_account_id())
         return True
     except ClientError:
         return False
@@ -96,6 +98,7 @@ def _put_json(key: str, payload: dict) -> None:
         Key=key,
         Body=json.dumps(payload),
         ContentType="application/json",
+        ExpectedBucketOwner=get_account_id(),
     )
     logger.info("Wrote s3://%s/%s", RAW_BUCKET, key)
 

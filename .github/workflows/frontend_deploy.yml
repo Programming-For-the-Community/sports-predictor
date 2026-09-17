@@ -85,6 +85,9 @@ jobs:
     needs: test-frontend
     uses: ./.github/workflows/sonar_scan.yml
     secrets: inherit
+    with:
+      environment: ${{ github.event.inputs.environment || 'development' }}
+      parent_workflow: ${{ github.workflow }}
 
   build_frontend:
     name: Frontend hosting (build)

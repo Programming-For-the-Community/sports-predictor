@@ -21,6 +21,7 @@ from datetime import datetime, timezone
 import boto3
 
 import live_scores
+from library.aws.boto_config import DEFAULT_CONFIG
 from library.http.f1_espn import F1EspnClient
 from library.storage.feature_storage import FeatureStorage
 
@@ -36,7 +37,7 @@ _CORS_HEADERS = {
 }
 
 # Initialized once per container lifetime, reused across warm invocations.
-_s3 = boto3.client("s3")
+_s3 = boto3.client("s3", config=DEFAULT_CONFIG)
 _storage: FeatureStorage | None = None
 
 

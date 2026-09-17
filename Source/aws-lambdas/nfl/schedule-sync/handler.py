@@ -21,6 +21,8 @@ from datetime import date
 
 import boto3
 
+from library.aws.account import get_account_id
+from library.aws.boto_config import DEFAULT_CONFIG
 from library.http.nfl import NFLClient
 from library.storage.depth_chart_cache import attach_depth_charts
 
@@ -36,7 +38,7 @@ REGULAR_SEASON_WEEKS = range(1, 19)
 POSTSEASON_WEEKS = range(1, 6)
 SEASON_TYPES = {"regular": 2, "postseason": 3}
 
-_s3 = boto3.client("s3")
+_s3 = boto3.client("s3", config=DEFAULT_CONFIG)
 
 
 def _current_nfl_season(today: date | None = None) -> int:
@@ -54,6 +56,7 @@ def _put_json(key: str, payload: dict) -> None:
         Key=key,
         Body=json.dumps(payload).encode("utf-8"),
         ContentType="application/json",
+        ExpectedBucketOwner=get_account_id(),
     )
 
 

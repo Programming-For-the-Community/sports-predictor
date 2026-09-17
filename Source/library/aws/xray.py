@@ -28,13 +28,15 @@ from contextlib import contextmanager
 
 import boto3
 
+from library.aws.boto_config import DEFAULT_CONFIG
+
 logger = logging.getLogger("xray")
 
 # Explicit region_name -- see dynamodb_table.py's/season_gate's own
 # handler.py for why an unqualified boto3.client() raises NoRegionError
 # in CI's test-collection environment (no AWS_REGION set there at all).
 _REGION = os.environ.get("AWS_REGION", "us-east-2")
-_xray = boto3.client("xray", region_name=_REGION)
+_xray = boto3.client("xray", region_name=_REGION, config=DEFAULT_CONFIG)
 
 
 def new_trace_id() -> str:

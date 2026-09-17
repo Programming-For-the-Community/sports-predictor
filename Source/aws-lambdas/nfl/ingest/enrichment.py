@@ -8,6 +8,7 @@ from typing import Callable, TypeVar
 
 from botocore.exceptions import ClientError
 
+from library.aws.account import get_account_id
 from library.http.espn_core import EspnCoreApiClient
 from library.http.nfl import NFLClient
 from library.storage.depth_chart_cache import attach_depth_charts, home_away_team_ids
@@ -25,14 +26,14 @@ def _get_json(s3, bucket: str, key: str) -> dict | None:
     -- either way the caller should treat it as a cache miss and fetch
     fresh, not raise."""
     try:
-        response = s3.get_object(Bucket=bucket, Key=key)
+        response = s3.get_object(Bucket=bucket, Key=key, ExpectedBucketOwner=get_account_id())
         return json.loads(response["Body"].read())
     except (ClientError, json.JSONDecodeError):
         return None
 
 
 def _put_json(s3, bucket: str, key: str, payload: dict) -> None:
-    s3.put_object(Bucket=bucket, Key=key, Body=json.dumps(payload), ContentType="application/json")
+    s3.put_object(Bucket=bucket, Key=key, Body=json.dumps(payload), ContentType="application/json", ExpectedBucketOwner=get_account_id())
 
 
 def _cached_or_fetch(s3, bucket: str, key: str, ttl_days: int, fetch: Callable[[], _T]) -> _T:

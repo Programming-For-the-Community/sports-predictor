@@ -56,6 +56,8 @@ import urllib.parse
 import boto3
 from botocore.exceptions import ClientError
 
+from library.aws.account import get_account_id
+from library.aws.boto_config import DEFAULT_CONFIG
 from library.normalize.f1 import (
     merge_qualifying_into_event,
     race_result_to_constructor_entities,
@@ -74,7 +76,7 @@ logger = logging.getLogger("f1-normalize")
 SPORT = "f1"
 _RAW_ONLY_PREFIXES = ("/pitstops/", "/standings/")
 
-_s3 = boto3.client("s3")
+_s3 = boto3.client("s3", config=DEFAULT_CONFIG)
 _storage: PipelineStorage | None = None
 
 
@@ -87,7 +89,7 @@ def _get_storage() -> PipelineStorage:
 
 
 def _read_json(bucket: str, key: str) -> dict:
-    response = _s3.get_object(Bucket=bucket, Key=key)
+    response = _s3.get_object(Bucket=bucket, Key=key, ExpectedBucketOwner=get_account_id())
     return json.loads(response["Body"].read())
 
 

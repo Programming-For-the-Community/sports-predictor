@@ -150,7 +150,7 @@ class TestDispatch:
             nfl_normalize._dispatch("my-bucket", "nfl/scoreboard/2025/2/5.json")
 
         mock_s3.get_object.assert_called_once_with(
-            Bucket="my-bucket", Key="nfl/scoreboard/2025/2/5.json"
+            Bucket="my-bucket", Key="nfl/scoreboard/2025/2/5.json", ExpectedBucketOwner="123456789012"
         )
 
 
@@ -215,7 +215,7 @@ class TestNormalizeLambdaHandler:
             nfl_normalize.lambda_handler(event, None)
 
         mock_s3.get_object.assert_called_once_with(
-            Bucket="test-bucket", Key="nfl/scoreboard/2025/2/5 extra.json"
+            Bucket="test-bucket", Key="nfl/scoreboard/2025/2/5 extra.json", ExpectedBucketOwner="123456789012"
         )
 
     def test_returns_empty_result_for_no_records(self):

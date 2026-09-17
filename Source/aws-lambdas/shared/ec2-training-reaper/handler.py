@@ -62,6 +62,8 @@ from datetime import datetime, timedelta, timezone
 
 import boto3
 
+from library.aws.boto_config import DEFAULT_CONFIG
+
 logger = logging.getLogger("ec2-training-reaper")
 logger.setLevel(logging.INFO)
 
@@ -72,10 +74,10 @@ logger.setLevel(logging.INFO)
 # can even run (real CI failure, 2026-09-02). Same fix
 # lambda-cloudwatch-geo-widget's own handler.py already uses.
 _REGION = os.environ.get("AWS_REGION", "us-east-2")
-ec2 = boto3.client("ec2", region_name=_REGION)
-ecs = boto3.client("ecs", region_name=_REGION)
-autoscaling = boto3.client("autoscaling", region_name=_REGION)
-scheduler = boto3.client("scheduler", region_name=_REGION)
+ec2 = boto3.client("ec2", region_name=_REGION, config=DEFAULT_CONFIG)
+ecs = boto3.client("ecs", region_name=_REGION, config=DEFAULT_CONFIG)
+autoscaling = boto3.client("autoscaling", region_name=_REGION, config=DEFAULT_CONFIG)
+scheduler = boto3.client("scheduler", region_name=_REGION, config=DEFAULT_CONFIG)
 
 
 def _describe_container_instances_in_batches(cluster_name: str, container_instance_arns: list[str]) -> list[dict]:

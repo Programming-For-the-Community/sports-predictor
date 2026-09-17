@@ -57,6 +57,8 @@ from pathlib import Path
 import boto3
 from PIL import Image, ImageDraw, ImageFilter, ImageFont
 
+from library.aws.boto_config import DEFAULT_CONFIG
+
 logger = logging.getLogger("cloudwatch-geo-widget")
 
 with Path(__file__).with_name("boundaries.json").open() as _f:
@@ -395,11 +397,11 @@ def lambda_handler(event, context):
     if mode == "blocked":
         # The CloudFront edge-access log group only ever exists in
         # us-east-1, regardless of this Lambda's own region.
-        logs_client = boto3.client("logs", region_name="us-east-1")
+        logs_client = boto3.client("logs", region_name="us-east-1", config=DEFAULT_CONFIG)
         counts = _blocked_counts_by_country(logs_client, os.environ["BLOCKED_LOG_GROUP_NAME"], start_ms, end_ms)
         body = _map_html(_render_blocked_image, counts)
     else:
-        logs_client = boto3.client("logs")
+        logs_client = boto3.client("logs", config=DEFAULT_CONFIG)
         log_group_names = os.environ["ACCEPTED_LOG_GROUP_NAMES"].split(",")
         counts = _accepted_counts_by_state(logs_client, log_group_names, start_ms, end_ms)
         body = _map_html(_render_accepted_image, counts)

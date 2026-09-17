@@ -20,6 +20,8 @@ from datetime import datetime, timedelta, timezone
 
 from botocore.exceptions import ClientError
 
+from library.aws.account import get_account_id
+
 TEAMS_CACHE_TTL_DAYS = 7
 
 
@@ -34,7 +36,7 @@ def get_cached_teams(s3, bucket: str, client, season: int) -> list[dict]:
     have school names."""
     key = _teams_cache_key(season)
     try:
-        response = s3.get_object(Bucket=bucket, Key=key)
+        response = s3.get_object(Bucket=bucket, Key=key, ExpectedBucketOwner=get_account_id())
         cached = json.loads(response["Body"].read())
         fetched_at = datetime.fromisoformat(cached["fetched_at"])
         if datetime.now(timezone.utc) - fetched_at < timedelta(days=TEAMS_CACHE_TTL_DAYS):
@@ -47,6 +49,7 @@ def get_cached_teams(s3, bucket: str, client, season: int) -> list[dict]:
         Bucket=bucket, Key=key,
         Body=json.dumps({"fetched_at": datetime.now(timezone.utc).isoformat(), "data": data}),
         ContentType="application/json",
+        ExpectedBucketOwner=get_account_id(),
     )
     return data
 

@@ -16,6 +16,7 @@ from datetime import datetime, timedelta, timezone
 
 from botocore.exceptions import ClientError
 
+from library.aws.account import get_account_id
 from library.http.espn import espn_scoreboard_date
 from library.normalize.espn import boxscore_to_player_game_stats
 from library.parsing import parse_number
@@ -47,7 +48,7 @@ STALE_AFTER = timedelta(minutes=5)
 
 def _get_cache(s3, bucket: str) -> dict | None:
     try:
-        response = s3.get_object(Bucket=bucket, Key=LIVE_SCORES_CACHE_KEY)
+        response = s3.get_object(Bucket=bucket, Key=LIVE_SCORES_CACHE_KEY, ExpectedBucketOwner=get_account_id())
         return json.loads(response["Body"].read())
     except (ClientError, json.JSONDecodeError):
         return None  # cache miss or malformed entry -- treat as "nothing cached yet"
@@ -57,6 +58,7 @@ def _put_cache(s3, bucket: str, payload: dict) -> None:
     s3.put_object(
         Bucket=bucket, Key=LIVE_SCORES_CACHE_KEY,
         Body=json.dumps(payload), ContentType="application/json",
+        ExpectedBucketOwner=get_account_id(),
     )
 
 

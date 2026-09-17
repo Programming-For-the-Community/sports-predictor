@@ -111,6 +111,8 @@ from datetime import date, datetime, timedelta, timezone
 import boto3
 from botocore.exceptions import ClientError
 
+from library.aws.account import get_account_id
+from library.aws.boto_config import DEFAULT_CONFIG
 from library.aws.dynamodb_table import DynamoDBTable
 from library.http.ncaambb import NCAAMBBClient
 from library.http.ncaambb_core import NCAAMBBCoreClient, resolve_conference_membership
@@ -160,18 +162,21 @@ SCHEDULE_SYNC_REFRESH_WINDOW_DAYS = 14
 # 2-week pre-game window a reschedule would.
 SCHEDULE_SYNC_REVALIDATION_DAYS = 21
 
-_s3 = boto3.client("s3")
+_s3 = boto3.client("s3", config=DEFAULT_CONFIG)
 
 
 def _object_last_synced(key: str) -> datetime | None:
     try:
-        return _s3.head_object(Bucket=RAW_BUCKET, Key=key)["LastModified"]
+        return _s3.head_object(Bucket=RAW_BUCKET, Key=key, ExpectedBucketOwner=get_account_id())["LastModified"]
     except ClientError:
         return None
 
 
 def _put_json(key: str, payload: dict) -> None:
-    _s3.put_object(Bucket=RAW_BUCKET, Key=key, Body=json.dumps(payload).encode("utf-8"), ContentType="application/json")
+    _s3.put_object(
+        Bucket=RAW_BUCKET, Key=key, Body=json.dumps(payload).encode("utf-8"), ContentType="application/json",
+        ExpectedBucketOwner=get_account_id(),
+    )
 
 
 def _current_ncaambb_season(today: date) -> int:

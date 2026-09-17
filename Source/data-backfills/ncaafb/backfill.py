@@ -55,6 +55,7 @@ from datetime import datetime, timezone
 import boto3
 
 import normalize
+from library.aws.boto_config import DEFAULT_CONFIG
 from library.http.cfbd import CFBDClient
 from library.parsing import us_eastern_date_from_iso
 from library.storage.ncaafb_coach_cache import coach_lookup_by_school, get_cached_coaches, rank_lookup_by_school
@@ -280,7 +281,7 @@ def main() -> None:
 
     client = CFBDClient(min_interval_seconds=args.request_delay)
     storage = PipelineStorage()
-    s3 = boto3.client("s3")
+    s3 = boto3.client("s3", config=DEFAULT_CONFIG)
 
     seed_teams(client, storage, s3, storage.raw_bucket, args.end_season)
 

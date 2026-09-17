@@ -26,6 +26,8 @@ import urllib.parse
 
 import boto3
 
+from library.aws.account import get_account_id
+from library.aws.boto_config import DEFAULT_CONFIG
 from library.normalize.pga import is_flat_stroke_play, leaderboard_event_to_event_item, leaderboard_event_to_player_entities
 from library.normalize.pga_matchplay import (
     is_exhibition,
@@ -42,7 +44,7 @@ logger = logging.getLogger("pga-normalize")
 
 SPORT = "pga"
 
-_s3 = boto3.client("s3")
+_s3 = boto3.client("s3", config=DEFAULT_CONFIG)
 _storage: PipelineStorage | None = None
 
 
@@ -164,7 +166,7 @@ def _process_leaderboard(payload: dict, key: str) -> None:
 
 
 def _dispatch(bucket: str, key: str) -> None:
-    response = _s3.get_object(Bucket=bucket, Key=key)
+    response = _s3.get_object(Bucket=bucket, Key=key, ExpectedBucketOwner=get_account_id())
     payload = json.loads(response["Body"].read())
 
     if "/leaderboard/" in key:

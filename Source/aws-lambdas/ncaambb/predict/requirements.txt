@@ -30,10 +30,10 @@
 # the ap_poll_to_rank_by_team import landed 2026-09-10 (136e331). Same
 # pin every ingest/live-scores/schedule-sync Lambda's own requirements.txt
 # already uses.
-numpy
-scipy
-scikit-learn
-joblib
-pandas
-lightgbm>=4.3
-requests>=2.31
+numpy==1.26.4
+scipy==1.12.0
+scikit-learn==1.4.2
+joblib==1.3.2
+pandas==2.2.3
+lightgbm==4.3.0
+requests==2.31.0

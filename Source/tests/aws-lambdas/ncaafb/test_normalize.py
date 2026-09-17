@@ -149,7 +149,9 @@ class TestDispatch:
              patch("ncaafb_normalize.PipelineStorage"):
             ncaafb_normalize._dispatch("my-bucket", "ncaafb/games/2025/regular/4.json")
 
-        mock_s3.get_object.assert_called_once_with(Bucket="my-bucket", Key="ncaafb/games/2025/regular/4.json")
+        mock_s3.get_object.assert_called_once_with(
+            Bucket="my-bucket", Key="ncaafb/games/2025/regular/4.json", ExpectedBucketOwner="123456789012"
+        )
 
 
 class TestPreserveRosterPosition:
@@ -353,7 +355,9 @@ class TestNormalizeLambdaHandler:
              patch("ncaafb_normalize.PipelineStorage"):
             ncaafb_normalize.lambda_handler(event, None)
 
-        mock_s3.get_object.assert_called_once_with(Bucket="test-bucket", Key="ncaafb/games/2025/regular/4 extra.json")
+        mock_s3.get_object.assert_called_once_with(
+            Bucket="test-bucket", Key="ncaafb/games/2025/regular/4 extra.json", ExpectedBucketOwner="123456789012"
+        )
 
     def test_returns_empty_result_for_no_records(self):
         with patch.object(ncaafb_normalize, "_s3", MagicMock()), \

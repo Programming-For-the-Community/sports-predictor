@@ -50,7 +50,7 @@ def _s3_with(responses: dict[str, dict]) -> MagicMock:
     file at once."""
     mock_s3 = MagicMock()
 
-    def _get_object(Bucket, Key):
+    def _get_object(Bucket, Key, **kwargs):
         if Key not in responses:
             raise _no_such_key()
         return _s3_response(responses[Key])

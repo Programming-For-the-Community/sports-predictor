@@ -18,6 +18,7 @@ import os
 
 import boto3
 
+from library.aws.boto_config import DEFAULT_CONFIG
 from library.http.client import HttpClient
 
 DEFAULT_CFBD_API_ROOT_URL = "https://api.collegefootballdata.com"
@@ -45,7 +46,7 @@ def _resolve_api_key() -> str:
     field = os.environ["CFBD_API_KEY_SECRET_FIELD"]
 
     if _secrets_client is None:
-        _secrets_client = boto3.client("secretsmanager")
+        _secrets_client = boto3.client("secretsmanager", config=DEFAULT_CONFIG)
     secret = json.loads(_secrets_client.get_secret_value(SecretId=secret_arn)["SecretString"])
     _cached_api_key = secret[field]
     return _cached_api_key

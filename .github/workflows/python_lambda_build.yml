@@ -80,7 +80,7 @@ jobs:
 
           # Install Lambda-specific dependencies (excludes boto3 -- runtime provides it)
           if [ -s "$HANDLER_DIR/requirements.txt" ]; then
-            pip install -r "$HANDLER_DIR/requirements.txt" -t package/
+            pip install --only-binary :all: -r "$HANDLER_DIR/requirements.txt" -t package/
           fi
 
           # Bundle the shared library without pulling its declared dependencies

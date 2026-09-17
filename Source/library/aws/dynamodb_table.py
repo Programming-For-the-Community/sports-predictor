@@ -13,10 +13,13 @@ import boto3
 from botocore.config import Config
 from botocore.exceptions import ClientError
 
+from library.aws.boto_config import DEFAULT_CONFIG
+
 logger = logging.getLogger(__name__)
 
-# Raised above botocore's default (10) to support concurrent writers.
-_CONFIG = Config(max_pool_connections=25)
+# max_pool_connections raised above botocore's default (10) to support
+# concurrent writers.
+_CONFIG = DEFAULT_CONFIG.merge(Config(max_pool_connections=25))
 
 # batch_get_item's UnprocessedKeys is throttling, not an error -- retry with
 # the same backoff shape library/http/client.py uses for external APIs,

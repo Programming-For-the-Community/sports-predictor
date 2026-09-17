@@ -41,6 +41,8 @@ import boto3
 from botocore.exceptions import ClientError
 
 import enrichment
+from library.aws.account import get_account_id
+from library.aws.boto_config import DEFAULT_CONFIG
 from library.http.cfbd import CFBDClient
 from library.parsing import us_eastern_date_from_iso
 from library.storage.ncaafb_team_cache import get_cached_teams, teams_by_school
@@ -50,7 +52,7 @@ logger = logging.getLogger("ncaafb-ingest")
 
 RAW_BUCKET = os.environ["RAW_BUCKET_NAME"]
 
-_s3 = boto3.client("s3")
+_s3 = boto3.client("s3", config=DEFAULT_CONFIG)
 
 
 def _current_ncaafb_season(today: date | None = None) -> int:
@@ -107,7 +109,10 @@ def _annotate_box_scores(box_scores: list[dict], games_by_id: dict[str, dict]) -
 
 
 def _put_json(key: str, payload) -> None:
-    _s3.put_object(Bucket=RAW_BUCKET, Key=key, Body=json.dumps(payload).encode("utf-8"), ContentType="application/json")
+    _s3.put_object(
+        Bucket=RAW_BUCKET, Key=key, Body=json.dumps(payload).encode("utf-8"), ContentType="application/json",
+        ExpectedBucketOwner=get_account_id(),
+    )
 
 
 def _annotate_roster(roster: list[dict], teams: list[dict]) -> None:
@@ -153,7 +158,7 @@ def _roster_needs_refresh(season: int, season_kickoff: datetime | None) -> bool:
     local to this Lambda since the roster payload has to be written to
     S3 for normalize to pick up."""
     try:
-        response = _s3.get_object(Bucket=RAW_BUCKET, Key=_roster_marker_key(season))
+        response = _s3.get_object(Bucket=RAW_BUCKET, Key=_roster_marker_key(season), ExpectedBucketOwner=get_account_id())
         fetched_at = datetime.fromisoformat(json.loads(response["Body"].read())["fetched_at"])
     except (ClientError, json.JSONDecodeError, KeyError, ValueError):
         return True  # cache miss or malformed marker -- treat as never fetched

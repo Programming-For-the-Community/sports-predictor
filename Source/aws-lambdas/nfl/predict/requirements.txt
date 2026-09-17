@@ -31,8 +31,8 @@
 # Lambda is already VPC-attached with a real, previously-measured cold
 # start (ENI provisioning) -- revisit with SnapStart/provisioned
 # concurrency if this addition regresses it further.
-numpy
-scipy
-scikit-learn
-joblib
-pandas
+numpy==1.26.4
+scipy==1.12.0
+scikit-learn==1.4.2
+joblib==1.3.2
+pandas==2.2.3

@@ -8,6 +8,9 @@ from unittest.mock import MagicMock, patch
 from library.aws.s3_manager import S3Manager
 
 
+TEST_OWNER = "123456789012"
+
+
 def _make_manager(pages: list[dict]):
     mock_client = MagicMock()
     mock_paginator = MagicMock()
@@ -16,7 +19,9 @@ def _make_manager(pages: list[dict]):
 
     with patch("library.aws.s3_manager.boto3") as mock_boto3:
         mock_boto3.client.return_value = mock_client
-        manager = S3Manager("test-bucket", region="us-east-1")
+        # expected_bucket_owner passed explicitly so construction never
+        # calls the real get_account_id() (sts:GetCallerIdentity).
+        manager = S3Manager("test-bucket", region="us-east-1", expected_bucket_owner=TEST_OWNER)
     return manager, mock_client, mock_paginator
 
 
@@ -48,7 +53,9 @@ class TestListKeys:
 
         manager.list_keys("nfl/win-probability/")
 
-        mock_paginator.paginate.assert_called_once_with(Bucket="test-bucket", Prefix="nfl/win-probability/")
+        mock_paginator.paginate.assert_called_once_with(
+            Bucket="test-bucket", Prefix="nfl/win-probability/", ExpectedBucketOwner=TEST_OWNER,
+        )
 
 
 class TestDeleteObject:
@@ -62,5 +69,7 @@ class TestDeleteObject:
         manager.delete_object("training-runs/nfl/win-probability/run-1/progress.json")
 
         mock_client.delete_object.assert_called_once_with(
-            Bucket="test-bucket", Key="training-runs/nfl/win-probability/run-1/progress.json",
+            Bucket="test-bucket",
+            Key="training-runs/nfl/win-probability/run-1/progress.json",
+            ExpectedBucketOwner=TEST_OWNER,
         )

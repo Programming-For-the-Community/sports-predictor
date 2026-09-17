@@ -74,6 +74,8 @@ from datetime import date, timedelta
 import boto3
 from botocore.exceptions import ClientError
 
+from library.aws.account import get_account_id
+from library.aws.boto_config import DEFAULT_CONFIG
 from library.http.ncaambb import NCAAMBBClient
 from library.http.ncaambb_core import NCAAMBBCoreClient, current_ap_poll_pointer
 from library.normalize.espn import roster_to_team_injuries
@@ -88,7 +90,7 @@ RAW_BUCKET = os.environ["RAW_BUCKET_NAME"]
 # equivalent loops stay sequential; its volume never justified this).
 _INGEST_MAX_WORKERS = 8
 
-_s3 = boto3.client("s3")
+_s3 = boto3.client("s3", config=DEFAULT_CONFIG)
 
 
 def _yesterday(today: date | None = None) -> str:
@@ -97,14 +99,17 @@ def _yesterday(today: date | None = None) -> str:
 
 def _object_exists(key: str) -> bool:
     try:
-        _s3.head_object(Bucket=RAW_BUCKET, Key=key)
+        _s3.head_object(Bucket=RAW_BUCKET, Key=key, ExpectedBucketOwner=get_account_id())
         return True
     except ClientError:
         return False
 
 
 def _put_json(key: str, payload: dict) -> None:
-    _s3.put_object(Bucket=RAW_BUCKET, Key=key, Body=json.dumps(payload).encode("utf-8"), ContentType="application/json")
+    _s3.put_object(
+        Bucket=RAW_BUCKET, Key=key, Body=json.dumps(payload).encode("utf-8"), ContentType="application/json",
+        ExpectedBucketOwner=get_account_id(),
+    )
     logger.info("Wrote s3://%s/%s", RAW_BUCKET, key)
 
 

@@ -2,6 +2,14 @@
 # additional requirements files a caller needs, then runs pytest against a
 # given test path. Each caller passes its own test_path and
 # requirements_files.
+#
+# Also collects coverage (--cov=Source) and uploads the raw .coverage data
+# file as an artifact, named from a hash of test_path so the ~90 separate
+# calls to this workflow across every pipeline never collide. sonar_scan.yml
+# downloads and combines every one of these before running its scan --
+# since scan always transitively depends on the test jobs before it (GitHub
+# Actions artifacts are run-scoped, not job-scoped), this needs no changes
+# to any caller's own job graph.
 
 name: Run Python Tests
 
@@ -43,11 +51,24 @@ jobs:
         if: inputs.requirements_files != ''
         run: |
           for f in ${{ inputs.requirements_files }}; do
-            pip install --no-cache-dir -r "$f"
+            pip install --no-cache-dir --only-binary :all: -r "$f"
           done
 
+      # Matches every requirements-dev.txt's own pytest pin.
       - name: Install pytest
-        run: pip install --no-cache-dir pytest
+        run: 'pip install --no-cache-dir --only-binary :all: pytest==8.0.2 pytest-cov==5.0.0 coverage==7.4.4'
 
       - name: Run tests
-        run: pytest ${{ inputs.test_path }} -v
+        run: pytest ${{ inputs.test_path }} -v --cov=Source --cov-report=
+
+      - name: Resolve coverage artifact name
+        id: cov_name
+        run: echo "name=coverage-$(echo -n '${{ inputs.test_path }}' | md5sum | cut -c1-12)" >> "$GITHUB_OUTPUT"
+
+      - name: Upload coverage data
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.cov_name.outputs.name }}
+          path: .coverage
+          retention-days: 1
+          if-no-files-found: ignore

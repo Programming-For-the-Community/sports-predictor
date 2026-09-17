@@ -4,19 +4,62 @@
 # and Build jobs, deliberately re-analyzing the full repo every time rather
 # than trying to scope the scan to just the calling component.
 #
-# sonar.qualitygate.wait=true makes this one action call block on and fail
-# the job if the quality gate fails, so callers just need a plain
-# `needs: scan` -- no separate quality-gate-polling step required.
+# wait_for_quality_gate controls whether a failing SonarQube Cloud quality
+# gate fails THIS job (and, via the caller's plain `needs: scan`, blocks
+# every downstream build/deploy job too). Defaults to false -- advisory
+# only -- since every individual sport's own _deploy.yml calls this with
+# the default, so a quality-gate dip on one sport's branch doesn't block
+# that sport's own deploy. app_deploy.yml (the main-branch, whole-repo
+# deploy) explicitly passes true, making it the one pipeline where a
+# failing quality gate actually halts the deployment.
 #
 # Requires the SonarQube Cloud project's Analysis Method to be set to
 # CI-based (Administration > Analysis Method) -- Automatic Analysis, the
 # default for new projects, rejects CI-submitted reports.
+#
+# environment/parent_workflow are attached to the analysis as
+# sonar.analysis.* custom properties (SonarQube Cloud's supported
+# mechanism for per-analysis metadata -- visible via the Web API and
+# webhooks, not project-level tags) so a given analysis run in the
+# SonarQube Cloud dashboard can be traced back to which top-level
+# pipeline produced it. parent_workflow should be passed as
+# `${{ github.workflow }}` from the CALLER's own job -- evaluating that
+# expression here inside the reusable callee would be ambiguous about
+# which workflow it refers to.
+#
+# Coverage: this job always transitively depends on every test-* job in
+# the calling pipeline (that's the whole reason `needs: scan` is enough
+# for callers), and GitHub Actions artifacts are scoped to the whole
+# workflow run rather than to whichever job uploaded them -- so every
+# coverage-* artifact run_python_tests.yml's test jobs already uploaded
+# is downloadable here with no changes to any caller's job graph. They're
+# combined into one coverage.xml and pointed at via
+# sonar.python.coverage.reportPaths, when any exist (a standalone
+# workflow_dispatch run of just this file has none, which is fine --
+# analysis just proceeds without coverage data that run).
 
 name: SonarQube Cloud Scan
 
 on:
   workflow_dispatch:
+    inputs: &inputs
+      wait_for_quality_gate:
+        description: 'Fail this job (and everything downstream) if the SonarQube Cloud quality gate fails'
+        required: false
+        type: boolean
+        default: false
+      environment:
+        description: 'Deployment environment this run belongs to (e.g. development, production) -- tagged on the analysis'
+        required: false
+        type: string
+        default: 'development'
+      parent_workflow:
+        description: 'Name of the top-level pipeline calling this scan (pass the github.workflow context value from the caller''s own job) -- tagged on the analysis'
+        required: false
+        type: string
+        default: ''
   workflow_call:
+    inputs: *inputs
 
 jobs:
   scan:
@@ -29,12 +72,58 @@ jobs:
           # Full history -- SonarQube's blame/new-code analysis needs it.
           fetch-depth: 0
 
+      - name: Download coverage data from every test job
+        # Tolerant of finding zero matches -- a standalone workflow_dispatch
+        # run of just this file has no upstream test jobs in the same run.
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          pattern: 'coverage-*'
+          path: coverage-artifacts
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Combine coverage data
+        id: merge_coverage
+        run: |
+          pip install --no-cache-dir --only-binary :all: coverage==7.4.4
+
+          mkdir -p merged_coverage
+          found=false
+          if [ -d coverage-artifacts ]; then
+            i=0
+            for d in coverage-artifacts/*/; do
+              if [ -f "${d}.coverage" ]; then
+                i=$((i + 1))
+                cp "${d}.coverage" "merged_coverage/.coverage.$i"
+                found=true
+              fi
+            done
+          fi
+
+          if [ "$found" = true ]; then
+            coverage combine merged_coverage
+            coverage xml -o coverage.xml
+            echo "report_path=coverage.xml" >> "$GITHUB_OUTPUT"
+          else
+            echo "report_path=" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Resolve scanner args
+        id: scanner_args
+        run: |
+          ARGS="-Dsonar.organization=${{ vars.SONAR_ORGANIZATION }} -Dsonar.projectKey=${{ vars.SONAR_PROJECT_KEY }} -Dsonar.qualitygate.wait=${{ inputs.wait_for_quality_gate }} -Dsonar.analysis.environment=${{ inputs.environment }} -Dsonar.analysis.parentWorkflow=${{ inputs.parent_workflow }}"
+          if [ -n "${{ steps.merge_coverage.outputs.report_path }}" ]; then
+            ARGS="$ARGS -Dsonar.python.coverage.reportPaths=${{ steps.merge_coverage.outputs.report_path }}"
+          fi
+          echo "args=$ARGS" >> "$GITHUB_OUTPUT"
+
       - name: SonarQube Cloud Scan
         uses: SonarSource/sonarqube-scan-action@v5
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
         with:
-          args: >
-            -Dsonar.organization=${{ vars.SONAR_ORGANIZATION }}
-            -Dsonar.projectKey=${{ vars.SONAR_PROJECT_KEY }}
-            -Dsonar.qualitygate.wait=true
+          args: ${{ steps.scanner_args.outputs.args }}

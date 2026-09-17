@@ -45,6 +45,8 @@ from datetime import date, datetime, timedelta
 
 import boto3
 
+from library.aws.account import get_account_id
+from library.aws.boto_config import DEFAULT_CONFIG
 from library.http.f1 import JolpicaClient
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s", force=True)  # AWS Lambda pre-attaches a root handler, so basicConfig() is otherwise a silent no-op
@@ -60,11 +62,14 @@ PITSTOPS_MIN_SEASON = 2011
 # for a fetch every day.
 TRAILING_WINDOW_DAYS = 3
 
-_s3 = boto3.client("s3")
+_s3 = boto3.client("s3", config=DEFAULT_CONFIG)
 
 
 def _put_json(key: str, payload) -> None:
-    _s3.put_object(Bucket=RAW_BUCKET, Key=key, Body=json.dumps(payload).encode("utf-8"), ContentType="application/json")
+    _s3.put_object(
+        Bucket=RAW_BUCKET, Key=key, Body=json.dumps(payload).encode("utf-8"), ContentType="application/json",
+        ExpectedBucketOwner=get_account_id(),
+    )
     logger.info("Wrote s3://%s/%s", RAW_BUCKET, key)
 
 

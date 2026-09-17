@@ -33,6 +33,8 @@ from datetime import date
 
 import boto3
 
+from library.aws.account import get_account_id
+from library.aws.boto_config import DEFAULT_CONFIG
 from library.http.cfbd import CFBDClient
 from library.storage.ncaafb_team_cache import attach_venue_indoor
 
@@ -54,7 +56,7 @@ REGULAR_SEASON_WEEKS = range(1, 17)
 POSTSEASON_WEEKS = range(1, 6)
 SEASON_TYPES = ("regular", "postseason")
 
-_s3 = boto3.client("s3")
+_s3 = boto3.client("s3", config=DEFAULT_CONFIG)
 
 
 def _current_ncaafb_season(today: date | None = None) -> int:
@@ -65,7 +67,10 @@ def _current_ncaafb_season(today: date | None = None) -> int:
 
 
 def _put_json(key: str, payload) -> None:
-    _s3.put_object(Bucket=RAW_BUCKET, Key=key, Body=json.dumps(payload).encode("utf-8"), ContentType="application/json")
+    _s3.put_object(
+        Bucket=RAW_BUCKET, Key=key, Body=json.dumps(payload).encode("utf-8"), ContentType="application/json",
+        ExpectedBucketOwner=get_account_id(),
+    )
 
 
 def lambda_handler(event: dict, context) -> dict:

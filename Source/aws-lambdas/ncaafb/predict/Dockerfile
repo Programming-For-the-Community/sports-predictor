@@ -24,8 +24,8 @@ COPY aws-lambdas/ncaafb/predict/requirements.txt ./requirements.txt
 COPY aws-lambdas/ncaafb/predict/requirements-nodeps.txt ./requirements-nodeps.txt
 
 RUN pip install --no-cache-dir --target=/install --no-deps ./library && \
-    pip install --no-cache-dir --target=/install --no-deps -r requirements-nodeps.txt && \
-    pip install --no-cache-dir --target=/install -r requirements.txt
+    pip install --no-cache-dir --only-binary :all: --target=/install --no-deps -r requirements-nodeps.txt && \
+    pip install --no-cache-dir --only-binary :all: --target=/install -r requirements.txt
 
 # --- Runtime: installed packages + application source, nothing else ---
 FROM public.ecr.aws/lambda/python:3.12 AS runtime
