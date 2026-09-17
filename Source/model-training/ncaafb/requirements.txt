@@ -2,6 +2,7 @@
 # own comment. Shared by both Dockerfiles in this directory (Dockerfile and
 # Dockerfile.ranking) -- every NCAAFB training script needs the same
 # xgboost/pandas/pyarrow/scikit-learn/scikit-learn-intelex stack.
+numpy==1.26.4
 pandas==2.2.3
 pyarrow==16.1.0
 scikit-learn==1.4.2

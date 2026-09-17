@@ -2,6 +2,7 @@
 # own comment -- including lightgbm, since several CANDIDATES lists include
 # a LightGBM adapter. lightgbm ships prebuilt manylinux wheels for standard
 # Fargate architectures, same as xgboost.
+numpy==1.26.4
 pandas==2.2.3
 pyarrow==16.1.0
 scikit-learn==1.4.2
