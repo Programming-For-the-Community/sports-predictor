@@ -115,7 +115,13 @@ jobs:
       - name: Resolve scanner args
         id: scanner_args
         run: |
-          ARGS="-Dsonar.organization=${{ vars.SONAR_ORGANIZATION }} -Dsonar.projectKey=${{ vars.SONAR_PROJECT_KEY }} -Dsonar.qualitygate.wait=${{ inputs.wait_for_quality_gate }} -Dsonar.analysis.environment=${{ inputs.environment }} -Dsonar.analysis.parentWorkflow=${{ inputs.parent_workflow }}"
+          # Sanitized to one shell-safe token -- the scan action's own
+          # script invokes sonar-scanner with this string unquoted, so a
+          # raw space (e.g. github.workflow's "App Deploy") gets word-split
+          # into a stray argument and the CLI rejects it.
+          PARENT_WORKFLOW="${{ inputs.parent_workflow }}"
+          PARENT_WORKFLOW="${PARENT_WORKFLOW// /_}"
+          ARGS="-Dsonar.organization=${{ vars.SONAR_ORGANIZATION }} -Dsonar.projectKey=${{ vars.SONAR_PROJECT_KEY }} -Dsonar.qualitygate.wait=${{ inputs.wait_for_quality_gate }} -Dsonar.analysis.environment=${{ inputs.environment }} -Dsonar.analysis.parentWorkflow=$PARENT_WORKFLOW"
           if [ -n "${{ steps.merge_coverage.outputs.report_path }}" ]; then
             ARGS="$ARGS -Dsonar.python.coverage.reportPaths=${{ steps.merge_coverage.outputs.report_path }}"
           fi
