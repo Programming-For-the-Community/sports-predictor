@@ -10,16 +10,16 @@ mocked; only the model bytes/model_card content are real. "nfl"/
 "win-probability" below are representative stand-ins -- sport/model_name
 are plain parameters, nothing here is NFL-specific.
 
-Source/tests/library/ is swept by CI jobs that never install xgboost (e.g.
-feature-engineering's/predict-read's own test jobs) -- importorskip keeps
-this file from breaking collection there, same as
+Source/tests/library/ is swept by CI jobs that never install pandas/
+xgboost (e.g. predict-read's own test job) -- importorskip keeps this file
+from breaking collection there, same as
 test_training_common_load_features.py's own pyarrow guard.
 """
 from unittest.mock import MagicMock, patch
 
-import pandas as pd
 import pytest
 
+pd = pytest.importorskip("pandas")
 xgb = pytest.importorskip("xgboost")
 
 from library.ml.model_types import LogisticRegressionAdapter  # noqa: E402
