@@ -46,7 +46,7 @@ def points_for_field(
             continue
         by_position.setdefault(position, []).append(entity_id)
 
-    result = {entity_id: 0.0 for entity_id in finish_positions}
+    result = dict.fromkeys(finish_positions, 0.0)
     for position, tied_entity_ids in by_position.items():
         tie_size = len(tied_entity_ids)
         # A tie of size N starting at `position` spans positions

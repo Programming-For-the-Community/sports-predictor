@@ -44,8 +44,19 @@ jobs:
         with:
           python-version: ${{ inputs.python_version }}
 
-      - name: Install library package
-        run: pip install --no-cache-dir ./Source/library
+      # Regenerates Source/library's own pylock.toml (PEP 751) fresh from
+      # its pyproject.toml every run via uv -- used here only as a
+      # lock-file generator, not installed as this project's package
+      # manager. --no-emit-project excludes the local editable package
+      # itself, which --require-hashes can't verify a hash for; it's
+      # installed separately, unhashed, straight from this checkout.
+      - name: Lock and install library package
+        run: |
+          set -e
+          pip install --no-cache-dir --quiet uv
+          (cd Source/library && uv lock --quiet && uv export --quiet --format pylock.toml --no-emit-project -o pylock.toml)
+          pip install --no-cache-dir --require-hashes -r Source/library/pylock.toml
+          pip install --no-cache-dir --no-deps ./Source/library
 
       - name: Install additional requirements
         if: inputs.requirements_files != ''

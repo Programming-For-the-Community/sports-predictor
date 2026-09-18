@@ -15,7 +15,7 @@ every test here.
 """
 from unittest.mock import MagicMock, patch
 
-import model_loader
+from library.serving import model_loader
 import ncaafb_predict
 import season_projection
 import season_simulation

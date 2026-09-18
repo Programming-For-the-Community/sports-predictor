@@ -197,12 +197,12 @@ def simulate_season(
     teams = set(team_conference)
     conferences = _group_by_conference(team_conference)
 
-    win_totals = {team_id: 0.0 for team_id in teams}
-    loss_totals = {team_id: 0.0 for team_id in teams}
-    conference_champion_totals = {team_id: 0 for team_id in teams}
-    bowl_totals = {team_id: 0 for team_id in teams}
-    cfp_totals = {team_id: 0 for team_id in teams}
-    championship_totals = {team_id: 0 for team_id in teams}
+    win_totals = dict.fromkeys(teams, 0.0)
+    loss_totals = dict.fromkeys(teams, 0.0)
+    conference_champion_totals = dict.fromkeys(teams, 0)
+    bowl_totals = dict.fromkeys(teams, 0)
+    cfp_totals = dict.fromkeys(teams, 0)
+    championship_totals = dict.fromkeys(teams, 0)
 
     for _ in range(simulations):
         wins = {team_id: current_wins.get(team_id, 0) for team_id in teams}

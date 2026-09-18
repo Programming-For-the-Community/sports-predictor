@@ -16,10 +16,10 @@ from boto3.dynamodb.conditions import Key
 
 import event_prediction
 import live_features
-import model_loader
 import season_simulation
 from library.features.common import compute_elo_ratings
 from library.features.nfl_teams import TEAM_DIVISIONS, is_real_franchise_matchup
+from library.serving import model_loader
 from library.serving.common import enrich_bracket_team_names, enrich_team_standings
 from library.serving.nfl_reads import WIN_PROBABILITY_MODEL, _actual_result, _home_and_away
 from library.storage.feature_storage import FeatureStorage

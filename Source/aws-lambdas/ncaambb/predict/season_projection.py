@@ -41,11 +41,11 @@ import pandas as pd
 from boto3.dynamodb.conditions import Key
 
 import event_prediction
-import model_loader
 import season_simulation
 from library.features.common import DEFAULT_HOME_ADVANTAGE, compute_elo_ratings, current_streak, average_opponent_elo, rolling_team_scoring_averages
 from library.http.ncaambb_core import ap_poll_to_rank_by_team
 from library.ml.model_types import ADAPTERS
+from library.serving import model_loader
 from library.serving.common import enrich_bracket_team_names, enrich_team_standings
 from library.serving.ncaambb_reads import WIN_PROBABILITY_MODEL, _actual_result, _home_and_away
 from library.storage.feature_storage import FeatureStorage

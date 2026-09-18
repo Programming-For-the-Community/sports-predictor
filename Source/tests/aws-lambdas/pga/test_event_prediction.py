@@ -9,7 +9,7 @@ import pytest
 
 import event_prediction
 import live_features
-import model_loader
+from library.serving import model_loader
 from library.serving import pga_reads
 
 

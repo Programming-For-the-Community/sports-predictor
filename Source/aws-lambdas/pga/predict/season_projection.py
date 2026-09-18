@@ -15,11 +15,11 @@ import pandas as pd
 
 import event_prediction
 import live_features
-import model_loader
 import season_simulation
 from library.features.pga_fedex_cup_points import points_for_field, tier_for_event
 from library.features.pga_field_projection import project_remaining_field
 from library.ml.model_types import ADAPTERS
+from library.serving import model_loader
 from library.storage.season_projections import season_projection_key
 
 logger = logging.getLogger("pga-predict")
@@ -67,7 +67,7 @@ def _season_standings_inputs(storage) -> dict:
         participant["entity_id"] for event in this_season_completed for participant in event.get("participants", [])
     })
 
-    current_points: dict[str, float] = {entity_id: 0.0 for entity_id in tracked_roster}
+    current_points: dict[str, float] = dict.fromkeys(tracked_roster, 0.0)
     for event in this_season_completed:
         tier = tier_for_event(current_season, event.get("tournament_name"), event.get("is_major", False))
         finish_positions = {

@@ -223,11 +223,11 @@ def simulate_season(
     # explicitly passed in.
     teams = set(TEAM_DIVISIONS)
 
-    win_totals = {team_id: 0.0 for team_id in teams}
-    loss_totals = {team_id: 0.0 for team_id in teams}
-    division_titles = {team_id: 0 for team_id in teams}
-    playoff_berths = {team_id: 0 for team_id in teams}
-    championships = {team_id: 0 for team_id in teams}
+    win_totals = dict.fromkeys(teams, 0.0)
+    loss_totals = dict.fromkeys(teams, 0.0)
+    division_titles = dict.fromkeys(teams, 0)
+    playoff_berths = dict.fromkeys(teams, 0)
+    championships = dict.fromkeys(teams, 0)
 
     conferences = _divisions_by_conference()
 

@@ -461,17 +461,17 @@ def simulate_season(
     teams = set(team_conference)
     conferences = _group_by_conference(team_conference)
 
-    win_totals = {team_id: 0.0 for team_id in teams}
-    loss_totals = {team_id: 0.0 for team_id in teams}
-    conference_tournament_champion_totals = {team_id: 0 for team_id in teams}
-    tournament_totals = {team_id: 0 for team_id in teams}
-    first_four_totals = {team_id: 0 for team_id in teams}
-    round_of_64_totals = {team_id: 0 for team_id in teams}
-    sweet_16_totals = {team_id: 0 for team_id in teams}
-    elite_eight_totals = {team_id: 0 for team_id in teams}
-    final_four_totals = {team_id: 0 for team_id in teams}
-    championship_game_totals = {team_id: 0 for team_id in teams}
-    champion_totals = {team_id: 0 for team_id in teams}
+    win_totals = dict.fromkeys(teams, 0.0)
+    loss_totals = dict.fromkeys(teams, 0.0)
+    conference_tournament_champion_totals = dict.fromkeys(teams, 0)
+    tournament_totals = dict.fromkeys(teams, 0)
+    first_four_totals = dict.fromkeys(teams, 0)
+    round_of_64_totals = dict.fromkeys(teams, 0)
+    sweet_16_totals = dict.fromkeys(teams, 0)
+    elite_eight_totals = dict.fromkeys(teams, 0)
+    final_four_totals = dict.fromkeys(teams, 0)
+    championship_game_totals = dict.fromkeys(teams, 0)
+    champion_totals = dict.fromkeys(teams, 0)
 
     for _ in range(simulations):
         wins = {team_id: current_wins.get(team_id, 0) for team_id in teams}

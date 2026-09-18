@@ -11,8 +11,9 @@ from datetime import datetime, timezone
 from boto3.dynamodb.conditions import Key
 
 import live_features
-import model_loader
 from library.schema.keys import event_key as build_event_key
+from library.serving import event_prediction_common as common
+from library.serving import model_loader
 from library.serving.pga_reads import (
     CUP_MODEL_NAME,
     CUTLINE_MODEL_NAME,
@@ -35,9 +36,7 @@ _ROUND_MODEL_KEY_RE = re.compile(r"^MODEL#round-([1-4])#v(\d+)#GOLFER#(.+)$")
 
 def get_cached_model(model_cache: dict, s3, model_name: str):
     """Loads each distinct model at most once per request."""
-    if model_name not in model_cache:
-        model_cache[model_name] = model_loader.load_current_model(s3, SPORT, model_name)
-    return model_cache[model_name]
+    return common.get_cached_model(model_cache, s3, SPORT, model_name)
 
 
 def record_prediction(predictions_table, event_key_value: str, model_key: str, value) -> None:

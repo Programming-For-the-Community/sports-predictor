@@ -28,18 +28,18 @@ def _load_handler(module_name: str, relative_path: str) -> None:
 _load_handler("f1_ingest", "aws-lambdas/f1/ingest/handler.py")
 _load_handler("f1_normalize", "aws-lambdas/f1/normalize/handler.py")
 
-# predict/'s own modules (live_features.py, model_loader.py,
-# event_prediction.py, season_projection.py, season_simulation.py) have
-# unique names -- a plain sys.path entry is enough for them, no
-# _load_handler renaming trick needed. predict/handler.py itself still
-# needs one, same reasoning as ingest/normalize above -- same pattern
-# tests/aws-lambdas/pga/conftest.py already uses.
+# predict/'s own modules (live_features.py, event_prediction.py,
+# season_projection.py, season_simulation.py) have unique names -- a
+# plain sys.path entry is enough for them, no _load_handler renaming
+# trick needed. predict/handler.py itself still needs one, same reasoning
+# as ingest/normalize above -- same pattern tests/aws-lambdas/pga/
+# conftest.py already uses.
 sys.path.insert(0, os.path.join(_src, "aws-lambdas", "f1", "predict"))
 _load_handler("f1_predict", "aws-lambdas/f1/predict/handler.py")
 
 # predict-read/'s handler.py only ever imports from library.* (no local
-# sibling modules the way predict/'s model_loader.py etc. are) -- no
-# sys.path insert needed, just the same unique-module-name registration.
+# sibling modules the way predict/'s own files are) -- no sys.path insert
+# needed, just the same unique-module-name registration.
 _load_handler("f1_predict_read", "aws-lambdas/f1/predict-read/handler.py")
 
 # live-scores/'s own live_scores.py has a unique name -- same split as

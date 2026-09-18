@@ -1,21 +1,29 @@
 """
-Unit tests for the inference Lambda's model loader. Uses tiny real
-XGBoost/scikit-learn models (trained on trivial synthetic data, not
-mocked) to verify the actual serialize -> deserialize -> predict round
-trip and column ordering are correct for both algorithms this Lambda can
-be asked to serve -- see library/ml/model_types.py's ADAPTERS registry,
-which model_loader.py dispatches through instead of hardcoding XGBoost.
-S3 access itself is mocked; only the model bytes/model_card content are
-real.
+Unit tests for the shared model loader every sport's predict Lambda uses
+(library/serving/model_loader.py). Uses tiny real XGBoost/scikit-learn
+models (trained on trivial synthetic data, not mocked) to verify the
+actual serialize -> deserialize -> predict round trip and column ordering
+are correct for both algorithms this module can be asked to serve -- see
+library/ml/model_types.py's ADAPTERS registry, which model_loader.py
+dispatches through instead of hardcoding XGBoost. S3 access itself is
+mocked; only the model bytes/model_card content are real. "nfl"/
+"win-probability" below are representative stand-ins -- sport/model_name
+are plain parameters, nothing here is NFL-specific.
+
+Source/tests/library/ is swept by CI jobs that never install xgboost (e.g.
+feature-engineering's/predict-read's own test jobs) -- importorskip keeps
+this file from breaking collection there, same as
+test_training_common_load_features.py's own pyarrow guard.
 """
 from unittest.mock import MagicMock, patch
 
 import pandas as pd
 import pytest
-import xgboost as xgb
 
-import model_loader
-from library.ml.model_types import LogisticRegressionAdapter
+xgb = pytest.importorskip("xgboost")
+
+from library.ml.model_types import LogisticRegressionAdapter  # noqa: E402
+from library.serving import model_loader  # noqa: E402
 
 
 @pytest.fixture(autouse=True)
@@ -121,9 +129,12 @@ class TestLoadCurrentModel:
         ]
         s3.get_bytes.return_value = _tiny_booster_bytes(feature_columns)
 
-        with patch("model_loader.time.monotonic", side_effect=[0.0, 0.0]):
+        with patch("library.serving.model_loader.time.monotonic", side_effect=[0.0, 0.0]):
             model_loader.load_current_model(s3, "nfl", "win-probability")
-        with patch("model_loader.time.monotonic", side_effect=[model_loader._MODEL_CACHE_TTL_SECONDS + 1, 0.0]):
+        with patch(
+            "library.serving.model_loader.time.monotonic",
+            side_effect=[model_loader._MODEL_CACHE_TTL_SECONDS + 1, 0.0],
+        ):
             model_loader.load_current_model(s3, "nfl", "win-probability")
 
         assert s3.get_bytes.call_count == 2

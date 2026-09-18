@@ -14,7 +14,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 import live_features
-import model_loader
+from library.serving import model_loader
 import nfl_predict
 import season_projection
 import season_simulation

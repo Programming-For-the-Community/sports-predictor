@@ -20,7 +20,13 @@ omitted, each function fetches its own.
 """
 from datetime import date
 
-from library.features.common import DEFAULT_STARTING_RATING, compute_elo_ratings
+from library.features.common import compute_elo_ratings
+from library.features.live_orchestration import EventNotFoundError, MalformedEventError
+from library.features.live_orchestration import home_away_ids as _home_away_ids
+from library.features.live_orchestration import is_roster_entry_fresh
+from library.features.live_orchestration import live_elo_ratings as _live_elo_ratings
+from library.features.live_orchestration import recent_volume as _recent_volume
+from library.features.live_orchestration import top_n_by_recent_volume as _top_n_by_recent_volume
 from library.features.nfl import build_event_features, build_player_features
 from library.schema.keys import player_key
 
@@ -28,47 +34,6 @@ DEFAULT_ROLLING_WINDOW = 5
 
 # Statuses that exclude a player from presumptive-leader selection.
 _INJURY_EXCLUDED_STATUSES = frozenset({"Out", "Doubtful"})
-
-
-class EventNotFoundError(Exception):
-    pass
-
-
-class MalformedEventError(Exception):
-    """The event exists but is missing a home/away participant role --
-    build_event_features/build_player_features both require both sides
-    to determine home/away, opponent, and Elo lookups."""
-
-
-def _home_away_ids(event: dict) -> tuple[str, str]:
-    participants = event.get("participants", [])
-    home = next((p for p in participants if p.get("role") == "home"), None)
-    away = next((p for p in participants if p.get("role") == "away"), None)
-    if home is None or away is None:
-        raise MalformedEventError(f"Event {event.get('event_key')} is missing a home or away participant")
-    return home["entity_id"], away["entity_id"]
-
-
-def _live_elo_ratings(
-    storage, sport: str, event: dict, home_id: str, away_id: str, current_ratings: dict | None = None,
-    events: list[dict] | None = None,
-) -> dict:
-    """A minimal elo_ratings dict containing just this one (not-yet-played)
-    event's key, mapped to each team's CURRENT rating (compute_elo_ratings'
-    second return value, not pre_game_ratings, which has no entry for a
-    future event).
-
-    current_ratings/events are optional already-computed pass-throughs
-    for a caller that's already paid for them."""
-    if current_ratings is None:
-        completed_events = events if events is not None else storage.get_all_events(sport)
-        _, current_ratings = compute_elo_ratings(completed_events, as_of_season=event.get("season"))
-    return {
-        event["event_key"]: {
-            "home_pre_rating": current_ratings.get(home_id, DEFAULT_STARTING_RATING),
-            "away_pre_rating": current_ratings.get(away_id, DEFAULT_STARTING_RATING),
-        }
-    }
 
 
 def _depth_chart_entries(depth_chart: dict | None, abbreviations: set[str]) -> list[dict]:
@@ -151,17 +116,7 @@ _ROSTER_STALENESS_DAYS = 14
 
 
 def _is_roster_entry_fresh(entity: dict, reference_date: str) -> bool:
-    """reference_date is when this prediction is being generated (today),
-    not the target event's own date -- roster sync only ever writes
-    "today's" team_id_as_of, so comparing against the event's date would
-    make any far-future event fail this check regardless of freshness."""
-    as_of = entity.get("metadata", {}).get("team_id_as_of")
-    if as_of is None:
-        return False
-    try:
-        return abs((date.fromisoformat(reference_date) - date.fromisoformat(as_of)).days) <= _ROSTER_STALENESS_DAYS
-    except ValueError:
-        return False
+    return is_roster_entry_fresh(entity, reference_date, _ROSTER_STALENESS_DAYS)
 
 
 def _fresh_roster(storage, sport: str, team_id: str, reference_date: str | None = None) -> list[dict]:
@@ -177,16 +132,6 @@ def _fresh_roster(storage, sport: str, team_id: str, reference_date: str | None 
 
 def _eligible_entity_ids(roster: list[dict], positions: set[str]) -> list[str]:
     return [entity["entity_id"] for entity in roster if entity.get("metadata", {}).get("position") in positions]
-
-
-def _recent_volume(storage, entity_id: str, stat: str, before_date: str, window: int) -> tuple[float, list[dict]]:
-    """(sum of stat over a candidate's most recent `window` games, that
-    same game list) for one candidate. A candidate with no games at all
-    sums to 0 rather than being excluded, so it still competes on equal
-    footing but never wins over a candidate with real volume."""
-    games = storage.get_player_game_stats(entity_id, before_date=before_date, limit=window)
-    total = sum(game.get("stat_line", {}).get(stat, 0) for game in games)
-    return total, games
 
 
 def _leader_history(storage, entity_ids: list[str], stat: str, before_date: str, window: int) -> list[dict]:
@@ -408,19 +353,6 @@ def build_live_event_leader_candidates(
             event.get("away_depth_chart"), event.get("away_injuries"), events=events,
         ),
     }
-
-
-def _top_n_by_recent_volume(
-    storage, entity_ids: list[str], stat: str, before_date: str, window: int, n: int,
-) -> dict[str, list]:
-    """entity_id -> most recent `window` games, for the top n of
-    entity_ids ranked by that same window's volume of stat. {} if
-    entity_ids is empty."""
-    if not entity_ids:
-        return {}
-    volumes = {entity_id: _recent_volume(storage, entity_id, stat, before_date, window) for entity_id in entity_ids}
-    ranked = sorted(volumes, key=lambda entity_id: volumes[entity_id][0], reverse=True)[:n]
-    return {entity_id: volumes[entity_id][1] for entity_id in ranked}
 
 
 def _team_leader_candidates(

@@ -19,7 +19,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-import model_loader
+from library.serving import model_loader
 import ncaambb_predict
 import season_projection
 import season_simulation

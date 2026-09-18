@@ -38,10 +38,10 @@ import pandas as pd
 
 import event_prediction
 import live_features
-import model_loader
 import season_simulation
 from library.features.f1_points import add_fastest_lap_bonus, constructor_points, points_for_field
 from library.ml.model_types import ADAPTERS
+from library.serving import model_loader
 from library.storage.season_projections import season_projection_key
 
 logger = logging.getLogger("f1-predict")

@@ -33,7 +33,15 @@ can share a single fetch instead of each function re-querying.
 from concurrent.futures import ThreadPoolExecutor
 from datetime import date, timedelta
 
-from library.features.common import DEFAULT_STARTING_RATING, compute_elo_ratings
+from library.features.common import compute_elo_ratings
+from library.features.live_orchestration import EventNotFoundError, MalformedEventError
+from library.features.live_orchestration import home_away_ids as _home_away_ids
+from library.features.live_orchestration import is_roster_entry_fresh
+from library.features.live_orchestration import live_elo_ratings as _live_elo_ratings
+from library.features.live_orchestration import recent_volume as _recent_volume
+from library.features.live_orchestration import team_player_games_for_event as _team_player_games_for_event
+from library.features.live_orchestration import team_previous_event_date as _team_previous_event_date
+from library.features.live_orchestration import top_n_by_recent_volume as _top_n_by_recent_volume
 from library.features.ncaambb import build_event_features, build_player_features
 from library.schema.keys import player_key
 
@@ -64,61 +72,8 @@ LEADER_VOLUME_STATS = {"scoring": "points", "rebounding": "rebounds", "assists":
 LEADER_CANDIDATE_LIMITS = {"scoring": 5, "rebounding": 5, "assists": 5}
 
 
-class EventNotFoundError(Exception):
-    pass
-
-
-class MalformedEventError(Exception):
-    """The event exists but is missing a home/away participant role."""
-
-
-def _home_away_ids(event: dict) -> tuple[str, str]:
-    participants = event.get("participants", [])
-    home = next((p for p in participants if p.get("role") == "home"), None)
-    away = next((p for p in participants if p.get("role") == "away"), None)
-    if home is None or away is None:
-        raise MalformedEventError(f"Event {event.get('event_key')} is missing a home or away participant")
-    return home["entity_id"], away["entity_id"]
-
-
-def _live_elo_ratings(
-    storage, sport: str, event: dict, home_id: str, away_id: str, current_ratings: dict | None = None,
-    events: list[dict] | None = None,
-) -> dict:
-    if current_ratings is None:
-        completed_events = events if events is not None else storage.get_all_events(sport)
-        _, current_ratings = compute_elo_ratings(completed_events, as_of_season=event.get("season"))
-    return {
-        event["event_key"]: {
-            "home_pre_rating": current_ratings.get(home_id, DEFAULT_STARTING_RATING),
-            "away_pre_rating": current_ratings.get(away_id, DEFAULT_STARTING_RATING),
-        }
-    }
-
-
-def _team_previous_event_date(storage, sport: str, team_id: str, before_date: str, events: list[dict] | None = None) -> str | None:
-    previous = storage.get_team_events(sport, team_id, before_date=before_date, limit=1, events=events)
-    return previous[0]["event_date"] if previous else None
-
-
-def _team_player_games_for_event(storage, team_id: str, event_key: str) -> list[dict]:
-    return [row for row in storage.get_player_game_stats_for_event(event_key) if row.get("team_id") == team_id]
-
-
 def _is_roster_entry_fresh(entity: dict, reference_date: str) -> bool:
-    """reference_date is today (the default -- see _still_on_team), not
-    the target event's own date: roster sync only ever writes "today's"
-    team_id_as_of, so comparing against a far-future scheduled event's
-    date would fail this check regardless of how fresh the confirmation
-    actually is. Same shape as nfl/predict/live_features.py's own
-    function of this name."""
-    as_of = (entity.get("metadata") or {}).get("team_id_as_of")
-    if as_of is None:
-        return False
-    try:
-        return abs((date.fromisoformat(reference_date) - date.fromisoformat(as_of)).days) <= _ROSTER_STALENESS_DAYS
-    except ValueError:
-        return False
+    return is_roster_entry_fresh(entity, reference_date, _ROSTER_STALENESS_DAYS)
 
 
 def _still_on_team(storage, sport: str, entity_id: str, team_id: str, reference_date: str | None = None) -> bool:
@@ -240,23 +195,6 @@ def _box_score_candidate_ids(
             executor.map(lambda entity_id: _still_on_team(storage, sport, entity_id, team_id, reference_date), ordered_ids),
         ))
     return [entity_id for entity_id in ordered_ids if still_rostered[entity_id]]
-
-
-def _recent_volume(storage, entity_id: str, stat: str, before_date: str, window: int) -> tuple[float, list[dict]]:
-    games = storage.get_player_game_stats(entity_id, before_date=before_date, limit=window)
-    total = sum(game.get("stat_line", {}).get(stat, 0) for game in games)
-    return total, games
-
-
-def _top_n_by_recent_volume(
-    storage, entity_ids: list[str], stat: str, before_date: str, window: int, n: int,
-) -> dict[str, list[dict]]:
-    """entity_id -> recent game history, for the top n of entity_ids by recent volume of stat."""
-    if not entity_ids:
-        return {}
-    volumes = {entity_id: _recent_volume(storage, entity_id, stat, before_date, window) for entity_id in entity_ids}
-    ranked = sorted(volumes, key=lambda entity_id: volumes[entity_id][0], reverse=True)[:n]
-    return {entity_id: volumes[entity_id][1] for entity_id in ranked}
 
 
 def build_live_event_leader_candidates(

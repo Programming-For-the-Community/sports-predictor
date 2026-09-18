@@ -6,7 +6,7 @@ predict_event's own scoring/sorting/dispatch logic, not real inference.
 from unittest.mock import MagicMock, patch
 
 import event_prediction
-import model_loader
+from library.serving import model_loader
 
 
 def _built_field_features(driver_rows=None, constructor_rows=None):

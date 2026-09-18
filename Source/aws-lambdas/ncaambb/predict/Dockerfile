@@ -41,7 +41,7 @@ RUN dnf install -y libgomp && dnf clean all
 
 COPY --from=builder /install ${LAMBDA_TASK_ROOT}
 COPY aws-lambdas/ncaambb/predict/handler.py aws-lambdas/ncaambb/predict/live_features.py \
-     aws-lambdas/ncaambb/predict/model_loader.py aws-lambdas/ncaambb/predict/event_prediction.py \
+     aws-lambdas/ncaambb/predict/event_prediction.py \
      aws-lambdas/ncaambb/predict/season_projection.py aws-lambdas/ncaambb/predict/season_simulation.py \
      ${LAMBDA_TASK_ROOT}/
 

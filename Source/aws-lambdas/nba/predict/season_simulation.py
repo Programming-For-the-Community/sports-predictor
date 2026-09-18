@@ -355,12 +355,12 @@ def simulate_season(
     # projection).
     teams = set(TEAM_DIVISIONS)
 
-    win_totals = {team_id: 0.0 for team_id in teams}
-    loss_totals = {team_id: 0.0 for team_id in teams}
-    division_titles = {team_id: 0 for team_id in teams}
-    play_in_berths = {team_id: 0 for team_id in teams}
-    playoff_berths = {team_id: 0 for team_id in teams}
-    championships = {team_id: 0 for team_id in teams}
+    win_totals = dict.fromkeys(teams, 0.0)
+    loss_totals = dict.fromkeys(teams, 0.0)
+    division_titles = dict.fromkeys(teams, 0)
+    play_in_berths = dict.fromkeys(teams, 0)
+    playoff_berths = dict.fromkeys(teams, 0)
+    championships = dict.fromkeys(teams, 0)
 
     conferences = _teams_by_conference()
     divisions = _teams_by_division()
@@ -481,10 +481,10 @@ def simulate_cup(
     rng = rng or random.Random()
     all_teams = [team_id for conference in groups.values() for team_ids in conference.values() for team_id in team_ids]
 
-    group_winner_totals = {team_id: 0 for team_id in all_teams}
-    knockout_totals = {team_id: 0 for team_id in all_teams}
-    finalist_totals = {team_id: 0 for team_id in all_teams}
-    champion_totals = {team_id: 0 for team_id in all_teams}
+    group_winner_totals = dict.fromkeys(all_teams, 0)
+    knockout_totals = dict.fromkeys(all_teams, 0)
+    finalist_totals = dict.fromkeys(all_teams, 0)
+    champion_totals = dict.fromkeys(all_teams, 0)
 
     for _ in range(simulations):
         wins = {team_id: cup_wins.get(team_id, 0) for team_id in all_teams}

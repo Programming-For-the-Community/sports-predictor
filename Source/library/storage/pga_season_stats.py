@@ -54,7 +54,7 @@ def resolve_season_stats(snapshots: list[dict], entity_id: str, before_date: str
     golfer wasn't in that category's top 50 that day."""
     candidates = [s for s in snapshots if s["as_of_date"] < before_date]
     if not candidates:
-        return {category: None for category in SEASON_STAT_CATEGORIES}
+        return dict.fromkeys(SEASON_STAT_CATEGORIES)
     latest = candidates[-1]  # snapshots is ascending -> the last qualifying one is the most recent
     return {
         category: latest["value_by_category_and_athlete"].get(category, {}).get(entity_id)

@@ -1,15 +1,23 @@
 """
-Loads a promoted model artifact for live inference, and scores one
-feature row against it. Reads the same current.json pointer and
-model_card.json layout the training scripts write --
-library.storage.model_artifacts is the shared, sport-agnostic
-key-naming module both sides already depend on.
+Loads a promoted model artifact (see library.ml.backtest.run_backtest,
+which is what actually decides which version/algorithm gets promoted) for
+live inference, and scores one feature row against it. Reads the same
+current.json pointer and model_card.json layout the training scripts
+write -- library.storage.model_artifacts is the shared, sport-agnostic
+key-naming module both sides already depend on, so no duplicated key
+convention exists between training and serving.
 
 Dispatches on model_card["algorithm"] through library.ml.model_types.
-ADAPTERS -- not hardcoded to XGBoost, since run_backtest lets several
-algorithms compete for the same target and promotes whichever wins, so
-the currently-promoted algorithm for any given model_name can change
-from one retrain to the next.
+ADAPTERS -- not hardcoded to one algorithm, since run_backtest lets
+several algorithms compete for the same target and promotes whichever
+wins, so the currently-promoted algorithm for any given model_name can
+change from one retrain to the next. Every predict Lambda's requirements
+need to cover whatever any of the candidate families might have won with
+(see library/ml/model_types.py).
+
+Shared verbatim across every sport's predict Lambda -- no sport-specific
+model-format branching exists here; `sport` is a plain parameter, not
+baked into the module.
 """
 import time
 
@@ -21,11 +29,13 @@ from library.storage.model_artifacts import current_version_key, model_artifact_
 MODEL_CARD_FILENAME = "model_card.json"
 
 # Module-level, not per-request -- a Lambda execution environment reuses
-# this module's state across every invocation it stays warm for, so a
-# plain dict here means one promoted model gets fetched from S3 once per
-# warm container instead of once per request. Keyed by (sport,
-# model_name); TTL'd rather than cached forever so a newly-promoted
-# model doesn't stay stale for a container's whole warm lifetime.
+# this module's state across every invocation it stays warm for (AWS's
+# own documented behavior, not something this code has to opt into), so
+# a plain dict here means one promoted model gets fetched from S3 once
+# per warm container instead of once per request. Keyed by (sport,
+# model_name); TTL'd rather than cached forever so a newly-promoted model
+# doesn't stay stale for a container's whole potentially-hours-long warm
+# lifetime under sustained traffic.
 _MODEL_CACHE_TTL_SECONDS = 300
 _model_cache: dict[tuple[str, str], tuple[float, tuple]] = {}
 
@@ -86,9 +96,10 @@ def load_current_model(s3, sport: str, model_name: str):
 
 def predict(estimator, model_card: dict, feature_row: dict) -> float:
     """feature_row is build_live_event_features'/build_live_player_features's
-    full output (features and labels mixed together, same shape training
-    rows have) -- this pulls out just the columns the model was actually
-    trained on. Missing/non-numeric values become NaN, the same coercion
+    (or the equivalent field/golfer/driver row builder) full output
+    (features and labels mixed together, same shape training rows have)
+    -- this pulls out just the columns the model was actually trained
+    on. Missing/non-numeric values become NaN, the same coercion
     library.ml.training_common.numeric_frame applies at training time,
     which every adapter's underlying estimator already expects (no
     training run ever imputed a value at the feature-row level instead of
@@ -97,9 +108,9 @@ def predict(estimator, model_card: dict, feature_row: dict) -> float:
 
     Works identically for a classification-task target (e.g.
     win-probability -- the adapter's predict() output already is the
-    probability) or a regression-task one (e.g. margin or a player-prop
-    stat) -- only what the returned float means differs, and this
-    function doesn't need to know which."""
+    probability) or a regression-task one (e.g. margin, a player-prop
+    stat, or a projected finish position) -- only what the returned float
+    means differs, and this function doesn't need to know which."""
     feature_columns = model_card["feature_columns"]
     row = {
         column: float(feature_row[column]) if isinstance(feature_row.get(column), (int, float)) else float("nan")

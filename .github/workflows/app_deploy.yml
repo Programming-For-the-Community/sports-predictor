@@ -85,7 +85,6 @@ jobs:
         Source/tests/aws-lambdas/nfl/test_live_features_leader_candidates.py
         Source/tests/aws-lambdas/nfl/test_live_features_depth_chart.py
         Source/tests/aws-lambdas/nfl/test_live_features_roster.py
-        Source/tests/aws-lambdas/nfl/test_model_loader.py
       requirements_files: 'Source/aws-lambdas/nfl/predict/requirements.in Source/aws-lambdas/nfl/predict/requirements-nodeps.in'
 
   test-nfl-predict-read:

@@ -21,7 +21,7 @@ import pytest
 
 import event_prediction
 import live_features
-import model_loader
+from library.serving import model_loader
 
 
 def _model_card(version: int) -> dict:
