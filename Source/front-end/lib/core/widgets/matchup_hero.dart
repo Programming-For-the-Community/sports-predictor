@@ -301,7 +301,7 @@ class MatchupResultHero extends StatelessWidget {
               Expanded(
                 child: _ResultTeamColumn(
                   color: away.primary, abbr: away.abbreviation,
-                  score: event.away.result?.score, won: !homeWon,
+                  score: event.away.result?.score, predictedScore: comparison?.predictedAwayScore, won: !homeWon,
                 ),
               ),
               Padding(
@@ -318,7 +318,7 @@ class MatchupResultHero extends StatelessWidget {
               Expanded(
                 child: _ResultTeamColumn(
                   color: home.primary, abbr: home.abbreviation,
-                  score: event.home.result?.score, won: homeWon,
+                  score: event.home.result?.score, predictedScore: comparison?.predictedHomeScore, won: homeWon,
                 ),
               ),
             ],
@@ -336,10 +336,16 @@ class MatchupResultHero extends StatelessWidget {
 }
 
 class _ResultTeamColumn extends StatelessWidget {
-  const _ResultTeamColumn({required this.color, required this.abbr, required this.score, required this.won});
+  const _ResultTeamColumn({
+    required this.color, required this.abbr, required this.score, required this.predictedScore, required this.won,
+  });
   final Color? color;
   final String abbr;
   final double? score;
+  // The pre-game predicted score, shown alongside the actual final score
+  // (same cyan-actual/predicted convention _TeamColumn uses live) -- null
+  // when no prediction was ever logged for this event.
+  final double? predictedScore;
   final bool won;
 
   @override
@@ -359,6 +365,10 @@ class _ResultTeamColumn extends StatelessWidget {
                 child: numeral,
               )
             : Opacity(opacity: 0.6, child: numeral),
+        if (predictedScore != null) ...[
+          const SizedBox(height: 4),
+          Text('${predictedScore!.round()} PTS PRED', style: AppTextStyles.metricValue(color: AppColors.cyan)),
+        ],
       ],
     );
   }

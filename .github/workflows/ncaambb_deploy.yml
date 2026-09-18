@@ -81,7 +81,7 @@ jobs:
     uses: ./.github/workflows/run_python_tests.yml
     with:
       test_path: 'Source/tests/library/ Source/tests/feature-engineering/ncaambb/ --ignore=Source/tests/library/ml'
-      requirements_files: 'Source/feature-engineering/ncaambb/requirements.txt'
+      requirements_files: 'Source/feature-engineering/ncaambb/requirements.in'
 
   # Covers every model-training/ncaambb/*.py script, including
   # train_ranking_model.py -- feeds both build-train-model-image and
@@ -95,7 +95,7 @@ jobs:
     uses: ./.github/workflows/run_python_tests.yml
     with:
       test_path: 'Source/tests/library/ Source/tests/model-training/ncaambb/'
-      requirements_files: 'Source/model-training/ncaambb/requirements.txt'
+      requirements_files: 'Source/model-training/ncaambb/requirements.in'
 
   test-predict:
     name: Run NCAA MBB predict tests
@@ -110,7 +110,7 @@ jobs:
         Source/tests/aws-lambdas/ncaambb/test_live_features.py
         Source/tests/aws-lambdas/ncaambb/test_event_prediction.py
         Source/tests/aws-lambdas/ncaambb/test_predict_handler.py
-      requirements_files: 'Source/aws-lambdas/ncaambb/predict/requirements.txt Source/aws-lambdas/ncaambb/predict/requirements-nodeps.txt'
+      requirements_files: 'Source/aws-lambdas/ncaambb/predict/requirements.in Source/aws-lambdas/ncaambb/predict/requirements-nodeps.in'
 
   test-predict-read:
     name: Run NCAA MBB predict-read tests
@@ -237,11 +237,6 @@ jobs:
   infra:
     name: Apply shared infrastructure
     needs: [backfill, ai_training, ai_hosting]
-    if: |
-      always() &&
-      (needs.backfill.result == 'success' || needs.backfill.result == 'skipped') &&
-      (needs.ai_training.result == 'success' || needs.ai_training.result == 'skipped') &&
-      (needs.ai_hosting.result == 'success' || needs.ai_hosting.result == 'skipped')
     uses: ./.github/workflows/tf_install.yml
     secrets: inherit
 

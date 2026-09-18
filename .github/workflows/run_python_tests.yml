@@ -51,7 +51,10 @@ jobs:
         if: inputs.requirements_files != ''
         run: |
           for f in ${{ inputs.requirements_files }}; do
-            pip install --no-cache-dir --only-binary :all: -r "$f"
+            case "$f" in
+              *requirements-nodeps.*) pip install --no-cache-dir --only-binary :all: --no-deps -r "$f" ;;
+              *)                      pip install --no-cache-dir --only-binary :all: -r "$f" ;;
+            esac
           done
 
       # Matches every requirements-dev.txt's own pytest pin.

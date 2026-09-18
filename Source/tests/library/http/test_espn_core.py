@@ -154,6 +154,35 @@ class TestGetSeasonCoaches:
 
         assert result["14"]["career_playoff_win_pct"] == 0.625
 
+    def test_one_coachs_failing_career_postseason_ref_does_not_break_the_others(self):
+        # Confirmed live 2026-09-17: a first-year head coach's
+        # /coaches/{id}/record/3 404s (ESPN never created that resource
+        # for a coach with zero career games at any level) -- this must
+        # not take the whole batch down with it, or every other coach's
+        # data (and everything ingest/handler.py runs after this call)
+        # is lost too.
+        client = self._client()
+        client._get = MagicMock(return_value={
+            "items": [{"$ref": "http://.../coaches/1"}, {"$ref": "http://.../coaches/2"}],
+        })
+
+        def fake_get_absolute(url, params=None):
+            if url == f"{client.base_url}/coaches/1/record/3":
+                raise RuntimeError("Request failed after 5 attempts")
+            responses = {
+                "http://.../coaches/1": self._coach_detail("1", "Rookie", "Coach", "10", 0),
+                "http://.../coaches/2": self._coach_detail("2", "Andy", "Reid", "12", 27),
+                f"{client.base_url}/coaches/2/record/3": {"summary": "10-6-0", "value": 0.625},
+            }
+            return responses[url]
+
+        client.get_absolute = MagicMock(side_effect=fake_get_absolute)
+
+        result = client.get_season_coaches(2025)
+
+        assert result["10"]["career_playoff_win_pct"] is None
+        assert result["12"]["career_playoff_win_pct"] == 0.625
+
     def test_zero_career_playoff_games_is_none_not_a_zero_division_crash(self):
         client = self._client()
         client._get = MagicMock(return_value={"items": [{"$ref": "http://.../coaches/1"}]})

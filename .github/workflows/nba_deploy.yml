@@ -65,7 +65,7 @@ jobs:
     uses: ./.github/workflows/run_python_tests.yml
     with:
       test_path: 'Source/tests/library/ Source/tests/feature-engineering/nba/ --ignore=Source/tests/library/ml'
-      requirements_files: 'Source/feature-engineering/nba/requirements.txt'
+      requirements_files: 'Source/feature-engineering/nba/requirements.in'
 
   test-train-model:
     name: Run NBA training model tests
@@ -76,7 +76,7 @@ jobs:
     uses: ./.github/workflows/run_python_tests.yml
     with:
       test_path: 'Source/tests/library/ Source/tests/model-training/nba/'
-      requirements_files: 'Source/model-training/nba/requirements.txt'
+      requirements_files: 'Source/model-training/nba/requirements.in'
 
   test-predict:
     name: Run NBA predict tests
@@ -93,7 +93,7 @@ jobs:
         Source/tests/aws-lambdas/nba/test_predict_handler.py
         Source/tests/aws-lambdas/nba/test_season_simulation.py
         Source/tests/aws-lambdas/nba/test_predict_season_simulation.py
-      requirements_files: 'Source/aws-lambdas/nba/predict/requirements.txt Source/aws-lambdas/nba/predict/requirements-nodeps.txt'
+      requirements_files: 'Source/aws-lambdas/nba/predict/requirements.in Source/aws-lambdas/nba/predict/requirements-nodeps.in'
 
   test-predict-read:
     name: Run NBA predict-read tests
@@ -217,11 +217,6 @@ jobs:
   infra:
     name: Apply shared infrastructure
     needs: [backfill, ai_training, ai_hosting]
-    if: |
-      always() &&
-      (needs.backfill.result == 'success' || needs.backfill.result == 'skipped') &&
-      (needs.ai_training.result == 'success' || needs.ai_training.result == 'skipped') &&
-      (needs.ai_hosting.result == 'success' || needs.ai_hosting.result == 'skipped')
     uses: ./.github/workflows/tf_install.yml
     secrets: inherit
 

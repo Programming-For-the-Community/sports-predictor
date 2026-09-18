@@ -70,7 +70,7 @@ jobs:
     uses: ./.github/workflows/run_python_tests.yml
     with:
       test_path: 'Source/tests/library/ Source/tests/feature-engineering/pga/ --ignore=Source/tests/library/ml'
-      requirements_files: 'Source/feature-engineering/pga/requirements.txt'
+      requirements_files: 'Source/feature-engineering/pga/requirements.in'
 
   test-train-top10-model:
     name: Run PGA train top-10-probability model tests
@@ -81,7 +81,7 @@ jobs:
     uses: ./.github/workflows/run_python_tests.yml
     with:
       test_path: 'Source/tests/library/ Source/tests/model-training/pga/'
-      requirements_files: 'Source/model-training/pga/requirements.txt'
+      requirements_files: 'Source/model-training/pga/requirements.in'
 
   test-predict:
     name: Run PGA predict tests
@@ -98,7 +98,7 @@ jobs:
         Source/tests/aws-lambdas/pga/test_predict_handler.py
         Source/tests/aws-lambdas/pga/test_season_simulation.py
         Source/tests/aws-lambdas/pga/test_season_projection.py
-      requirements_files: 'Source/aws-lambdas/pga/predict/requirements.txt Source/aws-lambdas/pga/predict/requirements-nodeps.txt'
+      requirements_files: 'Source/aws-lambdas/pga/predict/requirements.in Source/aws-lambdas/pga/predict/requirements-nodeps.in'
 
   test-predict-read:
     name: Run PGA predict-read tests
@@ -275,11 +275,6 @@ jobs:
   infra:
     name: Apply shared infrastructure
     needs: [backfill, ai_training, ai_hosting]
-    if: |
-      always() &&
-      (needs.backfill.result == 'success' || needs.backfill.result == 'skipped') &&
-      (needs.ai_training.result == 'success' || needs.ai_training.result == 'skipped') &&
-      (needs.ai_hosting.result == 'success' || needs.ai_hosting.result == 'skipped')
     uses: ./.github/workflows/tf_install.yml
     secrets: inherit
 

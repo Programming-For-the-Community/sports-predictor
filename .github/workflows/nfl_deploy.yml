@@ -71,7 +71,7 @@ jobs:
     uses: ./.github/workflows/run_python_tests.yml
     with:
       test_path: 'Source/tests/library/ Source/tests/feature-engineering/nfl/ --ignore=Source/tests/library/ml'
-      requirements_files: 'Source/feature-engineering/nfl/requirements.txt'
+      requirements_files: 'Source/feature-engineering/nfl/requirements.in'
 
   test-train-model:
     name: Run NFL training model tests
@@ -82,7 +82,7 @@ jobs:
     uses: ./.github/workflows/run_python_tests.yml
     with:
       test_path: 'Source/tests/library/ Source/tests/model-training/nfl/'
-      requirements_files: 'Source/model-training/nfl/requirements.txt'
+      requirements_files: 'Source/model-training/nfl/requirements.in'
 
   test-predict:
     name: Run NFL predict tests
@@ -109,7 +109,7 @@ jobs:
         Source/tests/aws-lambdas/nfl/test_live_features_roster.py
         Source/tests/aws-lambdas/nfl/test_model_loader.py
       # Both requirements files are installed so xgboost is importable in this test job.
-      requirements_files: 'Source/aws-lambdas/nfl/predict/requirements.txt Source/aws-lambdas/nfl/predict/requirements-nodeps.txt'
+      requirements_files: 'Source/aws-lambdas/nfl/predict/requirements.in Source/aws-lambdas/nfl/predict/requirements-nodeps.in'
 
   test-predict-read:
     name: Run NFL predict-read tests
@@ -273,11 +273,6 @@ jobs:
   infra:
     name: Apply shared infrastructure
     needs: [backfill, ai_training, ai_hosting]
-    if: |
-      always() &&
-      (needs.backfill.result == 'success' || needs.backfill.result == 'skipped') &&
-      (needs.ai_training.result == 'success' || needs.ai_training.result == 'skipped') &&
-      (needs.ai_hosting.result == 'success' || needs.ai_hosting.result == 'skipped')
     uses: ./.github/workflows/tf_install.yml
     secrets: inherit
 

@@ -159,15 +159,21 @@ class _EventDetailPageState extends ConsumerState<EventDetailPage> with WidgetsB
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             MatchupResultHero(sport: widget.sportId, event: event, comparison: event.predictionComparison),
-            if (leadersComparison != null) ...[
-              const SizedBox(height: 20),
+            const SizedBox(height: 20),
+            if (leadersComparison != null)
               TeamLeadersComparisonPanel(
                 sport: widget.sportId,
                 homeAbbr: teamDisplay(widget.sportId, event.home).abbreviation,
                 awayAbbr: teamDisplay(widget.sportId, event.away).abbreviation,
                 comparison: leadersComparison,
+              )
+            else
+              Center(
+                child: Text(
+                  'No player-prop predictions were recorded for this game.',
+                  style: AppTextStyles.body(color: AppColors.inkMute),
+                ),
               ),
-            ],
           ],
         ),
       );

@@ -57,14 +57,14 @@ jobs:
     uses: ./.github/workflows/run_python_tests.yml
     with:
       test_path: 'Source/tests/library/ Source/tests/feature-engineering/nfl/ --ignore=Source/tests/library/ml'
-      requirements_files: 'Source/feature-engineering/nfl/requirements.txt'
+      requirements_files: 'Source/feature-engineering/nfl/requirements.in'
 
   test-nfl-train-model:
     name: Run NFL training model tests
     uses: ./.github/workflows/run_python_tests.yml
     with:
       test_path: 'Source/tests/library/ Source/tests/model-training/nfl/'
-      requirements_files: 'Source/model-training/nfl/requirements.txt'
+      requirements_files: 'Source/model-training/nfl/requirements.in'
 
   test-nfl-predict:
     name: Run NFL predict tests
@@ -86,7 +86,7 @@ jobs:
         Source/tests/aws-lambdas/nfl/test_live_features_depth_chart.py
         Source/tests/aws-lambdas/nfl/test_live_features_roster.py
         Source/tests/aws-lambdas/nfl/test_model_loader.py
-      requirements_files: 'Source/aws-lambdas/nfl/predict/requirements.txt Source/aws-lambdas/nfl/predict/requirements-nodeps.txt'
+      requirements_files: 'Source/aws-lambdas/nfl/predict/requirements.in Source/aws-lambdas/nfl/predict/requirements-nodeps.in'
 
   test-nfl-predict-read:
     name: Run NFL predict-read tests
@@ -142,14 +142,14 @@ jobs:
     uses: ./.github/workflows/run_python_tests.yml
     with:
       test_path: 'Source/tests/library/ Source/tests/feature-engineering/ncaafb/ --ignore=Source/tests/library/ml'
-      requirements_files: 'Source/feature-engineering/ncaafb/requirements.txt'
+      requirements_files: 'Source/feature-engineering/ncaafb/requirements.in'
 
   test-ncaafb-train-models:
     name: Run NCAAFB training model tests
     uses: ./.github/workflows/run_python_tests.yml
     with:
       test_path: 'Source/tests/library/ Source/tests/model-training/ncaafb/'
-      requirements_files: 'Source/model-training/ncaafb/requirements.txt'
+      requirements_files: 'Source/model-training/ncaafb/requirements.in'
 
   test-ncaafb-predict:
     name: Run NCAAFB predict tests
@@ -162,7 +162,7 @@ jobs:
         Source/tests/aws-lambdas/ncaafb/test_predict_handler.py
         Source/tests/aws-lambdas/ncaafb/test_season_simulation.py
         Source/tests/aws-lambdas/ncaafb/test_season_projection.py
-      requirements_files: 'Source/aws-lambdas/ncaafb/predict/requirements.txt Source/aws-lambdas/ncaafb/predict/requirements-nodeps.txt'
+      requirements_files: 'Source/aws-lambdas/ncaafb/predict/requirements.in Source/aws-lambdas/ncaafb/predict/requirements-nodeps.in'
 
   test-ncaafb-predict-read:
     name: Run NCAAFB predict-read tests
@@ -214,14 +214,14 @@ jobs:
     uses: ./.github/workflows/run_python_tests.yml
     with:
       test_path: 'Source/tests/library/ Source/tests/feature-engineering/nba/ --ignore=Source/tests/library/ml'
-      requirements_files: 'Source/feature-engineering/nba/requirements.txt'
+      requirements_files: 'Source/feature-engineering/nba/requirements.in'
 
   test-nba-train-model:
     name: Run NBA training model tests
     uses: ./.github/workflows/run_python_tests.yml
     with:
       test_path: 'Source/tests/library/ Source/tests/model-training/nba/'
-      requirements_files: 'Source/model-training/nba/requirements.txt'
+      requirements_files: 'Source/model-training/nba/requirements.in'
 
   test-nba-predict:
     name: Run NBA predict tests
@@ -234,7 +234,7 @@ jobs:
         Source/tests/aws-lambdas/nba/test_predict_handler.py
         Source/tests/aws-lambdas/nba/test_season_simulation.py
         Source/tests/aws-lambdas/nba/test_predict_season_simulation.py
-      requirements_files: 'Source/aws-lambdas/nba/predict/requirements.txt Source/aws-lambdas/nba/predict/requirements-nodeps.txt'
+      requirements_files: 'Source/aws-lambdas/nba/predict/requirements.in Source/aws-lambdas/nba/predict/requirements-nodeps.in'
 
   test-nba-predict-read:
     name: Run NBA predict-read tests
@@ -284,14 +284,14 @@ jobs:
     uses: ./.github/workflows/run_python_tests.yml
     with:
       test_path: 'Source/tests/library/ Source/tests/feature-engineering/ncaambb/ --ignore=Source/tests/library/ml'
-      requirements_files: 'Source/feature-engineering/ncaambb/requirements.txt'
+      requirements_files: 'Source/feature-engineering/ncaambb/requirements.in'
 
   test-ncaambb-train-models:
     name: Run NCAA MBB training model tests
     uses: ./.github/workflows/run_python_tests.yml
     with:
       test_path: 'Source/tests/library/ Source/tests/model-training/ncaambb/'
-      requirements_files: 'Source/model-training/ncaambb/requirements.txt'
+      requirements_files: 'Source/model-training/ncaambb/requirements.in'
 
   test-ncaambb-predict:
     name: Run NCAA MBB predict tests
@@ -302,7 +302,7 @@ jobs:
         Source/tests/aws-lambdas/ncaambb/test_live_features.py
         Source/tests/aws-lambdas/ncaambb/test_event_prediction.py
         Source/tests/aws-lambdas/ncaambb/test_predict_handler.py
-      requirements_files: 'Source/aws-lambdas/ncaambb/predict/requirements.txt Source/aws-lambdas/ncaambb/predict/requirements-nodeps.txt'
+      requirements_files: 'Source/aws-lambdas/ncaambb/predict/requirements.in Source/aws-lambdas/ncaambb/predict/requirements-nodeps.in'
 
   test-ncaambb-predict-read:
     name: Run NCAA MBB predict-read tests
@@ -352,14 +352,14 @@ jobs:
     uses: ./.github/workflows/run_python_tests.yml
     with:
       test_path: 'Source/tests/library/ Source/tests/feature-engineering/pga/ --ignore=Source/tests/library/ml'
-      requirements_files: 'Source/feature-engineering/pga/requirements.txt'
+      requirements_files: 'Source/feature-engineering/pga/requirements.in'
 
   test-pga-train-top10-model:
     name: Run PGA train top-10-probability model tests
     uses: ./.github/workflows/run_python_tests.yml
     with:
       test_path: 'Source/tests/library/ Source/tests/model-training/pga/'
-      requirements_files: 'Source/model-training/pga/requirements.txt'
+      requirements_files: 'Source/model-training/pga/requirements.in'
 
   test-pga-predict:
     name: Run PGA predict tests
@@ -372,7 +372,7 @@ jobs:
         Source/tests/aws-lambdas/pga/test_predict_handler.py
         Source/tests/aws-lambdas/pga/test_season_simulation.py
         Source/tests/aws-lambdas/pga/test_season_projection.py
-      requirements_files: 'Source/aws-lambdas/pga/predict/requirements.txt Source/aws-lambdas/pga/predict/requirements-nodeps.txt'
+      requirements_files: 'Source/aws-lambdas/pga/predict/requirements.in Source/aws-lambdas/pga/predict/requirements-nodeps.in'
 
   test-pga-predict-read:
     name: Run PGA predict-read tests
@@ -426,14 +426,14 @@ jobs:
     uses: ./.github/workflows/run_python_tests.yml
     with:
       test_path: 'Source/tests/library/ Source/tests/feature-engineering/f1/ --ignore=Source/tests/library/ml'
-      requirements_files: 'Source/feature-engineering/f1/requirements.txt'
+      requirements_files: 'Source/feature-engineering/f1/requirements.in'
 
   test-f1-train-winprob-model:
     name: Run F1 train win-probability model tests
     uses: ./.github/workflows/run_python_tests.yml
     with:
       test_path: 'Source/tests/library/ Source/tests/model-training/f1/'
-      requirements_files: 'Source/model-training/f1/requirements.txt'
+      requirements_files: 'Source/model-training/f1/requirements.in'
 
   test-f1-predict:
     name: Run F1 predict tests
@@ -446,7 +446,7 @@ jobs:
         Source/tests/aws-lambdas/f1/test_predict_handler.py
         Source/tests/aws-lambdas/f1/test_season_simulation.py
         Source/tests/aws-lambdas/f1/test_season_projection.py
-      requirements_files: 'Source/aws-lambdas/f1/predict/requirements.txt Source/aws-lambdas/f1/predict/requirements-nodeps.txt'
+      requirements_files: 'Source/aws-lambdas/f1/predict/requirements.in Source/aws-lambdas/f1/predict/requirements-nodeps.in'
 
   test-f1-predict-read:
     name: Run F1 predict-read tests
@@ -842,8 +842,7 @@ jobs:
       image_version: '1.0.0'
       platform: 'linux/arm64'
 
-  # --- Infra: applies once, gated on every "before" job tolerating
-  # success-or-skip ---
+  # --- Infra: applies once every sport's build jobs have succeeded ---
   infra:
     name: Apply shared infrastructure
     needs: [
@@ -854,26 +853,6 @@ jobs:
       pga_backfill_build, pga_ai_training_build, pga_ai_hosting_build,
       f1_backfill_build, f1_ai_training_build, f1_ai_hosting_build,
     ]
-    if: |
-      always() &&
-      (needs.nfl_backfill_build.result == 'success' || needs.nfl_backfill_build.result == 'skipped') &&
-      (needs.nfl_ai_training_build.result == 'success' || needs.nfl_ai_training_build.result == 'skipped') &&
-      (needs.nfl_ai_hosting_build.result == 'success' || needs.nfl_ai_hosting_build.result == 'skipped') &&
-      (needs.ncaafb_backfill_build.result == 'success' || needs.ncaafb_backfill_build.result == 'skipped') &&
-      (needs.ncaafb_ai_training_build.result == 'success' || needs.ncaafb_ai_training_build.result == 'skipped') &&
-      (needs.ncaafb_ai_hosting_build.result == 'success' || needs.ncaafb_ai_hosting_build.result == 'skipped') &&
-      (needs.nba_backfill_build.result == 'success' || needs.nba_backfill_build.result == 'skipped') &&
-      (needs.nba_ai_training_build.result == 'success' || needs.nba_ai_training_build.result == 'skipped') &&
-      (needs.nba_ai_hosting_build.result == 'success' || needs.nba_ai_hosting_build.result == 'skipped') &&
-      (needs.ncaambb_backfill_build.result == 'success' || needs.ncaambb_backfill_build.result == 'skipped') &&
-      (needs.ncaambb_ai_training_build.result == 'success' || needs.ncaambb_ai_training_build.result == 'skipped') &&
-      (needs.ncaambb_ai_hosting_build.result == 'success' || needs.ncaambb_ai_hosting_build.result == 'skipped') &&
-      (needs.pga_backfill_build.result == 'success' || needs.pga_backfill_build.result == 'skipped') &&
-      (needs.pga_ai_training_build.result == 'success' || needs.pga_ai_training_build.result == 'skipped') &&
-      (needs.pga_ai_hosting_build.result == 'success' || needs.pga_ai_hosting_build.result == 'skipped') &&
-      (needs.f1_backfill_build.result == 'success' || needs.f1_backfill_build.result == 'skipped') &&
-      (needs.f1_ai_training_build.result == 'success' || needs.f1_ai_training_build.result == 'skipped') &&
-      (needs.f1_ai_hosting_build.result == 'success' || needs.f1_ai_hosting_build.result == 'skipped')
     uses: ./.github/workflows/tf_install.yml
     secrets: inherit
 

@@ -7,11 +7,14 @@ each item needs its own follow-up GET to resolve into real data. Used for
 season-wide head coach info (experience, this season's win rate with
 their current team) and per-team current injury reports.
 """
+import logging
 import os
 import re
 from concurrent.futures import ThreadPoolExecutor
 
 from library.http.client import HttpClient
+
+logger = logging.getLogger(__name__)
 
 DEFAULT_ESPN_CORE_API_ROOT_URL = "https://sports.core.api.espn.com/v2/sports/football/leagues/nfl"
 
@@ -58,6 +61,18 @@ class EspnCoreApiClient(HttpClient):
         with ThreadPoolExecutor(max_workers=min(len(urls), DEREF_MAX_WORKERS)) as executor:
             return list(executor.map(self.get_absolute, urls))
 
+    def _resolve_or_none(self, url: str) -> dict | None:
+        """Same single-$ref resolution as get_absolute, but a failing ref
+        (e.g. a 404 for a coach ESPN has no record resource for -- a
+        first-year head coach with no prior season or career-playoff
+        record) is logged and skipped rather than raised, so one bad ref
+        among dozens doesn't take the whole batch down with it."""
+        try:
+            return self.get_absolute(url)
+        except Exception:
+            logger.warning("Failed resolving %s -- skipping", url)
+            return None
+
     def get_season_coaches(self, season: int) -> dict[str, dict]:
         """One head coach per team (32 items across the league) for
         `season`. Returns {team_id: {"coach_id", "coach_name",
@@ -91,7 +106,7 @@ class EspnCoreApiClient(HttpClient):
             if "/types/2/coaches/" in (record.get("record", {}).get("$ref") or "")
         }
         with ThreadPoolExecutor(max_workers=min(len(record_refs) or 1, DEREF_MAX_WORKERS)) as executor:
-            resolved_records = dict(zip(record_refs.keys(), executor.map(self.get_absolute, record_refs.values())))
+            resolved_records = dict(zip(record_refs.keys(), executor.map(self._resolve_or_none, record_refs.values())))
 
         # Third round -- a coach's career postseason record lives on their
         # own person-level resource (.../coaches/{id}/record/3, "3" = Post
@@ -106,7 +121,7 @@ class EspnCoreApiClient(HttpClient):
         }
         with ThreadPoolExecutor(max_workers=min(len(career_postseason_refs) or 1, DEREF_MAX_WORKERS)) as executor:
             resolved_career_postseason = dict(
-                zip(career_postseason_refs.keys(), executor.map(self.get_absolute, career_postseason_refs.values())),
+                zip(career_postseason_refs.keys(), executor.map(self._resolve_or_none, career_postseason_refs.values())),
             )
 
         result: dict[str, dict] = {}
