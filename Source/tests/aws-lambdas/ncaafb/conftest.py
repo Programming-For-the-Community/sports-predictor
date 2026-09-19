@@ -42,11 +42,6 @@ _load_handler("ncaafb_schedule_sync", "aws-lambdas/ncaafb/schedule-sync/handler.
 sys.path.insert(0, os.path.join(_src, "aws-lambdas", "ncaafb", "predict"))
 _load_handler("ncaafb_predict", "aws-lambdas/ncaafb/predict/handler.py")
 
-# predict-read/'s handler.py only ever imports from library.* (no local
-# sibling modules the way predict/'s own files are) -- no sys.path insert
-# needed, just the same unique-module-name registration.
-_load_handler("ncaafb_predict_read", "aws-lambdas/ncaafb/predict-read/handler.py")
-
 # live-scores/'s own live_scores.py has a unique name, unlike handler.py --
 # same pattern as ingest/'s enrichment.py above.
 sys.path.insert(0, os.path.join(_src, "aws-lambdas", "ncaafb", "live-scores"))
@@ -68,20 +63,3 @@ def reset_ncaafb_predict_singletons():
     ncaafb_predict._storage = None
     ncaafb_predict._model_bucket = None
     ncaafb_predict._predictions_table = None
-
-
-@pytest.fixture(autouse=True)
-def reset_ncaafb_predict_read_singletons():
-    ncaafb_predict_read = sys.modules.get("ncaafb_predict_read")
-    if ncaafb_predict_read is None:
-        yield
-        return
-    ncaafb_predict_read._storage = None
-    ncaafb_predict_read._model_bucket = None
-    ncaafb_predict_read._predictions_table = None
-    ncaafb_predict_read._predict_invoker = None
-    yield
-    ncaafb_predict_read._storage = None
-    ncaafb_predict_read._model_bucket = None
-    ncaafb_predict_read._predictions_table = None
-    ncaafb_predict_read._predict_invoker = None

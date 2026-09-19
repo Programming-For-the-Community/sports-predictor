@@ -1,11 +1,11 @@
 # Routes for the two NFL serving Lambdas. All resources sit under
 # aws_api_gateway_rest_api.main (api-gateway.tf).
 #
-#   GET /nfl/events                                              -> nfl_predict_read
-#   GET /nfl/models                                              -> nfl_predict_read
-#   GET /nfl/season                                              -> nfl_predict_read
-#   GET /nfl/predictions/events/{event_id}                       -> nfl_predict_read (cache), async-computed by nfl_predict
-#   GET /nfl/predictions/events/{event_id}/players/{entity_id}   -> nfl_predict_read (cache), async-computed by nfl_predict
+#   GET /nfl/events                                              -> predict_read (shared)
+#   GET /nfl/models                                              -> predict_read (shared)
+#   GET /nfl/season                                              -> predict_read (shared)
+#   GET /nfl/predictions/events/{event_id}                       -> predict_read (shared) (cache), async-computed by nfl_predict
+#   GET /nfl/predictions/events/{event_id}/players/{entity_id}   -> predict_read (shared) (cache), async-computed by nfl_predict
 #
 # Deployment/stage/usage plan resources also live here -- api-gateway.tf
 # defers them since AWS requires at least one method to exist first.
@@ -36,7 +36,7 @@ resource "aws_api_gateway_integration" "nfl_events" {
   http_method             = aws_api_gateway_method.nfl_events.http_method
   type                    = "AWS_PROXY"
   integration_http_method = "POST"
-  uri                     = aws_lambda_function.nfl_predict_read.invoke_arn
+  uri                     = aws_lambda_function.predict_read.invoke_arn
 }
 
 resource "aws_api_gateway_resource" "nfl_models" {
@@ -59,7 +59,7 @@ resource "aws_api_gateway_integration" "nfl_models" {
   http_method             = aws_api_gateway_method.nfl_models.http_method
   type                    = "AWS_PROXY"
   integration_http_method = "POST"
-  uri                     = aws_lambda_function.nfl_predict_read.invoke_arn
+  uri                     = aws_lambda_function.predict_read.invoke_arn
 }
 
 resource "aws_api_gateway_resource" "nfl_season" {
@@ -82,7 +82,7 @@ resource "aws_api_gateway_integration" "nfl_season" {
   http_method             = aws_api_gateway_method.nfl_season.http_method
   type                    = "AWS_PROXY"
   integration_http_method = "POST"
-  uri                     = aws_lambda_function.nfl_predict_read.invoke_arn
+  uri                     = aws_lambda_function.predict_read.invoke_arn
 }
 
 resource "aws_api_gateway_resource" "nfl_predictions" {
@@ -135,7 +135,7 @@ resource "aws_api_gateway_integration" "nfl_predict_event" {
   http_method             = aws_api_gateway_method.nfl_predict_event.http_method
   type                    = "AWS_PROXY"
   integration_http_method = "POST"
-  uri                     = aws_lambda_function.nfl_predict_read.invoke_arn # cache read-through
+  uri                     = aws_lambda_function.predict_read.invoke_arn # cache read-through
 }
 
 # --- GET /nfl/predictions/events/{event_id}/players/{entity_id} -------------
@@ -160,7 +160,7 @@ resource "aws_api_gateway_integration" "nfl_predict_player" {
   http_method             = aws_api_gateway_method.nfl_predict_player.http_method
   type                    = "AWS_PROXY"
   integration_http_method = "POST"
-  uri                     = aws_lambda_function.nfl_predict_read.invoke_arn
+  uri                     = aws_lambda_function.predict_read.invoke_arn
 }
 
 # --- CORS preflight (OPTIONS) -------------------------------------------

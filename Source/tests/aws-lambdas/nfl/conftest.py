@@ -38,8 +38,6 @@ _load_handler("nfl_schedule_sync", "aws-lambdas/nfl/schedule-sync/handler.py")
 sys.path.insert(0, os.path.join(_src, "aws-lambdas", "nfl", "predict"))
 _load_handler("nfl_predict", "aws-lambdas/nfl/predict/handler.py")
 
-_load_handler("nfl_predict_read", "aws-lambdas/nfl/predict-read/handler.py")
-
 sys.path.insert(0, os.path.join(_src, "aws-lambdas", "nfl", "live-scores"))
 _load_handler("nfl_live_scores", "aws-lambdas/nfl/live-scores/handler.py")
 
@@ -52,9 +50,8 @@ def reset_nfl_predict_singletons():
     regardless of which handler a given file actually exercises, and
     resetting three attributes that already default to None is a no-op
     for anything that never touches them. Named with the nfl_predict_
-    prefix (not a bare reset_singletons) so it can't collide with
-    nfl_predict_read's own separate reset_singletons fixture in
-    test_predict_read.py."""
+    prefix (not a bare reset_singletons) to keep it distinct from other
+    per-module reset fixtures in this same directory."""
     nfl_predict = sys.modules.get("nfl_predict")
     if nfl_predict is None:
         yield

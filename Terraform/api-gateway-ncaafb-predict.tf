@@ -1,11 +1,11 @@
 # Routes for the two NCAAFB serving Lambdas under aws_api_gateway_rest_api.main.
 # Deployment/stage/usage-plan are managed in api-gateway-nfl-predict.tf.
 #
-#   GET /ncaafb/events                                              -> ncaafb_predict_read
-#   GET /ncaafb/models                                              -> ncaafb_predict_read
-#   GET /ncaafb/season                                              -> ncaafb_predict_read
-#   GET /ncaafb/predictions/events/{event_id}                       -> ncaafb_predict_read (cache), async-computed by ncaafb_predict
-#   GET /ncaafb/predictions/events/{event_id}/players/{entity_id}   -> ncaafb_predict_read (cache), async-computed by ncaafb_predict
+#   GET /ncaafb/events                                              -> predict_read (shared)
+#   GET /ncaafb/models                                              -> predict_read (shared)
+#   GET /ncaafb/season                                              -> predict_read (shared)
+#   GET /ncaafb/predictions/events/{event_id}                       -> predict_read (shared) (cache), async-computed by ncaafb_predict
+#   GET /ncaafb/predictions/events/{event_id}/players/{entity_id}   -> predict_read (shared) (cache), async-computed by ncaafb_predict
 
 resource "aws_api_gateway_resource" "ncaafb" {
   rest_api_id = aws_api_gateway_rest_api.main.id
@@ -33,7 +33,7 @@ resource "aws_api_gateway_integration" "ncaafb_events" {
   http_method             = aws_api_gateway_method.ncaafb_events.http_method
   type                    = "AWS_PROXY"
   integration_http_method = "POST"
-  uri                     = aws_lambda_function.ncaafb_predict_read.invoke_arn
+  uri                     = aws_lambda_function.predict_read.invoke_arn
 }
 
 resource "aws_api_gateway_resource" "ncaafb_models" {
@@ -56,7 +56,7 @@ resource "aws_api_gateway_integration" "ncaafb_models" {
   http_method             = aws_api_gateway_method.ncaafb_models.http_method
   type                    = "AWS_PROXY"
   integration_http_method = "POST"
-  uri                     = aws_lambda_function.ncaafb_predict_read.invoke_arn
+  uri                     = aws_lambda_function.predict_read.invoke_arn
 }
 
 resource "aws_api_gateway_resource" "ncaafb_season" {
@@ -79,7 +79,7 @@ resource "aws_api_gateway_integration" "ncaafb_season" {
   http_method             = aws_api_gateway_method.ncaafb_season.http_method
   type                    = "AWS_PROXY"
   integration_http_method = "POST"
-  uri                     = aws_lambda_function.ncaafb_predict_read.invoke_arn
+  uri                     = aws_lambda_function.predict_read.invoke_arn
 }
 
 resource "aws_api_gateway_resource" "ncaafb_predictions" {
@@ -132,7 +132,7 @@ resource "aws_api_gateway_integration" "ncaafb_predict_event" {
   http_method             = aws_api_gateway_method.ncaafb_predict_event.http_method
   type                    = "AWS_PROXY"
   integration_http_method = "POST"
-  uri                     = aws_lambda_function.ncaafb_predict_read.invoke_arn # cache read-through
+  uri                     = aws_lambda_function.predict_read.invoke_arn # cache read-through
 }
 
 # --- GET /ncaafb/predictions/events/{event_id}/players/{entity_id} -------------
@@ -157,7 +157,7 @@ resource "aws_api_gateway_integration" "ncaafb_predict_player" {
   http_method             = aws_api_gateway_method.ncaafb_predict_player.http_method
   type                    = "AWS_PROXY"
   integration_http_method = "POST"
-  uri                     = aws_lambda_function.ncaafb_predict_read.invoke_arn
+  uri                     = aws_lambda_function.predict_read.invoke_arn
 }
 
 # --- CORS preflight (OPTIONS) -------------------------------------------

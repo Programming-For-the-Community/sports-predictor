@@ -79,3 +79,8 @@ output "cloudwatch_geo_widget_function_name" {
   description = "Shared cloudwatch-geo-widget Lambda function name -- passed to shared_lambdas_deploy workflow for `aws lambda update-function-code`"
   value       = aws_lambda_function.cloudwatch_geo_widget.function_name
 }
+
+output "predict_read_function_name" {
+  description = "Shared predict-read Lambda function name (serves all 6 sports) -- passed to shared_lambdas_deploy workflow for `aws lambda update-function-code`"
+  value       = aws_lambda_function.predict_read.function_name
+}

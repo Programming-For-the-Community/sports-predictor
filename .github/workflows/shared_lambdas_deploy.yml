@@ -1,14 +1,18 @@
 # Builds and deploys the season-gate Lambda (Terraform/lambda-season-gate.tf,
 # shared across every sport's orchestrator state machine), the
-# cloudwatch-geo-widget Lambda, and the ec2-training-reaper Lambda.
+# cloudwatch-geo-widget Lambda, the ec2-training-reaper Lambda, and the
+# predict-read Lambda (Terraform/lambda-predict-read.tf -- the shared
+# read-only serving Lambda for all 6 sports, consolidated from 6 separate
+# per-sport Lambdas 2026-09-19).
 # Build+deploy only -- no test, no scan. The caller (each sport's own
 # _deploy.yml and app_deploy.yml) is responsible for testing
 # Source/tests/library/test_season.py, test_season_gate.py,
-# test_cloudwatch_geo_widget.py, and test_ec2_training_reaper.py directly
-# and folding them into that pipeline's own single SonarQube Cloud scan --
-# a scan job can't depend on jobs nested inside a called reusable
-# workflow, only a sibling job in the SAME calling file, so those tests
-# can't live inside this file if every caller is to have exactly one scan.
+# test_cloudwatch_geo_widget.py, test_ec2_training_reaper.py, and
+# Source/tests/aws-lambdas/shared/test_predict_read.py directly and
+# folding them into that pipeline's own single SonarQube Cloud scan -- a
+# scan job can't depend on jobs nested inside a called reusable workflow,
+# only a sibling job in the SAME calling file, so those tests can't live
+# inside this file if every caller is to have exactly one scan.
 
 name: Shared Lambdas Deploy
 
@@ -30,6 +34,11 @@ on:
         required: false
         type: string
         default: 'sports-predictor-ec2-training-reaper'
+      predict_read_function_name:
+        description: 'predict-read Lambda function name (from Terraform output predict_read_function_name)'
+        required: false
+        type: string
+        default: 'sports-predictor-predict-read'
   workflow_call:
     inputs: *inputs
 
@@ -87,3 +96,20 @@ jobs:
     with:
       function_name: ${{ inputs.ec2_training_reaper_function_name || 'sports-predictor-ec2-training-reaper' }}
       artifact_name: ${{ needs.build_ec2_training_reaper.outputs.artifact_name }}
+
+  build_predict_read:
+    name: Build predict-read Lambda
+    uses: ./.github/workflows/python_lambda_build.yml
+    with:
+      function_name: ${{ inputs.predict_read_function_name || 'sports-predictor-predict-read' }}
+      handler_dir: 'Source/aws-lambdas/shared/predict-read'
+      library_path: 'Source/library'
+
+  deploy_predict_read:
+    name: Deploy predict-read Lambda
+    needs: build_predict_read
+    uses: ./.github/workflows/python_lambda_deploy.yml
+    secrets: inherit
+    with:
+      function_name: ${{ inputs.predict_read_function_name || 'sports-predictor-predict-read' }}
+      artifact_name: ${{ needs.build_predict_read.outputs.artifact_name }}

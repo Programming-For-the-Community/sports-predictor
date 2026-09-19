@@ -18,6 +18,11 @@
 #
 # Code is deployed by the pga_data_pipeline GitHub Actions workflow, not
 # by Terraform.
+#
+# VPC-attached, private subnets, aws_security_group.lambda_pipeline
+# (security-groups.tf) -- only touches S3/DynamoDB (via the Gateway
+# Endpoints in vpc-endpoints.tf), never a sport's public data API, so
+# unlike ingest/live-scores it has no need for a public route out.
 
 resource "aws_cloudwatch_log_group" "pga_normalize" {
   name              = "/aws/lambda/${var.project}-pga-normalize"
@@ -66,6 +71,11 @@ resource "aws_lambda_function" "pga_normalize" {
       PLAYER_GAME_STATS_TABLE_NAME = aws_dynamodb_table.player_game_stats.name
       TEAM_GAME_STATS_TABLE_NAME   = aws_dynamodb_table.team_game_stats.name
     }
+  }
+
+  vpc_config {
+    subnet_ids         = [aws_subnet.private_a.id, aws_subnet.private_b.id, aws_subnet.private_c.id]
+    security_group_ids = [aws_security_group.lambda_pipeline.id]
   }
 
   logging_config {

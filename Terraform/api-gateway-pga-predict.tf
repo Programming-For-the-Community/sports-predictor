@@ -3,10 +3,10 @@
 # see that file's own "PGA routes" block appended to its redeployment-
 # trigger sha1 list.
 #
-#   GET /pga/events                          -> pga_predict_read
-#   GET /pga/models                          -> pga_predict_read
-#   GET /pga/season                          -> pga_predict_read (cache), async-computed weekly by pga_predict
-#   GET /pga/predictions/events/{event_id}   -> pga_predict_read (cache), async-computed by pga_predict
+#   GET /pga/events                          -> predict_read (shared)
+#   GET /pga/models                          -> predict_read (shared)
+#   GET /pga/season                          -> predict_read (shared) (cache), async-computed weekly by pga_predict
+#   GET /pga/predictions/events/{event_id}   -> predict_read (shared) (cache), async-computed by pga_predict
 #   GET /pga/live-scores                     -> pga_live_scores (api-gateway-pga-live-scores.tf, separate Lambda)
 #
 # No per-golfer prediction sub-route (unlike NBA's .../players/{entity_id})
@@ -40,7 +40,7 @@ resource "aws_api_gateway_integration" "pga_events" {
   http_method             = aws_api_gateway_method.pga_events.http_method
   type                    = "AWS_PROXY"
   integration_http_method = "POST"
-  uri                     = aws_lambda_function.pga_predict_read.invoke_arn
+  uri                     = aws_lambda_function.predict_read.invoke_arn
 }
 
 resource "aws_api_gateway_resource" "pga_models" {
@@ -63,7 +63,7 @@ resource "aws_api_gateway_integration" "pga_models" {
   http_method             = aws_api_gateway_method.pga_models.http_method
   type                    = "AWS_PROXY"
   integration_http_method = "POST"
-  uri                     = aws_lambda_function.pga_predict_read.invoke_arn
+  uri                     = aws_lambda_function.predict_read.invoke_arn
 }
 
 resource "aws_api_gateway_resource" "pga_season" {
@@ -86,7 +86,7 @@ resource "aws_api_gateway_integration" "pga_season" {
   http_method             = aws_api_gateway_method.pga_season.http_method
   type                    = "AWS_PROXY"
   integration_http_method = "POST"
-  uri                     = aws_lambda_function.pga_predict_read.invoke_arn
+  uri                     = aws_lambda_function.predict_read.invoke_arn
 }
 
 resource "aws_api_gateway_resource" "pga_predictions" {
@@ -127,7 +127,7 @@ resource "aws_api_gateway_integration" "pga_predict_event" {
   http_method             = aws_api_gateway_method.pga_predict_event.http_method
   type                    = "AWS_PROXY"
   integration_http_method = "POST"
-  uri                     = aws_lambda_function.pga_predict_read.invoke_arn # cache read-through
+  uri                     = aws_lambda_function.predict_read.invoke_arn # cache read-through
 }
 
 # --- CORS preflight (OPTIONS) -------------------------------------------

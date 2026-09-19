@@ -321,17 +321,19 @@ class _TeamLeadersComparisonColumn extends StatelessWidget {
         Text(label, style: AppTextStyles.cardTitle()),
         const SizedBox(height: 12),
         for (final category in _categoriesFor(sport))
-          if (team[category.key].isNotEmpty) _ComparisonCategorySection(title: category.title, players: team[category.key]),
+          if (team[category.key].isNotEmpty)
+            _ComparisonCategorySection(title: category.title, players: team[category.key], statKeys: category.statKeys),
       ],
     );
   }
 }
 
 class _ComparisonCategorySection extends StatelessWidget {
-  const _ComparisonCategorySection({required this.title, required this.players});
+  const _ComparisonCategorySection({required this.title, required this.players, required this.statKeys});
 
   final String title;
   final List<PlayerStatLineComparison> players;
+  final List<String> statKeys;
 
   @override
   Widget build(BuildContext context) {
@@ -342,7 +344,7 @@ class _ComparisonCategorySection extends StatelessWidget {
         children: [
           Text(title.toUpperCase(), style: AppTextStyles.microLabel()),
           const SizedBox(height: 6),
-          for (final player in players) _ComparisonPlayerRow(player: player),
+          for (final player in players) _ComparisonPlayerRow(player: player, statKeys: statKeys),
         ],
       ),
     );
@@ -350,9 +352,10 @@ class _ComparisonCategorySection extends StatelessWidget {
 }
 
 class _ComparisonPlayerRow extends StatelessWidget {
-  const _ComparisonPlayerRow({required this.player});
+  const _ComparisonPlayerRow({required this.player, required this.statKeys});
 
   final PlayerStatLineComparison player;
+  final List<String> statKeys;
 
   @override
   Widget build(BuildContext context) {
@@ -363,16 +366,25 @@ class _ComparisonPlayerRow extends StatelessWidget {
     // predicted-blue convention field_leaderboard_table.dart's
     // _RoundCell/_StandingCell use for PGA, color alone distinguishing
     // the two numbers instead of a parenthetical.
+    //
+    // Iterates statKeys (the category's own fixed YDS-then-TD order,
+    // same as _PlayerRow's predicted-only counterpart) rather than
+    // player.predicted.entries directly -- a Map's iteration order
+    // follows insertion order, which just reflected whatever order the
+    // API happened to serialize predicted_value's keys in, not this
+    // panel's own intended display order.
     final spans = <InlineSpan>[];
     var first = true;
-    for (final entry in player.predicted.entries) {
-      final label = _statShortLabels[entry.key] ?? entry.key.toUpperCase();
-      final actual = player.actual[entry.key];
+    for (final key in statKeys) {
+      final predicted = player.predicted[key];
+      if (predicted == null) continue;
+      final label = _statShortLabels[key] ?? key.toUpperCase();
+      final actual = player.actual[key];
       final actualText = actual != null ? actual.toStringAsFixed(0) : '--';
       if (!first) spans.add(TextSpan(text: ' · ', style: AppTextStyles.metricValue(color: AppColors.inkMute)));
       first = false;
       spans.add(TextSpan(text: '$actualText $label ', style: AppTextStyles.metricValue(color: AppColors.ink)));
-      spans.add(TextSpan(text: entry.value.toStringAsFixed(0), style: AppTextStyles.metricValue(color: AppColors.cyan)));
+      spans.add(TextSpan(text: predicted.toStringAsFixed(0), style: AppTextStyles.metricValue(color: AppColors.cyan)));
     }
 
     return _PlayerStatRow(name: player.displayName, spans: spans);

@@ -160,10 +160,43 @@ jobs:
             echo "::group::coverage.xml"
             head -c 2000 coverage.xml
             echo "::endgroup::"
+
+            # Confirms coverage.xml's recorded <source>/filename paths are
+            # actually relative to Source/ (what sonar.sources=Source
+            # expects) rather than absolute runner paths or relative to the
+            # repo root -- a mismatch here is the other documented way
+            # SonarQube Cloud silently shows 0% coverage even when a
+            # non-empty report_path is passed (see the "Resolved
+            # sonar-scanner arguments" step's own comment below).
+            echo "::group::coverage.xml -- <sources> and a sample of recorded filenames"
+            grep -o '<source>[^<]*</source>' coverage.xml || echo "(no <source> element found)"
+            grep -o 'filename="[^"]*"' coverage.xml | head -10
+            echo "Total <class> entries: $(grep -o '<class ' coverage.xml | wc -l)"
+            echo "::endgroup::"
+
             echo "report_path=coverage.xml" >> "$GITHUB_OUTPUT"
           else
             echo "report_path=" >> "$GITHUB_OUTPUT"
           fi
+
+          # Which of the ~55 run_python_tests.yml callers actually produced
+          # a .coverage file this run vs which artifacts came back empty --
+          # narrows down "coverage isn't showing up" to specific components
+          # instead of a single repo-wide percentage.
+          echo "::group::Per-job coverage artifact status"
+          if [ -d coverage-artifacts ]; then
+            for d in coverage-artifacts/*/; do
+              name="$(basename "$d")"
+              if [ -f "${d}.coverage" ]; then
+                echo "OK   $name ($(stat -c%s "${d}.coverage" 2>/dev/null || echo '?') bytes)"
+              else
+                echo "MISS $name (no .coverage file in this artifact)"
+              fi
+            done
+          else
+            echo "(coverage-artifacts directory not present -- zero test jobs uploaded anything this run)"
+          fi
+          echo "::endgroup::"
 
       - name: Resolve scanner args
         id: scanner_args

@@ -1,11 +1,11 @@
 # Routes for the two NBA serving Lambdas under aws_api_gateway_rest_api.main.
 # Deployment/stage/usage-plan are managed in api-gateway-nfl-predict.tf.
 #
-#   GET /nba/events                                              -> nba_predict_read
-#   GET /nba/models                                              -> nba_predict_read
-#   GET /nba/season                                              -> nba_predict_read
-#   GET /nba/predictions/events/{event_id}                       -> nba_predict_read (cache), async-computed by nba_predict
-#   GET /nba/predictions/events/{event_id}/players/{entity_id}   -> nba_predict_read (cache), async-computed by nba_predict
+#   GET /nba/events                                              -> predict_read (shared)
+#   GET /nba/models                                              -> predict_read (shared)
+#   GET /nba/season                                              -> predict_read (shared)
+#   GET /nba/predictions/events/{event_id}                       -> predict_read (shared) (cache), async-computed by nba_predict
+#   GET /nba/predictions/events/{event_id}/players/{entity_id}   -> predict_read (shared) (cache), async-computed by nba_predict
 
 resource "aws_api_gateway_resource" "nba" {
   rest_api_id = aws_api_gateway_rest_api.main.id
@@ -33,7 +33,7 @@ resource "aws_api_gateway_integration" "nba_events" {
   http_method             = aws_api_gateway_method.nba_events.http_method
   type                    = "AWS_PROXY"
   integration_http_method = "POST"
-  uri                     = aws_lambda_function.nba_predict_read.invoke_arn
+  uri                     = aws_lambda_function.predict_read.invoke_arn
 }
 
 resource "aws_api_gateway_resource" "nba_models" {
@@ -56,7 +56,7 @@ resource "aws_api_gateway_integration" "nba_models" {
   http_method             = aws_api_gateway_method.nba_models.http_method
   type                    = "AWS_PROXY"
   integration_http_method = "POST"
-  uri                     = aws_lambda_function.nba_predict_read.invoke_arn
+  uri                     = aws_lambda_function.predict_read.invoke_arn
 }
 
 resource "aws_api_gateway_resource" "nba_season" {
@@ -79,7 +79,7 @@ resource "aws_api_gateway_integration" "nba_season" {
   http_method             = aws_api_gateway_method.nba_season.http_method
   type                    = "AWS_PROXY"
   integration_http_method = "POST"
-  uri                     = aws_lambda_function.nba_predict_read.invoke_arn
+  uri                     = aws_lambda_function.predict_read.invoke_arn
 }
 
 resource "aws_api_gateway_resource" "nba_predictions" {
@@ -132,7 +132,7 @@ resource "aws_api_gateway_integration" "nba_predict_event" {
   http_method             = aws_api_gateway_method.nba_predict_event.http_method
   type                    = "AWS_PROXY"
   integration_http_method = "POST"
-  uri                     = aws_lambda_function.nba_predict_read.invoke_arn # cache read-through
+  uri                     = aws_lambda_function.predict_read.invoke_arn # cache read-through
 }
 
 # --- GET /nba/predictions/events/{event_id}/players/{entity_id} -------------
@@ -157,7 +157,7 @@ resource "aws_api_gateway_integration" "nba_predict_player" {
   http_method             = aws_api_gateway_method.nba_predict_player.http_method
   type                    = "AWS_PROXY"
   integration_http_method = "POST"
-  uri                     = aws_lambda_function.nba_predict_read.invoke_arn
+  uri                     = aws_lambda_function.predict_read.invoke_arn
 }
 
 # --- CORS preflight (OPTIONS) -------------------------------------------

@@ -19,7 +19,7 @@ resource "aws_cloudwatch_log_group" "pga_predict" {
 
 resource "aws_lambda_function" "pga_predict" {
   function_name = "${var.project}-pga-predict"
-  description   = "Computes PGA field/match-play/cup predictions in the background. Never called by API Gateway -- invoked by an async invoke from pga_predict_read on a cache miss. See predict/handler.py."
+  description   = "Computes PGA field/match-play/cup predictions in the background. Never called by API Gateway -- invoked by an async invoke from the shared predict-read Lambda on a cache miss. See predict/handler.py."
   role          = aws_iam_role.lambda_inference.arn
   package_type  = "Image"
   image_uri     = "${var.ecr_repo_url}:pga-predict-latest"

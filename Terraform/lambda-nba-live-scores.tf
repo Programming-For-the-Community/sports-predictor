@@ -44,6 +44,12 @@ resource "aws_lambda_function" "nba_live_scores" {
 
   environment {
     variables = {
+      # Missing here since this Lambda was first created -- live_scores.py's
+      # get_cache/put_cache have always passed ExpectedBucketOwner=
+      # get_account_id() to s3.get_object/put_object, which raises without
+      # this, so every real invocation fails outright. Found via a real
+      # production error 2026-09-19.
+      AWS_ACCOUNT_ID    = var.account_id
       RAW_BUCKET_NAME   = aws_s3_bucket.raw_data_lake.bucket
       ESPN_API_ROOT_URL = var.espn_api_root_url
       ESPN_USER_AGENT   = var.espn_user_agent

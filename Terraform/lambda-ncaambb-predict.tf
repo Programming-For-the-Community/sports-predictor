@@ -15,7 +15,7 @@ resource "aws_cloudwatch_log_group" "ncaambb_predict" {
 
 resource "aws_lambda_function" "ncaambb_predict" {
   function_name = "${var.project}-ncaambb-predict"
-  description   = "Computes NCAA MBB event-outcome and player-prop predictions in the background. Never called by API Gateway -- invoked async from ncaambb_predict_read on a cache miss. See predict/handler.py."
+  description   = "Computes NCAA MBB event-outcome and player-prop predictions in the background. Never called by API Gateway -- invoked async from the shared predict-read Lambda on a cache miss. See predict/handler.py."
   role          = aws_iam_role.lambda_inference.arn
   package_type  = "Image"
   image_uri     = "${var.ecr_repo_url}:ncaambb-predict-latest"

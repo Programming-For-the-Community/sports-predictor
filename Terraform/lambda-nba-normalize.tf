@@ -8,6 +8,12 @@
 #
 # Code is deployed by the nba_data_pipeline GitHub Actions workflow, not
 # by Terraform.
+#
+# VPC-attached, private subnets, aws_security_group.lambda_pipeline
+# (security-groups.tf) -- only touches S3/DynamoDB (via the Gateway
+# Endpoints in vpc-endpoints.tf), never a sport's public data API, so
+# unlike ingest/live-scores/schedule-sync it has no need for a public
+# route out.
 
 resource "aws_cloudwatch_log_group" "nba_normalize" {
   name              = "/aws/lambda/${var.project}-nba-normalize"
@@ -55,6 +61,11 @@ resource "aws_lambda_function" "nba_normalize" {
       # regardless of which one a given invocation actually writes to.
       TEAM_GAME_STATS_TABLE_NAME = aws_dynamodb_table.team_game_stats.name
     }
+  }
+
+  vpc_config {
+    subnet_ids         = [aws_subnet.private_a.id, aws_subnet.private_b.id, aws_subnet.private_c.id]
+    security_group_ids = [aws_security_group.lambda_pipeline.id]
   }
 
   logging_config {

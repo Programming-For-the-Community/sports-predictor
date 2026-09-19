@@ -237,7 +237,7 @@ resource "aws_sfn_state_machine" "training_orchestrator" {
                     "NetworkConfiguration": {
                       "AwsvpcConfiguration": {
                         "Subnets": ["${aws_subnet.private_a.id}", "${aws_subnet.private_b.id}", "${aws_subnet.private_c.id}"],
-                        "SecurityGroups": ["${aws_security_group.fargate_internet_egress.id}"]
+                        "SecurityGroups": ["${aws_security_group.ecs_pipeline.id}"]
                       }
                     },
                     "Overrides": {
@@ -292,7 +292,7 @@ resource "aws_sfn_state_machine" "training_orchestrator" {
                     "NetworkConfiguration": {
                       "AwsvpcConfiguration": {
                         "Subnets": ["${aws_subnet.private_a.id}", "${aws_subnet.private_b.id}", "${aws_subnet.private_c.id}"],
-                        "SecurityGroups": ["${aws_security_group.fargate_internet_egress.id}"]
+                        "SecurityGroups": ["${aws_security_group.ecs_pipeline.id}"]
                       }
                     },
                     "Overrides": {
@@ -347,7 +347,8 @@ resource "aws_sfn_state_machine" "training_orchestrator" {
       "Catch": [
         {
           "ErrorEquals": ["States.ALL"],
-          "ResultPath": "$.scale_down_spot_error",
+          "Comment": "ResultPath null, not a named path -- $ is still ForEachSport's own array output here (nothing before this reshapes it), and States.ReferencePathConflict rejects assigning a property onto a JSON array. Confirmed via a real failed execution 2026-09-19 (this same bug on InvokeReaperAfterCompletion's own Catch turned an intended best-effort skip into a full ExecutionFailed).",
+          "ResultPath": null,
           "Next": "ScaleDownTrainingOnDemandCapacity"
         }
       ],
@@ -365,7 +366,7 @@ resource "aws_sfn_state_machine" "training_orchestrator" {
       "Catch": [
         {
           "ErrorEquals": ["States.ALL"],
-          "ResultPath": "$.scale_down_ondemand_error",
+          "ResultPath": null,
           "Next": "WaitForLingeringInstances"
         }
       ],
@@ -373,8 +374,8 @@ resource "aws_sfn_state_machine" "training_orchestrator" {
     },
     "WaitForLingeringInstances": {
       "Type": "Wait",
-      "Comment": "20 minutes -- ScaleDownTrainingOnDemandCapacity above only sets DesiredCapacity to 0; a real run has still taken 30-40 minutes for the ASG to actually terminate the now-unwanted instances (managed_termination_protection waits for a task to genuinely finish first). Free: Standard workflows bill per state transition, not wall-clock duration.",
-      "Seconds": 1200,
+      "Comment": "10 minutes -- ScaleDownTrainingOnDemandCapacity above only sets DesiredCapacity to 0; native managed_scaling scale-in has taken 30-40 minutes to actually terminate the now-unwanted instances on its own (managed_termination_protection waits for a task to genuinely finish first), well past either wait length, so this isn't giving native scale-in time to finish -- it's just a short buffer before InvokeReaperAfterCompletion force-terminates via autoscaling:TerminateInstanceInAutoScalingGroup (which doesn't wait on native scale-in at all). Shortened from 20 minutes 2026-09-19 to cut idle EC2 billing time, now that the reaper's own ecs:DescribeContainerInstances permission gap (this same date) is fixed and it can actually reap on the first try. Free: Standard workflows bill per state transition, not wall-clock duration.",
+      "Seconds": 600,
       "Next": "InvokeReaperAfterCompletion"
     },
     "InvokeReaperAfterCompletion": {
@@ -388,7 +389,7 @@ resource "aws_sfn_state_machine" "training_orchestrator" {
       "Catch": [
         {
           "ErrorEquals": ["States.ALL"],
-          "ResultPath": "$.reaper_invoke_error",
+          "ResultPath": null,
           "Next": "TrainingOrchestratorDone"
         }
       ],

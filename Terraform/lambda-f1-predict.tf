@@ -18,7 +18,7 @@ resource "aws_cloudwatch_log_group" "f1_predict" {
 
 resource "aws_lambda_function" "f1_predict" {
   function_name = "${var.project}-f1-predict"
-  description   = "Computes F1 field/sprint predictions in the background. Never called by API Gateway -- invoked by an async invoke from f1_predict_read on a cache miss. See predict/handler.py."
+  description   = "Computes F1 field/sprint predictions in the background. Never called by API Gateway -- invoked by an async invoke from the shared predict-read Lambda on a cache miss. See predict/handler.py."
   role          = aws_iam_role.lambda_inference.arn
   package_type  = "Image"
   image_uri     = "${var.ecr_repo_url}:f1-predict-latest"

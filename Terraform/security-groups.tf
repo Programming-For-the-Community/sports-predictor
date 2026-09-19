@@ -27,6 +27,32 @@ resource "aws_security_group" "lambda_inference" {
   })
 }
 
+# Security group for the normalize Lambdas (all 6 sports). No inbound --
+# triggered by S3 event notifications, not through a network port. These
+# never call a sport's public data API directly (that's ingest's job) --
+# they only read the raw JSON ingest already wrote to S3 and upsert it into
+# DynamoDB, both reachable via the VPC Gateway Endpoints below, so outbound
+# is scoped to just those two endpoints' prefix lists, same as
+# lambda_inference above, not a general "0.0.0.0/0" allowance.
+resource "aws_security_group" "lambda_pipeline" {
+  name        = "${var.project}-lambda-pipeline"
+  description = "Normalize Lambdas -- outbound HTTPS to VPC endpoints only"
+  vpc_id      = var.vpc_id
+
+  egress {
+    from_port       = 443
+    to_port         = 443
+    protocol        = "tcp"
+    prefix_list_ids = [aws_vpc_endpoint.s3.prefix_list_id, aws_vpc_endpoint.dynamodb.prefix_list_id]
+    description     = "HTTPS to DynamoDB and S3 via VPC Gateway Endpoints"
+  }
+
+  tags = merge(local.common_tags, {
+    Sport     = "shared"
+    Component = "ingestion"
+  })
+}
+
 # Security group for the Feature Engineering and Train Model Fargate tasks.
 # No inbound -- tasks are launched by EventBridge or Step Functions via
 # ECS RunTask, not through a network port. Outbound HTTPS covers DynamoDB

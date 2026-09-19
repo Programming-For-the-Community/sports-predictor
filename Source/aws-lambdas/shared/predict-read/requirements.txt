@@ -1,0 +1,11 @@
+# boto3 is pre-installed in the Lambda Python runtime -- not bundled here.
+# The shared library (Source/library) is installed separately by the build
+# workflow via `pip install --no-deps Source/library -t package/`.
+#
+# Deliberately empty otherwise -- this Lambda's whole reason for existing
+# is to need NOTHING beyond boto3 + the library package (same as every one
+# of the 6 per-sport predict-read Lambdas it replaces). If a future change
+# to any library.serving.<sport>_reads module ever needs a real
+# third-party dependency, think hard before adding it here -- that's
+# exactly the cold-start cost those Lambdas were split out to avoid, now
+# shared across all 6 sports' traffic in one function.

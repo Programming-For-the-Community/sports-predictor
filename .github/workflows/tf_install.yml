@@ -59,9 +59,9 @@ on:
       ec2_training_reaper_function_name:
         description: 'Shared ec2-training-reaper Lambda function name'
         value: ${{ jobs.terraform.outputs.ec2_training_reaper_function_name }}
-      nfl_predict_read_function_name:
-        description: 'NFL predict-read Lambda function name'
-        value: ${{ jobs.terraform.outputs.nfl_predict_read_function_name }}
+      predict_read_function_name:
+        description: 'Shared predict-read Lambda function name (serves all 6 sports)'
+        value: ${{ jobs.terraform.outputs.predict_read_function_name }}
       nfl_live_scores_function_name:
         description: 'NFL live-scores Lambda function name'
         value: ${{ jobs.terraform.outputs.nfl_live_scores_function_name }}
@@ -77,9 +77,6 @@ on:
       ncaafb_predict_function_name:
         description: 'NCAAFB predict Lambda function name'
         value: ${{ jobs.terraform.outputs.ncaafb_predict_function_name }}
-      ncaafb_predict_read_function_name:
-        description: 'NCAAFB predict-read Lambda function name'
-        value: ${{ jobs.terraform.outputs.ncaafb_predict_read_function_name }}
       ncaafb_live_scores_function_name:
         description: 'NCAAFB live-scores Lambda function name'
         value: ${{ jobs.terraform.outputs.ncaafb_live_scores_function_name }}
@@ -95,9 +92,6 @@ on:
       nba_predict_function_name:
         description: 'NBA predict Lambda function name'
         value: ${{ jobs.terraform.outputs.nba_predict_function_name }}
-      nba_predict_read_function_name:
-        description: 'NBA predict-read Lambda function name'
-        value: ${{ jobs.terraform.outputs.nba_predict_read_function_name }}
       nba_live_scores_function_name:
         description: 'NBA live-scores Lambda function name'
         value: ${{ jobs.terraform.outputs.nba_live_scores_function_name }}
@@ -113,9 +107,6 @@ on:
       ncaambb_predict_function_name:
         description: 'NCAA MBB predict Lambda function name'
         value: ${{ jobs.terraform.outputs.ncaambb_predict_function_name }}
-      ncaambb_predict_read_function_name:
-        description: 'NCAA MBB predict-read Lambda function name'
-        value: ${{ jobs.terraform.outputs.ncaambb_predict_read_function_name }}
       ncaambb_live_scores_function_name:
         description: 'NCAA MBB live-scores Lambda function name'
         value: ${{ jobs.terraform.outputs.ncaambb_live_scores_function_name }}
@@ -131,9 +122,6 @@ on:
       pga_predict_function_name:
         description: 'PGA predict Lambda function name'
         value: ${{ jobs.terraform.outputs.pga_predict_function_name }}
-      pga_predict_read_function_name:
-        description: 'PGA predict-read Lambda function name'
-        value: ${{ jobs.terraform.outputs.pga_predict_read_function_name }}
       pga_live_scores_function_name:
         description: 'PGA live-scores Lambda function name'
         value: ${{ jobs.terraform.outputs.pga_live_scores_function_name }}
@@ -146,9 +134,6 @@ on:
       f1_predict_function_name:
         description: 'F1 predict Lambda function name'
         value: ${{ jobs.terraform.outputs.f1_predict_function_name }}
-      f1_predict_read_function_name:
-        description: 'F1 predict-read Lambda function name'
-        value: ${{ jobs.terraform.outputs.f1_predict_read_function_name }}
       f1_live_scores_function_name:
         description: 'F1 live-scores Lambda function name'
         value: ${{ jobs.terraform.outputs.f1_live_scores_function_name }}
@@ -219,36 +204,31 @@ jobs:
       nfl_predict_function_name: ${{ steps.tf_outputs.outputs.nfl_predict_function_name }}
       season_gate_function_name: ${{ steps.tf_outputs.outputs.season_gate_function_name }}
       ec2_training_reaper_function_name: ${{ steps.tf_outputs.outputs.ec2_training_reaper_function_name }}
-      nfl_predict_read_function_name: ${{ steps.tf_outputs.outputs.nfl_predict_read_function_name }}
+      predict_read_function_name: ${{ steps.tf_outputs.outputs.predict_read_function_name }}
       nfl_live_scores_function_name: ${{ steps.tf_outputs.outputs.nfl_live_scores_function_name }}
       ncaafb_ingest_function_name: ${{ steps.tf_outputs.outputs.ncaafb_ingest_function_name }}
       ncaafb_normalize_function_name: ${{ steps.tf_outputs.outputs.ncaafb_normalize_function_name }}
       ncaafb_schedule_sync_function_name: ${{ steps.tf_outputs.outputs.ncaafb_schedule_sync_function_name }}
       ncaafb_predict_function_name: ${{ steps.tf_outputs.outputs.ncaafb_predict_function_name }}
-      ncaafb_predict_read_function_name: ${{ steps.tf_outputs.outputs.ncaafb_predict_read_function_name }}
       ncaafb_live_scores_function_name: ${{ steps.tf_outputs.outputs.ncaafb_live_scores_function_name }}
       nba_ingest_function_name: ${{ steps.tf_outputs.outputs.nba_ingest_function_name }}
       nba_normalize_function_name: ${{ steps.tf_outputs.outputs.nba_normalize_function_name }}
       nba_schedule_sync_function_name: ${{ steps.tf_outputs.outputs.nba_schedule_sync_function_name }}
       nba_predict_function_name: ${{ steps.tf_outputs.outputs.nba_predict_function_name }}
-      nba_predict_read_function_name: ${{ steps.tf_outputs.outputs.nba_predict_read_function_name }}
       nba_live_scores_function_name: ${{ steps.tf_outputs.outputs.nba_live_scores_function_name }}
       ncaambb_ingest_function_name: ${{ steps.tf_outputs.outputs.ncaambb_ingest_function_name }}
       ncaambb_normalize_function_name: ${{ steps.tf_outputs.outputs.ncaambb_normalize_function_name }}
       ncaambb_schedule_sync_function_name: ${{ steps.tf_outputs.outputs.ncaambb_schedule_sync_function_name }}
       ncaambb_predict_function_name: ${{ steps.tf_outputs.outputs.ncaambb_predict_function_name }}
-      ncaambb_predict_read_function_name: ${{ steps.tf_outputs.outputs.ncaambb_predict_read_function_name }}
       ncaambb_live_scores_function_name: ${{ steps.tf_outputs.outputs.ncaambb_live_scores_function_name }}
       pga_ingest_function_name: ${{ steps.tf_outputs.outputs.pga_ingest_function_name }}
       pga_normalize_function_name: ${{ steps.tf_outputs.outputs.pga_normalize_function_name }}
       pga_schedule_sync_function_name: ${{ steps.tf_outputs.outputs.pga_schedule_sync_function_name }}
       pga_predict_function_name: ${{ steps.tf_outputs.outputs.pga_predict_function_name }}
-      pga_predict_read_function_name: ${{ steps.tf_outputs.outputs.pga_predict_read_function_name }}
       pga_live_scores_function_name: ${{ steps.tf_outputs.outputs.pga_live_scores_function_name }}
       f1_ingest_function_name: ${{ steps.tf_outputs.outputs.f1_ingest_function_name }}
       f1_normalize_function_name: ${{ steps.tf_outputs.outputs.f1_normalize_function_name }}
       f1_predict_function_name: ${{ steps.tf_outputs.outputs.f1_predict_function_name }}
-      f1_predict_read_function_name: ${{ steps.tf_outputs.outputs.f1_predict_read_function_name }}
       f1_live_scores_function_name: ${{ steps.tf_outputs.outputs.f1_live_scores_function_name }}
       cognito_user_pool_id: ${{ steps.tf_outputs.outputs.cognito_user_pool_id }}
       cognito_client_id: ${{ steps.tf_outputs.outputs.cognito_client_id }}
@@ -371,36 +351,31 @@ jobs:
         capture_output nfl_predict_function_name
         capture_output season_gate_function_name
         capture_output ec2_training_reaper_function_name
-        capture_output nfl_predict_read_function_name
+        capture_output predict_read_function_name
         capture_output nfl_live_scores_function_name
         capture_output ncaafb_ingest_function_name
         capture_output ncaafb_normalize_function_name
         capture_output ncaafb_schedule_sync_function_name
         capture_output ncaafb_predict_function_name
-        capture_output ncaafb_predict_read_function_name
         capture_output ncaafb_live_scores_function_name
         capture_output nba_ingest_function_name
         capture_output nba_normalize_function_name
         capture_output nba_schedule_sync_function_name
         capture_output nba_predict_function_name
-        capture_output nba_predict_read_function_name
         capture_output nba_live_scores_function_name
         capture_output ncaambb_ingest_function_name
         capture_output ncaambb_normalize_function_name
         capture_output ncaambb_schedule_sync_function_name
         capture_output ncaambb_predict_function_name
-        capture_output ncaambb_predict_read_function_name
         capture_output ncaambb_live_scores_function_name
         capture_output pga_ingest_function_name
         capture_output pga_normalize_function_name
         capture_output pga_schedule_sync_function_name
         capture_output pga_predict_function_name
-        capture_output pga_predict_read_function_name
         capture_output pga_live_scores_function_name
         capture_output f1_ingest_function_name
         capture_output f1_normalize_function_name
         capture_output f1_predict_function_name
-        capture_output f1_predict_read_function_name
         capture_output f1_live_scores_function_name
         capture_output cognito_user_pool_id
         capture_output cognito_client_id

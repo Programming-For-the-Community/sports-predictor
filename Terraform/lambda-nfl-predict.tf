@@ -1,6 +1,6 @@
 # NFL inference Lambda. Not triggered by API Gateway directly -- runs in
 # the background via EventBridge Scheduler or an async invoke from
-# nfl_predict_read. Reads live feature context from DynamoDB and the
+# the shared predict-read Lambda. Reads live feature context from DynamoDB and the
 # current promoted model, computes a prediction, and writes it to the
 # predictions table. See Source/aws-lambdas/nfl/predict/handler.py.
 #
@@ -26,7 +26,7 @@ resource "aws_cloudwatch_log_group" "nfl_predict" {
 
 resource "aws_lambda_function" "nfl_predict" {
   function_name = "${var.project}-nfl-predict"
-  description   = "Computes NFL event-outcome and player-prop predictions in the background. Never called by API Gateway -- invoked by EventBridge Scheduler (season projection) or an async invoke from nfl_predict_read on a cache miss. See predict/handler.py."
+  description   = "Computes NFL event-outcome and player-prop predictions in the background. Never called by API Gateway -- invoked by EventBridge Scheduler (season projection) or an async invoke from the shared predict-read Lambda on a cache miss. See predict/handler.py."
   role          = aws_iam_role.lambda_inference.arn
   package_type  = "Image"
   image_uri     = "${var.ecr_repo_url}:nfl-predict-latest"

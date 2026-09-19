@@ -51,12 +51,10 @@ data "aws_iam_policy_document" "eventbridge_invoke_permissions" {
   # target. ncaambb_live_scores: scheduler-ncaambb-live-scores.tf's own
   # target, same every-60s reasoning as nba_live_scores/ncaafb_live_scores.
   #
-  # The predict-read functions: scheduler-predict-read-warmup.tf's own
-  # 5-minute warmup ping (4 of them below, not 3 -- this comment's own
-  # count drifted stale at some point, not corrected here since fixing
-  # a comment isn't this pass's purpose).
+  # predict_read: scheduler-predict-read-warmup.tf's own 5-minute warmup
+  # ping -- one shared entry now (2026-09-19), not one per sport.
   #
-  # pga_predict/pga_predict_read: same warmup-ping reasoning, added
+  # pga_predict: same warmup-ping reasoning, added
   # 2026-08-27 alongside the rest of PGA's serving Lambda pair.
   #
   # pga_schedule_sync: a REAL pre-existing gap found while making the
@@ -78,7 +76,7 @@ data "aws_iam_policy_document" "eventbridge_invoke_permissions" {
   # this one was never invoked at all, ever, since NCAAFB onboarding --
   # see that new file's own comment.
   #
-  # f1_predict/f1_predict_read: same warmup-ping reasoning as every other
+  # f1_predict: same warmup-ping reasoning as every other
   # sport's own serving Lambda pair above. f1_predict is ALSO
   # scheduler-f1-season-projection.tf's own direct target (F1 has no
   # schedule_sync Lambda of its own -- Jolpica's full-season schedule
@@ -94,21 +92,16 @@ data "aws_iam_policy_document" "eventbridge_invoke_permissions" {
       aws_lambda_function.nfl_predict.arn,
       aws_lambda_function.nfl_schedule_sync.arn,
       aws_lambda_function.nfl_live_scores.arn,
-      aws_lambda_function.nfl_predict_read.arn,
       aws_lambda_function.ncaafb_predict.arn,
       aws_lambda_function.ncaafb_live_scores.arn,
-      aws_lambda_function.ncaafb_predict_read.arn,
       aws_lambda_function.nba_predict.arn,
       aws_lambda_function.nba_live_scores.arn,
       aws_lambda_function.nba_schedule_sync.arn,
-      aws_lambda_function.nba_predict_read.arn,
       aws_lambda_function.ncaambb_schedule_sync.arn,
       aws_lambda_function.ncaambb_predict.arn,
-      aws_lambda_function.ncaambb_predict_read.arn,
       aws_lambda_function.ncaambb_live_scores.arn,
       aws_lambda_function.pga_schedule_sync.arn,
       aws_lambda_function.pga_predict.arn,
-      aws_lambda_function.pga_predict_read.arn,
       # pga_live_scores: scheduler-pga-live-scores.tf's own target --
       # added in the same PR that creates the scheduler, unlike
       # pga_schedule_sync's own entry above (added only after the gap was
@@ -117,13 +110,16 @@ data "aws_iam_policy_document" "eventbridge_invoke_permissions" {
       aws_lambda_function.pga_live_scores.arn,
       aws_lambda_function.ncaafb_schedule_sync.arn,
       aws_lambda_function.f1_predict.arn,
-      aws_lambda_function.f1_predict_read.arn,
       # f1_live_scores: scheduler-f1-live-scores.tf's own target -- same
       # every-3-minutes reasoning as every other sport's own live-scores
       # entry above, added in the same change that creates the scheduler
       # (not retrofitted after a live gap the way pga_schedule_sync/
       # ncaafb_schedule_sync above were).
       aws_lambda_function.f1_live_scores.arn,
+      # predict_read: scheduler-predict-read-warmup.tf's own 5-minute
+      # warmup ping -- ONE shared entry now, not 6, since predict-read
+      # consolidated into a single Lambda serving all sports (2026-09-19).
+      aws_lambda_function.predict_read.arn,
       # ec2_training_reaper: no persistent schedule targets this Lambda at
       # all (see its own handler.py docstring) -- this grant is what lets
       # its own self-created, one-time EventBridge Scheduler retries

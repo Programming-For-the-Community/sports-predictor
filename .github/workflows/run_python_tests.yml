@@ -82,11 +82,20 @@ jobs:
       - name: Run tests
         run: pytest ${{ inputs.test_path }} -v --cov=Source --cov-report=
 
+      # always() -- otherwise a test failure aborts the job here and the
+      # coverage data collected up to that point never gets uploaded at
+      # all, silently zeroing out this component's contribution to
+      # sonar_scan.yml's combined coverage.xml even though the .coverage
+      # file itself was written before pytest exited non-zero. The job
+      # still reports failure (this step doesn't swallow that), only the
+      # artifact upload is no longer contingent on it.
       - name: Resolve coverage artifact name
+        if: always()
         id: cov_name
         run: echo "name=coverage-$(echo -n '${{ inputs.test_path }}' | md5sum | cut -c1-12)" >> "$GITHUB_OUTPUT"
 
       - name: Upload coverage data
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: ${{ steps.cov_name.outputs.name }}

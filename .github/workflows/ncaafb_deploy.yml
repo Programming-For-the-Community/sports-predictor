@@ -98,17 +98,6 @@ jobs:
         Source/tests/aws-lambdas/ncaafb/test_season_projection.py
       requirements_files: 'Source/aws-lambdas/ncaafb/predict/requirements.in Source/aws-lambdas/ncaafb/predict/requirements-nodeps.in'
 
-  test-predict-read:
-    name: Run NCAAFB predict-read tests
-    needs: approval
-    if: |
-      always() &&
-      (needs.approval.result == 'success' || needs.approval.result == 'skipped')
-    uses: ./.github/workflows/run_python_tests.yml
-    with:
-      test_path: 'Source/tests/aws-lambdas/ncaafb/test_predict_read_handler.py Source/tests/library/serving/test_ncaafb_reads.py Source/tests/library/storage/test_prediction_cache.py Source/tests/library/storage/test_model_artifacts.py Source/tests/library/aws/test_lambda_invoker.py'
-      requirements_files: 'Source/aws-lambdas/ncaafb/predict-read/requirements.txt'
-
   test-live-scores:
     name: Run NCAAFB live-scores tests
     needs: approval
@@ -159,19 +148,14 @@ jobs:
     name: SonarQube Cloud scan
     needs: [
       test-backfill, test-feature-engineering, test-train-models, test-predict,
-      test-predict-read, test-live-scores, test-ingest, test-normalize, test-schedule-sync,
+      test-live-scores, test-ingest, test-normalize, test-schedule-sync,
     ]
-    if: |
-      always() &&
-      (needs.test-backfill.result == 'success' || needs.test-backfill.result == 'skipped') &&
-      (needs.test-feature-engineering.result == 'success' || needs.test-feature-engineering.result == 'skipped') &&
-      (needs.test-train-models.result == 'success' || needs.test-train-models.result == 'skipped') &&
-      (needs.test-predict.result == 'success' || needs.test-predict.result == 'skipped') &&
-      (needs.test-predict-read.result == 'success' || needs.test-predict-read.result == 'skipped') &&
-      (needs.test-live-scores.result == 'success' || needs.test-live-scores.result == 'skipped') &&
-      (needs.test-ingest.result == 'success' || needs.test-ingest.result == 'skipped') &&
-      (needs.test-normalize.result == 'success' || needs.test-normalize.result == 'skipped') &&
-      (needs.test-schedule-sync.result == 'success' || needs.test-schedule-sync.result == 'skipped')
+    # always() -- see app_deploy.yml's own copy of this comment: gating on
+    # every listed test job being success-or-skipped meant one flaky/
+    # failing test anywhere skipped this job entirely, cascading to skip
+    # every downstream build/deploy job below (`needs: scan`, default
+    # `if: success()`).
+    if: always()
     uses: ./.github/workflows/sonar_scan.yml
     secrets: inherit
     with:
@@ -239,16 +223,6 @@ jobs:
       function_name: ${{ needs.infra.outputs.ncaafb_predict_function_name }}
       image_tag: ${{ needs.ai_hosting.outputs.image_tag }}
       default_image_tag: 'ncaafb-predict-latest'
-
-  predict_read_deploy:
-    name: NCAAFB predict-read (deploy)
-    needs: [scan, infra]
-    uses: ./.github/workflows/zip_lambda_deploy.yml
-    secrets: inherit
-    with:
-      sport: 'NCAAFB'
-      function_name: ${{ needs.infra.outputs.ncaafb_predict_read_function_name }}
-      handler_dir: 'Source/aws-lambdas/ncaafb/predict-read'
 
   live_scores_deploy:
     name: NCAAFB live-scores (deploy)

@@ -1,15 +1,14 @@
 # Application-level activity: Lambda invocations/errors/duration/
 # concurrency/throttles (AWS/Lambda metrics) and viewer analytics
-# (Logs Insights against predict-read log groups). Merges what were 2
+# (Logs Insights against the predict-read log group). Merges what were 2
 # separate dashboards (lambda-observability, viewer-analytics) into one.
 locals {
+  # One shared predict-read Lambda now, not 6 (2026-09-19) -- still a list
+  # (not a bare string) since lambda-cloudwatch-geo-widget.tf's own
+  # StartQuery calls and viewer_analytics_log_sources below both consume
+  # this as a list.
   viewer_analytics_log_group_names = [
-    aws_cloudwatch_log_group.nfl_predict_read.name,
-    aws_cloudwatch_log_group.ncaafb_predict_read.name,
-    aws_cloudwatch_log_group.nba_predict_read.name,
-    aws_cloudwatch_log_group.ncaambb_predict_read.name,
-    aws_cloudwatch_log_group.pga_predict_read.name,
-    aws_cloudwatch_log_group.f1_predict_read.name,
+    aws_cloudwatch_log_group.predict_read.name,
   ]
 
   # Dashboard-widget queries have no separate log-group field for a

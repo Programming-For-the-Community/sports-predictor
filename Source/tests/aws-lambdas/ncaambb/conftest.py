@@ -39,11 +39,6 @@ _load_handler("ncaambb_schedule_sync", "aws-lambdas/ncaambb/schedule-sync/handle
 sys.path.insert(0, os.path.join(_src, "aws-lambdas", "ncaambb", "predict"))
 _load_handler("ncaambb_predict", "aws-lambdas/ncaambb/predict/handler.py")
 
-# predict-read/'s handler.py only ever imports from library.* (no local
-# sibling modules the way predict/'s own files are) -- no sys.path insert
-# needed, just the same unique-module-name registration.
-_load_handler("ncaambb_predict_read", "aws-lambdas/ncaambb/predict-read/handler.py")
-
 # live-scores/'s own live_scores.py has a unique name -- same split as
 # predict/'s modules above.
 sys.path.insert(0, os.path.join(_src, "aws-lambdas", "ncaambb", "live-scores"))
@@ -67,20 +62,3 @@ def reset_ncaambb_predict_singletons():
     ncaambb_predict._model_bucket = None
     ncaambb_predict._predictions_table = None
     ncaambb_predict._raw_bucket = None
-
-
-@pytest.fixture(autouse=True)
-def reset_ncaambb_predict_read_singletons():
-    ncaambb_predict_read = sys.modules.get("ncaambb_predict_read")
-    if ncaambb_predict_read is None:
-        yield
-        return
-    ncaambb_predict_read._storage = None
-    ncaambb_predict_read._model_bucket = None
-    ncaambb_predict_read._predictions_table = None
-    ncaambb_predict_read._predict_invoker = None
-    yield
-    ncaambb_predict_read._storage = None
-    ncaambb_predict_read._model_bucket = None
-    ncaambb_predict_read._predictions_table = None
-    ncaambb_predict_read._predict_invoker = None

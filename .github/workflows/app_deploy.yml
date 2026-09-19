@@ -87,12 +87,12 @@ jobs:
         Source/tests/aws-lambdas/nfl/test_live_features_roster.py
       requirements_files: 'Source/aws-lambdas/nfl/predict/requirements.in Source/aws-lambdas/nfl/predict/requirements-nodeps.in'
 
-  test-nfl-predict-read:
-    name: Run NFL predict-read tests
+  test-predict-read:
+    name: Run shared predict-read tests
     uses: ./.github/workflows/run_python_tests.yml
     with:
-      test_path: 'Source/tests/aws-lambdas/nfl/test_predict_read.py Source/tests/library/serving/ Source/tests/library/storage/test_prediction_cache.py Source/tests/library/storage/test_model_artifacts.py Source/tests/library/aws/test_lambda_invoker.py'
-      requirements_files: 'Source/aws-lambdas/nfl/predict-read/requirements.txt'
+      test_path: 'Source/tests/aws-lambdas/shared/test_predict_read.py Source/tests/library/serving/ Source/tests/library/storage/test_prediction_cache.py Source/tests/library/storage/test_model_artifacts.py Source/tests/library/aws/test_lambda_invoker.py'
+      requirements_files: 'Source/aws-lambdas/shared/predict-read/requirements.txt'
 
   test-nfl-live-scores:
     name: Run NFL live-scores tests
@@ -163,13 +163,6 @@ jobs:
         Source/tests/aws-lambdas/ncaafb/test_season_projection.py
       requirements_files: 'Source/aws-lambdas/ncaafb/predict/requirements.in Source/aws-lambdas/ncaafb/predict/requirements-nodeps.in'
 
-  test-ncaafb-predict-read:
-    name: Run NCAAFB predict-read tests
-    uses: ./.github/workflows/run_python_tests.yml
-    with:
-      test_path: 'Source/tests/aws-lambdas/ncaafb/test_predict_read_handler.py Source/tests/library/serving/test_ncaafb_reads.py Source/tests/library/storage/test_prediction_cache.py Source/tests/library/storage/test_model_artifacts.py Source/tests/library/aws/test_lambda_invoker.py'
-      requirements_files: 'Source/aws-lambdas/ncaafb/predict-read/requirements.txt'
-
   test-ncaafb-live-scores:
     name: Run NCAAFB live-scores tests
     uses: ./.github/workflows/run_python_tests.yml
@@ -235,13 +228,6 @@ jobs:
         Source/tests/aws-lambdas/nba/test_predict_season_simulation.py
       requirements_files: 'Source/aws-lambdas/nba/predict/requirements.in Source/aws-lambdas/nba/predict/requirements-nodeps.in'
 
-  test-nba-predict-read:
-    name: Run NBA predict-read tests
-    uses: ./.github/workflows/run_python_tests.yml
-    with:
-      test_path: 'Source/tests/aws-lambdas/nba/test_predict_read_handler.py Source/tests/library/serving/test_nba_reads.py Source/tests/library/storage/test_prediction_cache.py Source/tests/library/storage/test_model_artifacts.py Source/tests/library/aws/test_lambda_invoker.py'
-      requirements_files: 'Source/aws-lambdas/nba/predict-read/requirements.txt'
-
   test-nba-live-scores:
     name: Run NBA live-scores tests
     uses: ./.github/workflows/run_python_tests.yml
@@ -302,13 +288,6 @@ jobs:
         Source/tests/aws-lambdas/ncaambb/test_event_prediction.py
         Source/tests/aws-lambdas/ncaambb/test_predict_handler.py
       requirements_files: 'Source/aws-lambdas/ncaambb/predict/requirements.in Source/aws-lambdas/ncaambb/predict/requirements-nodeps.in'
-
-  test-ncaambb-predict-read:
-    name: Run NCAA MBB predict-read tests
-    uses: ./.github/workflows/run_python_tests.yml
-    with:
-      test_path: 'Source/tests/aws-lambdas/ncaambb/test_predict_read_handler.py Source/tests/library/serving/test_ncaambb_reads.py Source/tests/library/storage/test_prediction_cache.py Source/tests/library/storage/test_model_artifacts.py Source/tests/library/aws/test_lambda_invoker.py'
-      requirements_files: 'Source/aws-lambdas/ncaambb/predict-read/requirements.txt'
 
   test-ncaambb-live-scores:
     name: Run NCAA MBB live-scores tests
@@ -372,13 +351,6 @@ jobs:
         Source/tests/aws-lambdas/pga/test_season_simulation.py
         Source/tests/aws-lambdas/pga/test_season_projection.py
       requirements_files: 'Source/aws-lambdas/pga/predict/requirements.in Source/aws-lambdas/pga/predict/requirements-nodeps.in'
-
-  test-pga-predict-read:
-    name: Run PGA predict-read tests
-    uses: ./.github/workflows/run_python_tests.yml
-    with:
-      test_path: 'Source/tests/aws-lambdas/pga/test_predict_read_handler.py Source/tests/library/serving/test_pga_reads.py Source/tests/library/serving/test_common.py Source/tests/library/storage/test_prediction_cache.py Source/tests/library/storage/test_model_artifacts.py Source/tests/library/aws/test_lambda_invoker.py'
-      requirements_files: 'Source/aws-lambdas/pga/predict-read/requirements.txt'
 
   test-pga-live-scores:
     name: Run PGA live-scores tests
@@ -446,13 +418,6 @@ jobs:
         Source/tests/aws-lambdas/f1/test_season_simulation.py
         Source/tests/aws-lambdas/f1/test_season_projection.py
       requirements_files: 'Source/aws-lambdas/f1/predict/requirements.in Source/aws-lambdas/f1/predict/requirements-nodeps.in'
-
-  test-f1-predict-read:
-    name: Run F1 predict-read tests
-    uses: ./.github/workflows/run_python_tests.yml
-    with:
-      test_path: 'Source/tests/aws-lambdas/f1/test_predict_read_handler.py Source/tests/library/serving/test_f1_reads.py Source/tests/library/serving/test_common.py Source/tests/library/storage/test_prediction_cache.py Source/tests/library/storage/test_model_artifacts.py Source/tests/library/aws/test_lambda_invoker.py'
-      requirements_files: 'Source/aws-lambdas/f1/predict-read/requirements.txt'
 
   test-f1-live-scores:
     name: Run F1 live-scores tests
@@ -537,79 +502,31 @@ jobs:
     name: SonarQube Cloud scan
     needs: [
       test-nfl-backfill, test-nfl-feature-engineering, test-nfl-train-model, test-nfl-predict,
-      test-nfl-predict-read, test-nfl-live-scores, test-nfl-ingest, test-nfl-normalize, test-nfl-schedule-sync,
+      test-nfl-live-scores, test-nfl-ingest, test-nfl-normalize, test-nfl-schedule-sync,
       test-ncaafb-backfill, test-ncaafb-feature-engineering, test-ncaafb-train-models, test-ncaafb-predict,
-      test-ncaafb-predict-read, test-ncaafb-live-scores, test-ncaafb-ingest, test-ncaafb-normalize, test-ncaafb-schedule-sync,
+      test-ncaafb-live-scores, test-ncaafb-ingest, test-ncaafb-normalize, test-ncaafb-schedule-sync,
       test-nba-backfill, test-nba-feature-engineering, test-nba-train-model, test-nba-predict,
-      test-nba-predict-read, test-nba-live-scores, test-nba-ingest, test-nba-normalize, test-nba-schedule-sync,
+      test-nba-live-scores, test-nba-ingest, test-nba-normalize, test-nba-schedule-sync,
       test-ncaambb-backfill, test-ncaambb-feature-engineering, test-ncaambb-train-models, test-ncaambb-predict,
-      test-ncaambb-predict-read, test-ncaambb-live-scores, test-ncaambb-ingest, test-ncaambb-normalize, test-ncaambb-schedule-sync,
+      test-ncaambb-live-scores, test-ncaambb-ingest, test-ncaambb-normalize, test-ncaambb-schedule-sync,
       test-pga-backfill, test-pga-feature-engineering, test-pga-train-top10-model, test-pga-predict,
-      test-pga-predict-read, test-pga-live-scores, test-pga-ingest, test-pga-normalize, test-pga-schedule-sync,
+      test-pga-live-scores, test-pga-ingest, test-pga-normalize, test-pga-schedule-sync,
       test-f1-backfill, test-f1-feature-engineering, test-f1-train-winprob-model, test-f1-predict,
-      test-f1-predict-read, test-f1-live-scores, test-f1-ingest, test-f1-normalize,
-      test-season-gate, test-cloudwatch-geo-widget, test-ec2-training-reaper,
+      test-f1-live-scores, test-f1-ingest, test-f1-normalize,
+      test-predict-read, test-season-gate, test-cloudwatch-geo-widget, test-ec2-training-reaper,
       test-frontend,
     ]
-    if: |
-      always() &&
-      (needs.test-nfl-backfill.result == 'success' || needs.test-nfl-backfill.result == 'skipped') &&
-      (needs.test-nfl-feature-engineering.result == 'success' || needs.test-nfl-feature-engineering.result == 'skipped') &&
-      (needs.test-nfl-train-model.result == 'success' || needs.test-nfl-train-model.result == 'skipped') &&
-      (needs.test-nfl-predict.result == 'success' || needs.test-nfl-predict.result == 'skipped') &&
-      (needs.test-nfl-predict-read.result == 'success' || needs.test-nfl-predict-read.result == 'skipped') &&
-      (needs.test-nfl-live-scores.result == 'success' || needs.test-nfl-live-scores.result == 'skipped') &&
-      (needs.test-nfl-ingest.result == 'success' || needs.test-nfl-ingest.result == 'skipped') &&
-      (needs.test-nfl-normalize.result == 'success' || needs.test-nfl-normalize.result == 'skipped') &&
-      (needs.test-nfl-schedule-sync.result == 'success' || needs.test-nfl-schedule-sync.result == 'skipped') &&
-      (needs.test-ncaafb-backfill.result == 'success' || needs.test-ncaafb-backfill.result == 'skipped') &&
-      (needs.test-ncaafb-feature-engineering.result == 'success' || needs.test-ncaafb-feature-engineering.result == 'skipped') &&
-      (needs.test-ncaafb-train-models.result == 'success' || needs.test-ncaafb-train-models.result == 'skipped') &&
-      (needs.test-ncaafb-predict.result == 'success' || needs.test-ncaafb-predict.result == 'skipped') &&
-      (needs.test-ncaafb-predict-read.result == 'success' || needs.test-ncaafb-predict-read.result == 'skipped') &&
-      (needs.test-ncaafb-live-scores.result == 'success' || needs.test-ncaafb-live-scores.result == 'skipped') &&
-      (needs.test-ncaafb-ingest.result == 'success' || needs.test-ncaafb-ingest.result == 'skipped') &&
-      (needs.test-ncaafb-normalize.result == 'success' || needs.test-ncaafb-normalize.result == 'skipped') &&
-      (needs.test-ncaafb-schedule-sync.result == 'success' || needs.test-ncaafb-schedule-sync.result == 'skipped') &&
-      (needs.test-nba-backfill.result == 'success' || needs.test-nba-backfill.result == 'skipped') &&
-      (needs.test-nba-feature-engineering.result == 'success' || needs.test-nba-feature-engineering.result == 'skipped') &&
-      (needs.test-nba-train-model.result == 'success' || needs.test-nba-train-model.result == 'skipped') &&
-      (needs.test-nba-predict.result == 'success' || needs.test-nba-predict.result == 'skipped') &&
-      (needs.test-nba-predict-read.result == 'success' || needs.test-nba-predict-read.result == 'skipped') &&
-      (needs.test-nba-live-scores.result == 'success' || needs.test-nba-live-scores.result == 'skipped') &&
-      (needs.test-nba-ingest.result == 'success' || needs.test-nba-ingest.result == 'skipped') &&
-      (needs.test-nba-normalize.result == 'success' || needs.test-nba-normalize.result == 'skipped') &&
-      (needs.test-nba-schedule-sync.result == 'success' || needs.test-nba-schedule-sync.result == 'skipped') &&
-      (needs.test-ncaambb-backfill.result == 'success' || needs.test-ncaambb-backfill.result == 'skipped') &&
-      (needs.test-ncaambb-feature-engineering.result == 'success' || needs.test-ncaambb-feature-engineering.result == 'skipped') &&
-      (needs.test-ncaambb-train-models.result == 'success' || needs.test-ncaambb-train-models.result == 'skipped') &&
-      (needs.test-ncaambb-predict.result == 'success' || needs.test-ncaambb-predict.result == 'skipped') &&
-      (needs.test-ncaambb-predict-read.result == 'success' || needs.test-ncaambb-predict-read.result == 'skipped') &&
-      (needs.test-ncaambb-live-scores.result == 'success' || needs.test-ncaambb-live-scores.result == 'skipped') &&
-      (needs.test-ncaambb-ingest.result == 'success' || needs.test-ncaambb-ingest.result == 'skipped') &&
-      (needs.test-ncaambb-normalize.result == 'success' || needs.test-ncaambb-normalize.result == 'skipped') &&
-      (needs.test-ncaambb-schedule-sync.result == 'success' || needs.test-ncaambb-schedule-sync.result == 'skipped') &&
-      (needs.test-pga-backfill.result == 'success' || needs.test-pga-backfill.result == 'skipped') &&
-      (needs.test-pga-feature-engineering.result == 'success' || needs.test-pga-feature-engineering.result == 'skipped') &&
-      (needs.test-pga-train-top10-model.result == 'success' || needs.test-pga-train-top10-model.result == 'skipped') &&
-      (needs.test-pga-predict.result == 'success' || needs.test-pga-predict.result == 'skipped') &&
-      (needs.test-pga-predict-read.result == 'success' || needs.test-pga-predict-read.result == 'skipped') &&
-      (needs.test-pga-live-scores.result == 'success' || needs.test-pga-live-scores.result == 'skipped') &&
-      (needs.test-pga-ingest.result == 'success' || needs.test-pga-ingest.result == 'skipped') &&
-      (needs.test-pga-normalize.result == 'success' || needs.test-pga-normalize.result == 'skipped') &&
-      (needs.test-pga-schedule-sync.result == 'success' || needs.test-pga-schedule-sync.result == 'skipped') &&
-      (needs.test-f1-backfill.result == 'success' || needs.test-f1-backfill.result == 'skipped') &&
-      (needs.test-f1-feature-engineering.result == 'success' || needs.test-f1-feature-engineering.result == 'skipped') &&
-      (needs.test-f1-train-winprob-model.result == 'success' || needs.test-f1-train-winprob-model.result == 'skipped') &&
-      (needs.test-f1-predict.result == 'success' || needs.test-f1-predict.result == 'skipped') &&
-      (needs.test-f1-predict-read.result == 'success' || needs.test-f1-predict-read.result == 'skipped') &&
-      (needs.test-f1-live-scores.result == 'success' || needs.test-f1-live-scores.result == 'skipped') &&
-      (needs.test-f1-ingest.result == 'success' || needs.test-f1-ingest.result == 'skipped') &&
-      (needs.test-f1-normalize.result == 'success' || needs.test-f1-normalize.result == 'skipped') &&
-      (needs.test-season-gate.result == 'success' || needs.test-season-gate.result == 'skipped') &&
-      (needs.test-cloudwatch-geo-widget.result == 'success' || needs.test-cloudwatch-geo-widget.result == 'skipped') &&
-      (needs.test-ec2-training-reaper.result == 'success' || needs.test-ec2-training-reaper.result == 'skipped') &&
-      (needs.test-frontend.result == 'success' || needs.test-frontend.result == 'skipped')
+    # always() -- deliberately NOT gated on every listed job being
+    # success-or-skipped. That gate used to mean any single flaky/failing
+    # test job anywhere (out of ~55 across 6 sports) skipped this job
+    # entirely, which cascaded to skip every *_ai_training_build/
+    # *_ai_hosting_build/*_backfill_build job below (their only gate is
+    # `needs: scan`, default `if: success()`) -- i.e. one broken test in
+    # one sport silently skipped every sport's AI training build/push, not
+    # just the affected one. scan always runs now and submits whatever
+    # coverage/analysis data exists; a real test failure still shows red
+    # on its own job, it just no longer blocks the rest of the pipeline.
+    if: always()
     uses: ./.github/workflows/sonar_scan.yml
     secrets: inherit
     with:
@@ -893,6 +810,7 @@ jobs:
     with:
       season_gate_function_name: ${{ needs.infra.outputs.season_gate_function_name }}
       ec2_training_reaper_function_name: ${{ needs.infra.outputs.ec2_training_reaper_function_name }}
+      predict_read_function_name: ${{ needs.infra.outputs.predict_read_function_name }}
 
   nfl_predict_deploy:
     name: NFL predict (deploy)
@@ -918,16 +836,6 @@ jobs:
       normalize_handler_dir: 'Source/aws-lambdas/nfl/normalize'
       schedule_sync_function_name: ${{ needs.infra.outputs.nfl_schedule_sync_function_name }}
       schedule_sync_handler_dir: 'Source/aws-lambdas/nfl/schedule-sync'
-
-  nfl_predict_read_deploy:
-    name: NFL predict-read (deploy)
-    needs: [scan, infra]
-    uses: ./.github/workflows/zip_lambda_deploy.yml
-    secrets: inherit
-    with:
-      sport: 'NFL'
-      function_name: ${{ needs.infra.outputs.nfl_predict_read_function_name }}
-      handler_dir: 'Source/aws-lambdas/nfl/predict-read'
 
   nfl_live_scores_deploy:
     name: NFL live-scores (deploy)
@@ -965,16 +873,6 @@ jobs:
       schedule_sync_function_name: ${{ needs.infra.outputs.ncaafb_schedule_sync_function_name }}
       schedule_sync_handler_dir: 'Source/aws-lambdas/ncaafb/schedule-sync'
 
-  ncaafb_predict_read_deploy:
-    name: NCAAFB predict-read (deploy)
-    needs: [scan, infra]
-    uses: ./.github/workflows/zip_lambda_deploy.yml
-    secrets: inherit
-    with:
-      sport: 'NCAAFB'
-      function_name: ${{ needs.infra.outputs.ncaafb_predict_read_function_name }}
-      handler_dir: 'Source/aws-lambdas/ncaafb/predict-read'
-
   ncaafb_live_scores_deploy:
     name: NCAAFB live-scores (deploy)
     needs: [scan, infra]
@@ -1010,16 +908,6 @@ jobs:
       schedule_sync_function_name: ${{ needs.infra.outputs.nba_schedule_sync_function_name }}
       schedule_sync_handler_dir: 'Source/aws-lambdas/nba/schedule-sync'
 
-  nba_predict_read_deploy:
-    name: NBA predict-read (deploy)
-    needs: [scan, infra]
-    uses: ./.github/workflows/zip_lambda_deploy.yml
-    secrets: inherit
-    with:
-      sport: 'NBA'
-      function_name: ${{ needs.infra.outputs.nba_predict_read_function_name }}
-      handler_dir: 'Source/aws-lambdas/nba/predict-read'
-
   nba_live_scores_deploy:
     name: NBA live-scores (deploy)
     needs: [scan, infra]
@@ -1043,16 +931,6 @@ jobs:
       function_name: ${{ needs.infra.outputs.ncaambb_predict_function_name }}
       image_tag: ${{ needs.ncaambb_ai_hosting_build.outputs.image_tag }}
       default_image_tag: 'ncaambb-predict-latest'
-
-  ncaambb_predict_read_deploy:
-    name: NCAA MBB predict-read (deploy)
-    needs: [scan, infra]
-    uses: ./.github/workflows/zip_lambda_deploy.yml
-    secrets: inherit
-    with:
-      sport: 'NCAA MBB'
-      function_name: ${{ needs.infra.outputs.ncaambb_predict_read_function_name }}
-      handler_dir: 'Source/aws-lambdas/ncaambb/predict-read'
 
   ncaambb_data_pipeline:
     name: NCAA MBB data pipeline (deploy)
@@ -1092,16 +970,6 @@ jobs:
       schedule_sync_function_name: ${{ needs.infra.outputs.pga_schedule_sync_function_name }}
       schedule_sync_handler_dir: 'Source/aws-lambdas/pga/schedule-sync'
 
-  pga_predict_read_deploy:
-    name: PGA predict-read (deploy)
-    needs: [scan, infra]
-    uses: ./.github/workflows/zip_lambda_deploy.yml
-    secrets: inherit
-    with:
-      sport: 'PGA'
-      function_name: ${{ needs.infra.outputs.pga_predict_read_function_name }}
-      handler_dir: 'Source/aws-lambdas/pga/predict-read'
-
   pga_live_scores_deploy:
     name: PGA live-scores (deploy)
     needs: [scan, infra]
@@ -1135,16 +1003,6 @@ jobs:
       normalize_function_name: ${{ needs.infra.outputs.f1_normalize_function_name }}
       normalize_handler_dir: 'Source/aws-lambdas/f1/normalize'
       # No f1-schedule-sync -- see f1_deploy.yml's own comment.
-
-  f1_predict_read_deploy:
-    name: F1 predict-read (deploy)
-    needs: [scan, infra]
-    uses: ./.github/workflows/zip_lambda_deploy.yml
-    secrets: inherit
-    with:
-      sport: 'F1'
-      function_name: ${{ needs.infra.outputs.f1_predict_read_function_name }}
-      handler_dir: 'Source/aws-lambdas/f1/predict-read'
 
   f1_live_scores_deploy:
     name: F1 live-scores (deploy)

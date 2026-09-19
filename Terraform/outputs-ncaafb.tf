@@ -25,11 +25,6 @@ output "ncaafb_predict_function_name" {
   value       = aws_lambda_function.ncaafb_predict.function_name
 }
 
-output "ncaafb_predict_read_function_name" {
-  description = "NCAAFB predict-read Lambda function name -- passed to ncaafb_deploy workflow for `aws lambda update-function-code`"
-  value       = aws_lambda_function.ncaafb_predict_read.function_name
-}
-
 output "ncaafb_live_scores_function_name" {
   description = "NCAAFB live-scores Lambda function name -- passed to ncaafb_deploy workflow for `aws lambda update-function-code`"
   value       = aws_lambda_function.ncaafb_live_scores.function_name

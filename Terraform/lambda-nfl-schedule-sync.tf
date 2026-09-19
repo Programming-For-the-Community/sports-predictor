@@ -48,6 +48,14 @@ resource "aws_lambda_function" "nfl_schedule_sync" {
 
   environment {
     variables = {
+      # handler.py's depth_chart_cache.attach_depth_charts calls library.
+      # aws.account.get_account_id() unconditionally (for S3's
+      # ExpectedBucketOwner) -- missing here since this Lambda was first
+      # created, same latent gap found live in every live-scores Lambda
+      # 2026-09-19 (see lambda-nfl-live-scores.tf). Not confirmed firing in
+      # this Lambda's own recent logs, but will raise the moment that
+      # enrichment path runs without it.
+      AWS_ACCOUNT_ID    = var.account_id
       RAW_BUCKET_NAME   = aws_s3_bucket.raw_data_lake.bucket
       ESPN_API_ROOT_URL = var.espn_api_root_url
       ESPN_USER_AGENT   = var.espn_user_agent

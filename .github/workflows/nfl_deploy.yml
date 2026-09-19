@@ -8,9 +8,9 @@
 # jobs nested inside a called reusable workflow -- only a sibling job in
 # the SAME file), `scan` needs all of them, and every build/deploy job
 # needs `scan`. NFL also owns shared_lambdas_deploy (season-gate/
-# cloudwatch-geo-widget/ec2-training-reaper), so its three tests are
-# folded into this same scan too, rather than shared_lambdas_deploy.yml
-# running its own separate one.
+# cloudwatch-geo-widget/ec2-training-reaper/predict-read), so its four
+# tests are folded into this same scan too, rather than
+# shared_lambdas_deploy.yml running its own separate one.
 #
 # Build jobs (backfill, ai_training, ai_hosting) run before infra since
 # they don't depend on Terraform-managed resources; infra's CreateFunction
@@ -111,15 +111,15 @@ jobs:
       requirements_files: 'Source/aws-lambdas/nfl/predict/requirements.in Source/aws-lambdas/nfl/predict/requirements-nodeps.in'
 
   test-predict-read:
-    name: Run NFL predict-read tests
+    name: Run shared predict-read tests
     needs: approval
     if: |
       always() &&
       (needs.approval.result == 'success' || needs.approval.result == 'skipped')
     uses: ./.github/workflows/run_python_tests.yml
     with:
-      test_path: 'Source/tests/aws-lambdas/nfl/test_predict_read.py Source/tests/library/serving/ Source/tests/library/storage/test_prediction_cache.py Source/tests/library/storage/test_model_artifacts.py Source/tests/library/aws/test_lambda_invoker.py'
-      requirements_files: 'Source/aws-lambdas/nfl/predict-read/requirements.txt'
+      test_path: 'Source/tests/aws-lambdas/shared/test_predict_read.py Source/tests/library/serving/ Source/tests/library/storage/test_prediction_cache.py Source/tests/library/storage/test_model_artifacts.py Source/tests/library/aws/test_lambda_invoker.py'
+      requirements_files: 'Source/aws-lambdas/shared/predict-read/requirements.txt'
 
   test-live-scores:
     name: Run NFL live-scores tests
@@ -211,20 +211,12 @@ jobs:
       test-predict-read, test-live-scores, test-ingest, test-normalize, test-schedule-sync,
       test-season-gate, test-cloudwatch-geo-widget, test-ec2-training-reaper,
     ]
-    if: |
-      always() &&
-      (needs.test-backfill.result == 'success' || needs.test-backfill.result == 'skipped') &&
-      (needs.test-feature-engineering.result == 'success' || needs.test-feature-engineering.result == 'skipped') &&
-      (needs.test-train-model.result == 'success' || needs.test-train-model.result == 'skipped') &&
-      (needs.test-predict.result == 'success' || needs.test-predict.result == 'skipped') &&
-      (needs.test-predict-read.result == 'success' || needs.test-predict-read.result == 'skipped') &&
-      (needs.test-live-scores.result == 'success' || needs.test-live-scores.result == 'skipped') &&
-      (needs.test-ingest.result == 'success' || needs.test-ingest.result == 'skipped') &&
-      (needs.test-normalize.result == 'success' || needs.test-normalize.result == 'skipped') &&
-      (needs.test-schedule-sync.result == 'success' || needs.test-schedule-sync.result == 'skipped') &&
-      (needs.test-season-gate.result == 'success' || needs.test-season-gate.result == 'skipped') &&
-      (needs.test-cloudwatch-geo-widget.result == 'success' || needs.test-cloudwatch-geo-widget.result == 'skipped') &&
-      (needs.test-ec2-training-reaper.result == 'success' || needs.test-ec2-training-reaper.result == 'skipped')
+    # always() -- see app_deploy.yml's own copy of this comment: gating on
+    # every listed test job being success-or-skipped meant one flaky/
+    # failing test anywhere skipped this job entirely, cascading to skip
+    # every downstream build/deploy job below (`needs: scan`, default
+    # `if: success()`).
+    if: always()
     uses: ./.github/workflows/sonar_scan.yml
     secrets: inherit
     with:
@@ -285,6 +277,7 @@ jobs:
     secrets: inherit
     with:
       season_gate_function_name: ${{ needs.infra.outputs.season_gate_function_name }}
+      predict_read_function_name: ${{ needs.infra.outputs.predict_read_function_name }}
 
   deploy_predict_lambda:
     name: AI hosting (deploy)
@@ -295,16 +288,6 @@ jobs:
       function_name: ${{ needs.infra.outputs.nfl_predict_function_name }}
       image_tag: ${{ needs.ai_hosting.outputs.image_tag }}
       default_image_tag: 'nfl-predict-latest'
-
-  predict_read_deploy:
-    name: NFL predict-read (deploy)
-    needs: [scan, infra]
-    uses: ./.github/workflows/zip_lambda_deploy.yml
-    secrets: inherit
-    with:
-      sport: 'NFL'
-      function_name: ${{ needs.infra.outputs.nfl_predict_read_function_name }}
-      handler_dir: 'Source/aws-lambdas/nfl/predict-read'
 
   live_scores_deploy:
     name: NFL live-scores (deploy)

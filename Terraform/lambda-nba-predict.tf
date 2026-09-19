@@ -15,7 +15,7 @@ resource "aws_cloudwatch_log_group" "nba_predict" {
 
 resource "aws_lambda_function" "nba_predict" {
   function_name = "${var.project}-nba-predict"
-  description   = "Computes NBA event-outcome and player-prop predictions in the background. Never called by API Gateway -- invoked by EventBridge Scheduler (season projection) or an async invoke from nba_predict_read on a cache miss. See predict/handler.py."
+  description   = "Computes NBA event-outcome and player-prop predictions in the background. Never called by API Gateway -- invoked by EventBridge Scheduler (season projection) or an async invoke from the shared predict-read Lambda on a cache miss. See predict/handler.py."
   role          = aws_iam_role.lambda_inference.arn
   package_type  = "Image"
   image_uri     = "${var.ecr_repo_url}:nba-predict-latest"

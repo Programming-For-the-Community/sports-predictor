@@ -39,11 +39,6 @@ _load_handler("pga_schedule_sync", "aws-lambdas/pga/schedule-sync/handler.py")
 sys.path.insert(0, os.path.join(_src, "aws-lambdas", "pga", "predict"))
 _load_handler("pga_predict", "aws-lambdas/pga/predict/handler.py")
 
-# predict-read/'s handler.py only ever imports from library.* (no local
-# sibling modules the way predict/'s own files are) -- no sys.path insert
-# needed, just the same unique-module-name registration.
-_load_handler("pga_predict_read", "aws-lambdas/pga/predict-read/handler.py")
-
 # live-scores/'s own live_scores.py has a unique name -- same split as
 # predict/'s modules above.
 sys.path.insert(0, os.path.join(_src, "aws-lambdas", "pga", "live-scores"))
@@ -65,20 +60,3 @@ def reset_pga_predict_singletons():
     pga_predict._storage = None
     pga_predict._model_bucket = None
     pga_predict._predictions_table = None
-
-
-@pytest.fixture(autouse=True)
-def reset_pga_predict_read_singletons():
-    pga_predict_read = sys.modules.get("pga_predict_read")
-    if pga_predict_read is None:
-        yield
-        return
-    pga_predict_read._storage = None
-    pga_predict_read._model_bucket = None
-    pga_predict_read._predictions_table = None
-    pga_predict_read._predict_invoker = None
-    yield
-    pga_predict_read._storage = None
-    pga_predict_read._model_bucket = None
-    pga_predict_read._predictions_table = None
-    pga_predict_read._predict_invoker = None

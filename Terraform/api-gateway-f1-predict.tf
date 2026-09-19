@@ -3,10 +3,10 @@
 # see that file's own "F1 routes" block appended to its redeployment-
 # trigger sha1 list.
 #
-#   GET /f1/events                          -> f1_predict_read
-#   GET /f1/models                          -> f1_predict_read
-#   GET /f1/season                          -> f1_predict_read (cache), async-computed weekly by f1_predict
-#   GET /f1/predictions/events/{event_id}   -> f1_predict_read (cache), async-computed by f1_predict
+#   GET /f1/events                          -> predict_read (shared)
+#   GET /f1/models                          -> predict_read (shared)
+#   GET /f1/season                          -> predict_read (shared) (cache), async-computed weekly by f1_predict
+#   GET /f1/predictions/events/{event_id}   -> predict_read (shared) (cache), async-computed by f1_predict
 #   GET /f1/live-scores                     -> f1_live_scores (api-gateway-f1-live-scores.tf, separate Lambda)
 #
 # No per-driver prediction sub-route (unlike NBA's .../players/{entity_id})
@@ -40,7 +40,7 @@ resource "aws_api_gateway_integration" "f1_events" {
   http_method             = aws_api_gateway_method.f1_events.http_method
   type                    = "AWS_PROXY"
   integration_http_method = "POST"
-  uri                     = aws_lambda_function.f1_predict_read.invoke_arn
+  uri                     = aws_lambda_function.predict_read.invoke_arn
 }
 
 resource "aws_api_gateway_resource" "f1_models" {
@@ -63,7 +63,7 @@ resource "aws_api_gateway_integration" "f1_models" {
   http_method             = aws_api_gateway_method.f1_models.http_method
   type                    = "AWS_PROXY"
   integration_http_method = "POST"
-  uri                     = aws_lambda_function.f1_predict_read.invoke_arn
+  uri                     = aws_lambda_function.predict_read.invoke_arn
 }
 
 resource "aws_api_gateway_resource" "f1_season" {
@@ -86,7 +86,7 @@ resource "aws_api_gateway_integration" "f1_season" {
   http_method             = aws_api_gateway_method.f1_season.http_method
   type                    = "AWS_PROXY"
   integration_http_method = "POST"
-  uri                     = aws_lambda_function.f1_predict_read.invoke_arn
+  uri                     = aws_lambda_function.predict_read.invoke_arn
 }
 
 resource "aws_api_gateway_resource" "f1_predictions" {
@@ -127,7 +127,7 @@ resource "aws_api_gateway_integration" "f1_predict_event" {
   http_method             = aws_api_gateway_method.f1_predict_event.http_method
   type                    = "AWS_PROXY"
   integration_http_method = "POST"
-  uri                     = aws_lambda_function.f1_predict_read.invoke_arn # cache read-through
+  uri                     = aws_lambda_function.predict_read.invoke_arn # cache read-through
 }
 
 # --- CORS preflight (OPTIONS) -------------------------------------------

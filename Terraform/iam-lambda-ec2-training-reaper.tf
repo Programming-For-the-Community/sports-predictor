@@ -41,10 +41,23 @@ data "aws_iam_policy_document" "lambda_ec2_training_reaper_permissions" {
     resources = ["*"]
   }
 
+  # ListContainerInstances is a cluster-level action, but
+  # DescribeContainerInstances is a container-instance-level action --
+  # scoping it to the cluster ARN (as a single combined statement did
+  # previously) silently fails with AccessDeniedException, since IAM
+  # doesn't accept a cluster ARN as a resource for that action. Confirmed
+  # via a real failed invocation's CloudWatch log 2026-09-19 (the reaper
+  # had never successfully identified an idle instance because of this).
   statement {
-    sid       = "InspectClusterContainerInstances"
-    actions   = ["ecs:ListContainerInstances", "ecs:DescribeContainerInstances"]
+    sid       = "ListClusterContainerInstances"
+    actions   = ["ecs:ListContainerInstances"]
     resources = [aws_ecs_cluster.main.arn]
+  }
+
+  statement {
+    sid       = "DescribeClusterContainerInstances"
+    actions   = ["ecs:DescribeContainerInstances"]
+    resources = ["arn:aws:ecs:${var.region}:${var.account_id}:container-instance/${aws_ecs_cluster.main.name}/*"]
   }
 
   # Same API/reasoning as sfn-training-orchestrator.tf's own scale-down

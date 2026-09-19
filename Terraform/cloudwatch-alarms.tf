@@ -75,36 +75,27 @@ resource "aws_cloudwatch_metric_alarm" "predict_errors" {
 }
 
 resource "aws_cloudwatch_metric_alarm" "predict_read_errors" {
+  # Plain single-metric alarm, not the dynamic multi-sport metric_query
+  # pattern every other Lambda-family alarm here uses -- predict-read
+  # consolidated into ONE shared Lambda serving all 6 sports (2026-09-19),
+  # so there's only one FunctionName dimension left to alarm on. Real
+  # trade-off: per-sport error breakdown is no longer available as a
+  # CloudWatch metric (dimensions are per-function); it's still visible via
+  # Logs Insights, filtering on the "sport" field log_viewer_analytics
+  # writes into every log line (cloudwatch-dashboard-application.tf).
   alarm_name          = "${var.project}-predict-read-lambda-errors"
-  alarm_description   = "Any predict-read Lambda (any sport) errored in the last 5 minutes -- the user-facing cache-read path the frontend calls directly."
+  alarm_description   = "The shared predict-read Lambda (all 6 sports) errored in the last 5 minutes -- the user-facing cache-read path the frontend calls directly."
   comparison_operator = "GreaterThanThreshold"
   evaluation_periods  = 1
   threshold           = 0
   treat_missing_data  = "notBreaching"
   alarm_actions       = [aws_sns_topic.ops_alerts.arn]
-
-  dynamic "metric_query" {
-    for_each = local.alarm_all_sports
-    content {
-      id          = "m${index(local.alarm_all_sports, metric_query.value) + 1}"
-      return_data = false
-      metric {
-        metric_name = "Errors"
-        namespace   = "AWS/Lambda"
-        period      = 300
-        stat        = "Sum"
-        dimensions = {
-          FunctionName = "${var.project}-${metric_query.value}-predict-read"
-        }
-      }
-    }
-  }
-
-  metric_query {
-    id          = "total"
-    expression  = "m1+m2+m3+m4+m5+m6"
-    label       = "Total predict-read Errors"
-    return_data = true
+  namespace           = "AWS/Lambda"
+  metric_name         = "Errors"
+  period              = 300
+  statistic           = "Sum"
+  dimensions = {
+    FunctionName = aws_lambda_function.predict_read.function_name
   }
 
   tags = merge(local.common_tags, {
@@ -423,35 +414,20 @@ resource "aws_cloudwatch_metric_alarm" "predict_throttles" {
 }
 
 resource "aws_cloudwatch_metric_alarm" "predict_read_throttles" {
+  # Plain single-metric alarm -- see predict_read_errors' own comment above
+  # for why (one shared Lambda now, not 6).
   alarm_name          = "${var.project}-predict-read-lambda-throttles"
-  alarm_description   = "Any predict-read Lambda (any sport) got throttled in the last 5 minutes."
+  alarm_description   = "The shared predict-read Lambda (all 6 sports) got throttled in the last 5 minutes."
   comparison_operator = "GreaterThanThreshold"
   evaluation_periods  = 1
   threshold           = 0
   treat_missing_data  = "notBreaching"
-
-  dynamic "metric_query" {
-    for_each = local.alarm_all_sports
-    content {
-      id          = "m${metric_query.key + 1}"
-      return_data = false
-      metric {
-        metric_name = "Throttles"
-        namespace   = "AWS/Lambda"
-        period      = 300
-        stat        = "Sum"
-        dimensions = {
-          FunctionName = "${var.project}-${metric_query.value}-predict-read"
-        }
-      }
-    }
-  }
-
-  metric_query {
-    id          = "total"
-    expression  = join("+", [for i in range(length(local.alarm_all_sports)) : "m${i + 1}"])
-    label       = "Total predict-read Throttles"
-    return_data = true
+  namespace           = "AWS/Lambda"
+  metric_name         = "Throttles"
+  period              = 300
+  statistic           = "Sum"
+  dimensions = {
+    FunctionName = aws_lambda_function.predict_read.function_name
   }
 
   tags = merge(local.common_tags, {
@@ -556,35 +532,22 @@ resource "aws_cloudwatch_metric_alarm" "predict_duration_p99" {
 }
 
 resource "aws_cloudwatch_metric_alarm" "predict_read_duration_p99" {
+  # Plain single-metric alarm -- see predict_read_errors' own comment above
+  # for why (one shared Lambda now, not 6). threshold is the real 24000ms
+  # boundary directly now, not the 0/1 boolean-expression shape the old
+  # multi-sport OR-across-metrics version needed.
   alarm_name          = "${var.project}-predict-read-duration-p99"
-  alarm_description   = "p99 duration on at least one predict-read Lambda exceeded 80% of its configured timeout (24000ms) in the last 5 minutes."
+  alarm_description   = "p99 duration on the shared predict-read Lambda (all 6 sports) exceeded 80% of its configured timeout (24000ms) in the last 5 minutes."
   comparison_operator = "GreaterThanThreshold"
   evaluation_periods  = 2
-  threshold           = 0 # boolean expression below (0 = no sport over threshold, 1 = at least one is)
+  threshold           = 24000
   treat_missing_data  = "notBreaching"
-
-  dynamic "metric_query" {
-    for_each = local.alarm_all_sports
-    content {
-      id          = "m${metric_query.key + 1}"
-      return_data = false
-      metric {
-        metric_name = "Duration"
-        namespace   = "AWS/Lambda"
-        period      = 300
-        stat        = "p99"
-        dimensions = {
-          FunctionName = "${var.project}-${metric_query.value}-predict-read"
-        }
-      }
-    }
-  }
-
-  metric_query {
-    id          = "total"
-    expression  = "m1>24000 OR m2>24000 OR m3>24000 OR m4>24000 OR m5>24000 OR m6>24000"
-    label       = "Any predict-read Lambda over 24000ms p99"
-    return_data = true
+  namespace           = "AWS/Lambda"
+  metric_name         = "Duration"
+  period              = 300
+  extended_statistic  = "p99"
+  dimensions = {
+    FunctionName = aws_lambda_function.predict_read.function_name
   }
 
   tags = merge(local.common_tags, {
