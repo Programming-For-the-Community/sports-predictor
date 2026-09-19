@@ -189,12 +189,16 @@ def build_live_event_features(
     return build_event_features(
         event, _live_elo_ratings(storage, sport, event, home_id, away_id, events=events),
         home_events, away_events, team_coordinates, window,
-        home_qb_games=leader_games(home_id, "passing"),
-        away_qb_games=leader_games(away_id, "passing"),
-        home_rb_games=leader_games(home_id, "rushing"),
-        away_rb_games=leader_games(away_id, "rushing"),
-        home_wr_games=leader_games(home_id, "receiving"),
-        away_wr_games=leader_games(away_id, "receiving"),
+        home_position_games={
+            "qb": leader_games(home_id, "passing"),
+            "rb": leader_games(home_id, "rushing"),
+            "wr": leader_games(home_id, "receiving"),
+        },
+        away_position_games={
+            "qb": leader_games(away_id, "passing"),
+            "rb": leader_games(away_id, "rushing"),
+            "wr": leader_games(away_id, "receiving"),
+        },
         home_team_box_stats=home_box, away_team_box_stats=away_box,
     )
 
