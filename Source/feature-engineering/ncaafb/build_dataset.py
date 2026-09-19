@@ -190,9 +190,8 @@ def _build_event_row(
 
     row = build_event_features(
         event, elo_ratings, home_history, away_history, team_coordinates, window,
-        home_qb_games=home_qb_hist, away_qb_games=away_qb_hist,
-        home_rb_games=home_rb_hist, away_rb_games=away_rb_hist,
-        home_wr_games=home_wr_hist, away_wr_games=away_wr_hist,
+        home_position_games={"qb": home_qb_hist, "rb": home_rb_hist, "wr": home_wr_hist},
+        away_position_games={"qb": away_qb_hist, "rb": away_rb_hist, "wr": away_wr_hist},
         home_team_box_stats=home_box_history, away_team_box_stats=away_box_history,
     )
     leader_updates = [

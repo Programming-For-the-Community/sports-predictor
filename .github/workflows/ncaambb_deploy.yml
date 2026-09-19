@@ -248,7 +248,7 @@ jobs:
     secrets: inherit
     with:
       function_name: ${{ needs.infra.outputs.ncaambb_predict_function_name }}
-      image_uri: ${{ needs.ai_hosting.outputs.image_uri }}
+      image_tag: ${{ needs.ai_hosting.outputs.image_tag }}
       default_image_tag: 'ncaambb-predict-latest'
 
   # ncaambb-predict-read -- the light GET /ncaambb/events + GET

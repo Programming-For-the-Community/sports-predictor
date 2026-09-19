@@ -71,7 +71,7 @@ def _run(candidates, run_id="run-1", **overrides):
         summary_metrics=["accuracy", "log_loss"], promotion_metric="log_loss",
         run_id=run_id,
     )
-    kwargs.update(zip(["X_train", "y_train", "X_test", "y_test"], _xy()))
+    kwargs["split"] = backtest.HoldoutSplit(*_xy())
     kwargs["candidates"] = candidates
     kwargs.update(overrides)
     with patch.object(backtest.training_common, "load_run_progress", return_value=None), \
@@ -246,7 +246,7 @@ class TestRunBacktest:
              patch.object(backtest.training_common, "would_beat_current", return_value=False):
             result = _run(
                 [higher_accuracy, lower_accuracy_better_log_loss],
-                X_train=X, y_train=y, X_test=X, y_test=y,
+                split=backtest.HoldoutSplit(X, y, X, y),
             )
 
         by_algorithm = {c["algorithm"]: c for c in result["candidates"]}
@@ -268,7 +268,7 @@ class TestRunBacktest:
              patch.object(backtest.training_common, "promote_if_better"):
             result = _run(
                 [adapter], sport="nfl", model_name="score-margin",
-                X_train=X_train, y_train=y_train, X_test=X_test, y_test=y_test,
+                split=backtest.HoldoutSplit(X_train, y_train, X_test, y_test),
                 naive_baseline_metrics={"naive_baseline_rmse": 5.0, "naive_baseline_mae": 4.0},
                 extra_metadata={"train_rows": 2, "test_rows": 2},
                 summary_metrics=["rmse", "mae"], promotion_metric="rmse", task="regression",
@@ -303,7 +303,7 @@ class TestRunBacktest:
              patch.object(backtest, "logger") as mock_logger:
             result = _run(
                 [adapter], sport="nfl", model_name="score-margin",
-                X_train=X_train, y_train=y_train, X_test=X_test, y_test=y_test,
+                split=backtest.HoldoutSplit(X_train, y_train, X_test, y_test),
                 naive_baseline_metrics={"naive_baseline_rmse": 1.0, "naive_baseline_mae": 1.0},
                 extra_metadata={"train_rows": 2, "test_rows": 2},
                 summary_metrics=["rmse", "mae"], promotion_metric="rmse", task="regression",
@@ -325,7 +325,7 @@ class TestRunBacktest:
              patch.object(backtest, "logger") as mock_logger:
             _run(
                 [adapter], sport="nfl", model_name="score-margin",
-                X_train=X_train, y_train=y_train, X_test=X_test, y_test=y_test,
+                split=backtest.HoldoutSplit(X_train, y_train, X_test, y_test),
                 naive_baseline_metrics={"naive_baseline_rmse": 10.0, "naive_baseline_mae": 10.0},
                 extra_metadata={"train_rows": 2, "test_rows": 2},
                 summary_metrics=["rmse", "mae"], promotion_metric="rmse", task="regression",
@@ -344,7 +344,7 @@ class TestRunBacktest:
              patch.object(backtest.training_common, "would_beat_current", return_value=False):
             backtest.run_backtest(
                 s3=MagicMock(), sport="nfl", model_name="win-probability", task="classification",
-                X_train=_xy()[0], y_train=_xy()[1], X_test=_xy()[2], y_test=_xy()[3],
+                split=backtest.HoldoutSplit(*_xy()),
                 candidates=[first, second],
                 naive_baseline_metrics={}, extra_metadata={"train_rows": 4, "test_rows": 4},
                 summary_metrics=["accuracy", "log_loss"], promotion_metric="log_loss",
@@ -486,7 +486,7 @@ class TestResumability:
             already_ran = _FakeAdapter("xgboost", np.array([0.9, 0.1, 0.9, 0.1]))
             result = backtest.run_backtest(
                 s3=MagicMock(), sport="nfl", model_name="win-probability", task="classification",
-                X_train=_xy()[0], y_train=_xy()[1], X_test=_xy()[2], y_test=_xy()[3],
+                split=backtest.HoldoutSplit(*_xy()),
                 candidates=[already_ran, new_candidate],
                 naive_baseline_metrics={}, extra_metadata={"train_rows": 4, "test_rows": 4},
                 summary_metrics=["accuracy", "log_loss"], promotion_metric="log_loss",
@@ -517,7 +517,7 @@ class TestResumability:
              patch.object(backtest.training_common, "would_beat_current", return_value=True) as mock_would_beat:
             result = backtest.run_backtest(
                 s3=MagicMock(), sport="nfl", model_name="win-probability", task="classification",
-                X_train=_xy()[0], y_train=_xy()[1], X_test=_xy()[2], y_test=_xy()[3],
+                split=backtest.HoldoutSplit(*_xy()),
                 candidates=[first_new_candidate],
                 naive_baseline_metrics={}, extra_metadata={"train_rows": 4, "test_rows": 4},
                 summary_metrics=["accuracy", "log_loss"], promotion_metric="log_loss",
@@ -542,7 +542,7 @@ class TestResumability:
              patch.object(backtest.training_common, "save_model_artifact") as mock_save:
             result = backtest.run_backtest(
                 s3=MagicMock(), sport="nfl", model_name="win-probability", task="classification",
-                X_train=_xy()[0], y_train=_xy()[1], X_test=_xy()[2], y_test=_xy()[3],
+                split=backtest.HoldoutSplit(*_xy()),
                 candidates=[adapter],
                 naive_baseline_metrics={}, extra_metadata={"train_rows": 4, "test_rows": 4},
                 summary_metrics=["accuracy", "log_loss"], promotion_metric="log_loss",

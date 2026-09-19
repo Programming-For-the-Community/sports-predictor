@@ -296,7 +296,6 @@ def build_cup_event_features(
     played any session of this Cup), since a Cup event's own participants
     carry only the two teams' final point totals, not a player roster."""
     home = next(p for p in cup_event["participants"] if p.get("role") == "home")
-    away = next(p for p in cup_event["participants"] if p.get("role") == "away")
 
     home_form = _average_side([rolling_golfer_averages(results, window) for results in home_roster_prior_results.values()])
     away_form = _average_side([rolling_golfer_averages(results, window) for results in away_roster_prior_results.values()])

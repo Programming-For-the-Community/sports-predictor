@@ -160,6 +160,70 @@ class _EventListPageState extends ConsumerState<EventListPage> with WidgetsBindi
     _scheduleLiveScoresPoll();
   }
 
+  // One entry per (conference, dateGroups) bucket -- 3 levels of nested
+  // loops (conference -> dateGroups -> dayEvents), pulled out of build/
+  // _dataView so their own nesting doesn't count toward either's
+  // cognitive complexity.
+  List<Widget> _groupedSections(
+    List<(String?, List<(String, List<SportEvent>)>)> grouped,
+    Map<String, LiveEventState> liveScores,
+  ) {
+    return [
+      for (final (conference, dateGroups) in grouped) ...[
+        if (conference != null)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 8),
+            child: Text(conference.toUpperCase(), style: AppTextStyles.sectionTitle(color: AppColors.cyan)),
+          ),
+        for (final (heading, dayEvents) in dateGroups) ...[
+          Padding(
+            padding: const EdgeInsets.only(bottom: 8),
+            child: Text(heading.toUpperCase(), style: AppTextStyles.microLabel(color: AppColors.inkSub)),
+          ),
+          for (final event in dayEvents) ...[
+            GameRow(sport: widget.sportId, event: event, liveState: liveScores[event.eventId]),
+            const SizedBox(height: 12),
+          ],
+          const SizedBox(height: 8),
+        ],
+        if (conference != null) const SizedBox(height: 12),
+      ],
+    ];
+  }
+
+  Widget _dataView(List<SportEvent> list, Map<String, LiveEventState> liveScores) {
+    if (list.isEmpty) {
+      // An empty "scheduled" list means next week hasn't been ingested
+      // yet, not that there's nothing to show.
+      final message = _status == EventStatus.scheduled ? 'Coming Soon' : 'No games found.';
+      return Text(message, style: AppTextStyles.body(color: AppColors.inkSub));
+    }
+    // Soonest-first for Upcoming, most-recent-first for Completed -- both
+    // read top-to-bottom as "closest to now at the top".
+    final sorted = [...list]..sort(
+        (a, b) => _status == EventStatus.scheduled
+            ? _sortKey(a).compareTo(_sortKey(b))
+            : _sortKey(b).compareTo(_sortKey(a)),
+      );
+    final grouped = _groupByConferenceThenDate(sorted, _conferenceFilter);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        // Only shown when there's more than one conference to filter.
+        if (_groupByConferenceThenDate(sorted, '').length > 1) ...[
+          ConferenceFilterField(
+            value: _conferenceFilter,
+            onChanged: (value) => setState(() => _conferenceFilter = value),
+          ),
+          const SizedBox(height: 16),
+        ],
+        if (grouped.isEmpty)
+          Text('No conferences match "$_conferenceFilter".', style: AppTextStyles.body(color: AppColors.inkSub)),
+        ..._groupedSections(grouped, liveScores),
+      ],
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final events = ref.watch(eventsListProvider((sport: widget.sportId, status: _status)));
@@ -203,59 +267,7 @@ class _EventListPageState extends ConsumerState<EventListPage> with WidgetsBindi
           Text('Times shown in your local time (${localTimezoneLabel()})', style: AppTextStyles.microLabel()),
           const SizedBox(height: 12),
           events.when(
-            data: (list) {
-              if (list.isEmpty) {
-                // An empty "scheduled" list means next week hasn't been
-                // ingested yet, not that there's nothing to show.
-                final message = _status == EventStatus.scheduled ? 'Coming Soon' : 'No games found.';
-                return Text(message, style: AppTextStyles.body(color: AppColors.inkSub));
-              }
-              // Soonest-first for Upcoming, most-recent-first for
-              // Completed -- both read top-to-bottom as "closest to now
-              // at the top".
-              final sorted = [...list]..sort(
-                  (a, b) => _status == EventStatus.scheduled
-                      ? _sortKey(a).compareTo(_sortKey(b))
-                      : _sortKey(b).compareTo(_sortKey(a)),
-                );
-              final grouped = _groupByConferenceThenDate(sorted, _conferenceFilter);
-              return Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  // Only shown when there's more than one conference to
-                  // filter.
-                  if (_groupByConferenceThenDate(sorted, '').length > 1) ...[
-                    ConferenceFilterField(
-                      value: _conferenceFilter,
-                      onChanged: (value) => setState(() => _conferenceFilter = value),
-                    ),
-                    const SizedBox(height: 16),
-                  ],
-                  if (grouped.isEmpty)
-                    Text('No conferences match "$_conferenceFilter".', style: AppTextStyles.body(color: AppColors.inkSub)),
-                  for (final (conference, dateGroups) in grouped) ...[
-                    if (conference != null) ...[
-                      Padding(
-                        padding: const EdgeInsets.only(bottom: 8),
-                        child: Text(conference.toUpperCase(), style: AppTextStyles.sectionTitle(color: AppColors.cyan)),
-                      ),
-                    ],
-                    for (final (heading, dayEvents) in dateGroups) ...[
-                      Padding(
-                        padding: const EdgeInsets.only(bottom: 8),
-                        child: Text(heading.toUpperCase(), style: AppTextStyles.microLabel(color: AppColors.inkSub)),
-                      ),
-                      for (final event in dayEvents) ...[
-                        GameRow(sport: widget.sportId, event: event, liveState: liveScores[event.eventId]),
-                        const SizedBox(height: 12),
-                      ],
-                      const SizedBox(height: 8),
-                    ],
-                    if (conference != null) const SizedBox(height: 12),
-                  ],
-                ],
-              );
-            },
+            data: (list) => _dataView(list, liveScores),
             loading: () => const Center(child: Padding(padding: EdgeInsets.all(40), child: CircularProgressIndicator())),
             error: (error, _) => Text('Couldn\'t load games: $error', style: AppTextStyles.body(color: AppColors.neg)),
           ),

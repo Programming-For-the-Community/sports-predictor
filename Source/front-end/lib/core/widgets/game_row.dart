@@ -125,6 +125,37 @@ double? _loggedPredictedScore(double? livePrediction, bool isCompleted, double? 
 /// least absolute pixel budget of any layout this row renders in, same
 /// reasoning field_status_pill.dart's own dotOnly uses.
 ///
+/// Bundles _predictionArea's own per-row values (fixed for the whole
+/// GameRow.build, unlike `compact` which varies per LayoutBuilder call) --
+/// kept these as 10 separate named parameters before, which alongside
+/// `compact` pushed _predictionArea to 11, over SonarQube's 7-parameter
+/// limit.
+class _PredictionAreaData {
+  const _PredictionAreaData({
+    required this.isCompleted,
+    required this.comparison,
+    required this.homeAbbr,
+    required this.awayAbbr,
+    required this.prediction,
+    required this.sport,
+    required this.eventId,
+    required this.isLive,
+    required this.isFinal,
+    required this.liveDetail,
+  });
+
+  final bool isCompleted;
+  final PredictionComparison? comparison;
+  final String homeAbbr;
+  final String awayAbbr;
+  final AsyncValue<EventPrediction>? prediction;
+  final String sport;
+  final String eventId;
+  final bool isLive;
+  final bool isFinal;
+  final String? liveDetail;
+}
+
 /// A live event still gets the pick/margin/confidence summary (the
 /// pre-game prediction, same one shown next to each team's own actual
 /// score in _MatchupLine) -- the LIVE pill+clock take the win-
@@ -132,25 +163,13 @@ double? _loggedPredictedScore(double? livePrediction, bool isCompleted, double? 
 /// line above it) so everything stays on one aligned baseline instead of
 /// staggering across two rows. Same idea for a completed event's FINAL
 /// pill, in _ComparisonSummary.
-Widget _predictionArea(
-  bool compact, {
-  required bool isCompleted,
-  required PredictionComparison? comparison,
-  required String homeAbbr,
-  required String awayAbbr,
-  required AsyncValue<EventPrediction>? prediction,
-  required String sport,
-  required String eventId,
-  required bool isLive,
-  required bool isFinal,
-  required String? liveDetail,
-}) {
-  return isCompleted
-      ? _ComparisonSummary(comparison: comparison, homeAbbr: homeAbbr, awayAbbr: awayAbbr, compact: compact)
+Widget _predictionArea(bool compact, _PredictionAreaData data) {
+  return data.isCompleted
+      ? _ComparisonSummary(comparison: data.comparison, homeAbbr: data.homeAbbr, awayAbbr: data.awayAbbr, compact: compact)
       : _LivePredictionSummary(
-          prediction: prediction!, homeAbbr: homeAbbr, awayAbbr: awayAbbr,
-          sport: sport, eventId: eventId, compact: compact,
-          isLive: isLive, isFinal: isFinal, liveDetail: liveDetail,
+          prediction: data.prediction!, homeAbbr: data.homeAbbr, awayAbbr: data.awayAbbr,
+          sport: data.sport, eventId: data.eventId, compact: compact,
+          isLive: data.isLive, isFinal: data.isFinal, liveDetail: data.liveDetail,
         );
 }
 
@@ -257,11 +276,12 @@ class GameRow extends ConsumerWidget {
     // separate line above it) so everything stays on one aligned
     // baseline instead of staggering across two rows. Same idea for a
     // completed event's FINAL pill, in _ComparisonSummary.
-    Widget predictionArea(bool compact) => _predictionArea(
-      compact, isCompleted: isCompleted, comparison: comparison, homeAbbr: home.abbreviation, awayAbbr: away.abbreviation,
+    final predictionAreaData = _PredictionAreaData(
+      isCompleted: isCompleted, comparison: comparison, homeAbbr: home.abbreviation, awayAbbr: away.abbreviation,
       prediction: prediction, sport: sport, eventId: event.eventId, isLive: isLive, isFinal: liveFinished,
       liveDetail: liveState?.detail,
     );
+    Widget predictionArea(bool compact) => _predictionArea(compact, predictionAreaData);
 
     return InkWell(
       onTap: () => context.go(AppRoutes.eventDetail(sport, event.eventId)),
@@ -318,93 +338,102 @@ class _LivePredictionSummary extends StatelessWidget {
   final bool isFinal;
   final String? liveDetail;
 
-  @override
-  Widget build(BuildContext context) {
-    // The leading slot: the pre-game win-probability bar (Expanded, fills
-    // the row), or -- once live or finished -- the LIVE/FINAL pill(+
-    // ESPN's own game-clock text). Also Flexible (not just naturally
-    // sized) once live/final: on a narrow card, the pill + pick/margin +
-    // confidence can together be wider than the available space, and
-    // this is the one piece with room to actually shrink (the game-clock
-    // text already ellipsizes; the pill itself never shrinks below its
-    // own dot/pill size).
-    Widget leading(double homeWinProbability) => (isLive || isFinal)
-        ? Flexible(
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                isLive ? LiveStatusPill(dotOnly: compact) : FinalStatusPill(dotOnly: compact),
-                if (liveDetail != null && liveDetail!.isNotEmpty) ...[
-                  const SizedBox(width: 8),
-                  Flexible(
-                    child: Text(
-                      liveDetail!, style: AppTextStyles.body(color: AppColors.inkSub),
-                      maxLines: 1, overflow: TextOverflow.ellipsis,
-                    ),
-                  ),
-                ],
-              ],
-            ),
-          )
-        : Expanded(child: WinProbabilityBar(homeWinProbability: homeWinProbability));
-
-    return prediction.when(
-      data: (p) {
-        final homeFavored = p.homeWinProbability >= 0.5;
-        final pickAbbr = homeFavored ? homeAbbr : awayAbbr;
-        // The favored team's own probability, not always home's, so this
-        // matches the pick/margin printed right below it.
-        final pickWinProbability = homeFavored ? p.homeWinProbability : 1 - p.homeWinProbability;
-        // Grouped into one block so spaceBetween below inserts exactly
-        // one gap (between this and `leading`), not a separate gap
-        // around every element in here.
-        final pickMarginConfidence = Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            // Flexible+ellipsis on both lines so the column gives up its
-            // own width before pushing ConfidencePill past the card edge.
+  /// The leading slot: the pre-game win-probability bar (Expanded, fills
+  /// the row), or -- once live or finished -- the LIVE/FINAL pill(+
+  /// ESPN's own game-clock text). Also Flexible (not just naturally
+  /// sized) once live/final: on a narrow card, the pill + pick/margin +
+  /// confidence can together be wider than the available space, and this
+  /// is the one piece with room to actually shrink (the game-clock text
+  /// already ellipsizes; the pill itself never shrinks below its own
+  /// dot/pill size).
+  Widget _leading(double homeWinProbability) {
+    if (!isLive && !isFinal) {
+      return Expanded(child: WinProbabilityBar(homeWinProbability: homeWinProbability));
+    }
+    final statusPill = isLive ? LiveStatusPill(dotOnly: compact) : FinalStatusPill(dotOnly: compact);
+    return Flexible(
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          statusPill,
+          if (liveDetail != null && liveDetail!.isNotEmpty) ...[
+            const SizedBox(width: 8),
             Flexible(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.end,
-                children: [
-                  Text(
-                    '${(pickWinProbability * 100).round()}%',
-                    style: AppTextStyles.metricValueLarge(color: AppColors.cyan),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                  // Predicted winner + margin -- the score itself renders
-                  // next to each team's own actual score on the left
-                  // (_MatchupLine).
-                  Text(
-                    '$pickAbbr -${p.margin.abs().toStringAsFixed(1)}',
-                    style: AppTextStyles.microLabel(color: AppColors.inkMute),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                  PredictionFreshnessBadge(
-                    sport: sport, eventId: eventId,
-                    stale: p.stale, retryAfterSeconds: p.staleRetryAfterSeconds, compact: true,
-                  ),
-                ],
+              child: Text(
+                liveDetail!, style: AppTextStyles.body(color: AppColors.inkSub),
+                maxLines: 1, overflow: TextOverflow.ellipsis,
               ),
             ),
-            const SizedBox(width: 8),
-            ConfidencePill(homeWinProbability: p.homeWinProbability, dotOnly: compact),
           ],
-        );
-        return Row(
-          // Puts the leftover gap between the two groups instead of
-          // pushing everything flush to one edge -- once the bar is
-          // gone (live/completed), this leaves the status pill roughly
-          // centered between the venue column to its left and the
-          // pick/margin/confidence group at the row's own right edge,
-          // instead of the two bunching up against each other.
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-          children: [leading(p.homeWinProbability), Flexible(child: pickMarginConfidence)],
-        );
-      },
-      loading: () => Row(children: [leading(0.5)]),
+        ],
+      ),
+    );
+  }
+
+  // Grouped into one block so spaceBetween in _dataView below inserts
+  // exactly one gap (between this and _leading), not a separate gap
+  // around every element in here.
+  Widget _pickMarginConfidence(EventPrediction p) {
+    final homeFavored = p.homeWinProbability >= 0.5;
+    final pickAbbr = homeFavored ? homeAbbr : awayAbbr;
+    // The favored team's own probability, not always home's, so this
+    // matches the pick/margin printed right below it.
+    final pickWinProbability = homeFavored ? p.homeWinProbability : 1 - p.homeWinProbability;
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        // Flexible+ellipsis on both lines so the column gives up its own
+        // width before pushing ConfidencePill past the card edge.
+        Flexible(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              Text(
+                '${(pickWinProbability * 100).round()}%',
+                style: AppTextStyles.metricValueLarge(color: AppColors.cyan),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+              // Predicted winner + margin -- the score itself renders
+              // next to each team's own actual score on the left
+              // (_MatchupLine).
+              Text(
+                '$pickAbbr -${p.margin.abs().toStringAsFixed(1)}',
+                style: AppTextStyles.microLabel(color: AppColors.inkMute),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+              PredictionFreshnessBadge(
+                sport: sport, eventId: eventId,
+                stale: p.stale, retryAfterSeconds: p.staleRetryAfterSeconds, compact: true,
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(width: 8),
+        ConfidencePill(homeWinProbability: p.homeWinProbability, dotOnly: compact),
+      ],
+    );
+  }
+
+  Widget _dataView(EventPrediction p) {
+    return Row(
+      // Puts the leftover gap between the two groups instead of pushing
+      // everything flush to one edge -- once the bar is gone (live/
+      // completed), this leaves the status pill roughly centered between
+      // the venue column to its left and the pick/margin/confidence
+      // group at the row's own right edge, instead of the two bunching
+      // up against each other.
+      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      children: [_leading(p.homeWinProbability), Flexible(child: _pickMarginConfidence(p))],
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return prediction.when(
+      data: _dataView,
+      loading: () => Row(children: [_leading(0.5)]),
       error: (error, _) => error is PredictionComputingException
           ? PredictionComputingRetry(sport: sport, eventId: eventId, retryAfterSeconds: error.retryAfterSeconds, compact: true)
           : Text('--', style: AppTextStyles.body(color: AppColors.inkMute)),

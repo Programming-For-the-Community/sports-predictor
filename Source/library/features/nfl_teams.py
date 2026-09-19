@@ -17,15 +17,24 @@ signature unchanged.
 """
 from library.features import geo
 
+_AFC_EAST = "AFC East"
+_AFC_NORTH = "AFC North"
+_AFC_SOUTH = "AFC South"
+_AFC_WEST = "AFC West"
+_NFC_EAST = "NFC East"
+_NFC_NORTH = "NFC North"
+_NFC_SOUTH = "NFC South"
+_NFC_WEST = "NFC West"
+
 TEAM_DIVISIONS: dict[str, str] = {
-    "2": "AFC East", "15": "AFC East", "17": "AFC East", "20": "AFC East",
-    "33": "AFC North", "4": "AFC North", "5": "AFC North", "23": "AFC North",
-    "34": "AFC South", "11": "AFC South", "30": "AFC South", "10": "AFC South",
-    "7": "AFC West", "12": "AFC West", "13": "AFC West", "24": "AFC West",
-    "6": "NFC East", "19": "NFC East", "21": "NFC East", "28": "NFC East",
-    "3": "NFC North", "8": "NFC North", "9": "NFC North", "16": "NFC North",
-    "1": "NFC South", "29": "NFC South", "18": "NFC South", "27": "NFC South",
-    "22": "NFC West", "14": "NFC West", "25": "NFC West", "26": "NFC West",
+    "2": _AFC_EAST, "15": _AFC_EAST, "17": _AFC_EAST, "20": _AFC_EAST,
+    "33": _AFC_NORTH, "4": _AFC_NORTH, "5": _AFC_NORTH, "23": _AFC_NORTH,
+    "34": _AFC_SOUTH, "11": _AFC_SOUTH, "30": _AFC_SOUTH, "10": _AFC_SOUTH,
+    "7": _AFC_WEST, "12": _AFC_WEST, "13": _AFC_WEST, "24": _AFC_WEST,
+    "6": _NFC_EAST, "19": _NFC_EAST, "21": _NFC_EAST, "28": _NFC_EAST,
+    "3": _NFC_NORTH, "8": _NFC_NORTH, "9": _NFC_NORTH, "16": _NFC_NORTH,
+    "1": _NFC_SOUTH, "29": _NFC_SOUTH, "18": _NFC_SOUTH, "27": _NFC_SOUTH,
+    "22": _NFC_WEST, "14": _NFC_WEST, "25": _NFC_WEST, "26": _NFC_WEST,
 }
 
 

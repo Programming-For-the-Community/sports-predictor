@@ -66,10 +66,10 @@ class TestTrain:
             train_winprob_model.train(MagicMock(), df)
 
         call = mock_run.call_args
-        assert list(call.kwargs["X_train"].columns) == ["avg_finish_position", "grid_position"]
-        assert len(call.kwargs["X_train"]) == 8
-        assert len(call.kwargs["X_test"]) == 2
-        assert call.kwargs["y_train"].name == "label_win"
+        assert list(call.kwargs["split"].X_train.columns) == ["avg_finish_position", "grid_position"]
+        assert len(call.kwargs["split"].X_train) == 8
+        assert len(call.kwargs["split"].X_test) == 2
+        assert call.kwargs["split"].y_train.name == "label_win"
 
     def test_naive_baseline_uses_the_majority_class_in_the_holdout(self):
         df = _make_df(10, winner_count=1)  # heavily majority-negative

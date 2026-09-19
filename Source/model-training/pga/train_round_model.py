@@ -133,7 +133,7 @@ def train(s3: S3Manager, df: pd.DataFrame, round_number: int) -> dict:
 
     return backtest.run_backtest(
         s3, SPORT, model_name, task="regression",
-        X_train=X_train, y_train=y_train, X_test=X_test, y_test=y_test,
+        split=backtest.HoldoutSplit(X_train, y_train, X_test, y_test),
         candidates=CANDIDATES,
         naive_baseline_metrics=naive_baseline_metrics,
         extra_metadata={

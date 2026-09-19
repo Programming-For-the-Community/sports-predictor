@@ -285,7 +285,7 @@ jobs:
     secrets: inherit
     with:
       function_name: ${{ needs.infra.outputs.pga_predict_function_name }}
-      image_uri: ${{ needs.ai_hosting.outputs.image_uri }}
+      image_tag: ${{ needs.ai_hosting.outputs.image_tag }}
       default_image_tag: 'pga-predict-latest'
 
   predict_read_deploy:

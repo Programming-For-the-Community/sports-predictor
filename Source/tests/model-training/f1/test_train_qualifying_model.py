@@ -64,7 +64,7 @@ class TestTrain:
             "XGBoostRegressorAdapter", "ElasticNetAdapter",
             "RandomForestRegressorAdapter", "MLPRegressorAdapter", "LightGBMRegressorAdapter",
         }
-        assert len(call.kwargs["X_train"]) + len(call.kwargs["X_test"]) == 8
+        assert len(call.kwargs["split"].X_train) + len(call.kwargs["split"].X_test) == 8
         assert result == _fake_result()
 
     def test_naive_baseline_metrics_are_computed_against_the_median(self):

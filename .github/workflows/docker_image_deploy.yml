@@ -8,7 +8,7 @@
 # one shared `scan` job needing all of them, then this workflow needing
 # `scan`.
 #
-# The `image_uri` output is only consumed by callers whose image feeds a
+# The `image_tag` output is only consumed by callers whose image feeds a
 # Lambda (ai_hosting's own callers, via docker_lambda_deploy.yml) --
 # harmless to ignore for an image that only feeds an ECS/Fargate task
 # (backfill), which reads the floating "-latest" tag directly instead.
@@ -40,8 +40,8 @@ on:
   workflow_call:
     inputs: *inputs
     outputs:
-      image_uri:
-        description: 'Versioned tag of the pushed image, for docker_lambda_deploy.yml to point a Lambda at (unused by ECS/Fargate-only images)'
+      image_tag:
+        description: 'Plain versioned tag of the pushed image (e.g. "nfl-predict-1.0.0"), no registry prefix -- for docker_lambda_deploy.yml to reconstruct a full image URI from its own secrets.ECR_URI access (unused by ECS/Fargate-only images). Deliberately not a full URI -- see docker_push.yml''s own push step comment for why embedding the ECR_URI secret in a job output silently breaks it.'
         value: ${{ jobs.push.outputs.versioned_tag }}
 
 permissions:

@@ -87,6 +87,147 @@ class _SeasonPageState extends ConsumerState<SeasonPage> {
   String _tab = _SeasonTab.standings;
   String _conferenceFilter = '';
 
+  // Toggle options only appear when the backend sent that block. Horizontal-
+  // scroll Row -- the toggle labels don't fit a phone-width screen. Null
+  // when the backend sent none of the optional blocks, so build() knows to
+  // skip both this row and the spacing after it.
+  Widget? _tabToggleRow(SeasonProjection season) {
+    final hasAnyOptionalBlock = season.leaderboards != null ||
+        season.bracket != null ||
+        season.cupBracket != null ||
+        season.marchMadnessBracket != null ||
+        season.conferenceBrackets != null;
+    if (!hasAnyOptionalBlock) return null;
+
+    return SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      child: Row(
+        children: [
+          StatusToggle(
+            label: _SeasonTabLabels.standings,
+            selected: _tab == _SeasonTab.standings,
+            onTap: () => setState(() => _tab = _SeasonTab.standings),
+            accentColor: AppColors.cyan,
+          ),
+          if (season.leaderboards != null) ...[
+            const SizedBox(width: 8),
+            StatusToggle(
+              label: _SeasonTabLabels.props,
+              selected: _tab == _SeasonTab.props,
+              onTap: () => setState(() => _tab = _SeasonTab.props),
+              accentColor: AppColors.cyan,
+            ),
+          ],
+          if (season.bracket != null) ...[
+            const SizedBox(width: 8),
+            StatusToggle(
+              label: _SeasonTabLabels.bracket,
+              selected: _tab == _SeasonTab.bracket,
+              onTap: () => setState(() => _tab = _SeasonTab.bracket),
+              accentColor: AppColors.cyan,
+            ),
+          ],
+          if (season.cupBracket != null) ...[
+            const SizedBox(width: 8),
+            StatusToggle(
+              label: _SeasonTabLabels.cupBracket,
+              selected: _tab == _SeasonTab.cupBracket,
+              onTap: () => setState(() => _tab = _SeasonTab.cupBracket),
+              accentColor: AppColors.cyan,
+            ),
+          ],
+          if (season.marchMadnessBracket != null) ...[
+            const SizedBox(width: 8),
+            StatusToggle(
+              label: _SeasonTabLabels.marchMadness,
+              selected: _tab == _SeasonTab.marchMadness,
+              onTap: () => setState(() => _tab = _SeasonTab.marchMadness),
+              accentColor: AppColors.cyan,
+            ),
+          ],
+          if (season.conferenceBrackets != null) ...[
+            const SizedBox(width: 8),
+            StatusToggle(
+              label: _SeasonTabLabels.conferenceBrackets,
+              selected: _tab == _SeasonTab.conferenceBrackets,
+              onTap: () => setState(() => _tab = _SeasonTab.conferenceBrackets),
+              accentColor: AppColors.cyan,
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _standingsView(SeasonProjection season) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        // Only shown when there's more than one conference/division to
+        // filter.
+        if (_groupByDivision(season.sport, season.standings, '').length > 1) ...[
+          ConferenceFilterField(
+            value: _conferenceFilter,
+            onChanged: (value) => setState(() => _conferenceFilter = value),
+          ),
+          const SizedBox(height: 16),
+        ],
+        // Fixed-width division cards in a Wrap so multiple divisions fit
+        // per row on a wide screen.
+        LayoutBuilder(
+          builder: (context, constraints) {
+            final width = cardWidth(
+              season.sport == SportIds.ncaafb || season.sport == SportIds.ncaambb ? 560 : 480, constraints.maxWidth,
+            );
+            final divisions = _groupByDivision(season.sport, season.standings, _conferenceFilter);
+            if (divisions.isEmpty) {
+              return Text('No conferences match "$_conferenceFilter".', style: AppTextStyles.body(color: AppColors.inkSub));
+            }
+            return Wrap(
+              spacing: 20,
+              runSpacing: 20,
+              children: [
+                for (final division in divisions)
+                  SizedBox(
+                    width: width,
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Padding(
+                          padding: const EdgeInsets.only(bottom: 8),
+                          child: Text(division.key.toUpperCase(), style: AppTextStyles.microLabel(color: AppColors.cyan)),
+                        ),
+                        _StandingsTable(sport: season.sport, standings: division.value),
+                      ],
+                    ),
+                  ),
+              ],
+            );
+          },
+        ),
+      ],
+    );
+  }
+
+  Widget _tabContent(SeasonProjection season) {
+    if (_tab == _SeasonTab.props && season.leaderboards != null) {
+      return _Leaderboards(leaderboards: season.leaderboards);
+    }
+    if (_tab == _SeasonTab.bracket && season.bracket != null) {
+      return _BracketSection(sport: season.sport, bracket: season.bracket!);
+    }
+    if (_tab == _SeasonTab.cupBracket && season.cupBracket != null) {
+      return _BracketSection(sport: season.sport, bracket: season.cupBracket!);
+    }
+    if (_tab == _SeasonTab.marchMadness && season.marchMadnessBracket != null) {
+      return _MarchMadnessSection(sport: season.sport, bracket: season.marchMadnessBracket!);
+    }
+    if (_tab == _SeasonTab.conferenceBrackets && season.conferenceBrackets != null) {
+      return _ConferenceBracketsSection(sport: season.sport, conferenceBrackets: season.conferenceBrackets!);
+    }
+    return _standingsView(season);
+  }
+
   @override
   Widget build(BuildContext context) {
     final projection = ref.watch(seasonProjectionProvider(widget.sportId));
@@ -96,138 +237,21 @@ class _SeasonPageState extends ConsumerState<SeasonPage> {
       child: SingleChildScrollView(
         padding: const EdgeInsets.all(24),
       child: projection.when(
-        data: (season) => Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Text(
-              season.season != null ? '${season.season} Season' : 'Season',
-              style: AppTextStyles.pageH1(),
-            ),
-            const SizedBox(height: 20),
-            // Toggle options only appear when the backend sent that block.
-            if (season.leaderboards != null ||
-                season.bracket != null ||
-                season.cupBracket != null ||
-                season.marchMadnessBracket != null ||
-                season.conferenceBrackets != null) ...[
-              // Horizontal-scroll Row -- the toggle labels don't fit a
-              // phone-width screen.
-              SingleChildScrollView(
-                scrollDirection: Axis.horizontal,
-                child: Row(
-                  children: [
-                    StatusToggle(
-                      label: _SeasonTabLabels.standings,
-                      selected: _tab == _SeasonTab.standings,
-                      onTap: () => setState(() => _tab = _SeasonTab.standings),
-                      accentColor: AppColors.cyan,
-                    ),
-                    if (season.leaderboards != null) ...[
-                      const SizedBox(width: 8),
-                      StatusToggle(
-                        label: _SeasonTabLabels.props,
-                        selected: _tab == _SeasonTab.props,
-                        onTap: () => setState(() => _tab = _SeasonTab.props),
-                        accentColor: AppColors.cyan,
-                      ),
-                    ],
-                    if (season.bracket != null) ...[
-                      const SizedBox(width: 8),
-                      StatusToggle(
-                        label: _SeasonTabLabels.bracket,
-                        selected: _tab == _SeasonTab.bracket,
-                        onTap: () => setState(() => _tab = _SeasonTab.bracket),
-                        accentColor: AppColors.cyan,
-                      ),
-                    ],
-                    if (season.cupBracket != null) ...[
-                      const SizedBox(width: 8),
-                      StatusToggle(
-                        label: _SeasonTabLabels.cupBracket,
-                        selected: _tab == _SeasonTab.cupBracket,
-                        onTap: () => setState(() => _tab = _SeasonTab.cupBracket),
-                        accentColor: AppColors.cyan,
-                      ),
-                    ],
-                    if (season.marchMadnessBracket != null) ...[
-                      const SizedBox(width: 8),
-                      StatusToggle(
-                        label: _SeasonTabLabels.marchMadness,
-                        selected: _tab == _SeasonTab.marchMadness,
-                        onTap: () => setState(() => _tab = _SeasonTab.marchMadness),
-                        accentColor: AppColors.cyan,
-                      ),
-                    ],
-                    if (season.conferenceBrackets != null) ...[
-                      const SizedBox(width: 8),
-                      StatusToggle(
-                        label: _SeasonTabLabels.conferenceBrackets,
-                        selected: _tab == _SeasonTab.conferenceBrackets,
-                        onTap: () => setState(() => _tab = _SeasonTab.conferenceBrackets),
-                        accentColor: AppColors.cyan,
-                      ),
-                    ],
-                  ],
-                ),
+        data: (season) {
+          final toggleRow = _tabToggleRow(season);
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Text(
+                season.season != null ? '${season.season} Season' : 'Season',
+                style: AppTextStyles.pageH1(),
               ),
               const SizedBox(height: 20),
+              if (toggleRow != null) ...[toggleRow, const SizedBox(height: 20)],
+              _tabContent(season),
             ],
-            if (_tab == _SeasonTab.props && season.leaderboards != null)
-              _Leaderboards(leaderboards: season.leaderboards)
-            else if (_tab == _SeasonTab.bracket && season.bracket != null)
-              _BracketSection(sport: season.sport, bracket: season.bracket!)
-            else if (_tab == _SeasonTab.cupBracket && season.cupBracket != null)
-              _BracketSection(sport: season.sport, bracket: season.cupBracket!)
-            else if (_tab == _SeasonTab.marchMadness && season.marchMadnessBracket != null)
-              _MarchMadnessSection(sport: season.sport, bracket: season.marchMadnessBracket!)
-            else if (_tab == _SeasonTab.conferenceBrackets && season.conferenceBrackets != null)
-              _ConferenceBracketsSection(sport: season.sport, conferenceBrackets: season.conferenceBrackets!)
-            else ...[
-              // Only shown when there's more than one conference/division
-              // to filter.
-              if (_groupByDivision(season.sport, season.standings, '').length > 1) ...[
-                ConferenceFilterField(
-                  value: _conferenceFilter,
-                  onChanged: (value) => setState(() => _conferenceFilter = value),
-                ),
-                const SizedBox(height: 16),
-              ],
-              // Fixed-width division cards in a Wrap so multiple divisions
-              // fit per row on a wide screen.
-              LayoutBuilder(
-                builder: (context, constraints) {
-                  final width = cardWidth(
-                    season.sport == SportIds.ncaafb || season.sport == SportIds.ncaambb ? 560 : 480, constraints.maxWidth,
-                  );
-                  final divisions = _groupByDivision(season.sport, season.standings, _conferenceFilter);
-                  if (divisions.isEmpty) {
-                    return Text('No conferences match "$_conferenceFilter".', style: AppTextStyles.body(color: AppColors.inkSub));
-                  }
-                  return Wrap(
-                    spacing: 20,
-                    runSpacing: 20,
-                    children: [
-                      for (final division in divisions)
-                        SizedBox(
-                          width: width,
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Padding(
-                                padding: const EdgeInsets.only(bottom: 8),
-                                child: Text(division.key.toUpperCase(), style: AppTextStyles.microLabel(color: AppColors.cyan)),
-                              ),
-                              _StandingsTable(sport: season.sport, standings: division.value),
-                            ],
-                          ),
-                        ),
-                    ],
-                  );
-                },
-              ),
-            ],
-          ],
-        ),
+          );
+        },
         loading: () => const Center(child: Padding(padding: EdgeInsets.all(40), child: CircularProgressIndicator())),
         error: (error, _) =>
             Text('Couldn\'t load season projection: $error', style: AppTextStyles.body(color: AppColors.neg)),
@@ -265,6 +289,19 @@ abstract final class _StandingsLabels {
   static const champNbaNcaambb = 'CHAMP%'; // NBA/NCAA MBB
   static const nc = 'NC%'; // NCAAFB
   static const sb = 'SB%'; // NFL
+}
+
+String _playoffLabel(bool isNba, bool isNcaafb, bool isNcaambb) {
+  if (isNba) return _StandingsLabels.playoffsNba;
+  if (isNcaafb) return _StandingsLabels.cfp;
+  if (isNcaambb) return _StandingsLabels.ncaaTourney;
+  return _StandingsLabels.po;
+}
+
+String _championshipLabel(bool isNba, bool isNcaafb, bool isNcaambb) {
+  if (isNba || isNcaambb) return _StandingsLabels.champNbaNcaambb;
+  if (isNcaafb) return _StandingsLabels.nc;
+  return _StandingsLabels.sb;
 }
 
 List<_StandingsColumn> _standingsColumns(String sport) {
@@ -330,13 +367,11 @@ List<_StandingsColumn> _standingsColumns(String sport) {
         2, (context, sport, team) => _PercentText(team.divisionWinnerProbability),
       ),
     _StandingsColumn(
-      isNba
-          ? _StandingsLabels.playoffsNba
-          : (isNcaafb ? _StandingsLabels.cfp : (isNcaambb ? _StandingsLabels.ncaaTourney : _StandingsLabels.po)),
+      _playoffLabel(isNba, isNcaafb, isNcaambb),
       2, (context, sport, team) => _PercentText(team.playoffProbability),
     ),
     _StandingsColumn(
-      isNba || isNcaambb ? _StandingsLabels.champNbaNcaambb : (isNcaafb ? _StandingsLabels.nc : _StandingsLabels.sb),
+      _championshipLabel(isNba, isNcaafb, isNcaambb),
       2, (context, sport, team) => _PercentText(team.championshipProbability),
     ),
   ];
@@ -869,6 +904,57 @@ class _FirstFourSection extends StatelessWidget {
   );
 }
 
+/// The largest slot value across both halves' own layouts -- used to size
+/// the grid's total height. Pulled out of _MarchMadnessGrid.build so its
+/// own triple-nested loop doesn't count toward that function's cognitive
+/// complexity.
+double _maxSlotAcross(List<_BracketSlotLayout> layouts) {
+  var maxSlot = 0.0;
+  for (final layout in layouts) {
+    for (final roundSlots in layout.slots) {
+      for (final slot in roundSlots) {
+        if (slot > maxSlot) maxSlot = slot;
+      }
+    }
+  }
+  return maxSlot;
+}
+
+/// Round r's matchups, in the same left-then-right-region concatenation
+/// order _computeConferenceBracketLayout used to build a half's own
+/// layout -- index i into a round's slots always lines up with index i
+/// here. Round halfColumns - 1 is the appended Final Four round, a single
+/// matchup outside either region's own rounds.
+List<BracketMatchup> _roundMatchups(
+  List<List<BracketRound>> regionRounds, int r, int halfColumns, BracketMatchup finalFourMatchup,
+) {
+  if (r < halfColumns - 1) return [...regionRounds[0][r].matchups, ...regionRounds[1][r].matchups];
+  return [finalFourMatchup];
+}
+
+String _roundLabel(List<BracketRound> regionRounds, int r, int halfColumns) {
+  if (r < halfColumns - 1) return regionRounds[r].round;
+  return 'Final Four';
+}
+
+/// One half's own region-round + Final-Four cards, positioned via the
+/// given column/slot functions -- the double-nested loop this replaces
+/// (round, then each round's own matchups) is identical for the left and
+/// right halves, differing only in which column/slot-layout/matchup
+/// lookup each side passes in.
+List<Widget> _regionCards(
+  int halfColumns,
+  List<List<double>> slots,
+  List<BracketMatchup> Function(int round) roundMatchups,
+  double Function(int round) column,
+  Widget Function(BracketMatchup matchup, double column, double slot) card,
+) {
+  return [
+    for (var r = 0; r < halfColumns; r++)
+      for (var i = 0; i < slots[r].length; i++) card(roundMatchups(r)[i], column(r), slots[r][i]),
+  ];
+}
+
 class _MarchMadnessGrid extends StatelessWidget {
   const _MarchMadnessGrid({required this.sport, required this.bracket, required this.regionOrder});
 
@@ -906,7 +992,7 @@ class _MarchMadnessGrid extends StatelessWidget {
     final hasFirstFour = bracket.firstFour.isNotEmpty;
     final columnOffset = hasFirstFour ? 1 : 0;
     final championshipColumn = halfColumns + columnOffset;
-    final firstFourLeftColumn = 0.0;
+    const firstFourLeftColumn = 0.0;
     final firstFourRightColumn = (halfColumns * 2 + columnOffset + 1).toDouble();
     double leftColumn(int round) => (round + columnOffset).toDouble();
     double rightColumn(int round) => (halfColumns * 2 - round + columnOffset).toDouble();
@@ -914,29 +1000,15 @@ class _MarchMadnessGrid extends StatelessWidget {
     double y(double slot) => slot * _verticalUnit;
     double yCenter(double slot) => y(slot) + _cardHeight / 2;
 
-    var maxSlot = 0.0;
-    for (final layout in [left.layout, right.layout]) {
-      for (final roundSlots in layout.slots) {
-        for (final slot in roundSlots) {
-          if (slot > maxSlot) maxSlot = slot;
-        }
-      }
-    }
+    final maxSlot = _maxSlotAcross([left.layout, right.layout]);
 
     final leftFinalFourSlot = left.layout.slots[halfColumns - 1][0];
     final rightFinalFourSlot = right.layout.slots[halfColumns - 1][0];
     final championshipSlot = (leftFinalFourSlot + rightFinalFourSlot) / 2;
 
-    // Round r's matchups, in the same left-then-right-region concatenation
-    // order _computeConferenceBracketLayout used to build left/right.layout
-    // -- index i into a round's slots always lines up with index i here.
-    // Round halfColumns - 1 is the appended Final Four round, a single
-    // matchup outside either region's own rounds.
-    List<BracketMatchup> leftRoundMatchups(int r) =>
-        r < halfColumns - 1 ? [...leftRegionRounds[0][r].matchups, ...leftRegionRounds[1][r].matchups] : [bracket.finalFour[0]];
-    List<BracketMatchup> rightRoundMatchups(int r) =>
-        r < halfColumns - 1 ? [...rightRegionRounds[0][r].matchups, ...rightRegionRounds[1][r].matchups] : [bracket.finalFour[1]];
-    String roundLabel(List<BracketRound> regionRounds, int r) => r < halfColumns - 1 ? regionRounds[r].round : 'Final Four';
+    List<BracketMatchup> leftRoundMatchups(int r) => _roundMatchups(leftRegionRounds, r, halfColumns, bracket.finalFour[0]);
+    List<BracketMatchup> rightRoundMatchups(int r) => _roundMatchups(rightRegionRounds, r, halfColumns, bracket.finalFour[1]);
+    String roundLabel(List<BracketRound> regionRounds, int r) => _roundLabel(regionRounds, r, halfColumns);
 
     final firstFourResolution = _resolveFirstFourPlacements(bracket.firstFour, leftRoundMatchups, rightRoundMatchups);
     final firstFourPlacements = firstFourResolution.placements;
@@ -1041,12 +1113,8 @@ class _MarchMadnessGrid extends StatelessWidget {
                     regionLabel(regionOrder[2], rightColumn(0), 0),
                     regionLabel(regionOrder[3], rightColumn(0), right.conferenceBOffset),
                     Positioned.fill(child: CustomPaint(painter: _GridConnectorPainter(segments: segments, color: AppColors.inkSub))),
-                    for (var r = 0; r < halfColumns; r++)
-                      for (var i = 0; i < left.layout.slots[r].length; i++)
-                        card(leftRoundMatchups(r)[i], leftColumn(r), left.layout.slots[r][i]),
-                    for (var r = 0; r < halfColumns; r++)
-                      for (var i = 0; i < right.layout.slots[r].length; i++)
-                        card(rightRoundMatchups(r)[i], rightColumn(r), right.layout.slots[r][i]),
+                    ..._regionCards(halfColumns, left.layout.slots, leftRoundMatchups, leftColumn, card),
+                    ..._regionCards(halfColumns, right.layout.slots, rightRoundMatchups, rightColumn, card),
                     for (final placement in firstFourPlacements)
                       card(
                         placement.matchup,
@@ -1611,6 +1679,45 @@ class _BracketTree extends StatelessWidget {
   // its own full emphasized size.
   static const double _championshipEntryGap = 28;
 
+  // A bye matchup (either side null -- see BracketMatchup's own doc
+  // comment) gets no card at all: the team it awarded simply appears
+  // already present in its own next real game, same as
+  // _computeBracketSlotLayout's own connector search already skips
+  // drawing a line back to a bye (nothing to connect to). Pulled out of
+  // build so its own nested loop+if/else doesn't count toward that
+  // function's cognitive complexity.
+  List<Widget> _cards(
+    _BracketSlotLayout layout, bool isChampionshipRound,
+    double championshipExtraWidth, double championshipExtraHeight, double championshipEntryGap,
+  ) {
+    return [
+      for (var r = 0; r < rounds.length; r++)
+        for (var i = 0; i < rounds[r].matchups.length; i++)
+          if (rounds[r].matchups[i].teamA != null && rounds[r].matchups[i].teamB != null)
+            if (isChampionshipRound && r == rounds.length - 1 && i == 0)
+              Positioned(
+                left: r * (_cardWidth + _roundGap) + championshipEntryGap - championshipExtraWidth,
+                top: layout.slots[r][i] * _verticalUnit - championshipExtraHeight,
+                width: _championshipCardWidth,
+                height: _championshipCardHeight,
+                child: _ChampionshipCard(sport: sport, matchup: rounds[r].matchups[i], teamNames: teamNames),
+              )
+            else
+              Positioned(
+                left: r * (_cardWidth + _roundGap),
+                top: layout.slots[r][i] * _verticalUnit,
+                width: _cardWidth,
+                height: _cardHeight,
+                child: _BracketMatchupCard(
+                  sport: sport,
+                  matchup: rounds[r].matchups[i],
+                  teamNames: teamNames,
+                  cardWidth: _cardWidth,
+                ),
+              ),
+    ];
+  }
+
   ({double maxSlot, double championshipExtraWidth, double championshipExtraHeight, double championshipEntryGap})
       _layoutMetrics(_BracketSlotLayout layout, bool isChampionshipRound) {
     var maxSlot = 0.0;
@@ -1723,36 +1830,7 @@ class _BracketTree extends StatelessWidget {
                         ),
                       ),
                     ),
-                    // A bye matchup (either side null -- see BracketMatchup's
-                    // own doc comment) gets no card at all: the team it
-                    // awarded simply appears already present in its own
-                    // next real game, same as _computeBracketSlotLayout's
-                    // connector search already skips drawing a line back
-                    // to a bye (nothing to connect to).
-                    for (var r = 0; r < rounds.length; r++)
-                      for (var i = 0; i < rounds[r].matchups.length; i++)
-                        if (rounds[r].matchups[i].teamA != null && rounds[r].matchups[i].teamB != null)
-                          if (isChampionshipRound && r == rounds.length - 1 && i == 0)
-                            Positioned(
-                              left: r * (_cardWidth + _roundGap) + championshipEntryGap - championshipExtraWidth,
-                              top: layout.slots[r][i] * _verticalUnit - championshipExtraHeight,
-                              width: _championshipCardWidth,
-                              height: _championshipCardHeight,
-                              child: _ChampionshipCard(sport: sport, matchup: rounds[r].matchups[i], teamNames: teamNames),
-                            )
-                          else
-                            Positioned(
-                              left: r * (_cardWidth + _roundGap),
-                              top: layout.slots[r][i] * _verticalUnit,
-                              width: _cardWidth,
-                              height: _cardHeight,
-                              child: _BracketMatchupCard(
-                                sport: sport,
-                                matchup: rounds[r].matchups[i],
-                                teamNames: teamNames,
-                                cardWidth: _cardWidth,
-                              ),
-                            ),
+                    ..._cards(layout, isChampionshipRound, championshipExtraWidth, championshipExtraHeight, championshipEntryGap),
                   ],
                 ),
               ),
@@ -1930,6 +2008,14 @@ class _DashedLegendSwatchPainter extends CustomPainter {
   bool shouldRepaint(covariant _DashedLegendSwatchPainter oldDelegate) => oldDelegate.color != color;
 }
 
+/// Winner-first predicted series record (e.g. "4-2"), or null if either
+/// side's predicted win count is missing.
+String? _seriesPredictedRecord(BracketMatchup matchup) {
+  if (matchup.predictedWinsA == null || matchup.predictedWinsB == null) return null;
+  if (matchup.predictedWinner == matchup.teamA) return '${matchup.predictedWinsA}-${matchup.predictedWinsB}';
+  return '${matchup.predictedWinsB}-${matchup.predictedWinsA}';
+}
+
 class _BracketMatchupCard extends StatelessWidget {
   const _BracketMatchupCard({required this.sport, required this.matchup, required this.teamNames, required this.cardWidth});
 
@@ -2010,26 +2096,34 @@ class _BracketMatchupCard extends StatelessWidget {
   // final record (winner-first, e.g. "4-2") appears on the status line.
   String _seriesStatusLabel() {
     final winnerLabel = matchup.predictedWinner != null ? _teamLabel(matchup.predictedWinner!) : null;
-    final predictedRecord = matchup.predictedWinsA != null && matchup.predictedWinsB != null
-        ? (matchup.predictedWinner == matchup.teamA
-            ? '${matchup.predictedWinsA}-${matchup.predictedWinsB}'
-            : '${matchup.predictedWinsB}-${matchup.predictedWinsA}')
-        : null;
+    final predictedRecord = _seriesPredictedRecord(matchup);
     switch (matchup.status) {
       case BracketMatchupStatus.finalStatus:
-        final winnerName = matchup.actualWinner != null ? _teamLabel(matchup.actualWinner!) : null;
-        return winnerName != null ? '$winnerName WINS SERIES' : 'SERIES FINAL';
+        return _seriesFinalLabel();
       case BracketMatchupStatus.scheduled:
-        if (matchup.winProbability == null || winnerLabel == null) return 'PREDICTION PENDING';
-        final probability = '${(matchup.winProbability! * 100).round()}%';
-        return predictedRecord != null ? '$winnerLabel $predictedRecord $probability' : '$probability $winnerLabel';
+        return _seriesScheduledLabel(winnerLabel, predictedRecord);
       default:
-        if (matchup.winProbability == null || winnerLabel == null) return 'PROJECTED';
-        final probability = '${(matchup.winProbability! * 100).round()}%';
-        return predictedRecord != null
-            ? 'PROJECTED — $winnerLabel $predictedRecord $probability'
-            : 'PROJECTED — $probability $winnerLabel';
+        return _seriesProjectedLabel(winnerLabel, predictedRecord);
     }
+  }
+
+  String _seriesFinalLabel() {
+    final winnerName = matchup.actualWinner != null ? _teamLabel(matchup.actualWinner!) : null;
+    return winnerName != null ? '$winnerName WINS SERIES' : 'SERIES FINAL';
+  }
+
+  String _seriesScheduledLabel(String? winnerLabel, String? predictedRecord) {
+    if (matchup.winProbability == null || winnerLabel == null) return 'PREDICTION PENDING';
+    final probability = '${(matchup.winProbability! * 100).round()}%';
+    return predictedRecord != null ? '$winnerLabel $predictedRecord $probability' : '$probability $winnerLabel';
+  }
+
+  String _seriesProjectedLabel(String? winnerLabel, String? predictedRecord) {
+    if (matchup.winProbability == null || winnerLabel == null) return 'PROJECTED';
+    final probability = '${(matchup.winProbability! * 100).round()}%';
+    return predictedRecord != null
+        ? 'PROJECTED — $winnerLabel $predictedRecord $probability'
+        : 'PROJECTED — $probability $winnerLabel';
   }
 
   String _singleGameStatusLabel() {

@@ -15,19 +15,19 @@ on:
         required: true
         type: string
       versioned_tag:
-        description: 'Full URI (immutable version tag) to push, from docker_build.yml'
+        description: 'Plain immutable-version tag to push (e.g. "nfl-predict-1.0.0"), no registry prefix -- from docker_build.yml. Never the full $URI:$TAG reference; see this job''s own push step comment for why'
         required: true
         type: string
       latest_tag:
-        description: 'Full URI (floating -latest tag) to push, from docker_build.yml'
+        description: 'Plain floating "-latest" tag to push (e.g. "nfl-predict-latest"), no registry prefix -- from docker_build.yml. Never the full $URI:$TAG reference; see this job''s own push step comment for why'
         required: true
         type: string
     outputs:
       versioned_tag:
-        description: 'Full URI of the pushed, version-tagged image (passthrough of the input)'
+        description: 'Plain immutable-version tag of the pushed image, no registry prefix (passthrough of the input)'
         value: ${{ inputs.versioned_tag }}
       latest_tag:
-        description: 'Full URI of the pushed, floating-latest-tagged image (passthrough of the input)'
+        description: 'Plain floating "-latest" tag of the pushed image, no registry prefix (passthrough of the input)'
         value: ${{ inputs.latest_tag }}
 
 permissions:
@@ -54,6 +54,17 @@ jobs:
           name: ${{ inputs.artifact_name }}
 
       - name: Load and push image to Amazon ECR
+        # Reconstructs the full $URI:$TAG reference locally, in this job,
+        # from its own direct secrets.ECR_URI access -- inputs.versioned_tag/
+        # latest_tag are deliberately plain tags with no registry prefix
+        # (see this workflow's own input comments), never the full
+        # reference, because docker_build.yml's OWN attempt to emit
+        # "$URI:$TAG" as a job output got silently dropped by GitHub
+        # Actions' secret-leak protection ("Skip output '...' since it may
+        # contain secret"), leaving this step's own VERSIONED_TAG/
+        # LATEST_TAG empty and `docker push ""` failing with "invalid
+        # reference format" on every push -- confirmed live, this exact
+        # failure across every image this repo builds.
         env:
           URI: ${{ secrets.ECR_URI }}
           VERSIONED_TAG: ${{ inputs.versioned_tag }}
@@ -67,7 +78,7 @@ jobs:
           aws ecr get-login-password --region ${{ vars.AWS_RESOURCE_REGION }} \
             | docker login --username AWS --password-stdin "$ECR_REGISTRY"
 
-          docker push "$VERSIONED_TAG"
-          docker push "$LATEST_TAG"
+          docker push "$URI:$VERSIONED_TAG"
+          docker push "$URI:$LATEST_TAG"
 
-          echo "Pushed: $VERSIONED_TAG and $LATEST_TAG"
+          echo "Pushed: $URI:$VERSIONED_TAG and $URI:$LATEST_TAG"

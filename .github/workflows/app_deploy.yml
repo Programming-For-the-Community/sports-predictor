@@ -885,7 +885,7 @@ jobs:
     secrets: inherit
     with:
       function_name: ${{ needs.infra.outputs.nfl_predict_function_name }}
-      image_uri: ${{ needs.nfl_ai_hosting_build.outputs.image_uri }}
+      image_tag: ${{ needs.nfl_ai_hosting_build.outputs.image_tag }}
       default_image_tag: 'nfl-predict-latest'
 
   nfl_data_pipeline:
@@ -931,7 +931,7 @@ jobs:
     secrets: inherit
     with:
       function_name: ${{ needs.infra.outputs.ncaafb_predict_function_name }}
-      image_uri: ${{ needs.ncaafb_ai_hosting_build.outputs.image_uri }}
+      image_tag: ${{ needs.ncaafb_ai_hosting_build.outputs.image_tag }}
       default_image_tag: 'ncaafb-predict-latest'
 
   ncaafb_data_pipeline:
@@ -977,7 +977,7 @@ jobs:
     secrets: inherit
     with:
       function_name: ${{ needs.infra.outputs.nba_predict_function_name }}
-      image_uri: ${{ needs.nba_ai_hosting_build.outputs.image_uri }}
+      image_tag: ${{ needs.nba_ai_hosting_build.outputs.image_tag }}
       default_image_tag: 'nba-predict-latest'
 
   nba_data_pipeline:
@@ -1025,7 +1025,7 @@ jobs:
     secrets: inherit
     with:
       function_name: ${{ needs.infra.outputs.ncaambb_predict_function_name }}
-      image_uri: ${{ needs.ncaambb_ai_hosting_build.outputs.image_uri }}
+      image_tag: ${{ needs.ncaambb_ai_hosting_build.outputs.image_tag }}
       default_image_tag: 'ncaambb-predict-latest'
 
   ncaambb_predict_read_deploy:
@@ -1059,7 +1059,7 @@ jobs:
     secrets: inherit
     with:
       function_name: ${{ needs.infra.outputs.pga_predict_function_name }}
-      image_uri: ${{ needs.pga_ai_hosting_build.outputs.image_uri }}
+      image_tag: ${{ needs.pga_ai_hosting_build.outputs.image_tag }}
       default_image_tag: 'pga-predict-latest'
 
   pga_data_pipeline:
@@ -1104,7 +1104,7 @@ jobs:
     secrets: inherit
     with:
       function_name: ${{ needs.infra.outputs.f1_predict_function_name }}
-      image_uri: ${{ needs.f1_ai_hosting_build.outputs.image_uri }}
+      image_tag: ${{ needs.f1_ai_hosting_build.outputs.image_tag }}
       default_image_tag: 'f1-predict-latest'
 
   f1_data_pipeline:

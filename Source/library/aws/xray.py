@@ -59,7 +59,7 @@ def current_trace_header() -> tuple[str, str] | None:
     header = os.environ.get("_X_AMZN_TRACE_ID")
     if not header:
         return None
-    parts = dict(part.split("=", 1) for part in header.split(";") if "=" in part)
+    parts = {key: value for part in header.split(";") if "=" in part for key, value in [part.split("=", 1)]}
     root, parent = parts.get("Root"), parts.get("Parent")
     if not root or not parent:
         return None

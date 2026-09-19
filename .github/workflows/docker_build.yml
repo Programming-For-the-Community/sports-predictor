@@ -45,10 +45,10 @@ on:
         description: 'Name of the uploaded image-tarball artifact, for docker_push.yml to download'
         value: ${{ jobs.build.outputs.artifact_name }}
       versioned_tag:
-        description: 'Full URI the image was tagged with (immutable version tag)'
+        description: 'Plain immutable-version tag the image was tagged with (e.g. "nfl-predict-1.0.0"), no registry prefix -- see this job''s own "Build and tag image" step comment for why'
         value: ${{ jobs.build.outputs.versioned_tag }}
       latest_tag:
-        description: 'Full URI the image was tagged with (floating -latest tag)'
+        description: 'Plain floating "-latest" tag the image was tagged with (e.g. "nfl-predict-latest"), no registry prefix -- see this job''s own "Build and tag image" step comment for why'
         value: ${{ jobs.build.outputs.latest_tag }}
 
 permissions:
@@ -161,8 +161,21 @@ jobs:
 
           echo "Built: $URI:$VERSIONED_TAG and $URI:$LATEST_TAG"
           echo "artifact_name=$ARTIFACT_NAME" >> "$GITHUB_OUTPUT"
-          echo "versioned_tag=$URI:$VERSIONED_TAG" >> "$GITHUB_OUTPUT"
-          echo "latest_tag=$URI:$LATEST_TAG" >> "$GITHUB_OUTPUT"
+          # Plain tag only (e.g. "nba-backfill-1.0.0"), never $URI:$TAG --
+          # GitHub Actions silently SKIPS setting a step/job output whose
+          # value contains a secret substring ("Skip output '...' since it
+          # may contain secret"), which is exactly what happened here:
+          # this used to emit "$URI:$VERSIONED_TAG", so downstream
+          # docker_push.yml always received an EMPTY versioned_tag/
+          # latest_tag input, and `docker push ""` failed with "invalid
+          # reference format" on every single push job. Confirmed live --
+          # every caller of this output (docker_push.yml, and eventually
+          # docker_lambda_deploy.yml's own image_tag) now reconstructs the
+          # full $URI:$TAG reference itself, from its own direct
+          # secrets.ECR_URI access, so the secret never has to cross an
+          # output boundary.
+          echo "versioned_tag=$VERSIONED_TAG" >> "$GITHUB_OUTPUT"
+          echo "latest_tag=$LATEST_TAG" >> "$GITHUB_OUTPUT"
 
       - name: Upload image artifact
         uses: actions/upload-artifact@v4

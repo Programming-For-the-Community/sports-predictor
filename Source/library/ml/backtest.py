@@ -15,6 +15,7 @@ training_common's promotion helpers as it finishes.
 import gc
 import logging
 import time
+from typing import Any, NamedTuple
 
 from library.aws import xray
 from library.aws.s3_manager import S3Manager
@@ -22,6 +23,16 @@ from library.ml import training_common
 from library.ml.model_types import ModelAdapter
 
 logger = logging.getLogger("model-training")
+
+
+class HoldoutSplit(NamedTuple):
+    """Bundles the 4 train/test arrays run_backtest/_run_backtest need
+    into a single parameter -- keeping them as 4 separate ones pushed both
+    functions 1 over SonarQube's 13-parameter limit."""
+    X_train: Any
+    y_train: Any
+    X_test: Any
+    y_test: Any
 
 
 def _release_candidate_resources() -> None:
@@ -45,7 +56,8 @@ def _release_candidate_resources() -> None:
     try:
         from joblib.externals.loky import get_reusable_executor
         get_reusable_executor().shutdown(wait=True, kill_workers=True)
-    except Exception:  # noqa: BLE001 -- cleanup best-effort, see docstring
+    except Exception:  # noqa: BLE001
+        # Cleanup best-effort, see docstring.
         logger.debug("Could not shut down loky's reusable executor -- continuing without it.", exc_info=True)
 
 
@@ -98,7 +110,7 @@ def run_backtest(
     sport: str,
     model_name: str,
     task: str,
-    X_train, y_train, X_test, y_test,
+    split: HoldoutSplit,
     candidates: list[ModelAdapter],
     naive_baseline_metrics: dict,
     extra_metadata: dict,
@@ -119,7 +131,7 @@ def run_backtest(
     training_orchestrator in the X-Ray Trace Map."""
     with xray.independent_segment(f"{sport}-train-{model_name}", annotations={"training_run_id": run_id}):
         return _run_backtest(
-            s3, sport, model_name, task, X_train, y_train, X_test, y_test,
+            s3, sport, model_name, task, split,
             candidates, naive_baseline_metrics, extra_metadata, summary_metrics, promotion_metric, run_id,
         )
 
@@ -129,7 +141,7 @@ def _run_backtest(
     sport: str,
     model_name: str,
     task: str,
-    X_train, y_train, X_test, y_test,
+    split: HoldoutSplit,
     candidates: list[ModelAdapter],
     naive_baseline_metrics: dict,
     extra_metadata: dict,
@@ -196,6 +208,7 @@ def _run_backtest(
     won); top-level candidates is the full score summary of every
     algorithm tried this run, win or lose.
     """
+    X_train, y_train, X_test, y_test = split
     display_metric = "accuracy" if task == "classification" else "mae"
 
     progress = training_common.load_run_progress(s3, sport, model_name, run_id)

@@ -62,6 +62,6 @@ class TestTrain:
             train_podium_model.train(MagicMock(), df)
 
         call = mock_run.call_args
-        assert len(call.kwargs["X_train"]) == 8
-        assert len(call.kwargs["X_test"]) == 2
-        assert call.kwargs["y_train"].name == "label_podium"
+        assert len(call.kwargs["split"].X_train) == 8
+        assert len(call.kwargs["split"].X_test) == 2
+        assert call.kwargs["split"].y_train.name == "label_podium"

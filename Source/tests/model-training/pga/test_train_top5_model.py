@@ -66,10 +66,10 @@ class TestTrain:
             train_top5_model.train(MagicMock(), df)
 
         call = mock_run.call_args
-        assert list(call.kwargs["X_train"].columns) == ["avg_finish_position", "purse"]
-        assert len(call.kwargs["X_train"]) == 8
-        assert len(call.kwargs["X_test"]) == 2
-        assert call.kwargs["y_train"].name == "label_top_5"
+        assert list(call.kwargs["split"].X_train.columns) == ["avg_finish_position", "purse"]
+        assert len(call.kwargs["split"].X_train) == 8
+        assert len(call.kwargs["split"].X_test) == 2
+        assert call.kwargs["split"].y_train.name == "label_top_5"
 
     def test_naive_baseline_is_the_majority_class_rate(self):
         df = _make_df(10, top_5_count=1)
@@ -106,7 +106,7 @@ class TestTrain:
         with patch.object(train_top5_model.backtest, "run_backtest", return_value=_fake_result()) as mock_run:
             train_top5_model.train(MagicMock(), df)
 
-        assert mock_run.call_args.kwargs["X_train"]["some_sparse_column"].dtype == np.float64
+        assert mock_run.call_args.kwargs["split"].X_train["some_sparse_column"].dtype == np.float64
 
 
 class TestMain:

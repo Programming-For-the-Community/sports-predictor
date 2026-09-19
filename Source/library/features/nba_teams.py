@@ -22,21 +22,28 @@ from library.features import geo
 # 11 IND, 12 LAC, 13 LAL, 14 MIA, 15 MIL, 16 MIN, 17 BKN, 18 NY, 19 ORL,
 # 20 PHI, 21 PHX, 22 POR, 23 SAC, 24 SA, 25 OKC, 26 UTAH, 27 WSH, 28 TOR,
 # 29 MEM, 30 CHA.
+_EASTERN_ATLANTIC = "Eastern Atlantic"
+_EASTERN_CENTRAL = "Eastern Central"
+_EASTERN_SOUTHEAST = "Eastern Southeast"
+_WESTERN_NORTHWEST = "Western Northwest"
+_WESTERN_PACIFIC = "Western Pacific"
+_WESTERN_SOUTHWEST = "Western Southwest"
+
 TEAM_DIVISIONS: dict[str, str] = {
     # Eastern Conference
-    "2": "Eastern Atlantic", "17": "Eastern Atlantic", "18": "Eastern Atlantic",
-    "20": "Eastern Atlantic", "28": "Eastern Atlantic",
-    "4": "Eastern Central", "5": "Eastern Central", "8": "Eastern Central",
-    "11": "Eastern Central", "15": "Eastern Central",
-    "1": "Eastern Southeast", "30": "Eastern Southeast", "14": "Eastern Southeast",
-    "19": "Eastern Southeast", "27": "Eastern Southeast",
+    "2": _EASTERN_ATLANTIC, "17": _EASTERN_ATLANTIC, "18": _EASTERN_ATLANTIC,
+    "20": _EASTERN_ATLANTIC, "28": _EASTERN_ATLANTIC,
+    "4": _EASTERN_CENTRAL, "5": _EASTERN_CENTRAL, "8": _EASTERN_CENTRAL,
+    "11": _EASTERN_CENTRAL, "15": _EASTERN_CENTRAL,
+    "1": _EASTERN_SOUTHEAST, "30": _EASTERN_SOUTHEAST, "14": _EASTERN_SOUTHEAST,
+    "19": _EASTERN_SOUTHEAST, "27": _EASTERN_SOUTHEAST,
     # Western Conference
-    "7": "Western Northwest", "16": "Western Northwest", "25": "Western Northwest",
-    "22": "Western Northwest", "26": "Western Northwest",
-    "9": "Western Pacific", "12": "Western Pacific", "13": "Western Pacific",
-    "21": "Western Pacific", "23": "Western Pacific",
-    "6": "Western Southwest", "10": "Western Southwest", "29": "Western Southwest",
-    "3": "Western Southwest", "24": "Western Southwest",
+    "7": _WESTERN_NORTHWEST, "16": _WESTERN_NORTHWEST, "25": _WESTERN_NORTHWEST,
+    "22": _WESTERN_NORTHWEST, "26": _WESTERN_NORTHWEST,
+    "9": _WESTERN_PACIFIC, "12": _WESTERN_PACIFIC, "13": _WESTERN_PACIFIC,
+    "21": _WESTERN_PACIFIC, "23": _WESTERN_PACIFIC,
+    "6": _WESTERN_SOUTHWEST, "10": _WESTERN_SOUTHWEST, "29": _WESTERN_SOUTHWEST,
+    "3": _WESTERN_SOUTHWEST, "24": _WESTERN_SOUTHWEST,
 }
 
 

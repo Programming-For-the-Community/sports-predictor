@@ -20,12 +20,12 @@ on:
         description: 'Lambda function name'
         required: true
         type: string
-      image_uri:
-        description: 'Image URI to deploy (leave blank to use default_image_tag)'
+      image_tag:
+        description: 'Plain ECR tag to deploy (e.g. nfl-predict-1.0.0), no registry prefix -- leave blank to use default_image_tag. Never a full image URI: this job reconstructs $ECR_URI:$TAG itself from its own secrets.ECR_URI access, since a job output built by embedding that secret gets silently dropped by GitHub Actions (see docker_push.yml''s own push step comment)'
         required: false
         type: string
       default_image_tag:
-        description: 'Fallback ECR tag (e.g. nfl-predict-latest) used when image_uri is blank'
+        description: 'Fallback ECR tag (e.g. nfl-predict-latest) used when image_tag is blank'
         required: true
         type: string
   workflow_call:
@@ -50,13 +50,14 @@ jobs:
       - name: Update function code
         env:
           FUNCTION_NAME: ${{ inputs.function_name }}
-          IMAGE_URI: ${{ inputs.image_uri }}
+          IMAGE_TAG: ${{ inputs.image_tag }}
           ECR_URI: ${{ secrets.ECR_URI }}
           DEFAULT_IMAGE_TAG: ${{ inputs.default_image_tag }}
         run: |
-          if [ -z "$IMAGE_URI" ]; then
-            IMAGE_URI="$ECR_URI:$DEFAULT_IMAGE_TAG"
+          if [ -z "$IMAGE_TAG" ]; then
+            IMAGE_TAG="$DEFAULT_IMAGE_TAG"
           fi
+          IMAGE_URI="$ECR_URI:$IMAGE_TAG"
 
           aws lambda update-function-code \
             --function-name "$FUNCTION_NAME" \

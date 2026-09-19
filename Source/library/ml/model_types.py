@@ -25,7 +25,7 @@ registry for both classifier and regressor model cards.
 import io
 import logging
 import types
-from typing import Any, Protocol
+from typing import Any, Optional, Protocol
 
 import joblib
 import numpy as np
@@ -321,6 +321,8 @@ class _JoblibSerializedAdapter:
     per algorithm and (for a classifier/regressor pair of the same
     algorithm) per task -- predict_proba only exists on a classifier."""
 
+    artifact_filename = "model.joblib"
+
     def serialize(self, estimator) -> bytes:
         buffer = io.BytesIO()
         joblib.dump(estimator, buffer)
@@ -356,14 +358,13 @@ class LogisticRegressionAdapter(_JoblibSerializedAdapter):
     (NaN-containing) X at predict time."""
 
     algorithm = "logistic_regression"
-    artifact_filename = "model.joblib"
 
     def _build_pipeline(self) -> Pipeline:
         return Pipeline([
             ("impute", SimpleImputer(strategy="median")),
             ("scale", StandardScaler()),
             ("model", LogisticRegression(solver="liblinear", max_iter=1000, random_state=_LOGISTIC_RANDOM_STATE)),
-        ])
+        ], memory=None)
 
     def tune_and_fit(self, X_train: pd.DataFrame, y_train: pd.Series) -> tuple[Pipeline, dict]:
         search = GridSearchCV(
@@ -405,14 +406,13 @@ _ELASTIC_NET_RANDOM_STATE = 42
 
 class ElasticNetAdapter(_JoblibSerializedAdapter):
     algorithm = "elastic_net"
-    artifact_filename = "model.joblib"
 
     def _build_pipeline(self) -> Pipeline:
         return Pipeline([
             ("impute", SimpleImputer(strategy="median")),
             ("scale", StandardScaler()),
             ("model", ElasticNet(alpha=1.0, l1_ratio=0.5, max_iter=5000, random_state=_ELASTIC_NET_RANDOM_STATE)),
-        ])
+        ], memory=None)
 
     def tune_and_fit(self, X_train: pd.DataFrame, y_train: pd.Series) -> tuple[Pipeline, dict]:
         search = GridSearchCV(
@@ -476,8 +476,7 @@ _RF_SEARCH_N_JOBS = _RF_CV_SPLITS
 
 
 class _RandomForestAdapterBase(_JoblibSerializedAdapter):
-    artifact_filename = "model.joblib"
-    _estimator_cls: type = None
+    _estimator_cls: Optional[type] = None
     _scoring = None
 
     def _build_pipeline(self) -> Pipeline:
@@ -487,7 +486,7 @@ class _RandomForestAdapterBase(_JoblibSerializedAdapter):
         return Pipeline([
             ("impute", SimpleImputer(strategy="median")),
             ("model", self._estimator_cls(random_state=_RF_RANDOM_STATE, n_jobs=1)),
-        ])
+        ], memory=None)
 
     def tune_and_fit(self, X_train: pd.DataFrame, y_train: pd.Series) -> tuple[Pipeline, dict]:
         search = _run_randomized_search_with_early_stopping(
@@ -548,8 +547,7 @@ _MLP_RANDOM_STATE = 42
 
 
 class _MLPAdapterBase(_JoblibSerializedAdapter):
-    artifact_filename = "model.joblib"
-    _estimator_cls: type = None
+    _estimator_cls: Optional[type] = None
     _scoring = None
 
     def _build_pipeline(self) -> Pipeline:
@@ -559,7 +557,7 @@ class _MLPAdapterBase(_JoblibSerializedAdapter):
             ("model", self._estimator_cls(
                 max_iter=2000, early_stopping=True, random_state=_MLP_RANDOM_STATE,
             )),
-        ])
+        ], memory=None)
 
     def tune_and_fit(self, X_train: pd.DataFrame, y_train: pd.Series) -> tuple[Pipeline, dict]:
         search = _run_randomized_search_with_early_stopping(
@@ -637,7 +635,6 @@ _LGBM_RANDOM_STATE = 42
 
 class LightGBMClassifierAdapter(_JoblibSerializedAdapter):
     algorithm = "lightgbm_classifier"
-    artifact_filename = "model.joblib"
 
     def tune_and_fit(self, X_train: pd.DataFrame, y_train: pd.Series) -> tuple[Any, dict]:
         LGBMClassifier, _ = _lgbm_estimator_classes()
@@ -671,7 +668,6 @@ class LightGBMClassifierAdapter(_JoblibSerializedAdapter):
 
 class LightGBMRegressorAdapter(_JoblibSerializedAdapter):
     algorithm = "lightgbm_regressor"
-    artifact_filename = "model.joblib"
 
     def tune_and_fit(self, X_train: pd.DataFrame, y_train: pd.Series) -> tuple[Any, dict]:
         _, LGBMRegressor = _lgbm_estimator_classes()

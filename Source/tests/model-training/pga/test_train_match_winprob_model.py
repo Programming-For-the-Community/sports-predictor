@@ -65,7 +65,7 @@ class TestTrain:
             train_match_winprob_model.train(MagicMock(), df)
 
         call = mock_run.call_args
-        assert len(call.kwargs["X_train"]) + len(call.kwargs["X_test"]) == 8
+        assert len(call.kwargs["split"].X_train) + len(call.kwargs["split"].X_test) == 8
 
     def test_splits_chronologically_and_builds_numeric_frames_of_the_right_columns(self):
         df = _make_df(10)
@@ -74,10 +74,10 @@ class TestTrain:
             train_match_winprob_model.train(MagicMock(), df)
 
         call = mock_run.call_args
-        assert list(call.kwargs["X_train"].columns) == ["is_singles", "home_avg_score_to_par", "away_avg_score_to_par"]
-        assert len(call.kwargs["X_train"]) == 8
-        assert len(call.kwargs["X_test"]) == 2
-        assert call.kwargs["y_train"].name == "label_home_won"
+        assert list(call.kwargs["split"].X_train.columns) == ["is_singles", "home_avg_score_to_par", "away_avg_score_to_par"]
+        assert len(call.kwargs["split"].X_train) == 8
+        assert len(call.kwargs["split"].X_test) == 2
+        assert call.kwargs["split"].y_train.name == "label_home_won"
 
     def test_labels_are_coerced_to_int(self):
         df = _make_df(10)
@@ -85,7 +85,7 @@ class TestTrain:
         with patch.object(train_match_winprob_model.backtest, "run_backtest", return_value=_fake_result()) as mock_run:
             train_match_winprob_model.train(MagicMock(), df)
 
-        assert mock_run.call_args.kwargs["y_train"].dtype == np.int64
+        assert mock_run.call_args.kwargs["split"].y_train.dtype == np.int64
 
     def test_passes_row_counts_and_date_ranges_in_extra_metadata(self):
         df = _make_df(10)
@@ -112,7 +112,7 @@ class TestTrain:
         with patch.object(train_match_winprob_model.backtest, "run_backtest", return_value=_fake_result()) as mock_run:
             train_match_winprob_model.train(MagicMock(), df)
 
-        assert mock_run.call_args.kwargs["X_train"]["some_sparse_column"].dtype == np.float64
+        assert mock_run.call_args.kwargs["split"].X_train["some_sparse_column"].dtype == np.float64
 
 
 class TestMain:

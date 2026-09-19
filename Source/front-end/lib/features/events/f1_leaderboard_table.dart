@@ -260,6 +260,36 @@ List<F1DriverPrediction> _sortedByActualResult(List<F1DriverPrediction> field, b
   return [for (final e in indexed) e.entry];
 }
 
+List<F1DriverPrediction> _sortedField(
+  List<F1DriverPrediction> field, bool isSprint, Map<String, F1DriverLiveResult> liveResults,
+) {
+  if (liveResults.isNotEmpty) return _sortedByLiveOrder(field, liveResults);
+  if (field.any((e) => e.actual != null)) return _sortedByActualResult(field, isSprint);
+  return field;
+}
+
+Widget _headerRow(List<_LeaderboardColumn> columns, bool compact) {
+  return Padding(
+    padding: const EdgeInsets.symmetric(vertical: 10),
+    child: Row(
+      children: [
+        if (compact) const SizedBox(width: 20),
+        for (var i = 0; i < columns.length; i++) ...[
+          if (i > 0) const SizedBox(width: 6),
+          Expanded(
+            flex: columns[i].flex,
+            child: Text(
+              columns[i].label, style: AppTextStyles.microLabel(),
+              textAlign: i == 0 ? TextAlign.start : TextAlign.center,
+              maxLines: 1, softWrap: false, overflow: TextOverflow.ellipsis,
+            ),
+          ),
+        ],
+      ],
+    ),
+  );
+}
+
 class F1LeaderboardTable extends StatelessWidget {
   const F1LeaderboardTable({super.key, required this.field, required this.isSprint, this.liveResults = const {}});
 
@@ -275,12 +305,7 @@ class F1LeaderboardTable extends StatelessWidget {
     if (field.isEmpty) {
       return Text('No field available yet.', style: AppTextStyles.body(color: AppColors.inkSub));
     }
-    final hasActualResults = field.any((e) => e.actual != null);
-    final sorted = liveResults.isNotEmpty
-        ? _sortedByLiveOrder(field, liveResults)
-        : hasActualResults
-            ? _sortedByActualResult(field, isSprint)
-            : field;
+    final sorted = _sortedField(field, isSprint, liveResults);
     return LayoutBuilder(
       builder: (context, constraints) {
         final compact = constraints.maxWidth < _compactBreakpoint;
@@ -294,25 +319,7 @@ class F1LeaderboardTable extends StatelessWidget {
           ),
           child: Column(
             children: [
-              Padding(
-                padding: const EdgeInsets.symmetric(vertical: 10),
-                child: Row(
-                  children: [
-                    if (compact) const SizedBox(width: 20),
-                    for (var i = 0; i < columns.length; i++) ...[
-                      if (i > 0) const SizedBox(width: 6),
-                      Expanded(
-                        flex: columns[i].flex,
-                        child: Text(
-                          columns[i].label, style: AppTextStyles.microLabel(),
-                          textAlign: i == 0 ? TextAlign.start : TextAlign.center,
-                          maxLines: 1, softWrap: false, overflow: TextOverflow.ellipsis,
-                        ),
-                      ),
-                    ],
-                  ],
-                ),
-              ),
+              _headerRow(columns, compact),
               for (var i = 0; i < sorted.length; i++) ...[
                 const Divider(height: 1, color: AppColors.border),
                 _LeaderboardRow(

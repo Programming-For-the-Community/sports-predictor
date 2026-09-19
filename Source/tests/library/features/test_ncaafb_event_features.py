@@ -60,7 +60,7 @@ class TestBuildEventFeaturesRollingStats:
             {"event_date": "2025-09-13", "stat_line": {"passing_yards": 280, "passing_touchdowns": 3}, "started": True},
         ]
 
-        row = build_event_features(event, {}, [], [], _COORDS, home_qb_games=home_qb_games)
+        row = build_event_features(event, {}, [], [], _COORDS, home_position_games={"qb": home_qb_games})
 
         assert row["home_qb_avg_passing_yards"] == 280
         assert row["home_qb_avg_passing_tds"] == 3
@@ -72,7 +72,7 @@ class TestBuildEventFeaturesRollingStats:
         home_rb_games = [{"event_date": "2025-09-13", "stat_line": {"rushing_yards": 110}, "started": True}]
         home_wr_games = [{"event_date": "2025-09-13", "stat_line": {"receiving_yards": 90, "receiving_receptions": 5}, "started": True}]
 
-        row = build_event_features(event, {}, [], [], _COORDS, home_rb_games=home_rb_games, home_wr_games=home_wr_games)
+        row = build_event_features(event, {}, [], [], _COORDS, home_position_games={"rb": home_rb_games, "wr": home_wr_games})
 
         assert row["home_rb_avg_rushing_yards"] == 110
         assert row["home_wr_avg_receiving_yards"] == 90

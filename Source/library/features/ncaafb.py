@@ -85,21 +85,23 @@ def build_event_features(
     away_team_events: list[dict],
     team_coordinates: dict[str, tuple[float, float]],
     window: int = DEFAULT_ROLLING_WINDOW,
-    home_qb_games: list[dict] | None = None,
-    away_qb_games: list[dict] | None = None,
-    home_rb_games: list[dict] | None = None,
-    away_rb_games: list[dict] | None = None,
-    home_wr_games: list[dict] | None = None,
-    away_wr_games: list[dict] | None = None,
+    home_position_games: dict[str, list[dict]] | None = None,
+    away_position_games: dict[str, list[dict]] | None = None,
     home_team_box_stats: list[dict] | None = None,
     away_team_box_stats: list[dict] | None = None,
 ) -> dict:
     """Assembles one training row for a head-to-head event -- same shape
     and calling convention as library.features.nfl.build_event_features
-    (see its own docstring for what each argument means); team_coordinates
-    is the one addition, {entity_id: (latitude, longitude)} built from
-    team entities' own metadata (see library/normalize/ncaafb.py's
-    team_to_entity) rather than a hardcoded module constant.
+    (see its own docstring for what each argument means), with two
+    differences: team_coordinates ({entity_id: (latitude, longitude)},
+    built from team entities' own metadata -- see library/normalize/
+    ncaafb.py's team_to_entity -- rather than a hardcoded module constant),
+    and home_position_games/away_position_games ({"qb"/"rb"/"wr": [game,
+    ...]}) replacing nfl.py's own 6 separate home_qb_games/away_qb_games/
+    home_rb_games/away_rb_games/home_wr_games/away_wr_games parameters --
+    needed to keep this function's own parameter count under SonarQube's
+    limit once team_coordinates was added on top of nfl.py's already-at-
+    the-limit shape.
 
     No raw season_type column -- unlike build_team_week_features (the
     ranking model's own row, which deliberately excludes it from training
@@ -123,12 +125,14 @@ def build_event_features(
     home_scoring = rolling_team_scoring_averages(home_team_events, home_id, window)
     away_scoring = rolling_team_scoring_averages(away_team_events, away_id, window)
 
-    home_qb_stats = rolling_player_stat_averages(home_qb_games or [], window)
-    away_qb_stats = rolling_player_stat_averages(away_qb_games or [], window)
-    home_rb_stats = rolling_player_stat_averages(home_rb_games or [], window)
-    away_rb_stats = rolling_player_stat_averages(away_rb_games or [], window)
-    home_wr_stats = rolling_player_stat_averages(home_wr_games or [], window)
-    away_wr_stats = rolling_player_stat_averages(away_wr_games or [], window)
+    home_position_games = home_position_games or {}
+    away_position_games = away_position_games or {}
+    home_qb_stats = rolling_player_stat_averages(home_position_games.get("qb") or [], window)
+    away_qb_stats = rolling_player_stat_averages(away_position_games.get("qb") or [], window)
+    home_rb_stats = rolling_player_stat_averages(home_position_games.get("rb") or [], window)
+    away_rb_stats = rolling_player_stat_averages(away_position_games.get("rb") or [], window)
+    home_wr_stats = rolling_player_stat_averages(home_position_games.get("wr") or [], window)
+    away_wr_stats = rolling_player_stat_averages(away_position_games.get("wr") or [], window)
 
     home_box_stats = rolling_player_stat_averages(home_team_box_stats or [], window)
     away_box_stats = rolling_player_stat_averages(away_team_box_stats or [], window)
@@ -301,7 +305,6 @@ def build_team_week_features(
     """
     participants = event["participants"]
     home = next(p for p in participants if p.get("role") == "home")
-    away = next(p for p in participants if p.get("role") == "away")
     is_home = team_id == home["entity_id"]
     conference = event.get("home_conference") if is_home else event.get("away_conference")
     current_rank = event.get("home_current_rank") if is_home else event.get("away_current_rank")

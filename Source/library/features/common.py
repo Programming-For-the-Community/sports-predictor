@@ -179,6 +179,23 @@ def rest_days(event_date: str, previous_event_date: str | None) -> int | None:
     return (date.fromisoformat(event_date) - date.fromisoformat(previous_event_date)).days
 
 
+def _own_and_opponent_scores(event: dict, entity_id: str) -> tuple[float, float] | None:
+    """(own_score, opp_score) for entity_id's own side of `event`, or None
+    if either side/score is missing -- shared by rolling_team_scoring_
+    averages and current_streak, both of which need the same own-vs-
+    opponent score lookup before doing anything else with it."""
+    participants = event.get("participants", [])
+    own = next((p for p in participants if p.get("entity_id") == entity_id), None)
+    opponent = next((p for p in participants if p.get("entity_id") != entity_id), None)
+    if own is None or opponent is None:
+        return None
+    own_score = own.get("result", {}).get("score")
+    opp_score = opponent.get("result", {}).get("score")
+    if own_score is None or opp_score is None:
+        return None
+    return own_score, opp_score
+
+
 def rolling_team_scoring_averages(
     team_events: list[dict], entity_id: str, window: int = DEFAULT_ROLLING_WINDOW
 ) -> dict:
@@ -188,15 +205,10 @@ def rolling_team_scoring_averages(
     None for either average if the team has no qualifying history yet."""
     scored, allowed = [], []
     for event in team_events[:window]:
-        participants = event.get("participants", [])
-        own = next((p for p in participants if p.get("entity_id") == entity_id), None)
-        opponent = next((p for p in participants if p.get("entity_id") != entity_id), None)
-        if own is None or opponent is None:
+        scores = _own_and_opponent_scores(event, entity_id)
+        if scores is None:
             continue
-        own_score = own.get("result", {}).get("score")
-        opp_score = opponent.get("result", {}).get("score")
-        if own_score is None or opp_score is None:
-            continue
+        own_score, opp_score = scores
         scored.append(own_score)
         allowed.append(opp_score)
 
@@ -220,14 +232,11 @@ def current_streak(team_events: list[dict], entity_id: str) -> int:
     """
     streak = 0
     for event in team_events:
-        participants = event.get("participants", [])
-        own = next((p for p in participants if p.get("entity_id") == entity_id), None)
-        opponent = next((p for p in participants if p.get("entity_id") != entity_id), None)
-        if own is None or opponent is None:
+        scores = _own_and_opponent_scores(event, entity_id)
+        if scores is None:
             break
-        own_score = own.get("result", {}).get("score")
-        opp_score = opponent.get("result", {}).get("score")
-        if own_score is None or opp_score is None or own_score == opp_score:
+        own_score, opp_score = scores
+        if own_score == opp_score:
             break
         won = own_score > opp_score
         if streak == 0:

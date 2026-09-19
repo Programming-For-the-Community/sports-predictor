@@ -103,7 +103,7 @@ def train(
 
     return backtest.run_backtest(
         s3, sport, model_name(score_target), task="regression",
-        X_train=X_train, y_train=y_train, X_test=X_test, y_test=y_test,
+        split=backtest.HoldoutSplit(X_train, y_train, X_test, y_test),
         candidates=candidates,
         naive_baseline_metrics=naive_baseline_metrics,
         extra_metadata={

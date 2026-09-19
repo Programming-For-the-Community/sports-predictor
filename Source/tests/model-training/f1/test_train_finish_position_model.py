@@ -68,7 +68,7 @@ class TestTrain:
             "RandomForestRegressorAdapter", "MLPRegressorAdapter", "LightGBMRegressorAdapter",
         }
         # 8 scored rows total (10 - 2 dnf), 80/20 chronological split.
-        assert len(call.kwargs["X_train"]) + len(call.kwargs["X_test"]) == 8
+        assert len(call.kwargs["split"].X_train) + len(call.kwargs["split"].X_test) == 8
         assert result == _fake_result()
 
     def test_naive_baseline_metrics_are_computed_against_the_median(self):

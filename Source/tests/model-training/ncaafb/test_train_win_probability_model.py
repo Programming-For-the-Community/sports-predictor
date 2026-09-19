@@ -77,9 +77,9 @@ class TestTrain:
             train_win_probability_model.train(MagicMock(), df)
 
         call = mock_run.call_args
-        assert len(call.kwargs["X_train"]) == 8
-        assert len(call.kwargs["X_test"]) == 2
-        assert call.kwargs["X_test"].index.tolist() == df.index[-2:].tolist()
+        assert len(call.kwargs["split"].X_train) == 8
+        assert len(call.kwargs["split"].X_test) == 2
+        assert call.kwargs["split"].X_test.index.tolist() == df.index[-2:].tolist()
 
     def test_all_null_feature_column_is_still_numeric_not_object(self):
         df = _make_df(10)
@@ -88,7 +88,7 @@ class TestTrain:
         with patch.object(train_win_probability_model.backtest, "run_backtest", return_value=_fake_result()) as mock_run:
             train_win_probability_model.train(MagicMock(), df)
 
-        assert mock_run.call_args.kwargs["X_train"]["home_current_rank"].dtype == np.float64
+        assert mock_run.call_args.kwargs["split"].X_train["home_current_rank"].dtype == np.float64
 
     def test_promotion_metric_is_log_loss(self):
         df = _make_df(10)

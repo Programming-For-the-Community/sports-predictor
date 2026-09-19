@@ -123,13 +123,13 @@ class TestTrain:
             train_win_probability_model.train(MagicMock(), df)
 
         call = mock_run.call_args
-        assert list(call.kwargs["X_train"].columns) == ["home_elo", "elo_diff"]
-        assert len(call.kwargs["X_train"]) == 8
-        assert len(call.kwargs["X_test"]) == 2
-        assert call.kwargs["y_train"].name == "label_home_won"
+        assert list(call.kwargs["split"].X_train.columns) == ["home_elo", "elo_diff"]
+        assert len(call.kwargs["split"].X_train) == 8
+        assert len(call.kwargs["split"].X_test) == 2
+        assert call.kwargs["split"].y_train.name == "label_home_won"
         # Chronological, not random -- the held-out rows are the most
         # recent by event_date.
-        assert call.kwargs["X_test"].index.tolist() == df.index[-2:].tolist()
+        assert call.kwargs["split"].X_test.index.tolist() == df.index[-2:].tolist()
 
     def test_naive_baseline_accuracy_is_fraction_of_home_wins_in_test_set(self):
         # label_home_won is [True, False, True, False, ...] -- the last 2
@@ -174,7 +174,7 @@ class TestTrain:
         with patch.object(train_win_probability_model.backtest, "run_backtest", return_value=_fake_result()) as mock_run:
             train_win_probability_model.train(MagicMock(), df)
 
-        assert mock_run.call_args.kwargs["X_train"]["weather_temperature"].dtype == np.float64
+        assert mock_run.call_args.kwargs["split"].X_train["weather_temperature"].dtype == np.float64
 
 
 class TestMain:
