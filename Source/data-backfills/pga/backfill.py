@@ -247,7 +247,8 @@ def process_season(client: PGAClient, storage: PipelineStorage, season: int) -> 
                 empty_events.append({"season": season, "event_id": event_id, "label": entry.get("label")})
             else:
                 tournaments_skipped += 1
-        except Exception as exc:  # noqa: BLE001 -- log and continue, one bad tournament shouldn't kill the run
+        # Log and continue -- one bad tournament shouldn't kill the run.
+        except Exception as exc:  # noqa: BLE001
             tournaments_failed += 1
             logger.exception("Failed processing event %s (%s, season %s)", event_id, entry.get("label"), season)
             failures.append({"season": season, "event_id": event_id, "label": entry.get("label"), "error": str(exc)})
@@ -308,7 +309,8 @@ def main() -> None:
             batch = futures[future]
             try:
                 all_results.extend(future.result())
-            except Exception:  # noqa: BLE001 -- a whole batch dying shouldn't stop us reporting the others
+            # A whole batch dying shouldn't stop us reporting the others.
+            except Exception:  # noqa: BLE001
                 logger.exception("Batch %s raised an unhandled exception", batch)
 
     elapsed = time.monotonic() - start_time

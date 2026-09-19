@@ -145,10 +145,9 @@ class TestConferenceSeedOrder:
     def test_ranks_by_conference_wins_then_point_differential(self):
         members = ["t1", "t2", "t3"]
         conference_wins = {"t1": 10, "t2": 12, "t3": 12}
-        conference_losses = {"t1": 2, "t2": 2, "t3": 2}
         point_differential = {"t1": 50, "t2": 30, "t3": 100}
 
-        order = ss._conference_seed_order(members, conference_wins, conference_losses, point_differential)
+        order = ss._conference_seed_order(members, conference_wins, point_differential)
 
         # t3 and t2 are tied on conference wins (12) -- t3 wins the tiebreak
         # on point differential (100 > 30). t1 has fewer conference wins.

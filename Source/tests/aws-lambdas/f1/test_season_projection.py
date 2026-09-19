@@ -124,7 +124,7 @@ class TestBuildSeasonProjection:
     def test_no_event_ever_stored_returns_none(self):
         storage = MagicMock()
         storage.get_all_events.side_effect = _by_status([])
-        assert season_projection.build_season_projection(storage, MagicMock(), MagicMock()) is None
+        assert season_projection.build_season_projection(storage, MagicMock()) is None
 
     def test_nothing_remaining_uses_real_final_standings_not_a_simulation(self):
         storage = MagicMock()
@@ -135,7 +135,7 @@ class TestBuildSeasonProjection:
         ])
         storage.get_entity.return_value = None
 
-        result = season_projection.build_season_projection(storage, MagicMock(), MagicMock())
+        result = season_projection.build_season_projection(storage, MagicMock())
 
         assert result["simulations"] == 0
         champion_row = next(r for r in result["driver_standings"] if r["entity_id"] == "a")
@@ -161,7 +161,7 @@ class TestBuildSeasonProjection:
                  "constructor_standings": [{"entity_id": "red_bull", "current_points": 25.0, "projected_points": 50.0, "champion_probability": 1.0}],
                  "simulations": 750,
              }) as mock_sim:
-            result = season_projection.build_season_projection(storage, MagicMock(), MagicMock())
+            result = season_projection.build_season_projection(storage, MagicMock())
 
         assert result["simulations"] == 750
         assert result["driver_standings"][0]["entity_id"] == "a"
@@ -172,12 +172,12 @@ class TestRunScheduled:
     def test_writes_to_s3_when_a_projection_is_produced(self):
         s3 = MagicMock()
         with patch.object(season_projection, "build_season_projection", return_value={"season": 2026, "driver_standings": [], "constructor_standings": []}):
-            season_projection.run_scheduled(MagicMock(), s3, MagicMock())
+            season_projection.run_scheduled(MagicMock(), s3)
         s3.put_json.assert_called_once()
 
     def test_skips_the_s3_write_when_there_is_no_season_to_project(self):
         s3 = MagicMock()
         with patch.object(season_projection, "build_season_projection", return_value=None):
-            result = season_projection.run_scheduled(MagicMock(), s3, MagicMock())
+            result = season_projection.run_scheduled(MagicMock(), s3)
         s3.put_json.assert_not_called()
         assert result == {"sport": "f1", "skipped": True}

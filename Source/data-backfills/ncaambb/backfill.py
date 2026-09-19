@@ -195,7 +195,8 @@ def process_date(client: NCAAMBBClient, storage: PipelineStorage, date_str: str)
             try:
                 future.result()
                 games_processed += 1
-            except Exception as exc:  # noqa: BLE001 -- log and continue, one bad game shouldn't kill the run
+            # Log and continue -- one bad game shouldn't kill the run.
+            except Exception as exc:  # noqa: BLE001
                 games_failed += 1
                 logger.exception("Failed processing event %s (date %s)", event["id"], date_str)
                 failures.append({"date": date_str, "event_id": event["id"], "error": str(exc)})
@@ -277,7 +278,8 @@ def main() -> None:
             batch = futures[future]
             try:
                 all_results.extend(future.result())
-            except Exception:  # noqa: BLE001 -- a whole batch dying shouldn't stop us reporting the others
+            # A whole batch dying shouldn't stop us reporting the others.
+            except Exception:  # noqa: BLE001
                 logger.exception("Batch %s raised an unhandled exception", batch)
 
     elapsed = time.monotonic() - start_time

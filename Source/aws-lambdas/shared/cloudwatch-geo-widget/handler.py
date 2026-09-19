@@ -57,9 +57,29 @@ from pathlib import Path
 import boto3
 from PIL import Image, ImageDraw, ImageFilter, ImageFont
 
+from library.aws import lambda_singletons
 from library.aws.boto_config import DEFAULT_CONFIG
 
 logger = logging.getLogger("cloudwatch-geo-widget")
+
+# The CloudFront edge-access log group ("blocked" mode) only ever exists
+# in us-east-1, regardless of this Lambda's own region.
+_CLOUDFRONT_EDGE_LOG_REGION = "us-east-1"
+
+# Lazy singletons, reused across warm invocations.
+_logs_client = None
+_cloudfront_logs_client = None
+
+
+def _get_logs_client():
+    return lambda_singletons.get_or_create(globals(), "_logs_client", lambda: boto3.client("logs", config=DEFAULT_CONFIG))
+
+
+def _get_cloudfront_logs_client():
+    return lambda_singletons.get_or_create(
+        globals(), "_cloudfront_logs_client",
+        lambda: boto3.client("logs", region_name=_CLOUDFRONT_EDGE_LOG_REGION, config=DEFAULT_CONFIG),
+    )
 
 with Path(__file__).with_name("boundaries.json").open() as _f:
     _BOUNDARIES = json.load(_f)
@@ -395,15 +415,11 @@ def lambda_handler(event, context):
     end_ms = time_range.get("end", 0)
 
     if mode == "blocked":
-        # The CloudFront edge-access log group only ever exists in
-        # us-east-1, regardless of this Lambda's own region.
-        logs_client = boto3.client("logs", region_name="us-east-1", config=DEFAULT_CONFIG)
-        counts = _blocked_counts_by_country(logs_client, os.environ["BLOCKED_LOG_GROUP_NAME"], start_ms, end_ms)
+        counts = _blocked_counts_by_country(_get_cloudfront_logs_client(), os.environ["BLOCKED_LOG_GROUP_NAME"], start_ms, end_ms)
         body = _map_html(_render_blocked_image, counts)
     else:
-        logs_client = boto3.client("logs", config=DEFAULT_CONFIG)
         log_group_names = os.environ["ACCEPTED_LOG_GROUP_NAMES"].split(",")
-        counts = _accepted_counts_by_state(logs_client, log_group_names, start_ms, end_ms)
+        counts = _accepted_counts_by_state(_get_logs_client(), log_group_names, start_ms, end_ms)
         body = _map_html(_render_accepted_image, counts)
 
     return f'<div style="background:#0d1420;padding:8px;border-radius:6px;">{body}</div>'

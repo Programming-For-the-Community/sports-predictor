@@ -91,7 +91,7 @@ def applicable_rounds(participant: dict) -> list[int]:
         return []
     played = {r["round"] for r in result.get("rounds", [])}
     next_round = max(played, default=0) + 1
-    return [r for r in range(next_round, 5)]
+    return list(range(next_round, 5))
 
 
 def _golfer_prior_history(

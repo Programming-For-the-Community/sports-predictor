@@ -166,7 +166,7 @@ List<_LeaderboardColumn> _fullColumns({required bool isSprint}) => [
         _F1ColumnKey.position, _F1ColumnLabels.position, 1,
         (context, entry, live, rowNumber) => _positionColumnCell(context, entry, live, rowNumber, isSprint),
       ),
-      _LeaderboardColumn(_F1ColumnKey.driver, _F1ColumnLabels.driver, 4, _driverColumnCell),
+      const _LeaderboardColumn(_F1ColumnKey.driver, _F1ColumnLabels.driver, 4, _driverColumnCell),
       _LeaderboardColumn(_F1ColumnKey.status, _F1ColumnLabels.status, 2,
           (context, entry, live, rowNumber) => Center(child: F1StatusPill(status: entry.actual?.status))),
       isSprint

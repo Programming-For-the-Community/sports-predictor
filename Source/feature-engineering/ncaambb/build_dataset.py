@@ -70,6 +70,7 @@ SPORT = "ncaambb"
 EVENT_FEATURES_KEY = "ncaambb/training-data/event_features.parquet"
 PLAYER_FEATURES_KEY = "ncaambb/training-data/player_features.parquet"
 RANKING_FEATURES_KEY = "ncaambb/training-data/ranking_features.parquet"
+_PARQUET_CONTENT_TYPE = "application/octet-stream"
 
 # Matches the raw key shape data-backfills/ncaambb/backfill.py's own
 # seed_rankings writes: ncaambb/rankings/{season}/{season_type}/{week}.json.
@@ -351,7 +352,7 @@ def main() -> None:
             f"s3://{bucket}/{EVENT_FEATURES_KEY} with an empty dataset",
         )
     logger.info("Writing %d event feature rows to Parquet...", len(event_rows))
-    s3.put_bytes(EVENT_FEATURES_KEY, _write_parquet(event_rows), content_type="application/octet-stream")
+    s3.put_bytes(EVENT_FEATURES_KEY, _write_parquet(event_rows), content_type=_PARQUET_CONTENT_TYPE)
     logger.info("Wrote %d event feature rows to s3://%s/%s", len(event_rows), bucket, EVENT_FEATURES_KEY)
 
     logger.info("Building player-level dataset...")
@@ -365,7 +366,7 @@ def main() -> None:
     logger.info("Writing %d player feature rows to Parquet...", player_row_count)
     player_parquet = _write_parquet(player_rows)
     del player_rows  # free the large list before the S3 upload, not just after
-    s3.put_bytes(PLAYER_FEATURES_KEY, player_parquet, content_type="application/octet-stream")
+    s3.put_bytes(PLAYER_FEATURES_KEY, player_parquet, content_type=_PARQUET_CONTENT_TYPE)
     logger.info("Wrote %d player feature rows to s3://%s/%s", player_row_count, bucket, PLAYER_FEATURES_KEY)
 
     logger.info("Building ranking dataset...")
@@ -376,7 +377,7 @@ def main() -> None:
             f"s3://{bucket}/{RANKING_FEATURES_KEY} with an empty dataset",
         )
     logger.info("Writing %d ranking feature rows to Parquet...", len(ranking_rows))
-    s3.put_bytes(RANKING_FEATURES_KEY, _write_parquet(ranking_rows), content_type="application/octet-stream")
+    s3.put_bytes(RANKING_FEATURES_KEY, _write_parquet(ranking_rows), content_type=_PARQUET_CONTENT_TYPE)
     logger.info("Wrote %d ranking feature rows to s3://%s/%s", len(ranking_rows), bucket, RANKING_FEATURES_KEY)
 
     logger.info("Feature engineering complete.")

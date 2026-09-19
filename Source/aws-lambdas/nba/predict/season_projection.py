@@ -526,7 +526,7 @@ def _next_series_game_probability(
     if next_game is None:
         return None
     event_key_value = next_game["event_key"]
-    home_id, away_id = _home_and_away(next_game)
+    home_id, _ = _home_and_away(next_game)
     logged = _logged_win_probability(predictions_table, event_key_value)
     if logged is None:
         try:
@@ -768,7 +768,7 @@ def _bracket_payload(
     # record, point differential as tiebreak. Decided once here since a
     # series' host team stays fixed across all 7 possible games even
     # though which games it physically hosts alternates (2-2-1-1-1).
-    (conference_a, champion_a), (conference_b, champion_b) = champions.items()
+    (_, champion_a), (_, champion_b) = champions.items()
     record_a = (wins.get(champion_a, 0), point_differential.get(champion_a, 0))
     record_b = (wins.get(champion_b, 0), point_differential.get(champion_b, 0))
     finals_home, finals_away = (champion_a, champion_b) if record_a >= record_b else (champion_b, champion_a)

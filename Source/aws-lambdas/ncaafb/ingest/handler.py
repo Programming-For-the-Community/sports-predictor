@@ -160,7 +160,7 @@ def _roster_needs_refresh(season: int, season_kickoff: datetime | None) -> bool:
     try:
         response = _s3.get_object(Bucket=RAW_BUCKET, Key=_roster_marker_key(season), ExpectedBucketOwner=get_account_id())
         fetched_at = datetime.fromisoformat(json.loads(response["Body"].read())["fetched_at"])
-    except (ClientError, json.JSONDecodeError, KeyError, ValueError):
+    except (ClientError, KeyError, ValueError):
         return True  # cache miss or malformed marker -- treat as never fetched
     if season_kickoff is not None and fetched_at < season_kickoff:
         return True

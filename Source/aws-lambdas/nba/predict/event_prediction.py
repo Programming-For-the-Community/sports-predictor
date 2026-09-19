@@ -92,7 +92,7 @@ def predict_event_leaders(storage, s3, predictions_table, event_key_value: str, 
         for category in LEADER_CATEGORY_STATS:
             primary_stat = LEADER_CATEGORY_STATS[category][0]
             scored = [score(row, LEADER_CATEGORY_STATS[category]) for row in team_candidates[category]]
-            scored.sort(key=lambda row: row.get(primary_stat, float("-inf")), reverse=True)
+            scored.sort(key=lambda row, primary_stat=primary_stat: row.get(primary_stat, float("-inf")), reverse=True)
             result[category] = scored
         return result
 

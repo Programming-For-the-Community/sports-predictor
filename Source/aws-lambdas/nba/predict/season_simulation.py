@@ -672,7 +672,7 @@ def project_cup_knockout_bracket(
         ]
         conference_finalists[conference] = conference_final["predicted_winner"]
 
-    (conference_a, finalist_a), (conference_b, finalist_b) = conference_finalists.items()
+    (_, finalist_a), (_, finalist_b) = conference_finalists.items()
     championship = projected(project_matchup(finalist_a, finalist_b, None, None, ratings, 0.0))
 
     return {

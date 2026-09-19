@@ -4,7 +4,7 @@ ingest/handler.py writes them to S3.
 import json
 import logging
 from datetime import datetime, timedelta, timezone
-from typing import Callable, TypeVar
+from typing import Callable
 
 from botocore.exceptions import ClientError
 
@@ -17,8 +17,6 @@ logger = logging.getLogger("nfl-ingest")
 
 # Injuries have no TTL constant -- fetched fresh every run, never cached.
 COACHES_CACHE_TTL_DAYS = 7
-
-_T = TypeVar("_T")
 
 
 def _get_json(s3, bucket: str, key: str) -> dict | None:
@@ -36,7 +34,7 @@ def _put_json(s3, bucket: str, key: str, payload: dict) -> None:
     s3.put_object(Bucket=bucket, Key=key, Body=json.dumps(payload), ContentType="application/json", ExpectedBucketOwner=get_account_id())
 
 
-def _cached_or_fetch(s3, bucket: str, key: str, ttl_days: int, fetch: Callable[[], _T]) -> _T:
+def _cached_or_fetch[T](s3, bucket: str, key: str, ttl_days: int, fetch: Callable[[], T]) -> T:
     """Returns the value cached at `key` if it was fetched within the last
     `ttl_days`, otherwise calls `fetch()`, caches the result (wrapped with
     a fetched_at timestamp), and returns it. A fetch failure propagates to

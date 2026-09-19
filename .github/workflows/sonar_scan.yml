@@ -81,10 +81,35 @@ jobs:
           pattern: 'coverage-*'
           path: coverage-artifacts
 
+      - name: Download Dart coverage data
+        # Separate artifact/step from the Python coverage-* pattern above --
+        # frontend_deploy.yml/app_deploy.yml's own test-frontend job uploads
+        # one LCOV file (a different tool and format entirely from Python's
+        # own .coverage SQLite files), nothing to combine. Same
+        # continue-on-error reasoning as the Python download.
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: dart-coverage
+          path: dart-coverage
+
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.12'
+
+      # Regenerates Source/library's own pylock.toml (PEP 751) fresh, same
+      # as run_python_tests.yml's own "Lock and install library package"
+      # step -- that step's own generated file never leaves its own job's
+      # ephemeral runner, so without this, this job's own checkout never
+      # has a pylock.toml on disk for the scanner to see, regardless of
+      # what every test job already generated. No actual install needed
+      # here, this job never imports library -- just the lock file itself.
+      - name: Regenerate Source/library's lock file
+        run: |
+          set -e
+          pip install --no-cache-dir --quiet uv
+          (cd Source/library && uv lock --quiet && uv export --quiet --format pylock.toml --no-emit-project -o pylock.toml)
 
       - name: Combine coverage data
         id: merge_coverage
@@ -141,6 +166,17 @@ jobs:
           ARGS="-Dsonar.organization=${{ vars.SONAR_ORGANIZATION }} -Dsonar.projectKey=${{ vars.SONAR_PROJECT_KEY }} -Dsonar.qualitygate.wait=${{ inputs.wait_for_quality_gate }} -Dsonar.buildString=${ENVIRONMENT}-${PARENT_WORKFLOW} -Dsonar.analysis.environment=$ENVIRONMENT -Dsonar.analysis.parentWorkflow=$PARENT_WORKFLOW"
           if [ -n "${{ steps.merge_coverage.outputs.report_path }}" ]; then
             ARGS="$ARGS -Dsonar.python.coverage.reportPaths=${{ steps.merge_coverage.outputs.report_path }}"
+          fi
+          # sonar.dart.coverage.reportPaths, by analogy with sonar.python.
+          # coverage.reportPaths above (same LANGUAGE.coverage.reportPaths
+          # shape SonarQube's own Python/JS/TS coverage import uses) --
+          # SonarQube Cloud's own Dart support is newer/less documented
+          # than Python's, so double-check the dashboard's own Coverage
+          # tab actually populates after this lands; an unrecognized -D
+          # property is silently ignored by the scanner, not a hard
+          # failure, so this is a safe attempt either way.
+          if [ -f dart-coverage/lcov.info ]; then
+            ARGS="$ARGS -Dsonar.dart.coverage.reportPaths=dart-coverage/lcov.info"
           fi
           echo "args=$ARGS" >> "$GITHUB_OUTPUT"
 

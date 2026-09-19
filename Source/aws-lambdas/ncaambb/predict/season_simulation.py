@@ -287,8 +287,7 @@ def _group_by_conference(team_conference: dict[str, str]) -> dict[str, list[str]
 
 
 def _conference_seed_order(
-    members: list[str], conference_wins: dict[str, int], conference_losses: dict[str, int],
-    point_differential: dict[str, int],
+    members: list[str], conference_wins: dict[str, int], point_differential: dict[str, int],
 ) -> list[str]:
     """Seed order (best first) for one conference's own tournament --
     conference-only wins then point differential, no real head-to-head/
@@ -455,7 +454,7 @@ def _simulate_regular_season_games(
 
 
 def _simulate_conference_tournaments(
-    conferences: dict[str, list[str]], conference_wins: dict[str, int], conference_losses: dict[str, int],
+    conferences: dict[str, list[str]], conference_wins: dict[str, int],
     point_differential: dict[str, int], ratings: dict[str, float], home_advantage: float, rng: random.Random,
     conference_tournament_champion_totals: dict[str, int],
 ) -> dict[str, str]:
@@ -464,7 +463,7 @@ def _simulate_conference_tournaments(
     conference_tournament_champion_totals in place."""
     conference_champions: dict[str, str] = {}
     for conference, members in conferences.items():
-        seed_order = _conference_seed_order(members, conference_wins, conference_losses, point_differential)
+        seed_order = _conference_seed_order(members, conference_wins, point_differential)
         survivors = _simulate_bracket_survivors(seed_order, ratings, home_advantage, rng)
         champion = survivors[-1][0]
         conference_champions[conference] = champion
@@ -613,7 +612,7 @@ def simulate_season(
             loss_totals[team_id] += losses[team_id]
 
         conference_champions = _simulate_conference_tournaments(
-            conferences, conference_wins, conference_losses, point_differential, ratings, home_advantage, rng,
+            conferences, conference_wins, point_differential, ratings, home_advantage, rng,
             conference_tournament_champion_totals,
         )
 

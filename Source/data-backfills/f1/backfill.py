@@ -249,7 +249,8 @@ def process_season(client: JolpicaClient, storage: PipelineStorage, season: int)
                 rounds_processed += 1
             else:
                 rounds_skipped += 1
-        except Exception as exc:  # noqa: BLE001 -- log and continue, one bad round shouldn't kill the run
+        # Log and continue -- one bad round shouldn't kill the run.
+        except Exception as exc:  # noqa: BLE001
             rounds_failed += 1
             logger.exception("Failed processing season %d round %d", season, round_)
             failures.append({"season": season, "round": round_, "error": str(exc)})
@@ -307,7 +308,8 @@ def main() -> None:
             batch = futures[future]
             try:
                 all_results.extend(future.result())
-            except Exception:  # noqa: BLE001 -- a whole batch dying shouldn't stop us reporting the others
+            # A whole batch dying shouldn't stop us reporting the others.
+            except Exception:  # noqa: BLE001
                 logger.exception("Batch %s raised an unhandled exception", batch)
 
     elapsed = time.monotonic() - start_time

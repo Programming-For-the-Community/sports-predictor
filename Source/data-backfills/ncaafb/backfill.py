@@ -172,7 +172,8 @@ def process_week(
         try:
             storage.upsert_event(normalize.game_to_event_item(game))
             games_processed += 1
-        except Exception as exc:  # noqa: BLE001 -- log and continue, one bad game shouldn't kill the run
+        # Log and continue -- one bad game shouldn't kill the run.
+        except Exception as exc:  # noqa: BLE001
             games_failed += 1
             logger.exception("Failed writing event for game %s (season %s)", game.get("id"), season)
             failures.append({"season": season, "event_id": game.get("id"), "error": str(exc)})
@@ -296,7 +297,8 @@ def main() -> None:
             batch = futures[future]
             try:
                 all_results.extend(future.result())
-            except Exception:  # noqa: BLE001 -- a whole batch dying shouldn't stop us reporting the others
+            # A whole batch dying shouldn't stop us reporting the others.
+            except Exception:  # noqa: BLE001
                 logger.exception("Batch %s raised an unhandled exception", batch)
 
     elapsed = time.monotonic() - start_time

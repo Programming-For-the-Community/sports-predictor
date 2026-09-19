@@ -222,7 +222,7 @@ def _final_standings_only(storage, inputs: dict) -> dict:
     }
 
 
-def build_season_projection(storage, s3, predictions_table) -> dict | None:
+def build_season_projection(storage, s3) -> dict | None:
     """The full FedEx Cup season projection, or None if there's no season
     to project yet (no PGA field event ever stored). A missing promoted
     score model raises model_loader.NoPromotedModelError, propagated to
@@ -273,11 +273,14 @@ def build_season_projection(storage, s3, predictions_table) -> dict | None:
     }
 
 
-def run_scheduled(storage, s3, predictions_table) -> dict:
+def run_scheduled(storage, s3) -> dict:
     """Entry point for handler.py's ScheduledSeasonProjection dispatch
     (weekly EventBridge trigger). Writes the result to S3 only when
-    there's a season to project."""
-    result = build_season_projection(storage, s3, predictions_table)
+    there's a season to project. No predictions_table param -- unlike
+    every other sport's own run_scheduled, PGA's season projection never
+    reads/writes the predictions table (no player-prop route to log
+    against, see this module's own docstring)."""
+    result = build_season_projection(storage, s3)
     if result is not None:
         s3.put_json(season_projection_key(SPORT), result)
         logger.info("Wrote PGA season projection: %d golfers, season %s", len(result["standings"]), result["season"])

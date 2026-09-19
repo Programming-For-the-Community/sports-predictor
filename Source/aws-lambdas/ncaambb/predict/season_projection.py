@@ -563,7 +563,7 @@ def _conference_bracket_payloads(
         if len(members) < 2:
             continue
         seed_order = season_simulation._conference_seed_order(
-            members, season_inputs["conference_wins"], season_inputs["conference_losses"], season_inputs["point_differential"],
+            members, season_inputs["conference_wins"], season_inputs["point_differential"],
         )
         round_names = season_simulation._round_names(season_simulation._next_power_of_two(len(seed_order)))
         try:

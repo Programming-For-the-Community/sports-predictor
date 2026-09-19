@@ -180,7 +180,7 @@ def project_full_bracket(
     conference_results = {
         conference: project_bracket(seeds, ratings, home_advantage) for conference, seeds in conference_seeds.items()
     }
-    (conference_a, result_a), (conference_b, result_b) = conference_results.items()
+    (_, result_a), (_, result_b) = conference_results.items()
     super_bowl_matchup = project_matchup(result_a["champion"], result_b["champion"], None, None, ratings, 0.0)
 
     return {

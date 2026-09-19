@@ -132,13 +132,13 @@ Widget _thisRoundColumnCell(BuildContext context, FieldParticipantPrediction ent
 
 List<_LeaderboardColumn> _leaderboardColumns(int? par, {required bool compact}) {
   final core = [
-    _LeaderboardColumn(_FieldColumnLabels.position, 1, _positionColumnCell),
-    _LeaderboardColumn(_FieldColumnLabels.player, 4, _playerColumnCell),
+    const _LeaderboardColumn(_FieldColumnLabels.position, 1, _positionColumnCell),
+    const _LeaderboardColumn(_FieldColumnLabels.player, 4, _playerColumnCell),
     _LeaderboardColumn(
       _FieldColumnLabels.status, compact ? 1 : 3,
       (context, entry, live, rowNumber) => _statusColumnCell(context, entry, live, rowNumber, compact),
     ),
-    _LeaderboardColumn(_FieldColumnLabels.total, 3, _totalColumnCell),
+    const _LeaderboardColumn(_FieldColumnLabels.total, 3, _totalColumnCell),
   ];
   if (compact) return core;
   // THIS RD/TOP 10%/TOP 5% move into the expanded per-row detail below

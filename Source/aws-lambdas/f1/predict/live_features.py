@@ -172,7 +172,7 @@ def current_roster(storage, sport: str, all_events: list[dict] | None = None) ->
 
 
 def _projected_constructor_rows(
-    storage, sport: str, event: dict, driver_ids: list[str], driver_to_constructor: dict[str, str],
+    event: dict, driver_ids: list[str], driver_to_constructor: dict[str, str],
     window: int, field_events_before: list[dict],
 ) -> dict[str, dict]:
     """Constructor rows for a PROJECTED field -- same grouping
@@ -232,7 +232,7 @@ def build_live_field_features(
         driver_rows = build_projected_field_features(
             storage, sport, event, driver_ids, driver_to_constructor, window, circuit_window, all_events=all_events,
         )
-        constructor_rows = _projected_constructor_rows(storage, sport, event, driver_ids, driver_to_constructor, window, field_events_before)
+        constructor_rows = _projected_constructor_rows(event, driver_ids, driver_to_constructor, window, field_events_before)
         return {"event": event, "driver_rows": driver_rows, "constructor_rows": constructor_rows}
 
     driver_rows = {}

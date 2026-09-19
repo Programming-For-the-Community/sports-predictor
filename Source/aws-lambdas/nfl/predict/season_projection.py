@@ -518,7 +518,7 @@ def _bracket_payload(
         conference_results[conference] = rounds
         champions[conference] = champion
 
-    (conference_a, champion_a), (conference_b, champion_b) = champions.items()
+    (_, champion_a), (_, champion_b) = champions.items()
     super_bowl, super_bowl_advancing = _project_bracket_round(
         "Super Bowl", [(champion_a, champion_b, None, None)],
         real_matchups, storage, s3, predictions_table, season_inputs["current_ratings"], 0.0,

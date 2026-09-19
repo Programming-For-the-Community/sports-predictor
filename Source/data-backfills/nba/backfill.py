@@ -121,7 +121,8 @@ def process_date(client: NBAClient, storage: PipelineStorage, date_str: str) -> 
             if event.get("status", {}).get("type", {}).get("completed", False):
                 process_game(client, storage, season, event_id)
             games_processed += 1
-        except Exception as exc:  # noqa: BLE001 -- log and continue, one bad game shouldn't kill the run
+        # Log and continue -- one bad game shouldn't kill the run.
+        except Exception as exc:  # noqa: BLE001
             games_failed += 1
             logger.exception("Failed processing event %s (date %s)", event_id, date_str)
             failures.append({"date": date_str, "event_id": event_id, "error": str(exc)})
@@ -195,7 +196,8 @@ def main() -> None:
             batch = futures[future]
             try:
                 all_results.extend(future.result())
-            except Exception:  # noqa: BLE001 -- a whole batch dying shouldn't stop us reporting the others
+            # A whole batch dying shouldn't stop us reporting the others.
+            except Exception:  # noqa: BLE001
                 logger.exception("Batch %s raised an unhandled exception", batch)
 
     elapsed = time.monotonic() - start_time

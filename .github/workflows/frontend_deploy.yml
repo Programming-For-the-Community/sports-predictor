@@ -78,7 +78,15 @@ jobs:
 
       - name: Test
         working-directory: Source/front-end
-        run: flutter test
+        run: flutter test --coverage
+
+      - name: Upload coverage data
+        uses: actions/upload-artifact@v4
+        with:
+          name: dart-coverage
+          path: Source/front-end/coverage/lcov.info
+          retention-days: 1
+          if-no-files-found: ignore
 
   scan:
     name: SonarQube Cloud scan

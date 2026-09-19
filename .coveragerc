@@ -1,0 +1,18 @@
+# Read by `coverage combine` in .github/workflows/sonar_scan.yml's own
+# "Combine coverage data" step. Source/library gets installed as a
+# NORMAL (non-editable) package in every run_python_tests.yml test job
+# (see that workflow's own "Lock and install library package" step's
+# comment for why it's not editable -- Source/library's own pyproject.toml
+# package-dir mapping ({"library": "."}) isn't representable by either
+# PEP 660 editable-install mode, confirmed by testing both locally), so
+# `library.*` code actually executes from its own site-packages COPY, not
+# the checked-out Source/library/*.py files -- coverage.py records hits
+# against that copy's own absolute path, which sonar_scan.yml's own
+# checkout doesn't have at all. This [paths] mapping tells `coverage
+# combine` to treat any site-packages-installed library/ hit as if it
+# were recorded against Source/library/ instead, so SonarQube can
+# correlate it against the real source file it's actually analyzing.
+[paths]
+library =
+    Source/library
+    */site-packages/library
