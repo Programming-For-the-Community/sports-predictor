@@ -12,6 +12,7 @@ numpy==1.26.4
 pandas==2.2.3
 pyarrow==16.1.0
 scikit-learn==1.9.0
+joblib==1.4.2
 scikit-learn-intelex==2024.0.1
 # Pinned to the EXACT version every other sport's training/serving images
 # pin -- xgboost's raw model format is not guaranteed compatible across
