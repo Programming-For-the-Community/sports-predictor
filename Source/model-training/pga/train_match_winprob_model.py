@@ -35,6 +35,7 @@ except ImportError:
 
 from library.aws.s3_manager import S3Manager
 from library.ml import backtest, training_common
+from library.ml import train_classifier_model_common as classifier_common
 from library.ml.model_types import (
     LightGBMClassifierAdapter,
     LogisticRegressionAdapter,
@@ -59,8 +60,6 @@ MATCH_FEATURES_KEY = "pga/training-data/match_features.parquet"
 # column, not a real categorical signal).
 NON_FEATURE_COLUMNS = {"event_key", "event_date", "match_format"}
 LABEL_COLUMN = "label_home_won"
-SUMMARY_METRICS = ["accuracy", "log_loss", "naive_baseline_accuracy"]
-PROMOTION_METRIC = "log_loss"
 
 CANDIDATES = [
     XGBoostClassifierAdapter(),
@@ -80,41 +79,14 @@ def train(s3: S3Manager, df) -> dict:
     result ({"promotions": [card, ...], "candidates": [summary, ...]}).
 
     A halved match has label_home_won=None (library/features/pga.py's
-    build_match_event_features) -- dropped here before the split, same
-    "filter at train time, keep the raw dataset complete" convention
+    build_match_event_features) -- dropped before the split, same "filter
+    at train time, keep the raw dataset complete" convention
     train_cutline_model.py's own cut_count > 0 filter uses."""
-    df = df[df[LABEL_COLUMN].notna()]
-    feature_columns = _feature_columns(df)
-    train_df, test_df = training_common.chronological_split(df, training_common.TEST_FRACTION)
-    train_date_range = [str(train_df["event_date"].min()), str(train_df["event_date"].max())]
-    test_date_range = [str(test_df["event_date"].min()), str(test_df["event_date"].max())]
-    logger.info(
-        "Training on %d rows (%s to %s), evaluating on %d rows (%s to %s)",
-        len(train_df), *train_date_range, len(test_df), *test_date_range,
-    )
-
-    X_train = training_common.numeric_frame(train_df, feature_columns)
-    y_train = train_df[LABEL_COLUMN].astype(int)
-    X_test = training_common.numeric_frame(test_df, feature_columns)
-    y_test = test_df[LABEL_COLUMN].astype(int)
-
-    naive_baseline_accuracy = float(max(y_test.mean(), 1 - y_test.mean()))
-    naive_baseline_metrics = {"naive_baseline_accuracy": naive_baseline_accuracy}
-
-    return backtest.run_backtest(
-        s3, SPORT, MODEL_NAME, task="classification",
-        split=backtest.HoldoutSplit(X_train, y_train, X_test, y_test),
-        candidates=CANDIDATES,
-        naive_baseline_metrics=naive_baseline_metrics,
-        extra_metadata={
-            "train_rows": int(len(train_df)),
-            "test_rows": int(len(test_df)),
-            "train_date_range": train_date_range,
-            "test_date_range": test_date_range,
-        },
-        summary_metrics=SUMMARY_METRICS,
-        promotion_metric=PROMOTION_METRIC,
-        run_id=training_common.resolve_run_id(),
+    return classifier_common.train(
+        s3, df, SPORT, MODEL_NAME,
+        label_column=LABEL_COLUMN, non_feature_columns=NON_FEATURE_COLUMNS,
+        candidates=CANDIDATES, logger=logger,
+        drop_null_label=True, coerce_int_label=True,
     )
 
 

@@ -3,7 +3,6 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../data/events_repository.dart';
 import '../theme/app_colors.dart';
 import '../theme/app_text_styles.dart';
 
@@ -11,18 +10,24 @@ import '../theme/app_text_styles.dart';
 /// PredictionComputingRetry, which replaces it) -- shown when predict-read
 /// served a 203 (see EventPrediction.stale): a small "updating" indicator,
 /// plus the mechanism that actually resolves it. Schedules a silent
-/// background eventPredictionProvider invalidate after retryAfterSeconds;
-/// the existing (stale-but-still-good) prediction stays on screen until
-/// the next fetch lands. Reschedules itself (didUpdateWidget) if that next
+/// background invalidatePrediction call after retryAfterSeconds; the
+/// existing (stale-but-still-good) prediction stays on screen until the
+/// next fetch lands. Reschedules itself (didUpdateWidget) if that next
 /// fetch is still stale, since Riverpod's default skipLoadingOnRefresh
 /// keeps rendering this same widget instance across a refetch. Renders
 /// (and schedules) nothing at all when not stale.
+///
+/// Shared across all 6 sports -- invalidatePrediction is the one thing
+/// that varies (each sport reads its prediction from a different Riverpod
+/// provider family: eventPredictionProvider/f1EventPredictionProvider/
+/// fieldEventPredictionProvider).
 class PredictionFreshnessBadge extends ConsumerStatefulWidget {
   const PredictionFreshnessBadge({
     super.key,
     required this.sport,
     required this.eventId,
     required this.stale,
+    required this.invalidatePrediction,
     this.retryAfterSeconds,
     this.compact = false,
   });
@@ -36,6 +41,7 @@ class PredictionFreshnessBadge extends ConsumerStatefulWidget {
   // Compact renders as a short inline caption (game_row.dart's list
   // card) -- non-compact is the full pill (matchup_hero.dart).
   final bool compact;
+  final void Function(WidgetRef ref, String sport, String eventId) invalidatePrediction;
 
   @override
   ConsumerState<PredictionFreshnessBadge> createState() => _PredictionFreshnessBadgeState();
@@ -61,7 +67,7 @@ class _PredictionFreshnessBadgeState extends ConsumerState<PredictionFreshnessBa
     if (!widget.stale) return;
     _refreshTimer = Timer(Duration(seconds: widget.retryAfterSeconds ?? 5), () {
       if (!mounted) return;
-      ref.invalidate(eventPredictionProvider((sport: widget.sport, eventId: widget.eventId)));
+      widget.invalidatePrediction(ref, widget.sport, widget.eventId);
     });
   }
 

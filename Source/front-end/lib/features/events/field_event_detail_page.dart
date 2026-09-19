@@ -9,8 +9,8 @@ import '../../core/models/field_live_score.dart';
 import '../../core/models/field_prediction.dart';
 import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_text_styles.dart';
-import '../../core/widgets/field_prediction_computing_retry.dart';
-import '../../core/widgets/field_prediction_freshness_badge.dart';
+import '../../core/widgets/prediction_computing_retry.dart';
+import '../../core/widgets/prediction_freshness_badge.dart';
 import 'field_leaderboard_table.dart';
 import 'two_sided_pga_matchup.dart';
 
@@ -80,7 +80,11 @@ class _FieldEventDetailPageState extends ConsumerState<FieldEventDetailPage> wit
             },
             loading: () => const Center(child: CircularProgressIndicator()),
             error: (error, _) => error is PredictionComputingException
-                ? FieldPredictionComputingRetry(sport: widget.sportId, eventId: widget.eventId, retryAfterSeconds: error.retryAfterSeconds)
+                ? PredictionComputingRetry(
+                    sport: widget.sportId, eventId: widget.eventId, retryAfterSeconds: error.retryAfterSeconds,
+                    invalidatePrediction: (ref, sport, eventId) =>
+                        ref.invalidate(fieldEventPredictionProvider((sport: sport, eventId: eventId))),
+                  )
                 : Text('Couldn\'t load prediction: $error', style: AppTextStyles.body(color: AppColors.neg)),
           ),
     );
@@ -114,8 +118,10 @@ class _FieldPredictionView extends ConsumerWidget {
         ],
         if (prediction.stale) ...[
           const SizedBox(height: 12),
-          FieldPredictionFreshnessBadge(
+          PredictionFreshnessBadge(
             sport: sport, eventId: eventId, stale: prediction.stale, retryAfterSeconds: prediction.staleRetryAfterSeconds,
+            invalidatePrediction: (ref, sport, eventId) =>
+                ref.invalidate(fieldEventPredictionProvider((sport: sport, eventId: eventId))),
           ),
         ],
         const SizedBox(height: 16),
@@ -147,8 +153,10 @@ class _TwoSidedPredictionView extends ConsumerWidget {
         if (prediction.stale) ...[
           const SizedBox(height: 12),
           Center(
-            child: FieldPredictionFreshnessBadge(
+            child: PredictionFreshnessBadge(
               sport: sport, eventId: eventId, stale: prediction.stale, retryAfterSeconds: prediction.staleRetryAfterSeconds,
+              invalidatePrediction: (ref, sport, eventId) =>
+                  ref.invalidate(fieldEventPredictionProvider((sport: sport, eventId: eventId))),
             ),
           ),
         ],

@@ -192,6 +192,8 @@ class _EventDetailPageState extends ConsumerState<EventDetailPage> with WidgetsB
             error: (error, _) => error is PredictionComputingException
                 ? PredictionComputingRetry(
                     sport: widget.sportId, eventId: widget.eventId, retryAfterSeconds: error.retryAfterSeconds,
+                    invalidatePrediction: (ref, sport, eventId) =>
+                        ref.invalidate(eventPredictionProvider((sport: sport, eventId: eventId))),
                   )
                 : Text('Couldn\'t load prediction: $error', style: AppTextStyles.body(color: AppColors.neg)),
           ),
@@ -225,6 +227,8 @@ class _EventDetailPageState extends ConsumerState<EventDetailPage> with WidgetsB
             child: PredictionFreshnessBadge(
               sport: widget.sportId, eventId: widget.eventId,
               stale: prediction.stale, retryAfterSeconds: prediction.staleRetryAfterSeconds,
+              invalidatePrediction: (ref, sport, eventId) =>
+                  ref.invalidate(eventPredictionProvider((sport: sport, eventId: eventId))),
             ),
           ),
         ],

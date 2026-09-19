@@ -406,6 +406,8 @@ class _LivePredictionSummary extends StatelessWidget {
               PredictionFreshnessBadge(
                 sport: sport, eventId: eventId,
                 stale: p.stale, retryAfterSeconds: p.staleRetryAfterSeconds, compact: true,
+                invalidatePrediction: (ref, sport, eventId) =>
+                    ref.invalidate(eventPredictionProvider((sport: sport, eventId: eventId))),
               ),
             ],
           ),
@@ -435,7 +437,11 @@ class _LivePredictionSummary extends StatelessWidget {
       data: _dataView,
       loading: () => Row(children: [_leading(0.5)]),
       error: (error, _) => error is PredictionComputingException
-          ? PredictionComputingRetry(sport: sport, eventId: eventId, retryAfterSeconds: error.retryAfterSeconds, compact: true)
+          ? PredictionComputingRetry(
+              sport: sport, eventId: eventId, retryAfterSeconds: error.retryAfterSeconds, compact: true,
+              invalidatePrediction: (ref, sport, eventId) =>
+                  ref.invalidate(eventPredictionProvider((sport: sport, eventId: eventId))),
+            )
           : Text('--', style: AppTextStyles.body(color: AppColors.inkMute)),
     );
   }

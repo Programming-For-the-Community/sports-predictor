@@ -5,13 +5,11 @@ import '../theme/app_text_styles.dart';
 
 /// map_status vocabulary (library/normalize/f1.py) -- F1StatusPill's own
 /// switch references these instead of retyping the raw string. A
-/// separate class from field_status_pill.dart's PgaParticipantStatus
-/// (PGA's own status vocabulary is a genuinely different set of strings
-/// -- reusing it here would mis-color a real "classified" or "dnf"
-/// result as if the driver were still racing, since neither string is in
-/// PGA's own recognized set) -- same "parallel files, don't generalize
-/// the shared one" precedent field_prediction_computing_retry.dart's own
-/// doc comment already establishes.
+/// separate class from field_status_pill.dart's PgaParticipantStatus --
+/// PGA's own status vocabulary is a genuinely different set of strings,
+/// reusing it here would mis-color a real "classified" or "dnf" result as
+/// if the driver were still racing, since neither string is in PGA's own
+/// recognized set.
 abstract final class F1DriverStatus {
   static const finished = 'finished';
   // Finished but didn't cover the real >=90%-distance classification

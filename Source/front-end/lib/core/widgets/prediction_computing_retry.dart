@@ -4,27 +4,30 @@ import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../data/events_repository.dart';
 import '../theme/app_colors.dart';
 import '../theme/app_text_styles.dart';
 
 /// Shown in place of a prediction while predict-read's cache is cold (see
 /// PredictionComputingException) -- the compute was already triggered
 /// server-side on the request that surfaced this, so all this does is
-/// wait `retryAfterSeconds` then invalidate eventPredictionProvider to
-/// pick up the now-cached result. Reschedules on every rebuild
-/// (didUpdateWidget), not just once in initState, so it keeps counting
-/// down from a fresh PredictionComputingException if the compute is still
-/// running when a retry lands. Doesn't re-trigger the compute itself on
-/// each retry -- a single miss only ever starts one background compute
-/// server-side, so repeated retries here are just re-reading the same
-/// in-progress cache entry until it resolves.
+/// wait `retryAfterSeconds` then call invalidatePrediction to pick up the
+/// now-cached result. Reschedules on every rebuild (didUpdateWidget), not
+/// just once in initState, so it keeps counting down from a fresh
+/// PredictionComputingException if the compute is still running when a
+/// retry lands. Doesn't re-trigger the compute itself on each retry -- a
+/// single miss only ever starts one background compute server-side, so
+/// repeated retries here are just re-reading the same in-progress cache
+/// entry until it resolves.
+///
+/// Shared across all 6 sports -- invalidatePrediction is the one thing
+/// that varies, same reasoning as prediction_freshness_badge.dart's own.
 class PredictionComputingRetry extends ConsumerStatefulWidget {
   const PredictionComputingRetry({
     super.key,
     required this.sport,
     required this.eventId,
     required this.retryAfterSeconds,
+    required this.invalidatePrediction,
     this.compact = false,
   });
 
@@ -35,6 +38,7 @@ class PredictionComputingRetry extends ConsumerStatefulWidget {
   // slot among several rows) -- non-compact takes a full centered block
   // (event_detail_page.dart, the only thing on that part of the page).
   final bool compact;
+  final void Function(WidgetRef ref, String sport, String eventId) invalidatePrediction;
 
   @override
   ConsumerState<PredictionComputingRetry> createState() => _PredictionComputingRetryState();
@@ -67,7 +71,7 @@ class _PredictionComputingRetryState extends ConsumerState<PredictionComputingRe
     final jitteredMs = baseMs + _random.nextInt((baseMs * 0.4).round() + 1);
     _retryTimer = Timer(Duration(milliseconds: jitteredMs), () {
       if (!mounted) return;
-      ref.invalidate(eventPredictionProvider((sport: widget.sport, eventId: widget.eventId)));
+      widget.invalidatePrediction(ref, widget.sport, widget.eventId);
     });
   }
 

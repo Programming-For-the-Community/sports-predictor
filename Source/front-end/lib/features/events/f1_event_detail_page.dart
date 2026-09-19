@@ -9,10 +9,10 @@ import '../../core/models/f1_live_score.dart';
 import '../../core/models/f1_prediction.dart';
 import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_text_styles.dart';
-import '../../core/widgets/f1_prediction_computing_retry.dart';
-import '../../core/widgets/f1_prediction_freshness_badge.dart';
 import '../../core/widgets/final_status_pill.dart';
 import '../../core/widgets/live_status_pill.dart';
+import '../../core/widgets/prediction_computing_retry.dart';
+import '../../core/widgets/prediction_freshness_badge.dart';
 import '../../core/widgets/sprint_badge.dart';
 import 'f1_leaderboard_table.dart';
 
@@ -84,7 +84,11 @@ class _F1EventDetailPageState extends ConsumerState<F1EventDetailPage> with Widg
             data: (prediction) => _PredictionView(sport: widget.sportId, eventId: widget.eventId, prediction: prediction, liveState: liveState),
             loading: () => const Center(child: CircularProgressIndicator()),
             error: (error, _) => error is PredictionComputingException
-                ? F1PredictionComputingRetry(sport: widget.sportId, eventId: widget.eventId, retryAfterSeconds: error.retryAfterSeconds)
+                ? PredictionComputingRetry(
+                    sport: widget.sportId, eventId: widget.eventId, retryAfterSeconds: error.retryAfterSeconds,
+                    invalidatePrediction: (ref, sport, eventId) =>
+                        ref.invalidate(f1EventPredictionProvider((sport: sport, eventId: eventId))),
+                  )
                 : Text('Couldn\'t load prediction: $error', style: AppTextStyles.body(color: AppColors.neg)),
           ),
     );
@@ -157,8 +161,10 @@ class _PredictionViewState extends State<_PredictionView> {
         ),
         if (prediction.stale) ...[
           const SizedBox(height: 12),
-          F1PredictionFreshnessBadge(
+          PredictionFreshnessBadge(
             sport: widget.sport, eventId: widget.eventId, stale: prediction.stale, retryAfterSeconds: prediction.staleRetryAfterSeconds,
+            invalidatePrediction: (ref, sport, eventId) =>
+                ref.invalidate(f1EventPredictionProvider((sport: sport, eventId: eventId))),
           ),
         ],
         // Own Drivers/Constructors tab toggle, same pill shape f1_season_
