@@ -187,8 +187,9 @@ jobs:
       image_name: 'ncaambb-backfill'
       image_version: '1.0.0'
 
-  # Builds feature engineering, win-probability/score/player-prop training
-  # (shared image), and national-ranking training (separate image).
+  # Builds feature engineering and win-probability/score/player-prop
+  # training (shared image). National-ranking training is a separate
+  # image, built below by ranking_model_build.
   ai_training:
     name: AI training (build)
     needs: scan
@@ -203,9 +204,17 @@ jobs:
       train_model_dockerfile_path: 'Source/model-training/ncaambb/Dockerfile'
       train_model_image_name: 'ncaambb-train-win-probability-model'
       train_model_image_version: '1.0.0'
-      ranking_model_dockerfile_path: 'Source/model-training/ncaambb/Dockerfile.ranking'
-      ranking_model_image_name: 'ncaambb-train-ranking-model'
-      ranking_model_image_version: '1.0.0'
+
+  ranking_model_build:
+    name: National ranking model (build)
+    needs: scan
+    uses: ./.github/workflows/docker_image_deploy.yml
+    secrets: inherit
+    with:
+      sport: 'NCAA MBB'
+      dockerfile_path: 'Source/model-training/ncaambb/Dockerfile.ranking'
+      image_name: 'ncaambb-train-ranking-model'
+      image_version: '1.0.0'
 
   # Ensures infra never runs without ncaambb-predict-latest already in ECR.
   ai_hosting:

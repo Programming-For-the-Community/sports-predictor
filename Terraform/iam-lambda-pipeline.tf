@@ -29,6 +29,16 @@ resource "aws_iam_role_policy_attachment" "lambda_pipeline_logs" {
   policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
 }
 
+# Required for every VPC-attached Lambda using this role (the normalize
+# Lambdas -- see their own lambda-*-normalize.tf vpc_config block) to
+# create/describe/delete the ENIs Lambda provisions in those subnets.
+# Ingest Lambdas share this role but aren't VPC-attached, so these
+# permissions are simply unused for them.
+resource "aws_iam_role_policy_attachment" "lambda_pipeline_vpc_access" {
+  role       = aws_iam_role.lambda_pipeline.name
+  policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole"
+}
+
 data "aws_iam_policy_document" "lambda_pipeline_permissions" {
   statement {
     sid       = "RawBucketReadWrite"

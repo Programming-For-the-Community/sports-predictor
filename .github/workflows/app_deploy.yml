@@ -604,9 +604,18 @@ jobs:
       train_model_dockerfile_path: 'Source/model-training/ncaafb/Dockerfile'
       train_model_image_name: 'ncaafb-train-win-probability-model'
       train_model_image_version: '1.0.0'
-      ranking_model_dockerfile_path: 'Source/model-training/ncaafb/Dockerfile.ranking'
-      ranking_model_image_name: 'ncaafb-train-ranking-model'
-      ranking_model_image_version: '1.0.0'
+
+  # National-ranking training image -- NCAAFB/NCAAMBB only.
+  ncaafb_ranking_model_build:
+    name: NCAAFB national ranking model (build)
+    needs: scan
+    uses: ./.github/workflows/docker_image_deploy.yml
+    secrets: inherit
+    with:
+      sport: 'NCAAFB'
+      dockerfile_path: 'Source/model-training/ncaafb/Dockerfile.ranking'
+      image_name: 'ncaafb-train-ranking-model'
+      image_version: '1.0.0'
 
   ncaafb_ai_hosting_build:
     name: NCAAFB AI hosting (build)
@@ -681,9 +690,18 @@ jobs:
       train_model_dockerfile_path: 'Source/model-training/ncaambb/Dockerfile'
       train_model_image_name: 'ncaambb-train-win-probability-model'
       train_model_image_version: '1.0.0'
-      ranking_model_dockerfile_path: 'Source/model-training/ncaambb/Dockerfile.ranking'
-      ranking_model_image_name: 'ncaambb-train-ranking-model'
-      ranking_model_image_version: '1.0.0'
+
+  # National-ranking training image -- NCAAFB/NCAAMBB only.
+  ncaambb_ranking_model_build:
+    name: NCAA MBB national ranking model (build)
+    needs: scan
+    uses: ./.github/workflows/docker_image_deploy.yml
+    secrets: inherit
+    with:
+      sport: 'NCAA MBB'
+      dockerfile_path: 'Source/model-training/ncaambb/Dockerfile.ranking'
+      image_name: 'ncaambb-train-ranking-model'
+      image_version: '1.0.0'
 
   ncaambb_ai_hosting_build:
     name: NCAA MBB AI hosting (build)

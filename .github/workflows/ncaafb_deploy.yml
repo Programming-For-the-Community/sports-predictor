@@ -173,8 +173,9 @@ jobs:
       image_name: 'ncaafb-backfill'
       image_version: '1.0.0'
 
-  # Builds feature engineering, win-probability/score/player-prop training
-  # (shared image), and national-ranking training (separate image).
+  # Builds feature engineering and win-probability/score/player-prop
+  # training (shared image). National-ranking training is a separate
+  # image, built below by ranking_model_build.
   ai_training:
     name: AI training (build)
     needs: scan
@@ -189,9 +190,17 @@ jobs:
       train_model_dockerfile_path: 'Source/model-training/ncaafb/Dockerfile'
       train_model_image_name: 'ncaafb-train-win-probability-model'
       train_model_image_version: '1.0.0'
-      ranking_model_dockerfile_path: 'Source/model-training/ncaafb/Dockerfile.ranking'
-      ranking_model_image_name: 'ncaafb-train-ranking-model'
-      ranking_model_image_version: '1.0.0'
+
+  ranking_model_build:
+    name: National ranking model (build)
+    needs: scan
+    uses: ./.github/workflows/docker_image_deploy.yml
+    secrets: inherit
+    with:
+      sport: 'NCAAFB'
+      dockerfile_path: 'Source/model-training/ncaafb/Dockerfile.ranking'
+      image_name: 'ncaafb-train-ranking-model'
+      image_version: '1.0.0'
 
   ai_hosting:
     name: AI hosting (build)
