@@ -28,6 +28,7 @@ resource "aws_ecs_task_definition" "nba_feature_engineering" {
       image     = "${var.ecr_repo_url}:nba-feature-engineering-latest"
       essential = true
       environment = [
+        { name = "AWS_ACCOUNT_ID", value = var.account_id },
         # FeatureStorage's constructor requires all four table names
         # unconditionally.
         { name = "ENTITIES_TABLE_NAME", value = aws_dynamodb_table.entities.name },

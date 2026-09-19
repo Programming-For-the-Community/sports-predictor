@@ -44,6 +44,7 @@ resource "aws_ecs_task_definition" "f1_train_winprob_model" {
       image     = "${var.ecr_repo_url}:f1-train-winprob-model-latest"
       essential = true
       environment = [
+        { name = "AWS_ACCOUNT_ID", value = var.account_id },
         { name = "MODEL_ARTIFACTS_BUCKET_NAME", value = aws_s3_bucket.model_artifacts.bucket },
         { name = "AWS_REGION", value = var.region },
         # BLAS-oversubscription guard: caps thread pools so scikit-learn

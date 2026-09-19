@@ -46,6 +46,7 @@ resource "aws_lambda_function" "nba_normalize" {
 
   environment {
     variables = {
+      AWS_ACCOUNT_ID               = var.account_id
       RAW_BUCKET_NAME              = aws_s3_bucket.raw_data_lake.bucket
       ENTITIES_TABLE_NAME          = aws_dynamodb_table.entities.name
       EVENTS_TABLE_NAME            = aws_dynamodb_table.events.name

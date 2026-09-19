@@ -32,6 +32,7 @@ resource "aws_ecs_task_definition" "pga_feature_engineering" {
       image     = "${var.ecr_repo_url}:pga-feature-engineering-latest"
       essential = true
       environment = [
+        { name = "AWS_ACCOUNT_ID", value = var.account_id },
         # FeatureStorage's constructor requires all four table names
         # unconditionally, even though build_golfer_dataset (Source/
         # feature-engineering/pga/build_dataset.py) only ever calls

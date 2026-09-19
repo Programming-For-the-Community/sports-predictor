@@ -89,7 +89,7 @@ class MatchupHero extends StatelessWidget {
       padding: const EdgeInsets.all(28),
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(20),
-        gradient: LinearGradient(begin: Alignment.topLeft, end: Alignment.bottomRight, colors: AppColors.surfaceGrad),
+        gradient: const LinearGradient(begin: Alignment.topLeft, end: Alignment.bottomRight, colors: AppColors.surfaceGrad),
         border: Border.all(color: AppColors.borderRaised),
       ),
       child: LayoutBuilder(
@@ -301,7 +301,7 @@ class MatchupResultHero extends StatelessWidget {
       padding: const EdgeInsets.all(28),
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(20),
-        gradient: LinearGradient(begin: Alignment.topLeft, end: Alignment.bottomRight, colors: AppColors.surfaceGrad),
+        gradient: const LinearGradient(begin: Alignment.topLeft, end: Alignment.bottomRight, colors: AppColors.surfaceGrad),
         border: Border.all(color: AppColors.borderRaised),
       ),
       child: Column(
@@ -461,7 +461,7 @@ class _VenueLabel extends StatelessWidget {
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
-        Icon(Icons.location_on_outlined, size: 13, color: AppColors.inkMute),
+        const Icon(Icons.location_on_outlined, size: 13, color: AppColors.inkMute),
         const SizedBox(width: 4),
         Flexible(
           child: Text(

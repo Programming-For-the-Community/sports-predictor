@@ -17,6 +17,9 @@ Required environment variables:
     RAW_BUCKET_NAME
     EVENTS_TABLE_NAME
     AWS_REGION
+    AWS_ACCOUNT_ID (S3Manager's ExpectedBucketOwner lookup -- library/aws/
+        account.py has no STS fallback, so this must be set explicitly for
+        a local run)
 
 Usage:
     python migrations/backfill_kickoff_time.py

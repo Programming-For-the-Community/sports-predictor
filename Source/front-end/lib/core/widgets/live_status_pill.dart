@@ -35,7 +35,7 @@ class LiveStatusPill extends StatelessWidget {
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Container(width: 6, height: 6, decoration: BoxDecoration(shape: BoxShape.circle, color: AppColors.live)),
+          Container(width: 6, height: 6, decoration: const BoxDecoration(shape: BoxShape.circle, color: AppColors.live)),
           const SizedBox(width: 6),
           Text(label, style: AppTextStyles.microLabel(color: AppColors.live)),
         ],

@@ -854,16 +854,32 @@ jobs:
       image_version: '1.0.0'
       platform: 'linux/arm64'
 
-  # --- Infra: applies once every sport's build jobs have succeeded ---
+  # --- Infra: applies once every sport's predict-Lambda image is pushed ---
+  # Only *_ai_hosting_build is a real dependency here: every aws_lambda_
+  # function predict resource (lambda-*-predict.tf) has `lifecycle {
+  # ignore_changes = [image_uri] }`, so ordinary applies never touch it --
+  # but AWS still validates the image exists in ECR at CREATE time, which
+  # matters the first time a brand-new sport's predict Lambda is bootstrapped.
+  # *_backfill_build/*_ai_training_build images are NOT terraform-managed
+  # resource inputs at all -- their only consumer is an ECS task definition
+  # (ecs-task-*.tf), which stores the image tag as a plain string with no
+  # existence check at `terraform apply`/task-definition-registration time
+  # (ECR pull only happens later, when a human actually runs the task).
+  # Confirmed via direct inspection of both resource types before removing
+  # them from this gate -- previously any single sport's backfill or
+  # training image failing to build skipped `infra` entirely, which
+  # cascaded to skip EVERY downstream deploy job (every sport's predict/
+  # predict-read/live-scores/data-pipeline, plus frontend), not just the
+  # one sport/component that actually failed.
   infra:
     name: Apply shared infrastructure
     needs: [
-      nfl_backfill_build, nfl_ai_training_build, nfl_ai_hosting_build,
-      ncaafb_backfill_build, ncaafb_ai_training_build, ncaafb_ai_hosting_build,
-      nba_backfill_build, nba_ai_training_build, nba_ai_hosting_build,
-      ncaambb_backfill_build, ncaambb_ai_training_build, ncaambb_ai_hosting_build,
-      pga_backfill_build, pga_ai_training_build, pga_ai_hosting_build,
-      f1_backfill_build, f1_ai_training_build, f1_ai_hosting_build,
+      nfl_ai_hosting_build,
+      ncaafb_ai_hosting_build,
+      nba_ai_hosting_build,
+      ncaambb_ai_hosting_build,
+      pga_ai_hosting_build,
+      f1_ai_hosting_build,
     ]
     uses: ./.github/workflows/tf_install.yml
     secrets: inherit

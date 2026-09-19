@@ -63,7 +63,7 @@ class _F1PredictionFreshnessBadgeState extends ConsumerState<F1PredictionFreshne
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          SizedBox(width: 10, height: 10, child: CircularProgressIndicator(strokeWidth: 1.5, color: AppColors.inkMute)),
+          const SizedBox(width: 10, height: 10, child: CircularProgressIndicator(strokeWidth: 1.5, color: AppColors.inkMute)),
           const SizedBox(width: 6),
           Text('UPDATING', style: AppTextStyles.microLabel(color: AppColors.inkMute)),
         ],

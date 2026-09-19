@@ -34,6 +34,7 @@ resource "aws_ecs_task_definition" "f1_feature_engineering" {
       image     = "${var.ecr_repo_url}:f1-feature-engineering-latest"
       essential = true
       environment = [
+        { name = "AWS_ACCOUNT_ID", value = var.account_id },
         # FeatureStorage's constructor requires all four table names
         # unconditionally, even though build_driver_dataset/build_
         # constructor_dataset/build_sprint_dataset (Source/feature-

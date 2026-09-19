@@ -38,6 +38,7 @@ resource "aws_ecs_task_definition" "nfl_train_player_prop_model" {
       command   = ["train_player_prop_model.py"]
       essential = true
       environment = [
+        { name = "AWS_ACCOUNT_ID", value = var.account_id },
         { name = "MODEL_ARTIFACTS_BUCKET_NAME", value = aws_s3_bucket.model_artifacts.bucket },
         { name = "AWS_REGION", value = var.region },
         # Avoids BLAS oversubscribing against the outer search's own

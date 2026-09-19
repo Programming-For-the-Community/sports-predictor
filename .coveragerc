@@ -1,0 +1,14 @@
+[run]
+# Coverage data is recorded in one CI job (run_python_tests.yml) and
+# combined/reported in a completely different one (sonar_scan.yml's own
+# "Combine coverage data" step) -- without this, coverage.py stores
+# ABSOLUTE file paths at collection time, and `coverage xml`'s emitted
+# <class filename="..."> entries end up rooted however that path happened
+# to resolve, which SonarQube's Python coverage sensor can silently fail
+# to match back to sonar.sources=Source (no error, just 0% coverage --
+# exactly what the SonarQube Cloud dashboard was showing project-wide,
+# across both languages, despite the report existing and being handed to
+# the scanner). Relative paths, always rooted at the repo root both jobs
+# checkout to, removes the ambiguity entirely.
+relative_files = True
+source = Source

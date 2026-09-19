@@ -39,3 +39,12 @@ resource "aws_vpc_endpoint" "dynamodb" {
     Name      = "${var.project}-dynamodb-endpoint"
   })
 }
+
+# No STS Interface Endpoint -- removed after get_account_id() (library/aws/
+# account.py) dropped its STS fallback entirely. Every compute resource
+# that needs the account ID now gets it from the AWS_ACCOUNT_ID env var
+# (var.account_id, wired into every Lambda/ECS task that constructs an
+# S3Manager), so nothing in this codebase calls STS anymore -- an Interface
+# Endpoint here would be pure unused cost (~$7/month for a single AZ) with
+# nothing to route. Re-add if a future dependency genuinely needs STS
+# reachability from inside the VPC.

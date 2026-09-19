@@ -42,6 +42,9 @@ resource "aws_lambda_function" "ncaambb_predict_read" {
 
   environment {
     variables = {
+      # Known at deploy time -- avoids get_account_id() (library/aws/
+      # account.py) needing an STS call on every cold start.
+      AWS_ACCOUNT_ID              = var.account_id
       MODEL_ARTIFACTS_BUCKET_NAME = aws_s3_bucket.model_artifacts.bucket
       PREDICTIONS_TABLE_NAME      = aws_dynamodb_table.predictions.name
       # FeatureStorage's constructor requires all four of these regardless

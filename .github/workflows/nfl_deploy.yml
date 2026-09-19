@@ -269,9 +269,12 @@ jobs:
       # Matches the nfl-predict Lambda's arm64 architecture.
       platform: 'linux/arm64'
 
+  # Only ai_hosting is a real dependency here -- see app_deploy.yml's own
+  # infra job comment for why backfill/ai_training images aren't a
+  # terraform-apply-time dependency at all.
   infra:
     name: Apply shared infrastructure
-    needs: [backfill, ai_training, ai_hosting]
+    needs: [ai_hosting]
     uses: ./.github/workflows/tf_install.yml
     secrets: inherit
 

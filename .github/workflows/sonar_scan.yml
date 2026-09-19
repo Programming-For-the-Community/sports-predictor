@@ -199,8 +199,24 @@ jobs:
           fi
           echo "args=$ARGS" >> "$GITHUB_OUTPUT"
 
+          # No secrets in $ARGS (SONAR_TOKEN is passed separately, as the
+          # scan action's own env var, never as a -D property) -- safe to
+          # print in full. Printed here, not just left to be inferred from
+          # the report_path/dart-coverage steps above, because it's the
+          # exact string handed to sonar-scanner -- the one thing to check
+          # first if the dashboard's Coverage tab still shows 0% after this
+          # job reports a non-empty report_path: either this project's
+          # SonarQube Cloud Analysis Method is set to Automatic (see this
+          # workflow's own top-of-file comment -- Automatic Analysis
+          # ignores/rejects everything a CI-submitted scan sends, including
+          # these -D properties) or coverage.xml's own recorded file paths
+          # don't line up with sonar.sources=Source.
+          echo "::group::Resolved sonar-scanner arguments"
+          echo "$ARGS"
+          echo "::endgroup::"
+
       - name: SonarQube Cloud Scan
-        uses: SonarSource/sonarqube-scan-action@v5
+        uses: SonarSource/sonarqube-scan-action@7006c4492b2e0ee0f816d36501671557c97f5995 # v8.1.0
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
         with:

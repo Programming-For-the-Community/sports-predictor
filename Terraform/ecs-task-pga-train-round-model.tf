@@ -34,6 +34,7 @@ resource "aws_ecs_task_definition" "pga_train_round_model" {
       command   = ["train_round_model.py"]
       essential = true
       environment = [
+        { name = "AWS_ACCOUNT_ID", value = var.account_id },
         { name = "MODEL_ARTIFACTS_BUCKET_NAME", value = aws_s3_bucket.model_artifacts.bucket },
         { name = "AWS_REGION", value = var.region },
         { name = "OMP_NUM_THREADS", value = "1" },

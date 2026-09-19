@@ -83,7 +83,7 @@ class _LoginPageState extends ConsumerState<LoginPage> {
                     ),
                     const SizedBox(height: 24),
                     if (_errorMessage != null) ...[
-                      Text(_errorMessage!, style: TextStyle(color: AppColors.neg)),
+                      Text(_errorMessage!, style: const TextStyle(color: AppColors.neg)),
                       const SizedBox(height: 16),
                     ],
                     if (needsNewPassword) ..._newPasswordFields() else ..._loginFields(),
@@ -152,7 +152,7 @@ class _ButtonSpinner extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return SizedBox(
+    return const SizedBox(
       width: 18,
       height: 18,
       child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.bg),

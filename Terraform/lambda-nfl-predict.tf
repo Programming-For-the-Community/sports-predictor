@@ -47,6 +47,11 @@ resource "aws_lambda_function" "nfl_predict" {
 
   environment {
     variables = {
+      # Known at deploy time (secrets.AWS_ACCOUNT_ID -> TF_VAR_account_id) --
+      # avoids get_account_id() (library/aws/account.py) needing to call
+      # STS at runtime, which this VPC-attached Lambda has no route to
+      # without the STS Interface Endpoint (see vpc-endpoints.tf).
+      AWS_ACCOUNT_ID               = var.account_id
       MODEL_ARTIFACTS_BUCKET_NAME  = aws_s3_bucket.model_artifacts.bucket
       PREDICTIONS_TABLE_NAME       = aws_dynamodb_table.predictions.name
       ENTITIES_TABLE_NAME          = aws_dynamodb_table.entities.name

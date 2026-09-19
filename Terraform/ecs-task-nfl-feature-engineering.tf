@@ -33,6 +33,7 @@ resource "aws_ecs_task_definition" "nfl_feature_engineering" {
       image     = "${var.ecr_repo_url}:nfl-feature-engineering-latest"
       essential = true
       environment = [
+        { name = "AWS_ACCOUNT_ID", value = var.account_id },
         # FeatureStorage's constructor requires all four table names
         # unconditionally, even though build_dataset.py itself only reads
         # events/player_game_stats/team_game_stats.

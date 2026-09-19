@@ -45,20 +45,20 @@ class _ConferenceFilterFieldState extends State<ConferenceFilterField> {
       decoration: InputDecoration(
         hintText: 'Filter by conference...',
         hintStyle: AppTextStyles.body(color: AppColors.inkMute),
-        prefixIcon: Icon(Icons.search, size: 18, color: AppColors.inkMute),
+        prefixIcon: const Icon(Icons.search, size: 18, color: AppColors.inkMute),
         suffixIcon: widget.value.isEmpty
             ? null
             : IconButton(
-                icon: Icon(Icons.close, size: 16, color: AppColors.inkMute),
+                icon: const Icon(Icons.close, size: 16, color: AppColors.inkMute),
                 onPressed: _clear,
               ),
         isDense: true,
         contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
         filled: true,
         fillColor: AppColors.surface,
-        border: OutlineInputBorder(borderRadius: BorderRadius.circular(999), borderSide: BorderSide(color: AppColors.border)),
-        enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(999), borderSide: BorderSide(color: AppColors.border)),
-        focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(999), borderSide: BorderSide(color: AppColors.cyan)),
+        border: OutlineInputBorder(borderRadius: BorderRadius.circular(999), borderSide: const BorderSide(color: AppColors.border)),
+        enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(999), borderSide: const BorderSide(color: AppColors.border)),
+        focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(999), borderSide: const BorderSide(color: AppColors.cyan)),
       ),
     );
   }

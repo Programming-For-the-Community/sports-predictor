@@ -69,7 +69,7 @@ class _FeatureBar extends StatelessWidget {
                   Container(color: const Color(0xFF1a2233)),
                   FractionallySizedBox(
                     widthFactor: fraction.clamp(0.02, 1.0),
-                    child: DecoratedBox(decoration: BoxDecoration(gradient: AppColors.cyanFill)),
+                    child: const DecoratedBox(decoration: BoxDecoration(gradient: AppColors.cyanFill)),
                   ),
                 ],
               ),

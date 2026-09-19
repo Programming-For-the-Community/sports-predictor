@@ -31,6 +31,7 @@ resource "aws_ecs_task_definition" "ncaambb_backfill" {
       image     = "${var.ecr_repo_url}:ncaambb-backfill-latest"
       essential = true
       environment = [
+        { name = "AWS_ACCOUNT_ID", value = var.account_id },
         { name = "RAW_BUCKET_NAME", value = aws_s3_bucket.raw_data_lake.bucket },
         { name = "ENTITIES_TABLE_NAME", value = aws_dynamodb_table.entities.name },
         { name = "EVENTS_TABLE_NAME", value = aws_dynamodb_table.events.name },

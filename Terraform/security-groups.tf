@@ -1,7 +1,10 @@
 # Security group for the inference Lambda. No inbound rules are needed --
 # Lambda is invoked by API Gateway via the AWS API, not through a network
 # port. Outbound HTTPS allows the function to reach DynamoDB and S3 via the
-# VPC Gateway Endpoints in vpc-endpoints.tf.
+# VPC Gateway Endpoints in vpc-endpoints.tf. No STS egress -- get_account_id
+# (library/aws/account.py) reads AWS_ACCOUNT_ID from its own environment
+# instead of calling STS, so this Lambda never needs a network path to it
+# (see vpc-endpoints.tf's own comment for why there's no STS endpoint here).
 resource "aws_security_group" "lambda_inference" {
   name        = "${var.project}-lambda-inference"
   description = "Inference Lambda -- outbound HTTPS to VPC endpoints only"

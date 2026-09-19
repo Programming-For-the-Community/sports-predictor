@@ -91,7 +91,7 @@ class F1EventRow extends StatelessWidget {
                           Row(
                             mainAxisSize: MainAxisSize.min,
                             children: [
-                              Icon(Icons.location_on_outlined, size: 12, color: AppColors.inkMute),
+                              const Icon(Icons.location_on_outlined, size: 12, color: AppColors.inkMute),
                               const SizedBox(width: 4),
                               Flexible(
                                 child: Text(
