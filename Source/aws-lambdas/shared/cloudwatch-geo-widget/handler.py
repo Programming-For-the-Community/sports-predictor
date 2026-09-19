@@ -57,6 +57,7 @@ from pathlib import Path
 import boto3
 from PIL import Image, ImageDraw, ImageFilter, ImageFont
 
+from library.aws import lambda_singletons
 from library.aws.boto_config import DEFAULT_CONFIG
 
 logger = logging.getLogger("cloudwatch-geo-widget")
@@ -65,11 +66,33 @@ logger = logging.getLogger("cloudwatch-geo-widget")
 # in us-east-1, regardless of this Lambda's own region.
 _CLOUDFRONT_EDGE_LOG_REGION = "us-east-1"
 
-# boto3.client() does no network I/O at construction time, so both are
-# created unconditionally here -- same pattern as every other handler.py
-# in this codebase (e.g. */ingest/handler.py's own module-level `_s3`).
-_logs_client = boto3.client("logs", config=DEFAULT_CONFIG)
-_cloudfront_logs_client = boto3.client("logs", region_name=_CLOUDFRONT_EDGE_LOG_REGION, config=DEFAULT_CONFIG)
+# Lazy, not eager like */ingest/handler.py's own module-level `_s3` --
+# unlike S3 (which falls back to a legacy default region when none is
+# configured), "logs" has no such fallback and raises NoRegionError
+# outright with no region source available, which real Lambda invocations
+# never hit (AWS_REGION is always set there) but eager module-level
+# construction DOES hit at test-collection time in CI, which has no AWS
+# region configured at all (confirmed live: a real CI run failed importing
+# this very module for exactly this reason). SonarQube's own "initialize
+# this AWS client outside the handler" finding is a known false positive
+# here as a result -- this still only constructs once, reused across warm
+# invocations, same as the rule's actual underlying intent; its checker
+# just can't see that through the lambda_singletons indirection. Same
+# category of accepted false positive as the region-hardcoded-string
+# finding below.
+_logs_client = None
+_cloudfront_logs_client = None
+
+
+def _get_logs_client():
+    return lambda_singletons.get_or_create(globals(), "_logs_client", lambda: boto3.client("logs", config=DEFAULT_CONFIG))
+
+
+def _get_cloudfront_logs_client():
+    return lambda_singletons.get_or_create(
+        globals(), "_cloudfront_logs_client",
+        lambda: boto3.client("logs", region_name=_CLOUDFRONT_EDGE_LOG_REGION, config=DEFAULT_CONFIG),
+    )
 
 with Path(__file__).with_name("boundaries.json").open() as _f:
     _BOUNDARIES = json.load(_f)
@@ -405,11 +428,11 @@ def lambda_handler(event, context):
     end_ms = time_range.get("end", 0)
 
     if mode == "blocked":
-        counts = _blocked_counts_by_country(_cloudfront_logs_client, os.environ["BLOCKED_LOG_GROUP_NAME"], start_ms, end_ms)
+        counts = _blocked_counts_by_country(_get_cloudfront_logs_client(), os.environ["BLOCKED_LOG_GROUP_NAME"], start_ms, end_ms)
         body = _map_html(_render_blocked_image, counts)
     else:
         log_group_names = os.environ["ACCEPTED_LOG_GROUP_NAMES"].split(",")
-        counts = _accepted_counts_by_state(_logs_client, log_group_names, start_ms, end_ms)
+        counts = _accepted_counts_by_state(_get_logs_client(), log_group_names, start_ms, end_ms)
         body = _map_html(_render_accepted_image, counts)
 
     return f'<div style="background:#0d1420;padding:8px;border-radius:6px;">{body}</div>'

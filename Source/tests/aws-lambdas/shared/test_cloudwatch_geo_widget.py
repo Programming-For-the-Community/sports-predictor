@@ -1,9 +1,24 @@
 import sys
 from unittest.mock import MagicMock
 
+import pytest
 from PIL import Image
 
 handler = sys.modules["shared_cloudwatch_geo_widget"]
+
+
+@pytest.fixture(autouse=True)
+def _reset_client_singletons():
+    """_get_logs_client/_get_cloudfront_logs_client cache their own client
+    module-level, so it'd otherwise survive across tests too -- whichever
+    test runs first would populate it, and every test after it would
+    silently reuse that first test's own mocked client instead of its
+    own patched boto3.client."""
+    handler._logs_client = None
+    handler._cloudfront_logs_client = None
+    yield
+    handler._logs_client = None
+    handler._cloudfront_logs_client = None
 
 
 def _mock_logs_client(rows: list[dict]):
@@ -277,20 +292,3 @@ class TestLambdaHandler:
         monkeypatch.setenv("ACCEPTED_LOG_GROUP_NAMES", "lg1")
         result = handler.lambda_handler({"widgetContext": {"timeRange": {"start": 0, "end": 1000}}}, None)
         assert "<img src=\"data:image/jpeg;base64," in result
-
-
-class TestClientConfiguration:
-    """Both clients are real (module-level, eagerly constructed at import --
-    see handler.py's own comment for why), not mocks -- these check the
-    actual construction instead of intercepting boto3.client at call time,
-    which TestLambdaHandler's own tests can no longer do now that both
-    clients already exist before any test runs."""
-
-    def test_only_ever_talks_to_cloudwatch_logs_no_mapping_or_location_service(self):
-        assert handler._logs_client.meta.service_model.service_name == "logs"
-        assert handler._cloudfront_logs_client.meta.service_model.service_name == "logs"
-
-    def test_cloudfront_logs_client_is_pinned_to_us_east_1(self):
-        # The edge-access log group only ever exists in us-east-1,
-        # regardless of this Lambda's own region.
-        assert handler._cloudfront_logs_client.meta.region_name == "us-east-1"
