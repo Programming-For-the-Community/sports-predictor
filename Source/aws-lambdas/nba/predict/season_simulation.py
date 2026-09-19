@@ -309,6 +309,77 @@ def project_finals(
     return project_matchup(home, away, None, None, ratings, home_advantage)
 
 
+def _simulate_regular_season_games(
+    remaining_games: list[tuple[str, str]], wins: dict[str, int], losses: dict[str, int],
+    ratings: dict[str, float], home_advantage: float, k_factor: float, rng: random.Random,
+) -> None:
+    """One simulated regular season's worth of remaining games -- mutates
+    wins/losses/ratings in place."""
+    for home_id, away_id in remaining_games:
+        home_rating = ratings.get(home_id, DEFAULT_STARTING_RATING)
+        away_rating = ratings.get(away_id, DEFAULT_STARTING_RATING)
+        home_win_probability = expected_score(home_rating, away_rating, home_advantage)
+        home_won = rng.random() < home_win_probability
+        winner_id = home_id if home_won else away_id
+        loser_id = away_id if home_won else home_id
+
+        wins[winner_id] += 1
+        losses[loser_id] += 1
+
+        actual_home = 1.0 if home_won else 0.0
+        ratings[home_id] = home_rating + k_factor * (actual_home - home_win_probability)
+        ratings[away_id] = away_rating + k_factor * ((1 - actual_home) - (1 - home_win_probability))
+
+
+def _simulate_conference_playoffs(
+    conferences: dict[str, list[str]], wins: dict[str, int], point_differential: dict[str, int],
+    ratings: dict[str, float], home_advantage: float, rng: random.Random,
+    play_in_berths: dict[str, int], playoff_berths: dict[str, int],
+) -> list[tuple[str, int, int]]:
+    """[(champion, wins, point_differential), ...] one per conference for
+    one simulated postseason -- mutates play_in_berths/playoff_berths in
+    place."""
+    conference_champions = []
+    for conference_teams in conferences.values():
+        seeds = _seed_conference(conference_teams, wins, point_differential)
+        direct_seeds = seeds[:DIRECT_PLAYOFF_SEEDS]
+        seed_7, seed_8, seed_9, seed_10 = seeds[6:PLAY_IN_FIELD_SIZE]
+
+        for team_id in (seed_7, seed_8, seed_9, seed_10):
+            play_in_berths[team_id] += 1
+
+        final_7, final_8 = _simulate_play_in(seed_7, seed_8, seed_9, seed_10, ratings, home_advantage, rng)
+
+        playoff_seeds = direct_seeds + [final_7, final_8]
+        for team_id in playoff_seeds:
+            playoff_berths[team_id] += 1
+
+        champion = _simulate_bracket(playoff_seeds, ratings, home_advantage, rng)
+        conference_champions.append((champion, wins[champion], point_differential.get(champion, 0)))
+    return conference_champions
+
+
+def _simulate_finals(
+    conference_champions: list[tuple[str, int, int]], ratings: dict[str, float], home_advantage: float,
+    rng: random.Random,
+) -> str:
+    """The NBA Finals winner for one simulated postseason -- home-court to
+    the better regular-season record, point differential as tiebreak, an
+    even-odds coinflip only if still tied on both."""
+    (champ_a, wins_a, pd_a), (champ_b, wins_b, pd_b) = conference_champions
+    record_a, record_b = (wins_a, pd_a), (wins_b, pd_b)
+    if record_a == record_b:
+        home, away = (champ_a, champ_b) if rng.random() < 0.5 else (champ_b, champ_a)
+    elif record_a > record_b:
+        home, away = champ_a, champ_b
+    else:
+        home, away = champ_b, champ_a
+    home_rating = ratings.get(home, DEFAULT_STARTING_RATING)
+    away_rating = ratings.get(away, DEFAULT_STARTING_RATING)
+    home_win_probability = expected_score(home_rating, away_rating, home_advantage)
+    return home if rng.random() < home_win_probability else away
+
+
 def simulate_season(
     current_wins: dict[str, int],
     current_losses: dict[str, int],
@@ -370,18 +441,7 @@ def simulate_season(
         losses = {team_id: current_losses.get(team_id, 0) for team_id in teams}
         ratings = dict(current_ratings)
 
-        for home_id, away_id in remaining_games:
-            home_rating = ratings.get(home_id, DEFAULT_STARTING_RATING)
-            away_rating = ratings.get(away_id, DEFAULT_STARTING_RATING)
-            home_win_probability = expected_score(home_rating, away_rating, home_advantage)
-            home_won = rng.random() < home_win_probability
-
-            wins[home_id if home_won else away_id] += 1
-            losses[away_id if home_won else home_id] += 1
-
-            actual_home = 1.0 if home_won else 0.0
-            ratings[home_id] = home_rating + k_factor * (actual_home - home_win_probability)
-            ratings[away_id] = away_rating + k_factor * ((1 - actual_home) - (1 - home_win_probability))
+        _simulate_regular_season_games(remaining_games, wins, losses, ratings, home_advantage, k_factor, rng)
 
         for team_id in teams:
             win_totals[team_id] += wins[team_id]
@@ -391,39 +451,10 @@ def simulate_season(
             winner = max(division_teams, key=lambda t: (wins.get(t, 0), point_differential.get(t, 0)))
             division_titles[winner] += 1
 
-        conference_champions = []
-        for conference_teams in conferences.values():
-            seeds = _seed_conference(conference_teams, wins, point_differential)
-            direct_seeds = seeds[:DIRECT_PLAYOFF_SEEDS]
-            seed_7, seed_8, seed_9, seed_10 = seeds[6:PLAY_IN_FIELD_SIZE]
-
-            for team_id in (seed_7, seed_8, seed_9, seed_10):
-                play_in_berths[team_id] += 1
-
-            final_7, final_8 = _simulate_play_in(seed_7, seed_8, seed_9, seed_10, ratings, home_advantage, rng)
-
-            playoff_seeds = direct_seeds + [final_7, final_8]
-            for team_id in playoff_seeds:
-                playoff_berths[team_id] += 1
-
-            champion = _simulate_bracket(playoff_seeds, ratings, home_advantage, rng)
-            conference_champions.append((champion, wins[champion], point_differential.get(champion, 0)))
-
-        # Finals -- home-court to the better regular-season record, point
-        # differential as tiebreak, an even-odds coinflip only if still
-        # tied on both.
-        (champ_a, wins_a, pd_a), (champ_b, wins_b, pd_b) = conference_champions
-        record_a, record_b = (wins_a, pd_a), (wins_b, pd_b)
-        if record_a == record_b:
-            home, away = (champ_a, champ_b) if rng.random() < 0.5 else (champ_b, champ_a)
-        elif record_a > record_b:
-            home, away = champ_a, champ_b
-        else:
-            home, away = champ_b, champ_a
-        home_rating = ratings.get(home, DEFAULT_STARTING_RATING)
-        away_rating = ratings.get(away, DEFAULT_STARTING_RATING)
-        home_win_probability = expected_score(home_rating, away_rating, home_advantage)
-        champion = home if rng.random() < home_win_probability else away
+        conference_champions = _simulate_conference_playoffs(
+            conferences, wins, point_differential, ratings, home_advantage, rng, play_in_berths, playoff_berths,
+        )
+        champion = _simulate_finals(conference_champions, ratings, home_advantage, rng)
         championships[champion] += 1
 
     return {
@@ -437,6 +468,78 @@ def simulate_season(
         }
         for team_id in teams
     }
+
+
+def _simulate_cup_group_games(
+    remaining_cup_games: list[tuple[str, str]], wins: dict[str, int], losses: dict[str, int],
+    ratings: dict[str, float], home_advantage: float, k_factor: float, rng: random.Random,
+) -> None:
+    """One simulated Cup group stage's worth of remaining games -- mutates
+    wins/losses/ratings in place."""
+    for home_id, away_id in remaining_cup_games:
+        if home_id not in wins or away_id not in wins:
+            continue  # not a real franchise in this season's groups -- skip defensively
+        home_rating = ratings.get(home_id, DEFAULT_STARTING_RATING)
+        away_rating = ratings.get(away_id, DEFAULT_STARTING_RATING)
+        home_win_probability = expected_score(home_rating, away_rating, home_advantage)
+        home_won = rng.random() < home_win_probability
+        wins[home_id if home_won else away_id] += 1
+        losses[away_id if home_won else home_id] += 1
+        actual_home = 1.0 if home_won else 0.0
+        ratings[home_id] = home_rating + k_factor * (actual_home - home_win_probability)
+        ratings[away_id] = away_rating + k_factor * ((1 - actual_home) - (1 - home_win_probability))
+
+
+def _cup_knockout_fields(
+    groups: dict[str, dict[str, list[str]]], wins: dict[str, int], losses: dict[str, int],
+    group_winner_totals: dict[str, int], knockout_totals: dict[str, int],
+) -> dict[str, list[str]]:
+    """{conference: [group winners sorted best-to-worst, then wildcard]}
+    for one simulated group stage -- mutates group_winner_totals/
+    knockout_totals in place."""
+    def record_key(team_id: str) -> tuple[int, int]:
+        return (wins.get(team_id, 0), -losses.get(team_id, 0))
+
+    knockout_field_by_conference: dict[str, list[str]] = {}
+    for conference, conference_groups in groups.items():
+        group_winners = []
+        all_conference_teams = []
+        for team_ids in conference_groups.values():
+            winner = max(team_ids, key=record_key)
+            group_winner_totals[winner] += 1
+            group_winners.append(winner)
+            all_conference_teams.extend(team_ids)
+
+        wildcard_pool = [t for t in all_conference_teams if t not in group_winners]
+        wildcard = max(wildcard_pool, key=record_key)
+
+        field = sorted(group_winners, key=record_key, reverse=True) + [wildcard]
+        knockout_field_by_conference[conference] = field
+        for team_id in field:
+            knockout_totals[team_id] += 1
+    return knockout_field_by_conference
+
+
+def _simulate_cup_knockout(
+    knockout_field_by_conference: dict[str, list[str]], ratings: dict[str, float], home_advantage: float,
+    rng: random.Random, finalist_totals: dict[str, int],
+) -> list[str]:
+    """Each conference's own finalist, in conference order -- mutates
+    finalist_totals in place."""
+    conference_champions = []
+    for field in knockout_field_by_conference.values():
+        seed_rank = {team_id: rank for rank, team_id in enumerate(field)}
+
+        def play(a: str, b: str) -> str:
+            return _play(a, b, seed_rank, ratings, home_advantage, rng)
+
+        one, two, three, four = field
+        semi1 = play(one, four)
+        semi2 = play(two, three)
+        finalist = play(semi1, semi2)
+        finalist_totals[finalist] += 1
+        conference_champions.append(finalist)
+    return conference_champions
 
 
 def simulate_cup(
@@ -491,53 +594,12 @@ def simulate_cup(
         losses = {team_id: cup_losses.get(team_id, 0) for team_id in all_teams}
         ratings = dict(current_ratings)
 
-        for home_id, away_id in remaining_cup_games:
-            if home_id not in wins or away_id not in wins:
-                continue  # not a real franchise in this season's groups -- skip defensively
-            home_rating = ratings.get(home_id, DEFAULT_STARTING_RATING)
-            away_rating = ratings.get(away_id, DEFAULT_STARTING_RATING)
-            home_win_probability = expected_score(home_rating, away_rating, home_advantage)
-            home_won = rng.random() < home_win_probability
-            wins[home_id if home_won else away_id] += 1
-            losses[away_id if home_won else home_id] += 1
-            actual_home = 1.0 if home_won else 0.0
-            ratings[home_id] = home_rating + k_factor * (actual_home - home_win_probability)
-            ratings[away_id] = away_rating + k_factor * ((1 - actual_home) - (1 - home_win_probability))
+        _simulate_cup_group_games(remaining_cup_games, wins, losses, ratings, home_advantage, k_factor, rng)
 
-        def record_key(team_id: str) -> tuple[int, int]:
-            return (wins.get(team_id, 0), -losses.get(team_id, 0))
-
-        knockout_field_by_conference: dict[str, list[str]] = {}
-        for conference, conference_groups in groups.items():
-            group_winners = []
-            all_conference_teams = []
-            for team_ids in conference_groups.values():
-                winner = max(team_ids, key=record_key)
-                group_winner_totals[winner] += 1
-                group_winners.append(winner)
-                all_conference_teams.extend(team_ids)
-
-            wildcard_pool = [t for t in all_conference_teams if t not in group_winners]
-            wildcard = max(wildcard_pool, key=record_key)
-
-            field = sorted(group_winners, key=record_key, reverse=True) + [wildcard]
-            knockout_field_by_conference[conference] = field
-            for team_id in field:
-                knockout_totals[team_id] += 1
-
-        conference_champions = []
-        for field in knockout_field_by_conference.values():
-            seed_rank = {team_id: rank for rank, team_id in enumerate(field)}
-
-            def play(a: str, b: str) -> str:
-                return _play(a, b, seed_rank, ratings, home_advantage, rng)
-
-            one, two, three, four = field
-            semi1 = play(one, four)
-            semi2 = play(two, three)
-            finalist = play(semi1, semi2)
-            finalist_totals[finalist] += 1
-            conference_champions.append(finalist)
+        knockout_field_by_conference = _cup_knockout_fields(groups, wins, losses, group_winner_totals, knockout_totals)
+        conference_champions = _simulate_cup_knockout(
+            knockout_field_by_conference, ratings, home_advantage, rng, finalist_totals,
+        )
 
         # Championship game -- neutral site, modeled at even odds (no
         # real home side).

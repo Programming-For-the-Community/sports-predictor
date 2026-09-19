@@ -830,6 +830,45 @@ class _FirstFourSection extends StatelessWidget {
 /// computes exactly "2 sources converge to 1 final matchup" -- the same
 /// shape NFL/NBA's own conference-split bracket needs); only the mapping
 /// from round index to horizontal position differs per half.
+/// Each First Four game's predicted winner already holds a fixed, known
+/// Round-of-64 slot (see season_projection.py's own
+/// _march_madness_bracket_payload docstring -- region assignment is
+/// seeded off that same predicted winner) -- finds which side's
+/// Round-of-64 list contains it and at what index, so the card can be
+/// drawn at that row instead of in an unpositioned list. A game whose
+/// winner isn't found on either side (should not happen for a
+/// self-consistent payload) lands in `unresolved` instead of crashing on
+/// a missing match.
+({
+  List<({BracketMatchup matchup, ({bool isLeft, int index}) destination})> placements,
+  List<BracketMatchup> unresolved,
+}) _resolveFirstFourPlacements(
+  List<BracketMatchup> firstFour,
+  List<BracketMatchup> Function(int round) leftRoundMatchups,
+  List<BracketMatchup> Function(int round) rightRoundMatchups,
+) {
+  ({bool isLeft, int index})? locate(BracketMatchup matchup) {
+    final winner = matchup.predictedWinner;
+    if (winner == null) return null;
+    final leftIndex = leftRoundMatchups(0).indexWhere((m) => m.teamA == winner || m.teamB == winner);
+    if (leftIndex != -1) return (isLeft: true, index: leftIndex);
+    final rightIndex = rightRoundMatchups(0).indexWhere((m) => m.teamA == winner || m.teamB == winner);
+    if (rightIndex != -1) return (isLeft: false, index: rightIndex);
+    return null;
+  }
+
+  return (
+    placements: [
+      for (final matchup in firstFour)
+        if (locate(matchup) case final destination?) (matchup: matchup, destination: destination),
+    ],
+    unresolved: [
+      for (final matchup in firstFour)
+        if (locate(matchup) == null) matchup,
+    ],
+  );
+}
+
 class _MarchMadnessGrid extends StatelessWidget {
   const _MarchMadnessGrid({required this.sport, required this.bracket, required this.regionOrder});
 
@@ -899,34 +938,11 @@ class _MarchMadnessGrid extends StatelessWidget {
         r < halfColumns - 1 ? [...rightRegionRounds[0][r].matchups, ...rightRegionRounds[1][r].matchups] : [bracket.finalFour[1]];
     String roundLabel(List<BracketRound> regionRounds, int r) => r < halfColumns - 1 ? regionRounds[r].round : 'Final Four';
 
-    // Each First Four game's predicted winner already holds a fixed,
-    // known Round-of-64 slot (see season_projection.py's own
-    // _march_madness_bracket_payload docstring -- region assignment is
-    // seeded off that same predicted winner) -- find which side's
-    // Round-of-64 list contains it and at what index, so the card can be
-    // drawn at that row instead of in an unpositioned list. Null (should
-    // not happen for a self-consistent payload) means this game is
-    // skipped from the grid rather than crashing on a missing match.
-    ({bool isLeft, int index})? locateFirstFourDestination(BracketMatchup matchup) {
-      final winner = matchup.predictedWinner;
-      if (winner == null) return null;
-      final leftIndex = leftRoundMatchups(0).indexWhere((m) => m.teamA == winner || m.teamB == winner);
-      if (leftIndex != -1) return (isLeft: true, index: leftIndex);
-      final rightIndex = rightRoundMatchups(0).indexWhere((m) => m.teamA == winner || m.teamB == winner);
-      if (rightIndex != -1) return (isLeft: false, index: rightIndex);
-      return null;
-    }
-
-    final firstFourPlacements = [
-      for (final matchup in bracket.firstFour)
-        if (locateFirstFourDestination(matchup) case final destination?) (matchup: matchup, destination: destination),
-    ];
+    final firstFourResolution = _resolveFirstFourPlacements(bracket.firstFour, leftRoundMatchups, rightRoundMatchups);
+    final firstFourPlacements = firstFourResolution.placements;
+    final unresolvedFirstFour = firstFourResolution.unresolved;
     final hasLeftFirstFour = firstFourPlacements.any((p) => p.destination.isLeft);
     final hasRightFirstFour = firstFourPlacements.any((p) => !p.destination.isLeft);
-    final unresolvedFirstFour = [
-      for (final matchup in bracket.firstFour)
-        if (locateFirstFourDestination(matchup) == null) matchup,
-    ];
 
     // Centered on the same column/slot a same-size card would use, just
     // scaled up around that center point -- computed here (not just
@@ -1228,6 +1244,103 @@ class _BracketConnection {
   bool get isSkip => toRound - fromRound > 1;
 }
 
+/// A matchup's vertical position is based only on sources in the
+/// immediately preceding round; a source found further back is drawn as
+/// a connector (see _bracketConnectorsForRound) but doesn't drive
+/// placement, since averaging it in can scramble a round's canonical
+/// seed order.
+List<double> _desiredMatchupPositions(
+  List<BracketMatchup> matchups, List<BracketMatchup> previousMatchups, List<double> previousSlots,
+) {
+  final desired = List<double>.filled(matchups.length, 0);
+  for (var i = 0; i < matchups.length; i++) {
+    final matchup = matchups[i];
+    final realSources = <double>[];
+    final byeSources = <double>[];
+    final currentSides = {matchup.teamA, matchup.teamB}..removeWhere((side) => side == null);
+    for (var j = 0; j < previousMatchups.length; j++) {
+      final previous = previousMatchups[j];
+      final previousSides = {previous.teamA, previous.teamB}..removeWhere((side) => side == null);
+      // A bye's own null side is never a "shared side" with another
+      // bye's null side -- both were removed above, so this only
+      // matches on a real team id appearing in both matchups.
+      if (previousSides.intersection(currentSides).isNotEmpty) {
+        (previous.teamA != null && previous.teamB != null ? realSources : byeSources).add(previousSlots[j]);
+      }
+    }
+    // A bye source doesn't drive position when a real source is also
+    // present -- the bye side never gets a card or a connector (see the
+    // backward search below), so averaging its slot in would pull this
+    // matchup off the real source's row for no visible reason, forcing
+    // an otherwise-unnecessary dogleg into an already-straight
+    // single-connector line. Only fall back to the bye's own slot when
+    // it's the sole immediate source (no real game to align with).
+    final immediateSources = realSources.isNotEmpty ? realSources : byeSources;
+    // No traceable source in the immediately preceding round ("bye"
+    // into this round) -- its own index stands in until the dedup pass
+    // below places it.
+    desired[i] = immediateSources.isEmpty
+        ? i.toDouble()
+        : immediateSources.reduce((a, b) => a + b) / immediateSources.length;
+  }
+  return desired;
+}
+
+/// Assigns final slots by desired position (ties broken by original
+/// index), pushing each one at least a full row past the slot just
+/// assigned before it -- a full 1-row minimum gap, not just an
+/// inequality check, since two desired values can be close enough to
+/// overlap visually without being numerically equal.
+List<double> _assignRoundSlots(int matchupCount, List<double> desired) {
+  final order = List<int>.generate(matchupCount, (i) => i)
+    ..sort((a, b) {
+      final cmp = desired[a].compareTo(desired[b]);
+      return cmp != 0 ? cmp : a.compareTo(b);
+    });
+  final roundSlots = List<double?>.filled(matchupCount, null);
+  var lastAssigned = double.negativeInfinity;
+  for (final i in order) {
+    final candidate = desired[i] > lastAssigned + 1 ? desired[i] : lastAssigned + 1;
+    roundSlots[i] = candidate;
+    lastAssigned = candidate;
+  }
+  return roundSlots.cast<double>();
+}
+
+/// Connector lines search back through every earlier round (nearest
+/// first, matching either of a previous matchup's two participants),
+/// independent of what drove position in _desiredMatchupPositions --
+/// draws the real source even for a side that skips the immediately
+/// preceding round or that only reappears as the loser of an earlier
+/// game.
+List<_BracketConnection> _bracketConnectorsForRound(
+  int r, List<BracketMatchup> matchups, List<BracketRound> rounds, List<List<double>> slots, List<double> roundSlots,
+) {
+  final connections = <_BracketConnection>[];
+  for (var i = 0; i < matchups.length; i++) {
+    final matchup = matchups[i];
+    for (final side in [matchup.teamA, matchup.teamB]) {
+      if (side == null) continue; // A bye side has no earlier-round game to trace a connector back to.
+      for (var back = r - 1; back >= 0; back--) {
+        final foundIndex = rounds[back].matchups.indexWhere((m) => m.teamA == side || m.teamB == side);
+        if (foundIndex != -1) {
+          final source = rounds[back].matchups[foundIndex];
+          // A bye source has no card rendered for it (see the card loop
+          // in _BracketTree) -- nothing to draw a connector line from.
+          // The team wasn't playing yet, it was awarded the round
+          // automatically; this is where its own bracket path actually
+          // starts, so search no further back either.
+          if (source.teamA != null && source.teamB != null) {
+            connections.add(_BracketConnection(back, slots[back][foundIndex], r, roundSlots[i]));
+          }
+          break;
+        }
+      }
+    }
+  }
+  return connections;
+}
+
 _BracketSlotLayout _computeBracketSlotLayout(List<BracketRound> rounds) {
   final slots = <List<double>>[];
   final connections = <_BracketConnection>[];
@@ -1239,90 +1352,10 @@ _BracketSlotLayout _computeBracketSlotLayout(List<BracketRound> rounds) {
       continue;
     }
 
-    // A matchup's vertical position is based only on sources in the
-    // immediately preceding round; a source found further back is drawn
-    // as a connector (below) but doesn't drive placement, since averaging
-    // it in can scramble a round's canonical seed order.
-    final previousMatchups = rounds[r - 1].matchups;
-    final previousSlots = slots[r - 1];
-    final desired = List<double>.filled(matchups.length, 0);
-    for (var i = 0; i < matchups.length; i++) {
-      final matchup = matchups[i];
-      final realSources = <double>[];
-      final byeSources = <double>[];
-      final currentSides = {matchup.teamA, matchup.teamB}..removeWhere((side) => side == null);
-      for (var j = 0; j < previousMatchups.length; j++) {
-        final previous = previousMatchups[j];
-        final previousSides = {previous.teamA, previous.teamB}..removeWhere((side) => side == null);
-        // A bye's own null side is never a "shared side" with another
-        // bye's null side -- both were removed above, so this only
-        // matches on a real team id appearing in both matchups.
-        if (previousSides.intersection(currentSides).isNotEmpty) {
-          (previous.teamA != null && previous.teamB != null ? realSources : byeSources).add(previousSlots[j]);
-        }
-      }
-      // A bye source doesn't drive position when a real source is also
-      // present -- the bye side never gets a card or a connector (see the
-      // backward search below), so averaging its slot in would pull this
-      // matchup off the real source's row for no visible reason, forcing
-      // an otherwise-unnecessary dogleg into an already-straight
-      // single-connector line. Only fall back to the bye's own slot when
-      // it's the sole immediate source (no real game to align with).
-      final immediateSources = realSources.isNotEmpty ? realSources : byeSources;
-      // No traceable source in the immediately preceding round ("bye"
-      // into this round) -- its own index stands in until the dedup pass
-      // below places it.
-      desired[i] = immediateSources.isEmpty
-          ? i.toDouble()
-          : immediateSources.reduce((a, b) => a + b) / immediateSources.length;
-    }
-
-    // Assign final slots by desired position (ties broken by original
-    // index), pushing each one at least a full row past the slot just
-    // assigned before it -- a full 1-row minimum gap, not just an
-    // inequality check, since two desired values can be close enough to
-    // overlap visually without being numerically equal.
-    final order = List<int>.generate(matchups.length, (i) => i)
-      ..sort((a, b) {
-        final cmp = desired[a].compareTo(desired[b]);
-        return cmp != 0 ? cmp : a.compareTo(b);
-      });
-    final roundSlots = List<double?>.filled(matchups.length, null);
-    var lastAssigned = double.negativeInfinity;
-    for (final i in order) {
-      final candidate = desired[i] > lastAssigned + 1 ? desired[i] : lastAssigned + 1;
-      roundSlots[i] = candidate;
-      lastAssigned = candidate;
-    }
-
-    // Connector lines search back through every earlier round (nearest
-    // first, matching either of a previous matchup's two participants),
-    // independent of what drove position above -- draws the real source
-    // even for a side that skips the immediately preceding round or that
-    // only reappears as the loser of an earlier game.
-    for (var i = 0; i < matchups.length; i++) {
-      final matchup = matchups[i];
-      for (final side in [matchup.teamA, matchup.teamB]) {
-        if (side == null) continue; // A bye side has no earlier-round game to trace a connector back to.
-        for (var back = r - 1; back >= 0; back--) {
-          final foundIndex = rounds[back].matchups.indexWhere((m) => m.teamA == side || m.teamB == side);
-          if (foundIndex != -1) {
-            final source = rounds[back].matchups[foundIndex];
-            // A bye source has no card rendered for it (see the card
-            // loop below) -- nothing to draw a connector line from. The
-            // team wasn't playing yet, it was awarded the round
-            // automatically; this is where its own bracket path
-            // actually starts, so search no further back either.
-            if (source.teamA != null && source.teamB != null) {
-              connections.add(_BracketConnection(back, slots[back][foundIndex], r, roundSlots[i]!));
-            }
-            break;
-          }
-        }
-      }
-    }
-
-    slots.add(roundSlots.cast<double>());
+    final desired = _desiredMatchupPositions(matchups, rounds[r - 1].matchups, slots[r - 1]);
+    final roundSlots = _assignRoundSlots(matchups.length, desired);
+    connections.addAll(_bracketConnectorsForRound(r, matchups, rounds, slots, roundSlots));
+    slots.add(roundSlots);
   }
 
   return _BracketSlotLayout(slots, connections);
@@ -1578,6 +1611,22 @@ class _BracketTree extends StatelessWidget {
   // its own full emphasized size.
   static const double _championshipEntryGap = 28;
 
+  ({double maxSlot, double championshipExtraWidth, double championshipExtraHeight, double championshipEntryGap})
+      _layoutMetrics(_BracketSlotLayout layout, bool isChampionshipRound) {
+    var maxSlot = 0.0;
+    for (final roundSlots in layout.slots) {
+      for (final slot in roundSlots) {
+        if (slot > maxSlot) maxSlot = slot;
+      }
+    }
+    return (
+      maxSlot: maxSlot,
+      championshipExtraWidth: isChampionshipRound ? (_championshipCardWidth - _cardWidth) / 2 : 0.0,
+      championshipExtraHeight: isChampionshipRound ? (_championshipCardHeight - _cardHeight) / 2 : 0.0,
+      championshipEntryGap: isChampionshipRound ? _championshipEntryGap : 0.0,
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     if (rounds.isEmpty) {
@@ -1585,16 +1634,9 @@ class _BracketTree extends StatelessWidget {
     }
 
     final layout = precomputedLayout ?? _computeBracketSlotLayout(rounds);
-    var maxSlot = 0.0;
-    for (final roundSlots in layout.slots) {
-      for (final slot in roundSlots) {
-        if (slot > maxSlot) maxSlot = slot;
-      }
-    }
     final isChampionshipRound = highlightFinalMatchup && rounds.last.matchups.length == 1;
-    final championshipExtraWidth = isChampionshipRound ? (_championshipCardWidth - _cardWidth) / 2 : 0.0;
-    final championshipExtraHeight = isChampionshipRound ? (_championshipCardHeight - _cardHeight) / 2 : 0.0;
-    final championshipEntryGap = isChampionshipRound ? _championshipEntryGap : 0.0;
+    final (:maxSlot, :championshipExtraWidth, :championshipExtraHeight, :championshipEntryGap) =
+        _layoutMetrics(layout, isChampionshipRound);
     final totalWidth =
         rounds.length * _cardWidth + (rounds.length - 1) * _roundGap + championshipExtraWidth + championshipEntryGap;
     final totalHeight = maxSlot * _verticalUnit + _cardHeight + championshipExtraHeight;
@@ -1607,7 +1649,7 @@ class _BracketTree extends StatelessWidget {
           Row(
             crossAxisAlignment: CrossAxisAlignment.center,
             children: [
-              CustomPaint(size: const Size(28, 12), painter: _DashedLegendSwatchPainter(color: AppColors.violet)),
+              const CustomPaint(size: Size(28, 12), painter: _DashedLegendSwatchPainter(color: AppColors.violet)),
               const SizedBox(width: 8),
               Flexible(
                 child: Text(
@@ -1961,34 +2003,37 @@ class _BracketMatchupCard extends StatelessWidget {
 
   // "Projected"/"Scheduled"/"Final". A series matchup (isSeries) folds in
   // its running win-loss record.
-  String _statusLabel() {
+  String _statusLabel() => matchup.isSeries ? _seriesStatusLabel() : _singleGameStatusLabel();
+
+  // The live win-loss record (winsA/winsB) is shown per-team by this
+  // card's own team rows, so it isn't repeated here. Only the predicted
+  // final record (winner-first, e.g. "4-2") appears on the status line.
+  String _seriesStatusLabel() {
     final winnerLabel = matchup.predictedWinner != null ? _teamLabel(matchup.predictedWinner!) : null;
-    if (matchup.isSeries) {
-      // The live win-loss record (winsA/winsB) is shown per-team by this
-      // card's own team rows, so it isn't repeated here. Only the
-      // predicted final record (winner-first, e.g. "4-2") appears on the
-      // status line.
-      final predictedRecord = matchup.predictedWinsA != null && matchup.predictedWinsB != null
-          ? (matchup.predictedWinner == matchup.teamA
-              ? '${matchup.predictedWinsA}-${matchup.predictedWinsB}'
-              : '${matchup.predictedWinsB}-${matchup.predictedWinsA}')
-          : null;
-      switch (matchup.status) {
-        case BracketMatchupStatus.finalStatus:
-          final winnerName = matchup.actualWinner != null ? _teamLabel(matchup.actualWinner!) : null;
-          return winnerName != null ? '$winnerName WINS SERIES' : 'SERIES FINAL';
-        case BracketMatchupStatus.scheduled:
-          if (matchup.winProbability == null || winnerLabel == null) return 'PREDICTION PENDING';
-          final probability = '${(matchup.winProbability! * 100).round()}%';
-          return predictedRecord != null ? '$winnerLabel $predictedRecord $probability' : '$probability $winnerLabel';
-        default:
-          if (matchup.winProbability == null || winnerLabel == null) return 'PROJECTED';
-          final probability = '${(matchup.winProbability! * 100).round()}%';
-          return predictedRecord != null
-              ? 'PROJECTED — $winnerLabel $predictedRecord $probability'
-              : 'PROJECTED — $probability $winnerLabel';
-      }
+    final predictedRecord = matchup.predictedWinsA != null && matchup.predictedWinsB != null
+        ? (matchup.predictedWinner == matchup.teamA
+            ? '${matchup.predictedWinsA}-${matchup.predictedWinsB}'
+            : '${matchup.predictedWinsB}-${matchup.predictedWinsA}')
+        : null;
+    switch (matchup.status) {
+      case BracketMatchupStatus.finalStatus:
+        final winnerName = matchup.actualWinner != null ? _teamLabel(matchup.actualWinner!) : null;
+        return winnerName != null ? '$winnerName WINS SERIES' : 'SERIES FINAL';
+      case BracketMatchupStatus.scheduled:
+        if (matchup.winProbability == null || winnerLabel == null) return 'PREDICTION PENDING';
+        final probability = '${(matchup.winProbability! * 100).round()}%';
+        return predictedRecord != null ? '$winnerLabel $predictedRecord $probability' : '$probability $winnerLabel';
+      default:
+        if (matchup.winProbability == null || winnerLabel == null) return 'PROJECTED';
+        final probability = '${(matchup.winProbability! * 100).round()}%';
+        return predictedRecord != null
+            ? 'PROJECTED — $winnerLabel $predictedRecord $probability'
+            : 'PROJECTED — $probability $winnerLabel';
     }
+  }
+
+  String _singleGameStatusLabel() {
+    final winnerLabel = matchup.predictedWinner != null ? _teamLabel(matchup.predictedWinner!) : null;
     switch (matchup.status) {
       case BracketMatchupStatus.finalStatus:
         return 'FINAL';

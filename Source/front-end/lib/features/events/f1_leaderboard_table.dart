@@ -131,29 +131,42 @@ String humanizeF1EntityId(String id) => id.split('_').map((w) => w.isEmpty ? w :
 // table in this app uses.
 const _compactBreakpoint = 600.0;
 
+/// "3" (real) / "5" (ESPN live) / "P5" (projected) position text for the
+/// POSITION column -- isSprint picks grid vs. finish, same as every other
+/// actual-vs-projected cell in this file.
+Widget _positionColumnCell(BuildContext context, F1DriverPrediction entry, F1DriverLiveResult? live, int rowNumber, bool isSprint) {
+  final actual = isSprint ? entry.actual?.gridPosition : entry.actual?.finishPosition;
+  final position = actual ?? live?.order;
+  final color = position != null ? (actual != null ? AppColors.inkMute : AppColors.live) : AppColors.inkMute;
+  return Text(
+    '${position ?? rowNumber}', style: AppTextStyles.metricValue(color: color), textAlign: TextAlign.center,
+    maxLines: 1, softWrap: false, overflow: TextOverflow.ellipsis,
+  );
+}
+
+/// Driver name plus its own constructor sub-label (falling back to a
+/// humanized constructor_entity_id if constructorName itself is null) for
+/// the DRIVER column.
+Widget _driverColumnCell(BuildContext context, F1DriverPrediction entry, F1DriverLiveResult? live, int rowNumber) {
+  final name = entry.name ?? entry.entityId;
+  final constructorLabel = entry.constructorName ?? (entry.constructorEntityId != null ? humanizeF1EntityId(entry.constructorEntityId!) : null);
+  return Column(
+    crossAxisAlignment: CrossAxisAlignment.start,
+    mainAxisSize: MainAxisSize.min,
+    children: [
+      Text(name, style: AppTextStyles.body(color: AppColors.ink), maxLines: 1, overflow: TextOverflow.ellipsis),
+      if (constructorLabel != null)
+        Text(constructorLabel, style: AppTextStyles.microLabel(color: AppColors.inkSub), maxLines: 1, overflow: TextOverflow.ellipsis),
+    ],
+  );
+}
+
 List<_LeaderboardColumn> _fullColumns({required bool isSprint}) => [
-      _LeaderboardColumn(_F1ColumnKey.position, _F1ColumnLabels.position, 1, (context, entry, live, rowNumber) {
-        final actual = isSprint ? entry.actual?.gridPosition : entry.actual?.finishPosition;
-        final position = actual ?? live?.order;
-        final color = position != null ? (actual != null ? AppColors.inkMute : AppColors.live) : AppColors.inkMute;
-        return Text(
-          '${position ?? rowNumber}', style: AppTextStyles.metricValue(color: color), textAlign: TextAlign.center,
-          maxLines: 1, softWrap: false, overflow: TextOverflow.ellipsis,
-        );
-      }),
-      _LeaderboardColumn(_F1ColumnKey.driver, _F1ColumnLabels.driver, 4, (context, entry, live, rowNumber) {
-        final name = entry.name ?? entry.entityId;
-        final constructorLabel = entry.constructorName ?? (entry.constructorEntityId != null ? humanizeF1EntityId(entry.constructorEntityId!) : null);
-        return Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text(name, style: AppTextStyles.body(color: AppColors.ink), maxLines: 1, overflow: TextOverflow.ellipsis),
-            if (constructorLabel != null)
-              Text(constructorLabel, style: AppTextStyles.microLabel(color: AppColors.inkSub), maxLines: 1, overflow: TextOverflow.ellipsis),
-          ],
-        );
-      }),
+      _LeaderboardColumn(
+        _F1ColumnKey.position, _F1ColumnLabels.position, 1,
+        (context, entry, live, rowNumber) => _positionColumnCell(context, entry, live, rowNumber, isSprint),
+      ),
+      _LeaderboardColumn(_F1ColumnKey.driver, _F1ColumnLabels.driver, 4, _driverColumnCell),
       _LeaderboardColumn(_F1ColumnKey.status, _F1ColumnLabels.status, 2,
           (context, entry, live, rowNumber) => Center(child: F1StatusPill(status: entry.actual?.status))),
       isSprint

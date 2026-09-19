@@ -72,16 +72,9 @@ class TeamStanding {
         ties: json['ties'] as int? ?? 0,
         projectedWins: (json['projected_wins'] as num?)?.toDouble() ?? (json['wins'] as int).toDouble(),
         projectedLosses: (json['projected_losses'] as num?)?.toDouble() ?? 0.0,
-        divisionWinnerProbability: (json['division_winner_probability'] as num? ??
-                    json['conference_champion_probability'] as num? ??
-                    json['conference_tournament_champion_probability'] as num?)
-                ?.toDouble() ??
-            0.0,
-        playoffProbability:
-            (json['playoff_probability'] as num? ?? json['ncaa_tournament_probability'] as num?)?.toDouble() ?? 0.0,
-        championshipProbability:
-            (json['championship_probability'] as num? ?? json['national_champion_probability'] as num?)?.toDouble() ??
-                0.0,
+        divisionWinnerProbability: _divisionWinnerProbability(json),
+        playoffProbability: _playoffProbability(json),
+        championshipProbability: _championshipProbability(json),
         playInProbability: (json['play_in_probability'] as num?)?.toDouble(),
         abbreviation: json['abbreviation'] as String?,
         currentRank: json['current_rank'] as int?,
@@ -89,6 +82,23 @@ class TeamStanding {
         color: json['color'] as String?,
       );
 }
+
+// division_winner_probability (NFL), conference_champion_probability
+// (NCAAFB), and conference_tournament_champion_probability (NCAA MBB) are
+// the same "won their group" concept at each sport's own granularity --
+// see TeamStanding.fromJson's own doc comment.
+double _divisionWinnerProbability(Map<String, dynamic> json) =>
+    (json['division_winner_probability'] as num? ??
+            json['conference_champion_probability'] as num? ??
+            json['conference_tournament_champion_probability'] as num?)
+        ?.toDouble() ??
+    0.0;
+
+double _playoffProbability(Map<String, dynamic> json) =>
+    (json['playoff_probability'] as num? ?? json['ncaa_tournament_probability'] as num?)?.toDouble() ?? 0.0;
+
+double _championshipProbability(Map<String, dynamic> json) =>
+    (json['championship_probability'] as num? ?? json['national_champion_probability'] as num?)?.toDouble() ?? 0.0;
 
 /// One row in a player-prop leaderboard -- `name` falls back to
 /// `entityId` the same way PlayerStatLine does.

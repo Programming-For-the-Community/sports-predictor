@@ -169,6 +169,45 @@ def project_cfp_bracket(seeds: list[str], ratings: dict[str, float], home_advant
     }
 
 
+def _simulate_regular_season_games(
+    remaining_games: list[tuple[str, str]], teams: set[str], wins: dict[str, int], losses: dict[str, int],
+    ratings: dict[str, float], home_advantage: float, k_factor: float, rng: random.Random,
+) -> None:
+    """One simulated regular season's worth of remaining games -- mutates
+    wins/losses/ratings in place."""
+    for home_id, away_id in remaining_games:
+        if home_id not in teams or away_id not in teams:
+            continue
+        home_rating = ratings.get(home_id, DEFAULT_STARTING_RATING)
+        away_rating = ratings.get(away_id, DEFAULT_STARTING_RATING)
+        home_win_probability = expected_score(home_rating, away_rating, home_advantage)
+        home_won = rng.random() < home_win_probability
+        winner_id = home_id if home_won else away_id
+        loser_id = away_id if home_won else home_id
+
+        wins[winner_id] += 1
+        losses[loser_id] += 1
+
+        actual_home = 1.0 if home_won else 0.0
+        ratings[home_id] = home_rating + k_factor * (actual_home - home_win_probability)
+        ratings[away_id] = away_rating + k_factor * ((1 - actual_home) - (1 - home_win_probability))
+
+
+def _simulate_conference_champions(
+    conferences: dict[str, list[str]], wins: dict[str, int], point_differential: dict[str, int],
+    conference_champion_totals: dict[str, int],
+) -> dict[str, str]:
+    """{conference: champion_team_id} for one simulated regular season --
+    mutates conference_champion_totals in place."""
+    champions = {
+        conference: _conference_champion(members, wins, point_differential)
+        for conference, members in conferences.items()
+    }
+    for champion_team in champions.values():
+        conference_champion_totals[champion_team] += 1
+    return champions
+
+
 def simulate_season(
     current_wins: dict[str, int],
     current_losses: dict[str, int],
@@ -209,20 +248,7 @@ def simulate_season(
         losses = {team_id: current_losses.get(team_id, 0) for team_id in teams}
         ratings = dict(current_ratings)
 
-        for home_id, away_id in remaining_games:
-            if home_id not in teams or away_id not in teams:
-                continue
-            home_rating = ratings.get(home_id, DEFAULT_STARTING_RATING)
-            away_rating = ratings.get(away_id, DEFAULT_STARTING_RATING)
-            home_win_probability = expected_score(home_rating, away_rating, home_advantage)
-            home_won = rng.random() < home_win_probability
-
-            wins[home_id if home_won else away_id] += 1
-            losses[away_id if home_won else home_id] += 1
-
-            actual_home = 1.0 if home_won else 0.0
-            ratings[home_id] = home_rating + k_factor * (actual_home - home_win_probability)
-            ratings[away_id] = away_rating + k_factor * ((1 - actual_home) - (1 - home_win_probability))
+        _simulate_regular_season_games(remaining_games, teams, wins, losses, ratings, home_advantage, k_factor, rng)
 
         for team_id in teams:
             win_totals[team_id] += wins[team_id]
@@ -230,12 +256,7 @@ def simulate_season(
             if wins[team_id] >= BOWL_ELIGIBILITY_WINS:
                 bowl_totals[team_id] += 1
 
-        champions = {
-            conference: _conference_champion(members, wins, point_differential)
-            for conference, members in conferences.items()
-        }
-        for champion_team in champions.values():
-            conference_champion_totals[champion_team] += 1
+        champions = _simulate_conference_champions(conferences, wins, point_differential, conference_champion_totals)
 
         model_scores = score_teams(wins, losses, ratings)
         seeds = _select_cfp_field(model_scores, champions)

@@ -127,46 +127,69 @@ def build_driver_dataset(
     total = len(events_ascending)
     rows = []
     for i, event in enumerate(events_ascending, start=1):
-        circuit_id = event.get("circuit_id")
         participants = event.get("participants", [])
         for participant in participants:
-            entity_id = participant["entity_id"]
-            constructor_id = participant.get("constructor_entity_id")
-            prior_results = history[entity_id][-window:][::-1]
-            circuit_results = (
-                circuit_history[(entity_id, circuit_id)][-circuit_window:][::-1] if circuit_id is not None else None
-            )
-            constructor_results = (
-                constructor_history[constructor_id][-window:][::-1] if constructor_id is not None else None
-            )
-            prior_qualifying = qualifying_history[entity_id][-window:][::-1]
-            constructor_qualifying = (
-                constructor_qualifying_history[constructor_id][-window:][::-1] if constructor_id is not None else None
-            )
-            rows.append(build_driver_event_features(
-                event, participant, prior_results, window, circuit_results, circuit_window,
-                constructor_results, window, prior_qualifying, constructor_qualifying,
+            rows.append(_build_driver_row(
+                event, participant, window, circuit_window,
+                history, circuit_history, constructor_history, qualifying_history, constructor_qualifying_history,
             ))
-
         for participant in participants:
-            entity_id = participant["entity_id"]
-            constructor_id = participant.get("constructor_entity_id")
-            result = participant.get("result") or {}
-            history[entity_id].append(result)
-            if circuit_id is not None:
-                circuit_history[(entity_id, circuit_id)].append(result)
-            if constructor_id is not None:
-                constructor_history[constructor_id].append(result)
-            qualifying = result.get("qualifying")
-            if qualifying is not None:
-                qualifying_history[entity_id].append(qualifying)
-                if constructor_id is not None:
-                    constructor_qualifying_history[constructor_id].append(qualifying)
+            _update_driver_history(
+                event, participant, history, circuit_history, constructor_history,
+                qualifying_history, constructor_qualifying_history,
+            )
 
         if i % 50 == 0 or i == total:
             logger.info("Built driver features: %d/%d races", i, total)
 
     return rows
+
+
+def _build_driver_row(
+    event: dict, participant: dict, window: int, circuit_window: int,
+    history: dict, circuit_history: dict, constructor_history: dict,
+    qualifying_history: dict, constructor_qualifying_history: dict,
+) -> dict:
+    """This participant's own feature row, built from history snapshots
+    taken BEFORE this race (see build_driver_dataset's own docstring for
+    why the fold-in happens in a separate pass, after every row for this
+    race is built)."""
+    entity_id = participant["entity_id"]
+    constructor_id = participant.get("constructor_entity_id")
+    circuit_id = event.get("circuit_id")
+    prior_results = history[entity_id][-window:][::-1]
+    circuit_results = circuit_history[(entity_id, circuit_id)][-circuit_window:][::-1] if circuit_id is not None else None
+    constructor_results = constructor_history[constructor_id][-window:][::-1] if constructor_id is not None else None
+    prior_qualifying = qualifying_history[entity_id][-window:][::-1]
+    constructor_qualifying = (
+        constructor_qualifying_history[constructor_id][-window:][::-1] if constructor_id is not None else None
+    )
+    return build_driver_event_features(
+        event, participant, prior_results, window, circuit_results, circuit_window,
+        constructor_results, window, prior_qualifying, constructor_qualifying,
+    )
+
+
+def _update_driver_history(
+    event: dict, participant: dict, history: dict, circuit_history: dict, constructor_history: dict,
+    qualifying_history: dict, constructor_qualifying_history: dict,
+) -> None:
+    """Folds this participant's own now-final result into every history
+    dict in place, once every row for this race has already been built."""
+    circuit_id = event.get("circuit_id")
+    entity_id = participant["entity_id"]
+    constructor_id = participant.get("constructor_entity_id")
+    result = participant.get("result") or {}
+    history[entity_id].append(result)
+    if circuit_id is not None:
+        circuit_history[(entity_id, circuit_id)].append(result)
+    if constructor_id is not None:
+        constructor_history[constructor_id].append(result)
+    qualifying = result.get("qualifying")
+    if qualifying is not None:
+        qualifying_history[entity_id].append(qualifying)
+        if constructor_id is not None:
+            constructor_qualifying_history[constructor_id].append(qualifying)
 
 
 def build_constructor_dataset(storage: FeatureStorage, window: int, since_date: str | None = None) -> list[dict]:

@@ -41,26 +41,51 @@ PLAYER_PROP_STATS = [
 ]
 
 
-def _season_standings_inputs(storage: FeatureStorage) -> dict:
-    """Fetches this season's completed+scheduled events once and derives
-    everything season_simulation.simulate_season needs, plus each team's
-    next scheduled event_key (reused by _leaderboards below)."""
-    # Excludes the Pro Bowl and any other exhibition matchup -- its AFC/NFC
-    # all-star "teams" aren't real franchises, so a played one would
-    # otherwise count as a real win/loss and Elo update for a
-    # non-existent team_id.
+def _current_season_events(storage: FeatureStorage) -> tuple[list[dict], list[dict], list[dict], int | None]:
+    """(scheduled, all_completed, completed, current_season) -- scheduled/
+    completed are scoped to just current_season, all_completed is the full
+    (unscoped) history compute_elo_ratings needs for its own season-
+    boundary regression. Excludes the Pro Bowl and any other exhibition
+    matchup -- its AFC/NFC all-star "teams" aren't real franchises, so a
+    played one would otherwise count as a real win/loss and Elo update
+    for a non-existent team_id."""
     scheduled = [e for e in storage.get_all_events(SPORT, status="scheduled") if is_real_franchise_matchup(e)]
     all_completed = [e for e in storage.get_all_events(SPORT, status="completed") if is_real_franchise_matchup(e)]
     current_season = max(
         (e.get("season") for e in scheduled + all_completed if e.get("season") is not None), default=None,
     )
     scheduled = [e for e in scheduled if e.get("season") == current_season]
-    # Wins/losses/point-differential are scoped to just this season --
-    # standings reset every year regardless of Elo. compute_elo_ratings
-    # below gets the FULL (unscoped) history instead, since it does its
-    # own season-boundary regression.
     completed = [e for e in all_completed if e.get("season") == current_season]
+    return scheduled, all_completed, completed, current_season
 
+
+def _record_game_result(
+    event: dict, entity_id: str, opponent_id: str,
+    wins: dict[str, int], losses: dict[str, int], ties: dict[str, int], point_differential: dict[str, int],
+    team_last_completed_date: dict[str, str],
+) -> None:
+    """Credits entity_id's own side of one completed game into
+    wins/losses/ties/point_differential and updates
+    team_last_completed_date -- no-op if either side's own score is
+    missing."""
+    participant = next(p for p in event["participants"] if p.get("entity_id") == entity_id)
+    opponent = next(p for p in event["participants"] if p.get("entity_id") == opponent_id)
+    score = (participant.get("result") or {}).get("score")
+    opponent_score = (opponent.get("result") or {}).get("score")
+    if score is None or opponent_score is None:
+        return
+    wins[entity_id] = wins.get(entity_id, 0) + (1 if score > opponent_score else 0)
+    losses[entity_id] = losses.get(entity_id, 0) + (1 if score < opponent_score else 0)
+    ties[entity_id] = ties.get(entity_id, 0) + (1 if score == opponent_score else 0)
+    point_differential[entity_id] = point_differential.get(entity_id, 0) + (score - opponent_score)
+    event_date = event.get("event_date", "")
+    if event_date > team_last_completed_date.get(entity_id, ""):
+        team_last_completed_date[entity_id] = event_date
+
+
+def _completed_game_records(completed: list[dict]) -> tuple[dict, dict, dict, dict, dict]:
+    """(wins, losses, ties, point_differential, team_last_completed_date)
+    derived from this season's own completed games."""
     wins: dict[str, int] = {}
     losses: dict[str, int] = {}
     ties: dict[str, int] = {}
@@ -71,22 +96,13 @@ def _season_standings_inputs(storage: FeatureStorage) -> dict:
         if home_away is None:
             continue
         for entity_id, opponent_id in (home_away, home_away[::-1]):
-            participant = next(p for p in event["participants"] if p.get("entity_id") == entity_id)
-            opponent = next(p for p in event["participants"] if p.get("entity_id") == opponent_id)
-            score = (participant.get("result") or {}).get("score")
-            opponent_score = (opponent.get("result") or {}).get("score")
-            if score is None or opponent_score is None:
-                continue
-            wins[entity_id] = wins.get(entity_id, 0) + (1 if score > opponent_score else 0)
-            losses[entity_id] = losses.get(entity_id, 0) + (1 if score < opponent_score else 0)
-            ties[entity_id] = ties.get(entity_id, 0) + (1 if score == opponent_score else 0)
-            point_differential[entity_id] = point_differential.get(entity_id, 0) + (score - opponent_score)
-            event_date = event.get("event_date", "")
-            if event_date > team_last_completed_date.get(entity_id, ""):
-                team_last_completed_date[entity_id] = event_date
+            _record_game_result(event, entity_id, opponent_id, wins, losses, ties, point_differential, team_last_completed_date)
+    return wins, losses, ties, point_differential, team_last_completed_date
 
-    _, current_ratings = compute_elo_ratings(all_completed, as_of_season=current_season)
 
+def _remaining_game_inputs(scheduled: list[dict]) -> tuple[list[tuple[str, str]], dict[str, str]]:
+    """(remaining_games, team_next_event) from this season's own
+    still-scheduled games, earliest first."""
     scheduled_sorted = sorted(scheduled, key=lambda e: e.get("event_date", ""))
     remaining_games = []
     team_next_event: dict[str, str] = {}
@@ -98,6 +114,21 @@ def _season_standings_inputs(storage: FeatureStorage) -> dict:
         remaining_games.append((home_id, away_id))
         team_next_event.setdefault(home_id, event["event_key"])
         team_next_event.setdefault(away_id, event["event_key"])
+    return remaining_games, team_next_event
+
+
+def _season_standings_inputs(storage: FeatureStorage) -> dict:
+    """Fetches this season's completed+scheduled events once and derives
+    everything season_simulation.simulate_season needs, plus each team's
+    next scheduled event_key (reused by _leaderboards below)."""
+    scheduled, all_completed, completed, current_season = _current_season_events(storage)
+    # Wins/losses/point-differential are scoped to just this season --
+    # standings reset every year regardless of Elo. compute_elo_ratings
+    # below gets the FULL (unscoped) history instead, since it does its
+    # own season-boundary regression.
+    wins, losses, ties, point_differential, team_last_completed_date = _completed_game_records(completed)
+    _, current_ratings = compute_elo_ratings(all_completed, as_of_season=current_season)
+    remaining_games, team_next_event = _remaining_game_inputs(scheduled)
 
     return {
         "current_season": current_season,
@@ -146,18 +177,9 @@ def _season_wide_candidate_rows(storage: FeatureStorage, season_inputs: dict) ->
     return rows_by_category
 
 
-def _leaderboards(storage: FeatureStorage, s3, model_cache: dict, season_inputs: dict) -> dict:
-    """Top-10 season-long leaderboard per tracked player-prop stat,
-    projected as current season-to-date total + (their own model's
-    prediction for their team's NEXT scheduled game * games remaining).
-    With zero current-season total (before Week 1, or a candidate who
-    simply hasn't recorded this particular stat yet), this reduces to a
-    pure full-season projection."""
-    season_player_stats = [
-        row for row in storage.get_all_player_game_stats(SPORT)
-        if row.get("event_key") in season_inputs["completed_event_keys"]
-    ]
-
+def _current_season_totals(season_player_stats: list[dict]) -> tuple[dict[str, str], dict[str, dict[str, float]]]:
+    """(player_team, current_totals_by_stat) from this season's own
+    completed-game stat lines."""
     player_team: dict[str, str] = {}
     for row in season_player_stats:
         player_team.setdefault(row["entity_id"], row.get("team_id"))
@@ -171,10 +193,18 @@ def _leaderboards(storage: FeatureStorage, s3, model_cache: dict, season_inputs:
             if value is not None:
                 totals = current_totals_by_stat[stat]
                 totals[entity_id] = totals.get(entity_id, 0) + value
+    return player_team, current_totals_by_stat
 
-    # feature_row_cache pre-populated from the depth-chart-sourced rows --
-    # build_live_event_leader_candidates already returns a full live
-    # feature row per candidate.
+
+def _depth_chart_feature_rows(
+    storage: FeatureStorage, season_inputs: dict, current_totals_by_stat: dict[str, dict[str, float]],
+    player_team: dict[str, str],
+) -> tuple[dict[str, dict], dict[str, set[str]]]:
+    """(feature_row_cache, stat_candidates) pre-populated from the
+    depth-chart-sourced rows -- build_live_event_leader_candidates already
+    returns a full live feature row per candidate. Mutates player_team in
+    place with any depth-chart candidate not already covered by this
+    season's own stat lines."""
     feature_row_cache: dict[str, dict] = {}
     stat_candidates: dict[str, set[str]] = {stat: set(current_totals_by_stat[stat]) for stat in PLAYER_PROP_STATS}
     for category, rows in _season_wide_candidate_rows(storage, season_inputs).items():
@@ -184,13 +214,17 @@ def _leaderboards(storage: FeatureStorage, s3, model_cache: dict, season_inputs:
             player_team.setdefault(entity_id, row.get("team_id"))
             for stat in event_prediction.LEADER_CATEGORY_STATS[category]:
                 stat_candidates[stat].add(entity_id)
+    return feature_row_cache, stat_candidates
 
-    # Any candidate not already covered above (this-season stats exist,
-    # but they weren't in their team's depth-chart snapshot -- a backup
-    # who got real volume, say) still needs its own feature row built.
-    all_candidates = {entity_id for entity_ids in stat_candidates.values() for entity_id in entity_ids}
-    remaining = all_candidates - feature_row_cache.keys()
 
+def _fill_remaining_feature_rows(
+    storage: FeatureStorage, season_inputs: dict, player_team: dict[str, str],
+    feature_row_cache: dict[str, dict], remaining: set[str],
+) -> None:
+    """Builds a live feature row for any candidate not already covered by
+    the depth-chart pass (this-season stats exist, but they weren't in
+    their team's depth-chart snapshot -- a backup who got real volume,
+    say) -- mutates feature_row_cache in place."""
     def _build_row(entity_id: str) -> tuple[str, dict | None]:
         next_event_key = season_inputs["team_next_event"].get(player_team.get(entity_id))
         if next_event_key is None:
@@ -213,37 +247,68 @@ def _leaderboards(storage: FeatureStorage, s3, model_cache: dict, season_inputs:
             if feature_row is not None:
                 feature_row_cache[entity_id] = feature_row
 
-    leaderboards: dict[str, list[dict]] = {}
-    for stat in PLAYER_PROP_STATS:
-        candidates = stat_candidates[stat]
-        current_totals = {entity_id: current_totals_by_stat[stat].get(entity_id, 0.0) for entity_id in candidates}
-        model_name = event_prediction.model_name_to_prop(stat)
-        try:
-            booster, model_card = event_prediction.get_cached_model(model_cache, s3, model_name)
-        except model_loader.NoPromotedModelError:
-            booster = None
 
-        per_game_projections: dict[str, float] = {}
-        if booster is not None:
-            for entity_id in candidates:
-                feature_row = feature_row_cache.get(entity_id)
-                if feature_row is not None:
-                    prediction = model_loader.predict(booster, model_card, feature_row)
-                    per_game_projections[entity_id] = event_prediction.non_negative(prediction)
+def _project_stat_leaderboard(
+    storage: FeatureStorage, s3, model_cache: dict, season_inputs: dict, stat: str, candidates: set[str],
+    current_totals_by_stat: dict[str, dict[str, float]], feature_row_cache: dict[str, dict],
+    player_team: dict[str, str],
+) -> list[dict]:
+    """Top-10 leaderboard for one player-prop stat -- current season-to-
+    date total + (their own model's prediction for their team's NEXT
+    scheduled game * games remaining). With zero current-season total
+    (before Week 1, or a candidate who simply hasn't recorded this
+    particular stat yet), this reduces to a pure full-season projection."""
+    current_totals = {entity_id: current_totals_by_stat[stat].get(entity_id, 0.0) for entity_id in candidates}
+    model_name = event_prediction.model_name_to_prop(stat)
+    try:
+        booster, model_card = event_prediction.get_cached_model(model_cache, s3, model_name)
+    except model_loader.NoPromotedModelError:
+        booster = None
 
-        games_remaining = {
-            entity_id: season_inputs["games_remaining"].get(player_team.get(entity_id), 0)
-            for entity_id in candidates
-        }
+    per_game_projections: dict[str, float] = {}
+    if booster is not None:
+        for entity_id in candidates:
+            feature_row = feature_row_cache.get(entity_id)
+            if feature_row is not None:
+                prediction = model_loader.predict(booster, model_card, feature_row)
+                per_game_projections[entity_id] = event_prediction.non_negative(prediction)
 
-        top = season_simulation.project_leaderboard(current_totals, per_game_projections, games_remaining, top_n=10)
-        for row in top:
-            entity = storage.get_entity(SPORT, row["entity_id"], "player")
-            if entity and entity.get("name"):
-                row["name"] = entity["name"]
-        leaderboards[stat] = top
+    games_remaining = {
+        entity_id: season_inputs["games_remaining"].get(player_team.get(entity_id), 0)
+        for entity_id in candidates
+    }
 
-    return leaderboards
+    top = season_simulation.project_leaderboard(current_totals, per_game_projections, games_remaining, top_n=10)
+    for row in top:
+        entity = storage.get_entity(SPORT, row["entity_id"], "player")
+        if entity and entity.get("name"):
+            row["name"] = entity["name"]
+    return top
+
+
+def _leaderboards(storage: FeatureStorage, s3, model_cache: dict, season_inputs: dict) -> dict:
+    """Top-10 season-long leaderboard per tracked player-prop stat -- see
+    _project_stat_leaderboard's own docstring for the projection shape."""
+    season_player_stats = [
+        row for row in storage.get_all_player_game_stats(SPORT)
+        if row.get("event_key") in season_inputs["completed_event_keys"]
+    ]
+    player_team, current_totals_by_stat = _current_season_totals(season_player_stats)
+    feature_row_cache, stat_candidates = _depth_chart_feature_rows(
+        storage, season_inputs, current_totals_by_stat, player_team,
+    )
+
+    all_candidates = {entity_id for entity_ids in stat_candidates.values() for entity_id in entity_ids}
+    remaining = all_candidates - feature_row_cache.keys()
+    _fill_remaining_feature_rows(storage, season_inputs, player_team, feature_row_cache, remaining)
+
+    return {
+        stat: _project_stat_leaderboard(
+            storage, s3, model_cache, season_inputs, stat, stat_candidates[stat],
+            current_totals_by_stat, feature_row_cache, player_team,
+        )
+        for stat in PLAYER_PROP_STATS
+    }
 
 
 def _real_postseason_matchups(storage: FeatureStorage, current_season: int | None) -> dict[frozenset, dict]:
@@ -305,21 +370,46 @@ def _resolve_matchup(
     home_id, away_id = _home_and_away(real_event)
 
     if real_event.get("status") == "completed":
-        actual = _actual_result(real_event)
-        logged = _logged_win_probability(predictions_table, event_key_value)
-        predicted_winner = win_probability = None
-        if logged is not None:
-            probability = logged["home_win_probability"]
-            predicted_winner = home_id if probability >= 0.5 else away_id
-            win_probability = probability if predicted_winner == home_id else 1 - probability
-        return {
-            "status": "final",
-            "team_a": home_id, "team_b": away_id, "seed_a": seed_a, "seed_b": seed_b,
-            "predicted_winner": predicted_winner, "win_probability": win_probability,
-            "actual_winner": home_id if actual["home_won"] else away_id,
-            "actual_home_score": actual["home_score"], "actual_away_score": actual["away_score"],
-        }
+        return _completed_matchup_row(real_event, event_key_value, home_id, away_id, seed_a, seed_b, predictions_table)
 
+    return _scheduled_matchup_row(
+        real_event, event_key_value, home_id, away_id, seed_a, seed_b, storage, s3, predictions_table,
+    )
+
+
+def _predicted_winner_and_probability(
+    logged: dict | None, home_id: str, away_id: str,
+) -> tuple[str | None, float | None]:
+    """(predicted_winner, win_probability) from a logged win-probability
+    prediction, or (None, None) if none was ever logged."""
+    if logged is None:
+        return None, None
+    probability = logged["home_win_probability"]
+    predicted_winner = home_id if probability >= 0.5 else away_id
+    win_probability = probability if predicted_winner == home_id else 1 - probability
+    return predicted_winner, win_probability
+
+
+def _completed_matchup_row(
+    real_event: dict, event_key_value: str, home_id: str, away_id: str, seed_a: int | None, seed_b: int | None,
+    predictions_table,
+) -> dict:
+    actual = _actual_result(real_event)
+    logged = _logged_win_probability(predictions_table, event_key_value)
+    predicted_winner, win_probability = _predicted_winner_and_probability(logged, home_id, away_id)
+    return {
+        "status": "final",
+        "team_a": home_id, "team_b": away_id, "seed_a": seed_a, "seed_b": seed_b,
+        "predicted_winner": predicted_winner, "win_probability": win_probability,
+        "actual_winner": home_id if actual["home_won"] else away_id,
+        "actual_home_score": actual["home_score"], "actual_away_score": actual["away_score"],
+    }
+
+
+def _scheduled_matchup_row(
+    real_event: dict, event_key_value: str, home_id: str, away_id: str, seed_a: int | None, seed_b: int | None,
+    storage: FeatureStorage, s3, predictions_table,
+) -> dict:
     logged = _logged_win_probability(predictions_table, event_key_value)
     if logged is None:
         try:
@@ -328,12 +418,7 @@ def _resolve_matchup(
         except Exception:
             logger.exception("Failed computing a live prediction for bracket game %s", event_key_value)
 
-    predicted_winner = win_probability = None
-    if logged is not None:
-        probability = logged["home_win_probability"]
-        predicted_winner = home_id if probability >= 0.5 else away_id
-        win_probability = probability if predicted_winner == home_id else 1 - probability
-
+    predicted_winner, win_probability = _predicted_winner_and_probability(logged, home_id, away_id)
     return {
         "status": "scheduled",
         "team_a": home_id, "team_b": away_id, "seed_a": seed_a, "seed_b": seed_b,

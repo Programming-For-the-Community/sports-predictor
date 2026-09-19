@@ -101,51 +101,61 @@ def compute_elo_ratings(
             ratings = _regress(ratings)
         current_season = event_season
 
-        participants = event.get("participants", [])
-        home = next((p for p in participants if p.get("role") == "home"), None)
-        away = next((p for p in participants if p.get("role") == "away"), None)
-        if home is None or away is None:
-            continue
-
-        home_id, away_id = home["entity_id"], away["entity_id"]
-        home_rating = ratings.setdefault(home_id, starting_rating)
-        away_rating = ratings.setdefault(away_id, starting_rating)
-
-        pre_game_ratings[event["event_key"]] = {
-            "home_pre_rating": home_rating,
-            "away_pre_rating": away_rating,
-        }
-
-        home_score = home.get("result", {}).get("score")
-        away_score = away.get("result", {}).get("score")
-        if home_score is None or away_score is None:
-            continue
-
-        point_diff = home_score - away_score
-        if home_score > away_score:
-            home_actual, away_actual = 1.0, 0.0
-            winner_elo_diff = (home_rating + home_advantage) - away_rating
-        elif home_score < away_score:
-            home_actual, away_actual = 0.0, 1.0
-            winner_elo_diff = away_rating - (home_rating + home_advantage)
-        else:
-            home_actual = away_actual = 0.5
-            winner_elo_diff = 0.0
-
-        mov_multiplier = (
-            _mov_multiplier(point_diff, winner_elo_diff, mov_base, mov_divisor) if point_diff != 0 else 1.0
+        _process_elo_event(
+            event, ratings, pre_game_ratings, starting_rating, home_advantage, k_factor, mov_base, mov_divisor,
         )
-
-        expected_home = expected_score(home_rating, away_rating, home_advantage)
-        expected_away = 1 - expected_home
-
-        ratings[home_id] = home_rating + k_factor * mov_multiplier * (home_actual - expected_home)
-        ratings[away_id] = away_rating + k_factor * mov_multiplier * (away_actual - expected_away)
 
     if as_of_season is not None and current_season is not None and as_of_season != current_season:
         ratings = _regress(ratings)
 
     return pre_game_ratings, ratings
+
+
+def _process_elo_event(
+    event: dict, ratings: dict[str, float], pre_game_ratings: dict[str, dict[str, float]],
+    starting_rating: float, home_advantage: float, k_factor: float, mov_base: float, mov_divisor: float,
+) -> None:
+    """Records this event's own pre-game ratings and, if it has a final
+    score, applies its margin-of-victory-scaled rating update -- mutates
+    ratings/pre_game_ratings in place."""
+    participants = event.get("participants", [])
+    home = next((p for p in participants if p.get("role") == "home"), None)
+    away = next((p for p in participants if p.get("role") == "away"), None)
+    if home is None or away is None:
+        return
+
+    home_id, away_id = home["entity_id"], away["entity_id"]
+    home_rating = ratings.setdefault(home_id, starting_rating)
+    away_rating = ratings.setdefault(away_id, starting_rating)
+
+    pre_game_ratings[event["event_key"]] = {
+        "home_pre_rating": home_rating,
+        "away_pre_rating": away_rating,
+    }
+
+    home_score = home.get("result", {}).get("score")
+    away_score = away.get("result", {}).get("score")
+    if home_score is None or away_score is None:
+        return
+
+    point_diff = home_score - away_score
+    if home_score > away_score:
+        home_actual, away_actual = 1.0, 0.0
+        winner_elo_diff = (home_rating + home_advantage) - away_rating
+    elif home_score < away_score:
+        home_actual, away_actual = 0.0, 1.0
+        winner_elo_diff = away_rating - (home_rating + home_advantage)
+    else:
+        home_actual = away_actual = 0.5
+        winner_elo_diff = 0.0
+
+    mov_multiplier = _mov_multiplier(point_diff, winner_elo_diff, mov_base, mov_divisor) if point_diff != 0 else 1.0
+
+    expected_home = expected_score(home_rating, away_rating, home_advantage)
+    expected_away = 1 - expected_home
+
+    ratings[home_id] = home_rating + k_factor * mov_multiplier * (home_actual - expected_home)
+    ratings[away_id] = away_rating + k_factor * mov_multiplier * (away_actual - expected_away)
 
 
 def kickoff_hour_utc(kickoff_time: str | None) -> int | None:

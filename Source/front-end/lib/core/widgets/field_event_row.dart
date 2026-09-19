@@ -3,6 +3,7 @@ import 'package:go_router/go_router.dart';
 
 import '../models/event_status.dart';
 import '../models/field_event.dart';
+import '../routing/app_routes.dart';
 import '../theme/app_colors.dart';
 import '../theme/app_text_styles.dart';
 
@@ -43,7 +44,7 @@ class FieldEventRow extends StatelessWidget {
   Widget build(BuildContext context) {
     final isCompleted = event.status == EventStatus.completed;
     return InkWell(
-      onTap: () => context.go('/$sport/events/${event.eventId}'),
+      onTap: () => context.go(AppRoutes.eventDetail(sport, event.eventId)),
       borderRadius: BorderRadius.circular(16),
       child: Container(
         decoration: BoxDecoration(

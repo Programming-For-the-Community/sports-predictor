@@ -7,6 +7,7 @@ import '../models/event_status.dart';
 import '../models/field_live_score.dart';
 import '../models/field_prediction.dart' show PgaEventType;
 import '../models/sport_config.dart';
+import '../routing/app_routes.dart';
 import '../theme/app_colors.dart';
 import '../theme/app_text_styles.dart';
 import 'field_status_pill.dart' show PgaParticipantStatus;
@@ -31,6 +32,22 @@ bool _fieldEntryIsLive(PgaLiveEventState state) => switch (state) {
           ? state.status != EventStatus.completed
           : state.participants.values.any((p) => p.status == PgaParticipantStatus.inProgress),
     };
+
+/// Whether `sport` has any event actually live right now (not just
+/// "implemented") -- watched only for an active sport, since an inactive
+/// one has no live-scores route to call at all. F1 gets its own branch
+/// (not the PGA one) -- same "own live-scores shape, not PGA's" reasoning
+/// f1_live_score.dart's own docstring gives.
+bool _isLiveNow(WidgetRef ref, SportConfig sport) {
+  if (!sport.active) return false;
+  if (sport.eventShape == EventShape.headToHead) {
+    return ref.watch(liveScoresProvider(sport.id)).value?.values.any((s) => s.live) ?? false;
+  }
+  if (sport.id == SportIds.f1) {
+    return ref.watch(f1LiveScoresProvider(sport.id)).value?.values.any((s) => s.isLive) ?? false;
+  }
+  return ref.watch(pgaLiveScoresProvider(sport.id)).value?.values.any(_fieldEntryIsLive) ?? false;
+}
 
 /// Invalidates whichever live-scores provider family `sport` actually
 /// uses -- the same per-shape branch SportCard.build reads from below,
@@ -63,22 +80,12 @@ class SportCard extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final active = sport.active;
     final accentStrip = sport.eventShape == EventShape.headToHead ? AppColors.accentStripH2h : AppColors.accentStripField;
-
-    // Only watched for an active sport -- an inactive one has no live-
-    // scores route to call at all. F1 gets its own branch here (not the
-    // PGA one below) -- same "own live-scores shape, not PGA's" reasoning
-    // f1_live_score.dart's own docstring gives.
-    final live = active &&
-        (sport.eventShape == EventShape.headToHead
-            ? (ref.watch(liveScoresProvider(sport.id)).value?.values.any((s) => s.live) ?? false)
-            : sport.id == SportIds.f1
-                ? (ref.watch(f1LiveScoresProvider(sport.id)).value?.values.any((s) => s.isLive) ?? false)
-                : (ref.watch(pgaLiveScoresProvider(sport.id)).value?.values.any(_fieldEntryIsLive) ?? false));
+    final live = _isLiveNow(ref, sport);
 
     return Opacity(
       opacity: active ? 1 : 0.55,
       child: InkWell(
-        onTap: active ? () => context.go('/${sport.id}/events') : null,
+        onTap: active ? () => context.go(AppRoutes.events(sport.id)) : null,
         borderRadius: BorderRadius.circular(18),
         child: Container(
           decoration: BoxDecoration(

@@ -411,7 +411,7 @@ class ElasticNetAdapter(_JoblibSerializedAdapter):
         return Pipeline([
             ("impute", SimpleImputer(strategy="median")),
             ("scale", StandardScaler()),
-            ("model", ElasticNet(max_iter=5000, random_state=_ELASTIC_NET_RANDOM_STATE)),
+            ("model", ElasticNet(alpha=1.0, l1_ratio=0.5, max_iter=5000, random_state=_ELASTIC_NET_RANDOM_STATE)),
         ])
 
     def tune_and_fit(self, X_train: pd.DataFrame, y_train: pd.Series) -> tuple[Pipeline, dict]:

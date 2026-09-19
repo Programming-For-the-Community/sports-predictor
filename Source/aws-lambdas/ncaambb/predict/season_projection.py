@@ -130,14 +130,11 @@ def _load_cached_team_conference(raw_bucket, current_season: int | None) -> dict
         return {}
 
 
-def _season_standings_inputs(storage: FeatureStorage, raw_bucket) -> dict:
-    """Fetches this season's completed+scheduled events once and derives
-    everything simulate_season and the ranking feature rows need.
-    team_conference comes from schedule-sync's own daily S3 cache (see
-    _load_cached_team_conference), not from event fields -- see this
-    module's own docstring. remaining_games only keeps plain regular-
-    season pairings (_is_regular_season_game) where both sides have a
-    known conference."""
+def _current_season_events(storage: FeatureStorage) -> tuple[list[dict], list[dict], list[dict], int]:
+    """(scheduled, all_completed, completed, current_season) -- scheduled/
+    completed are scoped to just current_season, all_completed is the full
+    (unscoped) history compute_elo_ratings needs for its own season-
+    boundary regression."""
     scheduled = storage.get_all_events(SPORT, status="scheduled")
     all_completed = storage.get_all_events(SPORT, status="completed")
     # A fixed calendar heuristic, not derived from event data -- the same
@@ -152,9 +149,40 @@ def _season_standings_inputs(storage: FeatureStorage, raw_bucket) -> dict:
     current_season = _current_ncaambb_season(datetime.now(timezone.utc).date())
     scheduled = [e for e in scheduled if e.get("season") == current_season]
     completed = [e for e in all_completed if e.get("season") == current_season]
+    return scheduled, all_completed, completed, current_season
 
-    team_conference = _load_cached_team_conference(raw_bucket, current_season)
 
+def _record_game_result(
+    event: dict, entity_id: str, opponent_id: str, is_conference: bool,
+    wins: dict[str, int], losses: dict[str, int], point_differential: dict[str, int],
+    conference_wins: dict[str, int], conference_losses: dict[str, int], team_last_completed_date: dict[str, str],
+) -> None:
+    """Credits entity_id's own side of one completed game into
+    wins/losses/point_differential (and conference_wins/conference_losses,
+    if this was a conference game) and updates team_last_completed_date --
+    no-op if either side's own score is missing."""
+    participant = next(p for p in event["participants"] if p.get("entity_id") == entity_id)
+    opponent = next(p for p in event["participants"] if p.get("entity_id") == opponent_id)
+    score = (participant.get("result") or {}).get("score")
+    opponent_score = (opponent.get("result") or {}).get("score")
+    if score is None or opponent_score is None:
+        return
+    won = score > opponent_score
+    wins[entity_id] = wins.get(entity_id, 0) + (1 if won else 0)
+    losses[entity_id] = losses.get(entity_id, 0) + (0 if won else 1)
+    if is_conference:
+        conference_wins[entity_id] = conference_wins.get(entity_id, 0) + (1 if won else 0)
+        conference_losses[entity_id] = conference_losses.get(entity_id, 0) + (0 if won else 1)
+    point_differential[entity_id] = point_differential.get(entity_id, 0) + (score - opponent_score)
+    event_date = event.get("event_date", "")
+    if event_date > team_last_completed_date.get(entity_id, ""):
+        team_last_completed_date[entity_id] = event_date
+
+
+def _completed_game_records(completed: list[dict]) -> tuple[dict, dict, dict, dict, dict, dict, dict]:
+    """(wins, losses, point_differential, team_last_completed_date,
+    conference_wins, conference_losses, completed_by_team) derived from
+    this season's own completed games."""
     wins: dict[str, int] = {}
     losses: dict[str, int] = {}
     point_differential: dict[str, int] = {}
@@ -172,28 +200,22 @@ def _season_standings_inputs(storage: FeatureStorage, raw_bucket) -> dict:
         is_conference = bool(event.get("conference_competition"))
 
         for entity_id, opponent_id in (home_away, home_away[::-1]):
-            participant = next(p for p in event["participants"] if p.get("entity_id") == entity_id)
-            opponent = next(p for p in event["participants"] if p.get("entity_id") == opponent_id)
-            score = (participant.get("result") or {}).get("score")
-            opponent_score = (opponent.get("result") or {}).get("score")
-            if score is None or opponent_score is None:
-                continue
-            won = score > opponent_score
-            wins[entity_id] = wins.get(entity_id, 0) + (1 if won else 0)
-            losses[entity_id] = losses.get(entity_id, 0) + (0 if won else 1)
-            if is_conference:
-                conference_wins[entity_id] = conference_wins.get(entity_id, 0) + (1 if won else 0)
-                conference_losses[entity_id] = conference_losses.get(entity_id, 0) + (0 if won else 1)
-            point_differential[entity_id] = point_differential.get(entity_id, 0) + (score - opponent_score)
-            event_date = event.get("event_date", "")
-            if event_date > team_last_completed_date.get(entity_id, ""):
-                team_last_completed_date[entity_id] = event_date
+            _record_game_result(
+                event, entity_id, opponent_id, is_conference, wins, losses, point_differential,
+                conference_wins, conference_losses, team_last_completed_date,
+            )
 
-    for team_id, team_events in completed_by_team.items():
+    for team_events in completed_by_team.values():
         team_events.sort(key=lambda e: e.get("event_date", ""), reverse=True)
 
-    pre_game_ratings, current_ratings = compute_elo_ratings(all_completed, as_of_season=current_season)
+    return wins, losses, point_differential, team_last_completed_date, conference_wins, conference_losses, completed_by_team
 
+
+def _team_rolling_stats(
+    completed_by_team: dict[str, list[dict]], pre_game_ratings: dict[str, float],
+) -> tuple[dict, dict, dict, dict]:
+    """(avg_points_scored, avg_points_allowed, win_streak,
+    strength_of_schedule), one entry per team with >=1 completed game."""
     avg_points_scored: dict[str, float | None] = {}
     avg_points_allowed: dict[str, float | None] = {}
     win_streak: dict[str, int] = {}
@@ -204,7 +226,16 @@ def _season_standings_inputs(storage: FeatureStorage, raw_bucket) -> dict:
         avg_points_allowed[team_id] = scoring["avg_points_allowed"]
         win_streak[team_id] = current_streak(team_events, team_id)
         strength_of_schedule[team_id] = average_opponent_elo(team_events, team_id, pre_game_ratings)
+    return avg_points_scored, avg_points_allowed, win_streak, strength_of_schedule
 
+
+def _remaining_game_inputs(
+    scheduled: list[dict], team_conference: dict[str, str],
+) -> tuple[list[tuple[str, str, bool]], dict[str, str]]:
+    """(remaining_games, team_next_event) from this season's own
+    still-scheduled games, earliest first. remaining_games only keeps
+    plain regular-season pairings (_is_regular_season_game) where both
+    sides have a known conference."""
     scheduled_sorted = sorted(scheduled, key=lambda e: e.get("event_date", ""))
     remaining_games: list[tuple[str, str, bool]] = []
     team_next_event: dict[str, str] = {}
@@ -217,6 +248,26 @@ def _season_standings_inputs(storage: FeatureStorage, raw_bucket) -> dict:
             remaining_games.append((home_id, away_id, bool(event.get("conference_competition"))))
         team_next_event.setdefault(home_id, event["event_key"])
         team_next_event.setdefault(away_id, event["event_key"])
+    return remaining_games, team_next_event
+
+
+def _season_standings_inputs(storage: FeatureStorage, raw_bucket) -> dict:
+    """Fetches this season's completed+scheduled events once and derives
+    everything simulate_season and the ranking feature rows need.
+    team_conference comes from schedule-sync's own daily S3 cache (see
+    _load_cached_team_conference), not from event fields -- see this
+    module's own docstring."""
+    scheduled, all_completed, completed, current_season = _current_season_events(storage)
+    team_conference = _load_cached_team_conference(raw_bucket, current_season)
+
+    wins, losses, point_differential, team_last_completed_date, conference_wins, conference_losses, completed_by_team = (
+        _completed_game_records(completed)
+    )
+    pre_game_ratings, current_ratings = compute_elo_ratings(all_completed, as_of_season=current_season)
+    avg_points_scored, avg_points_allowed, win_streak, strength_of_schedule = _team_rolling_stats(
+        completed_by_team, pre_game_ratings,
+    )
+    remaining_games, team_next_event = _remaining_game_inputs(scheduled, team_conference)
 
     return {
         "current_season": current_season,
@@ -384,21 +435,46 @@ def _resolve_matchup(
     home_id, away_id = _home_and_away(real_event)
 
     if real_event.get("status") == "completed":
-        actual = _actual_result(real_event)
-        logged = _logged_win_probability(predictions_table, event_key_value)
-        predicted_winner = win_probability = None
-        if logged is not None:
-            probability = logged["home_win_probability"]
-            predicted_winner = home_id if probability >= 0.5 else away_id
-            win_probability = probability if predicted_winner == home_id else 1 - probability
-        return {
-            "status": "final",
-            "team_a": home_id, "team_b": away_id, "seed_a": seed_a, "seed_b": seed_b,
-            "predicted_winner": predicted_winner, "win_probability": win_probability,
-            "actual_winner": home_id if actual["home_won"] else away_id,
-            "actual_home_score": actual["home_score"], "actual_away_score": actual["away_score"],
-        }
+        return _completed_matchup_row(real_event, event_key_value, home_id, away_id, seed_a, seed_b, predictions_table)
 
+    return _scheduled_matchup_row(
+        real_event, event_key_value, home_id, away_id, seed_a, seed_b, storage, s3, predictions_table,
+    )
+
+
+def _predicted_winner_and_probability(
+    logged: dict | None, home_id: str, away_id: str,
+) -> tuple[str | None, float | None]:
+    """(predicted_winner, win_probability) from a logged win-probability
+    prediction, or (None, None) if none was ever logged."""
+    if logged is None:
+        return None, None
+    probability = logged["home_win_probability"]
+    predicted_winner = home_id if probability >= 0.5 else away_id
+    win_probability = probability if predicted_winner == home_id else 1 - probability
+    return predicted_winner, win_probability
+
+
+def _completed_matchup_row(
+    real_event: dict, event_key_value: str, home_id: str, away_id: str, seed_a: int | None, seed_b: int | None,
+    predictions_table,
+) -> dict:
+    actual = _actual_result(real_event)
+    logged = _logged_win_probability(predictions_table, event_key_value)
+    predicted_winner, win_probability = _predicted_winner_and_probability(logged, home_id, away_id)
+    return {
+        "status": "final",
+        "team_a": home_id, "team_b": away_id, "seed_a": seed_a, "seed_b": seed_b,
+        "predicted_winner": predicted_winner, "win_probability": win_probability,
+        "actual_winner": home_id if actual["home_won"] else away_id,
+        "actual_home_score": actual["home_score"], "actual_away_score": actual["away_score"],
+    }
+
+
+def _scheduled_matchup_row(
+    real_event: dict, event_key_value: str, home_id: str, away_id: str, seed_a: int | None, seed_b: int | None,
+    storage: FeatureStorage, s3, predictions_table,
+) -> dict:
     logged = _logged_win_probability(predictions_table, event_key_value)
     if logged is None:
         try:
@@ -407,12 +483,7 @@ def _resolve_matchup(
         except Exception:
             logger.exception("Failed computing a live prediction for bracket game %s", event_key_value)
 
-    predicted_winner = win_probability = None
-    if logged is not None:
-        probability = logged["home_win_probability"]
-        predicted_winner = home_id if probability >= 0.5 else away_id
-        win_probability = probability if predicted_winner == home_id else 1 - probability
-
+    predicted_winner, win_probability = _predicted_winner_and_probability(logged, home_id, away_id)
     return {
         "status": "scheduled",
         "team_a": home_id, "team_b": away_id, "seed_a": seed_a, "seed_b": seed_b,
@@ -570,6 +641,55 @@ def _march_madness_bracket_payload(
     return enrich_bracket_team_names(storage, SPORT, bracket)
 
 
+def _compute_projections_and_brackets(
+    estimator, model_card, teams: list[str], season_inputs: dict, storage: FeatureStorage, s3, predictions_table,
+    current_season: int | None,
+) -> tuple[dict, dict, list[dict], dict | None]:
+    """(simulation, model_rankings, conference_brackets,
+    march_madness_bracket) for one season projection run -- the Monte
+    Carlo season simulation, model rankings, conference brackets, and
+    March Madness bracket, each independently try/excepted so one failing
+    doesn't cost the others (or the plain standings build_season_
+    projection can still build without any of them)."""
+    def score_teams(wins: dict, losses: dict, ratings: dict) -> dict[str, float]:
+        return _batch_score_teams(estimator, model_card, teams, season_inputs, wins, losses, ratings)
+
+    simulation: dict[str, dict] = {}
+    try:
+        simulation = season_simulation.simulate_season(
+            season_inputs["wins"], season_inputs["losses"],
+            season_inputs["conference_wins"], season_inputs["conference_losses"],
+            season_inputs["point_differential"], season_inputs["remaining_games"],
+            season_inputs["current_ratings"], season_inputs["team_conference"], score_teams,
+        )
+    except Exception:
+        logger.exception("Failed running the Monte Carlo season simulation -- standings will omit projected/probability columns this run")
+
+    model_rankings: dict[str, int] = {}
+    try:
+        model_rankings = _model_rankings(estimator, model_card, teams, season_inputs)
+    except Exception:
+        logger.exception("Failed to compute model_rank -- standings will omit it this run")
+
+    conference_brackets: list[dict] = []
+    try:
+        conference_brackets = _conference_bracket_payloads(storage, s3, predictions_table, season_inputs, current_season)
+    except Exception:
+        logger.exception("Failed building conference brackets")
+
+    conference_champions = {payload["conference"]: payload["bracket"]["champion"] for payload in conference_brackets}
+    march_madness_bracket = None
+    try:
+        march_madness_bracket = _march_madness_bracket_payload(
+            storage, s3, predictions_table, season_inputs, current_season,
+            estimator, model_card, teams, conference_champions,
+        )
+    except Exception:
+        logger.exception("Failed building the March Madness bracket")
+
+    return simulation, model_rankings, conference_brackets, march_madness_bracket
+
+
 def build_season_projection(storage: FeatureStorage, s3, predictions_table, raw_bucket) -> dict:
     season_inputs = _season_standings_inputs(storage, raw_bucket)
     teams = list(season_inputs["team_conference"])
@@ -588,37 +708,9 @@ def build_season_projection(storage: FeatureStorage, s3, predictions_table, raw_
             estimator = model_card = None
 
         if estimator is not None:
-            def score_teams(wins: dict, losses: dict, ratings: dict) -> dict[str, float]:
-                return _batch_score_teams(estimator, model_card, teams, season_inputs, wins, losses, ratings)
-
-            try:
-                simulation = season_simulation.simulate_season(
-                    season_inputs["wins"], season_inputs["losses"],
-                    season_inputs["conference_wins"], season_inputs["conference_losses"],
-                    season_inputs["point_differential"], season_inputs["remaining_games"],
-                    season_inputs["current_ratings"], season_inputs["team_conference"], score_teams,
-                )
-            except Exception:
-                logger.exception("Failed running the Monte Carlo season simulation -- standings will omit projected/probability columns this run")
-
-            try:
-                model_rankings = _model_rankings(estimator, model_card, teams, season_inputs)
-            except Exception:
-                logger.exception("Failed to compute model_rank -- standings will omit it this run")
-
-            try:
-                conference_brackets = _conference_bracket_payloads(storage, s3, predictions_table, season_inputs, current_season)
-            except Exception:
-                logger.exception("Failed building conference brackets")
-
-            conference_champions = {payload["conference"]: payload["bracket"]["champion"] for payload in conference_brackets}
-            try:
-                march_madness_bracket = _march_madness_bracket_payload(
-                    storage, s3, predictions_table, season_inputs, current_season,
-                    estimator, model_card, teams, conference_champions,
-                )
-            except Exception:
-                logger.exception("Failed building the March Madness bracket")
+            simulation, model_rankings, conference_brackets, march_madness_bracket = _compute_projections_and_brackets(
+                estimator, model_card, teams, season_inputs, storage, s3, predictions_table, current_season,
+            )
 
     standings = sorted(
         (

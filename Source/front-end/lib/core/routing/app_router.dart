@@ -9,6 +9,7 @@ import '../data/field_events_repository.dart';
 import '../data/models_repository.dart';
 import '../data/season_repository.dart';
 import '../models/sport_config.dart';
+import 'app_routes.dart';
 import '../../features/auth/login_page.dart';
 import '../../features/auth/splash_page.dart';
 import '../../features/home/home_page.dart';
@@ -63,26 +64,26 @@ final appRouterProvider = Provider<GoRouter>((ref) {
   final authNotifier = _AuthChangeNotifier(ref);
 
   return GoRouter(
-    initialLocation: '/',
+    initialLocation: AppRoutes.home,
     refreshListenable: authNotifier,
     redirect: (context, state) {
       final authState = ref.read(authRepositoryProvider);
-      final loggingIn = state.matchedLocation == '/login';
-      final onSplash = state.matchedLocation == '/splash';
+      final loggingIn = state.matchedLocation == AppRoutes.login;
+      final onSplash = state.matchedLocation == AppRoutes.splash;
 
       // Session restore hasn't finished -- send every route here, not
       // just '/', so the originally-requested route's real content never
       // builds and flashes on screen before this redirect resolves.
-      if (authState is AuthInitial) return onSplash ? null : '/splash';
+      if (authState is AuthInitial) return onSplash ? null : AppRoutes.splash;
 
       final authenticated = authState is AuthAuthenticated;
-      if (!authenticated) return loggingIn ? null : '/login';
-      return (loggingIn || onSplash) ? '/' : null;
+      if (!authenticated) return loggingIn ? null : AppRoutes.login;
+      return (loggingIn || onSplash) ? AppRoutes.home : null;
     },
     routes: [
-      GoRoute(path: '/login', builder: (context, state) => const LoginPage()),
-      GoRoute(path: '/splash', builder: (context, state) => const SplashPage()),
-      GoRoute(path: '/', builder: (context, state) => const HomePage()),
+      GoRoute(path: AppRoutes.login, builder: (context, state) => const LoginPage()),
+      GoRoute(path: AppRoutes.splash, builder: (context, state) => const SplashPage()),
+      GoRoute(path: AppRoutes.home, builder: (context, state) => const HomePage()),
       ShellRoute(
         builder: (context, state, child) {
           final sportId = state.pathParameters['sport']!;

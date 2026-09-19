@@ -260,7 +260,20 @@ def refresh(storage, s3, bucket: str, client, sport: str) -> dict:
         return {"polled": 0}
 
     events_out = {}
+    _refresh_field_events(client, field_candidates, sport, events_out, last_active_at, now)
+    _refresh_match_cup_events(client, match_cup_candidates, sport, events_out, last_active_at, now)
 
+    _put_cache(s3, bucket, {"fetched_at": now.isoformat(), "events": events_out})
+    logger.info("Refreshed live state for %d event(s)", len(events_out))
+    return {"polled": len(events_out)}
+
+
+def _refresh_field_events(
+    client, field_candidates: list[dict], sport: str, events_out: dict, last_active_at: dict[str, str], now: datetime,
+) -> None:
+    """Polls and records each field-event candidate's own current
+    leaderboard snapshot into events_out in place -- one bad tournament
+    shouldn't cost every other candidate its own refresh."""
     for event in field_candidates:
         event_id = event["event_id"]
         try:
@@ -278,8 +291,14 @@ def refresh(storage, s3, bucket: str, client, sport: str) -> dict:
             _record_item(events_out, event_id, item, last_active_at, now)
         except Exception:
             logger.exception("Failed live-polling field event %s", event_id)
-            continue  # one bad tournament shouldn't cost every other candidate its own refresh
 
+
+def _refresh_match_cup_events(
+    client, match_cup_candidates: list[str], sport: str, events_out: dict, last_active_at: dict[str, str],
+    now: datetime,
+) -> None:
+    """Polls and records each match_play/cup tournament's own current
+    match+cup snapshot into events_out in place."""
     for tournament_id in match_cup_candidates:
         try:
             leaderboard = client.get_leaderboard(tournament_id)
@@ -300,11 +319,6 @@ def refresh(storage, s3, bucket: str, client, sport: str) -> dict:
                 _record_item(events_out, cup_item["event_id"], cup_item, last_active_at, now)
         except Exception:
             logger.exception("Failed live-polling match/cup tournament %s", tournament_id)
-            continue
-
-    _put_cache(s3, bucket, {"fetched_at": now.isoformat(), "events": events_out})
-    logger.info("Refreshed live state for %d event(s)", len(events_out))
-    return {"polled": len(events_out)}
 
 
 def _record_item(events_out: dict, event_id: str, item: dict, last_active_at: dict[str, str], now: datetime) -> None:

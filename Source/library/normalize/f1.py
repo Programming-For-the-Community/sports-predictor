@@ -348,26 +348,48 @@ def qualifying_payload_to_results(payload: dict) -> dict[str, dict]:
 
     parsed: dict[str, dict] = {}
     for result in race.get("QualifyingResults", []):
-        driver_id = (result.get("Driver") or {}).get("driverId")
-        if not driver_id:
-            continue
-        q1 = _parse_lap_time_seconds(result.get("Q1"), context)
-        q2 = _parse_lap_time_seconds(result.get("Q2"), context)
-        q3 = _parse_lap_time_seconds(result.get("Q3"), context)
-        best = q3 if q3 is not None else (q2 if q2 is not None else q1)
-        parsed[driver_id] = {
-            "position": _int_or_none(result.get("position")),
-            "q1_seconds": q1, "q2_seconds": q2, "q3_seconds": q3,
-            "best_seconds": best, "gap_to_pole_seconds": None,
-        }
+        parsed_result = _parse_qualifying_result(result, context)
+        if parsed_result is not None:
+            driver_id, row = parsed_result
+            parsed[driver_id] = row
 
-    pole_time = min((r["best_seconds"] for r in parsed.values() if r["best_seconds"] is not None), default=None)
-    if pole_time is not None:
-        for r in parsed.values():
-            if r["best_seconds"] is not None:
-                r["gap_to_pole_seconds"] = round(r["best_seconds"] - pole_time, 3)
-
+    _apply_gap_to_pole(parsed)
     return parsed
+
+
+def _parse_qualifying_result(result: dict, context: str) -> tuple[str, dict] | None:
+    """(driver_id, row) for one QualifyingResults entry, or None if it has
+    no driverId at all."""
+    driver_id = (result.get("Driver") or {}).get("driverId")
+    if not driver_id:
+        return None
+    q1 = _parse_lap_time_seconds(result.get("Q1"), context)
+    q2 = _parse_lap_time_seconds(result.get("Q2"), context)
+    q3 = _parse_lap_time_seconds(result.get("Q3"), context)
+    if q3 is not None:
+        best = q3
+    elif q2 is not None:
+        best = q2
+    else:
+        best = q1
+    return driver_id, {
+        "position": _int_or_none(result.get("position")),
+        "q1_seconds": q1, "q2_seconds": q2, "q3_seconds": q3,
+        "best_seconds": best, "gap_to_pole_seconds": None,
+    }
+
+
+def _apply_gap_to_pole(parsed: dict[str, dict]) -> None:
+    """Computed in a second pass once every driver's best_seconds is
+    known -- mutates parsed in place. See qualifying_payload_to_results'
+    own docstring for why the pole-sitter's own row isn't a special
+    case."""
+    pole_time = min((r["best_seconds"] for r in parsed.values() if r["best_seconds"] is not None), default=None)
+    if pole_time is None:
+        return
+    for r in parsed.values():
+        if r["best_seconds"] is not None:
+            r["gap_to_pole_seconds"] = round(r["best_seconds"] - pole_time, 3)
 
 
 def merge_qualifying_into_event(event_item: dict, qualifying_payload: dict | None) -> dict:

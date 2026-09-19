@@ -244,11 +244,7 @@ def boxscore_to_player_game_stats(
     """
     header = summary["header"]
     event_id = header["id"]
-    event_date = None
-    for competition in header.get("competitions", []):
-        if competition.get("date"):
-            event_date = us_eastern_date_from_iso(competition["date"])
-            break
+    event_date = _event_date_from_header(header)
 
     stat_lines: dict[str, dict] = {}
     athlete_meta: dict[str, tuple] = {}
@@ -267,46 +263,75 @@ def boxscore_to_player_game_stats(
             category_name = snake_case(raw_category_name) if raw_category_name is not None else None
             keys = category.get("keys", [])
             for athlete_entry in category.get("athletes", []):
-                athlete = athlete_entry["athlete"]
-                # A DNP player can carry a stub athlete object with no "id"
-                # at all (just `links`/`shortName`). No stat line is
-                # recoverable without an id to key it by.
-                athlete_id = athlete.get("id")
-                if athlete_id is None:
-                    continue
-                values = athlete_entry.get("stats", [])
-                line = stat_lines.setdefault(athlete_id, {})
-                athlete_team[athlete_id] = team_id
-                athlete_meta[athlete_id] = (
-                    athlete.get("displayName", ""), athlete.get("jersey"),
-                    (athlete.get("position") or {}).get("abbreviation"),
+                _merge_athlete_category_stats(
+                    athlete_entry, team_id, category_name, keys, compound_key_splits,
+                    stat_lines, athlete_meta, athlete_team,
                 )
-                for key, value in zip(keys, values):
-                    if key in compound_key_splits:
-                        first_name, second_name = compound_key_splits[key]
-                        sep = "/" if "/" in value else "-"
-                        parts = value.split(sep, 1)
-                        if len(parts) == 2:
-                            line[first_name] = parse_number(parts[0])
-                            line[second_name] = parse_number(parts[1])
-                            continue
-                    # Most ESPN stat keys already bake their category into
-                    # the name itself (category "passing", key
-                    # "passingYards") -- snake-casing that and then also
-                    # prefixing the category would double it up into
-                    # "passing_passing_yards". Only prefix when the key
-                    # doesn't already carry it, so a bare key that would
-                    # otherwise collide across categories (category
-                    # "interceptions"'s own "interceptions" key vs
-                    # "passing"'s "interceptions" key, defensive picks vs
-                    # thrown picks) still gets disambiguated.
-                    snake_key = snake_case(key)
-                    if category_name is None or snake_key == category_name or snake_key.startswith(f"{category_name}_"):
-                        field_name = snake_key
-                    else:
-                        field_name = f"{category_name}_{snake_key}"
-                    line[field_name] = parse_number(value)
 
+    return _build_player_items(sport, event_id, event_date, stat_lines, athlete_meta, athlete_team)
+
+
+def _event_date_from_header(header: dict) -> str | None:
+    for competition in header.get("competitions", []):
+        if competition.get("date"):
+            return us_eastern_date_from_iso(competition["date"])
+    return None
+
+
+def _stat_field(key: str, value, category_name: str | None, compound_key_splits: dict[str, tuple[str, str]]) -> dict:
+    """One raw ESPN stat key/value pair -> {field_name: numeric_value} --
+    either a compound "made/attempted"-shaped split, or a single
+    snake-cased (optionally category-prefixed) field."""
+    if key in compound_key_splits:
+        first_name, second_name = compound_key_splits[key]
+        sep = "/" if "/" in value else "-"
+        parts = value.split(sep, 1)
+        if len(parts) == 2:
+            return {first_name: parse_number(parts[0]), second_name: parse_number(parts[1])}
+
+    # Most ESPN stat keys already bake their category into the name itself
+    # (category "passing", key "passingYards") -- snake-casing that and
+    # then also prefixing the category would double it up into
+    # "passing_passing_yards". Only prefix when the key doesn't already
+    # carry it, so a bare key that would otherwise collide across
+    # categories (category "interceptions"'s own "interceptions" key vs
+    # "passing"'s "interceptions" key, defensive picks vs thrown picks)
+    # still gets disambiguated.
+    snake_key = snake_case(key)
+    if category_name is None or snake_key == category_name or snake_key.startswith(f"{category_name}_"):
+        field_name = snake_key
+    else:
+        field_name = f"{category_name}_{snake_key}"
+    return {field_name: parse_number(value)}
+
+
+def _merge_athlete_category_stats(
+    athlete_entry: dict, team_id: str, category_name: str | None, keys: list, compound_key_splits: dict,
+    stat_lines: dict[str, dict], athlete_meta: dict[str, tuple], athlete_team: dict[str, str],
+) -> None:
+    """Merges one athlete's own stat line for one category into
+    stat_lines (keyed by athlete_id, accumulated across every category a
+    multi-category athlete appears in) -- no-op for a DNP stub athlete
+    with no "id" at all (just links/shortName), since no stat line is
+    recoverable without one."""
+    athlete = athlete_entry["athlete"]
+    athlete_id = athlete.get("id")
+    if athlete_id is None:
+        return
+    line = stat_lines.setdefault(athlete_id, {})
+    athlete_team[athlete_id] = team_id
+    athlete_meta[athlete_id] = (
+        athlete.get("displayName", ""), athlete.get("jersey"),
+        (athlete.get("position") or {}).get("abbreviation"),
+    )
+    for key, value in zip(keys, athlete_entry.get("stats", [])):
+        line.update(_stat_field(key, value, category_name, compound_key_splits))
+
+
+def _build_player_items(
+    sport: str, event_id: str, event_date: str | None,
+    stat_lines: dict[str, dict], athlete_meta: dict[str, tuple], athlete_team: dict[str, str],
+) -> tuple[list[dict], list[dict]]:
     player_game_stats_items = []
     player_entities = []
     for athlete_id, line in stat_lines.items():
@@ -364,32 +389,12 @@ def boxscore_to_team_game_stats(
     """
     header = summary["header"]
     event_id = header["id"]
-    event_date = None
-    for competition in header.get("competitions", []):
-        if competition.get("date"):
-            event_date = us_eastern_date_from_iso(competition["date"])
-            break
+    event_date = _event_date_from_header(header)
 
     items = []
     for team_block in summary.get("boxscore", {}).get("teams", []):
         team_id = str(team_block["team"]["id"])
-        line: dict = {}
-        for stat in team_block.get("statistics", []):
-            name = stat.get("name", "")
-            display_value = stat.get("displayValue")
-            if name in compound_key_splits:
-                first_name, second_name = compound_key_splits[name]
-                sep = "/" if "/" in display_value else "-"
-                parts = display_value.split(sep, 1)
-                if len(parts) == 2:
-                    line[first_name] = parse_number(parts[0])
-                    line[second_name] = parse_number(parts[1])
-                    continue
-            if name == "possessionTime":
-                line["possession_time_seconds"] = parse_clock_to_seconds(display_value)
-                continue
-            line[snake_case(name)] = parse_number(display_value)
-
+        line = _team_game_stats_line(team_block, compound_key_splits)
         items.append({
             "event_key": event_key(sport, event_id),
             "team_key": team_key(team_id),
@@ -399,3 +404,30 @@ def boxscore_to_team_game_stats(
             "stat_line": line,
         })
     return items
+
+
+def _team_stat_field(stat: dict, compound_key_splits: dict[str, tuple[str, str]]) -> dict:
+    """One raw ESPN team stat entry -> {field_name: numeric_value} --
+    either a compound "X-Y"-shaped split, the special-cased clock field, or
+    a single snake-cased field."""
+    name = stat.get("name", "")
+    display_value = stat.get("displayValue")
+    if name in compound_key_splits:
+        first_name, second_name = compound_key_splits[name]
+        sep = "/" if "/" in display_value else "-"
+        parts = display_value.split(sep, 1)
+        if len(parts) == 2:
+            return {first_name: parse_number(parts[0]), second_name: parse_number(parts[1])}
+    if name == "possessionTime":
+        return {"possession_time_seconds": parse_clock_to_seconds(display_value)}
+    return {snake_case(name): parse_number(display_value)}
+
+
+def _team_game_stats_line(team_block: dict, compound_key_splits: dict[str, tuple[str, str]]) -> dict:
+    """ESPN's team statistics list contains "interceptions" twice with an
+    identical value both times; the second occurrence just overwrites the
+    first with the same number."""
+    line: dict = {}
+    for stat in team_block.get("statistics", []):
+        line.update(_team_stat_field(stat, compound_key_splits))
+    return line

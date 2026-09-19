@@ -68,70 +68,87 @@ int? _currentRoundNumber(FieldParticipantPrediction entry) {
 // per-row detail below this width -- see _ExpandedProbabilities.
 const _compactBreakpoint = 600.0;
 
+/// Falls back to the row's own displayed position rather than '--' --
+/// every row gets a real number, whether or not a real tournament
+/// standing exists yet.
+Widget _positionColumnCell(BuildContext context, FieldParticipantPrediction entry, FieldParticipantLiveResult? live, int rowNumber) {
+  final position = live?.finishPosition ?? entry.actualFinishPosition;
+  final isTie = live?.isTie ?? false;
+  final label = position != null ? (isTie ? 'T$position' : '$position') : '$rowNumber';
+  return Text(
+    label, style: AppTextStyles.metricValue(color: AppColors.inkMute), textAlign: TextAlign.center,
+    maxLines: 1, softWrap: false, overflow: TextOverflow.ellipsis,
+  );
+}
+
+Widget _playerColumnCell(BuildContext context, FieldParticipantPrediction entry, FieldParticipantLiveResult? live, int rowNumber) {
+  final name = entry.name ?? entry.entityId;
+  return Column(
+    crossAxisAlignment: CrossAxisAlignment.start,
+    mainAxisSize: MainAxisSize.min,
+    children: [
+      Text(name, style: AppTextStyles.body(color: AppColors.ink), maxLines: 1, overflow: TextOverflow.ellipsis),
+      if (entry.country != null)
+        Text(entry.country!, style: AppTextStyles.microLabel(color: AppColors.inkSub)),
+    ],
+  );
+}
+
+/// Round status (scheduled/finished/cut/MDF/withdrawn/still playing).
+/// live.status first (freshest, live-poll window only), else this
+/// golfer's own real stored status -- not inferred from
+/// actualFinishPosition's presence.
+Widget _statusColumnCell(BuildContext context, FieldParticipantPrediction entry, FieldParticipantLiveResult? live, int rowNumber, bool compact) {
+  final status = live?.status ?? entry.actualStatus;
+  return Center(child: FieldStatusPill(status: status, dotOnly: compact));
+}
+
+/// Actual (live-first, else the real cumulative standing) next to the
+/// model's own projected FINAL tournament score-to-par. Labeled TOTAL,
+/// not TO PAR -- same term ESPN/PGA Tour's own real leaderboards use,
+/// and distinguishes it from THIS RD's own to-par-for-the-round-alone
+/// value.
+Widget _totalColumnCell(BuildContext context, FieldParticipantPrediction entry, FieldParticipantLiveResult? live, int rowNumber) {
+  final scoreToPar = live?.scoreToPar ?? entry.actualScoreToPar;
+  final projected = entry.projectedScoreToPar?.value;
+  return Center(child: _StandingCell(actual: scoreToPar, projected: projected));
+}
+
+/// The current round's own proj/actual, visible without expanding the
+/// row -- the full 1-4 breakdown is still only in the expanded panel
+/// below (_RoundBreakdownStrip).
+Widget _thisRoundColumnCell(BuildContext context, FieldParticipantPrediction entry, FieldParticipantLiveResult? live, int rowNumber, int? par) {
+  final round = _currentRoundNumber(entry);
+  if (round == null) {
+    return Text('--', style: AppTextStyles.metricValue(color: AppColors.inkMute), textAlign: TextAlign.center);
+  }
+  return Center(
+    child: _RoundCell(
+      round: round, projected: entry.rounds[round]?.value, actual: _actualForRound(round, entry, live), par: par,
+      thru: _currentThru(entry, live),
+    ),
+  );
+}
+
 List<_LeaderboardColumn> _leaderboardColumns(int? par, {required bool compact}) {
   final core = [
-      _LeaderboardColumn(_FieldColumnLabels.position, 1, (context, entry, live, rowNumber) {
-        final position = live?.finishPosition ?? entry.actualFinishPosition;
-        final isTie = live?.isTie ?? false;
-        // Falls back to the row's own displayed position rather than
-        // '--' -- every row gets a real number, whether or not a real
-        // tournament standing exists yet.
-        final label = position != null ? (isTie ? 'T$position' : '$position') : '$rowNumber';
-        return Text(
-          label, style: AppTextStyles.metricValue(color: AppColors.inkMute), textAlign: TextAlign.center,
-          maxLines: 1, softWrap: false, overflow: TextOverflow.ellipsis,
-        );
-      }),
-      _LeaderboardColumn(_FieldColumnLabels.player, 4, (context, entry, live, rowNumber) {
-        final name = entry.name ?? entry.entityId;
-        return Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text(name, style: AppTextStyles.body(color: AppColors.ink), maxLines: 1, overflow: TextOverflow.ellipsis),
-            if (entry.country != null)
-              Text(entry.country!, style: AppTextStyles.microLabel(color: AppColors.inkSub)),
-          ],
-        );
-      }),
-      // Round status (scheduled/finished/cut/MDF/withdrawn/still playing).
-      // live.status first (freshest, live-poll window only), else this
-      // golfer's own real stored status -- not inferred from
-      // actualFinishPosition's presence.
-      _LeaderboardColumn(_FieldColumnLabels.status, compact ? 1 : 3, (context, entry, live, rowNumber) {
-        final status = live?.status ?? entry.actualStatus;
-        return Center(child: FieldStatusPill(status: status, dotOnly: compact));
-      }),
-      // Actual (live-first, else the real cumulative standing) next to
-      // the model's own projected FINAL tournament score-to-par. Labeled
-      // TOTAL, not TO PAR -- same term ESPN/PGA Tour's own real
-      // leaderboards use, and distinguishes it from THIS RD's own
-      // to-par-for-the-round-alone value.
-      _LeaderboardColumn(_FieldColumnLabels.total, 3, (context, entry, live, rowNumber) {
-        final scoreToPar = live?.scoreToPar ?? entry.actualScoreToPar;
-        final projected = entry.projectedScoreToPar?.value;
-        return Center(child: _StandingCell(actual: scoreToPar, projected: projected));
-      }),
+    _LeaderboardColumn(_FieldColumnLabels.position, 1, _positionColumnCell),
+    _LeaderboardColumn(_FieldColumnLabels.player, 4, _playerColumnCell),
+    _LeaderboardColumn(
+      _FieldColumnLabels.status, compact ? 1 : 3,
+      (context, entry, live, rowNumber) => _statusColumnCell(context, entry, live, rowNumber, compact),
+    ),
+    _LeaderboardColumn(_FieldColumnLabels.total, 3, _totalColumnCell),
   ];
   if (compact) return core;
+  // THIS RD/TOP 10%/TOP 5% move into the expanded per-row detail below
+  // _compactBreakpoint -- see _ExpandedProbabilities.
   return [
     ...core,
-    // The current round's own proj/actual, visible without expanding the
-    // row -- the full 1-4 breakdown is still only in the expanded panel
-    // below (_RoundBreakdownStrip). Dropped from the compact (mobile)
-    // column set below _compactBreakpoint.
-    _LeaderboardColumn(_FieldColumnLabels.thisRound, 2, (context, entry, live, rowNumber) {
-      final round = _currentRoundNumber(entry);
-      if (round == null) {
-        return Text('--', style: AppTextStyles.metricValue(color: AppColors.inkMute), textAlign: TextAlign.center);
-      }
-      return Center(
-        child: _RoundCell(
-          round: round, projected: entry.rounds[round]?.value, actual: _actualForRound(round, entry, live), par: par,
-          thru: _currentThru(entry, live),
-        ),
-      );
-    }),
+    _LeaderboardColumn(
+      _FieldColumnLabels.thisRound, 2,
+      (context, entry, live, rowNumber) => _thisRoundColumnCell(context, entry, live, rowNumber, par),
+    ),
     _LeaderboardColumn(_FieldColumnLabels.top10, 2, (context, entry, live, rowNumber) => _PercentText(entry.top10Probability?.value)),
     _LeaderboardColumn(_FieldColumnLabels.top5, 2, (context, entry, live, rowNumber) => _PercentText(entry.top5Probability?.value)),
   ];

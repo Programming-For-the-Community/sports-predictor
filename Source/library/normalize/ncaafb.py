@@ -228,25 +228,45 @@ def game_player_stats_to_player_game_stats(game_box_score: dict, sport: str) -> 
             category_name = category.get("name", "misc")
             category_snake = snake_case(category_name)
             for type_entry in category.get("types", []):
-                type_name = type_entry.get("name", "")
-                compound_names = _PLAYER_STAT_COMPOUND_SPLITS.get(type_name)
-                field_name = None if compound_names else _stat_field_name(category_name, type_name)
-                for athlete in type_entry.get("athletes", []):
-                    athlete_id = athlete.get("id")
-                    if not athlete_id:
-                        continue
-                    athlete_id = str(athlete_id)
-                    line = stat_lines.setdefault(athlete_id, {})
-                    raw_value = athlete.get("stat")
-                    split = _split_compound_value(raw_value) if compound_names else None
-                    if split is not None:
-                        line[f"{category_snake}_{compound_names[0]}"] = split[0]
-                        line[f"{category_snake}_{compound_names[1]}"] = split[1]
-                    else:
-                        line[field_name or _stat_field_name(category_name, type_name)] = parse_number(raw_value)
-                    athlete_names[athlete_id] = athlete.get("name", "")
-                    athlete_team[athlete_id] = team_id
+                _merge_type_athletes(
+                    type_entry, category_name, category_snake, team_id, stat_lines, athlete_names, athlete_team,
+                )
 
+    return _build_player_items(sport, event_id, event_date, stat_lines, athlete_names, athlete_team)
+
+
+def _merge_type_athletes(
+    type_entry: dict, category_name: str, category_snake: str, team_id: str,
+    stat_lines: dict[str, dict], athlete_names: dict[str, str], athlete_team: dict[str, str],
+) -> None:
+    """Merges every athlete's own stat value for one (category, type)
+    pair into stat_lines (keyed by athlete_id, accumulated across every
+    category/type an athlete appears in) -- no-op per athlete missing an
+    "id"."""
+    type_name = type_entry.get("name", "")
+    compound_names = _PLAYER_STAT_COMPOUND_SPLITS.get(type_name)
+    field_name = None if compound_names else _stat_field_name(category_name, type_name)
+    for athlete in type_entry.get("athletes", []):
+        athlete_id = athlete.get("id")
+        if not athlete_id:
+            continue
+        athlete_id = str(athlete_id)
+        line = stat_lines.setdefault(athlete_id, {})
+        raw_value = athlete.get("stat")
+        split = _split_compound_value(raw_value) if compound_names else None
+        if split is not None:
+            line[f"{category_snake}_{compound_names[0]}"] = split[0]
+            line[f"{category_snake}_{compound_names[1]}"] = split[1]
+        else:
+            line[field_name or _stat_field_name(category_name, type_name)] = parse_number(raw_value)
+        athlete_names[athlete_id] = athlete.get("name", "")
+        athlete_team[athlete_id] = team_id
+
+
+def _build_player_items(
+    sport: str, event_id: str, event_date: str | None,
+    stat_lines: dict[str, dict], athlete_names: dict[str, str], athlete_team: dict[str, str],
+) -> tuple[list[dict], list[dict]]:
     player_game_stats_items = []
     player_entities = []
     for athlete_id, line in stat_lines.items():
@@ -361,27 +381,35 @@ def game_team_stats_to_team_game_stats(game_team_box_score: dict, sport: str) ->
         if team_id is None:
             continue
 
-        line: dict = {}
-        for stat in team_block.get("stats", []):
-            category = stat.get("category", "")
-            value = stat.get("stat")
-            if category == "possessionTime":
-                line["possession_time_seconds"] = parse_clock_to_seconds(value)
-                continue
-            if category in _TEAM_STAT_COMPOUND_SPLITS:
-                split = _split_compound_value(value)
-                if split is not None:
-                    first_name, second_name = _TEAM_STAT_COMPOUND_SPLITS[category]
-                    line[first_name], line[second_name] = split
-                    continue
-            line[snake_case(category)] = parse_number(value)
-
         items.append({
             "event_key": event_key(sport, event_id),
             "team_key": team_key(team_id),
             "team_id": team_id,
             "event_date": event_date,
             "sport": sport,
-            "stat_line": line,
+            "stat_line": _team_game_stats_line(team_block),
         })
     return items
+
+
+def _team_stat_field(stat: dict) -> dict:
+    """One raw CFBD team stat entry -> {field_name: numeric_value} --
+    either the special-cased clock field, a compound value split, or a
+    single snake-cased field."""
+    category = stat.get("category", "")
+    value = stat.get("stat")
+    if category == "possessionTime":
+        return {"possession_time_seconds": parse_clock_to_seconds(value)}
+    if category in _TEAM_STAT_COMPOUND_SPLITS:
+        split = _split_compound_value(value)
+        if split is not None:
+            first_name, second_name = _TEAM_STAT_COMPOUND_SPLITS[category]
+            return {first_name: split[0], second_name: split[1]}
+    return {snake_case(category): parse_number(value)}
+
+
+def _team_game_stats_line(team_block: dict) -> dict:
+    line: dict = {}
+    for stat in team_block.get("stats", []):
+        line.update(_team_stat_field(stat))
+    return line

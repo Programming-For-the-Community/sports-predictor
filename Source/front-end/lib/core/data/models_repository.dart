@@ -1,6 +1,7 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../api/api_client.dart';
+import '../api/api_routes.dart';
 import '../models/model_card.dart';
 
 class ModelsRepository {
@@ -9,7 +10,7 @@ class ModelsRepository {
   final ApiClient _api;
 
   Future<List<ModelCard>> listModels(String sport) async {
-    final response = await _api.get('/$sport/models') as Map<String, dynamic>;
+    final response = await _api.get(ApiRoutes.models(sport)) as Map<String, dynamic>;
     final models = response['models'] as List<dynamic>? ?? [];
     return models.map((m) => ModelCard.fromJson(m as Map<String, dynamic>)).toList();
   }

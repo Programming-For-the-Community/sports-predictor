@@ -1,6 +1,7 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../api/api_client.dart';
+import '../api/api_routes.dart';
 import '../models/event.dart';
 import '../models/event_status.dart';
 import '../models/prediction.dart';
@@ -23,13 +24,13 @@ class EventsRepository {
   final ApiClient _api;
 
   Future<List<SportEvent>> listEvents(String sport, {String status = EventStatus.scheduled}) async {
-    final response = await _api.get('/$sport/events', queryParameters: {'status': status}) as Map<String, dynamic>;
+    final response = await _api.get(ApiRoutes.events(sport), queryParameters: {'status': status}) as Map<String, dynamic>;
     final events = response['events'] as List<dynamic>? ?? [];
     return events.map((e) => SportEvent.fromJson(e as Map<String, dynamic>)).toList();
   }
 
   Future<EventPrediction> getEventPrediction(String sport, String eventId) async {
-    final response = await _api.get('/$sport/predictions/events/$eventId') as Map<String, dynamic>;
+    final response = await _api.get(ApiRoutes.eventPrediction(sport, eventId)) as Map<String, dynamic>;
     // ApiClient._decode treats 202 the same as any other 2xx -- the
     // "computing" shape is the only way to tell the two apart, since the
     // HTTP status code itself isn't threaded through this far.

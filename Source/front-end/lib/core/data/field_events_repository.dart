@@ -1,6 +1,7 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../api/api_client.dart';
+import '../api/api_routes.dart';
 import '../models/event_status.dart';
 import '../models/field_event.dart';
 import '../models/field_prediction.dart';
@@ -18,13 +19,13 @@ class FieldEventsRepository {
   final ApiClient _api;
 
   Future<List<FieldEvent>> listEvents(String sport, {String status = EventStatus.scheduled}) async {
-    final response = await _api.get('/$sport/events', queryParameters: {'status': status}) as Map<String, dynamic>;
+    final response = await _api.get(ApiRoutes.events(sport), queryParameters: {'status': status}) as Map<String, dynamic>;
     final events = response['events'] as List<dynamic>? ?? [];
     return events.map((e) => FieldEvent.fromJson(e as Map<String, dynamic>)).toList();
   }
 
   Future<PgaEventPrediction> getEventPrediction(String sport, String eventId) async {
-    final response = await _api.get('/$sport/predictions/events/$eventId') as Map<String, dynamic>;
+    final response = await _api.get(ApiRoutes.eventPrediction(sport, eventId)) as Map<String, dynamic>;
     // Same "computing" cache-miss shape as every other sport's predict
     // route -- reuses EventsRepository's own exception type rather than
     // duplicating it, since callers already catch this type generically.

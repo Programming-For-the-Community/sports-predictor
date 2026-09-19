@@ -425,6 +425,129 @@ def project_march_madness_bracket(
     return {"rounds": rounds, "champion": championship_matchup["predicted_winner"]}
 
 
+def _simulate_regular_season_games(
+    remaining_games: list[tuple[str, str, bool]], teams: set[str],
+    wins: dict[str, int], losses: dict[str, int],
+    conference_wins: dict[str, int], conference_losses: dict[str, int],
+    ratings: dict[str, float], home_advantage: float, k_factor: float, rng: random.Random,
+) -> None:
+    """One simulated regular season's worth of remaining games -- mutates
+    wins/losses/conference_wins/conference_losses/ratings in place."""
+    for home_id, away_id, is_conference in remaining_games:
+        if home_id not in teams or away_id not in teams:
+            continue
+        home_rating = ratings.get(home_id, DEFAULT_STARTING_RATING)
+        away_rating = ratings.get(away_id, DEFAULT_STARTING_RATING)
+        home_win_probability = expected_score(home_rating, away_rating, home_advantage)
+        home_won = rng.random() < home_win_probability
+        winner_id = home_id if home_won else away_id
+        loser_id = away_id if home_won else home_id
+
+        wins[winner_id] += 1
+        losses[loser_id] += 1
+        if is_conference:
+            conference_wins[winner_id] += 1
+            conference_losses[loser_id] += 1
+
+        actual_home = 1.0 if home_won else 0.0
+        ratings[home_id] = home_rating + k_factor * (actual_home - home_win_probability)
+        ratings[away_id] = away_rating + k_factor * ((1 - actual_home) - (1 - home_win_probability))
+
+
+def _simulate_conference_tournaments(
+    conferences: dict[str, list[str]], conference_wins: dict[str, int], conference_losses: dict[str, int],
+    point_differential: dict[str, int], ratings: dict[str, float], home_advantage: float, rng: random.Random,
+    conference_tournament_champion_totals: dict[str, int],
+) -> dict[str, str]:
+    """Returns {conference: champion_team_id} for one simulated round of
+    every conference's own tournament -- mutates
+    conference_tournament_champion_totals in place."""
+    conference_champions: dict[str, str] = {}
+    for conference, members in conferences.items():
+        seed_order = _conference_seed_order(members, conference_wins, conference_losses, point_differential)
+        survivors = _simulate_bracket_survivors(seed_order, ratings, home_advantage, rng)
+        champion = survivors[-1][0]
+        conference_champions[conference] = champion
+        conference_tournament_champion_totals[champion] += 1
+    return conference_champions
+
+
+def _simulate_first_four_and_round_of_64(
+    auto_bids: list[str], at_large: list[str], ratings: dict[str, float], rng: random.Random,
+    first_four_totals: dict[str, int], round_of_64_totals: dict[str, int],
+) -> list[str]:
+    """Returns the settled 64-team field (pre-region-assignment) for one
+    simulated First Four -- mutates first_four_totals/round_of_64_totals
+    in place."""
+    settled, contested_auto, contested_at_large = _first_four_pools(auto_bids, at_large)
+    field = list(settled)
+    for pool in (contested_auto, contested_at_large):
+        for i in range(0, len(pool) - 1, 2):
+            for team_id in (pool[i], pool[i + 1]):
+                first_four_totals[team_id] += 1
+            winner = _play(pool[i], pool[i + 1], ratings, 0.0, rng)
+            field.append(winner)
+            round_of_64_totals[winner] += 1
+    for team_id in settled:
+        round_of_64_totals[team_id] += 1
+    return field
+
+
+def _simulate_regions(
+    regions: dict[str, list[str]], ratings: dict[str, float], rng: random.Random,
+    sweet_16_totals: dict[str, int], elite_eight_totals: dict[str, int], final_four_totals: dict[str, int],
+) -> list[str]:
+    """Returns each region's own champion, in region order -- mutates
+    sweet_16_totals/elite_eight_totals/final_four_totals in place."""
+    region_champions = []
+    for region_teams in regions.values():
+        # Indexed from the end, not from the start: a real 16-team region
+        # always has exactly 4 survivor rounds (so -3/-2/-1 line up with
+        # Sweet 16/Elite Eight/Final Four exactly), but a smaller region (a
+        # sparse-data test fixture, or an early-season run with fewer than
+        # 68 teams tracked) has fewer rounds -- negative indexing degrades
+        # gracefully instead of raising IndexError, just skipping the
+        # credit for a stage that region's bracket size doesn't actually
+        # have.
+        survivors = _simulate_bracket_survivors(region_teams, ratings, 0.0, rng)
+        if len(survivors) >= 3:
+            for team_id in survivors[-3]:
+                sweet_16_totals[team_id] += 1
+        if len(survivors) >= 2:
+            for team_id in survivors[-2]:
+                elite_eight_totals[team_id] += 1
+        for team_id in survivors[-1]:
+            final_four_totals[team_id] += 1
+        region_champions.append(survivors[-1][0])
+    return region_champions
+
+
+def _simulate_march_madness(
+    auto_bids: list[str], at_large: list[str], ratings: dict[str, float], model_scores: dict[str, float],
+    rng: random.Random,
+    first_four_totals: dict[str, int], round_of_64_totals: dict[str, int], sweet_16_totals: dict[str, int],
+    elite_eight_totals: dict[str, int], final_four_totals: dict[str, int],
+    championship_game_totals: dict[str, int], champion_totals: dict[str, int],
+) -> None:
+    """One simulated March Madness tournament, from the First Four through
+    the championship game -- mutates every *_totals dict in place."""
+    field = _simulate_first_four_and_round_of_64(
+        auto_bids, at_large, ratings, rng, first_four_totals, round_of_64_totals,
+    )
+    field.sort(key=lambda t: model_scores.get(t, float("inf")))
+    regions = _assign_regions(field)
+    region_champions = _simulate_regions(regions, ratings, rng, sweet_16_totals, elite_eight_totals, final_four_totals)
+
+    semifinal_winners = [
+        _play(region_champions[0], region_champions[1], ratings, 0.0, rng),
+        _play(region_champions[2], region_champions[3], ratings, 0.0, rng),
+    ]
+    for team_id in semifinal_winners:
+        championship_game_totals[team_id] += 1
+    champion = _play(semifinal_winners[0], semifinal_winners[1], ratings, 0.0, rng)
+    champion_totals[champion] += 1
+
+
 def simulate_season(
     current_wins: dict[str, int],
     current_losses: dict[str, int],
@@ -480,84 +603,30 @@ def simulate_season(
         conference_losses = {team_id: current_conference_losses.get(team_id, 0) for team_id in teams}
         ratings = dict(current_ratings)
 
-        for home_id, away_id, is_conference in remaining_games:
-            if home_id not in teams or away_id not in teams:
-                continue
-            home_rating = ratings.get(home_id, DEFAULT_STARTING_RATING)
-            away_rating = ratings.get(away_id, DEFAULT_STARTING_RATING)
-            home_win_probability = expected_score(home_rating, away_rating, home_advantage)
-            home_won = rng.random() < home_win_probability
-
-            wins[home_id if home_won else away_id] += 1
-            losses[away_id if home_won else home_id] += 1
-            if is_conference:
-                conference_wins[home_id if home_won else away_id] += 1
-                conference_losses[away_id if home_won else home_id] += 1
-
-            actual_home = 1.0 if home_won else 0.0
-            ratings[home_id] = home_rating + k_factor * (actual_home - home_win_probability)
-            ratings[away_id] = away_rating + k_factor * ((1 - actual_home) - (1 - home_win_probability))
+        _simulate_regular_season_games(
+            remaining_games, teams, wins, losses, conference_wins, conference_losses, ratings,
+            home_advantage, k_factor, rng,
+        )
 
         for team_id in teams:
             win_totals[team_id] += wins[team_id]
             loss_totals[team_id] += losses[team_id]
 
-        conference_champions: dict[str, str] = {}
-        for conference, members in conferences.items():
-            seed_order = _conference_seed_order(members, conference_wins, conference_losses, point_differential)
-            survivors = _simulate_bracket_survivors(seed_order, ratings, home_advantage, rng)
-            champion = survivors[-1][0]
-            conference_champions[conference] = champion
-            conference_tournament_champion_totals[champion] += 1
+        conference_champions = _simulate_conference_tournaments(
+            conferences, conference_wins, conference_losses, point_differential, ratings, home_advantage, rng,
+            conference_tournament_champion_totals,
+        )
 
         model_scores = score_teams(wins, losses, ratings)
         auto_bids, at_large = select_march_madness_field(model_scores, conference_champions)
         for team_id in auto_bids + at_large:
             tournament_totals[team_id] += 1
 
-        settled, contested_auto, contested_at_large = _first_four_pools(auto_bids, at_large)
-        field = list(settled)
-        for pool in (contested_auto, contested_at_large):
-            for i in range(0, len(pool) - 1, 2):
-                for team_id in (pool[i], pool[i + 1]):
-                    first_four_totals[team_id] += 1
-                winner = _play(pool[i], pool[i + 1], ratings, 0.0, rng)
-                field.append(winner)
-                round_of_64_totals[winner] += 1
-        for team_id in settled:
-            round_of_64_totals[team_id] += 1
-
-        field.sort(key=lambda t: model_scores.get(t, float("inf")))
-        regions = _assign_regions(field)
-        region_champions = []
-        for region_teams in regions.values():
-            # Indexed from the end, not from the start: a real 16-team
-            # region always has exactly 4 survivor rounds (so -3/-2/-1
-            # line up with Sweet 16/Elite Eight/Final Four exactly), but a
-            # smaller region (a sparse-data test fixture, or an early-
-            # season run with fewer than 68 teams tracked) has fewer
-            # rounds -- negative indexing degrades gracefully instead of
-            # raising IndexError, just skipping the credit for a stage
-            # that region's bracket size doesn't actually have.
-            survivors = _simulate_bracket_survivors(region_teams, ratings, 0.0, rng)
-            if len(survivors) >= 3:
-                for team_id in survivors[-3]:
-                    sweet_16_totals[team_id] += 1
-            if len(survivors) >= 2:
-                for team_id in survivors[-2]:
-                    elite_eight_totals[team_id] += 1
-            for team_id in survivors[-1]:
-                final_four_totals[team_id] += 1
-            region_champions.append(survivors[-1][0])
-
-        semifinal_winners = [
-            _play(region_champions[0], region_champions[1], ratings, 0.0, rng),
-            _play(region_champions[2], region_champions[3], ratings, 0.0, rng),
-        ]
-        for team_id in semifinal_winners:
-            championship_game_totals[team_id] += 1
-        champion = _play(semifinal_winners[0], semifinal_winners[1], ratings, 0.0, rng)
-        champion_totals[champion] += 1
+        _simulate_march_madness(
+            auto_bids, at_large, ratings, model_scores, rng,
+            first_four_totals, round_of_64_totals, sweet_16_totals, elite_eight_totals, final_four_totals,
+            championship_game_totals, champion_totals,
+        )
 
     return {
         team_id: {

@@ -43,6 +43,33 @@ import 'win_probability_bar.dart';
 // LIVE/confidence pills to just their colored dots on a phone-width card.
 const _compactBreakpoint = 600.0;
 
+/// isFinished is true once ESPN itself reports the game over, even
+/// though this event's own SportEvent.status can still say "scheduled"
+/// for up to 24h (the once-daily batch ingest hasn't caught up yet --
+/// see LiveEventState.completed's own doc comment). Kept distinct from
+/// isLive: a finished game shows the FINAL pill instead of LIVE, but
+/// still needs the real (now final, not still-updating) score.
+///
+/// homeLeading is who's ahead right now -- null pre-game (no live score
+/// yet) or on a live tie, when neither side is "winning". Distinct from
+/// MatchupHero.build's own homeFavored, which is the pre-game
+/// win-probability pick and stays fixed for the whole game.
+({bool isLive, bool isFinished, double? homeLiveScore, double? awayLiveScore, bool? homeLeading}) _liveMatchupState(
+  LiveEventState? liveState,
+) {
+  final isLive = liveState?.live ?? false;
+  final isFinished = liveState?.completed ?? false;
+  final homeLiveScore = (isLive || isFinished) ? liveState!.homeScore : null;
+  final awayLiveScore = (isLive || isFinished) ? liveState!.awayScore : null;
+  final homeLeading = (homeLiveScore != null && awayLiveScore != null && homeLiveScore != awayLiveScore)
+      ? homeLiveScore > awayLiveScore
+      : null;
+  return (
+    isLive: isLive, isFinished: isFinished, homeLiveScore: homeLiveScore, awayLiveScore: awayLiveScore,
+    homeLeading: homeLeading,
+  );
+}
+
 class MatchupHero extends StatelessWidget {
   const MatchupHero({super.key, required this.sport, required this.event, required this.prediction, this.liveState});
 
@@ -56,23 +83,7 @@ class MatchupHero extends StatelessWidget {
     final home = teamDisplay(sport, event.home);
     final away = teamDisplay(sport, event.away);
     final homeFavored = prediction.homeWinProbability >= 0.5;
-    final isLive = liveState?.live ?? false;
-    // True once ESPN itself reports the game over, even though this
-    // event's own SportEvent.status can still say "scheduled" for up to
-    // 24h (the once-daily batch ingest hasn't caught up yet -- see
-    // LiveEventState.completed's own doc comment). Kept distinct from
-    // isLive: a finished game shows the FINAL pill instead of LIVE, but
-    // still needs the real (now final, not still-updating) score below.
-    final isFinished = liveState?.completed ?? false;
-    final homeLiveScore = (isLive || isFinished) ? liveState!.homeScore : null;
-    final awayLiveScore = (isLive || isFinished) ? liveState!.awayScore : null;
-    // Who's ahead right now -- null pre-game (no live score yet) or on a
-    // live tie, when neither side is "winning". Distinct from
-    // homeFavored, which is the pre-game win-probability pick and stays
-    // fixed for the whole game.
-    final homeLeading = (homeLiveScore != null && awayLiveScore != null && homeLiveScore != awayLiveScore)
-        ? homeLiveScore > awayLiveScore
-        : null;
+    final (:isLive, :isFinished, :homeLiveScore, :awayLiveScore, :homeLeading) = _liveMatchupState(liveState);
 
     return Container(
       padding: const EdgeInsets.all(28),

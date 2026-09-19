@@ -124,55 +124,81 @@ def build_event_dataset(storage: FeatureStorage, window: int, since_date: str | 
             continue
 
         home_id, away_id = home["entity_id"], away["entity_id"]
-        # Most-recent-first, capped at `window` -- O(window), not O(len(history)).
-        home_history = team_history[home_id][-window:][::-1]
-        away_history = team_history[away_id][-window:][::-1]
-        home_box_history = team_box_history[home_id][-window:][::-1]
-        away_box_history = team_box_history[away_id][-window:][::-1]
-
-        event_key = event["event_key"]
-        home_qb_game, home_qb_history = _leader_and_history(
-            player_games_by_event_team, qb_history, identify_starting_qb, event_key, home_id, window)
-        away_qb_game, away_qb_history = _leader_and_history(
-            player_games_by_event_team, qb_history, identify_starting_qb, event_key, away_id, window)
-        home_rb_game, home_rb_history = _leader_and_history(
-            player_games_by_event_team, rb_history, identify_lead_rusher, event_key, home_id, window)
-        away_rb_game, away_rb_history = _leader_and_history(
-            player_games_by_event_team, rb_history, identify_lead_rusher, event_key, away_id, window)
-        home_wr_game, home_wr_history = _leader_and_history(
-            player_games_by_event_team, wr_history, identify_lead_receiver, event_key, home_id, window)
-        away_wr_game, away_wr_history = _leader_and_history(
-            player_games_by_event_team, wr_history, identify_lead_receiver, event_key, away_id, window)
-
-        rows.append(build_event_features(
-            event, elo_ratings, home_history, away_history, window,
-            home_qb_games=home_qb_history, away_qb_games=away_qb_history,
-            home_rb_games=home_rb_history, away_rb_games=away_rb_history,
-            home_wr_games=home_wr_history, away_wr_games=away_wr_history,
-            home_team_box_stats=home_box_history, away_team_box_stats=away_box_history,
-        ))
-
-        team_history[home_id].append(event)
-        team_history[away_id].append(event)
-        for game, history in (
-            (home_qb_game, qb_history), (away_qb_game, qb_history),
-            (home_rb_game, rb_history), (away_rb_game, rb_history),
-            (home_wr_game, wr_history), (away_wr_game, wr_history),
-        ):
-            if game:
-                history[game["entity_id"]].append(game)
-
-        home_box_row = team_game_stats_by_event_team.get((event_key, home_id))
-        away_box_row = team_game_stats_by_event_team.get((event_key, away_id))
-        if home_box_row:
-            team_box_history[home_id].append(home_box_row)
-        if away_box_row:
-            team_box_history[away_id].append(away_box_row)
+        row, leader_updates = _build_event_row(
+            event, home_id, away_id, elo_ratings, window, team_history, qb_history, rb_history, wr_history,
+            team_box_history, player_games_by_event_team,
+        )
+        rows.append(row)
+        _update_event_history(
+            event, home_id, away_id, team_history, team_box_history, team_game_stats_by_event_team, leader_updates,
+        )
 
         if i % 500 == 0 or i == total:
             logger.info("Built event features: %d/%d", i, total)
 
     return rows
+
+
+def _build_event_row(
+    event: dict, home_id: str, away_id: str, elo_ratings: dict, window: int,
+    team_history: dict, qb_history: dict, rb_history: dict, wr_history: dict, team_box_history: dict,
+    player_games_by_event_team: dict,
+) -> tuple[dict, list[tuple[dict | None, dict]]]:
+    """This event's own feature row, plus [(leader_game_or_None,
+    history_dict), ...] for _update_event_history to fold in after every
+    row this event needs is built."""
+    # Most-recent-first, capped at `window` -- O(window), not O(len(history)).
+    home_history = team_history[home_id][-window:][::-1]
+    away_history = team_history[away_id][-window:][::-1]
+    home_box_history = team_box_history[home_id][-window:][::-1]
+    away_box_history = team_box_history[away_id][-window:][::-1]
+
+    event_key = event["event_key"]
+    home_qb_game, home_qb_hist = _leader_and_history(
+        player_games_by_event_team, qb_history, identify_starting_qb, event_key, home_id, window)
+    away_qb_game, away_qb_hist = _leader_and_history(
+        player_games_by_event_team, qb_history, identify_starting_qb, event_key, away_id, window)
+    home_rb_game, home_rb_hist = _leader_and_history(
+        player_games_by_event_team, rb_history, identify_lead_rusher, event_key, home_id, window)
+    away_rb_game, away_rb_hist = _leader_and_history(
+        player_games_by_event_team, rb_history, identify_lead_rusher, event_key, away_id, window)
+    home_wr_game, home_wr_hist = _leader_and_history(
+        player_games_by_event_team, wr_history, identify_lead_receiver, event_key, home_id, window)
+    away_wr_game, away_wr_hist = _leader_and_history(
+        player_games_by_event_team, wr_history, identify_lead_receiver, event_key, away_id, window)
+
+    row = build_event_features(
+        event, elo_ratings, home_history, away_history, window,
+        home_qb_games=home_qb_hist, away_qb_games=away_qb_hist,
+        home_rb_games=home_rb_hist, away_rb_games=away_rb_hist,
+        home_wr_games=home_wr_hist, away_wr_games=away_wr_hist,
+        home_team_box_stats=home_box_history, away_team_box_stats=away_box_history,
+    )
+    leader_updates = [
+        (home_qb_game, qb_history), (away_qb_game, qb_history),
+        (home_rb_game, rb_history), (away_rb_game, rb_history),
+        (home_wr_game, wr_history), (away_wr_game, wr_history),
+    ]
+    return row, leader_updates
+
+
+def _update_event_history(
+    event: dict, home_id: str, away_id: str, team_history: dict, team_box_history: dict,
+    team_game_stats_by_event_team: dict, leader_updates: list[tuple[dict | None, dict]],
+) -> None:
+    team_history[home_id].append(event)
+    team_history[away_id].append(event)
+    for game, history in leader_updates:
+        if game:
+            history[game["entity_id"]].append(game)
+
+    event_key = event["event_key"]
+    home_box_row = team_game_stats_by_event_team.get((event_key, home_id))
+    away_box_row = team_game_stats_by_event_team.get((event_key, away_id))
+    if home_box_row:
+        team_box_history[home_id].append(home_box_row)
+    if away_box_row:
+        team_box_history[away_id].append(away_box_row)
 
 
 def _group_player_games_by_player(player_games: list[dict]) -> dict[str, list[dict]]:

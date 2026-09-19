@@ -139,38 +139,54 @@ def build_golfer_dataset(
     total = len(events_ascending)
     rows = []
     for i, event in enumerate(events_ascending, start=1):
-        course_id = event.get("course_id")
         participants = event.get("participants", [])
         for participant in participants:
-            entity_id = participant["entity_id"]
-            prior_results = history[entity_id][-window:][::-1]  # most-recent-first, capped at window
-            course_results = (
-                course_history[(entity_id, course_id)][-course_window:][::-1] if course_id is not None else None
-            )
-            season_stats = resolve_season_stats(snapshots, entity_id, event["event_date"]) if snapshots else None
-            played_rounds = sorted(
-                (participant.get("result") or {}).get("rounds", []), key=lambda r: r["round"],
-            )
-            # k=0 (rounds_so_far=None, pre-tournament) through
-            # k=len(played_rounds) (every round this golfer actually
-            # played).
-            for k in range(len(played_rounds) + 1):
-                rows.append(build_golfer_event_features(
-                    event, participant, prior_results, window, course_results, course_window, season_stats,
-                    played_rounds[:k] or None,
-                ))
-
+            rows.extend(_build_golfer_rows(event, participant, window, course_window, history, course_history, snapshots))
         for participant in participants:
-            entity_id = participant["entity_id"]
-            result = participant.get("result") or {}
-            history[entity_id].append(result)
-            if course_id is not None:
-                course_history[(entity_id, course_id)].append(result)
+            _update_golfer_history(event, participant, history, course_history)
 
         if i % 50 == 0 or i == total:
             logger.info("Built golfer features: %d/%d tournaments", i, total)
 
     return rows
+
+
+def _build_golfer_rows(
+    event: dict, participant: dict, window: int, course_window: int,
+    history: dict[str, list[dict]], course_history: dict[tuple[str, str], list[dict]], snapshots: list[dict],
+) -> list[dict]:
+    """This participant's own in-tournament-progress snapshot rows (one per
+    already-played round boundary, k=0 pre-tournament through
+    k=len(played_rounds)), built from history snapshots taken BEFORE this
+    event -- see build_golfer_dataset's own docstring for why the fold-in
+    happens in a separate pass, after every row for this event is built."""
+    entity_id = participant["entity_id"]
+    course_id = event.get("course_id")
+    prior_results = history[entity_id][-window:][::-1]  # most-recent-first, capped at window
+    course_results = course_history[(entity_id, course_id)][-course_window:][::-1] if course_id is not None else None
+    season_stats = resolve_season_stats(snapshots, entity_id, event["event_date"]) if snapshots else None
+    played_rounds = sorted((participant.get("result") or {}).get("rounds", []), key=lambda r: r["round"])
+    return [
+        build_golfer_event_features(
+            event, participant, prior_results, window, course_results, course_window, season_stats,
+            played_rounds[:k] or None,
+        )
+        for k in range(len(played_rounds) + 1)
+    ]
+
+
+def _update_golfer_history(
+    event: dict, participant: dict, history: dict[str, list[dict]], course_history: dict[tuple[str, str], list[dict]],
+) -> None:
+    """Folds this participant's own now-final result into history/
+    course_history in place, once every row for this event has already
+    been built."""
+    course_id = event.get("course_id")
+    entity_id = participant["entity_id"]
+    result = participant.get("result") or {}
+    history[entity_id].append(result)
+    if course_id is not None:
+        course_history[(entity_id, course_id)].append(result)
 
 
 def build_round_dataset(storage: FeatureStorage, window: int, since_date: str | None = None) -> list[dict]:
@@ -207,27 +223,47 @@ def build_round_dataset(storage: FeatureStorage, window: int, since_date: str | 
     for i, event in enumerate(events_ascending, start=1):
         participants = event.get("participants", [])
         for participant in participants:
-            entity_id = participant["entity_id"]
-            result = participant.get("result") or {}
-            prior_overall = history[entity_id][-window:][::-1]
-            for round_result in result.get("rounds", []):
-                round_number = round_result["round"]
-                prior_same_round = round_history[(entity_id, round_number)][-window:][::-1]
-                rows.append(build_round_event_features(
-                    event, participant, round_result, prior_overall, prior_same_round, window,
-                ))
-
+            rows.extend(_build_round_rows(event, participant, window, history, round_history))
         for participant in participants:
-            entity_id = participant["entity_id"]
-            result = participant.get("result") or {}
-            history[entity_id].append(result)
-            for round_result in result.get("rounds", []):
-                round_history[(entity_id, round_result["round"])].append(round_result)
+            _update_round_history(participant, history, round_history)
 
         if i % 50 == 0 or i == total:
             logger.info("Built round features: %d/%d tournaments", i, total)
 
     return rows
+
+
+def _build_round_rows(
+    event: dict, participant: dict, window: int,
+    history: dict[str, list[dict]], round_history: dict[tuple[str, int], list[dict]],
+) -> list[dict]:
+    """This participant's own round-level rows (one per round actually
+    played), built from history snapshots taken BEFORE this tournament --
+    see build_round_dataset's own docstring for the two-loop ordering
+    discipline."""
+    entity_id = participant["entity_id"]
+    result = participant.get("result") or {}
+    prior_overall = history[entity_id][-window:][::-1]
+    return [
+        build_round_event_features(
+            event, participant, round_result, prior_overall,
+            round_history[(entity_id, round_result["round"])][-window:][::-1], window,
+        )
+        for round_result in result.get("rounds", [])
+    ]
+
+
+def _update_round_history(
+    participant: dict, history: dict[str, list[dict]], round_history: dict[tuple[str, int], list[dict]],
+) -> None:
+    """Folds this participant's own now-final tournament + round results
+    into history/round_history in place, once every row for this
+    tournament has already been built."""
+    entity_id = participant["entity_id"]
+    result = participant.get("result") or {}
+    history[entity_id].append(result)
+    for round_result in result.get("rounds", []):
+        round_history[(entity_id, round_result["round"])].append(round_result)
 
 
 def build_cutline_dataset(
@@ -311,6 +347,24 @@ def build_match_and_cup_datasets(
         len(field_events), len(match_events), len(cup_events),
     )
 
+    cup_rosters = _build_cup_rosters(match_events)
+
+    timeline = sorted(field_events + match_events + cup_events, key=lambda e: e.get("event_date", ""))
+    history: dict[str, list[dict]] = defaultdict(list)
+    match_rows, cup_rows = [], []
+    for event in timeline:
+        _process_timeline_event(event, cup_rosters, history, window, match_rows, cup_rows)
+
+    logger.info("Built %d match rows and %d cup rows", len(match_rows), len(cup_rows))
+    return match_rows, cup_rows
+
+
+def _build_cup_rosters(match_events: list[dict]) -> dict[str, dict[str, set]]:
+    """{parent_event_id: {"home": {golfer_id, ...}, "away": {...}}} -- a
+    Cup's own full roster (every golfer who played ANY session), derived
+    from scanning every match_play event's own golfer_entity_ids -- see
+    build_match_and_cup_datasets' own docstring for why this is the only
+    way to know a Cup's own roster."""
     cup_rosters: dict[str, dict[str, set]] = defaultdict(lambda: defaultdict(set))
     for match_event in match_events:
         parent_id = match_event.get("parent_event_id")
@@ -321,35 +375,39 @@ def build_match_and_cup_datasets(
             if role is None:
                 continue
             cup_rosters[parent_id][role].update(participant.get("golfer_entity_ids", []))
+    return cup_rosters
 
-    timeline = sorted(field_events + match_events + cup_events, key=lambda e: e.get("event_date", ""))
-    history: dict[str, list[dict]] = defaultdict(list)
-    match_rows, cup_rows = [], []
-    for event in timeline:
-        event_type = event.get("event_type")
-        if event_type == "field":
-            for participant in event.get("participants", []):
-                history[participant["entity_id"]].append(participant.get("result") or {})
-            continue
 
-        participants = event.get("participants", [])
-        home = next((p for p in participants if p.get("role") == "home"), None)
-        away = next((p for p in participants if p.get("role") == "away"), None)
-        if home is None or away is None:
-            continue
+def _process_timeline_event(
+    event: dict, cup_rosters: dict[str, dict[str, set]], history: dict[str, list[dict]], window: int,
+    match_rows: list[dict], cup_rows: list[dict],
+) -> None:
+    """One timeline entry -- folds a field event's own results into
+    history, or builds+appends a match_play/cup row from the current
+    history snapshot (never folding match/Cup results back in -- see
+    build_match_and_cup_datasets' own docstring). Mutates history/
+    match_rows/cup_rows in place."""
+    event_type = event.get("event_type")
+    if event_type == "field":
+        for participant in event.get("participants", []):
+            history[participant["entity_id"]].append(participant.get("result") or {})
+        return
 
-        if event_type == "match_play":
-            home_prior = {gid: history[gid][-window:][::-1] for gid in home.get("golfer_entity_ids", [])}
-            away_prior = {gid: history[gid][-window:][::-1] for gid in away.get("golfer_entity_ids", [])}
-            match_rows.append(build_match_event_features(event, home_prior, away_prior, window))
-        elif event_type == "cup":
-            roster = cup_rosters.get(event["event_id"], {})
-            home_prior = {gid: history[gid][-window:][::-1] for gid in roster.get("home", set())}
-            away_prior = {gid: history[gid][-window:][::-1] for gid in roster.get("away", set())}
-            cup_rows.append(build_cup_event_features(event, home_prior, away_prior, window))
+    participants = event.get("participants", [])
+    home = next((p for p in participants if p.get("role") == "home"), None)
+    away = next((p for p in participants if p.get("role") == "away"), None)
+    if home is None or away is None:
+        return
 
-    logger.info("Built %d match rows and %d cup rows", len(match_rows), len(cup_rows))
-    return match_rows, cup_rows
+    if event_type == "match_play":
+        home_prior = {gid: history[gid][-window:][::-1] for gid in home.get("golfer_entity_ids", [])}
+        away_prior = {gid: history[gid][-window:][::-1] for gid in away.get("golfer_entity_ids", [])}
+        match_rows.append(build_match_event_features(event, home_prior, away_prior, window))
+    elif event_type == "cup":
+        roster = cup_rosters.get(event["event_id"], {})
+        home_prior = {gid: history[gid][-window:][::-1] for gid in roster.get("home", set())}
+        away_prior = {gid: history[gid][-window:][::-1] for gid in roster.get("away", set())}
+        cup_rows.append(build_cup_event_features(event, home_prior, away_prior, window))
 
 
 def _write_parquet(rows: list[dict]) -> bytes:

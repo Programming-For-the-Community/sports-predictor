@@ -4,10 +4,23 @@ and GET /ncaafb/season -- shared between the heavy inference Lambda
 (Source/aws-lambdas/ncaafb/predict) and the light read-only Lambda
 (Source/aws-lambdas/ncaafb/predict-read).
 
+`_home_and_away`/`_actual_result`/`_prediction_comparison`/
+`_leaders_comparison`/`list_models`/`get_season_projection`/
+`WIN_PROBABILITY_MODEL`/`SCORE_MODELS` are thin re-exports of
+library.serving.common (confirmed identical across nfl/nba/ncaafb/ncaambb
+before sharing there -- see that module's own docstrings). What stays
+genuinely NCAAFB-owned here: week-grouping (`_week_key`/
+`_previous_week_events`/`_next_week_events`, a genuinely different date-
+gap-clustering algorithm from NFL's own fixed-cutoff one -- CFBD's flat
+postseason week numbering needs it), the CFP/Bowl round-name rule
+(`_round_label`), and list_events itself, which wires those together in a
+shape NFL's own list_events (different week-clustering algorithm, a
+Pro-Bowl/exhibition filter NCAAFB has no equivalent of) doesn't share
+closely enough to also fold in here.
+
 Callers own their own storage/s3/predictions_table objects and Lambda-
 lifecycle concerns.
 """
-import re
 from concurrent.futures import ThreadPoolExecutor
 from datetime import date, datetime, timedelta, timezone
 
@@ -15,41 +28,20 @@ from boto3.dynamodb.conditions import Key
 
 from library.features.ncaafb import is_bowl_game, is_playoff_game
 from library.parsing import us_eastern_date
-from library.serving.common import RECENT_EVENTS_LIMIT, enrich_participants
-from library.storage.model_artifacts import current_version_key, model_artifact_key
-from library.storage.season_projections import season_projection_key
+from library.serving import common
+from library.serving.common import (
+    RECENT_EVENTS_LIMIT,
+    SCORE_MODELS,
+    WIN_PROBABILITY_MODEL,
+    enrich_participants,
+    get_season_projection,
+    list_models,
+)
 
-WIN_PROBABILITY_MODEL = "win-probability"
-SCORE_MODELS = {"margin": "score-margin", "home_score": "home-score", "away_score": "away-score"}
-
-# Mirrors predict/event_prediction.py's own LEADER_CATEGORY_STATS,
-# inverted (stat -> category instead of category -> stats).
-_STAT_CATEGORY = {
-    "passing_yards": "passing", "passing_touchdowns": "passing",
-    "receiving_yards": "receiving", "receiving_touchdowns": "receiving",
-    "rushing_yards": "rushing", "rushing_touchdowns": "rushing",
-    "defensive_sacks": "sacks",
-}
-
-# Matches predict/event_prediction.py's record_prediction model_key shape
-# for a player-prop prediction (MODEL#player-prop-passing-yards#v3#PLAYER#qb1).
-_PLAYER_PROP_MODEL_KEY_RE = re.compile(r"^MODEL#player-prop-([a-z-]+)#v\d+#PLAYER#(.+)$")
-
-# Mirrors predict/event_prediction.py's own LEADER_CATEGORY_STATS primary
-# stat per category. The audit trail can hold more rows per category than
-# this many, so this re-sorts and re-slices rather than trusting it
-# already matches the leaders block shown pre-game.
-_LEADER_CATEGORY_LIMITS = {"rushing": 2, "receiving": 3, "sacks": 3}
-_CATEGORY_PRIMARY_STAT = {"rushing": "rushing_yards", "receiving": "receiving_yards", "sacks": "defensive_sacks"}
-
-
-def _home_and_away(event: dict) -> tuple[str, str] | None:
-    participants = event.get("participants", [])
-    home = next((p for p in participants if p.get("role") == "home"), None)
-    away = next((p for p in participants if p.get("role") == "away"), None)
-    if home is None or away is None:
-        return None
-    return home["entity_id"], away["entity_id"]
+_home_and_away = common._home_and_away
+_actual_result = common._actual_result
+_prediction_comparison = common._prediction_comparison
+_leaders_comparison = common._football_leaders_comparison
 
 
 def _week_key(event: dict) -> tuple:
@@ -139,150 +131,6 @@ def _next_week_events(scheduled: list[dict]) -> list[dict]:
     return [e for e in same_week if e.get("event_date", "") in cluster_dates]
 
 
-def _actual_result(event: dict) -> dict | None:
-    home_away = _home_and_away(event)
-    if home_away is None:
-        return None
-    home_id, away_id = home_away
-    participants = event.get("participants", [])
-    home = next((p for p in participants if p.get("entity_id") == home_id), None)
-    away = next((p for p in participants if p.get("entity_id") == away_id), None)
-    home_score = (home.get("result") or {}).get("score") if home else None
-    away_score = (away.get("result") or {}).get("score") if away else None
-    if home_score is None or away_score is None:
-        return None
-    return {"home_score": home_score, "away_score": away_score, "home_won": home_score > away_score}
-
-
-def _prediction_comparison(rows: list[dict], event: dict) -> dict | None:
-    """Compares this event's logged prediction against the actual result
-    -- reads the audit trail predict/event_prediction.py's record_prediction
-    already wrote, never recomputes one now.
-
-    rows: this event's own predictions-table rows, already fetched by the
-    caller and shared with _leaders_comparison rather than re-queried."""
-    actual = _actual_result(event)
-    if actual is None:
-        return None
-
-    def _row_for(model_prefix: str) -> dict | None:
-        return next((r for r in rows if r["model_key"].startswith(f"MODEL#{model_prefix}#")), None)
-
-    win_probability_row = _row_for(WIN_PROBABILITY_MODEL)
-    if win_probability_row is None:
-        return None
-
-    margin_row = _row_for(SCORE_MODELS["margin"])
-    home_score_row = _row_for(SCORE_MODELS["home_score"])
-    away_score_row = _row_for(SCORE_MODELS["away_score"])
-
-    home_win_probability = win_probability_row["predicted_value"]["home_win_probability"]
-    predicted_home_won = home_win_probability >= 0.5
-
-    return {
-        "predicted_home_win_probability": home_win_probability,
-        "predicted_home_won": predicted_home_won,
-        "actual_home_won": actual["home_won"],
-        "correct": predicted_home_won == actual["home_won"],
-        "predicted_margin": margin_row["predicted_value"]["value"] if margin_row else None,
-        "actual_margin": actual["home_score"] - actual["away_score"],
-        "predicted_home_score": home_score_row["predicted_value"]["value"] if home_score_row else None,
-        "predicted_away_score": away_score_row["predicted_value"]["value"] if away_score_row else None,
-        "actual_home_score": actual["home_score"],
-        "actual_away_score": actual["away_score"],
-    }
-
-
-def _leaders_comparison(storage, rows: list[dict], sport: str, event: dict) -> dict | None:
-    """Player-prop predicted-vs-actual for a completed event. Shape
-    mirrors the (predicted-only) `leaders` block predict/event_prediction.py's
-    predict_event_leaders returns: `passing` is a single entry or null per
-    team (only one passing candidate is ever scored), `rushing`/`receiving`/
-    `sacks` are lists.
-
-    rows: same already-fetched predictions-table rows _prediction_
-    comparison takes.
-
-    Grouped by (entity_id, category), not entity_id alone -- a versatile
-    player (e.g. a receiving back) can be a genuine candidate in more than
-    one category, scored separately per category by predict_event_leaders
-    (a distinct MODEL#player-prop-<stat># row per stat). Keying only on
-    entity_id previously merged every category's stats for that player
-    into one dict, then filed the WHOLE merged dict under whichever single
-    category won an arbitrary dict-iteration-order tiebreak -- a real
-    complaint 2026-09-xx: a running back's receiving-leaders row was
-    showing his rushing line appended after his (near-zero) receiving one.
-    Each (entity_id, category) pair now gets its own entry, correctly
-    scoped to just that category's own stats, and can appear in more than
-    one category's own list, same as the predicted-only leaders panel
-    already allows."""
-    home_away = _home_and_away(event)
-    if home_away is None:
-        return None
-    home_id, away_id = home_away
-
-    predicted_by_entity_category: dict[tuple[str, str], dict[str, float]] = {}
-    for row in rows:
-        match = _PLAYER_PROP_MODEL_KEY_RE.match(row["model_key"])
-        if match is None:
-            continue
-        stat = match.group(1).replace("-", "_")
-        category = _STAT_CATEGORY.get(stat)
-        if category is None:
-            continue
-        entity_id = match.group(2)
-        predicted_by_entity_category.setdefault((entity_id, category), {})[stat] = row["predicted_value"]["value"]
-
-    if not predicted_by_entity_category:
-        return None
-
-    actual_by_entity = {
-        row["entity_id"]: row.get("stat_line", {})
-        for row in storage.get_player_game_stats_for_event(event["event_key"])
-    }
-
-    home: dict[str, list[dict] | dict | None] = {"passing": None, "rushing": [], "receiving": [], "sacks": []}
-    away: dict[str, list[dict] | dict | None] = {"passing": None, "rushing": [], "receiving": [], "sacks": []}
-
-    entity_cache: dict[str, dict | None] = {}
-    for (entity_id, category), predicted_stats in predicted_by_entity_category.items():
-        if entity_id not in entity_cache:
-            entity_cache[entity_id] = storage.get_entity(sport, entity_id, "player")
-        entity = entity_cache[entity_id]
-        team_id = (entity.get("metadata") or {}).get("team_id") if entity else None
-        if team_id == home_id:
-            bucket = home
-        elif team_id == away_id:
-            bucket = away
-        else:
-            # Transferred/left the program since the prediction was
-            # recorded, or a lookup failure -- skip rather than guess
-            # which side.
-            continue
-
-        actual_stats = actual_by_entity.get(entity_id, {})
-        entry = {
-            "entity_id": entity_id,
-            "predicted": predicted_stats,
-            "actual": {stat: actual_stats[stat] for stat in predicted_stats if stat in actual_stats},
-        }
-        if entity and entity.get("name"):
-            entry["name"] = entity["name"]
-
-        if category == "passing":
-            bucket["passing"] = entry
-        else:
-            bucket[category].append(entry)
-
-    for bucket in (home, away):
-        for category, limit in _LEADER_CATEGORY_LIMITS.items():
-            primary_stat = _CATEGORY_PRIMARY_STAT[category]
-            bucket[category].sort(key=lambda entry: entry["predicted"].get(primary_stat, -1), reverse=True)
-            bucket[category] = bucket[category][:limit]
-
-    return {"home": home, "away": away}
-
-
 def _round_label(event: dict) -> str | None:
     """None for a regular-season game; "CFP" for a real 12-team playoff
     game (is_playoff_game); "Bowl" for any other postseason game."""
@@ -348,57 +196,3 @@ def list_events(storage, predictions_table, sport: str, status: str) -> dict:
         entries = list(executor.map(_entry, events))
 
     return {"sport": sport, "events": entries}
-
-
-def _load_model_summary(s3, sport: str, model_name: str) -> dict | None:
-    """One model's card summary, or None if it's never had a version
-    promoted. Same 3-round-trip, run-every-model-concurrently shape as
-    nfl_reads._load_model_summary."""
-    pointer_key = current_version_key(sport, model_name)
-    if not s3.object_exists(pointer_key):
-        return None
-    version = s3.get_json(pointer_key)["version"]
-    card = s3.get_json(model_artifact_key(sport, model_name, version, "model_card.json"))
-    top_features = [
-        {"feature": name, "importance": value}
-        for name, value in list(card.get("feature_importances", {}).items())[:5]
-    ]
-    return {
-        "model_name": card["model_name"],
-        "algorithm": card["algorithm"],
-        "version": card["version"],
-        "trained_at": card["trained_at"],
-        **{k: v for k, v in card.items() if k in (
-            "accuracy", "log_loss", "naive_baseline_accuracy", "rmse", "mae", "naive_baseline_rmse", "naive_baseline_mae",
-        )},
-        "top_features": top_features,
-        "candidates": card.get("candidates"),
-        "candidates_ranked_by": card.get("candidates_ranked_by"),
-    }
-
-
-def list_models(s3, sport: str) -> dict:
-    """GET /ncaafb/models -- lists every currently-promoted model
-    (win-probability, the three score models, the seven player-prop
-    models, national-ranking), with its latest model card summary. A
-    model that's never had a version promoted simply doesn't appear in
-    this list."""
-    prefix = f"{sport}/"
-    model_names = sorted({key[len(prefix):].split("/")[0] for key in s3.list_keys(prefix)})
-
-    if not model_names:
-        return {"sport": sport, "models": []}
-
-    with ThreadPoolExecutor(max_workers=min(len(model_names), 10)) as executor:
-        results = executor.map(lambda name: _load_model_summary(s3, sport, name), model_names)
-
-    return {"sport": sport, "models": [card for card in results if card is not None]}
-
-
-def get_season_projection(s3, sport: str) -> dict | None:
-    """Reads the cached season projection written weekly by the scheduled compute path.
-    None if it hasn't run yet."""
-    key = season_projection_key(sport)
-    if not s3.object_exists(key):
-        return None
-    return s3.get_json(key)

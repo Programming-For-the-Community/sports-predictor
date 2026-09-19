@@ -69,7 +69,9 @@ def _uses_team_layer(flat: list[dict]) -> bool:
     if not matches:
         return False
     first_competitors = matches[0].get("competitors") or []
-    return bool(first_competitors) and "team" in first_competitors[0]
+    if not first_competitors:
+        return False
+    return "team" in first_competitors[0]
 
 
 def is_match_scoring(event: dict) -> bool:

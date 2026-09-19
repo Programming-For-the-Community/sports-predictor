@@ -20,8 +20,7 @@ event_types.
 """
 from concurrent.futures import ThreadPoolExecutor
 
-from library.serving.common import RECENT_EVENTS_LIMIT, enrich_participants, prefetch_entities
-from library.storage.season_projections import season_projection_key
+from library.serving.common import RECENT_EVENTS_LIMIT, enrich_participants, get_season_projection, prefetch_entities
 
 FIELD_EVENT_MODELS = {
     "win_probability": "win-probability",
@@ -154,17 +153,3 @@ def list_events(storage, sport: str, status: str) -> dict:
         entries = list(executor.map(lambda e: _entry(storage, sport, e, entity_cache), events))
 
     return {"sport": sport, "events": entries}
-
-
-def get_season_projection(s3, sport: str) -> dict | None:
-    """GET /f1/season -- reads the championship standings/probability
-    projection (driver AND constructor standings, from the same simulated
-    pass -- see aws-lambdas/f1/predict/season_simulation.py's own
-    simulate_season) written weekly by the scheduled compute path
-    (aws-lambdas/f1/predict/season_projection.py's run_scheduled), never
-    computed live here. None if the schedule hasn't fired yet -- the
-    caller surfaces that as a 503, same as every other sport."""
-    key = season_projection_key(sport)
-    if not s3.object_exists(key):
-        return None
-    return s3.get_json(key)

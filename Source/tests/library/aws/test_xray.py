@@ -19,7 +19,9 @@ class TestNewTraceId:
         assert re.fullmatch(r"1-[0-9a-f]{8}-[0-9a-f]{24}", xray.new_trace_id())
 
     def test_two_calls_produce_different_ids(self):
-        assert xray.new_trace_id() != xray.new_trace_id()
+        first = xray.new_trace_id()
+        second = xray.new_trace_id()
+        assert first != second
 
 
 class TestCurrentTraceHeader:

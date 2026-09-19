@@ -1,6 +1,7 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../api/api_client.dart';
+import '../api/api_routes.dart';
 import '../models/f1_live_score.dart';
 import '../models/field_live_score.dart';
 import '../models/live_score.dart';
@@ -24,13 +25,13 @@ class LiveScoresRepository {
   final ApiClient _api;
 
   Future<Map<String, LiveEventState>> getLiveScores(String sport) async {
-    final response = await _api.get('/$sport/live-scores') as Map<String, dynamic>;
+    final response = await _api.get(ApiRoutes.liveScores(sport)) as Map<String, dynamic>;
     final events = response['events'] as Map<String, dynamic>? ?? {};
     return events.map((eventId, state) => MapEntry(eventId, LiveEventState.fromJson(state as Map<String, dynamic>)));
   }
 
   Future<Map<String, PgaLiveEventState>> getPgaLiveScores(String sport) async {
-    final response = await _api.get('/$sport/live-scores') as Map<String, dynamic>;
+    final response = await _api.get(ApiRoutes.liveScores(sport)) as Map<String, dynamic>;
     final events = response['events'] as Map<String, dynamic>? ?? {};
     return events.map((eventId, state) => MapEntry(eventId, parsePgaLiveEventState(state as Map<String, dynamic>)));
   }
@@ -44,7 +45,7 @@ class LiveScoresRepository {
   }
 
   Future<Map<String, F1LiveEventState>> getF1LiveScores(String sport) async {
-    final response = await _api.get('/$sport/live-scores') as Map<String, dynamic>;
+    final response = await _api.get(ApiRoutes.liveScores(sport)) as Map<String, dynamic>;
     final events = response['events'] as Map<String, dynamic>? ?? {};
     return events.map((eventId, state) => MapEntry(eventId, F1LiveEventState.fromJson(state as Map<String, dynamic>)));
   }

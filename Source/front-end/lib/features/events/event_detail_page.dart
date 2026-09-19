@@ -8,6 +8,7 @@ import '../../core/data/live_scores_repository.dart';
 import '../../core/models/event.dart';
 import '../../core/models/event_leaders.dart';
 import '../../core/models/event_status.dart';
+import '../../core/models/prediction.dart';
 import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_text_styles.dart';
 import '../../core/widgets/matchup_hero.dart';
@@ -151,90 +152,42 @@ class _EventDetailPageState extends ConsumerState<EventDetailPage> with WidgetsB
       return Text('Event not found.', style: AppTextStyles.body(color: AppColors.neg));
     }
 
-    if (event.status == EventStatus.completed) {
-      final leadersComparison = event.leadersComparison;
-      return SingleChildScrollView(
-        padding: const EdgeInsets.all(24),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            MatchupResultHero(sport: widget.sportId, event: event, comparison: event.predictionComparison),
-            const SizedBox(height: 20),
-            if (leadersComparison != null)
-              TeamLeadersComparisonPanel(
-                sport: widget.sportId,
-                homeAbbr: teamDisplay(widget.sportId, event.home).abbreviation,
-                awayAbbr: teamDisplay(widget.sportId, event.away).abbreviation,
-                comparison: leadersComparison,
-              )
-            else
-              Center(
-                child: Text(
-                  'No player-prop predictions were recorded for this game.',
-                  style: AppTextStyles.body(color: AppColors.inkMute),
-                ),
-              ),
-          ],
-        ),
-      );
-    }
+    return event.status == EventStatus.completed ? _completedEventView(event) : _upcomingOrLiveEventView(event);
+  }
 
+  Widget _completedEventView(SportEvent event) {
+    final leadersComparison = event.leadersComparison;
+    return SingleChildScrollView(
+      padding: const EdgeInsets.all(24),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          MatchupResultHero(sport: widget.sportId, event: event, comparison: event.predictionComparison),
+          const SizedBox(height: 20),
+          if (leadersComparison != null)
+            TeamLeadersComparisonPanel(
+              sport: widget.sportId,
+              homeAbbr: teamDisplay(widget.sportId, event.home).abbreviation,
+              awayAbbr: teamDisplay(widget.sportId, event.away).abbreviation,
+              comparison: leadersComparison,
+            )
+          else
+            Center(
+              child: Text(
+                'No player-prop predictions were recorded for this game.',
+                style: AppTextStyles.body(color: AppColors.inkMute),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _upcomingOrLiveEventView(SportEvent event) {
     return SingleChildScrollView(
       padding: const EdgeInsets.all(24),
       child: ref.watch(eventPredictionProvider((sport: widget.sportId, eventId: widget.eventId))).when(
-            data: (prediction) {
-              final leaders = prediction.leaders;
-              final liveScores = ref.watch(liveScoresProvider(widget.sportId)).value ?? const {};
-              final liveState = liveScores[widget.eventId];
-              // Once the game is live OR finished (liveState.completed --
-              // ESPN's own signal, independent of this event's own
-              // SportEvent.status, which can lag up to 24h behind the
-              // real result), swap to the same predicted-vs-actual panel
-              // a completed event uses, fed this event's live (or final)
-              // stat lines. Without the `completed` check, this panel
-              // would revert to the predicted-only one the instant the
-              // game ends (liveState.live flips back to false right
-              // then) and stay that way until DynamoDB's own status
-              // finally catches up. Falls back to the predicted-only
-              // panel before kickoff or before the live poll has produced
-              // any player stats.
-              final liveComparison = leaders != null && liveState != null && (liveState.live || liveState.completed)
-                  ? leaders.toLiveComparison(liveState.playerStats)
-                  : null;
-              return Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  MatchupHero(sport: widget.sportId, event: event, prediction: prediction, liveState: liveState),
-                  if (prediction.stale) ...[
-                    const SizedBox(height: 12),
-                    Center(
-                      child: PredictionFreshnessBadge(
-                        sport: widget.sportId, eventId: widget.eventId,
-                        stale: prediction.stale, retryAfterSeconds: prediction.staleRetryAfterSeconds,
-                      ),
-                    ),
-                  ],
-                  if (liveComparison != null) ...[
-                    const SizedBox(height: 20),
-                    TeamLeadersComparisonPanel(
-                      sport: widget.sportId,
-                      homeAbbr: teamDisplay(widget.sportId, event.home).abbreviation,
-                      awayAbbr: teamDisplay(widget.sportId, event.away).abbreviation,
-                      comparison: liveComparison,
-                      title: liveState!.live ? 'PLAYER LEADERS -- LIVE' : 'PLAYER LEADERS -- FINAL',
-                    ),
-                  ] else if (leaders != null) ...[
-                    const SizedBox(height: 20),
-                    TeamLeadersPanel(
-                      sport: widget.sportId,
-                      homeAbbr: teamDisplay(widget.sportId, event.home).abbreviation,
-                      awayAbbr: teamDisplay(widget.sportId, event.away).abbreviation,
-                      leaders: leaders,
-                    ),
-                  ],
-                ],
-              );
-            },
+            data: (prediction) => _predictionView(event, prediction),
             loading: () => const Center(child: CircularProgressIndicator()),
             error: (error, _) => error is PredictionComputingException
                 ? PredictionComputingRetry(
@@ -242,6 +195,58 @@ class _EventDetailPageState extends ConsumerState<EventDetailPage> with WidgetsB
                   )
                 : Text('Couldn\'t load prediction: $error', style: AppTextStyles.body(color: AppColors.neg)),
           ),
+    );
+  }
+
+  Widget _predictionView(SportEvent event, EventPrediction prediction) {
+    final leaders = prediction.leaders;
+    final liveScores = ref.watch(liveScoresProvider(widget.sportId)).value ?? const {};
+    final liveState = liveScores[widget.eventId];
+    // Once the game is live OR finished (liveState.completed -- ESPN's
+    // own signal, independent of this event's own SportEvent.status,
+    // which can lag up to 24h behind the real result), swap to the same
+    // predicted-vs-actual panel a completed event uses, fed this event's
+    // live (or final) stat lines. Without the `completed` check, this
+    // panel would revert to the predicted-only one the instant the game
+    // ends (liveState.live flips back to false right then) and stay
+    // that way until DynamoDB's own status finally catches up. Falls
+    // back to the predicted-only panel before kickoff or before the
+    // live poll has produced any player stats.
+    final liveComparison = leaders != null && liveState != null && (liveState.live || liveState.completed)
+        ? leaders.toLiveComparison(liveState.playerStats)
+        : null;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        MatchupHero(sport: widget.sportId, event: event, prediction: prediction, liveState: liveState),
+        if (prediction.stale) ...[
+          const SizedBox(height: 12),
+          Center(
+            child: PredictionFreshnessBadge(
+              sport: widget.sportId, eventId: widget.eventId,
+              stale: prediction.stale, retryAfterSeconds: prediction.staleRetryAfterSeconds,
+            ),
+          ),
+        ],
+        if (liveComparison != null) ...[
+          const SizedBox(height: 20),
+          TeamLeadersComparisonPanel(
+            sport: widget.sportId,
+            homeAbbr: teamDisplay(widget.sportId, event.home).abbreviation,
+            awayAbbr: teamDisplay(widget.sportId, event.away).abbreviation,
+            comparison: liveComparison,
+            title: liveState!.live ? 'PLAYER LEADERS -- LIVE' : 'PLAYER LEADERS -- FINAL',
+          ),
+        ] else if (leaders != null) ...[
+          const SizedBox(height: 20),
+          TeamLeadersPanel(
+            sport: widget.sportId,
+            homeAbbr: teamDisplay(widget.sportId, event.home).abbreviation,
+            awayAbbr: teamDisplay(widget.sportId, event.away).abbreviation,
+            leaders: leaders,
+          ),
+        ],
+      ],
     );
   }
 }

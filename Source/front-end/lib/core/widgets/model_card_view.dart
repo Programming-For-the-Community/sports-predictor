@@ -185,7 +185,7 @@ class _CandidateRow extends StatelessWidget {
           ),
         ),
         if (isCurrent) ...[
-          _Badge(text: 'PROMOTED'),
+          const _Badge(text: 'PROMOTED'),
           const SizedBox(width: 10),
         ],
         Text(value, style: AppTextStyles.metricValue(color: isCurrent ? AppColors.cyan : AppColors.inkSub)),

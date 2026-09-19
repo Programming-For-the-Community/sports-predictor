@@ -15,14 +15,13 @@ Key routing (based on S3 key pattern):
     nfl/boxscore/{season}/{event_id}.json      -> player stats, player entities, team stats
     nfl/roster/{team_id}.json                  -> player entities (team_id correction)
 """
-import json
 import logging
-import urllib.parse
 
 import boto3
 
-from library.aws.account import get_account_id
+from library.aws import lambda_singletons
 from library.aws.boto_config import DEFAULT_CONFIG
+from library.normalize import dispatch as dispatch_common
 from library.normalize.espn import (
     boxscore_to_player_game_stats,
     boxscore_to_team_game_stats,
@@ -58,11 +57,7 @@ _storage: PipelineStorage | None = None
 
 
 def _get_storage() -> PipelineStorage:
-    # Initialized once per container lifetime, reused across warm invocations.
-    global _storage
-    if _storage is None:
-        _storage = PipelineStorage()
-    return _storage
+    return lambda_singletons.get_or_create(globals(), "_storage", PipelineStorage)
 
 
 def _process_teams(payload: dict, key: str) -> None:
@@ -106,33 +101,12 @@ def _process_boxscore(payload: dict, key: str) -> None:
 
 
 def _dispatch(bucket: str, key: str) -> None:
-    response = _s3.get_object(Bucket=bucket, Key=key, ExpectedBucketOwner=get_account_id())
-    payload = json.loads(response["Body"].read())
-
-    if key.endswith("/teams.json"):
-        _process_teams(payload, key)
-    elif "/scoreboard/" in key:
-        _process_scoreboard(payload, key)
-    elif "/boxscore/" in key:
-        _process_boxscore(payload, key)
-    elif "/roster/" in key:
-        _process_roster(payload, key)
-    else:
-        logger.warning("Unrecognized S3 key pattern, skipping: %s", key)
+    dispatch_common.dispatch(
+        _s3, bucket, key, logger,
+        process_teams=_process_teams, process_scoreboard=_process_scoreboard,
+        process_boxscore=_process_boxscore, process_roster=_process_roster,
+    )
 
 
 def lambda_handler(event: dict, context) -> dict:
-    records = event.get("Records", [])
-    processed = failed = 0
-
-    for record in records:
-        bucket = record["s3"]["bucket"]["name"]
-        key = urllib.parse.unquote_plus(record["s3"]["object"]["key"])
-        try:
-            _dispatch(bucket, key)
-            processed += 1
-        except Exception:
-            logger.exception("Failed processing s3://%s/%s", bucket, key)
-            failed += 1
-
-    return {"processed": processed, "failed": failed}
+    return dispatch_common.lambda_handler_body(event, _dispatch, logger)

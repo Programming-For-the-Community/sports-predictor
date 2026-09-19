@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../core/models/sport_config.dart';
+import '../../core/routing/app_routes.dart';
 import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_text_styles.dart';
 import '../../core/widgets/page_glow.dart';
@@ -51,7 +52,7 @@ class SportShellPage extends StatelessWidget {
     // shell, so '/' is still correct for it.
     final segments = location.split('/');
     final onEventDetail = segments.length > 3 && segments[2] == 'events';
-    final backDestination = onEventDetail ? '/$sportId/events' : '/';
+    final backDestination = onEventDetail ? AppRoutes.events(sportId) : AppRoutes.home;
 
     return Scaffold(
       backgroundColor: AppColors.bg,
@@ -116,7 +117,7 @@ class _TabToggle extends StatelessWidget {
             child: _TabButton(
               label: _SportTabLabels.events,
               active: activeTab == _SportTab.events,
-              onTap: () => context.go('/$sportId/events'),
+              onTap: () => context.go(AppRoutes.events(sportId)),
             ),
           ),
           if (showSeasonTab)
@@ -124,14 +125,14 @@ class _TabToggle extends StatelessWidget {
               child: _TabButton(
                 label: _SportTabLabels.season,
                 active: activeTab == _SportTab.season,
-                onTap: () => context.go('/$sportId/season'),
+                onTap: () => context.go(AppRoutes.season(sportId)),
               ),
             ),
           Expanded(
             child: _TabButton(
               label: _SportTabLabels.models,
               active: activeTab == _SportTab.models,
-              onTap: () => context.go('/$sportId/models'),
+              onTap: () => context.go(AppRoutes.models(sportId)),
             ),
           ),
         ],

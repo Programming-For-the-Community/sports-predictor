@@ -190,6 +190,45 @@ def project_full_bracket(
     }
 
 
+def _simulate_regular_season_games(
+    remaining_games: list[tuple[str, str]], wins: dict[str, int], losses: dict[str, int],
+    ratings: dict[str, float], home_advantage: float, k_factor: float, rng: random.Random,
+) -> None:
+    """One simulated regular season's worth of remaining games -- mutates
+    wins/losses/ratings in place."""
+    for home_id, away_id in remaining_games:
+        home_rating = ratings.get(home_id, DEFAULT_STARTING_RATING)
+        away_rating = ratings.get(away_id, DEFAULT_STARTING_RATING)
+        home_win_probability = expected_score(home_rating, away_rating, home_advantage)
+        home_won = rng.random() < home_win_probability
+        winner_id = home_id if home_won else away_id
+        loser_id = away_id if home_won else home_id
+
+        wins[winner_id] += 1
+        losses[loser_id] += 1
+
+        actual_home = 1.0 if home_won else 0.0
+        ratings[home_id] = home_rating + k_factor * (actual_home - home_win_probability)
+        ratings[away_id] = away_rating + k_factor * ((1 - actual_home) - (1 - home_win_probability))
+
+
+def _simulate_conference_seeding(
+    conferences: dict[str, dict[str, list[str]]], wins: dict[str, int], point_differential: dict[str, int],
+    division_titles: dict[str, int], playoff_berths: dict[str, int],
+) -> dict[str, list[str]]:
+    """{conference: seeds 1-7} for one simulated regular season -- mutates
+    division_titles/playoff_berths in place."""
+    seeds_by_conference: dict[str, list[str]] = {}
+    for conference, division_teams in conferences.items():
+        seeds, division_winners = _seed_conference(division_teams, wins, point_differential)
+        for team_id in division_winners:
+            division_titles[team_id] += 1
+        for team_id in seeds:
+            playoff_berths[team_id] += 1
+        seeds_by_conference[conference] = seeds
+    return seeds_by_conference
+
+
 def simulate_season(
     current_wins: dict[str, int],
     current_losses: dict[str, int],
@@ -236,34 +275,18 @@ def simulate_season(
         losses = {team_id: current_losses.get(team_id, 0) for team_id in teams}
         ratings = dict(current_ratings)
 
-        for home_id, away_id in remaining_games:
-            home_rating = ratings.get(home_id, DEFAULT_STARTING_RATING)
-            away_rating = ratings.get(away_id, DEFAULT_STARTING_RATING)
-            home_win_probability = expected_score(home_rating, away_rating, home_advantage)
-            home_won = rng.random() < home_win_probability
-
-            wins[home_id if home_won else away_id] += 1
-            losses[away_id if home_won else home_id] += 1
-
-            actual_home = 1.0 if home_won else 0.0
-            ratings[home_id] = home_rating + k_factor * (actual_home - home_win_probability)
-            ratings[away_id] = away_rating + k_factor * ((1 - actual_home) - (1 - home_win_probability))
+        _simulate_regular_season_games(remaining_games, wins, losses, ratings, home_advantage, k_factor, rng)
 
         for team_id in teams:
             win_totals[team_id] += wins[team_id]
             loss_totals[team_id] += losses[team_id]
 
-        for conference, division_teams in conferences.items():
-            seeds, division_winners = _seed_conference(division_teams, wins, point_differential)
-            for team_id in division_winners:
-                division_titles[team_id] += 1
-            for team_id in seeds:
-                playoff_berths[team_id] += 1
-
-        conference_champions = []
-        for conference, division_teams in conferences.items():
-            seeds, _ = _seed_conference(division_teams, wins, point_differential)
-            conference_champions.append(_simulate_bracket(seeds, ratings, home_advantage, rng))
+        seeds_by_conference = _simulate_conference_seeding(
+            conferences, wins, point_differential, division_titles, playoff_berths,
+        )
+        conference_champions = [
+            _simulate_bracket(seeds, ratings, home_advantage, rng) for seeds in seeds_by_conference.values()
+        ]
         # Super Bowl -- neither side has a "home" designation in the real
         # NFL (a fixed pre-determined host), so this plays it at even odds.
         champion = conference_champions[0] if rng.random() < 0.5 else conference_champions[1]

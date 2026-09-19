@@ -61,6 +61,26 @@ def identify_top_rushers(team_player_games: list[dict], n: int = 2) -> list[dict
     return _identify_top_leaders(team_player_games, "rushing_attempts", n)
 
 
+def _travel_distances_with_warning(
+    event: dict, venue_city: str | None, home_id: str, away_id: str,
+) -> tuple[float | None, float | None]:
+    """(home_travel_km, away_travel_km) via travel_distances_km, logging a
+    warning first if this event's own venue is missing the US-state field
+    travel_distances_km needs and isn't a known international venue.
+    Every domestic US venue address has a state; international ones never
+    do -- a venue with no state and no entry in INTERNATIONAL_VENUES means
+    travel_distances_km is silently falling back to the ordinary-game
+    assumption for this event."""
+    if venue_city and event.get("venue_state") is None and venue_city not in INTERNATIONAL_VENUES:
+        logger.warning(
+            "Event %s has venue_city=%r with no US state and no entry in "
+            "INTERNATIONAL_VENUES -- travel distance for this game is "
+            "likely wrong; consider adding it to nfl_teams.INTERNATIONAL_VENUES.",
+            event.get("event_key"), venue_city,
+        )
+    return travel_distances_km(away_id, home_id, venue_city)
+
+
 def build_event_features(
     event: dict,
     elo_ratings: dict[str, dict[str, float]],
@@ -138,18 +158,7 @@ def build_event_features(
     away_injuries = event.get("away_injuries")
 
     venue_city = event.get("venue_city")
-    # Every domestic US venue address has a state; international ones
-    # never do. A venue with no state and no entry in INTERNATIONAL_VENUES
-    # means travel_distances_km is silently falling back to the
-    # ordinary-game assumption for this event.
-    if venue_city and event.get("venue_state") is None and venue_city not in INTERNATIONAL_VENUES:
-        logger.warning(
-            "Event %s has venue_city=%r with no US state and no entry in "
-            "INTERNATIONAL_VENUES -- travel distance for this game is "
-            "likely wrong; consider adding it to nfl_teams.INTERNATIONAL_VENUES.",
-            event.get("event_key"), venue_city,
-        )
-    home_travel_km, away_travel_km = travel_distances_km(away_id, home_id, venue_city)
+    home_travel_km, away_travel_km = _travel_distances_with_warning(event, venue_city, home_id, away_id)
 
     return {
         "event_key": event["event_key"],

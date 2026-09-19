@@ -100,15 +100,20 @@ def _constructor_pooled_results(events_most_recent_first: list[dict], constructo
 
 
 def _constructor_pooled_qualifying(events_most_recent_first: list[dict], constructor_id: str, window: int) -> list[dict]:
+    """Pooled sibling of _driver_qualifying_history, same "don't pollute
+    with a placeholder" and window-counts-result-rows conventions as
+    _constructor_pooled_results."""
     results = []
     for event in events_most_recent_first:
         for participant in event.get("participants", []):
-            if participant.get("constructor_entity_id") == constructor_id:
-                qualifying = (participant.get("result") or {}).get("qualifying")
-                if qualifying is not None:
-                    results.append(qualifying)
-                    if len(results) >= window:
-                        return results
+            if participant.get("constructor_entity_id") != constructor_id:
+                continue
+            qualifying = (participant.get("result") or {}).get("qualifying")
+            if qualifying is None:
+                continue
+            results.append(qualifying)
+            if len(results) >= window:
+                return results
     return results
 
 

@@ -7,6 +7,7 @@ import '../models/event.dart';
 import '../models/event_status.dart';
 import '../models/live_score.dart';
 import '../models/prediction.dart';
+import '../routing/app_routes.dart';
 import '../theme/app_colors.dart';
 import '../theme/app_text_styles.dart';
 import '../../static/nfl_team_colors.dart';
@@ -80,6 +81,110 @@ String localTimezoneLabel() {
   return 'UTC$sign${offset.abs().inHours}';
 }
 
+double? _liveOrStoredScore(bool liveOrFinal, double? liveScore, double? storedScore) =>
+    liveOrFinal ? liveScore : storedScore;
+
+T? _dataOrNull<T>(AsyncValue<T>? value) => value?.when(data: (v) => v, loading: () => null, error: (_, __) => null);
+
+/// (isLive, liveFinished) -- liveFinished is true once ESPN itself
+/// reports the game over, even though this event's own status can still
+/// say "scheduled" for up to 24h (the once-daily batch ingest hasn't
+/// caught up yet) -- see LiveEventState.completed's own doc comment.
+/// Distinct from GameRow's own isCompleted (this event's own DynamoDB-
+/// backed status, which gates predictionComparison/_ComparisonSummary --
+/// not available yet): a row in this state still shows FINAL/the final
+/// score, just via _LivePredictionSummary's own live-prediction fetch
+/// rather than the logged predictionComparison.
+({bool isLive, bool liveFinished}) _liveFlags(LiveEventState? liveState) =>
+    (isLive: liveState?.live ?? false, liveFinished: liveState?.completed ?? false);
+
+Widget _weekTimeColumn(SportEvent event) {
+  final kickoffLabel = _kickoffTimeLabel(event);
+  return SizedBox(
+    // Wide enough for "1:00 PM" on one line.
+    width: 72,
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(_weekLabel(event), style: AppTextStyles.microLabel()),
+        if (kickoffLabel.isNotEmpty)
+          Text(kickoffLabel, style: AppTextStyles.microLabel(color: AppColors.inkMute), maxLines: 1, softWrap: false),
+      ],
+    ),
+  );
+}
+
+/// A live/upcoming event's own fresh prediction, else (only once the
+/// event is completed) whatever was logged before kickoff.
+double? _loggedPredictedScore(double? livePrediction, bool isCompleted, double? loggedPrediction) =>
+    livePrediction ?? (isCompleted ? loggedPrediction : null);
+
+/// `compact` (true below GameRow's own _stackBreakpoint, same threshold
+/// _gameRowLayout switches layouts on) collapses the LIVE/FINAL/
+/// confidence pill to just its colored dot -- a phone-width card has the
+/// least absolute pixel budget of any layout this row renders in, same
+/// reasoning field_status_pill.dart's own dotOnly uses.
+///
+/// A live event still gets the pick/margin/confidence summary (the
+/// pre-game prediction, same one shown next to each team's own actual
+/// score in _MatchupLine) -- the LIVE pill+clock take the win-
+/// probability bar's own slot in that same row (rather than a separate
+/// line above it) so everything stays on one aligned baseline instead of
+/// staggering across two rows. Same idea for a completed event's FINAL
+/// pill, in _ComparisonSummary.
+Widget _predictionArea(
+  bool compact, {
+  required bool isCompleted,
+  required PredictionComparison? comparison,
+  required String homeAbbr,
+  required String awayAbbr,
+  required AsyncValue<EventPrediction>? prediction,
+  required String sport,
+  required String eventId,
+  required bool isLive,
+  required bool isFinal,
+  required String? liveDetail,
+}) {
+  return isCompleted
+      ? _ComparisonSummary(comparison: comparison, homeAbbr: homeAbbr, awayAbbr: awayAbbr, compact: compact)
+      : _LivePredictionSummary(
+          prediction: prediction!, homeAbbr: homeAbbr, awayAbbr: awayAbbr,
+          sport: sport, eventId: eventId, compact: compact,
+          isLive: isLive, isFinal: isFinal, liveDetail: liveDetail,
+        );
+}
+
+/// Two team dots/names/scores, plus a percentage/pill/margin line, need
+/// more width than a phone-size card has to split between them on one
+/// shared row -- each section gets the card's full width on its own line
+/// instead, below _stackBreakpoint.
+Widget _gameRowLayout(
+  BoxConstraints constraints, Widget weekTime, Widget matchup, String? venueLabel, Widget venueLine,
+  Widget Function(bool compact) predictionArea,
+) {
+  if (constraints.maxWidth < _stackBreakpoint) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(children: [weekTime, const SizedBox(width: 16), Expanded(child: matchup)]),
+        if (venueLabel != null) ...[const SizedBox(height: 8), venueLine],
+        const SizedBox(height: 12),
+        predictionArea(true),
+      ],
+    );
+  }
+  return Row(
+    children: [
+      weekTime,
+      Expanded(flex: 2, child: matchup),
+      const SizedBox(width: 16),
+      Expanded(flex: 2, child: venueLine),
+      const SizedBox(width: 16),
+      Expanded(flex: 3, child: predictionArea(false)),
+    ],
+  );
+}
+
 /// design/FRONTEND_STYLE.md's "Game row (list)" component.
 ///
 /// Scheduled and in-progress (live) events fetch their own live prediction
@@ -107,17 +212,7 @@ class GameRow extends ConsumerWidget {
     final home = teamDisplay(sport, event.home);
     final away = teamDisplay(sport, event.away);
     final isCompleted = event.status == EventStatus.completed;
-    final isLive = liveState?.live ?? false;
-    // True once ESPN itself reports the game over, even though this
-    // event's own status can still say "scheduled" for up to 24h (the
-    // once-daily batch ingest hasn't caught up yet) -- see
-    // LiveEventState.completed's own doc comment. Distinct from
-    // isCompleted (this event's own DynamoDB-backed status, which gates
-    // predictionComparison/_ComparisonSummary below -- not available
-    // yet): a row in this state still shows FINAL/the final score, just
-    // via _LivePredictionSummary's own live-prediction fetch rather than
-    // the logged predictionComparison.
-    final liveFinished = liveState?.completed ?? false;
+    final (:isLive, :liveFinished) = _liveFlags(liveState);
     // Fetched for any not-yet-completed event, live included -- watched
     // here (not inside _LivePredictionSummary) because _MatchupLine below
     // needs this same resolved value too, for the predicted score shown
@@ -127,37 +222,22 @@ class GameRow extends ConsumerWidget {
     final prediction = !isCompleted
         ? ref.watch(eventPredictionProvider((sport: sport, eventId: event.eventId)))
         : null;
-    final predicted = prediction?.when(data: (p) => p, loading: () => null, error: (_, __) => null);
+    final predicted = _dataOrNull(prediction);
     // A completed event has no live prediction; the prediction logged
     // before kickoff is already on hand via predictionComparison, the same
     // source _ComparisonSummary below uses.
     final comparison = event.predictionComparison;
-    final awayPredictedScore = predicted?.awayScore ?? (isCompleted ? comparison?.predictedAwayScore : null);
-    final homePredictedScore = predicted?.homeScore ?? (isCompleted ? comparison?.predictedHomeScore : null);
+    final awayPredictedScore = _loggedPredictedScore(predicted?.awayScore, isCompleted, comparison?.predictedAwayScore);
+    final homePredictedScore = _loggedPredictedScore(predicted?.homeScore, isCompleted, comparison?.predictedHomeScore);
 
-    final weekTime = SizedBox(
-      // Wide enough for "1:00 PM" on one line.
-      width: 72,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(_weekLabel(event), style: AppTextStyles.microLabel()),
-          if (_kickoffTimeLabel(event).isNotEmpty)
-            Text(
-              _kickoffTimeLabel(event),
-              style: AppTextStyles.microLabel(color: AppColors.inkMute),
-              maxLines: 1,
-              softWrap: false,
-            ),
-        ],
-      ),
-    );
+    final weekTime = _weekTimeColumn(event);
+    final liveOrFinal = isLive || liveFinished;
     final matchup = _MatchupLine(
       awayColor: away.primary, awayAbbr: away.abbreviation,
-      awayScore: (isLive || liveFinished) ? liveState!.awayScore : event.away.result?.score,
+      awayScore: _liveOrStoredScore(liveOrFinal, liveState?.awayScore, event.away.result?.score),
       awayPredictedScore: awayPredictedScore,
       homeColor: home.primary, homeAbbr: home.abbreviation,
-      homeScore: (isLive || liveFinished) ? liveState!.homeScore : event.home.result?.score,
+      homeScore: _liveOrStoredScore(liveOrFinal, liveState?.homeScore, event.home.result?.score),
       homePredictedScore: homePredictedScore,
     );
     // Stadium name/city/state -- renders nothing when absent rather than
@@ -177,18 +257,14 @@ class GameRow extends ConsumerWidget {
     // separate line above it) so everything stays on one aligned
     // baseline instead of staggering across two rows. Same idea for a
     // completed event's FINAL pill, in _ComparisonSummary.
-    Widget predictionArea(bool compact) => isCompleted
-        ? _ComparisonSummary(
-            comparison: comparison, homeAbbr: home.abbreviation, awayAbbr: away.abbreviation, compact: compact,
-          )
-        : _LivePredictionSummary(
-            prediction: prediction!, homeAbbr: home.abbreviation, awayAbbr: away.abbreviation,
-            sport: sport, eventId: event.eventId, compact: compact,
-            isLive: isLive, isFinal: liveFinished, liveDetail: liveState?.detail,
-          );
+    Widget predictionArea(bool compact) => _predictionArea(
+      compact, isCompleted: isCompleted, comparison: comparison, homeAbbr: home.abbreviation, awayAbbr: away.abbreviation,
+      prediction: prediction, sport: sport, eventId: event.eventId, isLive: isLive, isFinal: liveFinished,
+      liveDetail: liveState?.detail,
+    );
 
     return InkWell(
-      onTap: () => context.go('/$sport/events/${event.eventId}'),
+      onTap: () => context.go(AppRoutes.eventDetail(sport, event.eventId)),
       borderRadius: BorderRadius.circular(16),
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
@@ -198,34 +274,9 @@ class GameRow extends ConsumerWidget {
           border: Border.all(color: AppColors.border),
         ),
         child: LayoutBuilder(
-          builder: (context, constraints) {
-            // Two team dots/names/scores, plus a percentage/pill/margin
-            // line, need more width than a phone-size card has to split
-            // between them on one shared row. Each section gets the
-            // card's full width on its own line instead, below
-            // _stackBreakpoint.
-            if (constraints.maxWidth < _stackBreakpoint) {
-              return Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(children: [weekTime, const SizedBox(width: 16), Expanded(child: matchup)]),
-                  if (event.venueLabel != null) ...[const SizedBox(height: 8), venueLine],
-                  const SizedBox(height: 12),
-                  predictionArea(true),
-                ],
-              );
-            }
-            return Row(
-              children: [
-                weekTime,
-                Expanded(flex: 2, child: matchup),
-                const SizedBox(width: 16),
-                Expanded(flex: 2, child: venueLine),
-                const SizedBox(width: 16),
-                Expanded(flex: 3, child: predictionArea(false)),
-              ],
-            );
-          },
+          builder: (context, constraints) => _gameRowLayout(
+            constraints, weekTime, matchup, event.venueLabel, venueLine, predictionArea,
+          ),
         ),
       ),
     );

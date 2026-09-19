@@ -129,6 +129,66 @@ def _field_sort_key(entry: dict):
     return (2, 0)
 
 
+def _golfer_event_predictions(model_cache: dict, s3, predictions_table, event_key_value: str, entity_id: str, golfer_row: dict) -> dict:
+    """This golfer's own FIELD_EVENT_MODELS predictions (projected score,
+    top-10/top-5 probabilities, etc.) -- a model with no promoted version
+    yet is simply absent, not an error."""
+    predictions = {}
+    for key, model_name in FIELD_EVENT_MODELS.items():
+        scored = _score(model_cache, s3, predictions_table, event_key_value, model_name, golfer_row, f"GOLFER#{entity_id}")
+        if scored is not None:
+            if key == "projected_score_to_par":
+                scored = _field_projected_score_to_par(scored, golfer_row)
+            predictions[key] = scored
+    return predictions
+
+
+def _golfer_round_predictions(
+    model_cache: dict, s3, predictions_table, event_key_value: str, entity_id: str, round_rows: dict[int, dict],
+    participant: dict | None, historical_rounds: dict[str, dict[int, dict]],
+) -> dict:
+    """This golfer's own round-by-round predictions, keyed "round_N" --
+    an unplayed round gets this event's own live pre-round forecast, a
+    played round is backfilled from historical_rounds (its own pre-round
+    forecast, recovered from the audit trail since a played round is
+    never re-scored again) so the ROUND 1-4 breakdown can show it next to
+    the real actual."""
+    round_predictions = {}
+    for round_number, round_row in round_rows.items():
+        scored = _score(
+            model_cache, s3, predictions_table, event_key_value, ROUND_MODEL_NAMES[round_number], round_row, f"GOLFER#{entity_id}",
+        )
+        if scored is not None:
+            round_predictions[f"round_{round_number}"] = scored
+
+    played_rounds = {r["round"] for r in ((participant or {}).get("result") or {}).get("rounds", [])}
+    for round_number in played_rounds:
+        historical = historical_rounds.get(entity_id, {}).get(round_number)
+        if historical is not None:
+            round_predictions.setdefault(f"round_{round_number}", historical)
+    return round_predictions
+
+
+def _build_field_entry(
+    storage, model_cache: dict, s3, predictions_table, event_key_value: str, entity_id: str, rows: dict,
+    participant: dict | None, historical_rounds: dict[str, dict[int, dict]],
+) -> dict:
+    predictions = _golfer_event_predictions(model_cache, s3, predictions_table, event_key_value, entity_id, rows["golfer"])
+    round_predictions = _golfer_round_predictions(
+        model_cache, s3, predictions_table, event_key_value, entity_id, rows["rounds"], participant, historical_rounds,
+    )
+    if round_predictions:
+        predictions["rounds"] = round_predictions
+
+    entry = {"entity_id": entity_id, **_golfer_name(storage, entity_id), "predictions": predictions}
+    # Not gated on status == "completed" -- meaningful throughout.
+    if participant is not None:
+        actual = _actual_golfer_result(participant)
+        if actual is not None:
+            entry["actual"] = actual
+    return entry
+
+
 def predict_field_event(storage, s3, predictions_table, event_id: str) -> dict:
     built = live_features.build_live_field_features(storage, SPORT, event_id)
     event = built["event"]
@@ -140,42 +200,13 @@ def predict_field_event(storage, s3, predictions_table, event_id: str) -> dict:
     any_round_played = any((p.get("result") or {}).get("rounds") for p in participants_by_id.values())
     historical_rounds = _historical_round_predictions(predictions_table, event_key_value) if any_round_played else {}
 
-    field = []
-    for entity_id, rows in built["golfer_rows"].items():
-        predictions = {}
-        for key, model_name in FIELD_EVENT_MODELS.items():
-            scored = _score(model_cache, s3, predictions_table, event_key_value, model_name, rows["golfer"], f"GOLFER#{entity_id}")
-            if scored is not None:
-                if key == "projected_score_to_par":
-                    scored = _field_projected_score_to_par(scored, rows["golfer"])
-                predictions[key] = scored
-
-        round_predictions = {}
-        for round_number, round_row in rows["rounds"].items():
-            scored = _score(
-                model_cache, s3, predictions_table, event_key_value, ROUND_MODEL_NAMES[round_number], round_row, f"GOLFER#{entity_id}",
-            )
-            if scored is not None:
-                round_predictions[f"round_{round_number}"] = scored
-        # Backfill each played round's own pre-round forecast so the
-        # ROUND 1-4 breakdown can show it next to the real actual.
-        participant = participants_by_id.get(entity_id)
-        played_rounds = {r["round"] for r in ((participant or {}).get("result") or {}).get("rounds", [])}
-        for round_number in played_rounds:
-            historical = historical_rounds.get(entity_id, {}).get(round_number)
-            if historical is not None:
-                round_predictions.setdefault(f"round_{round_number}", historical)
-        if round_predictions:
-            predictions["rounds"] = round_predictions
-
-        entry = {"entity_id": entity_id, **_golfer_name(storage, entity_id), "predictions": predictions}
-        # Not gated on status == "completed" -- meaningful throughout.
-        if participant is not None:
-            actual = _actual_golfer_result(participant)
-            if actual is not None:
-                entry["actual"] = actual
-        field.append(entry)
-
+    field = [
+        _build_field_entry(
+            storage, model_cache, s3, predictions_table, event_key_value, entity_id, rows,
+            participants_by_id.get(entity_id), historical_rounds,
+        )
+        for entity_id, rows in built["golfer_rows"].items()
+    ]
     field.sort(key=_field_sort_key)
 
     cutline = None

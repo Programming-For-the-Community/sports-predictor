@@ -21,8 +21,10 @@ from datetime import datetime, timezone
 import boto3
 
 import live_scores
+from library.aws import lambda_singletons
 from library.aws.boto_config import DEFAULT_CONFIG
 from library.http.f1_espn import F1EspnClient
+from library.serving.live_scores_handler import make_lambda_handler
 from library.storage.feature_storage import FeatureStorage
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s", force=True)  # AWS Lambda pre-attaches a root handler, so basicConfig() is otherwise a silent no-op
@@ -42,31 +44,20 @@ _storage: FeatureStorage | None = None
 
 
 def _get_storage() -> FeatureStorage:
-    global _storage
-    if _storage is None:
-        _storage = FeatureStorage()
-    return _storage
+    return lambda_singletons.get_or_create(globals(), "_storage", FeatureStorage)
 
 
 def _response(status_code: int, body: dict) -> dict:
     return {"statusCode": status_code, "headers": _CORS_HEADERS, "body": json.dumps(body)}
 
 
-def lambda_handler(event, context):
-    if event.get("detail-type") == "LiveScoreRefresh":
-        # F1 seasons run within a single calendar year (unlike NBA/NHL),
-        # so "current year" is always the right season to poll.
-        season = datetime.now(timezone.utc).year
-        return live_scores.refresh(_get_storage(), _s3, RAW_BUCKET, F1EspnClient(), SPORT, season)
+def _current_season() -> tuple[int]:
+    # F1 seasons run within a single calendar year (unlike NBA/NHL), so
+    # "current year" is always the right season to poll.
+    return (datetime.now(timezone.utc).year,)
 
-    resource = event.get("resource", "")
 
-    try:
-        if resource == "/f1/live-scores":
-            return _response(200, live_scores.get_live_scores(_s3, RAW_BUCKET))
-
-        return _response(404, {"error": f"No route for resource {resource!r}"})
-
-    except Exception:
-        logger.exception("Unhandled error serving %s", resource)
-        return _response(500, {"error": "Internal server error"})
+lambda_handler = make_lambda_handler(
+    SPORT, F1EspnClient, _get_storage, _s3, RAW_BUCKET, live_scores, logger, _response,
+    refresh_extra_args=_current_season,
+)

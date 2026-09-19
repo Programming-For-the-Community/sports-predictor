@@ -31,6 +31,7 @@ import json
 import logging
 import os
 
+from library.aws import lambda_singletons
 from library.aws.dynamodb_table import DynamoDBTable
 from library.aws.lambda_invoker import LambdaInvoker
 from library.aws.s3_manager import S3Manager
@@ -61,31 +62,28 @@ _predict_invoker: LambdaInvoker | None = None
 
 
 def _get_storage() -> FeatureStorage:
-    global _storage
-    if _storage is None:
-        _storage = FeatureStorage()
-    return _storage
+    return lambda_singletons.get_or_create(globals(), "_storage", FeatureStorage)
 
 
 def _get_model_bucket() -> S3Manager:
-    global _model_bucket
-    if _model_bucket is None:
-        _model_bucket = S3Manager(os.environ["MODEL_ARTIFACTS_BUCKET_NAME"], region=os.environ.get("AWS_REGION"))
-    return _model_bucket
+    return lambda_singletons.get_or_create(
+        globals(), "_model_bucket",
+        lambda: S3Manager(os.environ["MODEL_ARTIFACTS_BUCKET_NAME"], region=os.environ.get("AWS_REGION")),
+    )
 
 
 def _get_predictions_table() -> DynamoDBTable:
-    global _predictions_table
-    if _predictions_table is None:
-        _predictions_table = DynamoDBTable(os.environ["PREDICTIONS_TABLE_NAME"], region=os.environ.get("AWS_REGION"))
-    return _predictions_table
+    return lambda_singletons.get_or_create(
+        globals(), "_predictions_table",
+        lambda: DynamoDBTable(os.environ["PREDICTIONS_TABLE_NAME"], region=os.environ.get("AWS_REGION")),
+    )
 
 
 def _get_predict_invoker() -> LambdaInvoker:
-    global _predict_invoker
-    if _predict_invoker is None:
-        _predict_invoker = LambdaInvoker(os.environ["PREDICT_FUNCTION_NAME"], region=os.environ.get("AWS_REGION"))
-    return _predict_invoker
+    return lambda_singletons.get_or_create(
+        globals(), "_predict_invoker",
+        lambda: LambdaInvoker(os.environ["PREDICT_FUNCTION_NAME"], region=os.environ.get("AWS_REGION")),
+    )
 
 
 def _response(status_code: int, body: dict) -> dict:
@@ -142,10 +140,7 @@ def lambda_handler(event, context):
     # warmup.tf) -- no "resource" key, so this can't collide with a real
     # API Gateway route.
     if event.get("warmup"):
-        _get_storage()
-        _get_model_bucket()
-        _get_predictions_table()
-        return _response(200, {"status": "warm"})
+        return _response(200, lambda_singletons.warm(_get_storage, _get_model_bucket, _get_predictions_table))
 
     path_params = event.get("pathParameters") or {}
     query_params = event.get("queryStringParameters") or {}

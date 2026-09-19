@@ -213,34 +213,48 @@ def refresh(storage, s3, bucket: str, client, sport: str, season: int) -> dict:
     events_out = {}
     for espn_event in espn_events:
         for competition in espn_event.get("competitions", []):
-            session_type = (competition.get("type") or {}).get("abbreviation")
-            our_event_type = _RELEVANT_SESSION_TYPES.get(session_type)
-            if our_event_type is None:
-                continue  # FP1/FP2/FP3/Qual -- no stored event of our own to join against
-
-            competition_date = (competition.get("date") or "")[:10]
-            our_event_id = event_ids.get((competition_date, our_event_type))
-            if our_event_id is None:
-                continue  # not yet backfilled/normalized into our own storage
-
-            status = (competition.get("status") or {}).get("type", {})
-            state = status.get("state")
-            if state == "pre":
-                continue  # hasn't started yet -- nothing live to show
-            if state != "in" and our_event_id not in scheduled_event_ids:
-                continue  # our own storage already has the real result
-
-            events_out[our_event_id] = {
-                "event_type": our_event_type,
-                "status": status.get("name"),
-                "state": state,
-                "race_name": espn_event.get("name"),
-                "participants": _competition_participants(competition, roster_by_name, roster_by_last_name),
-            }
+            _apply_competition_state(
+                competition, espn_event.get("name"), event_ids, scheduled_event_ids,
+                roster_by_name, roster_by_last_name, events_out,
+            )
 
     _put_cache(s3, bucket, {"fetched_at": now.isoformat(), "events": events_out})
     logger.info("Refreshed F1 live state for %d event(s)", len(events_out))
     return {"polled": len(events_out)}
+
+
+def _apply_competition_state(
+    competition: dict, race_name: str | None, event_ids: dict, scheduled_event_ids: set[str],
+    roster_by_name: dict, roster_by_last_name: dict, events_out: dict,
+) -> None:
+    """Applies one ESPN competition's own current state into events_out in
+    place, if it's a session type this project tracks and joins to a real
+    stored event -- see refresh's own docstring for the join/gating
+    rules."""
+    session_type = (competition.get("type") or {}).get("abbreviation")
+    our_event_type = _RELEVANT_SESSION_TYPES.get(session_type)
+    if our_event_type is None:
+        return  # FP1/FP2/FP3/Qual -- no stored event of our own to join against
+
+    competition_date = (competition.get("date") or "")[:10]
+    our_event_id = event_ids.get((competition_date, our_event_type))
+    if our_event_id is None:
+        return  # not yet backfilled/normalized into our own storage
+
+    status = (competition.get("status") or {}).get("type", {})
+    state = status.get("state")
+    if state == "pre":
+        return  # hasn't started yet -- nothing live to show
+    if state != "in" and our_event_id not in scheduled_event_ids:
+        return  # our own storage already has the real result
+
+    events_out[our_event_id] = {
+        "event_type": our_event_type,
+        "status": status.get("name"),
+        "state": state,
+        "race_name": race_name,
+        "participants": _competition_participants(competition, roster_by_name, roster_by_last_name),
+    }
 
 
 def get_live_scores(s3, bucket: str) -> dict:
