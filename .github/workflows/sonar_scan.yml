@@ -98,6 +98,25 @@ jobs:
         with:
           python-version: '3.12'
 
+      # Without this, SonarQube Cloud's Dart analyzer can't resolve a single
+      # `package:` import anywhere in Source/front-end/lib (no Flutter SDK,
+      # no resolved .dart_tool/package_config.json in this job's own
+      # checkout) -- surfaces as "Target of URI doesn't exist"/"Undefined
+      # class Widget/BuildContext/..." on nearly every Dart file, which look
+      # like real code errors but aren't (flutter analyze passes clean on
+      # the same code in frontend_deploy.yml's own test-frontend job, which
+      # does run this same setup first). Version matches frontend_deploy.yml/
+      # app_deploy.yml's own FLUTTER_VERSION.
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.29.3'
+          channel: stable
+
+      - name: Resolve front-end package dependencies
+        working-directory: Source/front-end
+        run: flutter pub get
+
       # Regenerates Source/library's own pylock.toml (PEP 751) fresh, same
       # as run_python_tests.yml's own "Lock and install library package"
       # step -- that step's own generated file never leaves its own job's

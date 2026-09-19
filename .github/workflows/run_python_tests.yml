@@ -48,15 +48,22 @@ jobs:
       # its pyproject.toml every run via uv -- used here only as a
       # lock-file generator, not installed as this project's package
       # manager. --no-emit-project excludes the local editable package
-      # itself, which --require-hashes can't verify a hash for; it's
-      # installed separately, unhashed, straight from this checkout.
-      - name: Lock and install library package
+      # itself, which --require-hashes can't verify a hash for. Installs
+      # library's own DEPENDENCIES (boto3, requests) only -- library
+      # itself is never pip-installed at all; the repo root's own
+      # pytest.ini puts Source/ on sys.path instead, so `import library`
+      # resolves directly to Source/library/*.py. See pytest.ini's own
+      # comment for why (both PEP 660 editable-install modes are
+      # incompatible with Source/library's package-dir mapping, and a
+      # normal non-editable install runs from a site-packages copy that
+      # coverage.py's --source=Source excludes from tracing entirely --
+      # confirmed directly, not an assumption).
+      - name: Lock library package's dependencies
         run: |
           set -e
           pip install --no-cache-dir --quiet uv
           (cd Source/library && uv lock --quiet && uv export --quiet --format pylock.toml --no-emit-project -o pylock.toml)
           pip install --no-cache-dir --require-hashes -r Source/library/pylock.toml
-          pip install --no-cache-dir --no-deps ./Source/library
 
       - name: Install additional requirements
         if: inputs.requirements_files != ''

@@ -1,24 +1,9 @@
 import sys
 from unittest.mock import MagicMock
 
-import pytest
 from PIL import Image
 
 handler = sys.modules["shared_cloudwatch_geo_widget"]
-
-
-@pytest.fixture(autouse=True)
-def _reset_client_singletons():
-    """_get_logs_client/_get_cloudfront_logs_client cache their own client
-    module-level, so it'd otherwise survive across tests too -- whichever
-    test runs first would populate it, and every test after it would
-    silently reuse that first test's own mocked client instead of its
-    own patched boto3.client."""
-    handler._logs_client = None
-    handler._cloudfront_logs_client = None
-    yield
-    handler._logs_client = None
-    handler._cloudfront_logs_client = None
 
 
 def _mock_logs_client(rows: list[dict]):
@@ -258,54 +243,54 @@ class TestMapHtml:
 
 class TestLambdaHandler:
     def test_describe_event_returns_markdown_without_touching_aws(self, monkeypatch):
-        called = MagicMock()
-        monkeypatch.setattr(handler.boto3, "client", called)
+        logs_client = MagicMock()
+        cloudfront_logs_client = MagicMock()
+        monkeypatch.setattr(handler, "_logs_client", logs_client)
+        monkeypatch.setattr(handler, "_cloudfront_logs_client", cloudfront_logs_client)
         result = handler.lambda_handler({"describe": True}, None)
         assert "Geo widget" in result
-        called.assert_not_called()
+        logs_client.start_query.assert_not_called()
+        cloudfront_logs_client.start_query.assert_not_called()
 
     def test_accepted_mode_queries_every_configured_log_group_and_embeds_a_map(self, monkeypatch):
         logs_client = _mock_logs_client([{"region": "TX", "requests": 3}])
-        monkeypatch.setattr(handler.boto3, "client", lambda service, **kwargs: logs_client)
+        monkeypatch.setattr(handler, "_logs_client", logs_client)
         monkeypatch.setenv("ACCEPTED_LOG_GROUP_NAMES", "lg1,lg2")
         result = handler.lambda_handler({"mode": "accepted", "widgetContext": {"timeRange": {"start": 0, "end": 1000}}}, None)
         assert "<img src=\"data:image/jpeg;base64," in result
         assert logs_client.start_query.call_args.kwargs["logGroupNames"] == ["lg1", "lg2"]
 
-    def test_blocked_mode_queries_the_configured_edge_log_group_in_us_east_1(self, monkeypatch):
-        logs_client = _mock_logs_client([{"c-country": "CN", "requests": 6}])
-        seen_kwargs = {}
-
-        def _client(service, **kwargs):
-            seen_kwargs.update(kwargs)
-            return logs_client
-
-        monkeypatch.setattr(handler.boto3, "client", _client)
+    def test_blocked_mode_uses_the_cloudfront_logs_client_not_the_regular_one(self, monkeypatch):
+        regular_logs_client = _mock_logs_client([])
+        cloudfront_logs_client = _mock_logs_client([{"c-country": "CN", "requests": 6}])
+        monkeypatch.setattr(handler, "_logs_client", regular_logs_client)
+        monkeypatch.setattr(handler, "_cloudfront_logs_client", cloudfront_logs_client)
         monkeypatch.setenv("BLOCKED_LOG_GROUP_NAME", "cf-edge-logs")
         result = handler.lambda_handler({"mode": "blocked", "widgetContext": {"timeRange": {"start": 0, "end": 1000}}}, None)
         assert "<img src=\"data:image/jpeg;base64," in result
-        # The edge-access log group only ever exists in us-east-1
-        # regardless of this Lambda's own region.
-        assert seen_kwargs.get("region_name") == "us-east-1"
+        cloudfront_logs_client.start_query.assert_called_once()
+        regular_logs_client.start_query.assert_not_called()
 
     def test_missing_mode_defaults_to_accepted(self, monkeypatch):
         logs_client = _mock_logs_client([])
-        monkeypatch.setattr(handler.boto3, "client", lambda service, **kwargs: logs_client)
+        monkeypatch.setattr(handler, "_logs_client", logs_client)
         monkeypatch.setenv("ACCEPTED_LOG_GROUP_NAMES", "lg1")
         result = handler.lambda_handler({"widgetContext": {"timeRange": {"start": 0, "end": 1000}}}, None)
         assert "<img src=\"data:image/jpeg;base64," in result
 
-    def test_never_calls_out_to_a_geo_maps_or_location_service_client(self, monkeypatch):
-        # Everything is rendered locally now -- no external mapping
-        # service call at all.
-        logs_client = _mock_logs_client([])
-        seen_services = []
 
-        def _client(service, **kwargs):
-            seen_services.append(service)
-            return logs_client
+class TestClientConfiguration:
+    """Both clients are real (module-level, eagerly constructed at import --
+    see handler.py's own comment for why), not mocks -- these check the
+    actual construction instead of intercepting boto3.client at call time,
+    which TestLambdaHandler's own tests can no longer do now that both
+    clients already exist before any test runs."""
 
-        monkeypatch.setattr(handler.boto3, "client", _client)
-        monkeypatch.setenv("ACCEPTED_LOG_GROUP_NAMES", "lg1")
-        handler.lambda_handler({"mode": "accepted", "widgetContext": {"timeRange": {"start": 0, "end": 1000}}}, None)
-        assert seen_services == ["logs"]
+    def test_only_ever_talks_to_cloudwatch_logs_no_mapping_or_location_service(self):
+        assert handler._logs_client.meta.service_model.service_name == "logs"
+        assert handler._cloudfront_logs_client.meta.service_model.service_name == "logs"
+
+    def test_cloudfront_logs_client_is_pinned_to_us_east_1(self):
+        # The edge-access log group only ever exists in us-east-1,
+        # regardless of this Lambda's own region.
+        assert handler._cloudfront_logs_client.meta.region_name == "us-east-1"
