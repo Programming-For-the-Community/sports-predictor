@@ -80,6 +80,7 @@ class TestDispatch:
         mock_s3 = MagicMock()
         mock_s3.get_object.return_value = _s3_response(payload)
         mock_storage = MagicMock()
+        mock_storage.get_team_entities.return_value = []
 
         with patch.object(nba_normalize, "_s3", mock_s3), \
              patch("nba_normalize.PipelineStorage", return_value=mock_storage):
@@ -94,6 +95,60 @@ class TestDispatch:
         with patch.object(nba_normalize, "_s3", mock_s3), \
              patch("nba_normalize.PipelineStorage"):
             nba_normalize._dispatch("test-bucket", "nba/unknown/thing.json")  # must not raise
+
+
+class TestClearDepartedPlayers:
+    def test_clears_a_player_missing_from_the_fresh_roster(self):
+        # Regression: a player who's since retired, been waived, or
+        # otherwise left the team but is simply absent from a fresh ESPN
+        # roster fetch previously kept whatever team_id their last
+        # confirmation set, forever -- roster_to_player_entities' own
+        # upserts only ever add/refresh players actually present in the
+        # new payload, never remove one who's disappeared from it. Same
+        # fix as ncaafb/normalize/handler.py's own _clear_departed_players.
+        storage = MagicMock()
+        storage.get_team_entities.return_value = [
+            {"entity_id": "a1", "name": "Still Here", "metadata": {"team_id": "1", "team_id_as_of": "2026-08-12"}},
+            {"entity_id": "a2", "name": "Departed Player", "team_key": "SPORT#NBA#TEAM#1",
+             "metadata": {"team_id": "1", "team_id_as_of": "2026-08-12", "position": "F"}},
+        ]
+        storage.upsert_player_entity.return_value = True
+        entities = [{"entity_id": "a1", "metadata": {"team_id": "1"}}]  # only a1 is in the fresh roster
+
+        cleared = nba_normalize._clear_departed_players(storage, "1", entities, "2026-09-06")
+
+        assert cleared == 1
+        storage.get_team_entities.assert_called_once_with("nba", "1")
+        written = storage.upsert_player_entity.call_args.args[0]
+        assert written["entity_id"] == "a2"
+        assert "team_key" not in written  # dropped out of the team-index GSI entirely
+        assert "team_id" not in written["metadata"]
+        assert written["metadata"]["team_id_as_of"] == "2026-09-06"
+
+    def test_does_not_touch_a_player_still_present_in_the_fresh_roster(self):
+        storage = MagicMock()
+        storage.get_team_entities.return_value = [
+            {"entity_id": "a1", "metadata": {"team_id": "1", "team_id_as_of": "2026-08-12"}},
+        ]
+        entities = [{"entity_id": "a1", "metadata": {"team_id": "1"}}]
+
+        cleared = nba_normalize._clear_departed_players(storage, "1", entities, "2026-09-06")
+
+        assert cleared == 0
+        storage.upsert_player_entity.assert_not_called()
+
+    def test_a_genuinely_empty_fetch_is_left_alone_rather_than_wiping_the_whole_team(self):
+        # A transient ESPN API gap for this one team is far more likely
+        # than every player on a real roster leaving at once, so an
+        # empty fetch is a no-op that self-heals on the next daily
+        # re-fetch instead of wiping the team's whole roster attribution
+        # over one bad response.
+        storage = MagicMock()
+
+        cleared = nba_normalize._clear_departed_players(storage, "1", [], "2026-09-06")
+
+        assert cleared == 0
+        storage.get_team_entities.assert_not_called()
 
 
 class TestLambdaHandler:
