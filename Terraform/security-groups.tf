@@ -68,11 +68,11 @@ resource "aws_security_group" "ecs_pipeline" {
   vpc_id      = var.vpc_id
 
   egress {
-    from_port   = 443
-    to_port     = 443
-    protocol    = "tcp"
-    cidr_blocks = [var.vpc_cidr]
-    description = "HTTPS to DynamoDB, S3, and ECR via VPC endpoints"
+    from_port       = 443
+    to_port         = 443
+    protocol        = "tcp"
+    prefix_list_ids = [aws_vpc_endpoint.s3.prefix_list_id, aws_vpc_endpoint.dynamodb.prefix_list_id]
+    description     = "HTTPS to S3 and DynamoDB via VPC Gateway Endpoints -- Gateway Endpoint traffic is addressed to AWS's own S3/DynamoDB prefix list, not an address inside the VPC CIDR, so a cidr_blocks rule scoped to var.vpc_cidr never matches it"
   }
 
   tags = merge(local.common_tags, {
