@@ -46,7 +46,7 @@ from library.features.common import DEFAULT_HOME_ADVANTAGE, compute_elo_ratings,
 from library.http.ncaambb_core import ap_poll_to_rank_by_team
 from library.ml.model_types import ADAPTERS
 from library.serving import model_loader
-from library.serving.common import enrich_bracket_team_names, enrich_team_standings
+from library.serving.common import enrich_bracket_team_names, enrich_team_standings, latest_matching_row
 from library.serving.ncaambb_reads import WIN_PROBABILITY_MODEL, _actual_result, _home_and_away
 from library.storage.feature_storage import FeatureStorage
 from library.storage.season_projections import season_projection_key
@@ -398,7 +398,7 @@ def _real_postseason_matchups(storage: FeatureStorage, current_season: int | Non
 
 def _logged_win_probability(predictions_table, event_key_value: str) -> dict | None:
     rows = predictions_table.query(Key("event_key").eq(event_key_value))
-    row = next((r for r in rows if r["model_key"].startswith(f"MODEL#{WIN_PROBABILITY_MODEL}#")), None)
+    row = latest_matching_row(rows, WIN_PROBABILITY_MODEL)
     return row["predicted_value"] if row else None
 
 

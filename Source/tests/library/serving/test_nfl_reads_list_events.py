@@ -199,6 +199,48 @@ class TestListEvents:
         assert comparison["actual_home_score"] == 24
         assert comparison["actual_away_score"] == 17
 
+    def test_a_repromoted_models_stale_earlier_version_rows_are_ignored(self):
+        # Confirmed live in production, 2026-09-20: a model retrained more
+        # than once before its event was finally played leaves one row per
+        # version still in the table (record_prediction's own key embeds
+        # the version, never overwrites an earlier row) -- DynamoDB's
+        # default ascending model_key sort order puts "v1" first, so
+        # picking just the first match returned the oldest, long-
+        # superseded prediction instead of the one actually live near
+        # kickoff. Rows deliberately NOT in version order here, matching
+        # a real query's own unordered-by-generated_at shape.
+        storage = MagicMock()
+        predictions_table = MagicMock()
+        predictions_table.query.return_value = [
+            _prediction_row(
+                "MODEL#win-probability#v4", {"home_win_probability": 0.34, "model_version": 4},
+                generated_at="2026-09-01T01:15:53+00:00",
+            ),
+            _prediction_row(
+                "MODEL#win-probability#v1", {"home_win_probability": 0.38, "model_version": 1},
+                generated_at="2026-08-06T12:31:12+00:00",
+            ),
+            _prediction_row(
+                "MODEL#win-probability#v6", {"home_win_probability": 0.71, "model_version": 6},
+                generated_at="2026-09-15T22:06:50+00:00",
+            ),
+            _prediction_row(
+                "MODEL#score-margin#v1", {"value": -4.5, "model_version": 1},
+                generated_at="2026-08-06T12:31:12+00:00",
+            ),
+            _prediction_row(
+                "MODEL#score-margin#v4", {"value": 6.2, "model_version": 4},
+                generated_at="2026-09-15T22:06:50+00:00",
+            ),
+        ]
+        storage.get_all_events.return_value = [_completed_event("EVT#1", 2025, "12", "13", 24, 17)]
+
+        result = nfl_reads.list_events(storage, predictions_table, "nfl", "completed")
+
+        comparison = result["events"][0]["prediction_comparison"]
+        assert comparison["predicted_home_win_probability"] == 0.71
+        assert comparison["predicted_margin"] == 6.2
+
     def test_completed_event_queries_the_predictions_table_exactly_once(self):
         # prediction_comparison and leaders_comparison used to each
         # independently re-query the same event_key partition -- one

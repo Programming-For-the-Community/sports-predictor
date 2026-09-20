@@ -47,6 +47,31 @@ class TestLeadersComparison:
 
         assert nfl_reads._leaders_comparison(storage, predictions_table.query.return_value, "nfl", event) is None
 
+    def test_a_re_scored_candidates_stale_earlier_version_row_is_ignored(self):
+        # Same model-repromotion-leaves-stale-rows shape as
+        # test_nfl_reads_list_events.py's own
+        # test_a_repromoted_models_stale_earlier_version_rows_are_ignored,
+        # here for a leader candidate re-scored after a later model
+        # version was promoted -- the stale v1 row must not win over v2
+        # just because rows aren't returned in generated_at order.
+        storage = MagicMock()
+        storage.get_entity.return_value = {"entity_id": "wr1", "metadata": {"team_id": "12"}, "name": "WR One"}
+        storage.get_player_game_stats_for_event.return_value = []
+        predictions_table = MagicMock()
+        predictions_table.query.return_value = [
+            _prediction_row(
+                "MODEL#player-prop-receiving-yards#v2#PLAYER#wr1", {"value": 95.0}, generated_at="2026-09-10T00:00:00+00:00",
+            ),
+            _prediction_row(
+                "MODEL#player-prop-receiving-yards#v1#PLAYER#wr1", {"value": 40.0}, generated_at="2026-08-06T00:00:00+00:00",
+            ),
+        ]
+        event = _completed_event("EVT#1", 2025, "12", "13", 24, 17)
+
+        result = nfl_reads._leaders_comparison(storage, predictions_table.query.return_value, "nfl", event)
+
+        assert result["home"]["receiving"][0]["predicted"]["receiving_yards"] == 95.0
+
     def test_receiving_leaders_are_grouped_as_a_list(self):
         storage = MagicMock()
         storage.get_entity.side_effect = lambda sport, entity_id, entity_type: {

@@ -263,6 +263,24 @@ def _actual_result(event: dict) -> dict | None:
     return {"home_score": home_score, "away_score": away_score, "home_won": home_score > away_score}
 
 
+def latest_matching_row(rows: list[dict], model_prefix: str) -> dict | None:
+    """The most-recently-recorded row whose model_key matches
+    MODEL#{model_prefix}#... -- a model repromoted more than once before
+    an event was finally played leaves one row per version still in the
+    predictions table (record_prediction's own key embeds the model
+    version, never overwrites an earlier version's row), and DynamoDB's
+    default ascending model_key sort order puts the OLDEST version first.
+    Taking just the first match would silently surface a long-superseded
+    prediction instead of the one actually live near kickoff -- picking
+    by `generated_at` (always present, unlike predicted_value's own
+    model_version, which some callers omit) gets the right one regardless
+    of how many versions accumulated or what order they sorted in."""
+    matches = [r for r in rows if r["model_key"].startswith(f"MODEL#{model_prefix}#")]
+    if not matches:
+        return None
+    return max(matches, key=lambda r: r.get("generated_at", ""))
+
+
 def _prediction_comparison(rows: list[dict], event: dict) -> dict | None:
     """Compares this event's logged prediction against the actual result --
     reads the audit trail predict/event_prediction_common.py's
@@ -280,7 +298,7 @@ def _prediction_comparison(rows: list[dict], event: dict) -> dict | None:
         return None
 
     def _row_for(model_prefix: str) -> dict | None:
-        return next((r for r in rows if r["model_key"].startswith(f"MODEL#{model_prefix}#")), None)
+        return latest_matching_row(rows, model_prefix)
 
     win_probability_row = _row_for(WIN_PROBABILITY_MODEL)
     if win_probability_row is None:
@@ -394,8 +412,15 @@ def _predicted_stats_by_entity_category(
     """{(entity_id, category): {stat: predicted_value}} from this event's
     own predictions-table rows, keyed by (entity_id, category) rather than
     entity_id alone -- see _basketball_leaders_comparison/
-    _football_leaders_comparison's own docstrings for why."""
+    _football_leaders_comparison's own docstrings for why.
+
+    A leader candidate re-scored after a model repromotion leaves one row
+    per version still in the table (see latest_matching_row's own
+    docstring) -- tracked per (entity_id, category, stat) here so only the
+    most-recently-generated row for each wins, not whichever one this
+    unordered rows list happens to iterate last."""
     predicted_by_entity_category: dict[tuple[str, str], dict[str, float]] = {}
+    generated_at_seen: dict[tuple[str, str, str], str] = {}
     for row in rows:
         match = _PLAYER_PROP_MODEL_KEY_RE.match(row["model_key"])
         if match is None:
@@ -405,6 +430,11 @@ def _predicted_stats_by_entity_category(
         if category is None:
             continue
         entity_id = match.group(2)
+        stat_key = (entity_id, category, stat)
+        generated_at = row.get("generated_at", "")
+        if generated_at < generated_at_seen.get(stat_key, ""):
+            continue
+        generated_at_seen[stat_key] = generated_at
         predicted_by_entity_category.setdefault((entity_id, category), {})[stat] = row["predicted_value"]["value"]
     return predicted_by_entity_category
 

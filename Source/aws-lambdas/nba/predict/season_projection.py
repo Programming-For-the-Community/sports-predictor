@@ -23,7 +23,7 @@ import season_simulation
 from library.features.common import compute_elo_ratings
 from library.features.nba_teams import TEAM_DIVISIONS, is_real_franchise_matchup
 from library.serving import model_loader
-from library.serving.common import enrich_bracket_team_names, enrich_team_standings
+from library.serving.common import enrich_bracket_team_names, enrich_team_standings, latest_matching_row
 from library.serving.nba_reads import WIN_PROBABILITY_MODEL, _actual_result, _home_and_away
 from library.storage.feature_storage import FeatureStorage
 from library.storage.season_projections import season_projection_key
@@ -413,7 +413,7 @@ def _logged_win_probability(predictions_table, event_key_value: str) -> dict | N
     """This event's own logged win-probability prediction, or None if
     nobody's ever requested one."""
     rows = predictions_table.query(Key("event_key").eq(event_key_value))
-    row = next((r for r in rows if r["model_key"].startswith(f"MODEL#{WIN_PROBABILITY_MODEL}#")), None)
+    row = latest_matching_row(rows, WIN_PROBABILITY_MODEL)
     return row["predicted_value"] if row else None
 
 

@@ -31,5 +31,5 @@ def scheduled_event(event_key, season, event_date, home_id, away_id, *,
     }
 
 
-def prediction_row(model_key, predicted_value):
-    return {"model_key": model_key, "predicted_value": predicted_value}
+def prediction_row(model_key, predicted_value, *, generated_at=""):
+    return {"model_key": model_key, "predicted_value": predicted_value, "generated_at": generated_at}

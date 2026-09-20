@@ -12,9 +12,39 @@ for the through-list_events/through-build_season_projection integration.
 from unittest.mock import MagicMock
 
 from library.serving.common import (
-    enrich_bracket_team_names, enrich_participants, enrich_team_standings, list_models, most_recent_event,
-    prefetch_entities,
+    enrich_bracket_team_names, enrich_participants, enrich_team_standings, latest_matching_row, list_models,
+    most_recent_event, prefetch_entities,
 )
+
+
+class TestLatestMatchingRow:
+    def test_none_when_nothing_matches(self):
+        rows = [{"model_key": "MODEL#score-margin#v1", "generated_at": "2026-01-01T00:00:00+00:00"}]
+        assert latest_matching_row(rows, "win-probability") is None
+
+    def test_single_match_returns_it(self):
+        row = {"model_key": "MODEL#win-probability#v1", "generated_at": "2026-01-01T00:00:00+00:00"}
+        assert latest_matching_row([row], "win-probability") is row
+
+    def test_picks_the_most_recently_generated_row_regardless_of_version_or_list_order(self):
+        # A model repromoted more than once before its event was finally
+        # played leaves one row per version -- DynamoDB's default
+        # ascending model_key sort ("v1" before "v10") is not generation
+        # order, so this must go by generated_at, not by list position or
+        # by parsing the version out of the key.
+        stale_v1 = {"model_key": "MODEL#win-probability#v1", "generated_at": "2026-08-06T00:00:00+00:00"}
+        latest_v10 = {"model_key": "MODEL#win-probability#v10", "generated_at": "2026-09-15T00:00:00+00:00"}
+        mid_v4 = {"model_key": "MODEL#win-probability#v4", "generated_at": "2026-09-01T00:00:00+00:00"}
+
+        assert latest_matching_row([latest_v10, stale_v1, mid_v4], "win-probability") is latest_v10
+        assert latest_matching_row([stale_v1, mid_v4, latest_v10], "win-probability") is latest_v10
+
+    def test_only_matches_the_exact_prefix_not_a_substring(self):
+        # "score-margin" must not match a "score-margin-v2" style typo'd
+        # or differently-named model sharing the same leading substring --
+        # the trailing "#" in the match is what anchors this.
+        rows = [{"model_key": "MODEL#score-margin-extra#v1", "generated_at": "2026-01-01T00:00:00+00:00"}]
+        assert latest_matching_row(rows, "score-margin") is None
 
 
 class TestEnrichParticipants:
