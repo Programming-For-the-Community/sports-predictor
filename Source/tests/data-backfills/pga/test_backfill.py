@@ -12,6 +12,8 @@ directory onto sys.path).
 """
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 import backfill
 
 
@@ -404,3 +406,89 @@ class TestProcessSeason:
         assert result["tournaments_skipped"] == 0
         assert result["tournaments_empty"] == 1
         assert result["empty_events"] == [{"season": 2026, "event_id": "2", "label": "Gap Event"}]
+
+
+class TestProcessBatch:
+    def test_processes_every_season_and_collects_results(self):
+        client = MagicMock()
+        storage = MagicMock()
+        season_results = {
+            2025: {"season": 2025, "tournaments_processed": 5, "tournaments_skipped": 0, "tournaments_empty": 0, "tournaments_failed": 0, "empty_events": [], "failures": []},
+            2026: {"season": 2026, "tournaments_processed": 3, "tournaments_skipped": 1, "tournaments_empty": 0, "tournaments_failed": 0, "empty_events": [], "failures": []},
+        }
+
+        with patch.object(backfill, "process_season", side_effect=lambda c, s, season: season_results[season]):
+            results = backfill.process_batch(client, storage, [2025, 2026])
+
+        assert results == [season_results[2025], season_results[2026]]
+
+
+class TestMain:
+    def _fake_result(self, season, processed=1, failed=0, failures=None, empty_events=None):
+        return {
+            "season": season, "tournaments_processed": processed, "tournaments_skipped": 0,
+            "tournaments_empty": len(empty_events or []), "tournaments_failed": failed,
+            "empty_events": empty_events or [], "failures": failures or [],
+        }
+
+    def test_delegates_batches_to_process_batch(self, monkeypatch):
+        monkeypatch.setattr("sys.argv", ["backfill.py", "--start-season", "2025", "--end-season", "2026", "--batch-size", "2"])
+        mock_storage = MagicMock()
+
+        with patch.object(backfill, "PGAClient"), \
+             patch.object(backfill, "PipelineStorage", return_value=mock_storage), \
+             patch.object(backfill, "process_batch", return_value=[self._fake_result(2025), self._fake_result(2026)]) as mock_process_batch:
+            backfill.main()
+
+        mock_process_batch.assert_called_once_with(mock_process_batch.call_args.args[0], mock_storage, [2025, 2026])
+
+    def test_no_failures_or_empty_events_does_not_write_to_s3(self, monkeypatch):
+        monkeypatch.setattr("sys.argv", ["backfill.py", "--start-season", "2026", "--end-season", "2026"])
+        mock_storage = MagicMock()
+
+        with patch.object(backfill, "PGAClient"), \
+             patch.object(backfill, "PipelineStorage", return_value=mock_storage), \
+             patch.object(backfill, "process_batch", return_value=[self._fake_result(2026)]):
+            backfill.main()
+
+        mock_storage.put_raw_json.assert_not_called()
+
+    def test_empty_events_are_written_to_s3_without_exiting(self, monkeypatch):
+        monkeypatch.setattr("sys.argv", ["backfill.py", "--start-season", "2026", "--end-season", "2026"])
+        mock_storage = MagicMock()
+        empty_event = {"season": 2026, "event_id": "1", "label": "Canceled Event"}
+
+        with patch.object(backfill, "PGAClient"), \
+             patch.object(backfill, "PipelineStorage", return_value=mock_storage), \
+             patch.object(backfill, "process_batch", return_value=[self._fake_result(2026, empty_events=[empty_event])]):
+            backfill.main()  # should not raise/exit -- empty events alone aren't a failure
+
+        key = mock_storage.put_raw_json.call_args.args[0]
+        assert key.startswith("pga/backfill-empty-events/")
+        assert mock_storage.put_raw_json.call_args.args[1] == {"empty_events": [empty_event]}
+
+    def test_failures_are_written_to_s3_and_exit_code_is_1(self, monkeypatch):
+        monkeypatch.setattr("sys.argv", ["backfill.py", "--start-season", "2026", "--end-season", "2026"])
+        mock_storage = MagicMock()
+        failure = {"season": 2026, "event_id": "1", "label": "Some Championship", "error": "boom"}
+
+        with patch.object(backfill, "PGAClient"), \
+             patch.object(backfill, "PipelineStorage", return_value=mock_storage), \
+             patch.object(backfill, "process_batch", return_value=[self._fake_result(2026, processed=1, failed=1, failures=[failure])]):
+            with pytest.raises(SystemExit) as exc_info:
+                backfill.main()
+
+        assert exc_info.value.code == 1
+        failure_call = next(c for c in mock_storage.put_raw_json.call_args_list if c.args[0].startswith("pga/backfill-failures/"))
+        assert failure_call.args[1] == {"failures": [failure]}
+
+    def test_a_batch_raising_does_not_stop_the_others_from_being_reported(self, monkeypatch):
+        monkeypatch.setattr("sys.argv", ["backfill.py", "--start-season", "2025", "--end-season", "2026", "--batch-size", "1"])
+        mock_storage = MagicMock()
+
+        with patch.object(backfill, "PGAClient"), \
+             patch.object(backfill, "PipelineStorage", return_value=mock_storage), \
+             patch.object(backfill, "process_batch", side_effect=[Exception("batch died"), [self._fake_result(2026)]]):
+            backfill.main()  # should not raise despite one batch failing
+
+        mock_storage.put_raw_json.assert_not_called()

@@ -20,6 +20,8 @@ directory onto sys.path).
 from datetime import date
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 import backfill
 
 
@@ -245,3 +247,69 @@ class TestProcessBatch:
         mock_seed_rankings.assert_any_call(core_client, storage, 2025)
         mock_seed_rankings.assert_any_call(core_client, storage, 2026)
         assert all(r["rankings_written"] == 5 for r in results)
+
+
+class TestMain:
+    def _fake_result(self, season, processed=1, failed=0, failures=None):
+        return {
+            "season": season, "games_processed": processed, "games_failed": failed,
+            "failures": failures or [], "rankings_written": 0,
+        }
+
+    def test_seeds_teams_and_delegates_batches_to_process_batch(self, monkeypatch):
+        monkeypatch.setattr("sys.argv", ["backfill.py", "--start-season", "2025", "--end-season", "2026", "--batch-size", "2"])
+        mock_storage = MagicMock()
+
+        with patch.object(backfill, "NCAAMBBClient"), \
+             patch.object(backfill, "NCAAMBBCoreClient"), \
+             patch.object(backfill, "PipelineStorage", return_value=mock_storage), \
+             patch.object(backfill, "seed_teams") as mock_seed_teams, \
+             patch.object(backfill, "process_batch", return_value=[self._fake_result(2025), self._fake_result(2026)]) as mock_process_batch:
+            backfill.main()
+
+        mock_seed_teams.assert_called_once()
+        assert mock_process_batch.call_args.args[3] == [2025, 2026]
+
+    def test_no_failures_does_not_exit_or_write_to_s3(self, monkeypatch):
+        monkeypatch.setattr("sys.argv", ["backfill.py", "--start-season", "2026", "--end-season", "2026"])
+        mock_storage = MagicMock()
+
+        with patch.object(backfill, "NCAAMBBClient"), \
+             patch.object(backfill, "NCAAMBBCoreClient"), \
+             patch.object(backfill, "PipelineStorage", return_value=mock_storage), \
+             patch.object(backfill, "seed_teams"), \
+             patch.object(backfill, "process_batch", return_value=[self._fake_result(2026)]):
+            backfill.main()
+
+        mock_storage.put_raw_json.assert_not_called()
+
+    def test_failures_are_written_to_s3_and_exit_code_is_1(self, monkeypatch):
+        monkeypatch.setattr("sys.argv", ["backfill.py", "--start-season", "2026", "--end-season", "2026"])
+        mock_storage = MagicMock()
+        failure = {"date": "20260115", "event_id": "1", "error": "boom"}
+
+        with patch.object(backfill, "NCAAMBBClient"), \
+             patch.object(backfill, "NCAAMBBCoreClient"), \
+             patch.object(backfill, "PipelineStorage", return_value=mock_storage), \
+             patch.object(backfill, "seed_teams"), \
+             patch.object(backfill, "process_batch", return_value=[self._fake_result(2026, processed=1, failed=1, failures=[failure])]):
+            with pytest.raises(SystemExit) as exc_info:
+                backfill.main()
+
+        assert exc_info.value.code == 1
+        key = mock_storage.put_raw_json.call_args.args[0]
+        assert key.startswith("ncaambb/backfill-failures/")
+        assert mock_storage.put_raw_json.call_args.args[1] == {"failures": [failure]}
+
+    def test_a_batch_raising_does_not_stop_the_others_from_being_reported(self, monkeypatch):
+        monkeypatch.setattr("sys.argv", ["backfill.py", "--start-season", "2025", "--end-season", "2026", "--batch-size", "1"])
+        mock_storage = MagicMock()
+
+        with patch.object(backfill, "NCAAMBBClient"), \
+             patch.object(backfill, "NCAAMBBCoreClient"), \
+             patch.object(backfill, "PipelineStorage", return_value=mock_storage), \
+             patch.object(backfill, "seed_teams"), \
+             patch.object(backfill, "process_batch", side_effect=[Exception("batch died"), [self._fake_result(2026)]]):
+            backfill.main()  # should not raise despite one batch failing
+
+        mock_storage.put_raw_json.assert_not_called()

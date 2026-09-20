@@ -11,6 +11,8 @@ directory onto sys.path).
 """
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 import backfill
 
 
@@ -373,3 +375,60 @@ class TestProcessBatch:
         results = backfill.process_batch(client, storage, [2010, 2011])
 
         assert [r["season"] for r in results] == [2010, 2011]
+
+
+class TestMain:
+    def _fake_result(self, season, processed=1, failed=0, failures=None):
+        return {
+            "season": season, "rounds_processed": processed, "rounds_skipped": 0,
+            "rounds_failed": failed, "failures": failures or [],
+        }
+
+    def test_delegates_batches_to_process_batch(self, monkeypatch):
+        monkeypatch.setattr("sys.argv", ["backfill.py", "--start-season", "2010", "--end-season", "2011", "--batch-size", "2"])
+        mock_storage = MagicMock()
+
+        with patch.object(backfill, "JolpicaClient"), \
+             patch.object(backfill, "PipelineStorage", return_value=mock_storage), \
+             patch.object(backfill, "process_batch", return_value=[self._fake_result(2010), self._fake_result(2011)]) as mock_process_batch:
+            backfill.main()
+
+        mock_process_batch.assert_called_once_with(mock_process_batch.call_args.args[0], mock_storage, [2010, 2011])
+
+    def test_no_failures_does_not_exit_or_write_to_s3(self, monkeypatch):
+        monkeypatch.setattr("sys.argv", ["backfill.py", "--start-season", "2011", "--end-season", "2011"])
+        mock_storage = MagicMock()
+
+        with patch.object(backfill, "JolpicaClient"), \
+             patch.object(backfill, "PipelineStorage", return_value=mock_storage), \
+             patch.object(backfill, "process_batch", return_value=[self._fake_result(2011)]):
+            backfill.main()
+
+        mock_storage.put_raw_json.assert_not_called()
+
+    def test_failures_are_written_to_s3_and_exit_code_is_1(self, monkeypatch):
+        monkeypatch.setattr("sys.argv", ["backfill.py", "--start-season", "2011", "--end-season", "2011"])
+        mock_storage = MagicMock()
+        failure = {"season": 2011, "round": 1, "error": "boom"}
+
+        with patch.object(backfill, "JolpicaClient"), \
+             patch.object(backfill, "PipelineStorage", return_value=mock_storage), \
+             patch.object(backfill, "process_batch", return_value=[self._fake_result(2011, processed=1, failed=1, failures=[failure])]):
+            with pytest.raises(SystemExit) as exc_info:
+                backfill.main()
+
+        assert exc_info.value.code == 1
+        key = mock_storage.put_raw_json.call_args.args[0]
+        assert key.startswith("f1/backfill-failures/")
+        assert mock_storage.put_raw_json.call_args.args[1] == {"failures": [failure]}
+
+    def test_a_batch_raising_does_not_stop_the_others_from_being_reported(self, monkeypatch):
+        monkeypatch.setattr("sys.argv", ["backfill.py", "--start-season", "2010", "--end-season", "2011", "--batch-size", "1"])
+        mock_storage = MagicMock()
+
+        with patch.object(backfill, "JolpicaClient"), \
+             patch.object(backfill, "PipelineStorage", return_value=mock_storage), \
+             patch.object(backfill, "process_batch", side_effect=[Exception("batch died"), [self._fake_result(2011)]]):
+            backfill.main()  # should not raise despite one batch failing
+
+        mock_storage.put_raw_json.assert_not_called()
