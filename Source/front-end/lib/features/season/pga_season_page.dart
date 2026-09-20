@@ -5,6 +5,7 @@ import '../../core/data/pga_season_repository.dart';
 import '../../core/models/pga_season_projection.dart';
 import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_text_styles.dart';
+import '../../core/widgets/points_standings_table.dart';
 
 /// PGA's own /:sport/season page -- a FedEx Cup points-standings table,
 /// not a bracket. Different shape from season_page.dart (no division/
@@ -68,10 +69,6 @@ abstract final class _PgaStandingsLabels {
   static const champion = 'CHAMP%';
 }
 
-String _formatPoints(double value) => value >= 1000 ? value.round().toString() : value.toStringAsFixed(1);
-
-String _formatPercent(double value) => '${(value * 100).round()}%';
-
 // Below this width, all 7 columns (#, GOLFER, POINTS, ST. JUDE%, BMW%,
 // TOUR CH.%, CHAMP%) don't fit -- same breakpoint as
 // field_leaderboard_table.dart's own _compactBreakpoint. The 3 Playoffs-
@@ -95,14 +92,14 @@ List<_Column> _fullColumns() => [
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.center,
             children: [
-              Text(_formatPoints(row.currentPoints), style: AppTextStyles.metricValue(color: AppColors.ink), maxLines: 1),
-              Text(_formatPoints(row.projectedPoints), style: AppTextStyles.microLabel(color: AppColors.cyan), maxLines: 1),
+              Text(formatPoints(row.currentPoints), style: AppTextStyles.metricValue(color: AppColors.ink), maxLines: 1),
+              Text(formatPoints(row.projectedPoints), style: AppTextStyles.microLabel(color: AppColors.cyan), maxLines: 1),
             ],
           )),
-      _Column(_PgaStandingsLabels.fedexStJude, 2, (context, row, rank) => _PercentText(row.fedexStJudeProbability)),
-      _Column(_PgaStandingsLabels.bmw, 2, (context, row, rank) => _PercentText(row.bmwProbability)),
-      _Column(_PgaStandingsLabels.tourChampionship, 2, (context, row, rank) => _PercentText(row.tourChampionshipProbability)),
-      _Column(_PgaStandingsLabels.champion, 2, (context, row, rank) => _PercentText(row.championProbability)),
+      _Column(_PgaStandingsLabels.fedexStJude, 2, (context, row, rank) => PercentText(row.fedexStJudeProbability)),
+      _Column(_PgaStandingsLabels.bmw, 2, (context, row, rank) => PercentText(row.bmwProbability)),
+      _Column(_PgaStandingsLabels.tourChampionship, 2, (context, row, rank) => PercentText(row.tourChampionshipProbability)),
+      _Column(_PgaStandingsLabels.champion, 2, (context, row, rank) => PercentText(row.championProbability)),
     ];
 
 List<_Column> _columns({required bool compact}) {
@@ -253,21 +250,8 @@ class _LabeledPercent extends StatelessWidget {
       children: [
         Text(label, style: AppTextStyles.microLabel(color: AppColors.inkMute)),
         const SizedBox(width: 6),
-        _PercentText(value),
+        PercentText(value),
       ],
-    );
-  }
-}
-
-class _PercentText extends StatelessWidget {
-  const _PercentText(this.value);
-  final double value;
-
-  @override
-  Widget build(BuildContext context) {
-    return Text(
-      _formatPercent(value), style: AppTextStyles.metricValue(color: AppColors.violet), textAlign: TextAlign.center,
-      maxLines: 1, softWrap: false, overflow: TextOverflow.ellipsis,
     );
   }
 }

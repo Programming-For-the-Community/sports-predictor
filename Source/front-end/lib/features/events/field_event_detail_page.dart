@@ -1,10 +1,9 @@
-import 'dart:async';
-
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/data/field_events_repository.dart';
 import '../../core/data/live_scores_repository.dart';
+import '../../core/mixins/polling_state_mixin.dart';
 import '../../core/models/field_live_score.dart';
 import '../../core/models/field_prediction.dart';
 import '../../core/theme/app_colors.dart';
@@ -38,32 +37,13 @@ class FieldEventDetailPage extends ConsumerStatefulWidget {
   ConsumerState<FieldEventDetailPage> createState() => _FieldEventDetailPageState();
 }
 
-class _FieldEventDetailPageState extends ConsumerState<FieldEventDetailPage> with WidgetsBindingObserver {
-  Timer? _pollTimer;
+class _FieldEventDetailPageState extends ConsumerState<FieldEventDetailPage>
+    with WidgetsBindingObserver, PollingStateMixin<FieldEventDetailPage> {
+  @override
+  Duration get pollInterval => _pollInterval;
 
   @override
-  void initState() {
-    super.initState();
-    WidgetsBinding.instance.addObserver(this);
-    _pollTimer = Timer.periodic(_pollInterval, (_) => _poll());
-  }
-
-  @override
-  void dispose() {
-    WidgetsBinding.instance.removeObserver(this);
-    _pollTimer?.cancel();
-    super.dispose();
-  }
-
-  // Same "a backgrounded tab's own timers get throttled/paused, with
-  // nothing catching back up on return" reasoning event_detail_page.dart's
-  // own didChangeAppLifecycleState carries in full.
-  @override
-  void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state == AppLifecycleState.resumed) _poll();
-  }
-
-  void _poll() {
+  void onPoll() {
     ref.invalidate(fieldLiveScoresProvider(widget.sportId));
     ref.invalidate(pgaLiveScoresProvider(widget.sportId));
     ref.invalidate(fieldEventPredictionProvider((sport: widget.sportId, eventId: widget.eventId)));

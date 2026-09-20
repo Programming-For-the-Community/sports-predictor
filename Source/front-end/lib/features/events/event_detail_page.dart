@@ -1,10 +1,9 @@
-import 'dart:async';
-
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/data/events_repository.dart';
 import '../../core/data/live_scores_repository.dart';
+import '../../core/mixins/polling_state_mixin.dart';
 import '../../core/models/event.dart';
 import '../../core/models/event_leaders.dart';
 import '../../core/models/event_status.dart';
@@ -55,22 +54,10 @@ class EventDetailPage extends ConsumerStatefulWidget {
   ConsumerState<EventDetailPage> createState() => _EventDetailPageState();
 }
 
-class _EventDetailPageState extends ConsumerState<EventDetailPage> with WidgetsBindingObserver {
-  Timer? _pollTimer;
-
+class _EventDetailPageState extends ConsumerState<EventDetailPage>
+    with WidgetsBindingObserver, PollingStateMixin<EventDetailPage> {
   @override
-  void initState() {
-    super.initState();
-    WidgetsBinding.instance.addObserver(this);
-    _pollTimer = Timer.periodic(_pollInterval, (_) => _poll());
-  }
-
-  @override
-  void dispose() {
-    WidgetsBinding.instance.removeObserver(this);
-    _pollTimer?.cancel();
-    super.dispose();
-  }
+  Duration get pollInterval => _pollInterval;
 
   // Browsers (and mobile OSes) throttle -- or outright pause -- a
   // backgrounded tab's own timers, so _pollTimer above can silently stop
@@ -84,7 +71,7 @@ class _EventDetailPageState extends ConsumerState<EventDetailPage> with WidgetsB
   // the page's own visibility state, not just a native app switch.
   //
   // Also invalidates both eventsListProvider buckets, not just
-  // liveScoresProvider (_poll's own call) -- a real complaint confirmed
+  // liveScoresProvider (onPoll's own call) -- a real complaint confirmed
   // live 2026-09-13 ("live-scores aren't always up-to-date" after locking
   // the machine/switching tabs a while, same root cause as
   // event_list_page.dart's own identical fix). This page's whole layout
@@ -94,17 +81,15 @@ class _EventDetailPageState extends ConsumerState<EventDetailPage> with WidgetsB
   // (up to ~24h after the real game ends) and the event drops out of the
   // live-scores cache, a stale `scheduled` list here still shows this
   // event mid-game/pre-game and never flips this page over to the
-  // completed recap, no matter how many times _poll's own liveScoresProvider
-  // invalidation fires. Called after _poll(), not before, so _poll's own
+  // completed recap, no matter how many times onPoll's own liveScoresProvider
+  // invalidation fires. Called after onPoll(), not before, so onPoll's own
   // synchronous read of the (about-to-be-refreshed) scheduled list isn't
   // disturbed by an invalidation racing ahead of it on the same tick.
   @override
-  void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state == AppLifecycleState.resumed) {
-      _poll();
-      ref.invalidate(eventsListProvider((sport: widget.sportId, status: EventStatus.scheduled)));
-      ref.invalidate(eventsListProvider((sport: widget.sportId, status: EventStatus.completed)));
-    }
+  void onResume() {
+    onPoll();
+    ref.invalidate(eventsListProvider((sport: widget.sportId, status: EventStatus.scheduled)));
+    ref.invalidate(eventsListProvider((sport: widget.sportId, status: EventStatus.completed)));
   }
 
   SportEvent? _findEvent(List<SportEvent> events) {
@@ -115,7 +100,8 @@ class _EventDetailPageState extends ConsumerState<EventDetailPage> with WidgetsB
   }
 
   // Only polls once the event is known and still scheduled.
-  void _poll() {
+  @override
+  void onPoll() {
     final scheduled = ref.read(eventsListProvider((sport: widget.sportId, status: EventStatus.scheduled))).value ?? const <SportEvent>[];
     final event = _findEvent(scheduled);
     if (event == null) return;

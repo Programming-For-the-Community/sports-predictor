@@ -26,6 +26,7 @@ PROMOTION_METRIC = "rmse"
 def train(
     s3: S3Manager, df: pd.DataFrame, sport: str, model_name: str, *, label_column: str,
     non_feature_columns: set[str], candidates: list, logger, extra_metadata: dict | None = None,
+    date_column: str = "event_date",
 ) -> dict:
     """Runs the full candidate tournament and returns run_backtest's
     result ({"promotions": [card, ...], "candidates": [summary, ...]}).
@@ -33,9 +34,9 @@ def train(
     train on -- any sport-specific pre-split filtering stays in the
     caller."""
     feature_columns = training_common.feature_columns(df, non_feature_columns)
-    train_df, test_df = training_common.chronological_split(df, training_common.TEST_FRACTION)
-    train_date_range = [str(train_df["event_date"].min()), str(train_df["event_date"].max())]
-    test_date_range = [str(test_df["event_date"].min()), str(test_df["event_date"].max())]
+    train_df, test_df = training_common.chronological_split(df, training_common.TEST_FRACTION, date_column=date_column)
+    train_date_range = [str(train_df[date_column].min()), str(train_df[date_column].max())]
+    test_date_range = [str(test_df[date_column].min()), str(test_df[date_column].max())]
     logger.info(
         "Training on %d rows (%s to %s), evaluating on %d rows (%s to %s)",
         len(train_df), *train_date_range, len(test_df), *test_date_range,

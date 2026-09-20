@@ -5,6 +5,7 @@ import '../../core/data/f1_season_repository.dart';
 import '../../core/models/f1_season_projection.dart';
 import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_text_styles.dart';
+import '../../core/widgets/points_standings_table.dart';
 
 enum _StandingsTab { drivers, constructors }
 
@@ -81,11 +82,25 @@ class _F1SeasonPageState extends ConsumerState<F1SeasonPage> {
               ),
               const SizedBox(height: 12),
               if (_tab == _StandingsTab.drivers)
-                _DriverStandingsTable(standings: season.driverStandings)
+                PointsStandingsTable<F1DriverStanding>(
+                  standings: season.driverStandings,
+                  nameColumnLabel: 'DRIVER',
+                  displayName: (s) => s.name ?? s.entityId,
+                  currentPoints: (s) => s.currentPoints,
+                  projectedPoints: (s) => s.projectedPoints,
+                  championProbability: (s) => s.championProbability,
+                )
               else if (season.constructorStandings.isEmpty)
                 Text('No constructor standings yet.', style: AppTextStyles.body(color: AppColors.inkSub))
               else
-                _ConstructorStandingsTable(standings: season.constructorStandings),
+                PointsStandingsTable<F1ConstructorStanding>(
+                  standings: season.constructorStandings,
+                  nameColumnLabel: 'CONSTRUCTOR',
+                  displayName: (s) => s.name ?? s.entityId,
+                  currentPoints: (s) => s.currentPoints,
+                  projectedPoints: (s) => s.projectedPoints,
+                  championProbability: (s) => s.championProbability,
+                ),
             ],
           );
         },
@@ -121,157 +136,3 @@ class _StandingsTabToggle extends StatelessWidget {
   }
 }
 
-String _formatPoints(double value) => value >= 1000 ? value.round().toString() : value.toStringAsFixed(1);
-
-String _formatPercent(double value) => '${(value * 100).round()}%';
-
-class _DriverStandingsTable extends StatelessWidget {
-  const _DriverStandingsTable({required this.standings});
-  final List<F1DriverStanding> standings;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 20),
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(16),
-        gradient: LinearGradient(begin: Alignment.topLeft, end: Alignment.bottomRight, colors: AppColors.surfaceGrad),
-        border: Border.all(color: AppColors.borderRaised),
-      ),
-      child: Column(
-        children: [
-          const Padding(
-            padding: EdgeInsets.symmetric(vertical: 10),
-            child: _HeaderRow(labels: ['#', 'DRIVER', 'POINTS', 'CHAMP%'], flexes: [1, 4, 2, 2]),
-          ),
-          for (var i = 0; i < standings.length; i++) ...[
-            const Divider(height: 1, color: AppColors.border),
-            Padding(
-              padding: const EdgeInsets.symmetric(vertical: 12),
-              child: Row(
-                children: [
-                  Expanded(flex: 1, child: Text('${i + 1}', style: AppTextStyles.metricValue(color: AppColors.inkMute), textAlign: TextAlign.center)),
-                  const SizedBox(width: 6),
-                  Expanded(
-                    flex: 4,
-                    child: Text(
-                      standings[i].name ?? standings[i].entityId, style: AppTextStyles.body(color: AppColors.ink),
-                      maxLines: 1, overflow: TextOverflow.ellipsis,
-                    ),
-                  ),
-                  const SizedBox(width: 6),
-                  Expanded(
-                    flex: 2,
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Text(_formatPoints(standings[i].currentPoints), style: AppTextStyles.metricValue(color: AppColors.ink), maxLines: 1),
-                        Text(_formatPoints(standings[i].projectedPoints), style: AppTextStyles.microLabel(color: AppColors.cyan), maxLines: 1),
-                      ],
-                    ),
-                  ),
-                  const SizedBox(width: 6),
-                  Expanded(
-                    flex: 2,
-                    child: Text(
-                      _formatPercent(standings[i].championProbability), style: AppTextStyles.metricValue(color: AppColors.violet),
-                      textAlign: TextAlign.center, maxLines: 1, softWrap: false, overflow: TextOverflow.ellipsis,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ],
-        ],
-      ),
-    );
-  }
-}
-
-class _ConstructorStandingsTable extends StatelessWidget {
-  const _ConstructorStandingsTable({required this.standings});
-  final List<F1ConstructorStanding> standings;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 20),
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(16),
-        gradient: LinearGradient(begin: Alignment.topLeft, end: Alignment.bottomRight, colors: AppColors.surfaceGrad),
-        border: Border.all(color: AppColors.borderRaised),
-      ),
-      child: Column(
-        children: [
-          const Padding(
-            padding: EdgeInsets.symmetric(vertical: 10),
-            child: _HeaderRow(labels: ['#', 'CONSTRUCTOR', 'POINTS', 'CHAMP%'], flexes: [1, 4, 2, 2]),
-          ),
-          for (var i = 0; i < standings.length; i++) ...[
-            const Divider(height: 1, color: AppColors.border),
-            Padding(
-              padding: const EdgeInsets.symmetric(vertical: 12),
-              child: Row(
-                children: [
-                  Expanded(flex: 1, child: Text('${i + 1}', style: AppTextStyles.metricValue(color: AppColors.inkMute), textAlign: TextAlign.center)),
-                  const SizedBox(width: 6),
-                  Expanded(
-                    flex: 4,
-                    child: Text(
-                      standings[i].name ?? standings[i].entityId, style: AppTextStyles.body(color: AppColors.ink),
-                      maxLines: 1, overflow: TextOverflow.ellipsis,
-                    ),
-                  ),
-                  const SizedBox(width: 6),
-                  Expanded(
-                    flex: 2,
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Text(_formatPoints(standings[i].currentPoints), style: AppTextStyles.metricValue(color: AppColors.ink), maxLines: 1),
-                        Text(_formatPoints(standings[i].projectedPoints), style: AppTextStyles.microLabel(color: AppColors.cyan), maxLines: 1),
-                      ],
-                    ),
-                  ),
-                  const SizedBox(width: 6),
-                  Expanded(
-                    flex: 2,
-                    child: Text(
-                      _formatPercent(standings[i].championProbability), style: AppTextStyles.metricValue(color: AppColors.violet),
-                      textAlign: TextAlign.center, maxLines: 1, softWrap: false, overflow: TextOverflow.ellipsis,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ],
-        ],
-      ),
-    );
-  }
-}
-
-class _HeaderRow extends StatelessWidget {
-  const _HeaderRow({required this.labels, required this.flexes});
-  final List<String> labels;
-  final List<int> flexes;
-
-  @override
-  Widget build(BuildContext context) {
-    return Row(
-      children: [
-        for (var i = 0; i < labels.length; i++) ...[
-          if (i > 0) const SizedBox(width: 6),
-          Expanded(
-            flex: flexes[i],
-            child: Text(
-              labels[i], style: AppTextStyles.microLabel(),
-              textAlign: i == 0 ? TextAlign.center : (i == 1 ? TextAlign.start : TextAlign.center),
-              maxLines: 1, softWrap: false, overflow: TextOverflow.ellipsis,
-            ),
-          ),
-        ],
-      ],
-    );
-  }
-}

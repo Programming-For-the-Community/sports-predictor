@@ -34,17 +34,13 @@ Optional environment variables:
 Usage:
     python build_dataset.py
 """
-import io
-import json
 import logging
 import os
 from collections import defaultdict
-from datetime import date, timedelta
-
-import pandas as pd
 
 from library.aws import xray
 from library.aws.s3_manager import S3Manager
+from library.features import build_dataset_common
 from library.features.common import compute_elo_ratings
 from library.features.ncaafb import (
     build_event_features,
@@ -98,8 +94,7 @@ def _group_player_games_by_event_and_team(player_games: list[dict]) -> dict[tupl
     return by_event_team
 
 
-def _index_team_game_stats(team_game_stats: list[dict]) -> dict[tuple[str, str], dict]:
-    return {(row["event_key"], row["team_id"]): row for row in team_game_stats}
+_index_team_game_stats = build_dataset_common.index_team_game_stats
 
 
 def _leader_and_history(
@@ -221,29 +216,8 @@ def _update_event_history(
         team_box_history[away_id].append(away_box_row)
 
 
-def _group_player_games_by_player(player_games: list[dict]) -> dict[str, list[dict]]:
-    by_player: dict[str, list[dict]] = defaultdict(list)
-    for game in player_games:
-        by_player[game["entity_id"]].append(game)
-    for games in by_player.values():
-        games.sort(key=lambda g: g.get("event_date", ""))
-    return by_player
-
-
-def _team_previous_event_dates(events: list[dict]) -> dict[tuple[str, str], str | None]:
-    by_team: dict[str, list[dict]] = defaultdict(list)
-    for event in events:
-        for participant in event.get("participants", []):
-            by_team[participant["entity_id"]].append(event)
-
-    previous_dates: dict[tuple[str, str], str | None] = {}
-    for team_id, team_events in by_team.items():
-        team_events.sort(key=lambda e: e.get("event_date", ""))
-        previous_date = None
-        for event in team_events:
-            previous_dates[(team_id, event["event_key"])] = previous_date
-            previous_date = event.get("event_date")
-    return previous_dates
+_group_player_games_by_player = build_dataset_common.group_player_games_by_player
+_team_previous_event_dates = build_dataset_common.team_previous_event_dates
 
 
 def build_player_dataset(storage: FeatureStorage, window: int, since_date: str | None = None) -> list[dict]:
@@ -319,17 +293,7 @@ def build_ranking_dataset(storage: FeatureStorage, since_date: str | None = None
     return rows
 
 
-def _write_parquet(rows: list[dict]) -> bytes:
-    """JSON-encodes dict-valued columns before writing to Parquet."""
-    if not rows:
-        return b""
-    df = pd.DataFrame(rows)
-    dict_columns = [key for key, value in rows[0].items() if isinstance(value, dict)]
-    for col in dict_columns:
-        df[col] = df[col].apply(json.dumps)
-    buffer = io.BytesIO()
-    df.to_parquet(buffer, engine="pyarrow", index=False)
-    return buffer.getvalue()
+_write_parquet = build_dataset_common.write_parquet
 
 
 def _write_dataset(s3: S3Manager, key: str, rows: list[dict], label: str) -> None:
@@ -340,16 +304,7 @@ def _write_dataset(s3: S3Manager, key: str, rows: list[dict], label: str) -> Non
     logger.info("Wrote %d %s rows to s3://%s/%s", len(rows), label, s3.bucket, key)
 
 
-def _lookback_since_date() -> str | None:
-    """Converts TRAINING_LOOKBACK_SEASONS (a season count) into an
-    approximate since_date FeatureStorage's GSI queries can filter on --
-    unset (the common case today) means unbounded, same as before this
-    existed. 366 days/season is deliberately generous (never trims a
-    genuinely in-window season for being a day short)."""
-    lookback = os.environ.get("TRAINING_LOOKBACK_SEASONS")
-    if not lookback:
-        return None
-    return (date.today() - timedelta(days=int(lookback) * 366)).isoformat()
+_lookback_since_date = build_dataset_common.lookback_since_date
 
 
 def main() -> None:

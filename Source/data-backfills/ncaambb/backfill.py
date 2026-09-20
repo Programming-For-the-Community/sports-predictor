@@ -75,6 +75,7 @@ import sys
 import time
 from datetime import date, datetime, timedelta, timezone
 
+from library.data_backfills import espn_backfill_common
 from library.http.ncaambb import NCAAMBBClient
 from library.http.ncaambb_core import NCAAMBBCoreClient
 import normalize
@@ -120,14 +121,7 @@ def season_date_range(season: int) -> list[date]:
 
 
 def seed_teams(client: NCAAMBBClient, storage: PipelineStorage) -> None:
-    """ESPN's /teams isn't season-scoped, so one global call seeds every team."""
-    logger.info("Seeding team entities")
-    teams_response = client.get_teams()
-    storage.put_raw_json("ncaambb/teams.json", teams_response)
-    league = teams_response["sports"][0]["leagues"][0]
-    for team_entry in league["teams"]:
-        storage.upsert_entity(normalize.team_to_entity(team_entry["team"]))
-    logger.info("Seeded %d teams", len(league["teams"]))
+    espn_backfill_common.seed_teams(client, storage, normalize, "ncaambb", logger)
 
 
 def seed_rankings(core_client: NCAAMBBCoreClient, storage: PipelineStorage, season: int) -> tuple[int, int]:
@@ -154,17 +148,7 @@ def seed_rankings(core_client: NCAAMBBCoreClient, storage: PipelineStorage, seas
 
 
 def process_game(client: NCAAMBBClient, storage: PipelineStorage, season: int, event_id: str) -> None:
-    raw_key = f"ncaambb/boxscore/{season}/{event_id}.json"
-    if storage.raw_object_exists(raw_key):
-        logger.debug("Box score already loaded, skipping event %s", event_id)
-        return
-    summary = client.get_summary(event_id)
-    storage.put_raw_json(raw_key, summary)
-    stats_items, player_entities = normalize.boxscore_to_player_game_stats(summary)
-    for entity in player_entities:
-        storage.upsert_player_entity(entity)
-    storage.write_player_game_stats(stats_items)
-    storage.write_team_game_stats(normalize.boxscore_to_team_game_stats(summary))
+    espn_backfill_common.process_game(client, storage, normalize, "ncaambb", season, event_id, logger)
 
 
 def _process_one_event(client: NCAAMBBClient, storage: PipelineStorage, season: int, event: dict) -> None:

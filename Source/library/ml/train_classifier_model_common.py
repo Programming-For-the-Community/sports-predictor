@@ -28,9 +28,14 @@ def train(
     s3: S3Manager, df, sport: str, model_name: str, *, label_column: str,
     non_feature_columns: set[str], candidates: list, logger,
     drop_null_label: bool = False, coerce_int_label: bool = False,
+    naive_baseline_fn=None,
 ) -> dict:
     """Runs the full candidate tournament and returns run_backtest's
-    result ({"promotions": [card, ...], "candidates": [summary, ...]})."""
+    result ({"promotions": [card, ...], "candidates": [summary, ...]}).
+    naive_baseline_fn(y_test) -> float overrides the default majority-class
+    baseline -- e.g. a head-to-head sport's win-probability model uses
+    "always predict the home team wins" (y_test.mean()) instead, since
+    home/away is a real asymmetry these targets don't have."""
     if drop_null_label:
         df = df[df[label_column].notna()]
 
@@ -51,7 +56,10 @@ def train(
         y_train = y_train.astype(int)
         y_test = y_test.astype(int)
 
-    naive_baseline_accuracy = float(max(y_test.mean(), 1 - y_test.mean()))
+    if naive_baseline_fn is not None:
+        naive_baseline_accuracy = naive_baseline_fn(y_test)
+    else:
+        naive_baseline_accuracy = float(max(y_test.mean(), 1 - y_test.mean()))
     naive_baseline_metrics = {"naive_baseline_accuracy": naive_baseline_accuracy}
 
     return backtest.run_backtest(

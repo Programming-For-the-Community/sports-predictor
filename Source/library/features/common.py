@@ -461,3 +461,170 @@ def _team_injury_count(injuries: list[dict] | None) -> int | None:
     if injuries is None:
         return None
     return sum(1 for injury in injuries if injury.get("status") in _TEAM_INJURY_COUNT_STATUSES)
+
+
+def build_basketball_event_features(
+    event: dict,
+    elo_ratings: dict[str, dict[str, float]],
+    home_team_events: list[dict],
+    away_team_events: list[dict],
+    window: int = DEFAULT_ROLLING_WINDOW,
+    home_team_box_stats: list[dict] | None = None,
+    away_team_box_stats: list[dict] | None = None,
+    *,
+    rebounds_fn,
+    extra_fields_fn,
+) -> dict:
+    """Shared nba/ncaambb build_event_features body (confirmed ~90%
+    identical before sharing here). rebounds_fn(box_stats) -> float | None
+    resolves home_avg_rebounds/away_avg_rebounds (NBA derives it as
+    offensive+defensive since ESPN's NBA box score has no raw combined
+    stat; NCAA MBB reads avg_total_rebounds directly, a stat ESPN does
+    expose there). extra_fields_fn(event, home_id, away_id) -> dict
+    returns the sport-specific fields merged in right after
+    away_box_games_played (NBA: is_divisional_game/is_international_game/
+    home_travel_km/away_travel_km; NCAA MBB: is_conference_game only --
+    the caller's own dict controls exactly which keys appear, so a sport
+    without a given field never gets it at all, not just a null value)."""
+    participants = event["participants"]
+    home = next(p for p in participants if p.get("role") == "home")
+    away = next(p for p in participants if p.get("role") == "away")
+    home_id, away_id = home["entity_id"], away["entity_id"]
+
+    ratings = elo_ratings.get(event["event_key"], {})
+    home_elo = ratings.get("home_pre_rating")
+    away_elo = ratings.get("away_pre_rating")
+
+    home_scoring = rolling_team_scoring_averages(home_team_events, home_id, window)
+    away_scoring = rolling_team_scoring_averages(away_team_events, away_id, window)
+
+    home_box_stats = rolling_player_stat_averages(home_team_box_stats or [], window)
+    away_box_stats = rolling_player_stat_averages(away_team_box_stats or [], window)
+
+    home_possessions = estimate_possessions(
+        home_box_stats.get("avg_field_goal_attempts"), home_box_stats.get("avg_offensive_rebounds"),
+        home_box_stats.get("avg_turnovers"), home_box_stats.get("avg_free_throw_attempts"),
+    )
+    away_possessions = estimate_possessions(
+        away_box_stats.get("avg_field_goal_attempts"), away_box_stats.get("avg_offensive_rebounds"),
+        away_box_stats.get("avg_turnovers"), away_box_stats.get("avg_free_throw_attempts"),
+    )
+    home_offensive_efficiency = _efficiency_per_100(home_scoring["avg_points_scored"], home_possessions)
+    home_defensive_efficiency = _efficiency_per_100(home_scoring["avg_points_allowed"], home_possessions)
+    away_offensive_efficiency = _efficiency_per_100(away_scoring["avg_points_scored"], away_possessions)
+    away_defensive_efficiency = _efficiency_per_100(away_scoring["avg_points_allowed"], away_possessions)
+
+    home_field_goal_pct = _rate(home_box_stats, "avg_field_goals_made", "avg_field_goal_attempts")
+    away_field_goal_pct = _rate(away_box_stats, "avg_field_goals_made", "avg_field_goal_attempts")
+    home_three_point_pct = _rate(home_box_stats, "avg_three_pointers_made", "avg_three_point_attempts")
+    away_three_point_pct = _rate(away_box_stats, "avg_three_pointers_made", "avg_three_point_attempts")
+    home_free_throw_pct = _rate(home_box_stats, "avg_free_throws_made", "avg_free_throw_attempts")
+    away_free_throw_pct = _rate(away_box_stats, "avg_free_throws_made", "avg_free_throw_attempts")
+
+    home_win_streak = current_streak(home_team_events, home_id)
+    away_win_streak = current_streak(away_team_events, away_id)
+
+    return {
+        "event_key": event["event_key"],
+        "event_date": event["event_date"],
+        "home_entity_id": home_id,
+        "away_entity_id": away_id,
+        "kickoff_hour_utc": kickoff_hour_utc(event.get("kickoff_time")),
+        "home_elo": home_elo,
+        "away_elo": away_elo,
+        "elo_diff": (home_elo - away_elo) if home_elo is not None and away_elo is not None else None,
+        "home_rest_days": rest_days(event["event_date"], home_team_events[0]["event_date"]) if home_team_events else None,
+        "away_rest_days": rest_days(event["event_date"], away_team_events[0]["event_date"]) if away_team_events else None,
+        "home_avg_points_scored": home_scoring["avg_points_scored"],
+        "home_avg_points_allowed": home_scoring["avg_points_allowed"],
+        "home_games_played": home_scoring["games_played"],
+        "away_avg_points_scored": away_scoring["avg_points_scored"],
+        "away_avg_points_allowed": away_scoring["avg_points_allowed"],
+        "away_games_played": away_scoring["games_played"],
+        "home_avg_rebounds": rebounds_fn(home_box_stats),
+        "home_avg_offensive_rebounds": home_box_stats.get("avg_offensive_rebounds"),
+        "home_avg_defensive_rebounds": home_box_stats.get("avg_defensive_rebounds"),
+        "home_avg_assists": home_box_stats.get("avg_assists"),
+        "home_avg_steals": home_box_stats.get("avg_steals"),
+        "home_avg_blocks": home_box_stats.get("avg_blocks"),
+        "home_avg_turnovers": home_box_stats.get("avg_turnovers"),
+        "home_avg_fouls": home_box_stats.get("avg_fouls"),
+        "home_field_goal_pct": home_field_goal_pct,
+        "home_three_point_pct": home_three_point_pct,
+        "home_free_throw_pct": home_free_throw_pct,
+        "home_offensive_efficiency": home_offensive_efficiency,
+        "home_defensive_efficiency": home_defensive_efficiency,
+        "home_box_games_played": home_box_stats["games_played"],
+        "away_avg_rebounds": rebounds_fn(away_box_stats),
+        "away_avg_offensive_rebounds": away_box_stats.get("avg_offensive_rebounds"),
+        "away_avg_defensive_rebounds": away_box_stats.get("avg_defensive_rebounds"),
+        "away_avg_assists": away_box_stats.get("avg_assists"),
+        "away_avg_steals": away_box_stats.get("avg_steals"),
+        "away_avg_blocks": away_box_stats.get("avg_blocks"),
+        "away_avg_turnovers": away_box_stats.get("avg_turnovers"),
+        "away_avg_fouls": away_box_stats.get("avg_fouls"),
+        "away_field_goal_pct": away_field_goal_pct,
+        "away_three_point_pct": away_three_point_pct,
+        "away_free_throw_pct": away_free_throw_pct,
+        "away_offensive_efficiency": away_offensive_efficiency,
+        "away_defensive_efficiency": away_defensive_efficiency,
+        "away_box_games_played": away_box_stats["games_played"],
+        **extra_fields_fn(event, home_id, away_id),
+        "home_win_streak": home_win_streak,
+        "away_win_streak": away_win_streak,
+        "home_team_injury_count": _team_injury_count(event.get("home_injuries")),
+        "away_team_injury_count": _team_injury_count(event.get("away_injuries")),
+        "label_home_won": home.get("result", {}).get("won"),
+        "label_home_score": home.get("result", {}).get("score"),
+        "label_away_score": away.get("result", {}).get("score"),
+    }
+
+
+def build_basketball_player_features(
+    player_game: dict,
+    prior_games: list[dict],
+    event: dict,
+    elo_ratings: dict[str, dict[str, float]],
+    own_previous_event_date: str | None,
+    window: int = DEFAULT_ROLLING_WINDOW,
+    *,
+    extra_fields_fn,
+) -> dict:
+    """Shared nba/ncaambb build_player_features body. extra_fields_fn(
+    event, home_id, away_id, is_home) -> dict mirrors
+    build_basketball_event_features' own extra_fields_fn (NBA: is_
+    divisional_game/is_international_game/travel_km; NCAA MBB: is_
+    conference_game only)."""
+    participants = event["participants"]
+    home = next(p for p in participants if p.get("role") == "home")
+    away = next(p for p in participants if p.get("role") == "away")
+    home_id, away_id = home["entity_id"], away["entity_id"]
+    team_id = player_game["team_id"]
+    is_home = team_id == home_id
+    opponent_id = away_id if is_home else home_id
+
+    ratings = elo_ratings.get(event["event_key"], {})
+    home_elo = ratings.get("home_pre_rating")
+    away_elo = ratings.get("away_pre_rating")
+    own_elo = home_elo if is_home else away_elo
+    opponent_elo = away_elo if is_home else home_elo
+
+    averages = rolling_player_stat_averages(prior_games, window)
+    return {
+        "event_key": player_game["event_key"],
+        "player_key": player_game["player_key"],
+        "entity_id": player_game["entity_id"],
+        "team_id": team_id,
+        "opponent_id": opponent_id,
+        "event_date": player_game["event_date"],
+        **averages,
+        "is_home": is_home,
+        "kickoff_hour_utc": kickoff_hour_utc(event.get("kickoff_time")),
+        "rest_days": rest_days(player_game["event_date"], own_previous_event_date),
+        "own_elo": own_elo,
+        "opponent_elo": opponent_elo,
+        "elo_diff": (own_elo - opponent_elo) if own_elo is not None and opponent_elo is not None else None,
+        **extra_fields_fn(event, home_id, away_id, is_home),
+        "label_stat_line": player_game.get("stat_line", {}),
+        "label_started": player_game.get("started"),
+    }

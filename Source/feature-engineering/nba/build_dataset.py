@@ -30,17 +30,13 @@ Optional environment variables:
 Usage:
     python build_dataset.py
 """
-import io
-import json
 import logging
 import os
 from collections import defaultdict
-from datetime import date, timedelta
-
-import pandas as pd
 
 from library.aws import xray
 from library.aws.s3_manager import S3Manager
+from library.features import build_dataset_common
 from library.features.common import compute_elo_ratings
 from library.features.nba import build_event_features, build_player_features
 from library.features.nba_teams import is_real_franchise_matchup
@@ -54,9 +50,7 @@ EVENT_FEATURES_KEY = "nba/training-data/event_features.parquet"
 PLAYER_FEATURES_KEY = "nba/training-data/player_features.parquet"
 
 
-def _index_team_game_stats(team_game_stats: list[dict]) -> dict[tuple[str, str], dict]:
-    # One row per (event, team), keyed for direct lookup.
-    return {(row["event_key"], row["team_id"]): row for row in team_game_stats}
+_index_team_game_stats = build_dataset_common.index_team_game_stats
 
 
 def build_event_dataset(storage: FeatureStorage, window: int, since_date: str | None = None) -> list[dict]:
@@ -114,98 +108,15 @@ def build_event_dataset(storage: FeatureStorage, window: int, since_date: str | 
     return rows
 
 
-def _group_player_games_by_player(player_games: list[dict]) -> dict[str, list[dict]]:
-    by_player: dict[str, list[dict]] = defaultdict(list)
-    for game in player_games:
-        by_player[game["entity_id"]].append(game)
-    for games in by_player.values():
-        games.sort(key=lambda g: g.get("event_date", ""))
-    return by_player
-
-
-def _team_previous_event_dates(events: list[dict]) -> dict[tuple[str, str], str | None]:
-    """Maps (team_id, event_key) -> that team's previous event's date."""
-    by_team: dict[str, list[dict]] = defaultdict(list)
-    for event in events:
-        for participant in event.get("participants", []):
-            by_team[participant["entity_id"]].append(event)
-
-    previous_dates: dict[tuple[str, str], str | None] = {}
-    for team_id, team_events in by_team.items():
-        team_events.sort(key=lambda e: e.get("event_date", ""))
-        previous_date = None
-        for event in team_events:
-            previous_dates[(team_id, event["event_key"])] = previous_date
-            previous_date = event.get("event_date")
-    return previous_dates
-
-
 def build_player_dataset(storage: FeatureStorage, window: int, since_date: str | None = None) -> list[dict]:
-    """Same incremental-history approach as build_event_dataset, per
-    player instead of per team."""
-    events = storage.get_all_events(SPORT, since_date=since_date)
-    events = [e for e in events if is_real_franchise_matchup(e)]
-    events_by_key = {event["event_key"]: event for event in events}
-    elo_ratings, _ = compute_elo_ratings(events)  # only the pre-game side is used here
-    team_previous_event_dates = _team_previous_event_dates(events)
-
-    player_games = storage.get_all_player_game_stats(SPORT, since_date=since_date)
-    logger.info("Loaded %d player-game rows", len(player_games))
-
-    games_by_player = _group_player_games_by_player(player_games)
-
-    total = len(player_games)
-    seen = 0  # rows examined, including skipped ones
-    skipped = 0
-    rows = []
-    for games in games_by_player.values():
-        history: list[dict] = []  # ascending, grows as we go
-        for game in games:
-            event = events_by_key.get(game["event_key"])
-            participants = event.get("participants", []) if event else []
-            has_home_and_away = any(p.get("role") == "home" for p in participants) and any(
-                p.get("role") == "away" for p in participants
-            )
-            if not has_home_and_away:
-                logger.debug("Skipping player-game %s -- event missing or missing home/away role", game["event_key"])
-                skipped += 1
-            else:
-                prior = history[-window:][::-1]  # most-recent-first, capped at window
-                own_previous_event_date = team_previous_event_dates.get((game["team_id"], game["event_key"]))
-                rows.append(build_player_features(game, prior, event, elo_ratings, own_previous_event_date, window))
-                history.append(game)
-
-            seen += 1
-            if seen % 20000 == 0 or seen == total:
-                logger.info("Built player features: %d/%d (%d skipped)", seen, total, skipped)
-
-    return rows
+    return build_dataset_common.build_player_dataset(
+        storage, SPORT, window, build_player_features, logger,
+        since_date=since_date, filter_fn=is_real_franchise_matchup,
+    )
 
 
-def _write_parquet(rows: list[dict]) -> bytes:
-    """JSON-encodes dict-valued columns (e.g. label_stat_line) before
-    writing, since Parquet doesn't support raw dict values."""
-    if not rows:
-        return b""
-    df = pd.DataFrame(rows)
-    dict_columns = [key for key, value in rows[0].items() if isinstance(value, dict)]
-    for col in dict_columns:
-        df[col] = df[col].apply(json.dumps)
-    buffer = io.BytesIO()
-    df.to_parquet(buffer, engine="pyarrow", index=False)
-    return buffer.getvalue()
-
-
-def _lookback_since_date() -> str | None:
-    """Converts TRAINING_LOOKBACK_SEASONS (a season count) into an
-    approximate since_date FeatureStorage's GSI queries can filter on --
-    unset (the common case today) means unbounded, same as before this
-    existed. 366 days/season is deliberately generous (never trims a
-    genuinely in-window season for being a day short)."""
-    lookback = os.environ.get("TRAINING_LOOKBACK_SEASONS")
-    if not lookback:
-        return None
-    return (date.today() - timedelta(days=int(lookback) * 366)).isoformat()
+_write_parquet = build_dataset_common.write_parquet
+_lookback_since_date = build_dataset_common.lookback_since_date
 
 
 def main() -> None:

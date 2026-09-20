@@ -18,13 +18,8 @@ logger = logging.getLogger("nba-predict")
 
 SPORT = "nba"
 
-# Stat(s) each leader category needs scored. Matches
-# library.serving.nba_reads' own _STAT_CATEGORY, inverted.
-LEADER_CATEGORY_STATS = {
-    "scoring": ["points"],
-    "rebounding": ["rebounds"],
-    "assists": ["assists"],
-}
+# Read directly by season_projection.py's own leaderboard-candidate loop.
+LEADER_CATEGORY_STATS = common.BASKETBALL_LEADER_CATEGORY_STATS
 
 model_name_to_prop = common.model_name_to_prop
 non_negative = common.non_negative
@@ -37,66 +32,10 @@ def get_cached_model(model_cache: dict, s3, model_name: str):
     return common.get_cached_model(model_cache, s3, SPORT, model_name)
 
 
-def _score_and_record_leader(storage, s3, predictions_table, model_cache: dict, event_key_value: str, feature_row: dict, stats: list[str]) -> dict:
-    """Scores one leader candidate against every stat in `stats` and records each prediction.
-    Missing a stat key entirely if that stat's model hasn't been promoted yet."""
-    entity_id = feature_row["entity_id"]
-    result = {"entity_id": entity_id}
-    entity = storage.get_entity(SPORT, entity_id, "player")
-    if entity and entity.get("name"):
-        result["name"] = entity["name"]
-
-    for stat in stats:
-        model_name = model_name_to_prop(stat)
-        try:
-            booster, model_card = get_cached_model(model_cache, s3, model_name)
-        except model_loader.NoPromotedModelError:
-            continue
-        value = non_negative(model_loader.predict(booster, model_card, feature_row))
-        result[stat] = value
-        try:
-            record_prediction(
-                predictions_table, event_key_value,
-                f"MODEL#{model_name}#v{model_card['version']}#PLAYER#{entity_id}", {"value": value},
-            )
-        except Exception:
-            logger.exception("Failed recording leader prediction for %s/%s", entity_id, stat)
-    return result
-
-
 def predict_event_leaders(storage, s3, predictions_table, event_key_value: str, events: list[dict] | None = None) -> dict | None:
     """The `leaders` block -- scoring/rebounding/assists leaders per team,
-    each always a list (no leader is inherently singular in basketball).
-    Best-effort: a failure here is logged and returns None rather than
-    failing predict_event."""
-    try:
-        candidates = live_features.build_live_event_leader_candidates(storage, SPORT, event_key_value, events=events)
-    except Exception:
-        logger.exception("Failed to build leader candidates for %s", event_key_value)
-        return None
-
-    model_cache: dict = {}
-
-    def score(feature_row: dict, stats: list[str]) -> dict:
-        return _score_and_record_leader(storage, s3, predictions_table, model_cache, event_key_value, feature_row, stats)
-
-    def team_leaders(team_candidates: dict) -> dict:
-        # Candidates arrive ordered by recent volume (that's how
-        # build_live_event_leader_candidates picks who to score at all),
-        # not by this game's own predicted value -- the two can genuinely
-        # disagree (e.g. a cold matchup for an otherwise-hot scorer), so
-        # each category is re-sorted by its own scored stat before
-        # returning, descending, missing-stat rows (no promoted model)
-        # last rather than crashing.
-        result = {}
-        for category in LEADER_CATEGORY_STATS:
-            primary_stat = LEADER_CATEGORY_STATS[category][0]
-            scored = [score(row, LEADER_CATEGORY_STATS[category]) for row in team_candidates[category]]
-            scored.sort(key=lambda row, primary_stat=primary_stat: row.get(primary_stat, float("-inf")), reverse=True)
-            result[category] = scored
-        return result
-
-    return {"home": team_leaders(candidates["home"]), "away": team_leaders(candidates["away"])}
+    each always a list (no leader is inherently singular in basketball)."""
+    return common.basketball_predict_event_leaders(storage, s3, predictions_table, event_key_value, SPORT, events=events)
 
 
 def predict_event(storage, s3, predictions_table, event_id: str) -> dict:

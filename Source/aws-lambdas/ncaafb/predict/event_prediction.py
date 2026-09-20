@@ -38,30 +38,7 @@ def get_cached_model(model_cache: dict, s3, model_name: str):
 
 
 def _score_and_record_leader(storage, s3, predictions_table, model_cache: dict, event_key_value: str, feature_row: dict, stats: list[str]) -> dict:
-    """Scores one leader candidate against every stat in `stats` and records each prediction.
-    Missing a stat key entirely if that stat's model hasn't been promoted yet."""
-    entity_id = feature_row["entity_id"]
-    result = {"entity_id": entity_id}
-    entity = storage.get_entity(SPORT, entity_id, "player")
-    if entity and entity.get("name"):
-        result["name"] = entity["name"]
-
-    for stat in stats:
-        model_name = model_name_to_prop(stat)
-        try:
-            booster, model_card = get_cached_model(model_cache, s3, model_name)
-        except model_loader.NoPromotedModelError:
-            continue
-        value = non_negative(model_loader.predict(booster, model_card, feature_row))
-        result[stat] = value
-        try:
-            record_prediction(
-                predictions_table, event_key_value,
-                f"MODEL#{model_name}#v{model_card['version']}#PLAYER#{entity_id}", {"value": value},
-            )
-        except Exception:
-            logger.exception("Failed recording leader prediction for %s/%s", entity_id, stat)
-    return result
+    return common._score_and_record_leader(storage, s3, predictions_table, SPORT, model_cache, event_key_value, feature_row, stats)
 
 
 def predict_event_leaders(storage, s3, predictions_table, event_key_value: str, events: list[dict] | None = None) -> dict | None:
