@@ -34,6 +34,15 @@ ShouldDecrementDesiredCapacity=True, not a raw ec2:TerminateInstances --
 the latter would leave the ASG's desired capacity stale and it would just
 launch a replacement instance in response.
 
+Both training ASGs run with managed_termination_protection=ENABLED, which
+protects an instance from scale-in until ECS's own reconciliation loop
+notices it has no tasks left and releases that protection -- on its own
+schedule, independent of this Lambda's own idle check. Since idle_
+training_instances already confirms zero running/pending tasks via ECS
+directly, this Lambda clears ProtectedFromScaleIn itself (autoscaling:
+SetInstanceProtection) immediately before terminating, rather than
+depending on that reconciliation to have already run.
+
 Required environment variables:
     ECS_CLUSTER_NAME
     PROJECT_TAG_VALUE -- scopes the describe_instances candidate search to
@@ -128,6 +137,18 @@ def idle_training_instances(cluster_name: str, project_tag_value: str, grace_per
     return list(idle_ids)
 
 
+def _auto_scaling_group_names(instance_ids: list[str]) -> dict[str, str]:
+    """instance_id -> its current AutoScalingGroupName, for every id still
+    a member of some Auto Scaling group -- an id already gone from every
+    ASG (mid-termination from a prior pass) is simply absent here."""
+    names: dict[str, str] = {}
+    for i in range(0, len(instance_ids), 50):  # DescribeAutoScalingInstances caps at 50 ids per call
+        batch = instance_ids[i:i + 50]
+        for entry in autoscaling.describe_auto_scaling_instances(InstanceIds=batch)["AutoScalingInstances"]:
+            names[entry["InstanceId"]] = entry["AutoScalingGroupName"]
+    return names
+
+
 def _maybe_schedule_retry(context, project_tag_value: str, retry_count: int, retry_delay_minutes: int, max_retries: int) -> None:
     """Self-creates one one-time, self-deleting EventBridge Scheduler
     schedule (ActionAfterCompletion=DELETE -- no manual cleanup needed
@@ -170,8 +191,14 @@ def lambda_handler(event, context):
     retry_count = int(event.get("retry_count", 0) if event else 0)
 
     reaped = idle_training_instances(cluster_name, project_tag_value, grace_period_minutes)
+    asg_names = _auto_scaling_group_names(reaped)
     for instance_id in reaped:
         logger.info("Reaping idle training instance %s", instance_id)
+        asg_name = asg_names.get(instance_id)
+        if asg_name:
+            autoscaling.set_instance_protection(
+                InstanceIds=[instance_id], AutoScalingGroupName=asg_name, ProtectedFromScaleIn=False,
+            )
         autoscaling.terminate_instance_in_auto_scaling_group(
             InstanceId=instance_id, ShouldDecrementDesiredCapacity=True,
         )

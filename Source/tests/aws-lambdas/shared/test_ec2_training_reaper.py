@@ -149,6 +149,37 @@ class TestIdleTrainingInstances:
         assert mock_ecs.describe_container_instances.call_count == 2
 
 
+class TestAutoScalingGroupNames:
+    def test_maps_each_instance_to_its_own_asg_name(self):
+        with patch.object(shared_ec2_training_reaper, "autoscaling") as mock_autoscaling:
+            mock_autoscaling.describe_auto_scaling_instances.return_value = {
+                "AutoScalingInstances": [
+                    {"InstanceId": "i-1", "AutoScalingGroupName": "asg-a"},
+                    {"InstanceId": "i-2", "AutoScalingGroupName": "asg-b"},
+                ],
+            }
+
+            result = shared_ec2_training_reaper._auto_scaling_group_names(["i-1", "i-2"])
+
+        assert result == {"i-1": "asg-a", "i-2": "asg-b"}
+
+    def test_empty_input_returns_empty_without_calling_aws(self):
+        with patch.object(shared_ec2_training_reaper, "autoscaling") as mock_autoscaling:
+            result = shared_ec2_training_reaper._auto_scaling_group_names([])
+
+        assert result == {}
+        mock_autoscaling.describe_auto_scaling_instances.assert_not_called()
+
+    def test_batches_past_50_ids(self):
+        ids = [f"i-{i}" for i in range(75)]
+        with patch.object(shared_ec2_training_reaper, "autoscaling") as mock_autoscaling:
+            mock_autoscaling.describe_auto_scaling_instances.return_value = {"AutoScalingInstances": []}
+
+            shared_ec2_training_reaper._auto_scaling_group_names(ids)
+
+        assert mock_autoscaling.describe_auto_scaling_instances.call_count == 2
+
+
 _BASE_ENV = {
     "ECS_CLUSTER_NAME": "sports-predictor-cluster", "PROJECT_TAG_VALUE": "sports-predictor",
     "SCHEDULER_GROUP_NAME": "sports-predictor-schedules", "SCHEDULER_ROLE_ARN": "arn:aws:iam::123:role/eventbridge-invoke",
@@ -165,6 +196,12 @@ class TestLambdaHandler:
              patch.object(shared_ec2_training_reaper, "autoscaling") as mock_autoscaling, \
              patch.object(shared_ec2_training_reaper, "_maybe_schedule_retry"), \
              patch.dict(os.environ, _BASE_ENV):
+            mock_autoscaling.describe_auto_scaling_instances.return_value = {
+                "AutoScalingInstances": [
+                    {"InstanceId": "i-idle-1", "AutoScalingGroupName": "sports-predictor-ec2-training-spot"},
+                    {"InstanceId": "i-idle-2", "AutoScalingGroupName": "sports-predictor-ec2-training-ondemand"},
+                ]
+            }
 
             result = shared_ec2_training_reaper.lambda_handler({}, None)
 
@@ -172,6 +209,35 @@ class TestLambdaHandler:
         assert mock_autoscaling.terminate_instance_in_auto_scaling_group.call_count == 2
         mock_autoscaling.terminate_instance_in_auto_scaling_group.assert_any_call(
             InstanceId="i-idle-1", ShouldDecrementDesiredCapacity=True,
+        )
+
+    def test_clears_scale_in_protection_before_terminating(self):
+        with patch.object(shared_ec2_training_reaper, "idle_training_instances", return_value=["i-idle-1"]), \
+             patch.object(shared_ec2_training_reaper, "autoscaling") as mock_autoscaling, \
+             patch.object(shared_ec2_training_reaper, "_maybe_schedule_retry"), \
+             patch.dict(os.environ, _BASE_ENV):
+            mock_autoscaling.describe_auto_scaling_instances.return_value = {
+                "AutoScalingInstances": [{"InstanceId": "i-idle-1", "AutoScalingGroupName": "sports-predictor-ec2-training-spot"}],
+            }
+
+            shared_ec2_training_reaper.lambda_handler({}, None)
+
+        mock_autoscaling.set_instance_protection.assert_called_once_with(
+            InstanceIds=["i-idle-1"], AutoScalingGroupName="sports-predictor-ec2-training-spot", ProtectedFromScaleIn=False,
+        )
+
+    def test_skips_protection_clear_when_instance_is_no_longer_in_any_asg(self):
+        with patch.object(shared_ec2_training_reaper, "idle_training_instances", return_value=["i-gone"]), \
+             patch.object(shared_ec2_training_reaper, "autoscaling") as mock_autoscaling, \
+             patch.object(shared_ec2_training_reaper, "_maybe_schedule_retry"), \
+             patch.dict(os.environ, _BASE_ENV):
+            mock_autoscaling.describe_auto_scaling_instances.return_value = {"AutoScalingInstances": []}
+
+            shared_ec2_training_reaper.lambda_handler({}, None)
+
+        mock_autoscaling.set_instance_protection.assert_not_called()
+        mock_autoscaling.terminate_instance_in_auto_scaling_group.assert_called_once_with(
+            InstanceId="i-gone", ShouldDecrementDesiredCapacity=True,
         )
 
     def test_no_idle_instances_terminates_nothing(self):

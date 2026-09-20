@@ -39,7 +39,7 @@ resource "aws_lambda_function" "nfl_ingest" {
   role          = aws_iam_role.lambda_pipeline.arn
   runtime       = "python3.12"
   handler       = "handler.lambda_handler"
-  timeout       = 300
+  timeout       = 840
   memory_size   = 256
 
   filename         = data.archive_file.nfl_ingest_placeholder.output_path

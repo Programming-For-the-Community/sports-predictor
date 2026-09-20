@@ -43,7 +43,7 @@ class TestLambdaHandler:
 
         # 18 regular-season weeks + 5 postseason weeks.
         assert mock_client.get_scoreboard.call_count == 23
-        assert result == {"season": 2026, "synced": 23, "failed": 0}
+        assert result == {"season": 2026, "synced": 23, "skipped": 0, "failed": 0}
 
     def test_uses_one_shared_client_for_the_whole_run(self):
         # One NFLClient means one RateLimiter pacing every request in the
@@ -158,8 +158,53 @@ class TestLambdaHandler:
              patch.object(nfl_schedule_sync, "NFLClient", return_value=mock_client):
             result = nfl_schedule_sync.lambda_handler({"season": 2026}, None)
 
-        assert result == {"season": 2026, "synced": 22, "failed": 1}
+        assert result == {"season": 2026, "synced": 22, "skipped": 0, "failed": 1}
         assert mock_client.get_scoreboard.call_count == 23
+
+    def test_skips_a_week_that_already_has_a_completed_event(self):
+        # _make_client's mock returns the same scoreboard for every
+        # get_scoreboard call -- the event payload doesn't scope which
+        # weeks run (lambda_handler loops all 23 regardless), so every
+        # week sees this same completed event and gets skipped.
+        mock_s3 = MagicMock()
+        completed_event = {"id": "1", "status": {"type": {"completed": True}}}
+        mock_client = _make_client({"events": [completed_event]})
+
+        with patch.object(nfl_schedule_sync, "_s3", mock_s3), \
+             patch.object(nfl_schedule_sync, "NFLClient", return_value=mock_client):
+            result = nfl_schedule_sync.lambda_handler({"season": 2026}, None)
+
+        assert result == {"season": 2026, "synced": 0, "skipped": 23, "failed": 0}
+        mock_s3.put_object.assert_not_called()
+
+    def test_still_syncs_a_week_with_only_scheduled_events(self):
+        mock_s3 = _make_s3()
+        scheduled_event = {"id": "1", "status": {"type": {"completed": False}}}
+        mock_client = _make_client({"events": [scheduled_event]})
+
+        with patch.object(nfl_schedule_sync, "_s3", mock_s3), \
+             patch.object(nfl_schedule_sync, "NFLClient", return_value=mock_client):
+            result = nfl_schedule_sync.lambda_handler({"season": 2026}, None)
+
+        assert result == {"season": 2026, "synced": 23, "skipped": 0, "failed": 0}
+
+    def test_a_week_with_a_mix_of_completed_and_scheduled_events_is_skipped(self):
+        # Once any game in a week has started, ingest owns that whole
+        # week's key going forward -- a partial overwrite here would still
+        # strip enrichment from the games that already finished.
+        mock_s3 = MagicMock()
+        events = [
+            {"id": "1", "status": {"type": {"completed": True}}},
+            {"id": "2", "status": {"type": {"completed": False}}},
+        ]
+        mock_client = _make_client({"events": events})
+
+        with patch.object(nfl_schedule_sync, "_s3", mock_s3), \
+             patch.object(nfl_schedule_sync, "NFLClient", return_value=mock_client):
+            result = nfl_schedule_sync.lambda_handler({"season": 2026}, None)
+
+        assert result["skipped"] == 23
+        mock_s3.put_object.assert_not_called()
 
 
 class TestCurrentNflSeason:

@@ -113,6 +113,29 @@ class TestListEvents:
 
         assert {e["event_id"] for e in result["events"]} == {"e2"}
 
+    def test_a_week_thats_entirely_past_but_still_scheduled_does_not_mask_next_week(self):
+        # Regression: confirmed live 2026-09-20 -- every one of last
+        # week's games had already been played (Thu/Fri already ingested
+        # to "completed", Saturday's late games not yet, since ingest
+        # hadn't run again since they finished) but was still "scheduled"
+        # in storage. That whole week's own events all fall below the
+        # today-or-later filter, so the real next week (also sitting in
+        # the same candidate pool) must still be found instead of this
+        # returning nothing at all.
+        storage = MagicMock()
+        predictions_table = MagicMock()
+        yesterday = us_eastern_date(datetime.now(timezone.utc) - timedelta(days=1))
+        storage.get_all_events.return_value = [
+            _event("stale1", yesterday, "61", "52", week=5),
+            _event("stale2", yesterday, "80", "90", week=5),
+            _event("next1", _future(6), "61", "70", week=6),
+            _event("next2", _future(6), "80", "70", week=6),
+        ]
+
+        result = ncaafb_reads.list_events(storage, predictions_table, "ncaafb", "scheduled")
+
+        assert {e["event_id"] for e in result["events"]} == {"next1", "next2"}
+
     def test_a_week_spanning_two_separate_clusters_only_shows_the_soonest_one(self):
         # Regression: confirmed live, 2026-08-24, against the real 2026
         # schedule -- CFBD's own week=1 tag covered a handful of true

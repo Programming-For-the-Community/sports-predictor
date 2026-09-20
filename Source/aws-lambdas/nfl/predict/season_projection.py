@@ -288,7 +288,11 @@ def _project_stat_leaderboard(
 
 def _leaderboards(storage: FeatureStorage, s3, model_cache: dict, season_inputs: dict) -> dict:
     """Top-10 season-long leaderboard per tracked player-prop stat -- see
-    _project_stat_leaderboard's own docstring for the projection shape."""
+    _project_stat_leaderboard's own docstring for the projection shape.
+    Each stat is scored independently: one stat's model failing (a stale
+    promoted artifact pickled under a since-upgraded library version, say)
+    omits just that stat rather than the whole leaderboards response --
+    every other stat's own model is unrelated and still worth serving."""
     season_player_stats = [
         row for row in storage.get_all_player_game_stats(SPORT)
         if row.get("event_key") in season_inputs["completed_event_keys"]
@@ -302,13 +306,16 @@ def _leaderboards(storage: FeatureStorage, s3, model_cache: dict, season_inputs:
     remaining = all_candidates - feature_row_cache.keys()
     _fill_remaining_feature_rows(storage, season_inputs, player_team, feature_row_cache, remaining)
 
-    return {
-        stat: _project_stat_leaderboard(
-            storage, s3, model_cache, season_inputs, stat, stat_candidates[stat],
-            current_totals_by_stat, feature_row_cache, player_team,
-        )
-        for stat in PLAYER_PROP_STATS
-    }
+    leaderboards: dict[str, list[dict]] = {}
+    for stat in PLAYER_PROP_STATS:
+        try:
+            leaderboards[stat] = _project_stat_leaderboard(
+                storage, s3, model_cache, season_inputs, stat, stat_candidates[stat],
+                current_totals_by_stat, feature_row_cache, player_team,
+            )
+        except Exception:
+            logger.exception("Failed projecting leaderboard for stat %s -- omitting just this stat", stat)
+    return leaderboards
 
 
 def _real_postseason_matchups(storage: FeatureStorage, current_season: int | None) -> dict[frozenset, dict]:

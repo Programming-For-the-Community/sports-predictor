@@ -73,6 +73,29 @@ data "aws_iam_policy_document" "lambda_ec2_training_reaper_permissions" {
     ]
   }
 
+  # Looks up each idle instance's own ASG name before clearing its
+  # scale-in protection below -- DescribeAutoScalingInstances doesn't
+  # support resource-level scoping (AWS-wide "*" is the only option),
+  # same constraint DescribeTrainingInstances above has.
+  statement {
+    sid       = "DescribeAutoScalingInstances"
+    actions   = ["autoscaling:DescribeAutoScalingInstances"]
+    resources = ["*"]
+  }
+
+  # Clears managed_termination_protection's own ProtectedFromScaleIn flag
+  # immediately before terminating, rather than waiting on ECS's separate
+  # reconciliation loop to release it first -- see handler.py's own
+  # module docstring.
+  statement {
+    sid     = "ClearScaleInProtectionBeforeReaping"
+    actions = ["autoscaling:SetInstanceProtection"]
+    resources = [
+      "arn:aws:autoscaling:${var.region}:${var.account_id}:autoScalingGroup:*:autoScalingGroupName/${var.project}-ec2-training-spot",
+      "arn:aws:autoscaling:${var.region}:${var.account_id}:autoScalingGroup:*:autoScalingGroupName/${var.project}-ec2-training-ondemand",
+    ]
+  }
+
   # Self-scheduling: when this Lambda finds a training-tagged instance
   # still running but not yet idle, it creates a one-time, self-deleting
   # EventBridge Scheduler schedule (ActionAfterCompletion=DELETE) to check

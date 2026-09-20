@@ -15,8 +15,13 @@ from library.storage.depth_chart_cache import attach_depth_charts, home_away_tea
 
 logger = logging.getLogger("nfl-ingest")
 
-# Injuries have no TTL constant -- fetched fresh every run, never cached.
 COACHES_CACHE_TTL_DAYS = 7
+# ESPN's injuries endpoint returns one entry per status change for the
+# whole season, not just current ones -- get_team_injuries resolves every
+# one of those via an individual $ref call, so the per-team cost grows as
+# the season goes on. Cached well under the daily ingest cadence so it
+# still refreshes every scheduled run.
+INJURIES_CACHE_TTL_HOURS = 20
 
 
 def _get_json(s3, bucket: str, key: str) -> dict | None:
@@ -34,7 +39,7 @@ def _put_json(s3, bucket: str, key: str, payload: dict) -> None:
     s3.put_object(Bucket=bucket, Key=key, Body=json.dumps(payload), ContentType="application/json", ExpectedBucketOwner=get_account_id())
 
 
-def _cached_or_fetch[T](s3, bucket: str, key: str, ttl_days: int, fetch: Callable[[], T]) -> T:
+def _cached_or_fetch[T](s3, bucket: str, key: str, ttl_days: float, fetch: Callable[[], T]) -> T:
     """Returns the value cached at `key` if it was fetched within the last
     `ttl_days`, otherwise calls `fetch()`, caches the result (wrapped with
     a fetched_at timestamp), and returns it. A fetch failure propagates to
@@ -64,6 +69,19 @@ def get_cached_coaches(s3, bucket: str, core_client: EspnCoreApiClient, season: 
     )
 
 
+def _injuries_cache_key(team_id: str) -> str:
+    return f"nfl/cache/team-injuries/{team_id}.json"
+
+
+def get_cached_team_injuries(s3, bucket: str, core_client: EspnCoreApiClient, team_id: str) -> list[dict]:
+    """One team's current injury report -- TTL-cached (INJURIES_CACHE_TTL_HOURS)
+    in S3 under _injuries_cache_key(team_id)."""
+    return _cached_or_fetch(
+        s3, bucket, _injuries_cache_key(team_id), INJURIES_CACHE_TTL_HOURS / 24,
+        lambda: core_client.get_team_injuries(team_id),
+    )
+
+
 def enrich_events(
     events: list[dict], season: int, nfl_client: NFLClient, core_client: EspnCoreApiClient, s3, bucket: str,
 ) -> None:
@@ -86,7 +104,7 @@ def enrich_events(
     injuries_by_team: dict[str, list[dict]] = {}
     for team_id in team_ids:
         try:
-            injuries_by_team[team_id] = core_client.get_team_injuries(team_id)
+            injuries_by_team[team_id] = get_cached_team_injuries(s3, bucket, core_client, team_id)
         except Exception:
             logger.exception("Failed fetching injuries for team %s -- injuries field will be omitted", team_id)
 

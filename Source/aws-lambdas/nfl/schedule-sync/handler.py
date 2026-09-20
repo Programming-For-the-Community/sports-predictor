@@ -11,6 +11,11 @@ does not fetch box scores -- both are meaningless months ahead of a game
 that hasn't been played. Does attach depth charts
 (library.storage.depth_chart_cache).
 
+Skips writing a week that already has any completed event -- once a
+week's games start, ingest/handler.py owns that key going forward
+(coach/injury enrichment plus box scores); overwriting it here would
+silently strip that back out on every future run.
+
 Uses one shared NFLClient for the whole run so every request is paced
 by the same RateLimiter instance.
 """
@@ -60,16 +65,28 @@ def _put_json(key: str, payload: dict) -> None:
     )
 
 
+def _any_event_completed(events: list[dict]) -> bool:
+    return any(e.get("status", {}).get("type", {}).get("completed", False) for e in events)
+
+
 def lambda_handler(event: dict, context) -> dict:
     season = event.get("season") or _current_nfl_season()
     client = NFLClient()
 
-    synced = failed = 0
+    synced = skipped = failed = 0
     for season_type, weeks in ((SEASON_TYPES["regular"], REGULAR_SEASON_WEEKS), (SEASON_TYPES["postseason"], POSTSEASON_WEEKS)):
         for week in weeks:
             try:
                 scoreboard = client.get_scoreboard(season, season_type, week)
-                attach_depth_charts(scoreboard.get("events", []), client, _s3, RAW_BUCKET)
+                events = scoreboard.get("events", [])
+                if _any_event_completed(events):
+                    logger.info(
+                        "Season %s type %d week %d already has a completed event -- owned by ingest from here, not overwriting",
+                        season, season_type, week,
+                    )
+                    skipped += 1
+                    continue
+                attach_depth_charts(events, client, _s3, RAW_BUCKET)
                 _put_json(f"nfl/scoreboard/{season}/{season_type}/{week}.json", scoreboard)
                 synced += 1
             except Exception:
@@ -79,5 +96,5 @@ def lambda_handler(event: dict, context) -> dict:
                 logger.exception("Failed syncing season %s type %d week %d", season, season_type, week)
                 failed += 1
 
-    logger.info("Schedule sync for season %s complete: %d synced, %d failed", season, synced, failed)
-    return {"season": season, "synced": synced, "failed": failed}
+    logger.info("Schedule sync for season %s complete: %d synced, %d skipped, %d failed", season, synced, skipped, failed)
+    return {"season": season, "synced": synced, "skipped": skipped, "failed": failed}

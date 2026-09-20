@@ -103,7 +103,16 @@ def _next_week_events(scheduled: list[dict]) -> list[dict]:
     _MAX_INTRA_WEEK_GAP_DAYS (measured between *consecutive* dates, not
     from the start) correctly isolates just the soonest cluster -- Aug 30
     -> Sep 3 is a 3-day gap, past the 2-day threshold -- without merging
-    a normal week's own internal 1-2 day gaps between game days."""
+    a normal week's own internal 1-2 day gaps between game days.
+
+    Tries each candidate week in earliest-first order, not just the very
+    first one -- a week whose games have ALL already been played (but
+    ingest hasn't flipped their status to "completed" yet, so they're
+    still "scheduled" and within the grace period) has every one of its
+    own events fall below the today-or-later filter, leaving nothing to
+    return for that week; the real next week, sitting right alongside it
+    in the same candidate pool, must still be found instead of this
+    function giving up."""
     # event_date is a calendar day in ESPN/CFBD's own U.S.-Eastern
     # bucketing (see library/parsing.py's us_eastern_date), not a
     # UTC date -- comparing it against a raw UTC "today" drops the whole
@@ -116,9 +125,19 @@ def _next_week_events(scheduled: list[dict]) -> list[dict]:
     plausible = [e for e in scheduled if e.get("event_date", "") >= cutoff]
     if not plausible:
         return []
-    earliest = min(plausible, key=lambda e: e.get("event_date", ""))
-    target = _week_key(earliest)
-    same_week = [e for e in plausible if _week_key(e) == target and e.get("event_date", "") >= today]
+
+    weeks_by_earliest_date: dict[tuple, str] = {}
+    for e in plausible:
+        key = _week_key(e)
+        event_date = e.get("event_date", "")
+        if key not in weeks_by_earliest_date or event_date < weeks_by_earliest_date[key]:
+            weeks_by_earliest_date[key] = event_date
+
+    same_week: list[dict] = []
+    for target in sorted(weeks_by_earliest_date, key=lambda k: weeks_by_earliest_date[k]):
+        same_week = [e for e in plausible if _week_key(e) == target and e.get("event_date", "") >= today]
+        if same_week:
+            break
     if not same_week:
         return []
     distinct_dates = sorted({e.get("event_date", "") for e in same_week})

@@ -168,7 +168,7 @@ class TestEnrichEvents:
         assert events[0]["home_depth_chart"] is None
         assert events[0]["away_depth_chart"] is None
 
-    def test_injuries_are_never_cached_even_when_coaches_and_depth_chart_are(self):
+    def test_coaches_depth_chart_and_injuries_are_all_cached_across_calls(self):
         events = [_competition_event("1", "12", "24")]
         nfl_client = MagicMock()
         nfl_client.get_depth_chart.return_value = _raw_depth_chart({})
@@ -180,16 +180,15 @@ class TestEnrichEvents:
         enrichment.enrich_events(events, 2025, nfl_client, core_client, mock_s3, BUCKET)
         enrichment.enrich_events(events, 2025, nfl_client, core_client, mock_s3, BUCKET)
 
-        # Coaches/depth-chart each got cached after their first fetch, so
-        # the second enrich_events call within the same (still-fresh)
-        # cache window shouldn't refetch them -- but injuries have no
-        # cache at all, so every call hits ESPN.
+        # Each got cached after its first fetch, so the second
+        # enrich_events call within the same (still-fresh) cache window
+        # shouldn't refetch any of them.
         assert core_client.get_season_coaches.call_count == 1
         # 2 teams (home + away), each its own cache key -- both fetched
         # once on the first enrich_events call, neither refetched on the
         # second.
         assert nfl_client.get_depth_chart.call_count == 2
-        assert core_client.get_team_injuries.call_count == 4
+        assert core_client.get_team_injuries.call_count == 2
 
 
 class TestCachedOrFetch:
