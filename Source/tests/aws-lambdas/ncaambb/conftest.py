@@ -46,19 +46,16 @@ _load_handler("ncaambb_live_scores", "aws-lambdas/ncaambb/live-scores/handler.py
 
 
 @pytest.fixture(autouse=True)
-def reset_ncaambb_predict_singletons():
-    """Clears ncaambb_predict's own module-level singletons before and after
-    every test in this directory."""
-    ncaambb_predict = sys.modules.get("ncaambb_predict")
-    if ncaambb_predict is None:
-        yield
-        return
-    ncaambb_predict._storage = None
-    ncaambb_predict._model_bucket = None
-    ncaambb_predict._predictions_table = None
-    ncaambb_predict._raw_bucket = None
-    yield
-    ncaambb_predict._storage = None
-    ncaambb_predict._model_bucket = None
-    ncaambb_predict._predictions_table = None
-    ncaambb_predict._raw_bucket = None
+def _reset_ncaambb_singletons(reset_singletons):
+    """Every ncaambb_* handler module registered above has its own
+    module-level singleton cache (FeatureStorage/S3Manager/DynamoDBTable/
+    a raw-bucket handle) -- reset before/after every test in this
+    directory via Source/tests/conftest.py's own reset_singletons,
+    regardless of which handler a given test file actually exercises (a
+    no-op for any module that test never touches)."""
+    reset_singletons(
+        sys.modules.get("ncaambb_predict"),
+        _storage=None, _model_bucket=None, _predictions_table=None, _raw_bucket=None,
+    )
+    reset_singletons(sys.modules.get("ncaambb_normalize"), _storage=None)
+    reset_singletons(sys.modules.get("ncaambb_live_scores"), _storage=None)

@@ -47,28 +47,13 @@ import pytest  # noqa: E402
 
 
 @pytest.fixture(autouse=True)
-def reset_f1_predict_singletons():
-    """Clears f1_predict's own module-level singletons before and after
-    every test in this directory."""
-    f1_predict = sys.modules.get("f1_predict")
-    if f1_predict is None:
-        yield
-        return
-    f1_predict._storage = None
-    f1_predict._model_bucket = None
-    f1_predict._predictions_table = None
-    yield
-    f1_predict._storage = None
-    f1_predict._model_bucket = None
-    f1_predict._predictions_table = None
-
-
-@pytest.fixture(autouse=True)
-def reset_f1_live_scores_singletons():
-    f1_live_scores = sys.modules.get("f1_live_scores")
-    if f1_live_scores is None:
-        yield
-        return
-    f1_live_scores._storage = None
-    yield
-    f1_live_scores._storage = None
+def _reset_f1_singletons(reset_singletons):
+    """Every f1_* handler module registered above has its own
+    module-level singleton cache (FeatureStorage/S3Manager/DynamoDBTable)
+    -- reset before/after every test in this directory via
+    Source/tests/conftest.py's own reset_singletons, regardless of which
+    handler a given test file actually exercises (a no-op for any module
+    that test never touches)."""
+    reset_singletons(sys.modules.get("f1_predict"), _storage=None, _model_bucket=None, _predictions_table=None)
+    reset_singletons(sys.modules.get("f1_normalize"), _storage=None)
+    reset_singletons(sys.modules.get("f1_live_scores"), _storage=None)

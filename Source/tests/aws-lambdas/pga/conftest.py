@@ -46,17 +46,13 @@ _load_handler("pga_live_scores", "aws-lambdas/pga/live-scores/handler.py")
 
 
 @pytest.fixture(autouse=True)
-def reset_pga_predict_singletons():
-    """Clears pga_predict's own module-level singletons before and after
-    every test in this directory."""
-    pga_predict = sys.modules.get("pga_predict")
-    if pga_predict is None:
-        yield
-        return
-    pga_predict._storage = None
-    pga_predict._model_bucket = None
-    pga_predict._predictions_table = None
-    yield
-    pga_predict._storage = None
-    pga_predict._model_bucket = None
-    pga_predict._predictions_table = None
+def _reset_pga_singletons(reset_singletons):
+    """Every pga_* handler module registered above has its own
+    module-level singleton cache (FeatureStorage/S3Manager/DynamoDBTable)
+    -- reset before/after every test in this directory via
+    Source/tests/conftest.py's own reset_singletons, regardless of which
+    handler a given test file actually exercises (a no-op for any module
+    that test never touches)."""
+    reset_singletons(sys.modules.get("pga_predict"), _storage=None, _model_bucket=None, _predictions_table=None)
+    reset_singletons(sys.modules.get("pga_normalize"), _storage=None)
+    reset_singletons(sys.modules.get("pga_live_scores"), _storage=None)

@@ -10,17 +10,12 @@ The nfl_live_scores module is registered in sys.modules by conftest.py.
 import json
 from unittest.mock import MagicMock, patch
 
-import pytest
-
 import live_scores
 import nfl_live_scores
 
-
-@pytest.fixture(autouse=True)
-def reset_singleton():
-    nfl_live_scores._storage = None
-    yield
-    nfl_live_scores._storage = None
+# nfl_live_scores's own _storage singleton is reset before/after every
+# test in this directory by conftest.py's own _reset_nfl_singletons
+# fixture.
 
 
 def _api_event(resource: str) -> dict:

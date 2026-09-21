@@ -49,17 +49,13 @@ _load_handler("ncaafb_live_scores", "aws-lambdas/ncaafb/live-scores/handler.py")
 
 
 @pytest.fixture(autouse=True)
-def reset_ncaafb_predict_singletons():
-    """Clears ncaafb_predict's own module-level singletons before and
-    after every test in this directory."""
-    ncaafb_predict = sys.modules.get("ncaafb_predict")
-    if ncaafb_predict is None:
-        yield
-        return
-    ncaafb_predict._storage = None
-    ncaafb_predict._model_bucket = None
-    ncaafb_predict._predictions_table = None
-    yield
-    ncaafb_predict._storage = None
-    ncaafb_predict._model_bucket = None
-    ncaafb_predict._predictions_table = None
+def _reset_ncaafb_singletons(reset_singletons):
+    """Every ncaafb_* handler module registered above has its own
+    module-level singleton cache (FeatureStorage/S3Manager/DynamoDBTable)
+    -- reset before/after every test in this directory via
+    Source/tests/conftest.py's own reset_singletons, regardless of which
+    handler a given test file actually exercises (a no-op for any module
+    that test never touches)."""
+    reset_singletons(sys.modules.get("ncaafb_predict"), _storage=None, _model_bucket=None, _predictions_table=None)
+    reset_singletons(sys.modules.get("ncaafb_normalize"), _storage=None)
+    reset_singletons(sys.modules.get("ncaafb_live_scores"), _storage=None)

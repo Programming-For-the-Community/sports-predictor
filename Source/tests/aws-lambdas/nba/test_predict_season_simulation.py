@@ -7,7 +7,7 @@ handler branch that runs season_simulation.simulate_season/simulate_cup
 and writes the result to S3.
 
 The nba_predict module is registered in sys.modules by conftest.py, whose
-reset_nba_predict_singletons fixture (autouse) resets nba_predict._storage/
+_reset_nba_singletons fixture (autouse) resets nba_predict._storage/
 _model_bucket/_predictions_table before and after every test here.
 """
 from unittest.mock import MagicMock, patch

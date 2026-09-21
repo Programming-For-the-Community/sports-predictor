@@ -12,17 +12,12 @@ The nba_normalize module is registered in sys.modules by conftest.py.
 """
 import json
 
-import pytest
 from unittest.mock import MagicMock, patch
 
 import nba_normalize
 
-
-@pytest.fixture(autouse=True)
-def reset_storage():
-    nba_normalize._storage = None
-    yield
-    nba_normalize._storage = None
+# nba_normalize's own _storage singleton is reset before/after every test
+# in this directory by conftest.py's own _reset_nba_singletons fixture.
 
 
 def _s3_response(payload) -> dict:

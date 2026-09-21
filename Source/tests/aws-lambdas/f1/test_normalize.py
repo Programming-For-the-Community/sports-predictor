@@ -20,12 +20,8 @@ from botocore.exceptions import ClientError
 
 import f1_normalize
 
-
-@pytest.fixture(autouse=True)
-def reset_storage():
-    f1_normalize._storage = None
-    yield
-    f1_normalize._storage = None
+# f1_normalize's own _storage singleton is reset before/after every test
+# in this directory by conftest.py's own _reset_f1_singletons fixture.
 
 
 def _s3_response(payload) -> dict:

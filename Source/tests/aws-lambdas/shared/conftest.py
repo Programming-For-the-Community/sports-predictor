@@ -33,22 +33,15 @@ _load_handler("shared_predict_read", "aws-lambdas/shared/predict-read/handler.py
 
 
 @pytest.fixture(autouse=True)
-def reset_shared_predict_read_singletons():
-    """Clears shared_predict_read's own module-level singletons before and
-    after every test in this directory -- same pattern every per-sport
-    conftest.py already used for its own (now-removed) predict-read
-    module. _predict_invokers is a dict (one LambdaInvoker per sport, not
-    a single value) since this Lambda now serves all 6 sports."""
-    shared_predict_read = sys.modules.get("shared_predict_read")
-    if shared_predict_read is None:
-        yield
-        return
-    shared_predict_read._storage = None
-    shared_predict_read._model_bucket = None
-    shared_predict_read._predictions_table = None
-    shared_predict_read._predict_invokers = {}
-    yield
-    shared_predict_read._storage = None
-    shared_predict_read._model_bucket = None
-    shared_predict_read._predictions_table = None
-    shared_predict_read._predict_invokers = {}
+def _reset_shared_predict_read_singletons(reset_singletons):
+    """shared_predict_read's own module-level singleton cache, reset
+    before/after every test in this directory via Source/tests/
+    conftest.py's own reset_singletons -- same pattern every per-sport
+    conftest.py now uses for its own handler modules. _predict_invokers
+    is a dict (one LambdaInvoker per sport, not a single value) since
+    this Lambda now serves all 6 sports, so it resets to {} rather than
+    None."""
+    reset_singletons(
+        sys.modules.get("shared_predict_read"),
+        _storage=None, _model_bucket=None, _predictions_table=None, _predict_invokers={},
+    )

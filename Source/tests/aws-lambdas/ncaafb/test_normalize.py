@@ -11,17 +11,13 @@ The ncaafb_normalize module is registered in sys.modules by conftest.py.
 import json
 from datetime import date, timedelta
 
-import pytest
 from unittest.mock import MagicMock, patch
 
 import ncaafb_normalize
 
-
-@pytest.fixture(autouse=True)
-def reset_storage():
-    ncaafb_normalize._storage = None
-    yield
-    ncaafb_normalize._storage = None
+# ncaafb_normalize's own _storage singleton is reset before/after every
+# test in this directory by conftest.py's own _reset_ncaafb_singletons
+# fixture.
 
 
 def _s3_response(payload) -> dict:

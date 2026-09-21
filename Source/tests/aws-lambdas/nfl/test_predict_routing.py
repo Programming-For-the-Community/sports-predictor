@@ -6,7 +6,7 @@ ScheduledSeasonProjection is covered separately in
 test_predict_season_simulation.py.
 
 The nfl_predict module is registered in sys.modules by conftest.py, whose
-reset_nfl_predict_singletons fixture (autouse) resets nfl_predict._storage/
+_reset_nfl_singletons fixture (autouse) resets nfl_predict._storage/
 _model_bucket/_predictions_table before and after every test here.
 """
 from unittest.mock import patch

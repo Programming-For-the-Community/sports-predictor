@@ -6,7 +6,7 @@ and the EventBridge-triggered ScheduledSeasonProjection handler branch
 that runs season_simulation.simulate_season and writes the result to S3.
 
 The nfl_predict module is registered in sys.modules by conftest.py, whose
-reset_nfl_predict_singletons fixture (autouse) resets nfl_predict._storage/
+_reset_nfl_singletons fixture (autouse) resets nfl_predict._storage/
 _model_bucket/_predictions_table before and after every test here.
 """
 from unittest.mock import MagicMock, patch

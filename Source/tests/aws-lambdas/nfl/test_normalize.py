@@ -9,23 +9,11 @@ The nfl_normalize module is registered in sys.modules by conftest.py.
 """
 import json
 
-import pytest
-
 import nfl_normalize
 from unittest.mock import MagicMock, patch
 
-# ---------------------------------------------------------------------------
-# Fixtures
-# ---------------------------------------------------------------------------
-
-@pytest.fixture(autouse=True)
-def reset_storage():
-    """Clear the _storage singleton before and after each test so that
-    PipelineStorage mocks are created fresh and don't leak between tests."""
-    nfl_normalize._storage = None
-    yield
-    nfl_normalize._storage = None
-
+# nfl_normalize's own _storage singleton is reset before/after every test
+# in this directory by conftest.py's own _reset_nfl_singletons fixture.
 
 # ---------------------------------------------------------------------------
 # Helpers

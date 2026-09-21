@@ -9,7 +9,7 @@ division table), and the ScheduledSeasonProjection branch loads the real
 national-ranking model before simulate_season can even be called.
 
 The ncaafb_predict module is registered in sys.modules by conftest.py,
-whose reset_ncaafb_predict_singletons fixture (autouse) resets
+whose _reset_ncaafb_singletons fixture (autouse) resets
 ncaafb_predict._storage/_model_bucket/_predictions_table before and after
 every test here.
 """

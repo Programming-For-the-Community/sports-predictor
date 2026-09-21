@@ -13,17 +13,13 @@ The ncaambb_normalize module is registered in sys.modules by conftest.py.
 """
 import json
 
-import pytest
 from unittest.mock import MagicMock, patch
 
 import ncaambb_normalize
 
-
-@pytest.fixture(autouse=True)
-def reset_storage():
-    ncaambb_normalize._storage = None
-    yield
-    ncaambb_normalize._storage = None
+# ncaambb_normalize's own _storage singleton is reset before/after every
+# test in this directory by conftest.py's own _reset_ncaambb_singletons
+# fixture.
 
 
 def _s3_response(payload) -> dict:

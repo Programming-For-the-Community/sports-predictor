@@ -43,23 +43,13 @@ _load_handler("nfl_live_scores", "aws-lambdas/nfl/live-scores/handler.py")
 
 
 @pytest.fixture(autouse=True)
-def reset_nfl_predict_singletons():
-    """Clears nfl_predict's own module-level singletons before and after
-    every test in this directory. Harmless for every other test file
-    here: nfl_predict is always registered by _load_handler above
-    regardless of which handler a given file actually exercises, and
-    resetting three attributes that already default to None is a no-op
-    for anything that never touches them. Named with the nfl_predict_
-    prefix (not a bare reset_singletons) to keep it distinct from other
-    per-module reset fixtures in this same directory."""
-    nfl_predict = sys.modules.get("nfl_predict")
-    if nfl_predict is None:
-        yield
-        return
-    nfl_predict._storage = None
-    nfl_predict._model_bucket = None
-    nfl_predict._predictions_table = None
-    yield
-    nfl_predict._storage = None
-    nfl_predict._model_bucket = None
-    nfl_predict._predictions_table = None
+def _reset_nfl_singletons(reset_singletons):
+    """Every nfl_* handler module registered above has its own
+    module-level singleton cache (FeatureStorage/S3Manager/DynamoDBTable)
+    -- reset before/after every test in this directory via
+    Source/tests/conftest.py's own reset_singletons, regardless of which
+    handler a given test file actually exercises (a no-op for any module
+    that test never touches)."""
+    reset_singletons(sys.modules.get("nfl_predict"), _storage=None, _model_bucket=None, _predictions_table=None)
+    reset_singletons(sys.modules.get("nfl_normalize"), _storage=None)
+    reset_singletons(sys.modules.get("nfl_live_scores"), _storage=None)

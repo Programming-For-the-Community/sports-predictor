@@ -10,7 +10,7 @@ _is_march_madness_game), _resolve_matchup's 3-state reconciliation, and
 the EventBridge-triggered ScheduledSeasonProjection handler branch.
 
 The ncaambb_predict module is registered in sys.modules by conftest.py,
-whose reset_ncaambb_predict_singletons fixture (autouse) resets
+whose _reset_ncaambb_singletons fixture (autouse) resets
 ncaambb_predict._storage/_model_bucket/_predictions_table/_raw_bucket
 before and after every test here.
 """
