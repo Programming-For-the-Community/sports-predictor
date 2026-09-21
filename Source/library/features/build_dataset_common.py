@@ -18,11 +18,27 @@ import io
 import json
 import os
 from collections import defaultdict
+from dataclasses import dataclass
 from datetime import date, timedelta
+from typing import Callable
 
 import pandas as pd
 
 from library.features.common import compute_elo_ratings
+
+LOG_INTERVAL = 20000  # rows between progress log lines
+
+
+@dataclass
+class _PlayerRowContext:
+    """Per-dataset context shared across all players' rows in get_player_rows."""
+    events_by_key: dict[str, dict]
+    elo_ratings: dict[str, dict[str, float]]
+    previous_event_dates: dict[tuple[str, str], str | None]
+    window: int
+    build_player_features_fn: Callable
+    logger: object
+    total: int
 
 
 def group_player_games_by_player(player_games: list[dict]) -> dict[str, list[dict]]:
@@ -76,32 +92,50 @@ def build_player_dataset(
 
     games_by_player = group_player_games_by_player(player_games)
 
-    total = len(player_games)
+    context = _PlayerRowContext(
+        events_by_key, elo_ratings, previous_event_dates, window,
+        build_player_features_fn, logger, len(player_games),
+    )
+    rows: list[dict] = []
     seen = 0  # rows examined, including skipped ones
     skipped = 0
-    rows = []
     for games in games_by_player.values():
         history: list[dict] = []  # ascending, grows as we go
-        for game in games:
-            event = events_by_key.get(game["event_key"])
-            participants = event.get("participants", []) if event else []
-            has_home_and_away = any(p.get("role") == "home" for p in participants) and any(
-                p.get("role") == "away" for p in participants
-            )
-            if not has_home_and_away:
-                logger.debug("Skipping player-game %s -- event missing or missing home/away role", game["event_key"])
-                skipped += 1
-            else:
-                prior = history[-window:][::-1]  # most-recent-first, capped at window
-                own_previous_event_date = previous_event_dates.get((game["team_id"], game["event_key"]))
-                rows.append(build_player_features_fn(game, prior, event, elo_ratings, own_previous_event_date, window))
-                history.append(game)
-
-            seen += 1
-            if seen % 20000 == 0 or seen == total:
-                logger.info("Built player features: %d/%d (%d skipped)", seen, total, skipped)
+        seen, skipped = get_player_rows(games, history, rows, context, seen, skipped)
 
     return rows
+
+
+def get_player_rows(
+    games: list[dict], history: list[dict], rows: list[dict], context: _PlayerRowContext,
+    seen: int, skipped: int,
+) -> tuple[int, int]:
+    """Appends one player's feature rows (in chronological order) to rows.
+    Returns the updated (seen, skipped) counters."""
+    for game in games:
+        event = context.events_by_key.get(game["event_key"])
+        participants = event.get("participants", []) if event else []
+        has_home_and_away = any(p.get("role") == "home" for p in participants) and any(
+            p.get("role") == "away" for p in participants
+        )
+        if not has_home_and_away:
+            context.logger.debug(
+                "Skipping player-game %s -- event missing or missing home/away role", game["event_key"],
+            )
+            skipped += 1
+        else:
+            prior = history[-context.window:][::-1]  # most-recent-first, capped at window
+            own_previous_event_date = context.previous_event_dates.get((game["team_id"], game["event_key"]))
+            rows.append(context.build_player_features_fn(
+                game, prior, event, context.elo_ratings, own_previous_event_date, context.window,
+            ))
+            history.append(game)
+
+        seen += 1
+        if seen % LOG_INTERVAL == 0 or seen == context.total:
+            context.logger.info("Built player features: %d/%d (%d skipped)", seen, context.total, skipped)
+
+    return seen, skipped
 
 
 def write_parquet(rows: list[dict]) -> bytes:
