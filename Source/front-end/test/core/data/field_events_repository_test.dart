@@ -93,4 +93,28 @@ void main() {
       );
     });
   });
+
+  group('providers', () {
+    test('fieldEventsListProvider resolves through fieldEventsRepositoryProvider', () async {
+      final container = buildTestContainer((request) async {
+        return http.Response(jsonEncode({'events': [_event(eventId: '1')]}), 200);
+      });
+      addTearDown(container.dispose);
+
+      final events = await container.read(fieldEventsListProvider((sport: 'pga', status: 'scheduled')).future);
+
+      expect(events.map((e) => e.eventId), ['1']);
+    });
+
+    test('fieldEventPredictionProvider resolves through fieldEventsRepositoryProvider', () async {
+      final container = buildTestContainer((request) async {
+        return http.Response(jsonEncode({'event_id': '1', 'event_type': 'field', 'field': []}), 200);
+      });
+      addTearDown(container.dispose);
+
+      final prediction = await container.read(fieldEventPredictionProvider((sport: 'pga', eventId: '401811963')).future);
+
+      expect(prediction, isA<PgaFieldPrediction>());
+    });
+  });
 }

@@ -42,4 +42,15 @@ void main() {
 
     expect(await repo.listModels('nfl'), isEmpty);
   });
+
+  test('modelsListProvider resolves through modelsRepositoryProvider for the given sport', () async {
+    final container = buildTestContainer((request) async {
+      return http.Response(jsonEncode({'models': [_model(name: 'a')]}), 200);
+    });
+    addTearDown(container.dispose);
+
+    final models = await container.read(modelsListProvider('nfl').future);
+
+    expect(models.map((m) => m.modelName), ['a']);
+  });
 }

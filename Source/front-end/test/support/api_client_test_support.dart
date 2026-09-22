@@ -28,3 +28,16 @@ ApiClient buildTestApiClient(Future<http.Response> Function(http.Request) handle
   final ref = container.read(refProvider);
   return ApiClient(ref, httpClient: MockClient(handler));
 }
+
+/// A ProviderContainer with apiClientProvider overridden to a
+/// buildTestApiClient-backed instance -- for the handful of tests per
+/// core/data/*_repository.dart that read a real xxxRepositoryProvider/
+/// FutureProvider through the container (confirming the provider's own
+/// wiring, not just the repository class's own methods, which every
+/// other test in that file already covers by constructing the class
+/// directly).
+ProviderContainer buildTestContainer(Future<http.Response> Function(http.Request) handler) {
+  return ProviderContainer(overrides: [
+    apiClientProvider.overrideWithValue(buildTestApiClient(handler)),
+  ]);
+}

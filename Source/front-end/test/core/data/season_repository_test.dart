@@ -39,4 +39,15 @@ void main() {
     expect(projection.sport, 'nfl');
     expect(projection.standings.single.teamId, 'KC');
   });
+
+  test('seasonProjectionProvider resolves through seasonRepositoryProvider for the given sport', () async {
+    final container = buildTestContainer((request) async {
+      return http.Response(jsonEncode({'sport': 'nfl', 'standings': []}), 200);
+    });
+    addTearDown(container.dispose);
+
+    final projection = await container.read(seasonProjectionProvider('nfl').future);
+
+    expect(projection.sport, 'nfl');
+  });
 }

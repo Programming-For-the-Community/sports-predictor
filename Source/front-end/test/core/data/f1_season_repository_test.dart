@@ -41,4 +41,15 @@ void main() {
     expect(projection.driverStandings.single.entityId, 'ver');
     expect(projection.constructorStandings.single.entityId, 'red_bull');
   });
+
+  test('f1SeasonProjectionProvider resolves through f1SeasonRepositoryProvider', () async {
+    final container = buildTestContainer((request) async {
+      return http.Response(jsonEncode({'season': 2026, 'driver_standings': [], 'constructor_standings': []}), 200);
+    });
+    addTearDown(container.dispose);
+
+    final projection = await container.read(f1SeasonProjectionProvider.future);
+
+    expect(projection.season, 2026);
+  });
 }

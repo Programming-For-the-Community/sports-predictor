@@ -46,4 +46,15 @@ void main() {
     expect(projection.season, 2026);
     expect(projection.standings.single.entityId, 'scheffler');
   });
+
+  test('pgaSeasonProjectionProvider resolves through pgaSeasonRepositoryProvider', () async {
+    final container = buildTestContainer((request) async {
+      return http.Response(jsonEncode({'season': 2026, 'standings': []}), 200);
+    });
+    addTearDown(container.dispose);
+
+    final projection = await container.read(pgaSeasonProjectionProvider.future);
+
+    expect(projection.season, 2026);
+  });
 }

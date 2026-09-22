@@ -82,4 +82,28 @@ void main() {
       );
     });
   });
+
+  group('providers', () {
+    test('f1EventsListProvider resolves through f1EventsRepositoryProvider', () async {
+      final container = buildTestContainer((request) async {
+        return http.Response(jsonEncode({'events': [_event(eventId: '1')]}), 200);
+      });
+      addTearDown(container.dispose);
+
+      final events = await container.read(f1EventsListProvider((sport: 'f1', status: 'scheduled')).future);
+
+      expect(events.map((e) => e.eventId), ['1']);
+    });
+
+    test('f1EventPredictionProvider resolves through f1EventsRepositoryProvider', () async {
+      final container = buildTestContainer((request) async {
+        return http.Response(jsonEncode({'event_id': '1197', 'event_type': 'field', 'field': []}), 200);
+      });
+      addTearDown(container.dispose);
+
+      final prediction = await container.read(f1EventPredictionProvider((sport: 'f1', eventId: '1197')).future);
+
+      expect(prediction.isSprint, isFalse);
+    });
+  });
 }
