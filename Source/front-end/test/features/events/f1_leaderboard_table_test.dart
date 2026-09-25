@@ -91,6 +91,46 @@ void main() {
     expect(find.text('P3'), findsNothing);
   });
 
+  testWidgets('a real result keeps its pre-race projection visible beneath it, from the server order, not the re-sorted row', (tester) async {
+    // Server order (pre-race prediction): a=P1, b=P2. Real result flips
+    // them, so the table re-sorts b first -- b's projection must still
+    // read "Pred P2", not "Pred P1" from its new row position.
+    final field = [
+      _driver('a', name: 'A', projectedFinishPosition: 1.0, actual: const F1ActualResult(finishPosition: 2, status: 'Finished')),
+      _driver('b', name: 'B', projectedFinishPosition: 2.0, actual: const F1ActualResult(finishPosition: 1, status: 'Finished')),
+    ];
+
+    await tester.pumpWidget(_wrap(F1LeaderboardTable(field: field, isSprint: false)));
+
+    expect(find.text('Pred P1'), findsOneWidget);
+    expect(find.text('Pred P2'), findsOneWidget);
+    // Actual values render as bare numbers, distinct from "P"-prefixed projections.
+    expect(find.text('1'), findsWidgets);
+  });
+
+  testWidgets('actual and projected qualifying are both shown once qualifying has a real result', (tester) async {
+    final field = [
+      _driver(
+        'a', name: 'A', projectedQualifyingPosition: 4.2, projectedQualifyingRank: 4,
+        actual: const F1ActualResult(qualifyingPosition: 2, finishPosition: 1, status: 'Finished'),
+      ),
+    ];
+
+    await tester.pumpWidget(_wrap(F1LeaderboardTable(field: field, isSprint: false)));
+
+    expect(find.text('Pred P4'), findsOneWidget);
+    expect(find.text('2'), findsWidgets);
+  });
+
+  testWidgets('a projection alone is a bare "P" value with no "Pred" line', (tester) async {
+    final field = [_driver('a', name: 'A', projectedFinishPosition: 3.0)];
+
+    await tester.pumpWidget(_wrap(F1LeaderboardTable(field: field, isSprint: false)));
+
+    expect(find.text('P1'), findsOneWidget);
+    expect(find.textContaining('Pred'), findsNothing);
+  });
+
   testWidgets('a field event shows a QUALIFYING column, a sprint event does not', (tester) async {
     final field = [_driver('a', name: 'A', projectedQualifyingPosition: 2.0)];
 

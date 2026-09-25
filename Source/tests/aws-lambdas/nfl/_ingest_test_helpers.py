@@ -69,10 +69,18 @@ def teams_response(*team_ids: str) -> dict:
     return {"sports": [{"leagues": [{"teams": [{"team": {"id": tid}} for tid in team_ids]}]}]}
 
 
-def make_client(board: dict, summary: dict | None = None):
+def make_client(board: dict, summary: dict | None = None, boards_by_week: dict | None = None):
+    """get_scoreboard_for_date mirrors ESPN's date-scoped response (just
+    `board`). get_scoreboard serves `board` for its own week number, plus
+    any `boards_by_week` entries ({(season_type, week): board}); every
+    other (type, week) comes back empty, as ESPN does for a week with no
+    games."""
     mock = MagicMock()
     mock.get_scoreboard_for_date.return_value = board
-    mock.get_scoreboard.return_value = board
+    served = {(SEASON_TYPE, board["week"]["number"]): board, **(boards_by_week or {})}
+    mock.get_scoreboard.side_effect = lambda season, season_type, week: served.get(
+        (season_type, week), {"leagues": board["leagues"], "events": []},
+    )
     mock.get_summary.return_value = summary or {"header": {}, "boxscore": {}}
     mock.get_depth_chart.return_value = {"depthchart": []}
     mock.get_roster.return_value = {"team": {"id": "0"}, "timestamp": "2026-08-08T00:00:00Z", "athletes": []}

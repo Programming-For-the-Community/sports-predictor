@@ -14,6 +14,8 @@ String? _seriesPredictedRecord(BracketMatchup matchup) {
   return '${matchup.predictedWinsB}-${matchup.predictedWinsA}';
 }
 
+const _maxTextScale = 1.1;
+
 class BracketMatchupCard extends StatelessWidget {
   const BracketMatchupCard({super.key, required this.sport, required this.matchup, required this.teamNames, required this.cardWidth});
 
@@ -28,6 +30,15 @@ class BracketMatchupCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final winner = matchup.isFinal ? matchup.actualWinner : matchup.predictedWinner;
+    // The bracket lays cards out at a fixed cardHeight (BracketDimensions),
+    // so unbounded system text scaling would push the two team rows past it.
+    return MediaQuery.withClampedTextScaling(
+      maxScaleFactor: _maxTextScale,
+      child: _card(winner),
+    );
+  }
+
+  Widget _card(String? winner) {
     return Container(
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(

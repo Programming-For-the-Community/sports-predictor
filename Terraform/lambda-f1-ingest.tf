@@ -48,6 +48,7 @@ resource "aws_lambda_function" "f1_ingest" {
 
   environment {
     variables = {
+      AWS_ACCOUNT_ID       = var.account_id
       RAW_BUCKET_NAME      = aws_s3_bucket.raw_data_lake.bucket
       JOLPICA_API_ROOT_URL = var.jolpica_api_root_url
       JOLPICA_USER_AGENT   = var.jolpica_user_agent

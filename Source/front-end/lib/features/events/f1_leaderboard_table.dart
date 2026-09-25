@@ -64,22 +64,27 @@ class _PercentText extends StatelessWidget {
 
 /// "3" (real, already-happened) in ink, "5" (ESPN's own live running
 /// order, mid-session) in the live accent color, or "P5" (still just a
-/// model projection) muted -- same "actual, else projected, visually
-/// distinguished" idea PGA's own _StandingCell establishes, simplified to
-/// a single integer position rather than a to-par score, with the live
-/// overlay slotted in between actual and projected (a real, if
-/// provisional, running position beats a pre-race model estimate).
+/// model projection) in the projection accent -- same "actual, else
+/// projected, visually distinguished" idea PGA's own _StandingCell
+/// establishes, simplified to a single integer position rather than a
+/// to-par score, with the live overlay slotted in between actual and
+/// projected (a real, if provisional, running position beats a pre-race
+/// model estimate). Whenever a real or live value is what's shown AND a
+/// projection exists, the projection stays visible beneath it as "Pred
+/// P5" so the two can be compared.
 ///
 /// `rank`, when given, is shown instead of rounding `projected` itself --
 /// the raw regression value rounded independently per row can collide
 /// (two close-but-distinct floats rounding to the same integer), which
 /// reads as an impossible shared finishing/grid/qualifying slot (real
 /// complaints 2026-08-31 for FINISH/GRID, 2026-09-01 for QUALIFYING).
-/// FINISH/GRID get `rank` for free from the field's own row order
+/// FINISH/GRID get `rank` from the field's own server-provided order
 /// (event_prediction.py's own _field_sort_key sorts by exactly one of
-/// them). QUALIFYING isn't the sort key, so it can't reuse row order --
-/// event_prediction.py's own _assign_qualifying_ranks computes an
-/// independent rank instead, carried on F1ModelValue.rank.
+/// them) -- NOT the row's current display position, which follows the
+/// real/live order once the race has one. QUALIFYING isn't the sort key,
+/// so it can't reuse that order -- event_prediction.py's own
+/// _assign_qualifying_ranks computes an independent rank instead,
+/// carried on F1ModelValue.rank.
 class _PositionCell extends StatelessWidget {
   const _PositionCell({required this.actual, this.live, required this.projected, this.rank, this.hasResult = false});
   final int? actual;
@@ -100,21 +105,33 @@ class _PositionCell extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final projectedLabel = projected == null ? null : 'P${rank ?? projected!.round()}';
+    final Widget primary;
+    var showsProjectionBeneath = true;
     if (actual != null) {
-      return Text('$actual', style: AppTextStyles.metricValue(color: AppColors.ink), textAlign: TextAlign.center, maxLines: 1);
-    }
-    if (live != null) {
-      return Text('$live', style: AppTextStyles.metricValue(color: AppColors.live), textAlign: TextAlign.center, maxLines: 1);
-    }
-    if (hasResult) {
+      primary = Text('$actual', style: AppTextStyles.metricValue(color: AppColors.ink), textAlign: TextAlign.center, maxLines: 1);
+    } else if (live != null) {
+      primary = Text('$live', style: AppTextStyles.metricValue(color: AppColors.live), textAlign: TextAlign.center, maxLines: 1);
+    } else if (hasResult) {
+      primary = Text('--', style: AppTextStyles.metricValue(color: AppColors.inkMute), textAlign: TextAlign.center);
+    } else if (projectedLabel != null) {
+      showsProjectionBeneath = false;
+      primary = Text(projectedLabel, style: AppTextStyles.metricValue(color: AppColors.cyan), textAlign: TextAlign.center, maxLines: 1);
+    } else {
       return Text('--', style: AppTextStyles.metricValue(color: AppColors.inkMute), textAlign: TextAlign.center);
     }
-    if (projected != null) {
-      return Text(
-        'P${rank ?? projected!.round()}', style: AppTextStyles.metricValue(color: AppColors.inkMute), textAlign: TextAlign.center, maxLines: 1,
-      );
-    }
-    return Text('--', style: AppTextStyles.metricValue(color: AppColors.inkMute), textAlign: TextAlign.center);
+    if (!showsProjectionBeneath || projectedLabel == null) return primary;
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.center,
+      children: [
+        primary,
+        Text(
+          'Pred $projectedLabel', style: AppTextStyles.microLabel(color: AppColors.cyan),
+          textAlign: TextAlign.center, maxLines: 1, softWrap: false, overflow: TextOverflow.ellipsis,
+        ),
+      ],
+    );
   }
 }
 
@@ -161,7 +178,7 @@ Widget _driverColumnCell(BuildContext context, F1DriverPrediction entry, F1Drive
   );
 }
 
-List<_LeaderboardColumn> _fullColumns({required bool isSprint}) => [
+List<_LeaderboardColumn> _fullColumns({required bool isSprint, required Map<String, int> projectedRanks}) => [
       _LeaderboardColumn(
         _F1ColumnKey.position, _F1ColumnLabels.position, 1,
         (context, entry, live, rowNumber) => _positionColumnCell(context, entry, live, rowNumber, isSprint),
@@ -173,12 +190,12 @@ List<_LeaderboardColumn> _fullColumns({required bool isSprint}) => [
           ? _LeaderboardColumn(_F1ColumnKey.finishOrGrid, _F1ColumnLabels.grid, 2, (context, entry, live, rowNumber) =>
               _PositionCell(
                 actual: entry.actual?.gridPosition, live: live?.order, projected: entry.projectedGridPosition?.value,
-                rank: rowNumber, hasResult: entry.actual != null,
+                rank: projectedRanks[entry.entityId], hasResult: entry.actual != null,
               ))
           : _LeaderboardColumn(_F1ColumnKey.finishOrGrid, _F1ColumnLabels.finish, 2, (context, entry, live, rowNumber) =>
               _PositionCell(
                 actual: entry.actual?.finishPosition, live: live?.order, projected: entry.projectedFinishPosition?.value,
-                rank: rowNumber, hasResult: entry.actual != null,
+                rank: projectedRanks[entry.entityId], hasResult: entry.actual != null,
               )),
       if (!isSprint)
         _LeaderboardColumn(_F1ColumnKey.qualifying, _F1ColumnLabels.qualifying, 2, (context, entry, live, rowNumber) =>
@@ -194,8 +211,8 @@ List<_LeaderboardColumn> _fullColumns({required bool isSprint}) => [
         _LeaderboardColumn(_F1ColumnKey.dnf, _F1ColumnLabels.dnf, 2, (context, entry, live, rowNumber) => _PercentText(entry.dnfProbability?.value)),
     ];
 
-List<_LeaderboardColumn> _columns({required bool isSprint, required bool compact}) {
-  final full = _fullColumns(isSprint: isSprint);
+List<_LeaderboardColumn> _columns({required bool isSprint, required bool compact, required Map<String, int> projectedRanks}) {
+  final full = _fullColumns(isSprint: isSprint, projectedRanks: projectedRanks);
   if (!compact) return full;
   // #, DRIVER, WIN% at the top level; STATUS/FINISH-or-GRID/QUALIFYING/
   // PODIUM%/DNF% move into the expanded per-row detail below
@@ -306,10 +323,13 @@ class F1LeaderboardTable extends StatelessWidget {
       return Text('No field available yet.', style: AppTextStyles.body(color: AppColors.inkSub));
     }
     final sorted = _sortedField(field, isSprint, liveResults);
+    // `field` arrives in the server's own pre-race predicted order (see
+    // _PositionCell's `rank` doc) -- captured before `sorted` reorders it.
+    final projectedRanks = {for (var i = 0; i < field.length; i++) field[i].entityId: i + 1};
     return LayoutBuilder(
       builder: (context, constraints) {
         final compact = constraints.maxWidth < _compactBreakpoint;
-        final columns = _columns(isSprint: isSprint, compact: compact);
+        final columns = _columns(isSprint: isSprint, compact: compact, projectedRanks: projectedRanks);
         return Container(
           padding: const EdgeInsets.symmetric(horizontal: 20),
           decoration: BoxDecoration(
@@ -324,7 +344,7 @@ class F1LeaderboardTable extends StatelessWidget {
                 const Divider(height: 1, color: AppColors.border),
                 _LeaderboardRow(
                   entry: sorted[i], live: liveResults[sorted[i].entityId], columns: columns, rowNumber: i + 1,
-                  compact: compact, isSprint: isSprint,
+                  compact: compact, isSprint: isSprint, projectedRank: projectedRanks[sorted[i].entityId],
                 ),
               ],
             ],
@@ -338,6 +358,7 @@ class F1LeaderboardTable extends StatelessWidget {
 class _LeaderboardRow extends StatefulWidget {
   const _LeaderboardRow({
     required this.entry, required this.live, required this.columns, required this.rowNumber, required this.compact, required this.isSprint,
+    required this.projectedRank,
   });
 
   final F1DriverPrediction entry;
@@ -346,6 +367,7 @@ class _LeaderboardRow extends StatefulWidget {
   final int rowNumber;
   final bool compact;
   final bool isSprint;
+  final int? projectedRank;
 
   @override
   State<_LeaderboardRow> createState() => _LeaderboardRowState();
@@ -384,7 +406,7 @@ class _LeaderboardRowState extends State<_LeaderboardRow> {
               const SizedBox(height: 8),
               Padding(
                 padding: const EdgeInsets.only(left: 20),
-                child: _ExpandedDetail(entry: widget.entry, live: widget.live, isSprint: widget.isSprint, rowNumber: widget.rowNumber),
+                child: _ExpandedDetail(entry: widget.entry, live: widget.live, isSprint: widget.isSprint, projectedRank: widget.projectedRank),
               ),
             ],
           ],
@@ -395,11 +417,11 @@ class _LeaderboardRowState extends State<_LeaderboardRow> {
 }
 
 class _ExpandedDetail extends StatelessWidget {
-  const _ExpandedDetail({required this.entry, required this.live, required this.isSprint, required this.rowNumber});
+  const _ExpandedDetail({required this.entry, required this.live, required this.isSprint, required this.projectedRank});
   final F1DriverPrediction entry;
   final F1DriverLiveResult? live;
   final bool isSprint;
-  final int rowNumber;
+  final int? projectedRank;
 
   @override
   Widget build(BuildContext context) {
@@ -412,7 +434,7 @@ class _ExpandedDetail extends StatelessWidget {
         _Labeled(_F1ColumnLabels.status, F1StatusPill(status: entry.actual?.status)),
         _Labeled(
           isSprint ? _F1ColumnLabels.grid : _F1ColumnLabels.finish,
-          _PositionCell(actual: position, live: live?.order, projected: projected, rank: rowNumber),
+          _PositionCell(actual: position, live: live?.order, projected: projected, rank: projectedRank, hasResult: entry.actual != null),
         ),
         if (!isSprint) _Labeled(_F1ColumnLabels.dnf, _PercentText(entry.dnfProbability?.value)),
         if (!isSprint)

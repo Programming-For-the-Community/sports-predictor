@@ -37,9 +37,17 @@ EventBridge can override any default via the schedule's input payload:
     { "season": 2025, "season_type": 2, "week": 4 }
 
 All three must be given together for a manual override -- there's no
-partial-override path. Omitting all three auto-detects the target week
-from the most recent Sunday's date: ESPN's scoreboard endpoint resolves
-season/type/week entirely from a `dates=YYYYMMDD` param.
+partial-override path, and only that one week is ingested. Omitting all
+three auto-detects the target week from the most recent Sunday's date:
+ESPN's scoreboard endpoint resolves season/type/week entirely from a
+`dates=YYYYMMDD` param. That date-based response only contains the games
+played ON that one calendar day, so it's used solely to learn the week
+number -- the week's full slate (including its Thursday, Saturday and
+Monday games) comes from the explicit season/type/week scoreboard call.
+Auto-detect ingests that week AND the next one: the most recent Sunday
+is still last week's from Monday through Saturday, so without the
+look-ahead the Thursday game of a new week would sit unfinalized until
+the following Sunday.
 
 Future weeks of the current season are seeded separately by the
 dedicated nfl-schedule-sync Lambda (aws-lambdas/nfl/schedule-sync/
@@ -71,6 +79,8 @@ logger = logging.getLogger("nfl-ingest")
 
 RAW_BUCKET = os.environ["RAW_BUCKET_NAME"]
 PRESEASON_TYPE = 1
+REGULAR_SEASON_TYPE = 2
+POSTSEASON_TYPE = 3
 
 _s3 = boto3.client("s3", config=DEFAULT_CONFIG)
 
@@ -167,58 +177,27 @@ def _fetch_depth_charts(client: NFLClient) -> tuple[int, int]:
     return fetched, failed
 
 
-def lambda_handler(event: dict, context) -> dict:
-    season = event.get("season")
-    season_type = event.get("season_type")
-    week = event.get("week")
+def _next_week_target(client: NFLClient, season: int, season_type: int, week: int) -> tuple[int, int, int] | None:
+    """The (season, type, week) that follows the given one, or None if
+    ESPN has no games for it yet. ESPN returns an empty events list for a
+    week number past the end of a season type, so the last regular-season
+    week falls through to the postseason's first round."""
+    if client.get_scoreboard(season, season_type, week + 1).get("events"):
+        return season, season_type, week + 1
+    if season_type == REGULAR_SEASON_TYPE and client.get_scoreboard(season, POSTSEASON_TYPE, 1).get("events"):
+        return season, POSTSEASON_TYPE, 1
+    return None
 
-    client = NFLClient()
-    core_client = EspnCoreApiClient()
 
-    # Runs unconditionally, before the preseason check below.
-    rosters_fetched, rosters_failed = _fetch_rosters(client)
-    logger.info("Rosters: %d fetched, %d failed", rosters_fetched, rosters_failed)
-
-    depth_charts_fetched, depth_charts_failed = _fetch_depth_charts(client)
-    logger.info("Depth charts: %d fetched, %d failed", depth_charts_fetched, depth_charts_failed)
-
-    coaches_fetched = _fetch_coaches(core_client)
-    logger.info("Coaches: %s", "fetched" if coaches_fetched else "failed")
-
-    if season_type == PRESEASON_TYPE:
-        logger.info("season_type=%d is preseason -- skipping, not ingested by design", PRESEASON_TYPE)
-        return {
-            "processed": 0, "skipped": 0, "failed": 0,
-            "rosters_fetched": rosters_fetched, "rosters_failed": rosters_failed,
-            "depth_charts_fetched": depth_charts_fetched, "depth_charts_failed": depth_charts_failed,
-            "coaches_fetched": coaches_fetched,
-        }
-
-    if week is None:
-        # Season year/type live under leagues[0].season, and type is a
-        # dict ({"id": "2", "type": 2, ...}) rather than a bare int.
-        # week is top-level.
-        scoreboard = client.get_scoreboard_for_date(_most_recent_sunday())
-        league_season = (scoreboard.get("leagues") or [{}])[0].get("season", {})
-        season = league_season.get("year", season)
-        season_type = league_season.get("type", {}).get("type", season_type)
-        week = scoreboard.get("week", {}).get("number", 1)
-
-        if season_type == PRESEASON_TYPE:
-            logger.info("Auto-detected preseason (season %s) -- skipping, not ingested by design", season)
-            return {
-                "processed": 0, "skipped": 0, "failed": 0,
-                "rosters_fetched": rosters_fetched, "rosters_failed": rosters_failed,
-                "depth_charts_fetched": depth_charts_fetched, "depth_charts_failed": depth_charts_failed,
-                "coaches_fetched": coaches_fetched,
-            }
-
-        logger.info("Auto-detected season %s type %s week %s", season, season_type, week)
-    else:
-        scoreboard = client.get_scoreboard(season, season_type, week)
-
+def _ingest_week(client: NFLClient, core_client: EspnCoreApiClient, season: int, season_type: int, week: int) -> tuple[int, int, int]:
+    """Fetches one week's full scoreboard, writes it (enriched) to S3, and
+    fetches the box score of each completed game not already there.
+    Returns (processed, skipped, failed)."""
+    scoreboard = client.get_scoreboard(season, season_type, week)
     events = scoreboard.get("events", [])
     logger.info("Found %d events in season %s type %s week %s", len(events), season, season_type, week)
+    if not events:
+        return 0, 0, 0
 
     # Mutates each event dict in place -- scoreboard["events"] holds the
     # same list/dict objects, so this enrichment is already reflected in
@@ -250,6 +229,72 @@ def lambda_handler(event: dict, context) -> dict:
         except Exception:
             logger.exception("Failed fetching summary for event %s", event_id)
             failed += 1
+    return processed, skipped, failed
+
+
+def lambda_handler(event: dict, context) -> dict:
+    season = event.get("season")
+    season_type = event.get("season_type")
+    week = event.get("week")
+
+    client = NFLClient()
+    core_client = EspnCoreApiClient()
+
+    # Runs unconditionally, before the preseason check below.
+    rosters_fetched, rosters_failed = _fetch_rosters(client)
+    logger.info("Rosters: %d fetched, %d failed", rosters_fetched, rosters_failed)
+
+    depth_charts_fetched, depth_charts_failed = _fetch_depth_charts(client)
+    logger.info("Depth charts: %d fetched, %d failed", depth_charts_fetched, depth_charts_failed)
+
+    coaches_fetched = _fetch_coaches(core_client)
+    logger.info("Coaches: %s", "fetched" if coaches_fetched else "failed")
+
+    if season_type == PRESEASON_TYPE:
+        logger.info("season_type=%d is preseason -- skipping, not ingested by design", PRESEASON_TYPE)
+        return {
+            "processed": 0, "skipped": 0, "failed": 0,
+            "rosters_fetched": rosters_fetched, "rosters_failed": rosters_failed,
+            "depth_charts_fetched": depth_charts_fetched, "depth_charts_failed": depth_charts_failed,
+            "coaches_fetched": coaches_fetched,
+        }
+
+    if week is None:
+        # Season year/type live under leagues[0].season, and type is a
+        # dict ({"id": "2", "type": 2, ...}) rather than a bare int.
+        # week is top-level. Only the week number is taken from this
+        # date-scoped response -- its events are just that one day's games.
+        scoreboard = client.get_scoreboard_for_date(_most_recent_sunday())
+        league_season = (scoreboard.get("leagues") or [{}])[0].get("season", {})
+        season = league_season.get("year", season)
+        season_type = league_season.get("type", {}).get("type", season_type)
+        week = scoreboard.get("week", {}).get("number", 1)
+
+        if season_type == PRESEASON_TYPE:
+            logger.info("Auto-detected preseason (season %s) -- skipping, not ingested by design", season)
+            return {
+                "processed": 0, "skipped": 0, "failed": 0,
+                "rosters_fetched": rosters_fetched, "rosters_failed": rosters_failed,
+                "depth_charts_fetched": depth_charts_fetched, "depth_charts_failed": depth_charts_failed,
+                "coaches_fetched": coaches_fetched,
+            }
+
+        logger.info("Auto-detected season %s type %s week %s", season, season_type, week)
+        targets = [(season, season_type, week)]
+        next_target = _next_week_target(client, season, season_type, week)
+        if next_target:
+            targets.append(next_target)
+    else:
+        targets = [(season, season_type, week)]
+
+    processed = skipped = failed = 0
+    for target_season, target_type, target_week in targets:
+        week_processed, week_skipped, week_failed = _ingest_week(
+            client, core_client, target_season, target_type, target_week,
+        )
+        processed += week_processed
+        skipped += week_skipped
+        failed += week_failed
 
     logger.info("Done: %d processed, %d skipped, %d failed", processed, skipped, failed)
     return {

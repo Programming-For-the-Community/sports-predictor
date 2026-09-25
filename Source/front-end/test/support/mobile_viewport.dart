@@ -6,12 +6,15 @@ import 'package:flutter_test/flutter_test.dart';
 /// would overflow first.
 const mobileViewportWidths = [360.0, 375.0, 390.0];
 
-/// Pumps `widget` at a specific viewport width/height and restores the
-/// test binding's real size afterward. Height is fixed and generous
-/// (this project's pages scroll vertically; only width ever needs to be
-/// tight) so every call only has one meaningful dimension to vary.
+/// Pumps `widget` at a specific viewport width on a realistic portrait-
+/// phone height (700), with the system text scale at 1.5 -- a common
+/// accessibility setting that pushes fixed-geometry layouts past their
+/// bounds while every default-scale test still passes. Restores the test
+/// binding's real size and text scale afterward.
 Future<void> pumpAtWidth(WidgetTester tester, double width, Widget widget) async {
-  tester.view.physicalSize = Size(width, 1200);
+  tester.view.physicalSize = Size(width, 700);
+  tester.platformDispatcher.textScaleFactorTestValue = 1.5;
+  addTearDown(tester.platformDispatcher.clearTextScaleFactorTestValue);
   tester.view.devicePixelRatio = 1.0;
   addTearDown(tester.view.reset);
   await tester.pumpWidget(widget);

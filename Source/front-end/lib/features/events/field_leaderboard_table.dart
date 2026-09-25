@@ -360,16 +360,23 @@ class _ExpandedProbabilities extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    return Wrap(
+      spacing: 20,
+      runSpacing: 4,
+      children: [
+        _labeledPercent(_FieldColumnLabels.top10, entry.top10Probability?.value),
+        _labeledPercent(_FieldColumnLabels.top5, entry.top5Probability?.value),
+      ],
+    );
+  }
+
+  Widget _labeledPercent(String label, double? value) {
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
-        Text(_FieldColumnLabels.top10, style: AppTextStyles.microLabel(color: AppColors.inkMute)),
+        Text(label, style: AppTextStyles.microLabel(color: AppColors.inkMute)),
         const SizedBox(width: 6),
-        _PercentText(entry.top10Probability?.value),
-        const SizedBox(width: 20),
-        Text(_FieldColumnLabels.top5, style: AppTextStyles.microLabel(color: AppColors.inkMute)),
-        const SizedBox(width: 6),
-        _PercentText(entry.top5Probability?.value),
+        _PercentText(value),
       ],
     );
   }

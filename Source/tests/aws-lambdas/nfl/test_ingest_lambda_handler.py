@@ -101,10 +101,82 @@ class TestIngestLambdaHandler:
 
         # Exact date value is covered by test_ingest_helpers.py's own
         # TestMostRecentSunday -- here we only need to confirm the
-        # date-based lookup is used instead of get_scoreboard's
-        # explicit-week path.
+        # date-based lookup is what finds the week; the week's games then
+        # come from the explicit-week call (the date-based response only
+        # holds that one day's games).
         mock_client.get_scoreboard_for_date.assert_called_once()
-        mock_client.get_scoreboard.assert_not_called()
+        mock_client.get_scoreboard.assert_any_call(SEASON_YEAR, 2, 7)
+
+    def test_auto_detect_ingests_thursday_and_monday_games_missing_from_date_scoreboard(self):
+        # Real ESPN behavior: dates=<Sunday> returns only Sunday's games.
+        # The Thursday/Monday games exist only in the full-week response.
+        sunday_only = scoreboard([completed_event("sun")], week=2)
+        full_week = scoreboard([completed_event("thu"), completed_event("sun"), completed_event("mon")], week=2)
+        mock_s3 = make_s3()
+        mock_client = make_client(full_week)
+        mock_client.get_scoreboard_for_date.return_value = sunday_only
+
+        with patch.object(nfl_ingest, "_s3", mock_s3), \
+             patch.object(nfl_ingest, "NFLClient", return_value=mock_client), \
+             patch.object(nfl_ingest, "EspnCoreApiClient", return_value=make_core_client()):
+            result = nfl_ingest.lambda_handler({}, None)
+
+        assert result["processed"] == 3
+        fetched = {call.args[0] for call in mock_client.get_summary.call_args_list}
+        assert fetched == {"thu", "sun", "mon"}
+
+    def test_auto_detect_also_ingests_next_week_so_thursday_game_finalizes(self):
+        # Friday-after-Thursday-night: most recent Sunday is still last
+        # week's, but the new week's Thursday game is already final.
+        this_week = scoreboard([completed_event("old")], week=2)
+        next_week = scoreboard([completed_event("thu3"), incomplete_event("sun3")], week=3)
+        mock_s3 = make_s3()
+        mock_client = make_client(this_week, boards_by_week={(2, 3): next_week})
+
+        with patch.object(nfl_ingest, "_s3", mock_s3), \
+             patch.object(nfl_ingest, "NFLClient", return_value=mock_client), \
+             patch.object(nfl_ingest, "EspnCoreApiClient", return_value=make_core_client()):
+            result = nfl_ingest.lambda_handler({}, None)
+
+        assert result["processed"] == 2
+        assert result["skipped"] == 1
+        keys = {call.kwargs["Key"] for call in mock_s3.put_object.call_args_list}
+        assert f"nfl/scoreboard/{SEASON_YEAR}/2/3.json" in keys
+
+    def test_auto_detect_falls_through_to_postseason_after_final_regular_season_week(self):
+        week_18 = scoreboard([completed_event("r18")], week=18)
+        wild_card = scoreboard([completed_event("wc1")], week=1, season_type=3)
+        mock_s3 = make_s3()
+        mock_client = make_client(week_18, boards_by_week={(3, 1): wild_card})
+
+        with patch.object(nfl_ingest, "_s3", mock_s3), \
+             patch.object(nfl_ingest, "NFLClient", return_value=mock_client), \
+             patch.object(nfl_ingest, "EspnCoreApiClient", return_value=make_core_client()):
+            result = nfl_ingest.lambda_handler({}, None)
+
+        assert result["processed"] == 2
+        mock_client.get_scoreboard.assert_any_call(SEASON_YEAR, 3, 1)
+
+    def test_explicit_week_does_not_ingest_next_week(self):
+        board = scoreboard([completed_event("1")], week=3)
+        mock_client = make_client(board)
+
+        with patch.object(nfl_ingest, "_s3", make_s3()),              patch.object(nfl_ingest, "NFLClient", return_value=mock_client),              patch.object(nfl_ingest, "EspnCoreApiClient", return_value=make_core_client()):
+            nfl_ingest.lambda_handler({"season": SEASON_YEAR, "season_type": 2, "week": 3}, None)
+
+        mock_client.get_scoreboard.assert_called_once_with(SEASON_YEAR, 2, 3)
+
+    def test_empty_next_week_writes_no_scoreboard(self):
+        mock_s3 = make_s3()
+        mock_client = make_client(scoreboard([completed_event("1")], week=5))
+
+        with patch.object(nfl_ingest, "_s3", mock_s3), \
+             patch.object(nfl_ingest, "NFLClient", return_value=mock_client), \
+             patch.object(nfl_ingest, "EspnCoreApiClient", return_value=make_core_client()):
+            nfl_ingest.lambda_handler({}, None)
+
+        keys = {call.kwargs["Key"] for call in mock_s3.put_object.call_args_list}
+        assert f"nfl/scoreboard/{SEASON_YEAR}/2/6.json" not in keys
 
     def test_skips_preseason_given_explicitly(self):
         mock_s3 = make_s3()

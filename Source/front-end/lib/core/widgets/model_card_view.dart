@@ -184,11 +184,24 @@ class _CandidateRow extends StatelessWidget {
             overflow: TextOverflow.ellipsis,
           ),
         ),
-        if (isCurrent) ...[
-          const _Badge(text: 'PROMOTED'),
-          const SizedBox(width: 10),
-        ],
-        Text(value, style: AppTextStyles.metricValue(color: isCurrent ? AppColors.cyan : AppColors.inkSub)),
+        // Scales down rather than overflowing when the badge + value
+        // outgrow the row (narrow width and/or enlarged system text).
+        Flexible(
+          child: FittedBox(
+            fit: BoxFit.scaleDown,
+            alignment: Alignment.centerRight,
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                if (isCurrent) ...[
+                  const _Badge(text: 'PROMOTED'),
+                  const SizedBox(width: 10),
+                ],
+                Text(value, style: AppTextStyles.metricValue(color: isCurrent ? AppColors.cyan : AppColors.inkSub)),
+              ],
+            ),
+          ),
+        ),
       ],
     );
   }
