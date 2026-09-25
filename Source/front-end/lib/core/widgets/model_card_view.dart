@@ -26,14 +26,11 @@ class ModelCardView extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           // Title on its own full-width line(s), badges wrapped below.
-          // Tooltip is a safety net for a name that doesn't fit maxLines: 2.
           Tooltip(
             message: _displayName(model.modelName),
             child: Text(
               _displayName(model.modelName),
               style: AppTextStyles.cardTitle(),
-              overflow: TextOverflow.ellipsis,
-              maxLines: 2,
             ),
           ),
           const SizedBox(height: 8),
@@ -181,7 +178,6 @@ class _CandidateRow extends StatelessWidget {
           child: Text(
             label,
             style: AppTextStyles.body(color: isCurrent ? AppColors.ink : AppColors.inkMute),
-            overflow: TextOverflow.ellipsis,
           ),
         ),
         // Scales down rather than overflowing when the badge + value

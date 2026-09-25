@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_riverpod/misc.dart' show Override;
 import 'package:flutter_test/flutter_test.dart';
@@ -12,6 +13,8 @@ import 'package:front_end/core/models/live_score.dart';
 import 'package:front_end/core/models/prediction.dart';
 import 'package:front_end/features/events/event_detail_page.dart';
 import 'package:front_end/features/sport_shell/sport_shell_page.dart';
+
+import '../../support/mobile_viewport.dart' show loadAppFonts;
 
 
 // Worst-case content (long names/venue, several candidates per category,
@@ -91,8 +94,23 @@ Future<void> pumpAtWidth(WidgetTester tester, double width, Widget widget) async
   tester.view.physicalSize = Size(width, 640);
   tester.view.devicePixelRatio = 1.0;
   addTearDown(tester.view.reset);
+  await tester.runAsync(loadAppFonts);
   await tester.pumpWidget(widget);
   await tester.pumpAndSettle();
+}
+
+// An ellipsis never throws, so takeException() alone can't see a clipped
+// player name or stat line -- scan every rendered paragraph for one that
+// was cut off by maxLines. `allowed` lists text that's intentionally
+// single-line/ellipsized (none currently).
+List<String> _truncatedText(WidgetTester tester) {
+  final clipped = <String>[];
+  void visit(RenderObject node) {
+    if (node is RenderParagraph && node.didExceedMaxLines) clipped.add(node.text.toPlainText());
+    node.visitChildren(visit);
+  }
+  visit(tester.binding.renderViews.first);
+  return clipped;
 }
 
 void main() {
@@ -107,6 +125,7 @@ void main() {
           liveScoresProvider.overrideWith((ref, s) async => const {}),
         ], scale));
         expect(tester.takeException(), isNull);
+        expect(_truncatedText(tester), isEmpty, reason: 'text clipped with an ellipsis');
       });
 
       testWidgets('live with live leaders comparison: $tag', (tester) async {
@@ -120,6 +139,7 @@ void main() {
               }),
         ], scale));
         expect(tester.takeException(), isNull);
+        expect(_truncatedText(tester), isEmpty, reason: 'text clipped with an ellipsis');
       });
 
       testWidgets('completed with full comparison + venue: $tag', (tester) async {
@@ -139,6 +159,7 @@ void main() {
               : []),
         ], scale));
         expect(tester.takeException(), isNull);
+        expect(_truncatedText(tester), isEmpty, reason: 'text clipped with an ellipsis');
       });
     }
   }

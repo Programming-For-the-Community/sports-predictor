@@ -5,6 +5,7 @@ import '../../core/models/f1_prediction.dart';
 import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_text_styles.dart';
 import '../../core/widgets/f1_status_pill.dart';
+import '../../core/widgets/fit_text.dart';
 
 /// F1's own driver leaderboard table -- column-spec pattern, same shape
 /// as field_leaderboard_table.dart's own _LeaderboardColumn (PGA's). A
@@ -55,9 +56,8 @@ class _PercentText extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Text(
-      _formatPercent(value), style: AppTextStyles.metricValue(color: AppColors.violet), textAlign: TextAlign.center,
-      maxLines: 1, softWrap: false, overflow: TextOverflow.ellipsis,
+    return FitText(
+      _formatPercent(value), style: AppTextStyles.metricValue(color: AppColors.violet), textAlign: TextAlign.center
     );
   }
 }
@@ -126,9 +126,9 @@ class _PositionCell extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.center,
       children: [
         primary,
-        Text(
+        FitText(
           'Pred $projectedLabel', style: AppTextStyles.microLabel(color: AppColors.cyan),
-          textAlign: TextAlign.center, maxLines: 1, softWrap: false, overflow: TextOverflow.ellipsis,
+          textAlign: TextAlign.center
         ),
       ],
     );
@@ -155,9 +155,8 @@ Widget _positionColumnCell(BuildContext context, F1DriverPrediction entry, F1Dri
   final actual = isSprint ? entry.actual?.gridPosition : entry.actual?.finishPosition;
   final position = actual ?? live?.order;
   final color = position != null ? (actual != null ? AppColors.inkMute : AppColors.live) : AppColors.inkMute;
-  return Text(
-    '${position ?? rowNumber}', style: AppTextStyles.metricValue(color: color), textAlign: TextAlign.center,
-    maxLines: 1, softWrap: false, overflow: TextOverflow.ellipsis,
+  return FitText(
+    '${position ?? rowNumber}', style: AppTextStyles.metricValue(color: color), textAlign: TextAlign.center
   );
 }
 
@@ -171,9 +170,9 @@ Widget _driverColumnCell(BuildContext context, F1DriverPrediction entry, F1Drive
     crossAxisAlignment: CrossAxisAlignment.start,
     mainAxisSize: MainAxisSize.min,
     children: [
-      Text(name, style: AppTextStyles.body(color: AppColors.ink), maxLines: 1, overflow: TextOverflow.ellipsis),
+      Text(name, style: AppTextStyles.body(color: AppColors.ink)),
       if (constructorLabel != null)
-        Text(constructorLabel, style: AppTextStyles.microLabel(color: AppColors.inkSub), maxLines: 1, overflow: TextOverflow.ellipsis),
+        Text(constructorLabel, style: AppTextStyles.microLabel(color: AppColors.inkSub)),
     ],
   );
 }
@@ -295,10 +294,9 @@ Widget _headerRow(List<_LeaderboardColumn> columns, bool compact) {
           if (i > 0) const SizedBox(width: 6),
           Expanded(
             flex: columns[i].flex,
-            child: Text(
+            child: FitText(
               columns[i].label, style: AppTextStyles.microLabel(),
-              textAlign: i == 0 ? TextAlign.start : TextAlign.center,
-              maxLines: 1, softWrap: false, overflow: TextOverflow.ellipsis,
+              textAlign: i == 0 ? TextAlign.start : TextAlign.center
             ),
           ),
         ],

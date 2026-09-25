@@ -74,8 +74,6 @@ class EventCard extends StatelessWidget {
                                 child: Text(
                                   venueLabel!,
                                   style: AppTextStyles.microLabel(color: AppColors.inkMute),
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
                                 ),
                               ),
                             ],

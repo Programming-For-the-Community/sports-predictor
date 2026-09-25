@@ -129,7 +129,6 @@ class SportCard extends ConsumerWidget {
                           child: Text(
                             sport.displayName,
                             style: AppTextStyles.cardTitle(),
-                            overflow: TextOverflow.ellipsis,
                           ),
                         ),
                         const SizedBox(width: 8),
@@ -152,7 +151,6 @@ class SportCard extends ConsumerWidget {
                             child: Text(
                               active ? 'View predictions' : 'Coming soon',
                               style: AppTextStyles.body(color: AppColors.inkSub),
-                              overflow: TextOverflow.ellipsis,
                             ),
                           ),
                           if (active)

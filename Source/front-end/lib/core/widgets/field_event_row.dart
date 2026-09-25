@@ -43,8 +43,6 @@ class FieldEventRow extends StatelessWidget {
       title: Text(
         event.tournamentName ?? 'Tournament',
         style: AppTextStyles.body(color: AppColors.ink),
-        maxLines: 1,
-        overflow: TextOverflow.ellipsis,
       ),
       dateLabel: _dateRangeLabel(event),
       isCompleted: event.status == EventStatus.completed,

@@ -4,6 +4,10 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:front_end/core/models/model_card.dart';
 import 'package:front_end/core/widgets/feature_attribution_bars.dart';
 
+// FeatureAttributionBars lets a long snake_case name wrap at its underscores
+// (a zero-width space after each) instead of truncating.
+String _wrapped(String feature) => feature.replaceAll('_', '_​');
+
 void main() {
   group('FeatureAttributionBars', () {
     testWidgets('shows a message when there are no features', (tester) async {
@@ -22,9 +26,9 @@ void main() {
         ),
       ));
 
-      expect(find.text('home_elo_rating'), findsOneWidget);
+      expect(find.text(_wrapped('home_elo_rating')), findsOneWidget);
       expect(find.text('0.42'), findsOneWidget);
-      expect(find.text('away_travel_km'), findsOneWidget);
+      expect(find.text(_wrapped('away_travel_km')), findsOneWidget);
       expect(find.text('0.18'), findsOneWidget);
     });
 
@@ -38,7 +42,7 @@ void main() {
       ));
 
       expect(tester.takeException(), isNull);
-      expect(find.text('unused_feature'), findsOneWidget);
+      expect(find.text(_wrapped('unused_feature')), findsOneWidget);
     });
   });
 }

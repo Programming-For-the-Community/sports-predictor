@@ -6,6 +6,7 @@ import '../../core/models/pga_season_projection.dart';
 import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_text_styles.dart';
 import '../../core/widgets/points_standings_table.dart';
+import '../../core/widgets/fit_text.dart';
 
 /// PGA's own /:sport/season page -- a FedEx Cup points-standings table,
 /// not a bracket. Different shape from season_page.dart (no division/
@@ -84,7 +85,7 @@ List<_Column> _fullColumns() => [
             crossAxisAlignment: CrossAxisAlignment.start,
             mainAxisSize: MainAxisSize.min,
             children: [
-              Text(row.name ?? row.entityId, style: AppTextStyles.body(color: AppColors.ink), maxLines: 1, overflow: TextOverflow.ellipsis),
+              Text(row.name ?? row.entityId, style: AppTextStyles.body(color: AppColors.ink)),
               if (row.country != null) Text(row.country!, style: AppTextStyles.microLabel(color: AppColors.inkSub)),
             ],
           )),
@@ -92,8 +93,8 @@ List<_Column> _fullColumns() => [
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.center,
             children: [
-              Text(formatPoints(row.currentPoints), style: AppTextStyles.metricValue(color: AppColors.ink), maxLines: 1),
-              Text(formatPoints(row.projectedPoints), style: AppTextStyles.microLabel(color: AppColors.cyan), maxLines: 1),
+              FitText(formatPoints(row.currentPoints), style: AppTextStyles.metricValue(color: AppColors.ink)),
+              FitText(formatPoints(row.projectedPoints), style: AppTextStyles.microLabel(color: AppColors.cyan)),
             ],
           )),
       _Column(_PgaStandingsLabels.fedexStJude, 2, (context, row, rank) => PercentText(row.fedexStJudeProbability)),
@@ -141,10 +142,9 @@ class _StandingsTable extends StatelessWidget {
                       if (i > 0) const SizedBox(width: 6),
                       Expanded(
                         flex: columns[i].flex,
-                        child: Text(
+                        child: FitText(
                           columns[i].label, style: AppTextStyles.microLabel(),
-                          textAlign: i == 0 ? TextAlign.start : TextAlign.center,
-                          maxLines: 1, softWrap: false, overflow: TextOverflow.ellipsis,
+                          textAlign: i == 0 ? TextAlign.start : TextAlign.center
                         ),
                       ),
                     ],

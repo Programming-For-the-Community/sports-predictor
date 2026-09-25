@@ -151,18 +151,15 @@ class MatchupHero extends StatelessWidget {
                     isLive ? LiveStatusPill(dotOnly: compact) : FinalStatusPill(dotOnly: compact),
                     if (liveState!.detail != null) ...[
                       const SizedBox(width: 8),
-                      // Flexible + ellipsis -- ESPN's own detail text isn't
+                      // Flexible + wrapping -- ESPN's own detail text isn't
                       // always a short clock ("Q3 08:14"); situational
                       // strings ("End of 2nd Quarter", "Delayed: Weather")
                       // can run long enough to overflow a phone-width card
-                      // otherwise (same guard game_row.dart's own live-detail
-                      // text already uses).
+                      // otherwise.
                       Flexible(
                         child: Text(
                           liveState!.detail!,
                           style: AppTextStyles.body(color: AppColors.inkSub),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
                         ),
                       ),
                     ],
@@ -408,8 +405,6 @@ class _PredictionRecap extends StatelessWidget {
               child: Text(
                 c.correct ? 'Model picked the winner' : 'Model missed the winner',
                 style: AppTextStyles.body(color: AppColors.inkSub),
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
               ),
             ),
           ],
@@ -440,7 +435,7 @@ class _StatTrio extends StatelessWidget {
     return Column(
       mainAxisSize: MainAxisSize.min,
       children: [
-        Text(label, style: AppTextStyles.microLabel(), maxLines: 1, overflow: TextOverflow.ellipsis),
+        Text(label, style: AppTextStyles.microLabel(), textAlign: TextAlign.center),
         const SizedBox(height: 4),
         Text(value, style: AppTextStyles.metricValueLarge()),
       ],
@@ -467,8 +462,6 @@ class _VenueLabel extends StatelessWidget {
           child: Text(
             label,
             style: AppTextStyles.microLabel(color: AppColors.inkMute),
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
           ),
         ),
       ],

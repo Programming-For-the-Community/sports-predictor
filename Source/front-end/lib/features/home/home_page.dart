@@ -69,14 +69,13 @@ class _HomePageState extends ConsumerState<HomePage> with WidgetsBindingObserver
                     children: [
                       const BrandMark(),
                       const SizedBox(width: 12),
-                      // Expanded so the title can give ground and
-                      // ellipsize instead of pushing the sign-out button
-                      // past the edge on a narrow (mobile) viewport.
+                      // Expanded so the title can give ground and wrap
+                      // instead of pushing the sign-out button past the
+                      // edge on a narrow (mobile) viewport.
                       Expanded(
                         child: Text(
                           'sports-predictor',
                           style: AppTextStyles.sectionTitle(),
-                          overflow: TextOverflow.ellipsis,
                         ),
                       ),
                       TextButton(

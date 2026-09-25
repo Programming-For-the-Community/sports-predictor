@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../theme/app_colors.dart';
 import '../theme/app_text_styles.dart';
+import 'fit_text.dart';
 
 /// map_status vocabulary (library/normalize/f1.py) -- F1StatusPill's own
 /// switch references these instead of retyping the raw string. A
@@ -69,7 +70,7 @@ class F1StatusPill extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
       decoration: BoxDecoration(color: color.withValues(alpha: 0.15), borderRadius: BorderRadius.circular(999)),
-      child: Text(label, style: AppTextStyles.microLabel(color: color), maxLines: 1, softWrap: false, overflow: TextOverflow.ellipsis),
+      child: FitText(label, style: AppTextStyles.microLabel(color: color)),
     );
   }
 }

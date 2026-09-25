@@ -50,8 +50,6 @@ class F1EventRow extends StatelessWidget {
             child: Text(
               event.raceName ?? 'Grand Prix',
               style: AppTextStyles.body(color: AppColors.ink),
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
             ),
           ),
           if (event.isSprint) ...[

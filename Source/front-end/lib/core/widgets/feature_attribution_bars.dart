@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import 'fit_text.dart';
+
 import '../models/model_card.dart';
 import '../theme/app_colors.dart';
 import '../theme/app_text_styles.dart';
@@ -39,10 +41,9 @@ class _FeatureBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // Flex-based so column widths scale with the card's own width instead
-    // of overflowing a narrow card for a long feature name (e.g.
-    // "away_coach_season_win_pct"); the Tooltip covers a name still
-    // truncated at any given width.
+    // Flex-based so column widths scale with the card's own width; a long
+    // feature name (e.g. "away_coach_season_win_pct") wraps at its
+    // underscores rather than truncating.
     return Row(
       children: [
         Expanded(
@@ -50,10 +51,8 @@ class _FeatureBar extends StatelessWidget {
           child: Tooltip(
             message: feature.feature,
             child: Text(
-              feature.feature,
+              feature.feature.replaceAll('_', '_​'),
               style: AppTextStyles.microLabel(color: AppColors.inkSub),
-              overflow: TextOverflow.ellipsis,
-              maxLines: 1,
             ),
           ),
         ),
@@ -79,11 +78,9 @@ class _FeatureBar extends StatelessWidget {
         const SizedBox(width: 10),
         Expanded(
           flex: 2,
-          child: Text(
+          child: FitText(
             feature.importance.toStringAsFixed(2),
             textAlign: TextAlign.right,
-            overflow: TextOverflow.ellipsis,
-            maxLines: 1,
             style: AppTextStyles.metricValue(color: AppColors.cyan),
           ),
         ),

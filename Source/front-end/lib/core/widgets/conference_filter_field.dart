@@ -44,6 +44,7 @@ class _ConferenceFilterFieldState extends State<ConferenceFilterField> {
       style: AppTextStyles.body(color: AppColors.ink),
       decoration: InputDecoration(
         hintText: 'Filter by conference...',
+        hintMaxLines: 2,
         hintStyle: AppTextStyles.body(color: AppColors.inkMute),
         prefixIcon: const Icon(Icons.search, size: 18, color: AppColors.inkMute),
         suffixIcon: widget.value.isEmpty

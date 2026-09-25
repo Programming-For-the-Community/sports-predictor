@@ -6,6 +6,7 @@ import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_text_styles.dart';
 import '../../core/widgets/team_color_dot.dart';
 import '../../static/nfl_team_colors.dart';
+import '../../core/widgets/fit_text.dart';
 
 // One list of (label, flex, cell) drives both the header row and every
 // data row, keeping each column's label and value in sync per sport.
@@ -63,19 +64,21 @@ List<_StandingsColumn> _standingsColumns(String sport) {
       _StandingsColumn(_StandingsLabels.rank, 3, (context, sport, team) {
         final real = team.currentRank;
         final model = team.modelRank;
-        return RichText(
-          textAlign: TextAlign.center,
-          maxLines: 1,
-          softWrap: false,
-          overflow: TextOverflow.ellipsis,
-          text: TextSpan(
-            children: [
-              TextSpan(text: real != null ? '#$real' : '--', style: AppTextStyles.metricValue(color: AppColors.inkMute)),
-              if (model != null) ...[
-                TextSpan(text: ' → ', style: AppTextStyles.microLabel(color: AppColors.inkMute)),
-                TextSpan(text: '#$model', style: AppTextStyles.metricValue(color: AppColors.cyan)),
+        return FittedBox(
+          fit: BoxFit.scaleDown,
+          child: RichText(
+            textAlign: TextAlign.center,
+            maxLines: 1,
+            softWrap: false,
+            text: TextSpan(
+              children: [
+                TextSpan(text: real != null ? '#$real' : '--', style: AppTextStyles.metricValue(color: AppColors.inkMute)),
+                if (model != null) ...[
+                  TextSpan(text: ' → ', style: AppTextStyles.microLabel(color: AppColors.inkMute)),
+                  TextSpan(text: '#$model', style: AppTextStyles.metricValue(color: AppColors.cyan)),
+                ],
               ],
-            ],
+            ),
           ),
         );
       }),
@@ -86,7 +89,7 @@ List<_StandingsColumn> _standingsColumns(String sport) {
           TeamColorDot(color: info.primary),
           if (info.primary != null) const SizedBox(width: 10),
           Flexible(
-            child: Text(info.abbreviation, style: AppTextStyles.body(color: AppColors.ink), overflow: TextOverflow.ellipsis),
+            child: Text(info.abbreviation, style: AppTextStyles.body(color: AppColors.ink)),
           ),
         ],
       );
@@ -174,13 +177,10 @@ class _StandingsHeaderRow extends StatelessWidget {
           if (i > 0) const SizedBox(width: 6),
           Expanded(
             flex: columns[i].flex,
-            child: Text(
+            child: FitText(
               columns[i].label,
               style: AppTextStyles.microLabel(),
-              textAlign: i == 0 ? TextAlign.start : TextAlign.center,
-              maxLines: 1,
-              softWrap: false,
-              overflow: TextOverflow.ellipsis,
+              textAlign: i == 0 ? TextAlign.start : TextAlign.center
             ),
           ),
         ],

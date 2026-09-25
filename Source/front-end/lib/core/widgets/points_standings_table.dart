@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../theme/app_colors.dart';
 import '../theme/app_text_styles.dart';
+import 'fit_text.dart';
 
 /// Formats a points total -- whole numbers once >= 1000 (season-long
 /// running totals), one decimal place below that.
@@ -15,9 +16,8 @@ class PercentText extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Text(
-      formatPercent(value), style: AppTextStyles.metricValue(color: AppColors.violet), textAlign: TextAlign.center,
-      maxLines: 1, softWrap: false, overflow: TextOverflow.ellipsis,
+    return FitText(
+      formatPercent(value), style: AppTextStyles.metricValue(color: AppColors.violet), textAlign: TextAlign.center
     );
   }
 }
@@ -35,10 +35,9 @@ class StandingsHeaderRow extends StatelessWidget {
           if (i > 0) const SizedBox(width: 6),
           Expanded(
             flex: flexes[i],
-            child: Text(
+            child: FitText(
               labels[i], style: AppTextStyles.microLabel(),
-              textAlign: i == 0 ? TextAlign.center : (i == 1 ? TextAlign.start : TextAlign.center),
-              maxLines: 1, softWrap: false, overflow: TextOverflow.ellipsis,
+              textAlign: i == 0 ? TextAlign.center : (i == 1 ? TextAlign.start : TextAlign.center)
             ),
           ),
         ],
@@ -96,7 +95,6 @@ class PointsStandingsTable<T> extends StatelessWidget {
                     flex: 4,
                     child: Text(
                       displayName(standings[i]), style: AppTextStyles.body(color: AppColors.ink),
-                      maxLines: 1, overflow: TextOverflow.ellipsis,
                     ),
                   ),
                   const SizedBox(width: 6),
@@ -105,17 +103,17 @@ class PointsStandingsTable<T> extends StatelessWidget {
                     child: Column(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        Text(formatPoints(currentPoints(standings[i])), style: AppTextStyles.metricValue(color: AppColors.ink), maxLines: 1),
-                        Text(formatPoints(projectedPoints(standings[i])), style: AppTextStyles.microLabel(color: AppColors.cyan), maxLines: 1),
+                        FitText(formatPoints(currentPoints(standings[i])), style: AppTextStyles.metricValue(color: AppColors.ink)),
+                        FitText(formatPoints(projectedPoints(standings[i])), style: AppTextStyles.microLabel(color: AppColors.cyan)),
                       ],
                     ),
                   ),
                   const SizedBox(width: 6),
                   Expanded(
                     flex: 2,
-                    child: Text(
+                    child: FitText(
                       formatPercent(championProbability(standings[i])), style: AppTextStyles.metricValue(color: AppColors.violet),
-                      textAlign: TextAlign.center, maxLines: 1, softWrap: false, overflow: TextOverflow.ellipsis,
+                      textAlign: TextAlign.center,
                     ),
                   ),
                 ],

@@ -5,6 +5,7 @@ import '../../core/models/field_prediction.dart';
 import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_text_styles.dart';
 import '../../core/widgets/field_status_pill.dart';
+import '../../core/widgets/fit_text.dart';
 
 /// PGA's own leaderboard table -- column-spec pattern, same shape as
 /// season_page.dart's own _StandingsTable/_StandingsColumn (chosen over
@@ -75,9 +76,8 @@ Widget _positionColumnCell(BuildContext context, FieldParticipantPrediction entr
   final position = live?.finishPosition ?? entry.actualFinishPosition;
   final isTie = live?.isTie ?? false;
   final label = position != null ? (isTie ? 'T$position' : '$position') : '$rowNumber';
-  return Text(
-    label, style: AppTextStyles.metricValue(color: AppColors.inkMute), textAlign: TextAlign.center,
-    maxLines: 1, softWrap: false, overflow: TextOverflow.ellipsis,
+  return FitText(
+    label, style: AppTextStyles.metricValue(color: AppColors.inkMute), textAlign: TextAlign.center
   );
 }
 
@@ -87,7 +87,7 @@ Widget _playerColumnCell(BuildContext context, FieldParticipantPrediction entry,
     crossAxisAlignment: CrossAxisAlignment.start,
     mainAxisSize: MainAxisSize.min,
     children: [
-      Text(name, style: AppTextStyles.body(color: AppColors.ink), maxLines: 1, overflow: TextOverflow.ellipsis),
+      Text(name, style: AppTextStyles.body(color: AppColors.ink)),
       if (entry.country != null)
         Text(entry.country!, style: AppTextStyles.microLabel(color: AppColors.inkSub)),
     ],
@@ -267,13 +267,10 @@ class _LeaderboardHeaderRow extends StatelessWidget {
           if (i > 0) const SizedBox(width: 6),
           Expanded(
             flex: columns[i].flex,
-            child: Text(
+            child: FitText(
               columns[i].label,
               style: AppTextStyles.microLabel(),
-              textAlign: i == 0 ? TextAlign.start : TextAlign.center,
-              maxLines: 1,
-              softWrap: false,
-              overflow: TextOverflow.ellipsis,
+              textAlign: i == 0 ? TextAlign.start : TextAlign.center
             ),
           ),
         ],
@@ -452,18 +449,16 @@ class _RoundCell extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final projectedStrokes = (par != null && projected != null) ? (par! + projected!) : null;
-    final actualText = Text(
+    final actualText = FitText(
       actual != null ? _formatStrokesAndToPar(actual!.totalStrokes, actual!.scoreToPar) : '--',
-      style: AppTextStyles.metricValue(color: actual != null ? AppColors.ink : AppColors.inkMute),
-      maxLines: 1, softWrap: false, overflow: TextOverflow.ellipsis,
+      style: AppTextStyles.metricValue(color: actual != null ? AppColors.ink : AppColors.inkMute)
     );
-    final projectedText = Text(
+    final projectedText = FitText(
       _formatStrokesAndToPar(projectedStrokes, projected),
-      style: AppTextStyles.microLabel(color: AppColors.cyan),
-      maxLines: 1, softWrap: false, overflow: TextOverflow.ellipsis,
+      style: AppTextStyles.microLabel(color: AppColors.cyan)
     );
     final thruCaption = thru != null
-        ? Text('Thru $thru', style: AppTextStyles.microLabel(color: AppColors.inkMute), maxLines: 1, overflow: TextOverflow.ellipsis)
+        ? Text('Thru $thru', style: AppTextStyles.microLabel(color: AppColors.inkMute))
         : null;
     // Inside the full breakdown (showLabel), actual and projected sit on
     // one line next to the "ROUND N" label above them. In the compact
@@ -509,14 +504,12 @@ class _StandingCell extends StatelessWidget {
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.center,
       children: [
-        Text(
-          _formatToPar(actual), style: AppTextStyles.metricValue(color: actual != null ? AppColors.ink : AppColors.inkMute),
-          maxLines: 1, softWrap: false, overflow: TextOverflow.ellipsis,
+        FitText(
+          _formatToPar(actual), style: AppTextStyles.metricValue(color: actual != null ? AppColors.ink : AppColors.inkMute)
         ),
-        Text(
+        FitText(
           _formatToPar(projected),
-          style: AppTextStyles.microLabel(color: AppColors.cyan),
-          maxLines: 1, softWrap: false, overflow: TextOverflow.ellipsis,
+          style: AppTextStyles.microLabel(color: AppColors.cyan)
         ),
       ],
     );
