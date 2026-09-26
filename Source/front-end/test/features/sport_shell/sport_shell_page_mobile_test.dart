@@ -29,4 +29,26 @@ void main() {
       expect(tester.takeException(), isNull);
     });
   }
+
+  // Four tabs (Events, Season, Performance, Models) are wider than a phone at
+  // large system text, so the row scrolls sideways instead of clipping a label.
+  for (final width in [320.0, ...mobileViewportWidths]) {
+    testWidgets('every tab is reachable and none is clipped at ${width}px wide', (tester) async {
+      final router = GoRouter(
+        initialLocation: '/nfl/events',
+        routes: [
+          GoRoute(path: '/nfl/events', builder: (context, state) => const SportShellPage(sportId: 'nfl', child: SizedBox())),
+        ],
+      );
+
+      await pumpAtWidth(tester, width, MaterialApp.router(routerConfig: router));
+
+      for (final label in ['Events', 'Season', 'Performance', 'Models']) {
+        await tester.ensureVisible(find.text(label));
+        await tester.pumpAndSettle();
+        expect(find.text(label), findsOneWidget, reason: label);
+      }
+      expect(tester.takeException(), isNull);
+    });
+  }
 }

@@ -691,8 +691,11 @@ def project_leaderboard(
     """Projects each candidate's season-end total as their current total
     plus a flat per-remaining-game estimate (their own player-prop
     model's prediction for their team's next game, applied across every
-    remaining game) -- not a per-opponent simulation. Returns the top_n by
-    projected total, descending.
+    remaining game) -- not a per-opponent simulation. Returns the top_n ranked by CURRENT
+    season-to-date total, descending -- the leaderboard is who is leading
+    now; projected_total is shown alongside it, not what orders it.
+    Ties (notably every candidate at 0 before any stats exist) break on
+    projected_total, so preseason still reads as a pure projection.
     """
     projected = []
     for entity_id, current_total in current_totals.items():
@@ -703,5 +706,5 @@ def project_leaderboard(
             "current_total": current_total,
             "projected_total": current_total + per_game * remaining,
         })
-    projected.sort(key=lambda row: row["projected_total"], reverse=True)
+    projected.sort(key=lambda row: (row["current_total"], row["projected_total"]), reverse=True)
     return projected[:top_n]

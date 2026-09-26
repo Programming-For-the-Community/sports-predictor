@@ -25,7 +25,20 @@ import json
 import logging
 
 
-def log_viewer_analytics(logger: logging.Logger, sport: str, resource: str, method: str | None, headers: dict | None) -> None:
+def _authenticated_user(request_context: dict | None) -> tuple[str | None, str | None]:
+    """(sub, username) from the Cognito authorizer's claims on the API
+    Gateway request context. The ID token carries `cognito:username`, the
+    access token `username` -- either may be what the client sends. This
+    pool has no email attribute (cognito-user-pool.tf), so the username is
+    the only human-readable identifier."""
+    claims = ((request_context or {}).get("authorizer") or {}).get("claims") or {}
+    return claims.get("sub"), claims.get("cognito:username") or claims.get("username")
+
+
+def log_viewer_analytics(
+    logger: logging.Logger, sport: str, resource: str, method: str | None, headers: dict | None,
+    request_context: dict | None = None, path: str | None = None,
+) -> None:
     """Never raises -- a logging failure here must not turn a working
     request into a 500. Call once per invocation, before routing, so every
     request is represented regardless of which route it hits or whether
@@ -34,7 +47,11 @@ def log_viewer_analytics(logger: logging.Logger, sport: str, resource: str, meth
     `resource` + `method` together identify the API endpoint (e.g. GET
     /nfl/predictions/events/{event_id}) -- passed separately from headers
     since API Gateway carries the HTTP method as its own top-level event
-    field (`httpMethod`), not a header."""
+    field (`httpMethod`), not a header.
+
+    `path` is the concrete request path (e.g. /nfl/predictions/events/
+    401547417) -- `resource` is the route template, which can't say WHICH
+    game was viewed. `request_context` supplies the signed-in user."""
     try:
         # API Gateway's REST API proxy integration preserves header casing
         # as received; CloudFront always sends these in CloudFront-Viewer-*
@@ -45,10 +62,14 @@ def log_viewer_analytics(logger: logging.Logger, sport: str, resource: str, meth
         def h(name: str) -> str | None:
             return lower_headers.get(name.lower())
 
+        user_id, username = _authenticated_user(request_context)
         logger.info("viewer_analytics %s", json.dumps({
             "sport": sport,
             "resource": resource,
+            "path": path,
             "method": method,
+            "user_id": user_id,
+            "username": username,
             "country": h("CloudFront-Viewer-Country"),
             "country_name": h("CloudFront-Viewer-Country-Name"),
             # 2-letter ISO 3166-2 subdivision code (e.g. "CA") -- distinct

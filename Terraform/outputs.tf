@@ -70,6 +70,16 @@ output "season_gate_function_name" {
   value       = aws_lambda_function.season_gate.function_name
 }
 
+output "prediction_scheduler_function_name" {
+  description = "Shared prediction-scheduler Lambda function name -- passed to shared_lambdas_deploy workflow for `aws lambda update-function-code`"
+  value       = aws_lambda_function.prediction_scheduler.function_name
+}
+
+output "model_performance_function_name" {
+  description = "Shared model-performance Lambda function name -- passed to shared_lambdas_deploy workflow for `aws lambda update-function-code`"
+  value       = aws_lambda_function.model_performance.function_name
+}
+
 output "ec2_training_reaper_function_name" {
   description = "Shared ec2-training-reaper Lambda function name -- passed to shared_lambdas_deploy workflow for `aws lambda update-function-code`"
   value       = aws_lambda_function.ec2_training_reaper.function_name

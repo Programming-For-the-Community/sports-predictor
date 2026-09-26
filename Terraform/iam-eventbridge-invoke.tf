@@ -125,6 +125,14 @@ data "aws_iam_policy_document" "eventbridge_invoke_permissions" {
       # its own self-created, one-time EventBridge Scheduler retries
       # (also assumed via this same role) actually invoke it.
       aws_lambda_function.ec2_training_reaper.arn,
+      # prediction_scheduler: scheduler-prediction-scheduler.tf's own
+      # every-5-minutes target -- added in the same change that creates the
+      # scheduler, not retrofitted after a live gap (see
+      # project-nba-eventbridge-permission-gap memory).
+      aws_lambda_function.prediction_scheduler.arn,
+      # model_performance: scheduler-model-performance.tf's own daily target,
+      # added in the same change that creates the scheduler.
+      aws_lambda_function.model_performance.arn,
     ]
   }
 }

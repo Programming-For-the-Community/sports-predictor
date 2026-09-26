@@ -16,7 +16,7 @@ from datetime import datetime, timezone
 import live_features
 from library.schema.keys import entity_key as build_entity_key
 from library.schema.keys import event_key as build_event_key
-from library.serving import model_loader
+from library.serving import model_loader, prediction_snapshots
 from library.storage import prediction_cache
 
 logger = logging.getLogger("event-prediction-common")
@@ -219,6 +219,21 @@ def compute_and_cache_event(storage, s3, predictions_table, event_id: str, sport
         prediction_cache.put_cached(s3, cache_key, result, model_versions, (event or {}).get("status"))
     finally:
         prediction_cache.clear_in_progress(s3, cache_key)
+
+
+def snapshot_event(storage, s3, predictions_table, event_id: str, sport: str, predict_event_fn) -> int:
+    """Fresh compute for one event (which also refreshes the S3 cache viewers
+    read), then copies exactly the rows that compute recorded to the event's
+    final-pregame snapshot -- see library.serving.prediction_snapshots. The
+    cutoff is taken before the compute so rows of older model versions, or of
+    players scored earlier on demand, are left out. Returns the number of
+    rows snapshotted; 0 when the compute recorded nothing (event not ingested,
+    no promoted model)."""
+    started = datetime.now(timezone.utc).isoformat()
+    compute_and_cache_event(storage, s3, predictions_table, event_id, sport, predict_event_fn)
+    return prediction_snapshots.snapshot_event_predictions(
+        predictions_table, build_event_key(sport, event_id), prediction_snapshots.FINAL_PREGAME, started,
+    )
 
 
 def compute_and_cache_player_prop(

@@ -74,11 +74,12 @@ def home_away_team_ids(event: dict) -> tuple[str, str] | None:
     return home_id, away_id
 
 
-def attach_depth_charts(events: list[dict], nfl_client, s3, bucket: str) -> None:
+def attach_depth_charts(events: list[dict], nfl_client, s3, bucket: str, ttl_days: float = DEPTH_CHART_CACHE_TTL_DAYS) -> None:
     """Attaches home_depth_chart/away_depth_chart to each event dict in
     place, fetching each participating team's depth chart at most once
     regardless of how many events reference it. Best-effort per team -- a
-    fetch failure just omits that team's field."""
+    fetch failure just omits that team's field. ttl_days=0 forces a fresh
+    fetch of every team (the pre-kickoff refresh)."""
     team_ids: set[str] = set()
     for event in events:
         ids = home_away_team_ids(event)
@@ -88,7 +89,7 @@ def attach_depth_charts(events: list[dict], nfl_client, s3, bucket: str) -> None
     depth_chart_by_team: dict[str, dict] = {}
     for team_id in team_ids:
         try:
-            depth_chart_by_team[team_id] = get_cached_depth_chart(s3, bucket, nfl_client, team_id)
+            depth_chart_by_team[team_id] = get_cached_depth_chart(s3, bucket, nfl_client, team_id, ttl_days)
         except Exception:
             logger.exception("Failed fetching depth chart for team %s -- depth chart field will be omitted", team_id)
 
@@ -102,7 +103,7 @@ def attach_depth_charts(events: list[dict], nfl_client, s3, bucket: str) -> None
 
 
 def get_cached_depth_chart(
-    s3, bucket: str, nfl_client, team_id: str, ttl_days: int = DEPTH_CHART_CACHE_TTL_DAYS,
+    s3, bucket: str, nfl_client, team_id: str, ttl_days: float = DEPTH_CHART_CACHE_TTL_DAYS,
 ) -> dict:
     """Returns team_id's depth chart from the shared S3 cache if it was
     fetched within the last ttl_days, otherwise fetches fresh via

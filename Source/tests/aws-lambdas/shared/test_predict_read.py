@@ -70,6 +70,39 @@ class TestUnrecognizedResource:
         assert response["statusCode"] == 404
 
 
+class TestModelPerformanceRoute:
+    """GET /{sport}/model-performance serves the scorecard the model-performance
+    Lambda wrote to S3 -- the same route for every sport."""
+
+    @staticmethod
+    def _bucket(stored: dict | None):
+        bucket = MagicMock()
+        bucket.object_exists.side_effect = lambda key: stored is not None and key == "model-performance/nfl/latest.json"
+        bucket.get_json.return_value = stored
+        return bucket
+
+    def test_returns_the_stored_scorecard(self):
+        scorecard = {"sport": "nfl", "season": 2026, "models": [{"model_name": "win-probability"}]}
+        with patch.object(shared_predict_read, "_get_model_bucket", return_value=self._bucket(scorecard)):
+            response = shared_predict_read.lambda_handler(_api_event("/nfl/model-performance"), None)
+
+        assert response["statusCode"] == 200
+        assert json.loads(response["body"]) == scorecard
+
+    def test_returns_an_empty_scorecard_before_the_first_run(self):
+        with patch.object(shared_predict_read, "_get_model_bucket", return_value=self._bucket(None)):
+            response = shared_predict_read.lambda_handler(_api_event("/nfl/model-performance"), None)
+
+        assert response["statusCode"] == 200
+        assert json.loads(response["body"]) == {"sport": "nfl", "models": []}
+
+    def test_every_sport_has_the_route(self):
+        for sport in ("nfl", "nba", "ncaafb", "ncaambb", "pga", "f1"):
+            with patch.object(shared_predict_read, "_get_model_bucket", return_value=self._bucket(None)):
+                response = shared_predict_read.lambda_handler(_api_event(f"/{sport}/model-performance"), None)
+            assert response["statusCode"] == 200, sport
+
+
 class _TeamSportRoutingMixin:
     """Shared body for nfl/nba/ncaafb/ncaambb's own TestRouting/
     TestPredictionRoutes classes -- each subclass sets SPORT, EVENT_ID, and

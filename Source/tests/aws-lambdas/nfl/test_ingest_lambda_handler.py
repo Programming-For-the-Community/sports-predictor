@@ -300,3 +300,29 @@ class TestIngestLambdaHandler:
             "coaches_fetched": True,
         }
         mock_client.get_summary.assert_not_called()
+
+
+class TestForceRefresh:
+    """The prediction-scheduler's pre-kickoff re-ingest sends force_refresh so
+    depth charts (3-day cache) are refetched instead of served stale."""
+
+    def _run(self, mock_s3, mock_client, payload):
+        with patch.object(nfl_ingest, "_s3", mock_s3), \
+             patch.object(nfl_ingest, "NFLClient", return_value=mock_client), \
+             patch.object(nfl_ingest, "EspnCoreApiClient", return_value=make_core_client()):
+            nfl_ingest.lambda_handler(payload, None)
+
+    def test_force_refresh_refetches_cached_depth_charts(self):
+        mock_s3 = make_s3()
+        mock_client = make_client(scoreboard([]))
+        mock_client.get_teams.return_value = teams_response("12", "13")
+        payload = {"season": SEASON_YEAR, "season_type": 2, "week": 5}
+
+        self._run(mock_s3, mock_client, payload)
+        assert mock_client.get_depth_chart.call_count == 2
+
+        self._run(mock_s3, mock_client, payload)  # cache still fresh -> no new fetch
+        assert mock_client.get_depth_chart.call_count == 2
+
+        self._run(mock_s3, mock_client, {**payload, "force_refresh": True})
+        assert mock_client.get_depth_chart.call_count == 4

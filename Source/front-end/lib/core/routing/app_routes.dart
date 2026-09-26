@@ -9,5 +9,6 @@ abstract final class AppRoutes {
   static String events(String sport) => '/$sport/events';
   static String eventDetail(String sport, String eventId) => '/$sport/events/$eventId';
   static String models(String sport) => '/$sport/models';
+  static String performance(String sport) => '/$sport/performance';
   static String season(String sport) => '/$sport/season';
 }

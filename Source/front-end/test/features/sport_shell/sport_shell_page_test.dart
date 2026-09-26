@@ -28,6 +28,15 @@ const _configWithoutSeason = SportConfig(
   hasSeasonProjection: false,
 );
 
+const _configWithPerformance = SportConfig(
+  id: 'test-with-performance',
+  displayName: 'Test Sport',
+  eventShape: EventShape.headToHead,
+  accentColor: AppColors.cyan,
+  active: true,
+  hasPerformanceTab: true,
+);
+
 void main() {
   Widget wrap(SportConfig config) {
     final router = GoRouter(
@@ -53,5 +62,48 @@ void main() {
     expect(find.text('Season'), findsNothing);
     expect(find.text('Events'), findsOneWidget);
     expect(find.text('Models'), findsOneWidget);
+  });
+
+  group('Performance tab', () {
+    testWidgets('is hidden unless the sport has a scorecard', (tester) async {
+      await tester.pumpWidget(wrap(_configWithSeason));
+
+      expect(find.text('Performance'), findsNothing);
+    });
+
+    testWidgets('is shown between Season and Models for a sport that has one', (tester) async {
+      await tester.pumpWidget(wrap(_configWithPerformance));
+
+      final season = tester.getCenter(find.text('Season')).dx;
+      final performance = tester.getCenter(find.text('Performance')).dx;
+      final models = tester.getCenter(find.text('Models')).dx;
+      expect(season, lessThan(performance));
+      expect(performance, lessThan(models));
+    });
+
+    testWidgets('tapping it goes to the sport performance route', (tester) async {
+      final router = GoRouter(
+        initialLocation: '/nfl/events',
+        routes: [
+          GoRoute(
+            path: '/nfl/events',
+            builder: (context, state) => SportShellPage(sportId: 'nfl', sportConfigOverride: _configWithPerformance, child: const SizedBox()),
+          ),
+          GoRoute(path: '/nfl/performance', builder: (context, state) => const Text('performance page')),
+        ],
+      );
+      await tester.pumpWidget(MaterialApp.router(routerConfig: router));
+
+      await tester.tap(find.text('Performance'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('performance page'), findsOneWidget);
+    });
+  });
+
+  test('every active sport has a Performance tab', () {
+    for (final sport in kSports.where((s) => s.active)) {
+      expect(sport.hasPerformanceTab, isTrue, reason: sport.id);
+    }
   });
 }

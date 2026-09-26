@@ -11,7 +11,7 @@ from botocore.exceptions import ClientError
 from library.aws.account import get_account_id
 from library.http.espn_core import EspnCoreApiClient
 from library.http.nfl import NFLClient
-from library.storage.depth_chart_cache import attach_depth_charts, home_away_team_ids
+from library.storage.depth_chart_cache import DEPTH_CHART_CACHE_TTL_DAYS, attach_depth_charts, home_away_team_ids
 
 logger = logging.getLogger("nfl-ingest")
 
@@ -73,22 +73,26 @@ def _injuries_cache_key(team_id: str) -> str:
     return f"nfl/cache/team-injuries/{team_id}.json"
 
 
-def get_cached_team_injuries(s3, bucket: str, core_client: EspnCoreApiClient, team_id: str) -> list[dict]:
+def get_cached_team_injuries(
+    s3, bucket: str, core_client: EspnCoreApiClient, team_id: str, force_refresh: bool = False,
+) -> list[dict]:
     """One team's current injury report -- TTL-cached (INJURIES_CACHE_TTL_HOURS)
-    in S3 under _injuries_cache_key(team_id)."""
+    in S3 under _injuries_cache_key(team_id). force_refresh skips the TTL."""
     return _cached_or_fetch(
-        s3, bucket, _injuries_cache_key(team_id), INJURIES_CACHE_TTL_HOURS / 24,
+        s3, bucket, _injuries_cache_key(team_id), 0 if force_refresh else INJURIES_CACHE_TTL_HOURS / 24,
         lambda: core_client.get_team_injuries(team_id),
     )
 
 
 def enrich_events(
     events: list[dict], season: int, nfl_client: NFLClient, core_client: EspnCoreApiClient, s3, bucket: str,
+    force_refresh: bool = False,
 ) -> None:
     """Attaches home_coach/away_coach, home_injuries/away_injuries, and
     home_depth_chart/away_depth_chart onto each event dict in place.
     Best-effort throughout: a coach/injury/depth-chart fetch failure is
-    logged and that field is simply omitted."""
+    logged and that field is simply omitted. force_refresh bypasses the
+    injury and depth-chart caches (the pre-kickoff refresh)."""
     team_ids: set[str] = set()
     for event in events:
         ids = home_away_team_ids(event)
@@ -104,7 +108,7 @@ def enrich_events(
     injuries_by_team: dict[str, list[dict]] = {}
     for team_id in team_ids:
         try:
-            injuries_by_team[team_id] = get_cached_team_injuries(s3, bucket, core_client, team_id)
+            injuries_by_team[team_id] = get_cached_team_injuries(s3, bucket, core_client, team_id, force_refresh)
         except Exception:
             logger.exception("Failed fetching injuries for team %s -- injuries field will be omitted", team_id)
 
@@ -118,4 +122,4 @@ def enrich_events(
         event["home_injuries"] = injuries_by_team.get(home_id)
         event["away_injuries"] = injuries_by_team.get(away_id)
 
-    attach_depth_charts(events, nfl_client, s3, bucket)
+    attach_depth_charts(events, nfl_client, s3, bucket, 0 if force_refresh else DEPTH_CHART_CACHE_TTL_DAYS)

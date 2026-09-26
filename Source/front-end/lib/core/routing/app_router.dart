@@ -7,6 +7,7 @@ import '../auth/auth_repository.dart';
 import '../data/events_repository.dart';
 import '../data/f1_events_repository.dart';
 import '../data/field_events_repository.dart';
+import '../data/model_performance_repository.dart';
 import '../data/models_repository.dart';
 import '../data/season_repository.dart';
 import '../models/sport_config.dart';
@@ -21,6 +22,7 @@ import '../../features/events/f1_event_list_page.dart';
 import '../../features/events/field_event_detail_page.dart';
 import '../../features/events/field_event_list_page.dart';
 import '../../features/models/model_cards_page.dart';
+import '../../features/performance/model_performance_page.dart';
 import '../../features/season/f1_season_page.dart';
 import '../../features/season/pga_season_page.dart';
 import '../../features/season/season_page.dart';
@@ -54,6 +56,7 @@ class _AuthChangeNotifier extends ChangeNotifier {
         ref.invalidate(f1EventsListProvider);
         ref.invalidate(f1EventPredictionProvider);
         ref.invalidate(modelsListProvider);
+        ref.invalidate(modelPerformanceProvider);
         ref.invalidate(seasonProjectionProvider);
       }
       notifyListeners();
@@ -141,6 +144,10 @@ final appRouterProvider = Provider<GoRouter>((ref) {
           GoRoute(
             path: '/:sport/models',
             builder: (context, state) => ModelCardsPage(sportId: state.pathParameters['sport']!),
+          ),
+          GoRoute(
+            path: '/:sport/performance',
+            builder: (context, state) => ModelPerformancePage(sportId: state.pathParameters['sport']!),
           ),
           GoRoute(
             path: '/:sport/season',

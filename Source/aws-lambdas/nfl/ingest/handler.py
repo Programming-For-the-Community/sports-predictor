@@ -36,6 +36,10 @@ above) does the rate limiting.
 EventBridge can override any default via the schedule's input payload:
     { "season": 2025, "season_type": 2, "week": 4 }
 
+Adding "force_refresh": true bypasses the injury/depth-chart caches -- the
+prediction-scheduler sends it (with the event's own season/type/week) ahead
+of a pre-kickoff snapshot.
+
 All three must be given together for a manual override -- there's no
 partial-override path, and only that one week is ingested. Omitting all
 three auto-detects the target week from the most recent Sunday's date:
@@ -72,7 +76,7 @@ from library.aws.account import get_account_id
 from library.aws.boto_config import DEFAULT_CONFIG
 from library.http.espn_core import EspnCoreApiClient
 from library.http.nfl import NFLClient
-from library.storage.depth_chart_cache import get_cached_depth_chart
+from library.storage.depth_chart_cache import DEPTH_CHART_CACHE_TTL_DAYS, get_cached_depth_chart
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s", force=True)  # AWS Lambda pre-attaches a root handler, so basicConfig() is otherwise a silent no-op
 logger = logging.getLogger("nfl-ingest")
@@ -161,7 +165,7 @@ def _fetch_coaches(core_client: EspnCoreApiClient) -> bool:
         return False
 
 
-def _fetch_depth_charts(client: NFLClient) -> tuple[int, int]:
+def _fetch_depth_charts(client: NFLClient, force_refresh: bool = False) -> tuple[int, int]:
     """Refreshes every NFL team's cached depth chart (library.storage.
     depth_chart_cache). get_cached_depth_chart's own TTL
     (DEPTH_CHART_CACHE_TTL_DAYS) does the rate limiting. Best-effort per
@@ -169,7 +173,7 @@ def _fetch_depth_charts(client: NFLClient) -> tuple[int, int]:
     fetched = failed = 0
     for team_id in _all_team_ids(client):
         try:
-            get_cached_depth_chart(_s3, RAW_BUCKET, client, team_id)
+            get_cached_depth_chart(_s3, RAW_BUCKET, client, team_id, 0 if force_refresh else DEPTH_CHART_CACHE_TTL_DAYS)
             fetched += 1
         except Exception:
             logger.exception("Failed fetching depth chart for team %s", team_id)
@@ -189,7 +193,9 @@ def _next_week_target(client: NFLClient, season: int, season_type: int, week: in
     return None
 
 
-def _ingest_week(client: NFLClient, core_client: EspnCoreApiClient, season: int, season_type: int, week: int) -> tuple[int, int, int]:
+def _ingest_week(
+    client: NFLClient, core_client: EspnCoreApiClient, season: int, season_type: int, week: int, force_refresh: bool = False,
+) -> tuple[int, int, int]:
     """Fetches one week's full scoreboard, writes it (enriched) to S3, and
     fetches the box score of each completed game not already there.
     Returns (processed, skipped, failed)."""
@@ -202,7 +208,7 @@ def _ingest_week(client: NFLClient, core_client: EspnCoreApiClient, season: int,
     # Mutates each event dict in place -- scoreboard["events"] holds the
     # same list/dict objects, so this enrichment is already reflected in
     # `scoreboard` by the time it's written below.
-    enrichment.enrich_events(events, season, client, core_client, _s3, RAW_BUCKET)
+    enrichment.enrich_events(events, season, client, core_client, _s3, RAW_BUCKET, force_refresh)
 
     scoreboard_key = f"nfl/scoreboard/{season}/{season_type}/{week}.json"
     _put_json(scoreboard_key, scoreboard)
@@ -236,6 +242,10 @@ def lambda_handler(event: dict, context) -> dict:
     season = event.get("season")
     season_type = event.get("season_type")
     week = event.get("week")
+    # Set by the prediction-scheduler's pre-kickoff refresh: bypass the
+    # injury and depth-chart caches so the re-ingested scoreboard (and so the
+    # event items normalize writes from it) carries the latest reports.
+    force_refresh = bool(event.get("force_refresh"))
 
     client = NFLClient()
     core_client = EspnCoreApiClient()
@@ -244,7 +254,7 @@ def lambda_handler(event: dict, context) -> dict:
     rosters_fetched, rosters_failed = _fetch_rosters(client)
     logger.info("Rosters: %d fetched, %d failed", rosters_fetched, rosters_failed)
 
-    depth_charts_fetched, depth_charts_failed = _fetch_depth_charts(client)
+    depth_charts_fetched, depth_charts_failed = _fetch_depth_charts(client, force_refresh)
     logger.info("Depth charts: %d fetched, %d failed", depth_charts_fetched, depth_charts_failed)
 
     coaches_fetched = _fetch_coaches(core_client)
@@ -290,7 +300,7 @@ def lambda_handler(event: dict, context) -> dict:
     processed = skipped = failed = 0
     for target_season, target_type, target_week in targets:
         week_processed, week_skipped, week_failed = _ingest_week(
-            client, core_client, target_season, target_type, target_week,
+            client, core_client, target_season, target_type, target_week, force_refresh,
         )
         processed += week_processed
         skipped += week_skipped

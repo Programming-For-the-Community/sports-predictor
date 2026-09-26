@@ -248,6 +248,37 @@ class TestProjectLeaderboard:
 
         assert [row["entity_id"] for row in result] == ["p2", "p3"]
 
+    def test_ranks_by_current_total_not_projected_end_of_season_value(self):
+        # p_hot leads today; p_proj is projected to overtake by season's end.
+        result = season_simulation.project_leaderboard(
+            current_totals={"p_hot": 900.0, "p_proj": 500.0},
+            per_game_projections={"p_hot": 10.0, "p_proj": 100.0},
+            games_remaining={"p_hot": 5, "p_proj": 10},
+            top_n=10,
+        )
+
+        assert [row["entity_id"] for row in result] == ["p_hot", "p_proj"]
+        assert result[0]["projected_total"] < result[1]["projected_total"]
+
+    def test_current_leader_outside_the_projected_top_n_is_still_included(self):
+        current_totals = {"p_lead": 300.0, **{f"p{i}": 100.0 for i in range(5)}}
+        per_game = {"p_lead": 0.0, **{f"p{i}": 50.0 for i in range(5)}}
+        games_remaining = {"p_lead": 4, **{f"p{i}": 4 for i in range(5)}}
+
+        result = season_simulation.project_leaderboard(current_totals, per_game, games_remaining, top_n=2)
+
+        assert result[0]["entity_id"] == "p_lead"
+
+    def test_with_no_current_stats_yet_ties_break_on_projected_total(self):
+        result = season_simulation.project_leaderboard(
+            current_totals={"a": 0.0, "b": 0.0},
+            per_game_projections={"a": 5.0, "b": 9.0},
+            games_remaining={"a": 17, "b": 17},
+            top_n=10,
+        )
+
+        assert [row["entity_id"] for row in result] == ["b", "a"]
+
     def test_missing_projection_or_games_remaining_defaults_to_no_growth(self):
         result = season_simulation.project_leaderboard(
             current_totals={"p1": 100.0}, per_game_projections={}, games_remaining={}, top_n=10,

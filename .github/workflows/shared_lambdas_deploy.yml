@@ -39,6 +39,16 @@ on:
         required: false
         type: string
         default: 'sports-predictor-predict-read'
+      prediction_scheduler_function_name:
+        description: 'prediction-scheduler Lambda function name (from Terraform output prediction_scheduler_function_name)'
+        required: false
+        type: string
+        default: 'sports-predictor-prediction-scheduler'
+      model_performance_function_name:
+        description: 'model-performance Lambda function name (from Terraform output model_performance_function_name)'
+        required: false
+        type: string
+        default: 'sports-predictor-model-performance'
   workflow_call:
     inputs: *inputs
 
@@ -113,3 +123,37 @@ jobs:
     with:
       function_name: ${{ inputs.predict_read_function_name || 'sports-predictor-predict-read' }}
       artifact_name: ${{ needs.build_predict_read.outputs.artifact_name }}
+
+  build_prediction_scheduler:
+    name: Build prediction-scheduler Lambda
+    uses: ./.github/workflows/python_lambda_build.yml
+    with:
+      function_name: ${{ inputs.prediction_scheduler_function_name || 'sports-predictor-prediction-scheduler' }}
+      handler_dir: 'Source/aws-lambdas/shared/prediction-scheduler'
+      library_path: 'Source/library'
+
+  deploy_prediction_scheduler:
+    name: Deploy prediction-scheduler Lambda
+    needs: build_prediction_scheduler
+    uses: ./.github/workflows/python_lambda_deploy.yml
+    secrets: inherit
+    with:
+      function_name: ${{ inputs.prediction_scheduler_function_name || 'sports-predictor-prediction-scheduler' }}
+      artifact_name: ${{ needs.build_prediction_scheduler.outputs.artifact_name }}
+
+  build_model_performance:
+    name: Build model-performance Lambda
+    uses: ./.github/workflows/python_lambda_build.yml
+    with:
+      function_name: ${{ inputs.model_performance_function_name || 'sports-predictor-model-performance' }}
+      handler_dir: 'Source/aws-lambdas/shared/model-performance'
+      library_path: 'Source/library'
+
+  deploy_model_performance:
+    name: Deploy model-performance Lambda
+    needs: build_model_performance
+    uses: ./.github/workflows/python_lambda_deploy.yml
+    secrets: inherit
+    with:
+      function_name: ${{ inputs.model_performance_function_name || 'sports-predictor-model-performance' }}
+      artifact_name: ${{ needs.build_model_performance.outputs.artifact_name }}

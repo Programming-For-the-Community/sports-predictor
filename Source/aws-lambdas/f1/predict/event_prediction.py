@@ -10,6 +10,7 @@ import live_features
 from library.schema.keys import event_key as build_event_key
 from library.serving import event_prediction_common as common
 from library.serving import model_loader
+from library.serving import prediction_snapshots as snapshots
 from library.serving.f1_reads import (
     CONSTRUCTOR_MODEL_NAME,
     FIELD_EVENT_MODELS,
@@ -238,6 +239,21 @@ def predict_event(storage, s3, predictions_table, event_id: str) -> dict:
     if event_type == "sprint":
         return predict_sprint_event(storage, s3, predictions_table, event_id)
     raise live_features.MalformedEventError(f"Event {event_id!r} has an unrecognized event_type {event_type!r}")
+
+
+def snapshot_event(storage, s3, predictions_table, event_id: str) -> int:
+    """The race's one snapshot, taken on race day once qualifying is in: a fresh
+    compute frozen as the event's final-pregame snapshot (first write wins).
+    Does nothing once the race has results. Returns rows written."""
+    event_key_value = build_event_key(SPORT, event_id)
+    event = storage.get_event(event_key_value)
+    if event is None or event.get("participants") and any((p.get("result") or {}).get("finish_position") is not None for p in event["participants"]):
+        return 0
+    started = datetime.now(timezone.utc).isoformat()
+    compute_and_cache_event(storage, s3, predictions_table, event_id)
+    return snapshots.snapshot_event_predictions(
+        predictions_table, event_key_value, snapshots.FINAL_PREGAME, started, overwrite=False,
+    )
 
 
 def compute_and_cache_event(storage, s3, predictions_table, event_id: str) -> None:

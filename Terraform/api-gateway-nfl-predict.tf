@@ -417,6 +417,14 @@ resource "aws_api_gateway_deployment" "main" {
       sha1(jsonencode(values(aws_api_gateway_method.f1_cors)[*].id)),
       sha1(jsonencode(values(aws_api_gateway_integration.f1_cors)[*].id)),
       sha1(jsonencode(values(aws_api_gateway_integration_response.f1_cors)[*].id)),
+      # model-performance routes (api-gateway-model-performance.tf), all sports
+      sha1(jsonencode(values(aws_api_gateway_resource.model_performance)[*].id)),
+      sha1(jsonencode(values(aws_api_gateway_method.model_performance)[*].id)),
+      sha1(jsonencode(values(aws_api_gateway_integration.model_performance)[*].id)),
+      sha1(jsonencode(values(aws_api_gateway_integration.model_performance)[*].uri)),
+      sha1(jsonencode(values(aws_api_gateway_method.model_performance_cors)[*].id)),
+      sha1(jsonencode(values(aws_api_gateway_integration.model_performance_cors)[*].id)),
+      sha1(jsonencode(values(aws_api_gateway_integration_response.model_performance_cors)[*].id)),
     ]))
   }
 

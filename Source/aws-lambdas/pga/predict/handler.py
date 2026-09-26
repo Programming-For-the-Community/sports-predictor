@@ -65,5 +65,8 @@ lambda_handler = make_lambda_handler(
     compute_and_cache_event_fn=lambda event_id: event_prediction.compute_and_cache_event(
         _get_storage(), _get_model_bucket(), _get_predictions_table(), event_id,
     ),
+    snapshot_event_fn=lambda event_id: event_prediction.snapshot_event(
+        _get_storage(), _get_model_bucket(), _get_predictions_table(), event_id,
+    ),
     logger=logger,
 )

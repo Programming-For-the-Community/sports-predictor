@@ -7,7 +7,7 @@ tests/library/test_season.py. No AWS involved.
 """
 import os
 import sys
-from datetime import date
+from datetime import date, datetime, timezone
 from unittest.mock import patch
 
 shared_season_gate = sys.modules["shared_season_gate"]
@@ -33,7 +33,7 @@ class TestSeasonGateHandler:
         assert result == {"in_season": False, "xray_trace_id": "", "xray_parent_id": ""}
 
     def test_uses_the_real_current_date_when_not_patched(self):
-        today_month_day = date.today().strftime("%m-%d")
+        today_month_day = datetime.now(timezone.utc).date().strftime("%m-%d")
         with patch.dict(os.environ, {}, clear=True):
             result = shared_season_gate.lambda_handler(
                 {"season_start": today_month_day, "season_end": today_month_day}, None

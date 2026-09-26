@@ -11,5 +11,6 @@ abstract final class ApiRoutes {
   static String eventPrediction(String sport, String eventId) => '/$sport/predictions/events/$eventId';
   static String liveScores(String sport) => '/$sport/live-scores';
   static String models(String sport) => '/$sport/models';
+  static String modelPerformance(String sport) => '/$sport/model-performance';
   static String season(String sport) => '/$sport/season';
 }

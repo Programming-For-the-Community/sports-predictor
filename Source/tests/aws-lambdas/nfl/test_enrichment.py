@@ -191,6 +191,24 @@ class TestEnrichEvents:
         assert core_client.get_team_injuries.call_count == 2
 
 
+    def test_force_refresh_bypasses_the_injury_and_depth_chart_caches(self):
+        events = [_competition_event("1", "12", "24")]
+        nfl_client = MagicMock()
+        nfl_client.get_depth_chart.return_value = _raw_depth_chart({})
+        core_client = MagicMock()
+        core_client.get_season_coaches.return_value = {}
+        core_client.get_team_injuries.return_value = []
+
+        mock_s3 = _make_s3()
+        enrichment.enrich_events(events, 2025, nfl_client, core_client, mock_s3, BUCKET)
+        enrichment.enrich_events(events, 2025, nfl_client, core_client, mock_s3, BUCKET, force_refresh=True)
+
+        assert nfl_client.get_depth_chart.call_count == 4
+        assert core_client.get_team_injuries.call_count == 4
+        # Coaches barely change and aren't part of the pre-kickoff refresh.
+        assert core_client.get_season_coaches.call_count == 1
+
+
 class TestCachedOrFetch:
     def test_cache_miss_calls_fetch_and_writes_the_result_back(self):
         mock_s3 = _make_s3()

@@ -14,6 +14,7 @@ import live_features
 from library.schema.keys import event_key as build_event_key
 from library.serving import event_prediction_common as common
 from library.serving import model_loader
+from library.serving import prediction_snapshots as snapshots
 from library.serving.pga_reads import (
     CUP_MODEL_NAME,
     CUTLINE_MODEL_NAME,
@@ -32,6 +33,9 @@ SPORT = "pga"
 # Matches a round model's model_key (MODEL#round-2#v3#GOLFER#1085).
 # Captures the version since predicted_value itself doesn't store it.
 _ROUND_MODEL_KEY_RE = re.compile(r"^MODEL#round-([1-4])#v(\d+)#GOLFER#(.+)$")
+# The same row inside the event's start-of-tournament snapshot
+# (SNAPSHOT#final_pregame#MODEL#round-2#v3#GOLFER#1085) -- see snapshot_event.
+_ROUND_SNAPSHOT_KEY_RE = re.compile(r"^SNAPSHOT#final_pregame#MODEL#round-([1-4])#v(\d+)#GOLFER#(.+)$")
 
 
 def get_cached_model(model_cache: dict, s3, model_name: str):
@@ -104,17 +108,34 @@ def _actual_golfer_result(participant: dict) -> dict | None:
 
 def _historical_round_predictions(predictions_table, event_key_value: str) -> dict[str, dict[int, dict]]:
     """{entity_id: {round_number: {"value":..., "model_version":...}}} --
-    recovers each round's own pre-round forecast, since a played round is
-    never re-scored again. One Query per event, filtered client-side."""
-    by_golfer: dict[str, dict[int, dict]] = defaultdict(dict)
+    each round's forecast, for showing next to its actual once the round has
+    been played (a played round is never re-scored).
+
+    The start-of-tournament snapshot wins when it exists: it was written
+    before any round was played and is never replaced, so every round's
+    forecast is the one the model made up front. Otherwise the live row the
+    last on-demand compute left -- which only exists if someone happened to
+    load the event before that round finished. One Query per event, filtered
+    client-side."""
+    live: dict[str, dict[int, dict]] = defaultdict(dict)
+    frozen: dict[str, dict[int, dict]] = defaultdict(dict)
     for row in predictions_table.query(Key("event_key").eq(event_key_value)):
+        snapshot_match = _ROUND_SNAPSHOT_KEY_RE.match(row["model_key"])
+        if snapshot_match is not None:
+            round_number, version, entity_id = int(snapshot_match.group(1)), int(snapshot_match.group(2)), snapshot_match.group(3)
+            frozen[entity_id][round_number] = {"value": row["predicted_value"]["value"], "model_version": version}
+            continue
         match = _ROUND_MODEL_KEY_RE.match(row["model_key"])
         if match is None:
             continue
         round_number, model_version, entity_id = int(match.group(1)), int(match.group(2)), match.group(3)
         # Same {"value", "model_version"} shape as _score's return value.
-        by_golfer[entity_id][round_number] = {"value": row["predicted_value"]["value"], "model_version": model_version}
-    return by_golfer
+        live[entity_id][round_number] = {"value": row["predicted_value"]["value"], "model_version": model_version}
+
+    merged: dict[str, dict[int, dict]] = defaultdict(dict)
+    for entity_id in {*live, *frozen}:
+        merged[entity_id] = {**live.get(entity_id, {}), **frozen.get(entity_id, {})}
+    return merged
 
 
 def _field_sort_key(entry: dict):
@@ -311,6 +332,30 @@ def predict_event(storage, s3, predictions_table, event_id: str) -> dict:
     if event_type == "cup":
         return predict_cup_event(storage, s3, predictions_table, event_id)
     raise live_features.MalformedEventError(f"Event {event_id!r} has an unrecognized event_type {event_type!r}")
+
+
+def _tournament_not_started(event: dict) -> bool:
+    """True while no golfer has played a round -- the only moment a snapshot
+    can still be a genuine pre-tournament forecast."""
+    return all(not ((p.get("result") or {}).get("rounds")) for p in event.get("participants", []))
+
+
+def snapshot_event(storage, s3, predictions_table, event_id: str) -> int:
+    """The tournament's one snapshot, taken at its start: a fresh compute,
+    frozen as the event's final-pregame snapshot (first write wins). It holds
+    the tournament-level forecasts AND every round's forecast, and is the only
+    snapshot PGA is graded against. Does nothing for a match-play/cup event or
+    once any round has been played (a snapshot then would not be pre-tournament).
+    Returns rows written."""
+    event_key_value = build_event_key(SPORT, event_id)
+    event = storage.get_event(event_key_value)
+    if event is None or event.get("event_type") != "field" or not _tournament_not_started(event):
+        return 0
+    started = datetime.now(timezone.utc).isoformat()
+    compute_and_cache_event(storage, s3, predictions_table, event_id)
+    return snapshots.snapshot_event_predictions(
+        predictions_table, event_key_value, snapshots.FINAL_PREGAME, started, overwrite=False,
+    )
 
 
 def compute_and_cache_event(storage, s3, predictions_table, event_id: str) -> None:

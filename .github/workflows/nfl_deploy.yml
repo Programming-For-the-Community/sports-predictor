@@ -118,7 +118,7 @@ jobs:
       (needs.approval.result == 'success' || needs.approval.result == 'skipped')
     uses: ./.github/workflows/run_python_tests.yml
     with:
-      test_path: 'Source/tests/aws-lambdas/shared/test_predict_read.py Source/tests/library/serving/ Source/tests/library/storage/test_prediction_cache.py Source/tests/library/storage/test_model_artifacts.py Source/tests/library/aws/test_lambda_invoker.py'
+      test_path: 'Source/tests/aws-lambdas/shared/test_predict_read.py Source/tests/aws-lambdas/shared/test_prediction_scheduler_handler.py Source/tests/aws-lambdas/shared/test_model_performance.py Source/tests/library/performance/ Source/tests/library/serving/ Source/tests/library/storage/test_prediction_cache.py Source/tests/library/storage/test_model_artifacts.py Source/tests/library/aws/test_lambda_invoker.py'
       requirements_files: 'Source/aws-lambdas/shared/predict-read/requirements.txt'
 
   test-live-scores:
@@ -278,6 +278,8 @@ jobs:
     with:
       season_gate_function_name: ${{ needs.infra.outputs.season_gate_function_name }}
       predict_read_function_name: ${{ needs.infra.outputs.predict_read_function_name }}
+      prediction_scheduler_function_name: ${{ needs.infra.outputs.prediction_scheduler_function_name }}
+      model_performance_function_name: ${{ needs.infra.outputs.model_performance_function_name }}
 
   deploy_predict_lambda:
     name: AI hosting (deploy)

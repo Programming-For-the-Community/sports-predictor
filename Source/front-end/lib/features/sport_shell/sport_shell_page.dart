@@ -7,18 +7,19 @@ import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_text_styles.dart';
 import '../../core/widgets/page_glow.dart';
 
-/// Per-sport tab shell: the "Events | Season | Models" segmented toggle
+/// Per-sport tab shell: the "Events | Season | Performance | Models" segmented toggle
 /// from design/FRONTEND_STYLE.md's top-bar spec. Reads SportConfig from the
 /// :sport path param for title/accent and to gate the Season tab
 /// (SportConfig.hasSeasonProjection) -- no other sport-specific logic
 /// lives here.
-enum _SportTab { events, season, models }
+enum _SportTab { events, season, performance, models }
 
 // Not shared with any other file, but named here instead of typed inline
 // in _TabToggle's own 3 _TabButton calls below.
 abstract final class _SportTabLabels {
   static const events = 'Events';
   static const season = 'Season';
+  static const performance = 'Performance';
   static const models = 'Models';
 }
 
@@ -41,9 +42,11 @@ class SportShellPage extends StatelessWidget {
     final location = GoRouterState.of(context).matchedLocation;
     final activeTab = location.endsWith('/models')
         ? _SportTab.models
-        : location.endsWith('/season')
-            ? _SportTab.season
-            : _SportTab.events;
+        : location.endsWith('/performance')
+            ? _SportTab.performance
+            : location.endsWith('/season')
+                ? _SportTab.season
+                : _SportTab.events;
 
     // '/:sport/events/:eventId' has 4 segments (leading '' + sport +
     // 'events' + eventId); the events list itself only has 3. Only that
@@ -88,7 +91,12 @@ class SportShellPage extends StatelessWidget {
                 // horizontal scroll to reach the third one.
                 Padding(
                   padding: const EdgeInsets.fromLTRB(24, 12, 24, 4),
-                  child: _TabToggle(sportId: sportId, activeTab: activeTab, showSeasonTab: sport.hasSeasonProjection),
+                  child: _TabToggle(
+                    sportId: sportId,
+                    activeTab: activeTab,
+                    showSeasonTab: sport.hasSeasonProjection,
+                    showPerformanceTab: sport.hasPerformanceTab,
+                  ),
                 ),
                 Expanded(child: child),
               ],
@@ -101,41 +109,42 @@ class SportShellPage extends StatelessWidget {
 }
 
 class _TabToggle extends StatelessWidget {
-  const _TabToggle({required this.sportId, required this.activeTab, required this.showSeasonTab});
+  const _TabToggle({required this.sportId, required this.activeTab, required this.showSeasonTab, required this.showPerformanceTab});
   final String sportId;
   final _SportTab activeTab;
   final bool showSeasonTab;
+  final bool showPerformanceTab;
 
   @override
   Widget build(BuildContext context) {
+    final tabs = [
+      _TabButton(label: _SportTabLabels.events, active: activeTab == _SportTab.events, onTap: () => context.go(AppRoutes.events(sportId))),
+      if (showSeasonTab)
+        _TabButton(label: _SportTabLabels.season, active: activeTab == _SportTab.season, onTap: () => context.go(AppRoutes.season(sportId))),
+      if (showPerformanceTab)
+        _TabButton(
+          label: _SportTabLabels.performance,
+          active: activeTab == _SportTab.performance,
+          onTap: () => context.go(AppRoutes.performance(sportId)),
+        ),
+      _TabButton(label: _SportTabLabels.models, active: activeTab == _SportTab.models, onTap: () => context.go(AppRoutes.models(sportId))),
+    ];
+
+    // With four tabs the row can be wider than a phone (the "Performance"
+    // label alone is ~90px, and larger system text widens every label). It
+    // spreads evenly across the pill when there's room and scrolls sideways
+    // when there isn't -- a label is never shrunk or clipped to fit.
     return Container(
       padding: const EdgeInsets.all(4),
       decoration: BoxDecoration(color: AppColors.surface, borderRadius: BorderRadius.circular(999)),
-      child: Row(
-        children: [
-          Expanded(
-            child: _TabButton(
-              label: _SportTabLabels.events,
-              active: activeTab == _SportTab.events,
-              onTap: () => context.go(AppRoutes.events(sportId)),
-            ),
+      child: LayoutBuilder(
+        builder: (context, constraints) => SingleChildScrollView(
+          scrollDirection: Axis.horizontal,
+          child: ConstrainedBox(
+            constraints: BoxConstraints(minWidth: constraints.maxWidth),
+            child: Row(mainAxisAlignment: MainAxisAlignment.spaceEvenly, children: tabs),
           ),
-          if (showSeasonTab)
-            Expanded(
-              child: _TabButton(
-                label: _SportTabLabels.season,
-                active: activeTab == _SportTab.season,
-                onTap: () => context.go(AppRoutes.season(sportId)),
-              ),
-            ),
-          Expanded(
-            child: _TabButton(
-              label: _SportTabLabels.models,
-              active: activeTab == _SportTab.models,
-              onTap: () => context.go(AppRoutes.models(sportId)),
-            ),
-          ),
-        ],
+        ),
       ),
     );
   }

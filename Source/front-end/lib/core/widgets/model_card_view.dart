@@ -2,8 +2,10 @@ import 'package:flutter/material.dart';
 
 import '../models/model_card.dart';
 import '../theme/app_colors.dart';
+import '../../static/model_display.dart';
 import '../theme/app_text_styles.dart';
 import 'feature_attribution_bars.dart';
+import 'model_card_frame.dart';
 
 /// design/FRONTEND_STYLE.md's "Model card" component -- quiet --surface
 /// card showing what's actually driving this model's predictions:
@@ -15,64 +17,36 @@ class ModelCardView extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(24),
-      decoration: BoxDecoration(
-        color: AppColors.surface,
-        borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: AppColors.border),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          // Title on its own full-width line(s), badges wrapped below.
-          Tooltip(
-            message: _displayName(model.modelName),
-            child: Text(
-              _displayName(model.modelName),
-              style: AppTextStyles.cardTitle(),
-            ),
-          ),
-          const SizedBox(height: 8),
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            children: [
-              _Badge(text: model.algorithm.toUpperCase()),
-              _Badge(text: 'v${model.version}'),
-            ],
-          ),
-          const SizedBox(height: 18),
-          // Wrap, not a plain Row -- a wide value string could overflow an
-          // unconstrained Row on a narrow phone-width card.
-          Wrap(
-            spacing: 32,
-            runSpacing: 12,
-            children: [
-              for (final metric in _metrics()) _MetricStat(label: metric.$1, value: metric.$2),
-            ],
-          ),
-          const SizedBox(height: 20),
-          Text('TOP FEATURES', style: AppTextStyles.microLabel()),
-          const SizedBox(height: 12),
-          FeatureAttributionBars(features: model.topFeatures),
-          if ((model.candidates?.length ?? 0) > 1) ...[
-            const SizedBox(height: 20),
-            Text('COMPARED AGAINST', style: AppTextStyles.microLabel()),
-            const SizedBox(height: 8),
-            _CandidateComparison(
-              candidates: model.candidates!,
-              currentAlgorithm: model.algorithm,
-              isClassifier: model.isClassifier,
-              unit: _unitLabel(model.modelName),
-            ),
+    return ModelCardFrame(
+      title: modelDisplayName(model.modelName),
+      badges: [model.algorithm.toUpperCase(), 'v${model.version}'],
+      children: [
+        const SizedBox(height: 18),
+        Wrap(
+          spacing: 32,
+          runSpacing: 12,
+          children: [
+            for (final metric in _metrics()) _MetricStat(label: metric.$1, value: metric.$2),
           ],
+        ),
+        const SizedBox(height: 20),
+        Text('TOP FEATURES', style: AppTextStyles.microLabel()),
+        const SizedBox(height: 12),
+        FeatureAttributionBars(features: model.topFeatures),
+        if ((model.candidates?.length ?? 0) > 1) ...[
+          const SizedBox(height: 20),
+          Text('COMPARED AGAINST', style: AppTextStyles.microLabel()),
+          const SizedBox(height: 8),
+          _CandidateComparison(
+            candidates: model.candidates!,
+            currentAlgorithm: model.algorithm,
+            isClassifier: model.isClassifier,
+            unit: _unitLabel(model.modelName),
+          ),
         ],
-      ),
+      ],
     );
   }
-
-  String _displayName(String modelName) => modelName.split('-').map((w) => w[0].toUpperCase() + w.substring(1)).join(' ');
 
   // Shows skill relative to a trivial baseline (always pick the home team;
   // predict the player's own rolling average) rather than a raw
@@ -190,7 +164,7 @@ class _CandidateRow extends StatelessWidget {
               mainAxisSize: MainAxisSize.min,
               children: [
                 if (isCurrent) ...[
-                  const _Badge(text: 'PROMOTED'),
+                  const ModelCardBadge(text: 'PROMOTED'),
                   const SizedBox(width: 10),
                 ],
                 Text(value, style: AppTextStyles.metricValue(color: isCurrent ? AppColors.cyan : AppColors.inkSub)),
@@ -199,20 +173,6 @@ class _CandidateRow extends StatelessWidget {
           ),
         ),
       ],
-    );
-  }
-}
-
-class _Badge extends StatelessWidget {
-  const _Badge({required this.text});
-  final String text;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-      decoration: BoxDecoration(color: AppColors.inset, borderRadius: BorderRadius.circular(999)),
-      child: Text(text, style: AppTextStyles.microLabel()),
     );
   }
 }

@@ -54,6 +54,7 @@ exactly:
 """
 from library.aws import lambda_singletons
 from library.schema.keys import event_key as build_event_key
+from library.serving.common import get_model_performance
 from library.serving.viewer_analytics import log_viewer_analytics
 from library.storage import prediction_cache
 
@@ -101,6 +102,10 @@ def _handle_models(namespace, list_models_fn, response_fn) -> dict:
     return response_fn(200, list_models_fn(namespace["_get_model_bucket"]()))
 
 
+def _handle_model_performance(namespace, sport: str, response_fn) -> dict:
+    return response_fn(200, get_model_performance(namespace["_get_model_bucket"](), sport))
+
+
 def _handle_season(namespace, get_season_projection_fn, response_fn) -> dict:
     body = get_season_projection_fn(namespace["_get_model_bucket"]())
     if body is None:
@@ -145,6 +150,7 @@ def _build_routes(sport_configs: dict) -> dict:
         routes[f"/{sport}/events"] = (sport, "events")
         routes[f"/{sport}/models"] = (sport, "models")
         routes[f"/{sport}/season"] = (sport, "season")
+        routes[f"/{sport}/model-performance"] = (sport, "model_performance")
         routes[f"/{sport}/predictions/events/{{event_id}}"] = (sport, "event_prediction")
         if config["has_player_prop_route"]:
             routes[f"/{sport}/predictions/events/{{event_id}}/players/{{entity_id}}"] = (sport, "player_prop")
@@ -160,6 +166,9 @@ def _dispatch_route(namespace, route: str, sport: str, config: dict, response_fn
 
     if route == "season":
         return _handle_season(namespace, config["get_season_projection_fn"], response_fn)
+
+    if route == "model_performance":
+        return _handle_model_performance(namespace, sport, response_fn)
 
     if route == "event_prediction":
         return _handle_event_prediction(namespace, sport, config["freshness_inputs_fn"], response_fn, path_params["event_id"])
@@ -199,7 +208,10 @@ def make_multi_sport_lambda_handler(*, sport_configs: dict, namespace, logger, r
         if match is None:
             return response_fn(404, {"error": f"No route for resource {resource!r}"})
         sport, route = match
-        log_viewer_analytics(logger, sport, resource, event.get("httpMethod"), event.get("headers"))
+        log_viewer_analytics(
+            logger, sport, resource, event.get("httpMethod"), event.get("headers"),
+            request_context=event.get("requestContext"), path=event.get("path"),
+        )
 
         try:
             return _dispatch_route(namespace, route, sport, sport_configs[sport], response_fn, path_params, query_params)

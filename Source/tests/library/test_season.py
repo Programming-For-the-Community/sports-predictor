@@ -3,7 +3,7 @@ Unit tests for library.season -- season-window membership, including the
 calendar-year wraparound both real sports (NFL, NCAAFB) exercise. No AWS
 involved.
 """
-from datetime import date
+from datetime import date, datetime, timezone
 
 from library.season import current_month_day, is_in_season
 
@@ -16,7 +16,7 @@ class TestCurrentMonthDay:
         assert current_month_day(date(2026, 1, 5)) == "01-05"
 
     def test_defaults_to_todays_utc_date_when_none_given(self):
-        assert current_month_day() == date.today().strftime("%m-%d")
+        assert current_month_day() == datetime.now(timezone.utc).date().strftime("%m-%d")
 
 
 class TestIsInSeasonNonWrapping:

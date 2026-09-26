@@ -321,6 +321,136 @@ resource "aws_cloudwatch_dashboard" "application" {
           updateOn = { refresh = true, resize = false, timeRange = true }
         }
       },
+      # --- Who is using the app ---
+      {
+        type       = "text", x = 0, y = 86, width = 24, height = 1
+        properties = { markdown = "## Users -- who is signed in and what they view (username comes from the Cognito authorizer claims; requests logged before this shipped have no user)" }
+      },
+      {
+        type   = "log"
+        x      = 0
+        y      = 87
+        width  = 12
+        height = 7
+        properties = {
+          region = var.region
+          title  = "Requests by user"
+          view   = "table"
+          query  = <<-QUERY
+            ${local.viewer_analytics_log_sources}
+            | filter @message like /viewer_analytics/
+            | parse @message '"username": "*"' as username
+            | parse @message '"sport": "*"' as sport
+            | filter ispresent(username)
+            | stats count(*) as requests, count_distinct(sport) as sports, max(@timestamp) as last_seen by username
+            | sort requests desc
+            | limit 25
+          QUERY
+        }
+      },
+      {
+        type   = "log"
+        x      = 12
+        y      = 87
+        width  = 12
+        height = 7
+        properties = {
+          region = var.region
+          title  = "Daily active users"
+          view   = "bar"
+          query  = <<-QUERY
+            ${local.viewer_analytics_log_sources}
+            | filter @message like /viewer_analytics/
+            | parse @message '"username": "*"' as username
+            | filter ispresent(username)
+            | stats count_distinct(username) as active_users by bin(1d)
+          QUERY
+        }
+      },
+      {
+        type   = "log"
+        x      = 0
+        y      = 94
+        width  = 12
+        height = 7
+        properties = {
+          region = var.region
+          title  = "Most-viewed sport per user"
+          view   = "table"
+          query  = <<-QUERY
+            ${local.viewer_analytics_log_sources}
+            | filter @message like /viewer_analytics/
+            | parse @message '"username": "*"' as username
+            | filter ispresent(username)
+            | parse @message '"sport": "*"' as sport
+            | stats count(*) as requests by username, sport
+            | sort username asc, requests desc
+            | limit 50
+          QUERY
+        }
+      },
+      {
+        type   = "log"
+        x      = 12
+        y      = 94
+        width  = 12
+        height = 7
+        properties = {
+          region = var.region
+          title  = "Top endpoints per user"
+          view   = "table"
+          query  = <<-QUERY
+            ${local.viewer_analytics_log_sources}
+            | filter @message like /viewer_analytics/
+            | parse @message '"username": "*"' as username
+            | filter ispresent(username)
+            | parse @message '"resource": "*"' as resource
+            | stats count(*) as requests by username, resource
+            | sort requests desc
+            | limit 50
+          QUERY
+        }
+      },
+      {
+        type   = "log"
+        x      = 0
+        y      = 101
+        width  = 12
+        height = 7
+        properties = {
+          region = var.region
+          title  = "Most-viewed games / pages (by concrete path)"
+          view   = "table"
+          query  = <<-QUERY
+            ${local.viewer_analytics_log_sources}
+            | filter @message like /viewer_analytics/
+            | parse @message '"path": "*"' as path
+            | parse @message '"user_id": "*"' as user_id
+            | filter ispresent(path)
+            | stats count(*) as views, count_distinct(user_id) as viewers by path
+            | sort views desc
+            | limit 25
+          QUERY
+        }
+      },
+      {
+        type   = "log"
+        x      = 12
+        y      = 101
+        width  = 12
+        height = 7
+        properties = {
+          region = var.region
+          title  = "Requests over time by sport"
+          view   = "line"
+          query  = <<-QUERY
+            ${local.viewer_analytics_log_sources}
+            | filter @message like /viewer_analytics/
+            | parse @message '"sport": "*"' as sport
+            | stats count(*) as requests by bin(1h), sport
+          QUERY
+        }
+      },
     ]
   })
 }

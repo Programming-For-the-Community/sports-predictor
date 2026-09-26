@@ -30,6 +30,10 @@ sport's own test_predict_routing.py/test_predict_handler.py before
 writing this, same discipline the normalize-dispatch and predict-read
 dedup passes both used after finding the equivalent pitfall in each.
 
+SnapshotPrediction ({"detail-type": "SnapshotPrediction", "event_id": ...}) is
+handled only when a sport passes snapshot_event_fn: one fresh compute, then a
+copy of what it recorded to the event's immutable pre-kickoff snapshot.
+
 The two sport "shapes" for ComputeAndCachePrediction, preserved exactly:
   - nfl/nba/ncaafb/ncaambb (has_player_prop_route=True): ANY
     ComputeAndCachePrediction detail-type returns {"status": "ok"}
@@ -46,7 +50,7 @@ from library.logging_safety import safe_log_value
 
 def make_lambda_handler(
     *, warmup_fn, run_scheduled_fn, compute_and_cache_event_fn, logger,
-    compute_and_cache_player_prop_fn=None,
+    compute_and_cache_player_prop_fn=None, snapshot_event_fn=None,
 ):
     def lambda_handler(event, context):
         # EventBridge Scheduler warmup ping -- keeps a container past its
@@ -56,6 +60,10 @@ def make_lambda_handler(
 
         if event.get("detail-type") == "ScheduledSeasonProjection":
             return run_scheduled_fn()
+        # From the prediction-scheduler shortly before kickoff -- only the
+        # sports that pass snapshot_event_fn take part.
+        if event.get("detail-type") == "SnapshotPrediction" and snapshot_event_fn is not None:
+            return {"status": "ok", "snapshotted": snapshot_event_fn(event["event_id"])}
 
         if compute_and_cache_player_prop_fn is not None:
             if event.get("detail-type") == "ComputeAndCachePrediction":

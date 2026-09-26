@@ -7,8 +7,10 @@ from datetime import datetime, timezone
 
 from boto3.dynamodb.conditions import Key
 
+from library.serving.prediction_snapshots import event_prediction_rows
 from library.parsing import us_eastern_date
 from library.storage.model_artifacts import current_version_key, model_artifact_key
+from library.storage.model_performance import model_performance_key
 from library.storage.season_projections import season_projection_key
 
 # Every head-to-head sport's own predict/event_prediction_common.py writes
@@ -236,6 +238,16 @@ def get_season_projection(s3, sport: str) -> dict | None:
     key = season_projection_key(sport)
     if not s3.object_exists(key):
         return None
+    return s3.get_json(key)
+
+
+def get_model_performance(s3, sport: str) -> dict:
+    """GET /{sport}/model-performance -- the scorecard the model-performance
+    Lambda wrote, or an empty one before its first run so the tab renders
+    "no results yet" rather than an error."""
+    key = model_performance_key(sport)
+    if not s3.object_exists(key):
+        return {"sport": sport, "models": []}
     return s3.get_json(key)
 
 
@@ -532,7 +544,7 @@ def list_events_grouped_by_day(storage, predictions_table, sport: str, status: s
             # One query shared by _prediction_comparison and
             # _basketball_leaders_comparison rather than each querying
             # independently.
-            rows = predictions_table.query(Key("event_key").eq(e["event_key"]))
+            rows = event_prediction_rows(predictions_table, e["event_key"])
             entry["prediction_comparison"] = _prediction_comparison(rows, e)
             entry["leaders_comparison"] = _basketball_leaders_comparison(storage, rows, sport, e)
         return entry

@@ -28,6 +28,7 @@ from datetime import datetime, timedelta, timezone
 
 from boto3.dynamodb.conditions import Key
 
+from library.serving.prediction_snapshots import event_prediction_rows
 from library.features.nfl_teams import is_real_franchise_matchup
 from library.parsing import us_eastern_date
 from library.serving import common
@@ -165,7 +166,7 @@ def list_events(storage, predictions_table, sport: str, status: str) -> dict:
         if status == "completed":
             # One query shared by _prediction_comparison and
             # _leaders_comparison rather than each querying independently.
-            rows = predictions_table.query(Key("event_key").eq(e["event_key"]))
+            rows = event_prediction_rows(predictions_table, e["event_key"])
             entry["prediction_comparison"] = _prediction_comparison(rows, e)
             entry["leaders_comparison"] = _leaders_comparison(storage, rows, sport, e)
         return entry

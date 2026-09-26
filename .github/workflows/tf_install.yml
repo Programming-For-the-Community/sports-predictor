@@ -62,6 +62,12 @@ on:
       predict_read_function_name:
         description: 'Shared predict-read Lambda function name (serves all 6 sports)'
         value: ${{ jobs.terraform.outputs.predict_read_function_name }}
+      prediction_scheduler_function_name:
+        description: 'Shared prediction-scheduler Lambda function name'
+        value: ${{ jobs.terraform.outputs.prediction_scheduler_function_name }}
+      model_performance_function_name:
+        description: 'Shared model-performance Lambda function name'
+        value: ${{ jobs.terraform.outputs.model_performance_function_name }}
       nfl_live_scores_function_name:
         description: 'NFL live-scores Lambda function name'
         value: ${{ jobs.terraform.outputs.nfl_live_scores_function_name }}
@@ -205,6 +211,8 @@ jobs:
       season_gate_function_name: ${{ steps.tf_outputs.outputs.season_gate_function_name }}
       ec2_training_reaper_function_name: ${{ steps.tf_outputs.outputs.ec2_training_reaper_function_name }}
       predict_read_function_name: ${{ steps.tf_outputs.outputs.predict_read_function_name }}
+      prediction_scheduler_function_name: ${{ steps.tf_outputs.outputs.prediction_scheduler_function_name }}
+      model_performance_function_name: ${{ steps.tf_outputs.outputs.model_performance_function_name }}
       nfl_live_scores_function_name: ${{ steps.tf_outputs.outputs.nfl_live_scores_function_name }}
       ncaafb_ingest_function_name: ${{ steps.tf_outputs.outputs.ncaafb_ingest_function_name }}
       ncaafb_normalize_function_name: ${{ steps.tf_outputs.outputs.ncaafb_normalize_function_name }}
@@ -352,6 +360,8 @@ jobs:
         capture_output season_gate_function_name
         capture_output ec2_training_reaper_function_name
         capture_output predict_read_function_name
+        capture_output prediction_scheduler_function_name
+        capture_output model_performance_function_name
         capture_output nfl_live_scores_function_name
         capture_output ncaafb_ingest_function_name
         capture_output ncaafb_normalize_function_name

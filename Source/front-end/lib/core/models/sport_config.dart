@@ -35,6 +35,7 @@ class SportConfig {
     required this.active,
     this.hasSeasonProjection = true,
     this.usesFedexCupSeasonPage = false,
+    this.hasPerformanceTab = false,
   });
 
   final String id;
@@ -54,6 +55,11 @@ class SportConfig {
   // Separate from eventShape since F1 is also EventShape.field but will
   // want its own driver-standings shape, not necessarily this one.
   final bool usesFedexCupSeasonPage;
+
+  // True shows the Performance tab (season/last-period results per model,
+  // from GET /{sport}/model-performance). Off until that sport's backend
+  // builds a scorecard -- every sport has one.
+  final bool hasPerformanceTab;
 }
 
 const kSports = [
@@ -63,6 +69,7 @@ const kSports = [
     eventShape: EventShape.headToHead,
     accentColor: AppColors.cyan,
     active: true,
+    hasPerformanceTab: true,
   ),
   SportConfig(
     // Matches the backend's own route prefix (/ncaafb/...) exactly --
@@ -73,6 +80,7 @@ const kSports = [
     eventShape: EventShape.headToHead,
     accentColor: AppColors.cyan,
     active: true,
+    hasPerformanceTab: true,
   ),
   SportConfig(
     id: SportIds.nba,
@@ -80,6 +88,7 @@ const kSports = [
     eventShape: EventShape.headToHead,
     accentColor: AppColors.cyan,
     active: true,
+    hasPerformanceTab: true,
   ),
   SportConfig(
     // Matches the backend's own route prefix (/ncaambb/...) exactly, same
@@ -89,6 +98,7 @@ const kSports = [
     eventShape: EventShape.headToHead,
     accentColor: AppColors.cyan,
     active: true,
+    hasPerformanceTab: true,
   ),
   SportConfig(
     id: SportIds.pga,
@@ -96,6 +106,7 @@ const kSports = [
     eventShape: EventShape.field,
     accentColor: AppColors.violet,
     active: true,
+    hasPerformanceTab: true,
     // FedEx Cup season simulation (aws-lambdas/pga/predict/
     // season_projection.py) -- a points-standings table, not a bracket,
     // hence usesFedexCupSeasonPage routing to its own PgaSeasonPage.
@@ -108,6 +119,7 @@ const kSports = [
     eventShape: EventShape.field,
     accentColor: AppColors.violet,
     active: true,
+    hasPerformanceTab: true,
     // Driver + constructor championship season simulation (aws-lambdas/
     // f1/predict/season_projection.py) -- a points-standings shape like
     // PGA's own, but with a real second (constructor) standings table

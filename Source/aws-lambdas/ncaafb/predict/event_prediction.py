@@ -98,6 +98,11 @@ def compute_and_cache_event(storage, s3, predictions_table, event_id: str) -> No
     common.compute_and_cache_event(storage, s3, predictions_table, event_id, SPORT, predict_event)
 
 
+def snapshot_event(storage, s3, predictions_table, event_id: str) -> int:
+    """Pre-kickoff snapshot for one event -- see common.snapshot_event."""
+    return common.snapshot_event(storage, s3, predictions_table, event_id, SPORT, predict_event)
+
+
 def compute_and_cache_player_prop(storage, s3, predictions_table, event_id: str, entity_id: str, target_stat: str) -> None:
     """Same role as compute_and_cache_event, for one player-prop stat."""
     common.compute_and_cache_player_prop(
