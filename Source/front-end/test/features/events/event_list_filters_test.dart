@@ -108,7 +108,7 @@ void main() {
       expect(_rowCount(tester), 3);
     });
 
-    testWidgets('a kickoff chip keeps only games in that slot, and selecting it again clears it', (tester) async {
+    testWidgets('a start-time chip keeps only games in that slot, and selecting it again clears it', (tester) async {
       await _pumpPage(
         tester,
         [_event('early', hour: 12), _event('late', hour: 19, minute: 30), _event('late2', hour: 19, minute: 30)],
@@ -124,10 +124,10 @@ void main() {
       expect(_rowCount(tester), 3);
     });
 
-    testWidgets('no kickoff row when every game kicks off in the same hour', (tester) async {
+    testWidgets('no start-time row when every game starts in the same hour', (tester) async {
       await _pumpPage(tester, [_event('a', hour: 13), _event('b', hour: 13)], {'a': 0.7, 'b': 0.7});
 
-      expect(find.text('KICKOFF'), findsNothing);
+      expect(find.text('START TIME'), findsNothing);
       expect(find.text('WINNER CONFIDENCE'), findsOneWidget);
     });
 

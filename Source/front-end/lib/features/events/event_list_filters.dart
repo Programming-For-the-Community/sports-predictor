@@ -44,7 +44,7 @@ List<KickoffSlot> kickoffSlots(List<SportEvent> events) {
   ];
 }
 
-/// Confidence-tier and kickoff-slot chips for the Upcoming/Current list.
+/// Confidence-tier and start-time chips for the Upcoming/Current list.
 /// An empty selection in a row means that row doesn't filter.
 class EventListFilters extends StatelessWidget {
   const EventListFilters({
@@ -85,7 +85,7 @@ class EventListFilters extends StatelessWidget {
         // A single slot has nothing to choose between.
         if (slots.length > 1) ...[
           const SizedBox(height: 12),
-          Text('KICKOFF', style: AppTextStyles.microLabel(color: AppColors.inkSub)),
+          Text('START TIME', style: AppTextStyles.microLabel(color: AppColors.inkSub)),
           const SizedBox(height: 8),
           Wrap(
             spacing: 8,
