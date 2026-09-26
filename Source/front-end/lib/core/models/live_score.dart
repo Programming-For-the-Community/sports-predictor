@@ -45,10 +45,18 @@ class LiveEventState {
         homeScore: (json['home_score'] as num?)?.toDouble(),
         awayScore: (json['away_score'] as num?)?.toDouble(),
         playerStats: (json['player_stats'] as Map<String, dynamic>? ?? {}).map(
-          (entityId, statLine) => MapEntry(
-            entityId,
-            (statLine as Map<String, dynamic>).map((key, value) => MapEntry(key, (value as num).toDouble())),
-          ),
+          (entityId, statLine) => MapEntry(entityId, _numericStats(statLine)),
         ),
       );
+}
+
+/// A stat line's numeric values only -- ESPN sends placeholders like "--"
+/// for some rows, and one of those must not fail the whole live-scores
+/// response (it blanked every NCAAFB game's live score, 2026-09-26).
+Map<String, double> _numericStats(Object? statLine) {
+  if (statLine is! Map<String, dynamic>) return const {};
+  return {
+    for (final entry in statLine.entries)
+      if (entry.value is num) entry.key: (entry.value as num).toDouble(),
+  };
 }

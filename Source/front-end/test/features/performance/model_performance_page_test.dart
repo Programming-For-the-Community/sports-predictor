@@ -113,7 +113,23 @@ void main() {
     expect(find.textContaining("Couldn't load performance"), findsOneWidget);
   });
 
-  testWidgets('on a desktop screen each card is one wide row', (tester) async {
+  testWidgets('on a 1366px laptop the cards sit two to a row without crashing', (tester) async {
+    tester.view.physicalSize = const Size(1366, 1800);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.reset);
+
+    await tester.pumpWidget(_page(() async => _performance(fullNflSet())));
+    await tester.pumpAndSettle();
+
+    expect(tester.takeException(), isNull);
+    final first = tester.getRect(find.byType(ModelPerformanceCardView).at(0));
+    final second = tester.getTopLeft(find.byType(ModelPerformanceCardView).at(1));
+    expect(first.width, 620);
+    expect(second.dy, first.top);
+    expect(second.dx, greaterThan(first.right));
+  });
+
+  testWidgets('on a narrower desktop window the cards are one to a row', (tester) async {
     tester.view.physicalSize = const Size(1100, 1800);
     tester.view.devicePixelRatio = 1.0;
     addTearDown(tester.view.reset);
@@ -124,23 +140,7 @@ void main() {
     expect(tester.takeException(), isNull);
     final first = tester.getRect(find.byType(ModelPerformanceCardView).at(0));
     final second = tester.getTopLeft(find.byType(ModelPerformanceCardView).at(1));
-    expect(first.width, 880);
     expect(second.dy, greaterThan(first.bottom));
-  });
-
-  testWidgets('on a very wide screen the wide cards sit two to a row without crashing', (tester) async {
-    tester.view.physicalSize = const Size(1900, 1800);
-    tester.view.devicePixelRatio = 1.0;
-    addTearDown(tester.view.reset);
-
-    await tester.pumpWidget(_page(() async => _performance(fullNflSet())));
-    await tester.pumpAndSettle();
-
-    expect(tester.takeException(), isNull);
-    final first = tester.getTopLeft(find.byType(ModelPerformanceCardView).at(0));
-    final second = tester.getTopLeft(find.byType(ModelPerformanceCardView).at(1));
-    expect(second.dy, first.dy);
-    expect(second.dx, greaterThan(first.dx));
   });
 
   for (final width in [320.0, 360.0, 375.0, 390.0]) {

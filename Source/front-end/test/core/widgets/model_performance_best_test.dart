@@ -45,6 +45,19 @@ ModelPerformanceRecord _rushingYards() => _record(
       best: {'entity_type': 'player', 'entities': [_entity('9', 1.9, 3, name: 'Demond Williams Jr.')]},
     );
 
+ModelPerformanceRecord _withBands(ModelPerformanceRecord record) => ModelPerformanceRecord.fromJson({
+      'model_name': record.modelName, 'version': 1, 'kind': record.kind, 'band_kind': record.bandKind,
+      'season': {'value': 0.714, 'n': 266}, 'last_period': {'label': 'Wk 3', 'value': 0.742, 'n': 93},
+      'periods': <dynamic>[], 'best': {'entity_type': 'team', 'entities': [
+        for (final e in record.best!.entities) {'entity_id': e.entityId, 'value': e.value, 'n': e.n, 'name': e.name, 'abbreviation': e.abbreviation},
+      ]},
+      'bands': [
+        {'tag': 'HIGH', 'lo': 0.13, 'hi': null, 'n': 112, 'pct': 0.84, 'early': false},
+        {'tag': 'MED', 'lo': 0.06, 'hi': 0.13, 'n': 87, 'pct': 0.69, 'early': false},
+        {'tag': 'LOW', 'lo': 0.0, 'hi': 0.06, 'n': 67, 'pct': 0.54, 'early': false},
+      ],
+    });
+
 Widget _card(ModelPerformanceRecord record, {double width = 460}) => MaterialApp(
       home: Scaffold(
         body: SingleChildScrollView(
@@ -119,16 +132,18 @@ void main() {
     expect(find.text('MOST ACCURATE ON'), findsNothing);
   });
 
-  testWidgets('on a wide card the list sits beside the results', (tester) async {
-    tester.view.physicalSize = const Size(1200, 1400);
+  testWidgets('on a laptop-width card the summary spans the card and the list sits beside the bars', (tester) async {
+    tester.view.physicalSize = const Size(1200, 1600);
     tester.view.devicePixelRatio = 1.0;
     addTearDown(tester.view.reset);
-    await tester.pumpWidget(_card(_winProbability(), width: 880));
+    await tester.pumpWidget(_card(_withBands(_winProbability()), width: 620));
 
     final list = tester.getRect(find.text('MOST ACCURATE ON'));
-    final headline = tester.getRect(find.textContaining('THIS SEASON'));
-    expect(list.left, greaterThan(headline.right));
-    expect(list.top, closeTo(headline.top, 40));
+    final lastWeek = tester.getRect(find.textContaining('LAST WEEK'));
+    final bars = tester.getRect(find.textContaining('CONFIDENCE'));
+    expect(list.top, greaterThan(lastWeek.bottom), reason: 'summary boxes span the card above the list');
+    expect(list.left, greaterThan(bars.right), reason: 'list is beside the bars');
+    expect(list.top, closeTo(bars.top, 4), reason: 'list is level with the bars');
   });
 
   testWidgets('on a narrow card the list stays under the results', (tester) async {

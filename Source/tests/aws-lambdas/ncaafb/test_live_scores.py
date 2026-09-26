@@ -281,6 +281,34 @@ class TestLivePlayerStats:
             "completions": 20, "passing_attempts": 30, "passing_yards": 250,
         }
 
+    def test_placeholder_stat_values_are_dropped_from_the_cache(self):
+        # Real payload (2026-09-26, event 401856805): ESPN sent "--" for every
+        # rushing stat of player -7627, and the app failed to read the whole
+        # response -- every NCAAFB game lost its live score.
+        storage = MagicMock()
+        storage.get_all_events.return_value = [_event("1", datetime.now(timezone.utc).isoformat())]
+        client = MagicMock()
+        client.get_scoreboard_for_date.return_value = {
+            "events": [_espn_event("1", state="in", completed=False, detail="Q2", home_score="14", away_score="21")],
+        }
+        summary = _espn_summary("1")
+        summary["boxscore"]["players"][0]["statistics"].append({
+            "name": "rushing",
+            "keys": ["rushingAttempts", "rushingYards"],
+            "athletes": [
+                {"athlete": {"id": "-7627", "displayName": "Team"}, "stats": ["--", "--"]},
+                {"athlete": {"id": "100", "displayName": "QB One"}, "stats": ["4", "--"]},
+            ],
+        })
+        client.get_summary.return_value = summary
+        s3 = _make_s3()
+
+        live_scores.refresh(storage, s3, BUCKET, client, SPORT)
+
+        stats = json.loads(s3._store[live_scores.LIVE_SCORES_CACHE_KEY])["events"]["1"]["player_stats"]
+        assert "-7627" not in stats
+        assert stats["100"] == {"completions": 20, "passing_attempts": 30, "passing_yards": 250, "rushing_attempts": 4}
+
     def test_a_not_yet_live_candidate_never_fetches_a_boxscore(self):
         storage = MagicMock()
         storage.get_all_events.return_value = [_event("1", datetime.now(timezone.utc).isoformat())]

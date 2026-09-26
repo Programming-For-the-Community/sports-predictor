@@ -102,6 +102,12 @@ def extract_live_state(espn_event: dict) -> dict:
     }
 
 
+def _numeric_stats(stat_line: dict) -> dict:
+    """Only the numeric values -- ESPN sends placeholders like "--" for some
+    rows, which the app can't read as a stat."""
+    return {key: value for key, value in stat_line.items() if isinstance(value, (int, float)) and not isinstance(value, bool)}
+
+
 def live_player_stats(client, sport: str, event_id: str, compound_key_splits: dict[str, tuple[str, str]]) -> dict[str, dict]:
     """Best-effort entity_id -> stat_line for one currently-live event,
     from ESPN's own boxscore/summary endpoint. Empty on any fetch/parse
@@ -110,7 +116,8 @@ def live_player_stats(client, sport: str, event_id: str, compound_key_splits: di
     try:
         summary = client.get_summary(event_id)
         stats_items, _ = boxscore_to_player_game_stats(summary, sport, compound_key_splits)
-        return {item["entity_id"]: item["stat_line"] for item in stats_items}
+        lines = {item["entity_id"]: _numeric_stats(item["stat_line"]) for item in stats_items}
+        return {entity_id: line for entity_id, line in lines.items() if line}
     except Exception:
         logger.exception("Failed fetching live box score for event %s -- omitting player_stats this tick", event_id)
         return {}

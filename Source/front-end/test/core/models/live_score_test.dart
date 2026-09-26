@@ -44,6 +44,22 @@ void main() {
     expect(state.playerStats['100'], {'passing_yards': 250.0, 'passing_touchdowns': 2.0});
   });
 
+  test('a non-numeric stat value is skipped instead of failing the whole parse', () {
+    // Real payload (2026-09-26, NCAAFB 401856805): ESPN's "--" placeholders
+    // for player -7627 made every NCAAFB game's live score disappear.
+    final state = LiveEventState.fromJson({
+      'live': true, 'detail': '5:48 - 2nd', 'home_score': 14, 'away_score': 21,
+      'player_stats': {
+        '-7627': {'rushing_attempts': '--', 'rushing_yards': '--'},
+        '4432577': {'rushing_yards': 88, 'rushing_touchdowns': '--'},
+      },
+    });
+
+    expect(state.homeScore, 14);
+    expect(state.playerStats['-7627'], isEmpty);
+    expect(state.playerStats['4432577'], {'rushing_yards': 88.0});
+  });
+
   test('player_stats defaults to empty when absent (not live, or not yet fetched this tick)', () {
     final state = LiveEventState.fromJson({
       'live': false,
