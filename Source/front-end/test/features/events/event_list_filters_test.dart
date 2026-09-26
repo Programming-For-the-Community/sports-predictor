@@ -131,6 +131,18 @@ void main() {
       expect(find.text('WINNER CONFIDENCE'), findsOneWidget);
     });
 
+    testWidgets('both filter groups sit on one row on a wide screen', (tester) async {
+      tester.view.physicalSize = const Size(1200, 900);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.reset);
+      await _pumpPage(tester, [_event('a', hour: 12), _event('b', hour: 19)], {'a': 0.7, 'b': 0.7});
+
+      final confidence = tester.getRect(find.text('WINNER CONFIDENCE'));
+      final startTime = tester.getRect(find.text('START TIME'));
+      expect(startTime.center.dy, closeTo(confidence.center.dy, 2));
+      expect(startTime.left, greaterThan(confidence.right));
+    });
+
     testWidgets('says so when the filters leave nothing', (tester) async {
       await _pumpPage(tester, [_event('a', hour: 13)], {'a': 0.52});
 

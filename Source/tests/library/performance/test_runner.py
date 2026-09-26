@@ -6,12 +6,17 @@ from test_head_to_head import _event, _row, _rows
 
 
 class _Storage:
-    def __init__(self, events, stat_lines=None):
+    def __init__(self, events, stat_lines=None, upcoming=None):
         self.events = events
         self.stat_lines = stat_lines or {}
+        self.upcoming = upcoming or []
         self.requested = None
+        self.upcoming_requested = None
 
-    def get_all_events(self, sport, status, since_date=None):
+    def get_all_events(self, sport, status, since_date=None, scan_index_forward=False, limit=None):
+        if status == "scheduled":
+            self.upcoming_requested = (sport, since_date, scan_index_forward, limit)
+            return self.upcoming[:limit]
         self.requested = (sport, status, since_date)
         return self.events
 
@@ -95,6 +100,30 @@ def test_coverage_counts_completed_events_that_were_never_predicted():
     document, _ = _run(_Storage([predicted, unpredicted]), _Table({predicted["event_key"]: _rows()}))
 
     assert document["coverage"] == {"completed_events": 2, "with_prediction": 1, "unpredicted": 1}
+
+
+def test_the_week_of_the_next_unfinished_game_is_left_out_of_last_week():
+    finished_week = _season_event("1", 2026, week=3, event_date="2026-09-20")
+    open_week = _season_event("2", 2026, week=4, event_date="2026-09-25")
+    upcoming = _season_event("3", 2026, week=4, event_date="2026-09-30")
+    table = _Table({finished_week["event_key"]: _rows(), open_week["event_key"]: _rows()})
+    storage = _Storage([finished_week, open_week], upcoming=[upcoming])
+
+    document, _ = _run(storage, table)
+
+    win = next(m for m in document["models"] if m["model_name"] == "win-probability")
+    assert win["last_period"]["label"] == "Wk 3"
+    assert win["season"]["n"] == 2
+    assert storage.upcoming_requested == ("nfl", "2026-09-30", True, 1)
+
+
+def test_with_nothing_left_to_play_the_latest_week_is_last_week():
+    event = _season_event("1", 2026, week=4)
+
+    document, _ = _run(_Storage([event]), _Table({event["event_key"]: _rows()}))
+
+    win = next(m for m in document["models"] if m["model_name"] == "win-probability")
+    assert win["last_period"]["label"] == "Wk 4"
 
 
 def test_a_sport_with_no_completed_events_writes_an_empty_scorecard():

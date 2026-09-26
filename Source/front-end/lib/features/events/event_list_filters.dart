@@ -64,15 +64,15 @@ class EventListFilters extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
+    // Both groups share one row, each label inline before its chips; a
+    // group only moves to its own line when the screen is too narrow.
+    return Wrap(
+      spacing: 24,
+      runSpacing: 12,
       children: [
-        Text('WINNER CONFIDENCE', style: AppTextStyles.microLabel(color: AppColors.inkSub)),
-        const SizedBox(height: 8),
-        Wrap(
-          spacing: 8,
-          runSpacing: 8,
-          children: [
+        _FilterGroup(
+          label: 'WINNER CONFIDENCE',
+          chips: [
             for (final tier in confidenceTiers)
               StatusToggle(
                 label: tier,
@@ -83,14 +83,10 @@ class EventListFilters extends StatelessWidget {
           ],
         ),
         // A single slot has nothing to choose between.
-        if (slots.length > 1) ...[
-          const SizedBox(height: 12),
-          Text('START TIME', style: AppTextStyles.microLabel(color: AppColors.inkSub)),
-          const SizedBox(height: 8),
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            children: [
+        if (slots.length > 1)
+          _FilterGroup(
+            label: 'START TIME',
+            chips: [
               for (final slot in slots)
                 StatusToggle(
                   label: slot.label,
@@ -100,8 +96,24 @@ class EventListFilters extends StatelessWidget {
                 ),
             ],
           ),
-        ],
       ],
+    );
+  }
+}
+
+class _FilterGroup extends StatelessWidget {
+  const _FilterGroup({required this.label, required this.chips});
+
+  final String label;
+  final List<Widget> chips;
+
+  @override
+  Widget build(BuildContext context) {
+    return Wrap(
+      spacing: 8,
+      runSpacing: 8,
+      crossAxisAlignment: WrapCrossAlignment.center,
+      children: [Text(label, style: AppTextStyles.microLabel(color: AppColors.inkSub)), ...chips],
     );
   }
 }

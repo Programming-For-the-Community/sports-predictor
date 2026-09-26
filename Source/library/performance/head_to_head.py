@@ -102,24 +102,29 @@ def _collect_player_props(add, period: Period, rows: list[dict], actual_by_entit
         add(f"player-prop-{stat_slug}", AmountSample(period, row["predicted_value"]["value"], actual_value))
 
 
-def build_records(samples_by_model: dict[str, list], model_cards: list[dict]) -> list[dict]:
+def build_records(samples_by_model: dict[str, list], model_cards: list[dict], open_period: Period | None = None) -> list[dict]:
     """One record per currently-promoted model -- a promoted model with no
-    graded predictions yet still gets one (the UI shows "no graded games yet")."""
+    graded predictions yet still gets one (the UI shows "no graded games yet").
+    `open_period` is the week still being played, kept out of the week-by-week
+    figures (see scorecard._by_period)."""
     records = []
     for card in sorted(model_cards, key=lambda c: c["model_name"]):
         name = card["model_name"]
         samples = samples_by_model.get(name, [])
         if name == WIN_PROBABILITY_MODEL:
-            records.append(scorecard.pick_record(name, card.get("version"), samples, card.get("accuracy")))
+            records.append(scorecard.pick_record(name, card.get("version"), samples, card.get("accuracy"), open_period=open_period))
         else:
             mae = card.get("mae")
-            records.append(scorecard.amount_record(name, card.get("version"), samples, mae, mae))
+            records.append(scorecard.amount_record(name, card.get("version"), samples, mae, mae, open_period=open_period))
     return records
 
 
 def build_head_to_head_scorecard(
     sport: str, season: int | None, events: list[dict], rows_by_event: dict[str, list[dict]],
-    stats_by_event: dict[str, dict[str, dict]], model_cards: list[dict],
+    stats_by_event: dict[str, dict[str, dict]], model_cards: list[dict], next_event: dict | None = None,
 ) -> dict:
+    """`next_event` is the sport's soonest not-yet-final event; the week it
+    falls in is still being played."""
     samples = collect_samples(sport, events, rows_by_event, stats_by_event)
-    return scorecard.build_scorecard(sport, season, "week", build_records(samples, model_cards))
+    open_period = period_for(sport, next_event) if next_event is not None else None
+    return scorecard.build_scorecard(sport, season, "week", build_records(samples, model_cards, open_period))

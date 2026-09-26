@@ -85,11 +85,14 @@ def _mean(values: list[float]) -> float | None:
     return sum(values) / len(values) if values else None
 
 
-def _by_period(samples: list, value_of) -> list[dict]:
-    """Chronological [{"label", "value", "n"}] -- one entry per period."""
+def _by_period(samples: list, value_of, open_period: "Period | None" = None) -> list[dict]:
+    """Chronological [{"label", "value", "n"}] -- one entry per finished
+    period. `open_period` (one with games still to play) is left out: it
+    isn't "last week" yet. The season figures still count its graded games."""
     grouped: dict[Period, list[float]] = {}
     for sample in samples:
-        grouped.setdefault(sample.period, []).append(value_of(sample))
+        if sample.period != open_period:
+            grouped.setdefault(sample.period, []).append(value_of(sample))
     return [
         {"label": period.label, "value": _mean(values), "n": len(values)}
         for period, values in sorted(grouped.items(), key=lambda item: item[0].key)
@@ -117,11 +120,12 @@ def _base(model_name: str, version: int | None, kind: str, band_kind: str, count
 def pick_record(
     model_name: str, version: int | None, samples: list[PickSample], at_training: float | None,
     tiers: tuple[tuple[str, float], ...] = WIN_PICK_TIERS, count_noun: str | None = None,
+    open_period: Period | None = None,
 ) -> dict:
     record = _base(model_name, version, KIND_PICK, BAND_CONFIDENCE, count_noun)
     accuracy = _mean([1.0 if s.correct else 0.0 for s in samples])
     baseline = _mean([1.0 if s.baseline_correct else 0.0 for s in samples])
-    record.update(_headline(_by_period(samples, lambda s: 1.0 if s.correct else 0.0), accuracy, len(samples)))
+    record.update(_headline(_by_period(samples, lambda s: 1.0 if s.correct else 0.0, open_period), accuracy, len(samples)))
     record["vs_baseline_pct"] = (accuracy - baseline) / baseline * 100 if accuracy is not None and baseline else None
     record["at_training"] = at_training
     record["margin_of_error"] = None
@@ -149,7 +153,7 @@ def _bias(samples: list["AmountSample"]) -> float | None:
 
 def amount_record(
     model_name: str, version: int | None, samples: list[AmountSample], at_training: float | None,
-    margin_of_error: float | None, count_noun: str | None = None,
+    margin_of_error: float | None, count_noun: str | None = None, open_period: Period | None = None,
 ) -> dict:
     """`margin_of_error` is the model's usual miss (its mean absolute error at
     training). Without one -- an older model card -- the season's own average
@@ -157,7 +161,7 @@ def amount_record(
     record = _base(model_name, version, KIND_AMOUNT, BAND_PREDICTED_AMOUNT, count_noun)
     misses = [abs(s.predicted - s.actual) for s in samples]
     avg_miss = _mean(misses)
-    record.update(_headline(_by_period(samples, lambda s: abs(s.predicted - s.actual)), avg_miss, len(samples)))
+    record.update(_headline(_by_period(samples, lambda s: abs(s.predicted - s.actual), open_period), avg_miss, len(samples)))
 
     actual_mean = _mean([s.actual for s in samples])
     baseline_miss = _mean([abs(s.actual - actual_mean) for s in samples]) if samples else None

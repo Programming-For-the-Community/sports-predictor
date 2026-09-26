@@ -37,6 +37,13 @@ def _current_season_events(storage, sport: str, today: date) -> tuple[int | None
     return season, [e for e in events if e.get("season") == season]
 
 
+def _next_event(storage, sport: str, today: date) -> dict | None:
+    """The soonest event from today on that isn't final yet (a live game is
+    still "scheduled") -- None in the off-season."""
+    upcoming = storage.get_all_events(sport, "scheduled", scan_index_forward=True, limit=1, since_date=today.isoformat())
+    return upcoming[0] if upcoming else None
+
+
 def run_sport(sport: str, storage, predictions_table, s3, today: date) -> dict:
     if sport in field_events.SPORTS:
         return _run_field_sport(sport, storage, predictions_table, s3, today)
@@ -77,7 +84,9 @@ def _run_head_to_head_sport(sport: str, storage, predictions_table, s3, today: d
         with_props = [key for key, rows in rows_by_event.items() if any(r["model_key"].startswith(_PROP_ROW_MARKER) for r in rows)]
         stats_by_event = dict(zip(with_props, executor.map(_stats, with_props)))
 
-    document = build_head_to_head_scorecard(sport, season, events, rows_by_event, stats_by_event, list_models(s3, sport)["models"])
+    document = build_head_to_head_scorecard(
+        sport, season, events, rows_by_event, stats_by_event, list_models(s3, sport)["models"], _next_event(storage, sport, today),
+    )
     document["coverage"] = _coverage(events, rows_by_event)
     _stamp_window(document, sport)
     s3.put_json(model_performance_key(sport), document)

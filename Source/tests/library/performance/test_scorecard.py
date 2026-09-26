@@ -22,6 +22,25 @@ class TestPickRecord:
         assert [p["value"] for p in record["periods"]] == [0.5, 1.0, 0.5]
         assert record["at_training"] == 0.66
 
+    def test_the_week_still_being_played_is_not_last_week_but_counts_toward_the_season(self):
+        # Real bug (2026-09-26): NCAAFB week 4's Thursday/Friday games made
+        # week 4 "last week" while its Saturday slate was still to play.
+        samples = [_pick(WK2, True), _pick(WK2, False), _pick(WK3, True)]
+
+        record = scorecard.pick_record("win-probability", 9, samples, None, open_period=WK3)
+
+        assert record["last_period"] == {"label": "Wk 2", "value": 0.5, "n": 2}
+        assert [p["label"] for p in record["periods"]] == ["Wk 2"]
+        assert record["season"]["n"] == 3
+
+    def test_an_open_period_leaves_amount_records_week_chips_too(self):
+        record = scorecard.amount_record(
+            "score-margin", 6, [_amount(WK1, 5, 3), _amount(WK2, 5, 1)], 10.0, 10.0, open_period=WK2,
+        )
+
+        assert record["last_period"]["label"] == "Wk 1"
+        assert record["season"]["n"] == 2
+
     def test_vs_baseline_is_relative_lift_over_always_picking_home(self):
         # 4 of 5 right vs "always home" right 3 of 5 -> +33% better
         samples = [_pick(WK1, True, baseline_correct=b) for b in (True, True, True, False, False)]
