@@ -8,6 +8,7 @@ import '../../core/models/field_event.dart';
 import '../../core/routing/app_routes.dart';
 import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_text_styles.dart';
+import '../../core/widgets/game_row.dart' show clockLabel;
 
 /// A Ryder Cup/Presidents Cup's own matches, grouped by session in tee-off
 /// order. Each row opens that match's own detail page.
@@ -56,11 +57,7 @@ class CupMatchList extends ConsumerWidget {
 /// "1:05 PM" in the viewer's own local time -- '' if matchTime is absent.
 String _teeTimeLabel(FieldEvent match) {
   final local = match.matchTime != null ? DateTime.tryParse(match.matchTime!)?.toLocal() : null;
-  if (local == null) return '';
-  final hour12 = local.hour % 12 == 0 ? 12 : local.hour % 12;
-  final minute = local.minute.toString().padLeft(2, '0');
-  final period = local.hour < 12 ? 'AM' : 'PM';
-  return '$hour12:$minute $period';
+  return local == null ? '' : clockLabel(local);
 }
 
 class _MatchRow extends StatelessWidget {

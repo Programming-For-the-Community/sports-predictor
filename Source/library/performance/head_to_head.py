@@ -18,17 +18,25 @@ from library.serving.common import SCORE_MODELS, WIN_PROBABILITY_MODEL, _actual_
 FOOTBALL = {"nfl", "ncaafb"}
 
 _PLAYER_PROP_ROW = re.compile(r"^MODEL#player-prop-([a-z-]+)#v\d+#PLAYER#(.+)$")
-_REGULAR_SEASON_TYPE = 2
+# NFL stores ESPN's numeric season type (2 = regular season); NCAAFB stores
+# CFBD's "regular"/"postseason". A missing season_type counts as regular.
+_REGULAR_SEASON_TYPES = {"2", "regular"}
+
+
+def _is_regular_season(event: dict) -> bool:
+    season_type = event.get("season_type")
+    return season_type is None or str(season_type) in _REGULAR_SEASON_TYPES
 
 
 def period_for(sport: str, event: dict) -> Period:
     """The reporting period an event falls in: a numbered week for football
-    (all playoff games share one "Playoffs" period), the Monday-to-Sunday week
-    of the event's date for basketball."""
+    (all postseason games share one "Playoffs" period, after every regular
+    week), the Monday-to-Sunday week of the event's date for basketball."""
     if sport in FOOTBALL and event.get("week") is not None:
-        season_type = event.get("season_type") or _REGULAR_SEASON_TYPE
-        key = f"{season_type}-{event['week']:02d}"
-        return Period(key, f"Wk {event['week']}" if season_type == _REGULAR_SEASON_TYPE else "Playoffs")
+        if not _is_regular_season(event):
+            return Period("2-postseason", "Playoffs")
+        week = int(event["week"])
+        return Period(f"1-{week:02d}", f"Wk {week}")
     day = date.fromisoformat(event["event_date"])
     monday = day - timedelta(days=day.weekday())
     return Period(monday.isoformat(), f"{monday.strftime('%b')} {monday.day}")

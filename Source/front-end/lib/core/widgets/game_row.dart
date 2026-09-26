@@ -38,17 +38,21 @@ String _weekLabel(SportEvent event) {
   return event.week != null ? 'WK ${event.week}' : '';
 }
 
+/// "1:00 PM" for an already-local time.
+String clockLabel(DateTime local) {
+  final hour12 = local.hour % 12 == 0 ? 12 : local.hour % 12;
+  final minute = local.minute.toString().padLeft(2, '0');
+  final period = local.hour < 12 ? 'AM' : 'PM';
+  return '$hour12:$minute $period';
+}
+
 /// "1:00 PM" in the viewer's own local time -- '' if kickoffTime is
 /// absent (an event ingested before that field existed).
 String _kickoffTimeLabel(SportEvent event) {
   final kickoff = event.kickoffTime;
   if (kickoff == null) return '';
   final local = DateTime.tryParse(kickoff)?.toLocal();
-  if (local == null) return '';
-  final hour12 = local.hour % 12 == 0 ? 12 : local.hour % 12;
-  final minute = local.minute.toString().padLeft(2, '0');
-  final period = local.hour < 12 ? 'AM' : 'PM';
-  return '$hour12:$minute $period';
+  return local == null ? '' : clockLabel(local);
 }
 
 const _usTimeZones = {

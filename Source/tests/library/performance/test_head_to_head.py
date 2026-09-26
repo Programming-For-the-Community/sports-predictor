@@ -31,7 +31,7 @@ class TestPeriodFor:
     def test_football_regular_season_is_a_numbered_week(self):
         period = head_to_head.period_for("nfl", _event("1", 1, 0, week=3))
 
-        assert (period.key, period.label) == ("2-03", "Wk 3")
+        assert (period.key, period.label) == ("1-03", "Wk 3")
 
     def test_football_postseason_is_one_playoffs_period_ordered_after_the_regular_season(self):
         regular = head_to_head.period_for("nfl", _event("1", 1, 0, week=18))
@@ -39,6 +39,26 @@ class TestPeriodFor:
 
         assert playoff.label == "Playoffs"
         assert playoff.key > regular.key
+
+    def test_football_playoff_weeks_all_share_one_period(self):
+        wild_card = head_to_head.period_for("nfl", _event("1", 1, 0, week=1, season_type=3))
+        super_bowl = head_to_head.period_for("nfl", _event("2", 1, 0, week=5, season_type=3))
+
+        assert wild_card == super_bowl
+
+    def test_ncaafb_cfbd_regular_season_type_is_a_numbered_week(self):
+        # Real bug (2026-09-26): NCAAFB stores CFBD's "regular"/"postseason"
+        # strings, so every regular-season week was labeled "Playoffs".
+        period = head_to_head.period_for("ncaafb", _event("1", 1, 0, week=4, season_type="regular"))
+
+        assert period.label == "Wk 4"
+
+    def test_ncaafb_cfbd_postseason_is_playoffs_after_the_regular_season(self):
+        regular = head_to_head.period_for("ncaafb", _event("1", 1, 0, week=15, season_type="regular"))
+        bowl = head_to_head.period_for("ncaafb", _event("2", 1, 0, week=1, season_type="postseason"))
+
+        assert bowl.label == "Playoffs"
+        assert bowl.key > regular.key
 
     def test_basketball_groups_by_the_monday_to_sunday_week(self):
         tuesday = head_to_head.period_for("nba", {"event_date": "2026-09-22"})  # a Tuesday

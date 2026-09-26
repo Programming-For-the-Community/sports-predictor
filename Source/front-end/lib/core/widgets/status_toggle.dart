@@ -3,7 +3,7 @@ import 'package:flutter/material.dart';
 import '../theme/app_colors.dart';
 import '../theme/app_text_styles.dart';
 
-/// Upcoming/Completed pill toggle -- shared by event_list_page.dart (h2h),
+/// Selectable pill -- the Upcoming/Completed toggle shared by event_list_page.dart (h2h),
 /// f1_event_list_page.dart, and field_event_list_page.dart, each passing
 /// its own sport's accent color.
 class StatusToggle extends StatelessWidget {

@@ -3,6 +3,7 @@ import 'package:flutter_test/flutter_test.dart';
 
 import 'package:front_end/core/widgets/model_performance_card_view.dart';
 
+import '../../support/mobile_viewport.dart';
 import '../../support/model_performance_fixtures.dart';
 
 Widget _wrap(Widget child) => MaterialApp(
@@ -57,6 +58,26 @@ void main() {
   });
 
   group('amount models', () {
+    for (final width in [360.0, 700.0]) {
+      testWidgets('each band puts its tier pill, range and count on one row at ${width}px', (tester) async {
+        await tester.runAsync(loadAppFonts);
+        await tester.pumpWidget(MaterialApp(
+          home: Scaffold(body: SingleChildScrollView(child: SizedBox(width: width, child: ModelPerformanceCardView(record: amountRecord(), isWeekly: true)))),
+        ));
+
+        final pill = tester.getRect(find.text('LOW'));
+        final range = tester.getRect(find.text('0.5–6.0 pts'));
+        final count = [for (var i = 0; i < find.text('11 games').evaluate().length; i++) tester.getRect(find.text('11 games').at(i))].reduce(
+              (a, b) => (a.center.dy - pill.center.dy).abs() < (b.center.dy - pill.center.dy).abs() ? a : b,
+            );
+        expect(range.left, greaterThan(pill.right));
+        expect(count.left, greaterThan(range.right));
+        for (final other in [range, count]) {
+          expect(other.center.dy, closeTo(pill.center.dy, 4));
+        }
+      });
+    }
+
     testWidgets('score margin shows average miss with units, and predicted-amount bands with ranges - never confidence', (tester) async {
       await tester.pumpWidget(_wrap(ModelPerformanceCardView(record: amountRecord(), isWeekly: true)));
 

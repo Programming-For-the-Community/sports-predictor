@@ -11,9 +11,11 @@ import '../../core/models/live_score.dart';
 import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_text_styles.dart';
 import '../../core/widgets/conference_filter_field.dart';
+import '../../core/widgets/confidence_pill.dart';
 import '../../core/widgets/game_row.dart';
 import '../../core/widgets/status_toggle.dart';
 import '../../static/conference_order.dart';
+import 'event_list_filters.dart';
 
 const _weekdayNames = [
   'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday',
@@ -96,6 +98,9 @@ class EventListPage extends ConsumerStatefulWidget {
 class _EventListPageState extends ConsumerState<EventListPage> with WidgetsBindingObserver {
   String _status = EventStatus.scheduled;
   String _conferenceFilter = '';
+  // Upcoming/Current only; empty means "don't filter on this".
+  final Set<String> _confidenceTiers = {};
+  final Set<int> _kickoffHours = {};
   Timer? _liveScoresTimer;
 
   @override
@@ -191,6 +196,32 @@ class _EventListPageState extends ConsumerState<EventListPage> with WidgetsBindi
     ];
   }
 
+  void _toggle<T>(Set<T> selection, T value) {
+    setState(() => selection.contains(value) ? selection.remove(value) : selection.add(value));
+  }
+
+  /// The events passing the Upcoming/Current filters, plus how many were
+  /// kept only because their prediction hasn't loaded yet (no tier to test).
+  /// Watches the same per-event prediction providers GameRow already does,
+  /// so a confidence filter costs no extra requests.
+  (List<SportEvent>, int) _applyFilters(List<SportEvent> events) {
+    var pending = 0;
+    final kept = <SportEvent>[];
+    for (final event in events) {
+      if (_kickoffHours.isNotEmpty && !_kickoffHours.contains(kickoffHour(event))) continue;
+      if (_confidenceTiers.isNotEmpty) {
+        final prediction = ref.watch(eventPredictionProvider((sport: widget.sportId, eventId: event.eventId))).value;
+        if (prediction == null) {
+          pending++;
+        } else if (!_confidenceTiers.contains(confidenceTierFor(prediction.homeWinProbability))) {
+          continue;
+        }
+      }
+      kept.add(event);
+    }
+    return (kept, pending);
+  }
+
   Widget _dataView(List<SportEvent> list, Map<String, LiveEventState> liveScores) {
     if (list.isEmpty) {
       // An empty "scheduled" list means next week hasn't been ingested
@@ -205,10 +236,29 @@ class _EventListPageState extends ConsumerState<EventListPage> with WidgetsBindi
             ? _sortKey(a).compareTo(_sortKey(b))
             : _sortKey(b).compareTo(_sortKey(a)),
       );
-    final grouped = _groupByConferenceThenDate(sorted, _conferenceFilter);
+    final isUpcoming = _status == EventStatus.scheduled;
+    final (filtered, pending) = isUpcoming ? _applyFilters(sorted) : (sorted, 0);
+    final grouped = _groupByConferenceThenDate(filtered, _conferenceFilter);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
+        if (isUpcoming) ...[
+          EventListFilters(
+            slots: kickoffSlots(sorted),
+            selectedTiers: _confidenceTiers,
+            selectedHours: _kickoffHours,
+            onToggleTier: (tier) => _toggle(_confidenceTiers, tier),
+            onToggleHour: (hour) => _toggle(_kickoffHours, hour),
+          ),
+          const SizedBox(height: 16),
+        ],
+        if (pending > 0) ...[
+          Text(
+            '$pending ${pending == 1 ? 'game' : 'games'} still loading a prediction -- shown until its confidence is known.',
+            style: AppTextStyles.microLabel(),
+          ),
+          const SizedBox(height: 12),
+        ],
         // Only shown when there's more than one conference to filter.
         if (_groupByConferenceThenDate(sorted, '').length > 1) ...[
           ConferenceFilterField(
@@ -217,7 +267,9 @@ class _EventListPageState extends ConsumerState<EventListPage> with WidgetsBindi
           ),
           const SizedBox(height: 16),
         ],
-        if (grouped.isEmpty)
+        if (filtered.isEmpty)
+          Text('No games match these filters.', style: AppTextStyles.body(color: AppColors.inkSub))
+        else if (grouped.isEmpty)
           Text('No conferences match "$_conferenceFilter".', style: AppTextStyles.body(color: AppColors.inkSub)),
         ..._groupedSections(grouped, liveScores),
       ],

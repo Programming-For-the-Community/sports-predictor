@@ -8,8 +8,10 @@ import 'model_card_frame.dart';
 import 'model_performance_format.dart';
 
 // Below this width (scaled by the system text size), a band row stacks its
-// tier/count line above its bar instead of putting all four cells on one line.
-const _bandRowStackWidth = 400.0;
+// tier/range/count line above its bar instead of putting all four cells on one line.
+const _bandRowStackWidth = 440.0;
+// Width of the pill-and-range cell in the one-line band row.
+const _bandTierWidth = 170.0;
 // Below this width the season and last-period stats stack instead of sitting side by side.
 const _headlineStackWidth = 340.0;
 
@@ -296,8 +298,7 @@ class _BandRow extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
                 Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [Flexible(child: tier), const SizedBox(width: 12), Flexible(child: Align(alignment: Alignment.topRight, child: count))],
+                  children: [Expanded(child: tier), const SizedBox(width: 12), count],
                 ),
                 const SizedBox(height: 8),
                 Row(children: [Expanded(child: bar), const SizedBox(width: 12), value]),
@@ -307,7 +308,7 @@ class _BandRow extends StatelessWidget {
           return Row(
             crossAxisAlignment: CrossAxisAlignment.center,
             children: [
-              SizedBox(width: 120, child: tier),
+              SizedBox(width: _bandTierWidth, child: tier),
               const SizedBox(width: 12),
               SizedBox(width: 96, child: count),
               const SizedBox(width: 12),
@@ -334,19 +335,17 @@ class _Tier extends StatelessWidget {
       'MED' => (AppColors.warn, AppColors.warn.withValues(alpha: 0.12)),
       _ => (AppColors.inkSub, AppColors.inset),
     };
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      mainAxisSize: MainAxisSize.min,
+    return Wrap(
+      spacing: 8,
+      runSpacing: 4,
+      crossAxisAlignment: WrapCrossAlignment.center,
       children: [
         Container(
           padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
           decoration: BoxDecoration(color: background, borderRadius: BorderRadius.circular(999)),
           child: Text(tag, style: AppTextStyles.microLabel(color: foreground)),
         ),
-        if (range != null) ...[
-          const SizedBox(height: 4),
-          Text(range!, style: AppTextStyles.metricValue(color: AppColors.inkSub).copyWith(fontSize: 11.5)),
-        ],
+        if (range != null) Text(range!, style: AppTextStyles.metricValue(color: AppColors.inkSub).copyWith(fontSize: 11.5)),
       ],
     );
   }
