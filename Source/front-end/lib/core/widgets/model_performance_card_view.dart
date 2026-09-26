@@ -15,6 +15,9 @@ const _bandRowStackWidth = 440.0;
 const _bandTierWidth = 170.0;
 // Below this width the season and last-period stats stack instead of sitting side by side.
 const _headlineStackWidth = 340.0;
+// From this width (scaled by the system text size) the "most accurate on" list
+// sits beside the results instead of under them.
+const _bestBesideWidth = 760.0;
 
 /// One model's season and last-period results, in the same card shell as the
 /// Models tab's training cards (ModelCardFrame). Nothing here ellipsizes:
@@ -52,19 +55,34 @@ class ModelPerformanceCardView extends StatelessWidget {
       ],
       children: [
         const SizedBox(height: 20),
-        if (!record.hasResults)
-          _EmptyState(noun: nounFor(record, display))
-        else ...[
-          _Headline(record: record, display: display, isWeekly: isWeekly, seasonLabel: seasonLabel),
-          ..._facts(display),
-          if (record.bands.isNotEmpty) ...[const SizedBox(height: 20), _Bands(record: record, display: display)],
-          if (record.periods.isNotEmpty) ...[const SizedBox(height: 20), _RecentPeriods(record: record, display: display, isWeekly: isWeekly)],
-          if (record.best != null) ...[
-            const SizedBox(height: 20),
-            ModelPerformanceBest(sport: sport, record: record, display: display, isWeekly: isWeekly),
-          ],
-        ],
+        if (!record.hasResults) _EmptyState(noun: nounFor(record, display)) else _results(display),
       ],
+    );
+  }
+
+  Widget _results(ModelDisplay display) {
+    final results = Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        _Headline(record: record, display: display, isWeekly: isWeekly, seasonLabel: seasonLabel),
+        ..._facts(display),
+        if (record.bands.isNotEmpty) ...[const SizedBox(height: 20), _Bands(record: record, display: display)],
+        if (record.periods.isNotEmpty) ...[const SizedBox(height: 20), _RecentPeriods(record: record, display: display, isWeekly: isWeekly)],
+      ],
+    );
+    if (record.best == null) return results;
+    final best = ModelPerformanceBest(sport: sport, record: record, display: display, isWeekly: isWeekly);
+
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        if (constraints.maxWidth < _bestBesideWidth * MediaQuery.textScalerOf(context).scale(1)) {
+          return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [results, const SizedBox(height: 20), best]);
+        }
+        return Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [Expanded(flex: 3, child: results), const SizedBox(width: 28), Expanded(flex: 2, child: best)],
+        );
+      },
     );
   }
 

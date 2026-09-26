@@ -113,8 +113,23 @@ void main() {
     expect(find.textContaining("Couldn't load performance"), findsOneWidget);
   });
 
-  testWidgets('on a wide screen the cards sit two to a row without crashing', (tester) async {
+  testWidgets('on a desktop screen each card is one wide row', (tester) async {
     tester.view.physicalSize = const Size(1100, 1800);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.reset);
+
+    await tester.pumpWidget(_page(() async => _performance(fullNflSet())));
+    await tester.pumpAndSettle();
+
+    expect(tester.takeException(), isNull);
+    final first = tester.getRect(find.byType(ModelPerformanceCardView).at(0));
+    final second = tester.getTopLeft(find.byType(ModelPerformanceCardView).at(1));
+    expect(first.width, 880);
+    expect(second.dy, greaterThan(first.bottom));
+  });
+
+  testWidgets('on a very wide screen the wide cards sit two to a row without crashing', (tester) async {
+    tester.view.physicalSize = const Size(1900, 1800);
     tester.view.devicePixelRatio = 1.0;
     addTearDown(tester.view.reset);
 

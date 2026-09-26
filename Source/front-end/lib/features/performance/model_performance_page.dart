@@ -56,6 +56,8 @@ class ModelPerformancePage extends ConsumerWidget {
                 const SizedBox(height: 20),
                 ModelCardGrid<ModelPerformanceRecord>(
                   equalHeight: false,
+                  // Wide enough for a card's "most accurate on" list to sit beside its results.
+                  idealCardWidth: 880,
                   items: orderedPerformanceModels(data.models),
                   cardBuilder: (record) => ModelPerformanceCardView(
                     record: record,

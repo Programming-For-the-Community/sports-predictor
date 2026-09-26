@@ -98,7 +98,7 @@ def _run_head_to_head_sport(sport: str, storage, predictions_table, s3, today: d
 def _name_best(storage, sport: str, document: dict) -> None:
     """Adds each ranked team's or player's name, abbreviation and color, in
     one batched entity read across every record."""
-    lists = [record[key] for record in document["models"] for key in ("best", "best_relative") if key in record]
+    lists = [record["best"] for record in document["models"] if "best" in record]
     refs = [(entry["entity_id"], ranked["entity_type"]) for ranked in lists for entry in ranked["entities"]]
     entities = storage.get_entities(sport, refs) if refs else {}
     for ranked in lists:

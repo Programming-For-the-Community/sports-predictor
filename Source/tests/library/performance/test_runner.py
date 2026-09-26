@@ -143,7 +143,6 @@ def test_ranked_teams_and_players_carry_their_names():
     assert {e["entity_id"]: e["name"] for e in win["best"]["entities"]} == {"h": "Name h", "a": "Name a"}
     props = next(m for m in document["models"] if m["model_name"] == "player-prop-passing-yards")
     assert props["best"]["entities"][0] == {"entity_id": "p1", "value": 50.0, "n": 1, "name": "Name p1", "abbreviation": "P1", "color": "#123456"}
-    assert props["best_relative"]["entities"][0]["value"] == 50.0 / 300
 
 
 def _prop_rows(player):
@@ -162,8 +161,7 @@ def test_only_players_from_this_season_are_ranked():
     document, _ = _run(_Storage([last_season, this_season], stats), table)
 
     record = next(m for m in document["models"] if m["model_name"] == "player-prop-passing-yards")
-    for key in ("best", "best_relative"):
-        assert [e["entity_id"] for e in record[key]["entities"]] == ["current"]
+    assert [e["entity_id"] for e in record["best"]["entities"]] == ["current"]
 
 
 def test_a_sport_with_no_completed_events_writes_an_empty_scorecard():

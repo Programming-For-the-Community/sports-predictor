@@ -135,13 +135,6 @@ def _best(samples: list, score, entity_type: str, lower_is_better: bool) -> dict
     }
 
 
-def _relative_miss(members: list["AmountSample"]) -> float | None:
-    """Average miss as a share of the average actual amount -- None when the
-    actual amounts average zero or less, where a share means nothing."""
-    actual = _mean([s.actual for s in members])
-    return None if not actual or actual <= 0 else _mean([abs(s.predicted - s.actual) for s in members]) / actual
-
-
 def _headline(periods: list[dict], season_value: float | None, season_n: int) -> dict:
     last = periods[-1] if periods else None
     return {
@@ -204,13 +197,14 @@ def _bias(samples: list["AmountSample"]) -> float | None:
 def amount_record(
     model_name: str, version: int | None, samples: list[AmountSample], at_training: float | None,
     margin_of_error: float | None, count_noun: str | None = None, open_period: Period | None = None,
-    entity_type: str | None = None, relative_best: bool = False,
+    entity_type: str | None = None, require_recorded_stat: bool = False,
 ) -> dict:
     """`margin_of_error` is the model's usual miss (its mean absolute error at
     training). Without one -- an older model card -- the season's own average
-    miss stands in for it. `relative_best` also ranks entities by miss as a
-    share of their actual amount (`best_relative`) -- for a stat like yards,
-    where a raw miss favors whoever barely plays."""
+    miss stands in for it. `require_recorded_stat` ranks only entities that
+    recorded the stat in at least half their graded games -- for a rare stat
+    like sacks, a player who never records one is otherwise "most accurate"
+    just because we predicted almost nothing for him."""
     record = _base(model_name, version, KIND_AMOUNT, BAND_PREDICTED_AMOUNT, count_noun)
     misses = [abs(s.predicted - s.actual) for s in samples]
     avg_miss = _mean(misses)
@@ -225,10 +219,19 @@ def amount_record(
     record["bias"] = _bias(samples)
     record["bands"] = _amount_bands(samples, tolerance)
     if entity_type is not None:
-        _put_best(record, "best", _best(samples, lambda m: _mean([abs(s.predicted - s.actual) for s in m]), entity_type, lower_is_better=True))
-        if relative_best:
-            _put_best(record, "best_relative", _best(samples, _relative_miss, entity_type, lower_is_better=True))
+        score = _avg_miss_if_recorded if require_recorded_stat else _avg_miss
+        _put_best(record, "best", _best(samples, score, entity_type, lower_is_better=True))
     return record
+
+
+def _avg_miss(members: list[AmountSample]) -> float | None:
+    return _mean([abs(s.predicted - s.actual) for s in members])
+
+
+def _avg_miss_if_recorded(members: list[AmountSample]) -> float | None:
+    """None unless the stat was non-zero in at least half these games."""
+    recorded = sum(1 for s in members if s.actual != 0)
+    return _avg_miss(members) if recorded * 2 >= len(members) else None
 
 
 def _amount_bands(samples: list[AmountSample], tolerance: float | None) -> list[dict]:

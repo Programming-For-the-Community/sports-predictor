@@ -15,18 +15,27 @@ const _cardSpacing = 20.0;
 /// card that contains a LayoutBuilder -- the Performance cards do, and their
 /// heights differ a lot, so they leave it off and let content set the height.
 class ModelCardGrid<T> extends StatelessWidget {
-  const ModelCardGrid({super.key, required this.items, required this.cardBuilder, this.equalHeight = true});
+  const ModelCardGrid({
+    super.key,
+    required this.items,
+    required this.cardBuilder,
+    this.equalHeight = true,
+    this.idealCardWidth = _cardWidth,
+  });
 
   final List<T> items;
   final Widget Function(T item) cardBuilder;
   final bool equalHeight;
 
+  /// A card's width when there's room for it; narrower on a phone.
+  final double idealCardWidth;
+
   @override
   Widget build(BuildContext context) {
     return LayoutBuilder(
       builder: (context, constraints) {
-        final perRow = ((constraints.maxWidth + _cardSpacing) / (_cardWidth + _cardSpacing)).floor().clamp(1, 999);
-        final width = cardWidth(_cardWidth, constraints.maxWidth);
+        final perRow = ((constraints.maxWidth + _cardSpacing) / (idealCardWidth + _cardSpacing)).floor().clamp(1, 999);
+        final width = cardWidth(idealCardWidth, constraints.maxWidth);
 
         final rows = <List<T>>[];
         for (var i = 0; i < items.length; i += perRow) {

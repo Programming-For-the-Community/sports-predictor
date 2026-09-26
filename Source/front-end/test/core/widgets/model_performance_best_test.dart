@@ -15,7 +15,6 @@ ModelPerformanceRecord _record({
   required String kind,
   required String bandKind,
   required Map<String, dynamic> best,
-  Map<String, dynamic>? bestRelative,
 }) =>
     ModelPerformanceRecord.fromJson({
       'model_name': modelName, 'version': 1, 'kind': kind, 'band_kind': bandKind,
@@ -23,7 +22,6 @@ ModelPerformanceRecord _record({
       'last_period': {'label': 'Wk 3', 'value': kind == 'amount' ? 11.9 : 0.742, 'n': 93},
       'periods': <dynamic>[], 'bands': <dynamic>[],
       'best': best,
-      if (bestRelative != null) 'best_relative': bestRelative,
     });
 
 ModelPerformanceRecord _winProbability() => _record(
@@ -45,7 +43,6 @@ ModelPerformanceRecord _margin() => _record(
 ModelPerformanceRecord _rushingYards() => _record(
       modelName: 'player-prop-rushing-yards', kind: 'amount', bandKind: 'predicted_amount',
       best: {'entity_type': 'player', 'entities': [_entity('9', 1.9, 3, name: 'Demond Williams Jr.')]},
-      bestRelative: {'entity_type': 'player', 'entities': [_entity('4', 0.06, 3, name: 'Quinshon Judkins')]},
     );
 
 Widget _card(ModelPerformanceRecord record, {double width = 460}) => MaterialApp(
@@ -71,7 +68,6 @@ void main() {
     });
 
     expect(record.best, isNull);
-    expect(record.bestRelative, isNull);
   });
 
   testWidgets('win probability shows the leading team with how many it picked right, then the rest', (tester) async {
@@ -95,25 +91,12 @@ void main() {
     expect(find.text('avg miss'), findsOneWidget);
   });
 
-  testWidgets('a player prop starts on share of actual and toggles to the raw miss', (tester) async {
+  testWidgets('a player prop ranks players by their raw miss', (tester) async {
     await tester.pumpWidget(_card(_rushingYards()));
-
-    expect(find.text('Quinshon Judkins'), findsOneWidget);
-    expect(find.text('6%'), findsOneWidget);
-    expect(find.text('of actual'), findsOneWidget);
-
-    await tester.tap(find.text('RAW YDS'));
-    await tester.pump();
 
     expect(find.text('Demond Williams Jr.'), findsOneWidget);
     expect(find.text('1.9 yds'), findsOneWidget);
-    expect(find.text('Quinshon Judkins'), findsNothing);
-  });
-
-  testWidgets('a team or game model has no toggle', (tester) async {
-    await tester.pumpWidget(_card(_margin()));
-
-    expect(find.text('% OF ACTUAL'), findsNothing);
+    expect(find.text('avg miss'), findsOneWidget);
   });
 
   testWidgets('with nothing ranked yet it says so', (tester) async {
@@ -134,6 +117,26 @@ void main() {
     await tester.pumpWidget(_card(record));
 
     expect(find.text('MOST ACCURATE ON'), findsNothing);
+  });
+
+  testWidgets('on a wide card the list sits beside the results', (tester) async {
+    tester.view.physicalSize = const Size(1200, 1400);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.reset);
+    await tester.pumpWidget(_card(_winProbability(), width: 880));
+
+    final list = tester.getRect(find.text('MOST ACCURATE ON'));
+    final headline = tester.getRect(find.textContaining('THIS SEASON'));
+    expect(list.left, greaterThan(headline.right));
+    expect(list.top, closeTo(headline.top, 40));
+  });
+
+  testWidgets('on a narrow card the list stays under the results', (tester) async {
+    await tester.pumpWidget(_card(_winProbability(), width: 460));
+
+    final list = tester.getRect(find.text('MOST ACCURATE ON'));
+    final headline = tester.getRect(find.textContaining('THIS SEASON'));
+    expect(list.top, greaterThan(headline.bottom));
   });
 
   for (final width in mobileViewportWidths) {

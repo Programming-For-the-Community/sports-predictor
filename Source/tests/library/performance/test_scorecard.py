@@ -221,22 +221,35 @@ class TestBest:
 
         assert [e["entity_id"] for e in best["entities"]] == ["t1", "t2", "t3", "t4", "t5"]
 
-    def test_player_props_also_rank_by_miss_as_a_share_of_actual_yards(self):
-        # The backup's 2-yard miss is the smallest raw miss but a third of his yards.
-        samples = [AmountSample(WK1, 4, 6, ("backup",)), AmountSample(WK1, 90, 100, ("starter",))]
+    def test_a_player_prop_ranks_only_players_who_recorded_the_stat_in_half_their_games(self):
+        # Real data (2026 NCAAFB sacks): with no filter, the top 5 had zero
+        # sacks in all 3 games -- a tiny prediction and zero actual is a tiny miss.
+        never = [AmountSample(p, 0.13, 0, ("never",)) for p in (WK1, WK2, WK3)]
+        half = [AmountSample(WK1, 0.4, 1, ("half",)), AmountSample(WK2, 0.4, 0, ("half",))]
+        once_in_three = [AmountSample(p, 0.3, a, ("once",)) for p, a in ((WK1, 1), (WK2, 0), (WK3, 0))]
 
-        record = scorecard.amount_record("player-prop-rushing-yards", 4, samples, 20.0, 20.0, entity_type="player", relative_best=True)
+        best = scorecard.amount_record(
+            "player-prop-defensive-sacks", 4, never + half + once_in_three, 0.5, 0.5, entity_type="player", require_recorded_stat=True,
+        )["best"]
 
-        assert [e["entity_id"] for e in record["best"]["entities"]] == ["backup", "starter"]
-        assert [e["entity_id"] for e in record["best_relative"]["entities"]] == ["starter", "backup"]
-        assert record["best_relative"]["entities"][0]["value"] == pytest.approx(0.1)
+        assert [e["entity_id"] for e in best["entities"]] == []
 
-    def test_a_player_with_no_actual_yards_has_no_share_to_rank(self):
-        record = scorecard.amount_record(
-            "player-prop-rushing-yards", 4, [AmountSample(WK1, 5, 0, ("dnp",))], 20.0, 20.0, entity_type="player", relative_best=True,
-        )
+    def test_the_recorded_stat_rule_keeps_players_who_recorded_it_in_at_least_half(self):
+        samples = [AmountSample(p, 0.4, a, ("rusher",)) for p, a in ((WK1, 1), (WK2, 0), (WK3, 1))]
+        samples += [AmountSample(p, 0.13, 0, ("never",)) for p in (WK1, WK2, WK3)]
 
-        assert record["best_relative"]["entities"] == []
+        best = scorecard.amount_record(
+            "player-prop-defensive-sacks", 4, samples, 0.5, 0.5, entity_type="player", require_recorded_stat=True,
+        )["best"]
+
+        assert [e["entity_id"] for e in best["entities"]] == ["rusher"]
+
+    def test_without_the_rule_a_zero_stat_player_can_lead(self):
+        samples = [AmountSample(p, 0.13, 0, ("never",)) for p in (WK1, WK2, WK3)]
+
+        best = scorecard.amount_record("player-prop-defensive-sacks", 4, samples, 0.5, 0.5, entity_type="player")["best"]
+
+        assert [e["entity_id"] for e in best["entities"]] == ["never"]
 
     def test_no_best_when_no_prediction_names_a_team_or_player(self):
         record = scorecard.amount_record("score-margin", 1, [AmountSample(WK1, 5, 7)], 2.0, 2.0, entity_type="team")

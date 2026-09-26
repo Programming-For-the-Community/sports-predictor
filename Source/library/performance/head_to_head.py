@@ -129,7 +129,7 @@ def build_records(samples_by_model: dict[str, list], model_cards: list[dict], op
             is_prop = name.startswith("player-prop-")
             records.append(scorecard.amount_record(
                 name, card.get("version"), samples, mae, mae, open_period=open_period,
-                entity_type="player" if is_prop else "team", relative_best=is_prop,
+                entity_type="player" if is_prop else "team", require_recorded_stat=is_prop,
             ))
     return records
 
