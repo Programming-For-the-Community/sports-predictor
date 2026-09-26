@@ -59,6 +59,7 @@ class ModelPerformancePage extends ConsumerWidget {
                   items: orderedPerformanceModels(data.models),
                   cardBuilder: (record) => ModelPerformanceCardView(
                     record: record,
+                    sport: sportId,
                     isWeekly: data.isWeekly,
                     seasonLabel: data.windowDays == null ? 'THIS SEASON' : 'LAST ${data.windowDays} DAYS',
                   ),

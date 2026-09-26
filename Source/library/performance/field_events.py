@@ -167,9 +167,9 @@ def collect_samples(sport: str, events: list[dict], raw_rows_by_event: dict[str,
                     continue
                 predicted = row["predicted_value"]["value"]
                 if spec.kind == scorecard.KIND_CHANCE:
-                    samples.setdefault(model_name, []).append(ChanceSample(period, predicted, bool(actual)))
+                    samples.setdefault(model_name, []).append(ChanceSample(period, predicted, bool(actual), (entity,)))
                 else:
-                    samples.setdefault(model_name, []).append(AmountSample(period, predicted, actual))
+                    samples.setdefault(model_name, []).append(AmountSample(period, predicted, actual, (entity,)))
     return samples
 
 
@@ -185,11 +185,15 @@ def build_records(sport: str, samples_by_model: dict[str, list], model_cards: li
         if spec is None:
             continue
         samples = samples_by_model.get(name, [])
+        # A constructor is a team entity; golfers and drivers are players.
+        entity_type = "team" if spec.entity_actual is not None else "player"
         if spec.kind == scorecard.KIND_CHANCE:
-            records.append(scorecard.chance_record(name, card.get("version"), samples, card.get("accuracy"), COUNT_NOUN_OVERRIDES.get(name, noun)))
+            records.append(scorecard.chance_record(
+                name, card.get("version"), samples, card.get("accuracy"), COUNT_NOUN_OVERRIDES.get(name, noun), entity_type=entity_type,
+            ))
         else:
             mae = card.get("mae")
-            records.append(scorecard.amount_record(name, card.get("version"), samples, mae, mae, noun))
+            records.append(scorecard.amount_record(name, card.get("version"), samples, mae, mae, noun, entity_type=entity_type))
     return records
 
 

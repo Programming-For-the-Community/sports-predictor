@@ -21,6 +21,8 @@ _PLAYER_PROP_ROW = re.compile(r"^MODEL#player-prop-([a-z-]+)#v\d+#PLAYER#(.+)$")
 # NFL stores ESPN's numeric season type (2 = regular season); NCAAFB stores
 # CFBD's "regular"/"postseason". A missing season_type counts as regular.
 _REGULAR_SEASON_TYPES = {"2", "regular"}
+# Promoted models the Performance tab leaves out.
+_NOT_SHOWN = {"national-ranking"}
 
 
 def _is_regular_season(event: dict) -> bool:
@@ -56,6 +58,10 @@ def collect_samples(sport: str, events: list[dict], rows_by_event: dict[str, lis
         if actual is None or not rows:
             continue
         period = period_for(sport, event)
+        home = tuple(p["entity_id"] for p in event.get("participants", []) if p.get("role") == "home")
+        away = tuple(p["entity_id"] for p in event.get("participants", []) if p.get("role") == "away")
+        # The teams each game-level prediction counts toward.
+        teams_for = {"margin": home + away, "home_score": home, "away_score": away}
 
         win_row = latest_matching_row(rows, WIN_PROBABILITY_MODEL)
         if win_row is not None:
@@ -65,6 +71,7 @@ def collect_samples(sport: str, events: list[dict], rows_by_event: dict[str, lis
                 correct=(home_win_probability >= 0.5) == actual["home_won"],
                 edge=abs(home_win_probability - 0.5),
                 baseline_correct=actual["home_won"],
+                entities=home + away,
             ))
 
         actual_values = {
@@ -75,7 +82,7 @@ def collect_samples(sport: str, events: list[dict], rows_by_event: dict[str, lis
         for key, model_name in SCORE_MODELS.items():
             row = latest_matching_row(rows, model_name)
             if row is not None:
-                add(model_name, AmountSample(period, row["predicted_value"]["value"], actual_values[key]))
+                add(model_name, AmountSample(period, row["predicted_value"]["value"], actual_values[key], teams_for[key]))
 
         _collect_player_props(add, period, rows, stats_by_event.get(event["event_key"], {}))
     return samples
@@ -99,7 +106,7 @@ def _collect_player_props(add, period: Period, rows: list[dict], actual_by_entit
         if not stat_line:
             continue
         actual_value = stat_line.get(stat_slug.replace("-", "_"), 0)
-        add(f"player-prop-{stat_slug}", AmountSample(period, row["predicted_value"]["value"], actual_value))
+        add(f"player-prop-{stat_slug}", AmountSample(period, row["predicted_value"]["value"], actual_value, (entity_id,)))
 
 
 def build_records(samples_by_model: dict[str, list], model_cards: list[dict], open_period: Period | None = None) -> list[dict]:
@@ -110,12 +117,20 @@ def build_records(samples_by_model: dict[str, list], model_cards: list[dict], op
     records = []
     for card in sorted(model_cards, key=lambda c: c["model_name"]):
         name = card["model_name"]
+        if name in _NOT_SHOWN:
+            continue
         samples = samples_by_model.get(name, [])
         if name == WIN_PROBABILITY_MODEL:
-            records.append(scorecard.pick_record(name, card.get("version"), samples, card.get("accuracy"), open_period=open_period))
+            records.append(scorecard.pick_record(
+                name, card.get("version"), samples, card.get("accuracy"), open_period=open_period, entity_type="team",
+            ))
         else:
             mae = card.get("mae")
-            records.append(scorecard.amount_record(name, card.get("version"), samples, mae, mae, open_period=open_period))
+            is_prop = name.startswith("player-prop-")
+            records.append(scorecard.amount_record(
+                name, card.get("version"), samples, mae, mae, open_period=open_period,
+                entity_type="player" if is_prop else "team", relative_best=is_prop,
+            ))
     return records
 
 

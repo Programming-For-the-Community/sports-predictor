@@ -65,6 +65,47 @@ class PerformanceBand {
       );
 }
 
+/// One team or player in a model's "most accurate on" list.
+class BestEntity {
+  const BestEntity({required this.entityId, required this.value, required this.n, this.name, this.abbreviation, this.color});
+
+  final String entityId;
+
+  /// Accuracy (0..1) for a pick or chance model; average miss for an amount,
+  /// or miss as a share of actual (0..1) in a relative ranking.
+  final double value;
+
+  /// How many of its predictions were graded.
+  final int n;
+  final String? name;
+  final String? abbreviation;
+  final String? color;
+
+  factory BestEntity.fromJson(Map<String, dynamic> json) => BestEntity(
+        entityId: json['entity_id'] as String,
+        value: (json['value'] as num).toDouble(),
+        n: json['n'] as int,
+        name: json['name'] as String?,
+        abbreviation: json['abbreviation'] as String?,
+        color: json['color'] as String?,
+      );
+}
+
+/// Best-first; `entityType` is "team" or "player".
+class BestRanking {
+  const BestRanking({required this.entityType, required this.entities});
+
+  final String entityType;
+  final List<BestEntity> entities;
+
+  factory BestRanking.fromJson(Map<String, dynamic> json) => BestRanking(
+        entityType: json['entity_type'] as String,
+        entities: (json['entities'] as List<dynamic>? ?? [])
+            .map((e) => BestEntity.fromJson(e as Map<String, dynamic>))
+            .toList(),
+      );
+}
+
 class ModelPerformanceRecord {
   const ModelPerformanceRecord({
     required this.modelName,
@@ -80,6 +121,8 @@ class ModelPerformanceRecord {
     required this.bands,
     this.bias,
     this.countNoun,
+    this.best,
+    this.bestRelative,
   });
 
   static const kindPick = 'pick';
@@ -113,6 +156,13 @@ class ModelPerformanceRecord {
   /// "drivers"); null falls back to the app's own per-model default.
   final String? countNoun;
 
+  /// The teams or players this model has been most accurate on. Null from an
+  /// older scorecard.
+  final BestRanking? best;
+
+  /// Player props only: the same, ranked by miss as a share of actual.
+  final BestRanking? bestRelative;
+
   bool get isPick => kind == kindPick;
 
   /// A number model (average miss); every other kind is graded right/wrong (accuracy).
@@ -134,6 +184,8 @@ class ModelPerformanceRecord {
         marginOfError: (json['margin_of_error'] as num?)?.toDouble(),
         bias: (json['bias'] as num?)?.toDouble(),
         countNoun: json['count_noun'] as String?,
+        best: json['best'] == null ? null : BestRanking.fromJson(json['best'] as Map<String, dynamic>),
+        bestRelative: json['best_relative'] == null ? null : BestRanking.fromJson(json['best_relative'] as Map<String, dynamic>),
         bands: (json['bands'] as List<dynamic>? ?? [])
             .map((b) => PerformanceBand.fromJson(b as Map<String, dynamic>))
             .toList(),

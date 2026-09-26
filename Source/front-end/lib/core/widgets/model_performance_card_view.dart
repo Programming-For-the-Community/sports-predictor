@@ -5,6 +5,7 @@ import '../models/model_performance.dart';
 import '../theme/app_colors.dart';
 import '../theme/app_text_styles.dart';
 import 'model_card_frame.dart';
+import 'model_performance_best.dart';
 import 'model_performance_format.dart';
 
 // Below this width (scaled by the system text size), a band row stacks its
@@ -20,9 +21,18 @@ const _headlineStackWidth = 340.0;
 /// text wraps and rows re-flow, so a long name, a big number or a large
 /// system font never hides part of a result.
 class ModelPerformanceCardView extends StatelessWidget {
-  const ModelPerformanceCardView({super.key, required this.record, required this.isWeekly, this.seasonLabel = 'THIS SEASON'});
+  const ModelPerformanceCardView({
+    super.key,
+    required this.record,
+    required this.isWeekly,
+    this.seasonLabel = 'THIS SEASON',
+    this.sport = '',
+  });
 
   final ModelPerformanceRecord record;
+
+  /// For team colors in the "most accurate on" list.
+  final String sport;
 
   /// What the first stat box is called: "THIS SEASON", or "LAST 7 DAYS" for a
   /// sport graded on a rolling window.
@@ -49,6 +59,10 @@ class ModelPerformanceCardView extends StatelessWidget {
           ..._facts(display),
           if (record.bands.isNotEmpty) ...[const SizedBox(height: 20), _Bands(record: record, display: display)],
           if (record.periods.isNotEmpty) ...[const SizedBox(height: 20), _RecentPeriods(record: record, display: display, isWeekly: isWeekly)],
+          if (record.best != null) ...[
+            const SizedBox(height: 20),
+            ModelPerformanceBest(sport: sport, record: record, display: display, isWeekly: isWeekly),
+          ],
         ],
       ],
     );

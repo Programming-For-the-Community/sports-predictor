@@ -181,3 +181,67 @@ def test_build_scorecard_wraps_records_with_the_period_kind():
     assert document["period_kind"] == "week"
     assert document["models"] == [{"model_name": "win-probability"}]
     assert document["generated_at"]
+
+
+class TestBest:
+    def test_ranks_teams_by_how_often_their_games_were_picked_right(self):
+        samples = [
+            PickSample(WK1, True, 0.2, True, ("uga", "bama")),
+            PickSample(WK2, True, 0.2, True, ("uga", "lsu")),
+            PickSample(WK3, True, 0.2, True, ("uga", "tex")),
+            PickSample(WK1, False, 0.2, True, ("osu", "mich")),
+            PickSample(WK2, True, 0.2, True, ("osu", "psu")),
+            PickSample(WK3, True, 0.2, True, ("osu", "ore")),
+        ]
+
+        best = scorecard.pick_record("win-probability", 9, samples, None, entity_type="team")["best"]
+
+        assert best["entity_type"] == "team"
+        assert [(e["entity_id"], e["n"]) for e in best["entities"]] == [("uga", 3), ("osu", 3)]
+        assert best["entities"][1]["value"] == pytest.approx(2 / 3)
+
+    def test_the_three_game_floor_applies_once_anyone_has_three(self):
+        samples = [AmountSample(WK1, 10, 10, ("one-game",))] + [AmountSample(p, 10, 12, ("three-games",)) for p in (WK1, WK2, WK3)]
+
+        best = scorecard.amount_record("score-margin", 6, samples, 5.0, 5.0, entity_type="team")["best"]
+
+        assert [e["entity_id"] for e in best["entities"]] == ["three-games"]
+
+    def test_before_anyone_has_three_every_entity_counts(self):
+        samples = [AmountSample(WK1, 10, 11, ("a",)), AmountSample(WK1, 10, 14, ("b",))]
+
+        best = scorecard.amount_record("score-margin", 6, samples, 5.0, 5.0, entity_type="team")["best"]
+
+        assert [(e["entity_id"], e["value"]) for e in best["entities"]] == [("a", 1.0), ("b", 4.0)]
+
+    def test_amounts_rank_by_smallest_miss_and_keep_the_top_five(self):
+        samples = [AmountSample(WK1, 10, 10 + miss, (f"t{miss}",)) for miss in (6, 1, 5, 2, 4, 3)]
+
+        best = scorecard.amount_record("score-margin", 6, samples, 5.0, 5.0, entity_type="team")["best"]
+
+        assert [e["entity_id"] for e in best["entities"]] == ["t1", "t2", "t3", "t4", "t5"]
+
+    def test_player_props_also_rank_by_miss_as_a_share_of_actual_yards(self):
+        # The backup's 2-yard miss is the smallest raw miss but a third of his yards.
+        samples = [AmountSample(WK1, 4, 6, ("backup",)), AmountSample(WK1, 90, 100, ("starter",))]
+
+        record = scorecard.amount_record("player-prop-rushing-yards", 4, samples, 20.0, 20.0, entity_type="player", relative_best=True)
+
+        assert [e["entity_id"] for e in record["best"]["entities"]] == ["backup", "starter"]
+        assert [e["entity_id"] for e in record["best_relative"]["entities"]] == ["starter", "backup"]
+        assert record["best_relative"]["entities"][0]["value"] == pytest.approx(0.1)
+
+    def test_a_player_with_no_actual_yards_has_no_share_to_rank(self):
+        record = scorecard.amount_record(
+            "player-prop-rushing-yards", 4, [AmountSample(WK1, 5, 0, ("dnp",))], 20.0, 20.0, entity_type="player", relative_best=True,
+        )
+
+        assert record["best_relative"]["entities"] == []
+
+    def test_no_best_when_no_prediction_names_a_team_or_player(self):
+        record = scorecard.amount_record("score-margin", 1, [AmountSample(WK1, 5, 7)], 2.0, 2.0, entity_type="team")
+
+        assert "best" not in record
+
+    def test_no_best_without_an_entity_type(self):
+        assert "best" not in scorecard.pick_record("win-probability", 9, [_pick(WK1, True)], None)

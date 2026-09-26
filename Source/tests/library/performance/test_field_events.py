@@ -54,7 +54,7 @@ class TestPgaSamples:
     def test_top_5_uses_its_own_cutoff(self):
         samples, _ = self._samples([_golfer("1", 7)], [_row("MODEL#top-5-probability#v2#GOLFER#1", 0.4)])
 
-        assert samples["top-5-probability"] == [ChanceSample(field_events.period_for(_pga_event([])), 0.4, False)]
+        assert samples["top-5-probability"] == [ChanceSample(field_events.period_for(_pga_event([])), 0.4, False, ("1",))]
 
     def test_final_score_is_graded_only_for_golfers_who_finished(self):
         samples, _ = self._samples(

@@ -81,9 +81,19 @@ class TestCollectSamples:
         assert pick.correct is True
         assert pick.edge == pytest.approx(0.2)
         assert pick.baseline_correct is True
-        assert samples["score-margin"] == [AmountSample(pick.period, 5.0, 7)]
+        assert samples["score-margin"] == [AmountSample(pick.period, 5.0, 7, ("h", "a"))]
         assert samples["home-score"][0].actual == 27
         assert samples["away-score"][0].actual == 20
+
+    def test_each_prediction_counts_toward_the_teams_it_is_about(self):
+        events = [_event("1", 27, 20)]
+
+        samples = head_to_head.collect_samples("nfl", events, {events[0]["event_key"]: _rows()}, {})
+
+        assert samples["win-probability"][0].entities == ("h", "a")
+        assert samples["score-margin"][0].entities == ("h", "a")
+        assert samples["home-score"][0].entities == ("h",)
+        assert samples["away-score"][0].entities == ("a",)
 
     def test_an_underdog_pick_that_hit_and_the_home_baseline_that_missed(self):
         events = [_event("1", 17, 24)]  # away won
@@ -136,6 +146,13 @@ class TestBuildRecords:
             {"model_name": "score-margin", "version": 6, "mae": 10.8},
             {"model_name": "player-prop-sacks", "version": 3, "mae": 0.9},
         ]
+
+    def test_national_ranking_is_not_shown(self):
+        cards = self._cards() + [{"model_name": "national-ranking", "version": 1, "mae": 3.0}]
+
+        names = {r["model_name"] for r in head_to_head.build_records({}, cards)}
+
+        assert "national-ranking" not in names
 
     def test_one_record_per_promoted_model_with_training_figures(self):
         events = [_event("1", 27, 20)]

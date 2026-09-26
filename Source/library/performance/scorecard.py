@@ -26,12 +26,20 @@ Two kinds of model:
 
 Fewer than MIN_BAND_SAMPLE predictions in a band is flagged `early` -- the
 UI shows "too early" instead of a percentage that means nothing yet.
+
+A record built with an `entity_type` also carries `best`: the teams or players
+the model has been most accurate on (see _best). Each sample names the
+entities it counts toward in `entities`.
 """
 from dataclasses import dataclass
 from datetime import datetime, timezone
 
 MIN_BAND_SAMPLE = 5
 RECENT_PERIODS = 6
+BEST_COUNT = 5
+# An entity needs this many graded predictions to rank -- applied once any
+# entity has reached it, so the first weeks of a season still have a list.
+BEST_MIN_SAMPLE = 3
 
 # (tag, minimum edge over a coin flip) -- the same tiers ConfidencePill in
 # the app's game cards uses (edge = |win probability - 0.5|), so the two
@@ -65,6 +73,7 @@ class PickSample:
     correct: bool
     edge: float  # how sure the model was: |win probability - 0.5|
     baseline_correct: bool  # would "always pick the home side" have been right?
+    entities: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -72,6 +81,7 @@ class AmountSample:
     period: Period
     predicted: float
     actual: float
+    entities: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -79,6 +89,7 @@ class ChanceSample:
     period: Period
     probability: float  # the chance we gave that it happens
     happened: bool
+    entities: tuple[str, ...] = ()
 
 
 def _mean(values: list[float]) -> float | None:
@@ -97,6 +108,38 @@ def _by_period(samples: list, value_of, open_period: "Period | None" = None) -> 
         {"label": period.label, "value": _mean(values), "n": len(values)}
         for period, values in sorted(grouped.items(), key=lambda item: item[0].key)
     ]
+
+
+def _best(samples: list, score, entity_type: str, lower_is_better: bool) -> dict | None:
+    """The BEST_COUNT entities with the best `score` (a function of one
+    entity's samples; None skips the entity), ties going to the one with more
+    samples. None when no sample names an entity (a model not about any one
+    team or player)."""
+    by_entity: dict[str, list] = {}
+    for sample in samples:
+        for entity in sample.entities:
+            by_entity.setdefault(entity, []).append(sample)
+    if not by_entity:
+        return None
+    most = max((len(members) for members in by_entity.values()), default=0)
+    min_n = BEST_MIN_SAMPLE if most >= BEST_MIN_SAMPLE else 1
+    ranked = []
+    for entity, members in by_entity.items():
+        value = score(members) if len(members) >= min_n else None
+        if value is not None:
+            ranked.append((value if lower_is_better else -value, -len(members), entity, value))
+    ranked.sort()
+    return {
+        "entity_type": entity_type,
+        "entities": [{"entity_id": entity, "value": value, "n": -neg_n} for _, neg_n, entity, value in ranked[:BEST_COUNT]],
+    }
+
+
+def _relative_miss(members: list["AmountSample"]) -> float | None:
+    """Average miss as a share of the average actual amount -- None when the
+    actual amounts average zero or less, where a share means nothing."""
+    actual = _mean([s.actual for s in members])
+    return None if not actual or actual <= 0 else _mean([abs(s.predicted - s.actual) for s in members]) / actual
 
 
 def _headline(periods: list[dict], season_value: float | None, season_n: int) -> dict:
@@ -120,7 +163,7 @@ def _base(model_name: str, version: int | None, kind: str, band_kind: str, count
 def pick_record(
     model_name: str, version: int | None, samples: list[PickSample], at_training: float | None,
     tiers: tuple[tuple[str, float], ...] = WIN_PICK_TIERS, count_noun: str | None = None,
-    open_period: Period | None = None,
+    open_period: Period | None = None, entity_type: str | None = None,
 ) -> dict:
     record = _base(model_name, version, KIND_PICK, BAND_CONFIDENCE, count_noun)
     accuracy = _mean([1.0 if s.correct else 0.0 for s in samples])
@@ -130,7 +173,14 @@ def pick_record(
     record["at_training"] = at_training
     record["margin_of_error"] = None
     record["bands"] = [_pick_band(tag, floor, tiers, samples) for tag, floor in tiers]
+    if entity_type is not None:
+        _put_best(record, "best", _best(samples, lambda m: _mean([1.0 if s.correct else 0.0 for s in m]), entity_type, lower_is_better=False))
     return record
+
+
+def _put_best(record: dict, key: str, ranking: dict | None) -> None:
+    if ranking is not None:
+        record[key] = ranking
 
 
 def _pick_band(tag: str, floor: float, tiers, samples: list[PickSample]) -> dict:
@@ -154,10 +204,13 @@ def _bias(samples: list["AmountSample"]) -> float | None:
 def amount_record(
     model_name: str, version: int | None, samples: list[AmountSample], at_training: float | None,
     margin_of_error: float | None, count_noun: str | None = None, open_period: Period | None = None,
+    entity_type: str | None = None, relative_best: bool = False,
 ) -> dict:
     """`margin_of_error` is the model's usual miss (its mean absolute error at
     training). Without one -- an older model card -- the season's own average
-    miss stands in for it."""
+    miss stands in for it. `relative_best` also ranks entities by miss as a
+    share of their actual amount (`best_relative`) -- for a stat like yards,
+    where a raw miss favors whoever barely plays."""
     record = _base(model_name, version, KIND_AMOUNT, BAND_PREDICTED_AMOUNT, count_noun)
     misses = [abs(s.predicted - s.actual) for s in samples]
     avg_miss = _mean(misses)
@@ -171,6 +224,10 @@ def amount_record(
     record["margin_of_error"] = tolerance
     record["bias"] = _bias(samples)
     record["bands"] = _amount_bands(samples, tolerance)
+    if entity_type is not None:
+        _put_best(record, "best", _best(samples, lambda m: _mean([abs(s.predicted - s.actual) for s in m]), entity_type, lower_is_better=True))
+        if relative_best:
+            _put_best(record, "best_relative", _best(samples, _relative_miss, entity_type, lower_is_better=True))
     return record
 
 
@@ -197,6 +254,7 @@ def _amount_bands(samples: list[AmountSample], tolerance: float | None) -> list[
 
 def chance_record(
     model_name: str, version: int | None, samples: list[ChanceSample], at_training: float | None, count_noun: str | None = None,
+    entity_type: str | None = None,
 ) -> dict:
     """A yes/no probability model. Accuracy is how often the call (more than
     50% = yes) was right; the baseline is always answering no, which is
@@ -214,7 +272,13 @@ def chance_record(
     record["at_training"] = at_training
     record["margin_of_error"] = None
     record["bands"] = _chance_bands(samples)
+    if entity_type is not None:
+        _put_best(record, "best", _best(samples, _called_right_share, entity_type, lower_is_better=False))
     return record
+
+
+def _called_right_share(members: list[ChanceSample]) -> float | None:
+    return _mean([1.0 if (s.probability >= 0.5) == s.happened else 0.0 for s in members])
 
 
 def _chance_bands(samples: list[ChanceSample]) -> list[dict]:

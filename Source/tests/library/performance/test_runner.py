@@ -23,6 +23,12 @@ class _Storage:
     def get_player_game_stats_for_event(self, event_key):
         return self.stat_lines.get(event_key, [])
 
+    def get_entities(self, sport, refs):
+        return {
+            ref: {"name": f"Name {ref[0]}", "metadata": {"abbreviation": ref[0].upper(), "color": "#123456"}}
+            for ref in refs
+        }
+
 
 class _Table:
     def __init__(self, rows_by_event):
@@ -124,6 +130,40 @@ def test_with_nothing_left_to_play_the_latest_week_is_last_week():
 
     win = next(m for m in document["models"] if m["model_name"] == "win-probability")
     assert win["last_period"]["label"] == "Wk 4"
+
+
+def test_ranked_teams_and_players_carry_their_names():
+    event = _season_event("1", 2026)
+    rows = _rows() + [_row("MODEL#player-prop-passing-yards#v4#PLAYER#p1", {"value": 250.0})]
+    storage = _Storage([event], {event["event_key"]: [{"entity_id": "p1", "stat_line": {"passing_yards": 300}}]})
+
+    document, _ = _run(storage, _Table({event["event_key"]: rows}))
+
+    win = next(m for m in document["models"] if m["model_name"] == "win-probability")
+    assert {e["entity_id"]: e["name"] for e in win["best"]["entities"]} == {"h": "Name h", "a": "Name a"}
+    props = next(m for m in document["models"] if m["model_name"] == "player-prop-passing-yards")
+    assert props["best"]["entities"][0] == {"entity_id": "p1", "value": 50.0, "n": 1, "name": "Name p1", "abbreviation": "P1", "color": "#123456"}
+    assert props["best_relative"]["entities"][0]["value"] == 50.0 / 300
+
+
+def _prop_rows(player):
+    return _rows() + [_row(f"MODEL#player-prop-passing-yards#v4#PLAYER#{player}", {"value": 250.0})]
+
+
+def test_only_players_from_this_season_are_ranked():
+    last_season = _season_event("0", 2025)
+    this_season = _season_event("1", 2026)
+    stats = {
+        last_season["event_key"]: [{"entity_id": "graduated", "stat_line": {"passing_yards": 250}}],
+        this_season["event_key"]: [{"entity_id": "current", "stat_line": {"passing_yards": 300}}],
+    }
+    table = _Table({last_season["event_key"]: _prop_rows("graduated"), this_season["event_key"]: _prop_rows("current")})
+
+    document, _ = _run(_Storage([last_season, this_season], stats), table)
+
+    record = next(m for m in document["models"] if m["model_name"] == "player-prop-passing-yards")
+    for key in ("best", "best_relative"):
+        assert [e["entity_id"] for e in record[key]["entities"]] == ["current"]
 
 
 def test_a_sport_with_no_completed_events_writes_an_empty_scorecard():

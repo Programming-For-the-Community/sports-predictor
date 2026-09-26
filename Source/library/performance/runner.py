@@ -63,6 +63,7 @@ def _run_field_sport(sport: str, storage, predictions_table, s3, today: date) ->
 
     document = field_events.build_field_scorecard(sport, season, events, raw_rows_by_event, list_models(s3, sport)["models"])
     document["coverage"] = _coverage(events, raw_rows_by_event)
+    _name_best(storage, sport, document)
     _stamp_window(document, sport)
     s3.put_json(model_performance_key(sport), document)
     return document
@@ -88,9 +89,23 @@ def _run_head_to_head_sport(sport: str, storage, predictions_table, s3, today: d
         sport, season, events, rows_by_event, stats_by_event, list_models(s3, sport)["models"], _next_event(storage, sport, today),
     )
     document["coverage"] = _coverage(events, rows_by_event)
+    _name_best(storage, sport, document)
     _stamp_window(document, sport)
     s3.put_json(model_performance_key(sport), document)
     return document
+
+
+def _name_best(storage, sport: str, document: dict) -> None:
+    """Adds each ranked team's or player's name, abbreviation and color, in
+    one batched entity read across every record."""
+    lists = [record[key] for record in document["models"] for key in ("best", "best_relative") if key in record]
+    refs = [(entry["entity_id"], ranked["entity_type"]) for ranked in lists for entry in ranked["entities"]]
+    entities = storage.get_entities(sport, refs) if refs else {}
+    for ranked in lists:
+        for entry in ranked["entities"]:
+            entity = entities.get((entry["entity_id"], ranked["entity_type"])) or {}
+            metadata = entity.get("metadata") or {}
+            entry.update(name=entity.get("name"), abbreviation=metadata.get("abbreviation"), color=metadata.get("color"))
 
 
 def _stamp_window(document: dict, sport: str) -> None:
