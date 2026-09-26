@@ -21,7 +21,7 @@ def test_handler_runs_a_tick_and_returns_its_summary(monkeypatch):
 
     lambda_client = MagicMock()
     with patch.object(shared_prediction_scheduler.prediction_scheduler, "run_tick", fake_run_tick), \
-         patch.object(shared_prediction_scheduler, "_lambda_client", lambda_client), \
+         patch.object(shared_prediction_scheduler, "_get_lambda_client", return_value=lambda_client), \
          patch.object(shared_prediction_scheduler, "_get_events_table", return_value="events"), \
          patch.object(shared_prediction_scheduler, "_get_predictions_table", return_value="predictions"):
         result = shared_prediction_scheduler.lambda_handler({}, None)

@@ -23,9 +23,17 @@ from library.serving import prediction_scheduler
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s", force=True)  # AWS Lambda pre-attaches a root handler, so basicConfig() is otherwise a silent no-op
 logger = logging.getLogger("prediction-scheduler")
 
-_lambda_client = boto3.client("lambda", config=DEFAULT_CONFIG)
+# Created lazily: a boto3 Lambda client needs a region, which an import-time
+# call would demand of every environment that merely imports this module (CI).
+_lambda_client = None
 _events_table: DynamoDBTable | None = None
 _predictions_table: DynamoDBTable | None = None
+
+
+def _get_lambda_client():
+    return lambda_singletons.get_or_create(
+        globals(), "_lambda_client", lambda: boto3.client("lambda", region_name=os.environ.get("AWS_REGION"), config=DEFAULT_CONFIG),
+    )
 
 
 def _get_events_table() -> DynamoDBTable:
@@ -42,7 +50,7 @@ def _get_predictions_table() -> DynamoDBTable:
 
 def _invoke_async(function_name: str, payload: dict) -> None:
     logger.info("Invoking %s with %s", function_name, json.dumps(payload))
-    _lambda_client.invoke(FunctionName=function_name, InvocationType="Event", Payload=json.dumps(payload).encode("utf-8"))
+    _get_lambda_client().invoke(FunctionName=function_name, InvocationType="Event", Payload=json.dumps(payload).encode("utf-8"))
 
 
 def lambda_handler(event, context):
