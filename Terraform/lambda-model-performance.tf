@@ -29,7 +29,7 @@ data "archive_file" "model_performance_placeholder" {
 
 resource "aws_lambda_function" "model_performance" {
   function_name = "${var.project}-model-performance"
-  description   = "Daily: scores every promoted model against the season's completed events (using each event's pre-kickoff snapshot) and writes the per-sport scorecard read by GET /{sport}/model-performance. Triggered by EventBridge Scheduler -- see scheduler-model-performance.tf."
+  description   = "Daily: scores each promoted model against the season's completed events (via pre-kickoff snapshots) and writes the per-sport scorecard served by GET /{sport}/model-performance. See scheduler-model-performance.tf."
   role          = aws_iam_role.lambda_model_performance.arn
   runtime       = "python3.12"
   handler       = "handler.lambda_handler"
