@@ -10,7 +10,10 @@ import 'event_status.dart';
 import 'field_prediction.dart' show PgaEventType;
 
 class FieldParticipantResult {
-  const FieldParticipantResult({this.finishPosition, this.isTie = false, this.status, this.scoreToPar, this.totalStrokes});
+  const FieldParticipantResult({
+    this.finishPosition, this.isTie = false, this.status, this.scoreToPar, this.totalStrokes,
+    this.won = false, this.halved = false, this.marginDisplay,
+  });
 
   final int? finishPosition;
   final bool isTie;
@@ -19,6 +22,10 @@ class FieldParticipantResult {
   final String? status;
   final num? scoreToPar;
   final double? totalStrokes;
+  // match_play only -- "3 & 2"/"1 Up" on the winning side.
+  final bool won;
+  final bool halved;
+  final String? marginDisplay;
 
   factory FieldParticipantResult.fromJson(Map<String, dynamic> json) => FieldParticipantResult(
         finishPosition: json['finish_position'] as int?,
@@ -26,12 +33,15 @@ class FieldParticipantResult {
         status: json['status'] as String?,
         scoreToPar: json['score_to_par'] as num?,
         totalStrokes: (json['total_strokes'] as num?)?.toDouble(),
+        won: json['won'] as bool? ?? false,
+        halved: json['halved'] as bool? ?? false,
+        marginDisplay: json['margin_display'] as String?,
       );
 }
 
 class FieldParticipant {
   const FieldParticipant({
-    required this.entityId, this.name, this.abbreviation, this.color, this.result,
+    required this.entityId, this.name, this.abbreviation, this.color, this.result, this.golferNames = const [],
   });
 
   final String entityId;
@@ -42,6 +52,8 @@ class FieldParticipant {
   final String? abbreviation;
   final String? color;
   final FieldParticipantResult? result;
+  // A team match_play side's golfers -- empty for every other event_type.
+  final List<String> golferNames;
 
   factory FieldParticipant.fromJson(Map<String, dynamic> json) => FieldParticipant(
         entityId: json['entity_id'] as String,
@@ -49,6 +61,10 @@ class FieldParticipant {
         abbreviation: json['abbreviation'] as String?,
         color: json['color'] as String?,
         result: json['result'] != null ? FieldParticipantResult.fromJson(json['result'] as Map<String, dynamic>) : null,
+        golferNames: (json['golfers'] as List<dynamic>? ?? [])
+            .map((g) => (g as Map<String, dynamic>)['name'] as String?)
+            .whereType<String>()
+            .toList(),
       );
 }
 
@@ -65,6 +81,8 @@ class FieldEvent {
     this.venueName,
     this.venueCity,
     this.venueState,
+    this.sessionName,
+    this.matchTime,
   });
 
   final String eventId;
@@ -82,6 +100,9 @@ class FieldEvent {
   final String? venueName;
   final String? venueCity;
   final String? venueState;
+  // match_play only -- "Friday Foursomes" and the match's own tee-off time.
+  final String? sessionName;
+  final String? matchTime;
 
   factory FieldEvent.fromJson(Map<String, dynamic> json) => FieldEvent(
         eventId: json['event_id'] as String,
@@ -97,6 +118,8 @@ class FieldEvent {
         venueName: json['venue_name'] as String?,
         venueCity: json['venue_city'] as String?,
         venueState: json['venue_state'] as String?,
+        sessionName: json['session_name'] as String?,
+        matchTime: json['match_time'] as String?,
       );
 
   // "Bellerive Country Club -- St. Louis, MO", degrading gracefully as

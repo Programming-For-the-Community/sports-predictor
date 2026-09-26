@@ -174,6 +174,7 @@ SPORT_CONFIGS = {
     },
     "pga": {
         "list_events_fn": lambda storage, status: pga_reads.list_events(storage, "pga", status),
+        "list_child_events_fn": lambda storage, parent_event_id: pga_reads.list_child_events(storage, "pga", parent_event_id),
         "get_season_projection_fn": lambda model_bucket: pga_reads.get_season_projection(model_bucket, "pga"),
         "list_models_fn": lambda model_bucket: list_models(model_bucket, "pga"),
         # Adapts the shared module's (s3, get_storage, event_id) calling

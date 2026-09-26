@@ -25,10 +25,14 @@ def _cup_event(event_id="401465497", participants=None):
     }
 
 
-def _match_play_event(event_id="401465497-match-10951", participants=None):
+def _match_play_event(
+    event_id="401465497-match-10951", participants=None, parent_event_id="401465497", status="completed",
+    match_time="2022-09-22T16:00Z",
+):
     return {
         "event_id": event_id, "event_key": f"K{event_id}", "event_type": "match_play", "event_date": "2022-09-22",
-        "status": "completed", "season": {"year": 2023}, "tournament_name": "Presidents Cup",
+        "parent_event_id": parent_event_id, "match_time": match_time, "session_name": "Thursday Foursomes",
+        "status": status, "season": {"year": 2023}, "tournament_name": "Presidents Cup",
         "participants": participants if participants is not None else [
             {"entity_id": "1", "golfer_entity_ids": ["1085", "1086"]},  # team match play
             {"entity_id": "3", "golfer_entity_ids": ["2001", "2002"]},
@@ -80,7 +84,7 @@ class TestListEvents:
 
         assert [e["event_id"] for e in result["events"]] == ["newest"]
 
-    def test_completed_queries_get_all_events_bounded_to_one(self):
+    def test_completed_queries_get_all_events_bounded_to_the_lookback_window(self):
         # Regression: most_recent_event's own post-hoc narrowing wasn't
         # enough on its own -- the unbounded get_all_events call itself
         # paginated through the sport's entire completed-event history
@@ -91,7 +95,34 @@ class TestListEvents:
 
         pga_reads.list_events(storage, "pga", "completed")
 
-        storage.get_all_events.assert_called_once_with("pga", status="completed", limit=1)
+        storage.get_all_events.assert_called_once_with("pga", status="completed", limit=pga_reads.COMPLETED_LOOKBACK_ROWS)
+
+    def test_scheduled_excludes_a_cups_own_match_rows(self):
+        # Real bug (2026-09-26): the in-progress Presidents Cup showed as 5
+        # identical "Presidents Cup" rows -- the cup row plus 4 scheduled
+        # match rows.
+        storage = MagicMock()
+        storage.get_entities.return_value = {}
+        storage.get_all_events.return_value = [
+            _cup_event(), _match_play_event("m1", status="scheduled"), _match_play_event("m2", status="scheduled"),
+        ]
+        storage.get_entity.return_value = None
+
+        result = pga_reads.list_events(storage, "pga", "scheduled")
+
+        assert [e["event_id"] for e in result["events"]] == ["401465497"]
+
+    def test_completed_skips_later_dated_match_rows_to_reach_the_tournament(self):
+        storage = MagicMock()
+        storage.get_entities.return_value = {}
+        match = _match_play_event("m1")
+        match["event_date"] = "2022-09-25"
+        storage.get_all_events.return_value = [match, _cup_event(), _field_event("older", "2022-08-20", status="completed")]
+        storage.get_entity.return_value = None
+
+        result = pga_reads.list_events(storage, "pga", "completed")
+
+        assert [e["event_id"] for e in result["events"]] == ["401465497"]
 
     def test_completed_prefetches_entities_once_across_the_field_instead_of_per_participant(self):
         # The other half of the same fix -- even bounded to one
@@ -128,6 +159,40 @@ class TestListEvents:
         assert result["events"][0]["event_type"] == "cup"
 
 
+class TestListChildEvents:
+    def test_returns_only_that_parents_matches_across_statuses_in_tee_off_order(self):
+        storage = MagicMock()
+        storage.get_entities.return_value = {}
+        storage.get_entity.return_value = None
+        storage.get_event.return_value = _cup_event()
+        scheduled = [_match_play_event("sat-1", status="scheduled", match_time="2022-09-24T12:00Z"), _field_event("e1")]
+        completed = [
+            _match_play_event("fri-1", match_time="2022-09-23T12:00Z"),
+            _match_play_event("thu-1", match_time="2022-09-22T12:00Z"),
+            _match_play_event("other-cup", parent_event_id="999"),
+        ]
+        storage.get_all_events.side_effect = lambda sport, status, **kwargs: scheduled if status == "scheduled" else completed
+
+        result = pga_reads.list_child_events(storage, "pga", "401465497")
+
+        assert [e["event_id"] for e in result["events"]] == ["thu-1", "fri-1", "sat-1"]
+        assert result["events"][0]["session_name"] == "Thursday Foursomes"
+        storage.get_all_events.assert_any_call("pga", status="completed", since_date="2022-09-22")
+
+    def test_unknown_parent_returns_no_events(self):
+        storage = MagicMock()
+        storage.get_event.return_value = None
+
+        assert pga_reads.list_child_events(storage, "pga", "nope") == {"sport": "pga", "events": []}
+        storage.get_all_events.assert_not_called()
+
+
+def _list_one_match(storage, match):
+    storage.get_event.return_value = _cup_event()
+    storage.get_all_events.side_effect = lambda sport, status, **kwargs: [match] if status == "completed" else []
+    pga_reads.list_child_events(storage, "pga", "401465497")
+
+
 class TestEnrichPgaParticipants:
     def test_field_event_participants_are_looked_up_as_players(self):
         storage = MagicMock()
@@ -154,26 +219,38 @@ class TestEnrichPgaParticipants:
         participant's own golfer_entity_ids -- a disjoint id space."""
         storage = MagicMock()
         storage.get_entities.return_value = {}
-        storage.get_all_events.return_value = [
-            _match_play_event(participants=[{"entity_id": "1", "golfer_entity_ids": ["1085", "1086"]}]),
-        ]
         storage.get_entity.return_value = {"name": "USA", "metadata": {}}
 
-        pga_reads.list_events(storage, "pga", "completed")
+        _list_one_match(storage, _match_play_event(participants=[{"entity_id": "1", "golfer_entity_ids": ["1085", "1086"]}]))
 
-        storage.get_entity.assert_called_with("pga", "1", "team")
+        storage.get_entity.assert_any_call("pga", "1", "team")
+
+    def test_team_match_play_side_carries_its_golfers_names(self):
+        storage = MagicMock()
+        storage.get_entities.return_value = {
+            ("1", "team"): {"name": "USA", "metadata": {}},
+            ("1085", "player"): {"name": "Scottie Scheffler"},
+            ("1086", "player"): {"name": "Xander Schauffele"},
+        }
+        storage.get_event.return_value = _cup_event()
+        match = _match_play_event(participants=[{"entity_id": "1", "golfer_entity_ids": ["1085", "1086"]}])
+        storage.get_all_events.side_effect = lambda sport, status, **kwargs: [match] if status == "completed" else []
+
+        result = pga_reads.list_child_events(storage, "pga", "401465497")
+
+        assert result["events"][0]["participants"][0]["golfers"] == [
+            {"entity_id": "1085", "name": "Scottie Scheffler"}, {"entity_id": "1086", "name": "Xander Schauffele"},
+        ]
+        storage.get_entities.assert_called_once_with("pga", [("1", "team"), ("1085", "player"), ("1086", "player")])
 
     def test_individual_wgc_match_play_participant_is_looked_up_as_a_player(self):
         """entity_id doubles as this golfer's own single-element
         golfer_entity_ids -- WGC has no team layer at all."""
         storage = MagicMock()
         storage.get_entities.return_value = {}
-        storage.get_all_events.return_value = [
-            _match_play_event(participants=[{"entity_id": "3439", "golfer_entity_ids": ["3439"]}]),
-        ]
         storage.get_entity.return_value = {"name": "Scottie Scheffler", "metadata": {}}
 
-        pga_reads.list_events(storage, "pga", "completed")
+        _list_one_match(storage, _match_play_event(participants=[{"entity_id": "3439", "golfer_entity_ids": ["3439"]}]))
 
         storage.get_entity.assert_called_with("pga", "3439", "player")
 
@@ -184,15 +261,12 @@ class TestEnrichPgaParticipants:
         participant and apply that type to the whole list."""
         storage = MagicMock()
         storage.get_entities.return_value = {}
-        storage.get_all_events.return_value = [
-            _match_play_event(participants=[
-                {"entity_id": "1", "golfer_entity_ids": ["1085", "1086"]},  # team
-                {"entity_id": "3439", "golfer_entity_ids": ["3439"]},  # individual
-            ]),
-        ]
         storage.get_entity.return_value = {"name": "x", "metadata": {}}
 
-        pga_reads.list_events(storage, "pga", "completed")
+        _list_one_match(storage, _match_play_event(participants=[
+            {"entity_id": "1", "golfer_entity_ids": ["1085", "1086"]},  # team
+            {"entity_id": "3439", "golfer_entity_ids": ["3439"]},  # individual
+        ]))
 
         storage.get_entity.assert_any_call("pga", "1", "team")
         storage.get_entity.assert_any_call("pga", "3439", "player")

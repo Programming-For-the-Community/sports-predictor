@@ -93,9 +93,12 @@ def _handle_warmup(namespace, response_fn) -> dict:
     ))
 
 
-def _handle_events(namespace, list_events_fn, response_fn, query_params: dict) -> dict:
+def _handle_events(namespace, config: dict, response_fn, query_params: dict) -> dict:
+    parent_event_id = query_params.get("parent_event_id")
+    if parent_event_id and "list_child_events_fn" in config:
+        return response_fn(200, config["list_child_events_fn"](namespace["_get_storage"](), parent_event_id))
     status = query_params.get("status", "scheduled")
-    return response_fn(200, list_events_fn(namespace["_get_storage"](), status))
+    return response_fn(200, config["list_events_fn"](namespace["_get_storage"](), status))
 
 
 def _handle_models(namespace, list_models_fn, response_fn) -> dict:
@@ -159,7 +162,7 @@ def _build_routes(sport_configs: dict) -> dict:
 
 def _dispatch_route(namespace, route: str, sport: str, config: dict, response_fn, path_params: dict, query_params: dict) -> dict:
     if route == "events":
-        return _handle_events(namespace, config["list_events_fn"], response_fn, query_params)
+        return _handle_events(namespace, config, response_fn, query_params)
 
     if route == "models":
         return _handle_models(namespace, config["list_models_fn"], response_fn)
@@ -183,8 +186,10 @@ def _dispatch_route(namespace, route: str, sport: str, config: dict, response_fn
 
 def make_multi_sport_lambda_handler(*, sport_configs: dict, namespace, logger, response_fn):
     """sport_configs: {sport: {list_events_fn, get_season_projection_fn,
-    list_models_fn, freshness_inputs_fn, has_player_prop_route}}, one entry
-    per sport this Lambda serves. Builds the resource-path -> (sport,
+    list_models_fn, freshness_inputs_fn, has_player_prop_route, optional
+    list_child_events_fn}}, one entry per sport this Lambda serves.
+    list_child_events_fn(storage, parent_event_id) serves GET /{sport}/
+    events?parent_event_id=... for a sport that sets it. Builds the resource-path -> (sport,
     route) lookup once at Lambda cold start (not per-request) -- the same
     5 route shapes every sport already had (f"/{sport}/events" etc.), just
     resolved dynamically per request via this dict instead of baked into a

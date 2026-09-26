@@ -36,6 +36,7 @@ Callers own their own storage/s3 objects and Lambda-lifecycle concerns.
 """
 from concurrent.futures import ThreadPoolExecutor
 
+from library.schema.keys import event_key
 from library.serving.common import enrich_participants, get_season_projection, most_recent_event, prefetch_entities
 
 FIELD_EVENT_MODELS = {
@@ -63,6 +64,11 @@ FIELD_EVENT_MODEL_VERSIONS = {
 }
 MATCH_MODEL_VERSIONS = {"match_win_probability": MATCH_MODEL_NAME}
 CUP_MODEL_VERSIONS = {"cup_win_probability": CUP_MODEL_NAME}
+
+# Most-recent completed rows read to find the latest tournament-level row --
+# a finished Ryder Cup/Presidents Cup puts its ~28-30 match rows (dated
+# later than the cup row itself) ahead of it.
+COMPLETED_LOOKBACK_ROWS = 64
 
 
 def model_versions_for(event_type: str) -> dict[str, str]:
@@ -111,9 +117,28 @@ def _entity_refs(event: dict) -> list[tuple[str, str]]:
     if event_type == "cup":
         return [(p["entity_id"], "team") for p in participants]
     if event_type == "match_play":
-        return [(p["entity_id"], _match_play_entity_type(p)) for p in participants]
+        return [
+            *((p["entity_id"], _match_play_entity_type(p)) for p in participants),
+            *((golfer_id, "player") for p in participants for golfer_id in _team_side_golfer_ids(p)),
+        ]
     # "field" (and any future/unrecognized event_type).
     return [(p["entity_id"], "player") for p in participants]
+
+
+def _team_side_golfer_ids(participant: dict) -> list[str]:
+    """The golfers playing for a TEAM-typed match_play side -- empty for an
+    individual (WGC) side, whose golfer is the participant itself."""
+    if _match_play_entity_type(participant) != "team":
+        return []
+    return participant.get("golfer_entity_ids") or []
+
+
+def _golfers(storage, sport: str, participant: dict, entity_cache: dict[tuple[str, str], dict] | None) -> list[dict]:
+    golfers = []
+    for golfer_id in _team_side_golfer_ids(participant):
+        entity = (entity_cache or {}).get((golfer_id, "player")) or storage.get_entity(sport, golfer_id, "player")
+        golfers.append({"entity_id": golfer_id, "name": (entity or {}).get("name")})
+    return golfers
 
 
 def _enrich_match_play_participants(
@@ -128,12 +153,14 @@ def _enrich_match_play_participants(
     the single-entity_type helper."""
     if not participants:
         return participants
-    return [
-        enrich_participants(
+    enriched = []
+    for participant in participants:
+        entry = enrich_participants(
             storage, sport, [participant], entity_type=_match_play_entity_type(participant), entity_cache=entity_cache,
         )[0]
-        for participant in participants
-    ]
+        golfers = _golfers(storage, sport, participant, entity_cache)
+        enriched.append({**entry, "golfers": golfers} if golfers else entry)
+    return enriched
 
 
 def _enrich_pga_participants(
@@ -163,51 +190,61 @@ def _entry(storage, sport: str, event: dict, entity_cache: dict[tuple[str, str],
         "venue_name": event.get("venue_name"),
         "venue_city": event.get("venue_city"),
         "venue_state": event.get("venue_state"),
+        "session_name": event.get("session_name"),
+        "match_time": event.get("match_time"),
     }
 
 
-def list_events(storage, sport: str, status: str) -> dict:
-    """GET /pga/events?status=scheduled|completed -- across all 3
-    event_types ("field"/"match_play"/"cup"), unfiltered; the frontend
-    uses event_type to decide how to render each one before it ever calls
-    GET /pga/predictions/events/{event_id}. status=completed is bounded to
-    the single most recent tournament -- see this module's own docstring.
+def _is_child_match(event: dict) -> bool:
+    """A match_play row belonging to a parent tournament -- listed under
+    that tournament (list_child_events), never as a tournament itself."""
+    return event.get("parent_event_id") is not None
 
-    limit=1 on the query itself for status=completed, not just
-    most_recent_event's own post-hoc narrowing -- the unbounded
-    get_all_events call itself is the bottleneck once completed-event
-    count grows large (PGA has 1000+ historical events): every historical
-    completed event would paginate in from DynamoDB before
-    most_recent_event ever got to discard all but one. get_all_events
-    already sorts most-recent-first by default, so Limit=1 returns
-    exactly the same row most_recent_event's own max() would have picked
-    out of the full set."""
-    if status == "completed":
-        events = storage.get_all_events(sport, status=status, limit=1)
-        events = most_recent_event(events)
-    else:
-        events = storage.get_all_events(sport, status=status)
 
+def _entries_response(storage, sport: str, events: list[dict]) -> dict:
     if not events:
         return {"sport": sport, "events": []}
 
-    # One BatchGetItem pass across every event's own participants (up to
-    # ~150 golfers for a single tournament, deduplicated -- the same
-    # golfer showing up as, say, both a "field" and a "cup" participant is
-    # only fetched once) instead of each participant costing its own
-    # GetItem -- the fix behind the 504 this module's own docstring
-    # describes. entity_cache stays a plain dict even when empty, so a
-    # cache MISS still safely falls back to enrich_participants' own
-    # per-participant GetItem path (see that function's own docstring).
+    # One BatchGetItem pass across every event's own participants instead
+    # of a GetItem per participant.
     refs = [ref for event in events for ref in _entity_refs(event)]
     entity_cache = prefetch_entities(storage, sport, refs)
 
-    # Concurrent, not sequential -- each entry still makes its own
-    # independent per-event work (venue/status/etc.), even though entity
-    # lookups themselves are now cache hits, not their own round trips.
     with ThreadPoolExecutor(max_workers=min(len(events), 16)) as executor:
         entries = list(executor.map(lambda e: _entry(storage, sport, e, entity_cache), events))
 
     return {"sport": sport, "events": entries}
 
 
+def list_events(storage, sport: str, status: str) -> dict:
+    """GET /pga/events?status=scheduled|completed -- one row per tournament
+    ("field"/"cup", plus any match_play row without a parent); a cup's own
+    matches come from list_child_events. The frontend uses event_type to
+    decide how to render each one. status=completed is bounded to the
+    single most recent tournament -- see this module's own docstring --
+    reading at most COMPLETED_LOOKBACK_ROWS rows rather than the sport's
+    entire completed history (1000+ PGA events)."""
+    if status == "completed":
+        events = storage.get_all_events(sport, status=status, limit=COMPLETED_LOOKBACK_ROWS)
+        events = most_recent_event([e for e in events if not _is_child_match(e)])
+    else:
+        events = [e for e in storage.get_all_events(sport, status=status) if not _is_child_match(e)]
+    return _entries_response(storage, sport, events)
+
+
+def list_child_events(storage, sport: str, parent_event_id: str) -> dict:
+    """GET /pga/events?parent_event_id={id} -- every match_play row of one
+    tournament (Ryder Cup/Presidents Cup), any status, in tee-off order.
+    Completed rows are bounded to on/after the parent's own start date."""
+    parent = storage.get_event(event_key(sport, parent_event_id))
+    if parent is None:
+        return {"sport": sport, "events": []}
+    candidates = [
+        *storage.get_all_events(sport, status="scheduled"),
+        *storage.get_all_events(sport, status="completed", since_date=parent.get("event_date") or None),
+    ]
+    events = sorted(
+        (e for e in candidates if e.get("parent_event_id") == parent_event_id),
+        key=lambda e: (e.get("match_time") or e.get("event_date") or "", e["event_id"]),
+    )
+    return _entries_response(storage, sport, events)

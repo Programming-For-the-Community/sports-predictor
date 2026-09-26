@@ -68,5 +68,20 @@ void main() {
       expect(participant.result!.isTie, isTrue);
       expect(participant.result!.status, 'finished');
     });
+
+    test('parses a team match_play side with its golfers and match result', () {
+      final participant = FieldParticipant.fromJson({
+        'entity_id': '1',
+        'golfers': [
+          {'entity_id': '1085', 'name': 'Scottie Scheffler'},
+          {'entity_id': '1086', 'name': null},
+        ],
+        'result': {'status': 'finished', 'won': true, 'halved': false, 'margin_display': '3 & 2'},
+      });
+
+      expect(participant.golferNames, ['Scottie Scheffler']);
+      expect(participant.result!.won, isTrue);
+      expect(participant.result!.marginDisplay, '3 & 2');
+    });
   });
 }

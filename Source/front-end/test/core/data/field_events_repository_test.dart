@@ -49,6 +49,22 @@ void main() {
     });
   });
 
+  group('listChildEvents', () {
+    test('requests the events route filtered to one parent tournament', () async {
+      Uri? capturedUri;
+      final repo = FieldEventsRepository(buildTestApiClient((request) async {
+        capturedUri = request.url;
+        return http.Response(jsonEncode({'events': [_event(eventId: 'm1')]}), 200);
+      }));
+
+      final events = await repo.listChildEvents('pga', '401824815');
+
+      expect(capturedUri?.path, '/pga/events');
+      expect(capturedUri?.queryParameters['parent_event_id'], '401824815');
+      expect(events.map((e) => e.eventId), ['m1']);
+    });
+  });
+
   group('getEventPrediction', () {
     test('requests the event-scoped prediction route', () async {
       Uri? capturedUri;

@@ -22,9 +22,9 @@ String _dateRangeLabel(FieldEvent event) {
   return '$startLabel-$endLabel, ${end.year}';
 }
 
-/// Used uniformly for all three PGA event_type values (field/match_play/
-/// cup) -- GET /pga/events returns homogeneous top-level metadata across
-/// all three, and the list page shows no per-row prediction (a full field
+/// Used uniformly for every row GET /pga/events returns (field/cup, never
+/// a cup's own match rows) -- homogeneous top-level metadata across
+/// event_types, and the list page shows no per-row prediction (a full field
 /// response is too heavy to fetch per row in a ~45-tournament season
 /// list), so there's no meaningful list-level distinction to branch on --
 /// see field_event_detail_page.dart for where the event_type branch

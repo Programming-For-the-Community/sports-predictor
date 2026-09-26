@@ -10,6 +10,7 @@ import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_text_styles.dart';
 import '../../core/widgets/prediction_computing_retry.dart';
 import '../../core/widgets/prediction_freshness_badge.dart';
+import 'cup_match_list.dart';
 import 'field_leaderboard_table.dart';
 import 'two_sided_pga_matchup.dart';
 
@@ -23,10 +24,9 @@ const _pollInterval = Duration(seconds: 60);
 /// periodic polling shell, but branches on the resolved
 /// PgaEventPrediction's runtime type: FieldEventPrediction gets a
 /// leaderboard table, TwoSidedPgaPrediction (match_play/cup) gets a
-/// compact matchup view. This is the ONLY place PGA's three event_types
-/// diverge in the frontend -- the list page (field_event_list_page.dart)
-/// deliberately shows all three uniformly, see field_event_row.dart's own
-/// doc comment for why.
+/// compact matchup view, plus a cup's own match list (CupMatchList). The
+/// list page (field_event_list_page.dart) shows one row per tournament;
+/// a cup's matches are reached only from here.
 class FieldEventDetailPage extends ConsumerStatefulWidget {
   const FieldEventDetailPage({super.key, required this.sportId, required this.eventId});
 
@@ -47,6 +47,7 @@ class _FieldEventDetailPageState extends ConsumerState<FieldEventDetailPage>
     ref.invalidate(fieldLiveScoresProvider(widget.sportId));
     ref.invalidate(pgaLiveScoresProvider(widget.sportId));
     ref.invalidate(fieldEventPredictionProvider((sport: widget.sportId, eventId: widget.eventId)));
+    ref.invalidate(fieldChildEventsProvider((sport: widget.sportId, eventId: widget.eventId)));
   }
 
   @override
@@ -140,6 +141,7 @@ class _TwoSidedPredictionView extends ConsumerWidget {
             ),
           ),
         ],
+        if (prediction.eventType == PgaEventType.cup) CupMatchList(sport: sport, cupEventId: eventId),
       ],
     );
   }

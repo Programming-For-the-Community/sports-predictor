@@ -24,6 +24,14 @@ class FieldEventsRepository {
     return events.map((e) => FieldEvent.fromJson(e as Map<String, dynamic>)).toList();
   }
 
+  /// A Ryder Cup/Presidents Cup's own matches, in tee-off order.
+  Future<List<FieldEvent>> listChildEvents(String sport, String parentEventId) async {
+    final response =
+        await _api.get(ApiRoutes.events(sport), queryParameters: {'parent_event_id': parentEventId}) as Map<String, dynamic>;
+    final events = response['events'] as List<dynamic>? ?? [];
+    return events.map((e) => FieldEvent.fromJson(e as Map<String, dynamic>)).toList();
+  }
+
   Future<PgaEventPrediction> getEventPrediction(String sport, String eventId) async {
     final response = await _api.get(ApiRoutes.eventPrediction(sport, eventId)) as Map<String, dynamic>;
     // Same "computing" cache-miss shape as every other sport's predict
@@ -46,6 +54,10 @@ final fieldEventsListProvider = FutureProvider.family<List<FieldEvent>, _FieldEv
 });
 
 typedef _FieldEventQuery = ({String sport, String eventId});
+
+final fieldChildEventsProvider = FutureProvider.family<List<FieldEvent>, _FieldEventQuery>((ref, query) {
+  return ref.watch(fieldEventsRepositoryProvider).listChildEvents(query.sport, query.eventId);
+});
 
 final fieldEventPredictionProvider = FutureProvider.family<PgaEventPrediction, _FieldEventQuery>((ref, query) {
   return ref.watch(fieldEventsRepositoryProvider).getEventPrediction(query.sport, query.eventId);

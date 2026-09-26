@@ -248,6 +248,16 @@ class TestPgaRouting:
 
         assert mock_list.call_args.args[-1] == "scheduled"
 
+    def test_events_route_with_parent_event_id_lists_that_cups_matches(self):
+        with patch.object(shared_predict_read, "_get_storage"), \
+             patch.object(shared_predict_read.pga_reads, "list_events") as mock_list, \
+             patch.object(shared_predict_read.pga_reads, "list_child_events", return_value={"sport": "pga", "events": []}) as mock_children:
+            response = shared_predict_read.lambda_handler(_api_event("/pga/events", {"parent_event_id": "401824815"}), None)
+
+        assert response["statusCode"] == 200
+        assert mock_children.call_args.args[1:] == ("pga", "401824815")
+        mock_list.assert_not_called()
+
     def test_models_route_calls_the_real_list_models(self):
         with patch.object(shared_predict_read, "_get_model_bucket"), \
              patch.object(shared_predict_read, "list_models", return_value={"sport": "pga", "models": []}):
