@@ -4,6 +4,7 @@ import '../../core/models/season_projection.dart';
 import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_text_styles.dart';
 import '../../core/widgets/responsive.dart';
+import '../../core/widgets/stat_value.dart';
 
 // Shared NFL/NBA player-prop stat display labels.
 const _statLabels = {
@@ -51,7 +52,7 @@ class SeasonLeaderboards extends StatelessWidget {
           runSpacing: 20,
           children: [
             for (final entry in entries)
-              SizedBox(width: width, child: _LeaderboardCard(label: entry.value, entries: boards[entry.key]!)),
+              SizedBox(width: width, child: _LeaderboardCard(statKey: entry.key, label: entry.value, entries: boards[entry.key]!)),
           ],
         );
       },
@@ -60,8 +61,9 @@ class SeasonLeaderboards extends StatelessWidget {
 }
 
 class _LeaderboardCard extends StatelessWidget {
-  const _LeaderboardCard({required this.label, required this.entries});
+  const _LeaderboardCard({required this.statKey, required this.label, required this.entries});
 
+  final String statKey;
   final String label;
   final List<LeaderboardEntry> entries;
 
@@ -94,12 +96,12 @@ class _LeaderboardCard extends StatelessWidget {
                   ),
                   // Current total -> projected season-end total.
                   Text(
-                    entries[i].currentTotal.toStringAsFixed(0),
+                    statValueText(statKey, entries[i].currentTotal),
                     style: AppTextStyles.metricValue(color: AppColors.inkMute),
                   ),
                   Text(' → ', style: AppTextStyles.microLabel(color: AppColors.inkMute)),
                   Text(
-                    entries[i].projectedTotal.toStringAsFixed(0),
+                    statValueText(statKey, entries[i].projectedTotal),
                     style: AppTextStyles.metricValue(color: AppColors.cyan),
                   ),
                 ],

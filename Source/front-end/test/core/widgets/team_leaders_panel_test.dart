@@ -3,7 +3,10 @@ import 'package:flutter_test/flutter_test.dart';
 
 import 'package:front_end/core/models/event_leaders.dart';
 import 'package:front_end/core/theme/app_colors.dart';
+import 'package:front_end/core/widgets/td_dots.dart';
 import 'package:front_end/core/widgets/team_leaders_panel.dart';
+
+import '../../support/mobile_viewport.dart';
 
 /// team_leaders_panel.dart picks its category set (label + which stat keys
 /// to show) per sport -- football's passing/rushing/receiving/sacks vs.
@@ -28,6 +31,127 @@ void main() {
 
     expect(find.text('PASSING'), findsOneWidget);
     expect(find.text('SCORING'), findsNothing);
+  });
+
+  testWidgets('a predicted sack total shows to the nearest half sack', (tester) async {
+    const leaders = EventLeaders(
+      home: TeamLeaders({
+        'passing': [],
+        'receiving': [],
+        'rushing': [],
+        'sacks': [PlayerStatLine(entityId: '1', name: 'Edge Rusher', stats: {'defensive_sacks': 0.62})],
+      }),
+      away: TeamLeaders({'passing': [], 'receiving': [], 'rushing': [], 'sacks': []}),
+    );
+
+    await tester.pumpWidget(wrap(const TeamLeadersPanel(sport: 'ncaafb', homeAbbr: 'UGA', awayAbbr: 'BAMA', leaders: leaders)));
+
+    expect(find.textContaining('0.5 SACKS'), findsOneWidget);
+  });
+
+  const footballComparison = EventLeadersComparison(
+    home: TeamLeadersComparison({
+      'passing': [
+        PlayerStatLineComparison(
+          entityId: '1', name: 'Ty Simpson',
+          predicted: {'passing_yards': 241, 'passing_touchdowns': 1.72}, actual: {'passing_yards': 268, 'passing_touchdowns': 2},
+        ),
+      ],
+      'rushing': [
+        PlayerStatLineComparison(
+          entityId: '2', name: 'Jam Miller',
+          predicted: {'rushing_yards': 64, 'rushing_touchdowns': 0.58}, actual: {'rushing_yards': 52, 'rushing_touchdowns': 1},
+        ),
+      ],
+      'receiving': [],
+      'sacks': [
+        PlayerStatLineComparison(entityId: '3', name: 'LT Overton', predicted: {'defensive_sacks': 0.62}, actual: {'defensive_sacks': 1.5}),
+      ],
+    }),
+    away: TeamLeadersComparison({'passing': [], 'rushing': [], 'receiving': [], 'sacks': []}),
+  );
+
+  testWidgets('a predicted touchdown shows its whole number with dots', (tester) async {
+    const leaders = EventLeaders(
+      home: TeamLeaders({
+        'passing': [PlayerStatLine(entityId: '1', name: 'Ty Simpson', stats: {'passing_yards': 241, 'passing_touchdowns': 1.72})],
+        'receiving': [],
+        'rushing': [],
+        'sacks': [],
+      }),
+      away: TeamLeaders({'passing': [], 'receiving': [], 'rushing': [], 'sacks': []}),
+    );
+
+    await tester.pumpWidget(wrap(const TeamLeadersPanel(sport: 'ncaafb', homeAbbr: 'UGA', awayAbbr: 'BAMA', leaders: leaders)));
+
+    expect(find.textContaining('241 YDS · 2 TD'), findsOneWidget);
+    final dots = tester.widget<TdDots>(find.byType(TdDots));
+    expect((dots.value, dots.slots), (1.72, 2));
+  });
+
+  testWidgets('basketball never shows dots', (tester) async {
+    const leaders = EventLeaders(
+      home: TeamLeaders({'scoring': [PlayerStatLine(entityId: '1', name: 'Jayson Tatum', stats: {'points': 27.4})], 'rebounding': [], 'assists': []}),
+      away: TeamLeaders({'scoring': [], 'rebounding': [], 'assists': []}),
+    );
+
+    await tester.pumpWidget(wrap(const TeamLeadersPanel(sport: 'nba', homeAbbr: 'BOS', awayAbbr: 'LAL', leaders: leaders)));
+
+    expect(find.byType(TdDots), findsNothing);
+  });
+
+  testWidgets('a football comparison on a wide screen stays one line per player, with dots', (tester) async {
+    tester.view.physicalSize = const Size(1000, 1400);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.reset);
+
+    await tester.pumpWidget(
+      wrap(const TeamLeadersComparisonPanel(sport: 'ncaafb', homeAbbr: 'UGA', awayAbbr: 'BAMA', comparison: footballComparison)),
+    );
+
+    expect(find.byType(Table), findsNothing);
+    expect(find.textContaining('268 YDS 241'), findsOneWidget);
+    expect(find.byType(TdDots), findsNWidgets(2));
+  });
+
+  for (final width in mobileViewportWidths) {
+    testWidgets('a football comparison on a ${width}px phone stacks actual over predicted in aligned columns', (tester) async {
+      await pumpAtWidth(
+        tester,
+        width,
+        wrap(const SingleChildScrollView(
+          child: TeamLeadersComparisonPanel(sport: 'ncaafb', homeAbbr: 'UGA', awayAbbr: 'BAMA', comparison: footballComparison),
+        )),
+      );
+
+      expect(tester.takeException(), isNull);
+      expect(find.byType(Table), findsNWidgets(3));
+      final actualYards = tester.getRect(find.text('268'));
+      final predictedYards = tester.getRect(find.text('241'));
+      expect(predictedYards.right, closeTo(actualYards.right, 0.5));
+      expect(predictedYards.top, greaterThan(actualYards.bottom - 1));
+      expect(find.text('1.5'), findsOneWidget);
+      expect(find.text('0.5'), findsOneWidget);
+      final dots = tester.getRect(find.byType(TdDots).first);
+      final predictedTd = tester.getRect(find.text('2').last);
+      expect(dots.left, greaterThan(predictedTd.right), reason: 'dots sit right of the number');
+    });
+  }
+
+  testWidgets('a basketball comparison on a phone does not stack', (tester) async {
+    const comparison = EventLeadersComparison(
+      home: TeamLeadersComparison({
+        'scoring': [PlayerStatLineComparison(entityId: '1', name: 'Jayson Tatum', predicted: {'points': 27}, actual: {'points': 31})],
+        'rebounding': [],
+        'assists': [],
+      }),
+      away: TeamLeadersComparison({'scoring': [], 'rebounding': [], 'assists': []}),
+    );
+
+    await pumpAtWidth(tester, 360, wrap(const TeamLeadersComparisonPanel(sport: 'nba', homeAbbr: 'BOS', awayAbbr: 'LAL', comparison: comparison)));
+
+    expect(find.byType(Table), findsNothing);
+    expect(find.textContaining('31 PTS 27'), findsOneWidget);
   });
 
   testWidgets('nba leaders render the basketball category labels, one candidate per category', (tester) async {

@@ -1,9 +1,13 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 
 import '../models/event_leaders.dart';
 import '../models/sport_config.dart';
 import '../theme/app_colors.dart';
 import '../theme/app_text_styles.dart';
+import 'stat_value.dart';
+import 'td_dots.dart';
 
 // Below this width, two team-leader columns side by side leave too little
 // room per column for a player name and its stat values on one line.
@@ -82,6 +86,22 @@ const _basketballCategories = [
   _CategoryConfig('rebounding', 'Rebounding', ['rebounds']),
   _CategoryConfig('assists', 'Assists', ['assists']),
 ];
+
+bool _isFootball(String sport) => sport != SportIds.nba && sport != SportIds.ncaambb;
+
+/// A predicted stat's spans: its value (whole-number TD plus TdDots for a
+/// touchdown stat) in cyan, optionally followed by its short label.
+List<InlineSpan> _predictedSpans(String key, double value, {String? label}) {
+  final style = AppTextStyles.metricValue(color: AppColors.cyan);
+  final slots = tdDotSlots(key);
+  if (slots == null) {
+    return [TextSpan(text: label == null ? statValueText(key, value) : '${statValueText(key, value)} $label', style: style)];
+  }
+  return [
+    TextSpan(text: label == null ? '${value.round()} ' : '${value.round()} $label ', style: style),
+    WidgetSpan(alignment: PlaceholderAlignment.middle, child: TdDots(value: value, slots: slots)),
+  ];
+}
 
 List<_CategoryConfig> _categoriesFor(String sport) =>
     sport == SportIds.nba || sport == SportIds.ncaambb ? _basketballCategories : _footballCategories;
@@ -174,19 +194,15 @@ class _PlayerRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final values = statKeys
-        .map((key) {
-          final value = player.stats[key];
-          if (value == null) return null;
-          return '${value.toStringAsFixed(0)} ${_statShortLabels[key] ?? key.toUpperCase()}';
-        })
-        .whereType<String>()
-        .join(' · ');
+    final spans = <InlineSpan>[];
+    for (final key in statKeys) {
+      final value = player.stats[key];
+      if (value == null) continue;
+      if (spans.isNotEmpty) spans.add(TextSpan(text: ' · ', style: AppTextStyles.metricValue(color: AppColors.cyan)));
+      spans.addAll(_predictedSpans(key, value, label: _statShortLabels[key] ?? key.toUpperCase()));
+    }
 
-    return _PlayerStatRow(
-      name: player.displayName,
-      spans: [TextSpan(text: values, style: AppTextStyles.metricValue(color: AppColors.cyan))],
-    );
+    return _PlayerStatRow(name: player.displayName, spans: spans);
   }
 }
 
@@ -210,11 +226,21 @@ class _PlayerStatRow extends StatelessWidget {
   static const _gap = 8.0;
 
   double _naturalWidth(BuildContext context, InlineSpan span) {
+    final placeholders = <PlaceholderDimensions>[];
+    span.visitChildren((child) {
+      if (child is WidgetSpan) {
+        final widget = child.child;
+        placeholders.add(PlaceholderDimensions(size: widget is TdDots ? widget.size : Size.zero, alignment: child.alignment));
+      }
+      return true;
+    });
     final painter = TextPainter(
       text: span,
       textDirection: Directionality.of(context),
       textScaler: MediaQuery.textScalerOf(context),
-    )..layout();
+    )
+      ..setPlaceholderDimensions(placeholders)
+      ..layout();
     final width = painter.width;
     painter.dispose();
     return width;
@@ -289,9 +315,15 @@ class TeamLeadersComparisonPanel extends StatelessWidget {
         children: [
           Text(title, style: AppTextStyles.microLabel()),
           const SizedBox(height: 16),
-          _ResponsiveTeamColumns(
-            away: _TeamLeadersComparisonColumn(sport: sport, label: awayAbbr, team: comparison.away),
-            home: _TeamLeadersComparisonColumn(sport: sport, label: homeAbbr, team: comparison.home),
+          LayoutBuilder(
+            builder: (context, constraints) {
+              // Football on a phone: actual over predicted in aligned columns.
+              final stacked = _isFootball(sport) && constraints.maxWidth < _stackBreakpoint;
+              return _ResponsiveTeamColumns(
+                away: _TeamLeadersComparisonColumn(sport: sport, label: awayAbbr, team: comparison.away, stacked: stacked),
+                home: _TeamLeadersComparisonColumn(sport: sport, label: homeAbbr, team: comparison.home, stacked: stacked),
+              );
+            },
           ),
         ],
       ),
@@ -300,11 +332,12 @@ class TeamLeadersComparisonPanel extends StatelessWidget {
 }
 
 class _TeamLeadersComparisonColumn extends StatelessWidget {
-  const _TeamLeadersComparisonColumn({required this.sport, required this.label, required this.team});
+  const _TeamLeadersComparisonColumn({required this.sport, required this.label, required this.team, this.stacked = false});
 
   final String sport;
   final String label;
   final TeamLeadersComparison team;
+  final bool stacked;
 
   @override
   Widget build(BuildContext context) {
@@ -315,7 +348,9 @@ class _TeamLeadersComparisonColumn extends StatelessWidget {
         const SizedBox(height: 12),
         for (final category in _categoriesFor(sport))
           if (team[category.key].isNotEmpty)
-            _ComparisonCategorySection(title: category.title, players: team[category.key], statKeys: category.statKeys),
+            stacked
+                ? _StackedComparisonSection(title: category.title, players: team[category.key], statKeys: category.statKeys)
+                : _ComparisonCategorySection(title: category.title, players: team[category.key], statKeys: category.statKeys),
       ],
     );
   }
@@ -341,6 +376,88 @@ class _ComparisonCategorySection extends StatelessWidget {
         ],
       ),
     );
+  }
+}
+
+/// Football on a phone: the category's stat names across the top, then each
+/// player's actual row (white) over their predicted row (blue), numbers in
+/// aligned columns. A touchdown column keeps a fixed slot to the right of its
+/// numbers for the predicted dots, so the numbers stay lined up.
+class _StackedComparisonSection extends StatelessWidget {
+  const _StackedComparisonSection({required this.title, required this.players, required this.statKeys});
+
+  final String title;
+  final List<PlayerStatLineComparison> players;
+  final List<String> statKeys;
+
+  static const _columnGap = 14.0;
+  static const _dotsGap = 5.0;
+
+  @override
+  Widget build(BuildContext context) {
+    final keys = statKeys.where((key) => players.any((p) => p.predicted[key] != null)).toList();
+    final valueStyle = AppTextStyles.metricValue();
+    // Each touchdown column's dot slot fits its widest prediction (a 3.2-TD
+    // passer needs four dots, not the usual two).
+    final slotWidths = {
+      for (final key in keys)
+        if (tdDotSlots(key) case final slots?)
+          key: [
+            for (final player in players)
+              TdDots(value: player.predicted[key] ?? 0, slots: slots).size.width,
+          ].fold(0.0, math.max) + _dotsGap,
+    };
+
+    // Every cell in a column gets the same trailing slot -- the dots in a
+    // predicted TD cell, empty space everywhere else.
+    Widget cell(String key, Widget value, {Widget? trailing}) {
+      final slotWidth = slotWidths[key];
+      return Padding(
+        padding: const EdgeInsets.only(left: _columnGap),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.end,
+          children: [
+            value,
+            if (slotWidth != null) SizedBox(width: slotWidth, child: Align(alignment: Alignment.centerRight, child: trailing)),
+          ],
+        ),
+      );
+    }
+
+    final rows = <TableRow>[
+      TableRow(children: [
+        Padding(padding: const EdgeInsets.only(bottom: 2), child: Text(title.toUpperCase(), style: AppTextStyles.microLabel())),
+        for (final key in keys) cell(key, Text(_statShortLabels[key] ?? key.toUpperCase(), style: AppTextStyles.microLabel())),
+      ]),
+    ];
+    for (final player in players) {
+      rows.add(TableRow(children: [
+        Padding(padding: const EdgeInsets.only(top: 6), child: Text(player.displayName, style: AppTextStyles.body())),
+        for (final key in keys)
+          cell(key, Text(player.actual[key] != null ? statValueText(key, player.actual[key]!) : '--', style: valueStyle.copyWith(color: AppColors.ink))),
+      ]));
+      rows.add(TableRow(children: [
+        const SizedBox.shrink(),
+        for (final key in keys) _predictedCell(key, player.predicted[key], cell),
+      ]));
+    }
+
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 14),
+      child: Table(
+        columnWidths: {0: const FlexColumnWidth(), for (var i = 1; i <= keys.length; i++) i: const IntrinsicColumnWidth()},
+        defaultVerticalAlignment: TableCellVerticalAlignment.middle,
+        children: rows,
+      ),
+    );
+  }
+
+  Widget _predictedCell(String key, double? predicted, Widget Function(String, Widget, {Widget? trailing}) cell) {
+    final style = AppTextStyles.metricValue(color: AppColors.cyan);
+    if (predicted == null) return cell(key, Text('--', style: style));
+    final slots = tdDotSlots(key);
+    if (slots == null) return cell(key, Text(statValueText(key, predicted), style: style));
+    return cell(key, Text('${predicted.round()}', style: style), trailing: TdDots(value: predicted, slots: slots));
   }
 }
 
@@ -373,11 +490,11 @@ class _ComparisonPlayerRow extends StatelessWidget {
       if (predicted == null) continue;
       final label = _statShortLabels[key] ?? key.toUpperCase();
       final actual = player.actual[key];
-      final actualText = actual != null ? actual.toStringAsFixed(0) : '--';
+      final actualText = actual != null ? statValueText(key, actual) : '--';
       if (!first) spans.add(TextSpan(text: ' · ', style: AppTextStyles.metricValue(color: AppColors.inkMute)));
       first = false;
       spans.add(TextSpan(text: '$actualText $label ', style: AppTextStyles.metricValue(color: AppColors.ink)));
-      spans.add(TextSpan(text: predicted.toStringAsFixed(0), style: AppTextStyles.metricValue(color: AppColors.cyan)));
+      spans.addAll(_predictedSpans(key, predicted));
     }
 
     return _PlayerStatRow(name: player.displayName, spans: spans);
