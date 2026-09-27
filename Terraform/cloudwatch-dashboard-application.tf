@@ -240,7 +240,7 @@ resource "aws_cloudwatch_dashboard" "application" {
         width  = 12
         height = 6
         properties = {
-          region = "us-east-1" # where cloudfront_edge_access_logs lives
+          region = local.cloudfront_edge_logs_region
           title  = "Blocked requests by country"
           view   = "bar"
           query  = <<-QUERY
@@ -258,7 +258,7 @@ resource "aws_cloudwatch_dashboard" "application" {
         width  = 12
         height = 6
         properties = {
-          region = "us-east-1"
+          region = local.cloudfront_edge_logs_region
           title  = "Blocked requests by attempted path"
           view   = "table"
           query  = <<-QUERY
@@ -277,7 +277,7 @@ resource "aws_cloudwatch_dashboard" "application" {
         width  = 24
         height = 8
         properties = {
-          region = "us-east-1"
+          region = local.cloudfront_edge_logs_region
           title  = "Recent blocked requests"
           view   = "table"
           query  = <<-QUERY

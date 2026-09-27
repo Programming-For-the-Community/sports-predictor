@@ -21,13 +21,21 @@ resource "aws_cloudwatch_log_group" "cloudfront_edge_access_logs" {
   })
 }
 
-# us-east-1 twin of iam-stepfunctions-orchestrator.tf's vended_logs policy;
-# CloudWatch Logs resource policies are per-region. Capped at 10 per
+# The region the edge log group was actually created in, read off its own
+# ARN (arn:aws:logs:<region>:...) -- used wherever that region is spelled out
+# (the resource policy below, the viewer-analytics dashboard's log widgets,
+# the cloudwatch-geo-widget Lambda), so it always matches the real resource.
+locals {
+  cloudfront_edge_logs_region = split(":", aws_cloudwatch_log_group.cloudfront_edge_access_logs.arn)[3]
+}
+
+# This region's twin of iam-stepfunctions-orchestrator.tf's vended_logs
+# policy; CloudWatch Logs resource policies are per-region. Capped at 10 per
 # account per region.
 resource "aws_cloudwatch_log_resource_policy" "vended_logs_us_east_1" {
   provider = aws.us_east_1
 
-  policy_name = "${var.project}-vended-logs-us-east-1"
+  policy_name = "${var.project}-vended-logs-${local.cloudfront_edge_logs_region}"
   policy_document = jsonencode({
     Version = "2012-10-17"
     Statement = [
@@ -35,7 +43,7 @@ resource "aws_cloudwatch_log_resource_policy" "vended_logs_us_east_1" {
         Effect    = "Allow"
         Principal = { Service = "delivery.logs.amazonaws.com" }
         Action    = ["logs:CreateLogStream", "logs:PutLogEvents"]
-        Resource  = "arn:aws:logs:us-east-1:${var.account_id}:log-group:/aws/vendedlogs/*:*"
+        Resource  = "arn:aws:logs:${local.cloudfront_edge_logs_region}:${var.account_id}:log-group:/aws/vendedlogs/*:*"
       }
     ]
   })

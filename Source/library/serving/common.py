@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 
 from boto3.dynamodb.conditions import Key
 
-from library.serving.live_scores_common import POLL_SAFETY_CAP_AFTER_KICKOFF, parse_kickoff
+from library.serving.live_window import POLL_SAFETY_CAP_AFTER_KICKOFF, parse_kickoff
 from library.serving.prediction_snapshots import event_prediction_rows
 from library.parsing import us_eastern_date
 from library.storage.model_artifacts import current_version_key, model_artifact_key

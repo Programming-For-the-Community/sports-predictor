@@ -30,6 +30,7 @@ from library.aws.account import get_account_id
 from library.http.espn import espn_scoreboard_date
 from library.normalize.espn import boxscore_to_player_game_stats
 from library.parsing import parse_number
+from library.serving.live_window import POLL_SAFETY_CAP_AFTER_KICKOFF, parse_kickoff
 
 logger = logging.getLogger("library.serving.live_scores_common")
 
@@ -37,12 +38,6 @@ logger = logging.getLogger("library.serving.live_scores_common")
 # that goes live a few minutes early/on time without waiting for the
 # scheduled kickoff_time to have technically arrived.
 POLL_START_BEFORE_KICKOFF = timedelta(minutes=15)
-
-# Hard safety cap so a data anomaly (a bad kickoff_time, or a game whose
-# status never reaches completed) can't get polled forever -- no real game
-# in any of these sports runs anywhere close to this long after its own
-# kickoff/tip-off.
-POLL_SAFETY_CAP_AFTER_KICKOFF = timedelta(hours=7)
 
 # How stale the cache is allowed to look before a reader should treat it
 # as "unknown" rather than trust it. Read by get_live_scores below.
@@ -65,9 +60,6 @@ def put_cache(s3, bucket: str, cache_key: str, payload: dict) -> None:
     )
 
 
-def parse_kickoff(kickoff_time: str) -> datetime:
-    # ESPN's own timestamp shape ("...Z").
-    return datetime.fromisoformat(kickoff_time.replace("Z", "+00:00"))
 
 
 def candidate_events(scheduled_events: list[dict], now: datetime, already_completed: set[str]) -> list[dict]:

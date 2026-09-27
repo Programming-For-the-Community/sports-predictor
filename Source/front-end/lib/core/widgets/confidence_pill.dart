@@ -1,21 +1,9 @@
 import 'package:flutter/material.dart';
 
-import '../theme/app_colors.dart';
+import '../../static/confidence_tiers.dart';
 import '../theme/app_text_styles.dart';
 
-/// The confidence tiers, strongest first.
-const confidenceTiers = ['HIGH', 'MED', 'LOW'];
-
-/// design/FRONTEND_STYLE.md's confidence tier for a home win probability:
-/// edge off 50/50 >= 0.13 -> HIGH, >= 0.06 -> MED, else LOW.
-String confidenceTierFor(double homeWinProbability) {
-  final edge = (homeWinProbability - 0.5).abs();
-  return edge >= 0.13 ? 'HIGH' : edge >= 0.06 ? 'MED' : 'LOW';
-}
-
-/// design/FRONTEND_STYLE.md's confidence tiers: "distance off 50/50: edge
-/// >= 0.13 -> HIGH (cyan), >= 0.06 -> MED (amber), else LOW (muted)".
-/// Win-probability only -- margin/score/player-prop predictions are plain
+/// A win pick's ConfidenceTier as a colored pill. Win-probability only -- margin/score/player-prop predictions are plain
 /// regression point estimates with no probability distribution to derive
 /// a tier from.
 class ConfidencePill extends StatelessWidget {
@@ -29,12 +17,8 @@ class ConfidencePill extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final label = confidenceTierFor(homeWinProbability);
-    final color = switch (label) {
-      'HIGH' => AppColors.cyan,
-      'MED' => AppColors.warn,
-      _ => AppColors.inkMute,
-    };
+    final tier = ConfidenceTier.forProbability(homeWinProbability);
+    final (label, color) = (tier.label, tier.color);
 
     if (dotOnly) {
       return Tooltip(

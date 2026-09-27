@@ -3,9 +3,9 @@ import 'package:flutter/material.dart';
 import '../../core/models/event.dart';
 import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_text_styles.dart';
-import '../../core/widgets/confidence_pill.dart';
 import '../../core/widgets/game_row.dart' show clockLabel;
 import '../../core/widgets/status_toggle.dart';
+import '../../static/confidence_tiers.dart';
 
 /// Every game kicking off in the same local hour.
 class KickoffSlot {
@@ -57,9 +57,9 @@ class EventListFilters extends StatelessWidget {
   });
 
   final List<KickoffSlot> slots;
-  final Set<String> selectedTiers;
+  final Set<ConfidenceTier> selectedTiers;
   final Set<int> selectedHours;
-  final ValueChanged<String> onToggleTier;
+  final ValueChanged<ConfidenceTier> onToggleTier;
   final ValueChanged<int> onToggleHour;
 
   @override
@@ -73,9 +73,9 @@ class EventListFilters extends StatelessWidget {
         _FilterGroup(
           label: 'WINNER CONFIDENCE',
           chips: [
-            for (final tier in confidenceTiers)
+            for (final tier in ConfidenceTier.values)
               StatusToggle(
-                label: tier,
+                label: tier.label,
                 selected: selectedTiers.contains(tier),
                 onTap: () => onToggleTier(tier),
                 accentColor: AppColors.cyan,

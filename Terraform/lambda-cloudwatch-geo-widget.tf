@@ -48,8 +48,9 @@ resource "aws_lambda_function" "cloudwatch_geo_widget" {
       # Plain comma-joined log group names -- passed to StartQuery's own
       # logGroupNames parameter, not embedded as SOURCE clauses in the
       # query text.
-      ACCEPTED_LOG_GROUP_NAMES = join(",", local.viewer_analytics_log_group_names)
-      BLOCKED_LOG_GROUP_NAME   = aws_cloudwatch_log_group.cloudfront_edge_access_logs.name
+      ACCEPTED_LOG_GROUP_NAMES   = join(",", local.viewer_analytics_log_group_names)
+      BLOCKED_LOG_GROUP_NAME     = aws_cloudwatch_log_group.cloudfront_edge_access_logs.name
+      CLOUDFRONT_EDGE_LOG_REGION = local.cloudfront_edge_logs_region
     }
   }
 

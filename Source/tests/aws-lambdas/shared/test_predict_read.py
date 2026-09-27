@@ -21,12 +21,15 @@ The shared_predict_read module is registered in sys.modules by
 Source/tests/aws-lambdas/shared/conftest.py.
 """
 import json
+import os
 import time
 from unittest.mock import MagicMock, patch
 
 import shared_predict_read
 from library.schema.keys import event_key as build_event_key
 from library.storage.model_artifacts import current_version_key
+
+_SOURCE = os.path.normpath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
 
 
 def _api_event(resource, query_params=None):
@@ -519,3 +522,26 @@ class TestF1PredictionRoute:
 
         assert response["statusCode"] == 200  # versions match -> fresh, not stale
         get_invoker.assert_not_called()
+
+
+def test_the_handler_imports_with_only_what_the_lambda_bundles():
+    # Real outage (2026-09-27): library.serving.common started importing a
+    # module that needs `requests`, which this Lambda doesn't bundle -- every
+    # sport's /events route returned 502 on ImportModuleError. Runs the
+    # handler's imports with the third-party packages the Lambda runtime
+    # lacks blocked.
+    import subprocess
+    import sys as _sys
+
+    blocked = ["requests", "numpy", "pandas", "pyarrow", "sklearn", "xgboost", "lightgbm", "PIL"]
+    handler_path = os.path.join(_SOURCE, "aws-lambdas", "shared", "predict-read", "handler.py")
+    code = (
+        "import importlib.util, sys\n"
+        f"for name in {blocked!r}: sys.modules[name] = None\n"
+        f"spec = importlib.util.spec_from_file_location('predict_read_handler_check', {handler_path!r})\n"
+        "spec.loader.exec_module(importlib.util.module_from_spec(spec))\n"
+    )
+    env = {**os.environ, "PYTHONPATH": _SOURCE, "AWS_DEFAULT_REGION": "us-east-2"}
+    result = subprocess.run([_sys.executable, "-c", code], env=env, capture_output=True, text=True, timeout=60)
+
+    assert result.returncode == 0, result.stderr[-2000:]

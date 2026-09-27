@@ -26,6 +26,12 @@ def _load_handler(module_name: str, relative_path: str) -> None:
     sys.modules[module_name] = mod
 
 
+# Handlers build their AWS clients at import, and a Logs client needs a
+# region -- CI has none configured. CLOUDFRONT_EDGE_LOG_REGION stands in for
+# the value Terraform passes the cloudwatch-geo-widget Lambda.
+os.environ.setdefault("AWS_DEFAULT_REGION", "us-east-2")
+os.environ.setdefault("CLOUDFRONT_EDGE_LOG_REGION", "us-east-1")
+
 _load_handler("shared_season_gate", "aws-lambdas/shared/season-gate/handler.py")
 _load_handler("shared_cloudwatch_geo_widget", "aws-lambdas/shared/cloudwatch-geo-widget/handler.py")
 _load_handler("shared_ec2_training_reaper", "aws-lambdas/shared/ec2-training-reaper/handler.py")

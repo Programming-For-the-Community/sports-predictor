@@ -1,24 +1,10 @@
+import os
 import sys
 from unittest.mock import MagicMock
 
-import pytest
 from PIL import Image
 
 handler = sys.modules["shared_cloudwatch_geo_widget"]
-
-
-@pytest.fixture(autouse=True)
-def _reset_client_singletons():
-    """_get_logs_client/_get_cloudfront_logs_client cache their own client
-    module-level, so it'd otherwise survive across tests too -- whichever
-    test runs first would populate it, and every test after it would
-    silently reuse that first test's own mocked client instead of its
-    own patched boto3.client."""
-    handler._logs_client = None
-    handler._cloudfront_logs_client = None
-    yield
-    handler._logs_client = None
-    handler._cloudfront_logs_client = None
 
 
 def _mock_logs_client(rows: list[dict]):
@@ -285,6 +271,9 @@ class TestLambdaHandler:
         assert "<img src=\"data:image/jpeg;base64," in result
         cloudfront_logs_client.start_query.assert_called_once()
         regular_logs_client.start_query.assert_not_called()
+
+    def test_the_cloudfront_logs_client_uses_the_region_terraform_passes_in(self):
+        assert handler._cloudfront_logs_client.meta.region_name == os.environ["CLOUDFRONT_EDGE_LOG_REGION"]
 
     def test_missing_mode_defaults_to_accepted(self, monkeypatch):
         logs_client = _mock_logs_client([])

@@ -11,10 +11,10 @@ import '../../core/models/live_score.dart';
 import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_text_styles.dart';
 import '../../core/widgets/conference_filter_field.dart';
-import '../../core/widgets/confidence_pill.dart';
 import '../../core/widgets/game_row.dart';
 import '../../core/widgets/status_toggle.dart';
 import '../../static/conference_order.dart';
+import '../../static/confidence_tiers.dart';
 import 'event_list_filters.dart';
 
 const _weekdayNames = [
@@ -99,7 +99,7 @@ class _EventListPageState extends ConsumerState<EventListPage> with WidgetsBindi
   String _status = EventStatus.scheduled;
   String _conferenceFilter = '';
   // Upcoming/Current only; empty means "don't filter on this".
-  final Set<String> _confidenceTiers = {};
+  final Set<ConfidenceTier> _confidenceTiers = {};
   final Set<int> _kickoffHours = {};
   Timer? _liveScoresTimer;
 
@@ -213,7 +213,7 @@ class _EventListPageState extends ConsumerState<EventListPage> with WidgetsBindi
         final prediction = ref.watch(eventPredictionProvider((sport: widget.sportId, eventId: event.eventId))).value;
         if (prediction == null) {
           pending++;
-        } else if (!_confidenceTiers.contains(confidenceTierFor(prediction.homeWinProbability))) {
+        } else if (!_confidenceTiers.contains(ConfidenceTier.forProbability(prediction.homeWinProbability))) {
           continue;
         }
       }
