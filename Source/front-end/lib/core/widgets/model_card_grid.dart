@@ -36,38 +36,35 @@ class ModelCardGrid<T> extends StatelessWidget {
       builder: (context, constraints) {
         final perRow = ((constraints.maxWidth + _cardSpacing) / (idealCardWidth + _cardSpacing)).floor().clamp(1, 999);
         final width = cardWidth(idealCardWidth, constraints.maxWidth);
-
-        final rows = <List<T>>[];
-        for (var i = 0; i < items.length; i += perRow) {
-          rows.add(items.sublist(i, (i + perRow).clamp(0, items.length)));
-        }
-
         // A single column has nothing to equalize against.
         final stretch = equalHeight && perRow > 1;
 
-        Widget rowOf(List<T> row) {
-          final cards = Row(
-            crossAxisAlignment: stretch ? CrossAxisAlignment.stretch : CrossAxisAlignment.start,
-            children: [
-              for (var c = 0; c < row.length; c++) ...[
-                SizedBox(width: width, child: cardBuilder(row[c])),
-                if (c < row.length - 1) const SizedBox(width: _cardSpacing),
-              ],
-            ],
-          );
-          return stretch ? IntrinsicHeight(child: cards) : cards;
-        }
-
         return Column(
           crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            for (var r = 0; r < rows.length; r++) ...[
-              rowOf(rows[r]),
-              if (r < rows.length - 1) const SizedBox(height: _cardSpacing),
-            ],
-          ],
+          children: _withGaps(
+            _chunk(perRow).map((row) => _row(row, width, stretch)),
+            const SizedBox(height: _cardSpacing),
+          ),
         );
       },
     );
   }
+
+  Widget _row(List<T> row, double width, bool stretch) {
+    final cards = Row(
+      crossAxisAlignment: stretch ? CrossAxisAlignment.stretch : CrossAxisAlignment.start,
+      children: _withGaps(row.map((item) => SizedBox(width: width, child: cardBuilder(item))), const SizedBox(width: _cardSpacing)),
+    );
+    return stretch ? IntrinsicHeight(child: cards) : cards;
+  }
+
+  /// `items` split into consecutive rows of `perRow` (the last may be shorter).
+  List<List<T>> _chunk(int perRow) => [
+        for (var i = 0; i < items.length; i += perRow) items.sublist(i, (i + perRow).clamp(0, items.length)),
+      ];
+
+  /// `children` with `gap` between each pair.
+  static List<Widget> _withGaps(Iterable<Widget> children, Widget gap) => [
+        for (final (i, child) in children.indexed) ...[if (i > 0) gap, child],
+      ];
 }

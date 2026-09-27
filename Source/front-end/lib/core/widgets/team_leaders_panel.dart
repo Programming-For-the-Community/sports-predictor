@@ -390,74 +390,87 @@ class _StackedComparisonSection extends StatelessWidget {
   final List<PlayerStatLineComparison> players;
   final List<String> statKeys;
 
-  static const _columnGap = 14.0;
-  static const _dotsGap = 5.0;
-
   @override
   Widget build(BuildContext context) {
-    final keys = statKeys.where((key) => players.any((p) => p.predicted[key] != null)).toList();
-    final valueStyle = AppTextStyles.metricValue();
-    // Each touchdown column's dot slot fits its widest prediction (a 3.2-TD
-    // passer needs four dots, not the usual two).
-    final slotWidths = {
-      for (final key in keys)
-        if (tdDotSlots(key) case final slots?)
-          key: [
-            for (final player in players)
-              TdDots(value: player.predicted[key] ?? 0, slots: slots).size.width,
-          ].fold(0.0, math.max) + _dotsGap,
-    };
-
-    // Every cell in a column gets the same trailing slot -- the dots in a
-    // predicted TD cell, empty space everywhere else.
-    Widget cell(String key, Widget value, {Widget? trailing}) {
-      final slotWidth = slotWidths[key];
-      return Padding(
-        padding: const EdgeInsets.only(left: _columnGap),
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.end,
-          children: [
-            value,
-            if (slotWidth != null) SizedBox(width: slotWidth, child: Align(alignment: Alignment.centerRight, child: trailing)),
-          ],
-        ),
-      );
-    }
-
-    final rows = <TableRow>[
-      TableRow(children: [
-        Padding(padding: const EdgeInsets.only(bottom: 2), child: Text(title.toUpperCase(), style: AppTextStyles.microLabel())),
-        for (final key in keys) cell(key, Text(_statShortLabels[key] ?? key.toUpperCase(), style: AppTextStyles.microLabel())),
-      ]),
-    ];
-    for (final player in players) {
-      rows.add(TableRow(children: [
-        Padding(padding: const EdgeInsets.only(top: 6), child: Text(player.displayName, style: AppTextStyles.body())),
-        for (final key in keys)
-          cell(key, Text(player.actual[key] != null ? statValueText(key, player.actual[key]!) : '--', style: valueStyle.copyWith(color: AppColors.ink))),
-      ]));
-      rows.add(TableRow(children: [
-        const SizedBox.shrink(),
-        for (final key in keys) _predictedCell(key, player.predicted[key], cell),
-      ]));
-    }
-
+    final columns = _StatColumns(statKeys, players);
     return Padding(
       padding: const EdgeInsets.only(bottom: 14),
       child: Table(
-        columnWidths: {0: const FlexColumnWidth(), for (var i = 1; i <= keys.length; i++) i: const IntrinsicColumnWidth()},
+        columnWidths: {0: const FlexColumnWidth(), for (var i = 1; i <= columns.keys.length; i++) i: const IntrinsicColumnWidth()},
         defaultVerticalAlignment: TableCellVerticalAlignment.middle,
-        children: rows,
+        children: [
+          _headerRow(columns),
+          for (final player in players) ...[_actualRow(player, columns), _predictedRow(player, columns)],
+        ],
       ),
     );
   }
 
-  Widget _predictedCell(String key, double? predicted, Widget Function(String, Widget, {Widget? trailing}) cell) {
+  TableRow _headerRow(_StatColumns columns) => TableRow(children: [
+        Padding(padding: const EdgeInsets.only(bottom: 2), child: Text(title.toUpperCase(), style: AppTextStyles.microLabel())),
+        for (final key in columns.keys)
+          columns.cell(key, Text(_statShortLabels[key] ?? key.toUpperCase(), style: AppTextStyles.microLabel())),
+      ]);
+
+  TableRow _actualRow(PlayerStatLineComparison player, _StatColumns columns) {
+    final style = AppTextStyles.metricValue(color: AppColors.ink);
+    return TableRow(children: [
+      Padding(padding: const EdgeInsets.only(top: 6), child: Text(player.displayName, style: AppTextStyles.body())),
+      for (final key in columns.keys)
+        columns.cell(key, Text(player.actual[key] != null ? statValueText(key, player.actual[key]!) : '--', style: style)),
+    ]);
+  }
+
+  TableRow _predictedRow(PlayerStatLineComparison player, _StatColumns columns) => TableRow(children: [
+        const SizedBox.shrink(),
+        for (final key in columns.keys) _predictedCell(key, player.predicted[key], columns),
+      ]);
+
+  Widget _predictedCell(String key, double? predicted, _StatColumns columns) {
     final style = AppTextStyles.metricValue(color: AppColors.cyan);
-    if (predicted == null) return cell(key, Text('--', style: style));
+    if (predicted == null) return columns.cell(key, Text('--', style: style));
     final slots = tdDotSlots(key);
-    if (slots == null) return cell(key, Text(statValueText(key, predicted), style: style));
-    return cell(key, Text('${predicted.round()}', style: style), trailing: TdDots(value: predicted, slots: slots));
+    if (slots == null) return columns.cell(key, Text(statValueText(key, predicted), style: style));
+    return columns.cell(key, Text('${predicted.round()}', style: style), trailing: TdDots(value: predicted, slots: slots));
+  }
+}
+
+/// A stacked section's stat columns: the stats with a prediction to show, and
+/// each touchdown column's dot-slot width.
+class _StatColumns {
+  _StatColumns(List<String> statKeys, List<PlayerStatLineComparison> players)
+      : keys = statKeys.where((key) => players.any((p) => p.predicted[key] != null)).toList() {
+    for (final key in keys) {
+      final slots = tdDotSlots(key);
+      if (slots != null) slotWidths[key] = _widestDots(key, slots, players) + _dotsGap;
+    }
+  }
+
+  static const _columnGap = 14.0;
+  static const _dotsGap = 5.0;
+
+  final List<String> keys;
+  final Map<String, double> slotWidths = {};
+
+  /// Each touchdown column's slot fits its widest prediction (a 3.2-TD passer
+  /// needs four dots, not the usual two).
+  static double _widestDots(String key, int slots, List<PlayerStatLineComparison> players) =>
+      players.map((p) => TdDots(value: p.predicted[key] ?? 0, slots: slots).size.width).fold(0.0, math.max);
+
+  /// Every cell in a column gets the same trailing slot -- the dots in a
+  /// predicted TD cell, empty space everywhere else.
+  Widget cell(String key, Widget value, {Widget? trailing}) {
+    final slotWidth = slotWidths[key];
+    return Padding(
+      padding: const EdgeInsets.only(left: _columnGap),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.end,
+        children: [
+          value,
+          if (slotWidth != null) SizedBox(width: slotWidth, child: Align(alignment: Alignment.centerRight, child: trailing)),
+        ],
+      ),
+    );
   }
 }
 

@@ -263,6 +263,31 @@ class TestRefresh:
 
 
 class TestLivePlayerStats:
+    def test_a_late_game_past_midnight_eastern_is_found_on_its_own_dates_scoreboard(self):
+        # Real bug (2026-09-27): Minnesota @ Washington kicked off 10pm CT,
+        # dated 9/26; after midnight Eastern only 9/27's scoreboard was
+        # fetched, so the game dropped out of the live cache while live.
+        now = datetime.now(timezone.utc)
+        late = {**_event("late", (now - timedelta(hours=2)).isoformat()), "event_date": "2026-09-26"}
+        early = {**_event("early", (now + timedelta(minutes=5)).isoformat()), "event_date": "2026-09-27"}
+        storage = MagicMock()
+        storage.get_all_events.return_value = [late, early]
+        scoreboards = {
+            "20260926": {"events": [_espn_event("late", state="in", completed=False, detail="Q3", home_score="21", away_score="17")]},
+            "20260927": {"events": [_espn_event("early", state="pre", completed=False, detail="Pregame", home_score="0", away_score="0")]},
+        }
+        client = MagicMock()
+        client.get_scoreboard_for_date.side_effect = lambda date: scoreboards[date]
+        client.get_summary.return_value = _espn_summary("late")
+        s3 = _make_s3()
+
+        live_scores.refresh(storage, s3, BUCKET, client, SPORT)
+
+        assert sorted(c.args[0] for c in client.get_scoreboard_for_date.call_args_list) == ["20260926", "20260927"]
+        cached = json.loads(s3._store[live_scores.LIVE_SCORES_CACHE_KEY])["events"]
+        assert cached["late"]["live"] is True
+        assert "early" in cached
+
     def test_a_live_candidates_boxscore_is_fetched_and_cached(self):
         storage = MagicMock()
         storage.get_all_events.return_value = [_event("1", datetime.now(timezone.utc).isoformat())]

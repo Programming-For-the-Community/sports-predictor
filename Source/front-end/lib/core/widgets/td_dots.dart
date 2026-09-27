@@ -4,41 +4,22 @@ import 'package:flutter/material.dart';
 
 import '../theme/app_colors.dart';
 
-/// Which way a touchdown prediction leans relative to the whole number shown.
-enum TdLean {
-  /// Just under the next TD (within 0.15), so it rounds up.
-  up,
-
-  /// Just past a whole TD (within 0.15), leaning away from the next one.
-  away,
-
-  /// 0.15-0.35 from the whole number shown.
-  leaning,
-
-  /// Near the half.
-  tossUp,
+/// A dot's color by how full it is: red when nearly empty (unlikely to count
+/// as a TD), amber at half, green when full or nearly full (counts).
+Color tdFillColor(double fill) {
+  final f = fill.clamp(0.0, 1.0);
+  return f <= 0.5
+      ? Color.lerp(AppColors.neg, AppColors.warn, f / 0.5)!
+      : Color.lerp(AppColors.warn, AppColors.live, (f - 0.5) / 0.5)!;
 }
-
-TdLean tdLeanFor(double value) {
-  final shown = value.round();
-  final distance = (value - shown).abs();
-  if (distance <= 0.15) return value < shown ? TdLean.up : TdLean.away;
-  return distance <= 0.35 ? TdLean.leaning : TdLean.tossUp;
-}
-
-Color tdLeanColor(TdLean lean) => switch (lean) {
-      TdLean.up => AppColors.live,
-      TdLean.away => AppColors.neg,
-      TdLean.leaning => AppColors.warn,
-      TdLean.tossUp => AppColors.inkSub,
-    };
 
 const _dotSize = 11.0;
 const _dotGap = 3.0;
 
-/// A touchdown prediction's fraction as dots: whole TDs solid, the next dot
-/// filled with the fraction, colored by tdLeanFor. `slots` is how many dots
-/// to draw at minimum (2 for passing, 1 otherwise).
+/// A touchdown prediction's fraction as dots: whole TDs solid green, the next
+/// dot filled with the fraction and colored by tdFillColor, any slot left
+/// over an empty outline. `slots` is how many dots to draw at minimum (2 for
+/// passing, 1 otherwise).
 class TdDots extends StatelessWidget {
   const TdDots({super.key, required this.value, this.slots = 1});
 
@@ -52,7 +33,6 @@ class TdDots extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final color = tdLeanColor(tdLeanFor(value));
     return Tooltip(
       message: '${value.toStringAsFixed(2)} TD predicted',
       child: Row(
@@ -60,7 +40,7 @@ class TdDots extends StatelessWidget {
         children: [
           for (var i = 0; i < _count; i++) ...[
             if (i > 0) const SizedBox(width: _dotGap),
-            CustomPaint(size: const Size(_dotSize, _dotSize), painter: _DotPainter((value - i).clamp(0.0, 1.0), color)),
+            CustomPaint(size: const Size(_dotSize, _dotSize), painter: _DotPainter((value - i).clamp(0.0, 1.0))),
           ],
         ],
       ),
@@ -69,14 +49,14 @@ class TdDots extends StatelessWidget {
 }
 
 class _DotPainter extends CustomPainter {
-  const _DotPainter(this.fill, this.color);
+  const _DotPainter(this.fill);
 
   final double fill;
-  final Color color;
 
   @override
   void paint(Canvas canvas, Size size) {
     const stroke = 1.5;
+    final color = fill == 0 ? AppColors.inkMute : tdFillColor(fill);
     final center = size.center(Offset.zero);
     final radius = size.shortestSide / 2;
     if (fill > 0) {
@@ -99,5 +79,5 @@ class _DotPainter extends CustomPainter {
   }
 
   @override
-  bool shouldRepaint(_DotPainter old) => old.fill != fill || old.color != color;
+  bool shouldRepaint(_DotPainter old) => old.fill != fill;
 }

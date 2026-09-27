@@ -151,8 +151,9 @@ def refresh(
             logger.info("No events in a live-poll window -- skipping ESPN call")
         return {"polled": len(carried_over)}
 
-    scoreboard = client.get_scoreboard_for_date(espn_scoreboard_date(now))
-    espn_events_by_id = {e["id"]: e for e in scoreboard.get("events", [])}
+    espn_events_by_id = {
+        e["id"]: e for date in _scoreboard_dates(candidates, now) for e in client.get_scoreboard_for_date(date).get("events", [])
+    }
 
     events_out = dict(carried_over)
     live_event_ids = _apply_scoreboard_states(candidates, espn_events_by_id, previous_events, events_out)
@@ -167,6 +168,16 @@ def _carried_over_events(previous_events: dict, already_completed: set[str], sch
     return {event_id: previous_events[event_id] for event_id in already_completed if event_id in scheduled_event_ids}
 
 
+def _scoreboard_dates(candidates: list[dict], now: datetime) -> list[str]:
+    """Every ESPN scoreboard date (YYYYMMDD) the candidates are listed under.
+    ESPN buckets a game by its Eastern start date, so a late game still being
+    played after midnight Eastern is on the previous day's scoreboard, not
+    today's (real bug, 2026-09-27: a 10pm CT kickoff dropped out of the live
+    cache at midnight). Usually one date; two around midnight."""
+    dates = {e["event_date"].replace("-", "") for e in candidates if e.get("event_date")}
+    return sorted(dates or {espn_scoreboard_date(now)})
+
+
 def _apply_scoreboard_states(
     candidates: list[dict], espn_events_by_id: dict, previous_events: dict, events_out: dict,
 ) -> list[str]:
@@ -177,7 +188,7 @@ def _apply_scoreboard_states(
     for event in candidates:
         espn_event = espn_events_by_id.get(event["event_id"])
         if espn_event is None:
-            logger.warning("Candidate event %s not found in today's ESPN scoreboard -- skipping", event["event_id"])
+            logger.warning("Candidate event %s not found on its ESPN scoreboard -- skipping", event["event_id"])
             continue
         state = extract_live_state(espn_event)
         if state["completed"] and not state["live"]:
