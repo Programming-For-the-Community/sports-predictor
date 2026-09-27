@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 
 from boto3.dynamodb.conditions import Key
 
+from library.serving.live_scores_common import POLL_SAFETY_CAP_AFTER_KICKOFF, parse_kickoff
 from library.serving.prediction_snapshots import event_prediction_rows
 from library.parsing import us_eastern_date
 from library.storage.model_artifacts import current_version_key, model_artifact_key
@@ -356,6 +357,24 @@ def _previous_day_events(completed: list[dict]) -> list[dict]:
     return [e for e in completed if e.get("event_date") == latest_date]
 
 
+def is_current_or_upcoming(event: dict, now: datetime) -> bool:
+    """A not-yet-final event dated today or later (U.S. Eastern, matching
+    event_date's own bucketing), or one that kicked off recently enough to
+    still be in progress -- the live-scores poller's own window. A late West
+    Coast game runs past midnight Eastern while still dated the day before
+    (real bug, 2026-09-27: a 10pm CT NCAAFB kickoff vanished mid-game and
+    the list jumped to the next week)."""
+    if event.get("event_date", "") >= us_eastern_date(now):
+        return True
+    kickoff = event.get("kickoff_time")
+    if not kickoff:
+        return False
+    try:
+        return now - parse_kickoff(kickoff) <= POLL_SAFETY_CAP_AFTER_KICKOFF
+    except ValueError:
+        return False
+
+
 def _next_day_events(scheduled: list[dict]) -> list[dict]:
     """Only the soonest upcoming date's games. No grace-period/cutoff step
     needed: grouping by single calendar date means filtering straight to
@@ -367,12 +386,17 @@ def _next_day_events(scheduled: list[dict]) -> list[dict]:
     # list the moment the server clock crosses UTC midnight, which for a
     # 6pm+ Eastern tip-off is while it's still being played. Deriving
     # "today" the same Eastern way keeps both sides on the same calendar.
-    today = us_eastern_date(datetime.now(timezone.utc))
-    plausible = [e for e in scheduled if e.get("event_date", "") >= today]
-    if not plausible:
-        return []
-    earliest_date = min(e.get("event_date", "") for e in plausible)
-    return [e for e in plausible if e.get("event_date") == earliest_date]
+    # A game still in progress from before midnight stays listed alongside
+    # the new day's slate -- see is_current_or_upcoming.
+    now = datetime.now(timezone.utc)
+    today = us_eastern_date(now)
+    current = [e for e in scheduled if is_current_or_upcoming(e, now)]
+    still_live = [e for e in current if e.get("event_date", "") < today]
+    upcoming = [e for e in current if e.get("event_date", "") >= today]
+    if not upcoming:
+        return still_live
+    earliest_date = min(e.get("event_date", "") for e in upcoming)
+    return still_live + [e for e in upcoming if e.get("event_date") == earliest_date]
 
 
 def _basketball_leaders_comparison(storage, rows: list[dict], sport: str, event: dict) -> dict | None:

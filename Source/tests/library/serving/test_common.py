@@ -9,8 +9,10 @@ docstring for why the pre-existing per-sport nba_reads.py/etc. copies
 weren't rewired to import from here). See their respective test files
 for the through-list_events/through-build_season_projection integration.
 """
+from datetime import datetime, timezone
 from unittest.mock import MagicMock
 
+from library.serving import common
 from library.serving.common import (
     enrich_bracket_team_names, enrich_participants, enrich_team_standings, latest_matching_row, list_models,
     most_recent_event, prefetch_entities,
@@ -327,3 +329,25 @@ class TestListModels:
         result = list_models(s3, "pga")
 
         assert result["models"] == []
+
+
+class TestIsCurrentOrUpcoming:
+    NOW = datetime(2026, 9, 27, 4, 3, tzinfo=timezone.utc)  # 12:03am ET
+
+    def _event(self, event_date, kickoff_time):
+        return {"event_date": event_date, "kickoff_time": kickoff_time}
+
+    def test_dated_today_or_later_eastern_counts(self):
+        assert common.is_current_or_upcoming(self._event("2026-09-27", "2026-09-27T16:00:00.000Z"), self.NOW)
+        assert common.is_current_or_upcoming(self._event("2026-10-03", "2026-10-03T16:00:00.000Z"), self.NOW)
+
+    def test_yesterdays_late_kickoff_still_in_progress_counts(self):
+        # 10pm CT = 03:00 UTC, dated the day before in Eastern terms.
+        assert common.is_current_or_upcoming(self._event("2026-09-26", "2026-09-27T03:00:00.000Z"), self.NOW)
+
+    def test_yesterdays_game_past_the_live_window_does_not(self):
+        assert not common.is_current_or_upcoming(self._event("2026-09-26", "2026-09-26T16:00:00.000Z"), self.NOW)
+
+    def test_a_past_game_without_a_usable_kickoff_does_not(self):
+        assert not common.is_current_or_upcoming({"event_date": "2026-09-26"}, self.NOW)
+        assert not common.is_current_or_upcoming(self._event("2026-09-26", "not a time"), self.NOW)

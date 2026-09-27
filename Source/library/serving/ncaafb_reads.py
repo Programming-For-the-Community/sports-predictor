@@ -86,9 +86,10 @@ def _next_week_events(scheduled: list[dict]) -> list[dict]:
     so a stale "scheduled" game doesn't win min() permanently. The grace
     period only decides which week counts as "soonest" (so an
     already-played Thursday game doesn't hide the rest of its own week's
-    Saturday games) -- the returned list is separately filtered to
-    today-or-later, since "upcoming" must never include a past-dated
-    event, played or not.
+    Saturday games) -- the returned list is separately filtered to events
+    that are today-or-later or still possibly in progress (see
+    common.is_current_or_upcoming), so a played past-dated game drops off
+    but a late game running past midnight stays.
 
     Also clusters results by date gap, not just the `week` tag -- confirmed
     live, 2026-08-24: week 1's own games actually split into two clusters,
@@ -121,8 +122,8 @@ def _next_week_events(scheduled: list[dict]) -> list[dict]:
     # midnight, which for a 6pm+ Eastern kickoff is while it's still being
     # played. Deriving "today" the same Eastern way keeps both sides on
     # the same calendar.
-    today = us_eastern_date(datetime.now(timezone.utc))
-    cutoff = us_eastern_date(datetime.now(timezone.utc) - timedelta(days=_STALE_SCHEDULED_GRACE_DAYS))
+    now = datetime.now(timezone.utc)
+    cutoff = us_eastern_date(now - timedelta(days=_STALE_SCHEDULED_GRACE_DAYS))
     plausible = [e for e in scheduled if e.get("event_date", "") >= cutoff]
     if not plausible:
         return []
@@ -136,7 +137,7 @@ def _next_week_events(scheduled: list[dict]) -> list[dict]:
 
     same_week: list[dict] = []
     for target in sorted(weeks_by_earliest_date, key=lambda k: weeks_by_earliest_date[k]):
-        same_week = [e for e in plausible if _week_key(e) == target and e.get("event_date", "") >= today]
+        same_week = [e for e in plausible if _week_key(e) == target and common.is_current_or_upcoming(e, now)]
         if same_week:
             break
     if not same_week:

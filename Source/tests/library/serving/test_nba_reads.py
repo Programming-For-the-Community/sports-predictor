@@ -122,6 +122,26 @@ class TestListEvents:
 
         storage.get_all_events.assert_called_once_with("nba", status="completed", limit=nba_reads.RECENT_EVENTS_LIMIT)
 
+    def test_a_game_still_in_progress_past_midnight_stays_listed_with_todays_slate(self):
+        # Same failure as NCAAFB's 2026-09-27 bug: a 10:30pm ET West Coast
+        # tip-off is still being played after midnight Eastern.
+        storage = MagicMock()
+        predictions_table = MagicMock()
+        now = datetime.now(timezone.utc)
+        yesterday = us_eastern_date(now - timedelta(days=1))
+        late_game = _event("late", yesterday, "13", "17")
+        late_game["kickoff_time"] = (now - timedelta(hours=2)).strftime("%Y-%m-%dT%H:%M:%S.000Z")
+        storage.get_all_events.return_value = [
+            _event("done", yesterday, "1", "2"),
+            late_game,
+            _event("next", _future(1), "3", "4"),
+            _event("later", _future(2), "5", "6"),
+        ]
+
+        result = nba_reads.list_events(storage, predictions_table, "nba", "scheduled")
+
+        assert {e["event_id"] for e in result["events"]} == {"late", "next"}
+
     def test_scheduled_queries_get_all_events_soonest_first_and_bounded(self):
         storage = MagicMock()
         predictions_table = MagicMock()

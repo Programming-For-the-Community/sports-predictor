@@ -113,6 +113,26 @@ class TestListEvents:
 
         assert {e["event_id"] for e in result["events"]} == {"e2"}
 
+    def test_a_late_game_still_in_progress_past_midnight_keeps_its_week_listed(self):
+        # Real bug (2026-09-27): a 10pm CT kickoff was still being played
+        # after midnight Eastern, dated the day before; the list dropped it
+        # and jumped to next week's games, losing the live feed.
+        storage = MagicMock()
+        predictions_table = MagicMock()
+        now = datetime.now(timezone.utc)
+        yesterday = us_eastern_date(now - timedelta(days=1))
+        late_game = _event("late", yesterday, "61", "52", week=5)
+        late_game["kickoff_time"] = (now - timedelta(hours=2)).strftime("%Y-%m-%dT%H:%M:%S.000Z")
+        storage.get_all_events.return_value = [
+            _event("played", yesterday, "80", "90", week=5),
+            late_game,
+            _event("next1", _future(6), "61", "70", week=6),
+        ]
+
+        result = ncaafb_reads.list_events(storage, predictions_table, "ncaafb", "scheduled")
+
+        assert {e["event_id"] for e in result["events"]} == {"late"}
+
     def test_a_week_thats_entirely_past_but_still_scheduled_does_not_mask_next_week(self):
         # Regression: confirmed live 2026-09-20 -- every one of last
         # week's games had already been played (Thu/Fri already ingested
