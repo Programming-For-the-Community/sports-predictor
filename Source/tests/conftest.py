@@ -2,10 +2,25 @@
 Repo-wide test fixtures -- applies to every test under Source/tests/ via
 pytest's conftest.py discovery, with no per-file import needed.
 """
+import os
 import socket
 from unittest.mock import patch
 
 import pytest
+
+# Set before any test module (and its module-level boto3 clients) is
+# imported: with no credentials available, botocore's provider chain falls
+# through to the EC2 instance-metadata endpoint -- a real network call.
+# Fake static credentials also keep a developer's real AWS credentials from
+# ever signing a request made by a test.
+os.environ.pop("AWS_PROFILE", None)
+os.environ.update({
+    "AWS_ACCESS_KEY_ID": "testing",
+    "AWS_SECRET_ACCESS_KEY": "testing",
+    "AWS_SESSION_TOKEN": "testing",
+    "AWS_EC2_METADATA_DISABLED": "true",
+})
+os.environ.setdefault("AWS_DEFAULT_REGION", "us-east-2")
 
 _LOOPBACK_HOSTS = {"localhost", "127.0.0.1", "::1"}
 

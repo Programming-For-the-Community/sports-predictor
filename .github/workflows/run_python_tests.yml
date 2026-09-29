@@ -79,7 +79,15 @@ jobs:
       - name: Install pytest
         run: 'pip install --no-cache-dir --only-binary :all: pytest==8.0.2 pytest-cov==5.0.0 coverage==7.4.4'
 
+      # Fake AWS values only -- unit tests mock every AWS call and must never
+      # see real credentials. Step-level env overrides anything set on the job.
       - name: Run tests
+        env:
+          AWS_ACCESS_KEY_ID: testing
+          AWS_SECRET_ACCESS_KEY: testing
+          AWS_SESSION_TOKEN: testing
+          AWS_DEFAULT_REGION: us-east-2
+          AWS_EC2_METADATA_DISABLED: 'true'
         run: pytest ${{ inputs.test_path }} -v --cov=Source --cov-report=
 
       # always() -- otherwise a test failure aborts the job here and the
