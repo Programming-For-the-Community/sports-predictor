@@ -1,8 +1,8 @@
 """
 Unit tests for library.normalize.espn.boxscore_to_player_game_stats,
 including its field-naming logic (category-prefix de-duplication).
-Hand-built synthetic payloads, not live ESPN data -- the live-network
-shape checks live in tests/data-backfills/nfl/test_espn_nfl.py. The
+Hand-built synthetic payloads -- the client-through-normalize flow is
+covered in tests/data-backfills/nfl/test_espn_nfl.py. The
 field-naming suite exists specifically to lock in the de-duplication
 rule: getting it wrong previously meant a QB's passing stats landed under
 keys (library.features.nfl's build_event_features) never checked for,

@@ -665,6 +665,15 @@ class TestParticipantRounds:
         rounds = item["participants"][0]["result"]["rounds"]
         assert [r["round"] for r in rounds] == [1]
 
+    def test_a_linescore_with_no_period_is_skipped(self):
+        competitor = _competitor(linescores=[
+            {"value": 70.0, "displayValue": "E"},
+            {"period": 1, "value": 68.0, "displayValue": "-2"},
+        ])
+        item = leaderboard_event_to_event_item(_event(competitors=[competitor]), "pga")
+        rounds = item["participants"][0]["result"]["rounds"]
+        assert [r["round"] for r in rounds] == [1]
+
 
 class TestLeaderboardEventToPlayerEntities:
     def test_raises_on_a_non_medal_scoring_event(self):

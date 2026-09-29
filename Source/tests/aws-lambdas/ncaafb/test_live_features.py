@@ -129,6 +129,33 @@ class TestBoxScoreCandidateIds:
         assert ids == []
         storage.get_entity.assert_not_called()
 
+    def test_stops_walking_history_past_the_season_lookback(self):
+        storage = MagicMock()
+        storage.get_team_events.return_value = [
+            _event("e1", "2025-10-11", "61", "52", season=2025),
+            _event("old", "2022-10-11", "61", "52", season=2022),
+        ]
+        storage.get_player_game_stats_for_event.side_effect = lambda event_key: [
+            _player_game("101" if event_key == "e1" else "999", "61", event_key, "2025-10-11", {"rushing_yards": 50}),
+        ]
+        storage.get_entity.return_value = _entity("61")
+
+        ids = live_features._box_score_candidate_ids(storage, "ncaafb", "61", "2025-10-18", 2025, "rushing_yards")
+
+        assert ids == ["101"]
+
+
+class TestTeamCoordinatesFor:
+    def test_only_teams_with_both_coordinates_are_included(self):
+        storage = MagicMock()
+        storage.get_entity.side_effect = lambda sport, team_id, entity_type: {
+            "61": {"metadata": {"latitude": 33.9, "longitude": -83.4}},
+            "52": {"metadata": {"latitude": 33.2}},
+            "99": None,
+        }[team_id]
+
+        assert live_features._team_coordinates_for(storage, "ncaafb", "61", "52", "99") == {"61": (33.9, -83.4)}
+
     def test_empty_team_events_short_circuits_without_any_roster_check(self):
         storage = MagicMock()
         storage.get_team_events.return_value = []

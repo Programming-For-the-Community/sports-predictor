@@ -182,6 +182,14 @@ class TestScoreboardEventToEventItemCoachInjuryDepthChart:
         assert item["home_depth_chart"] == depth_chart
         assert "away_depth_chart" not in item
 
+    def test_away_depth_chart_passed_through_as_is(self):
+        depth_chart = {"qb": {"position": {"abbreviation": "QB"}, "athletes": [{"id": "2"}]}}
+
+        item = scoreboard_event_to_event_item(_scoreboard_event(away_depth_chart=depth_chart), "nfl")
+
+        assert item["away_depth_chart"] == depth_chart
+        assert "home_depth_chart" not in item
+
     def test_tournament_note_headline_is_captured(self):
         # notes is a sibling of competitions, not nested inside it --
         # confirmed live against a real NBA Cup group-play game.

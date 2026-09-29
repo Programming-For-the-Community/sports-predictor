@@ -149,3 +149,8 @@ class TestGameToEventItemCoachAndRank:
         item = game_to_event_item(raw, "ncaafb")
         assert item["home_current_rank"] == 1
         assert "away_current_rank" not in item
+
+    def test_away_current_rank_kept_when_present(self):
+        item = game_to_event_item(_game(home_current_rank=None, away_current_rank=12), "ncaafb")
+        assert item["away_current_rank"] == 12
+        assert "home_current_rank" not in item

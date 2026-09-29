@@ -299,3 +299,12 @@ class TestGetSeasonProjection:
         s3.object_exists.return_value = False
 
         assert pga_reads.get_season_projection(s3, "pga") is None
+
+
+class TestEnrichMatchPlayParticipants:
+    def test_empty_or_missing_participants_pass_through_unchanged(self):
+        storage = MagicMock()
+
+        assert pga_reads._enrich_match_play_participants(storage, "pga", None, {}) is None
+        assert pga_reads._enrich_match_play_participants(storage, "pga", [], {}) == []
+        storage.get_entity.assert_not_called()

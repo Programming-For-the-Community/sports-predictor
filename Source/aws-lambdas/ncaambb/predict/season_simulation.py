@@ -189,16 +189,13 @@ def project_single_elim_bracket(
         seed: (seeded_teams[seed - 1] if seed <= len(seeded_teams) else None) for seed in seed_line
     }
 
-    def _matchup(team_a: str | None, seed_a: int, team_b: str | None, seed_b: int, advantage: float) -> dict:
+    # A bye (a seed beyond the field) always lands in slot b -- see
+    # _standard_seed_line -- and every later round's slots hold real winners.
+    def _matchup(team_a: str, seed_a: int, team_b: str | None, seed_b: int, advantage: float) -> dict:
         if team_b is None:
             return {
                 "team_a": team_a, "seed_a": seed_a, "team_b": None, "seed_b": None,
                 "predicted_winner": team_a, "win_probability": 1.0,
-            }
-        if team_a is None:
-            return {
-                "team_a": team_b, "seed_a": seed_b, "team_b": None, "seed_b": None,
-                "predicted_winner": team_b, "win_probability": 1.0,
             }
         rating_a = ratings.get(team_a, DEFAULT_STARTING_RATING)
         rating_b = ratings.get(team_b, DEFAULT_STARTING_RATING)
@@ -222,7 +219,7 @@ def project_single_elim_bracket(
             matchup = _matchup(slot_team[seed_a], seed_a, slot_team[seed_b], seed_b, advantage)
             matchups.append(matchup)
             winner = matchup["predicted_winner"]
-            winner_seed = matchup["seed_a"] if winner == matchup["team_a"] else seed_b
+            winner_seed = seed_a if winner == matchup["team_a"] else seed_b
             next_seeds.append(winner_seed)
             slot_team[winner_seed] = winner
         rounds.append({"round": round_name, "matchups": matchups})
@@ -263,10 +260,8 @@ def _simulate_bracket_survivors(
         for i in range(0, len(current_seeds), 2):
             seed_a, seed_b = current_seeds[i], current_seeds[i + 1]
             team_a, team_b = slot_team[seed_a], slot_team[seed_b]
-            if team_b is None:
+            if team_b is None:  # a bye -- always slot b, see project_single_elim_bracket
                 winner, winner_seed = team_a, seed_a
-            elif team_a is None:
-                winner, winner_seed = team_b, seed_b
             else:
                 winner = _play(team_a, team_b, ratings, advantage, rng)
                 winner_seed = seed_a if winner == team_a else seed_b

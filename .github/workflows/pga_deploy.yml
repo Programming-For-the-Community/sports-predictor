@@ -96,6 +96,7 @@ jobs:
         Source/tests/aws-lambdas/pga/test_live_features.py
         Source/tests/aws-lambdas/pga/test_event_prediction.py
         Source/tests/aws-lambdas/pga/test_predict_handler.py
+        Source/tests/aws-lambdas/pga/test_predict_snapshot.py
         Source/tests/aws-lambdas/pga/test_season_simulation.py
         Source/tests/aws-lambdas/pga/test_season_projection.py
       requirements_files: 'Source/aws-lambdas/pga/predict/requirements.in Source/aws-lambdas/pga/predict/requirements-nodeps.in'

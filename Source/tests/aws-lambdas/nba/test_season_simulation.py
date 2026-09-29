@@ -538,3 +538,20 @@ class TestProjectLeaderboard:
         )
 
         assert result[0]["projected_total"] == 100.0
+
+
+class TestSimulateFinalsHomeCourt:
+    class _AlwaysHome:
+        def random(self):
+            return 0.0  # every coin flip/game goes to the home side
+
+    def test_the_better_regular_season_record_hosts(self):
+        champions = [("east", 60, 300), ("west", 55, 400)]
+
+        assert season_simulation._simulate_finals(champions, {}, 0.0, self._AlwaysHome()) == "east"
+        assert season_simulation._simulate_finals(champions[::-1], {}, 0.0, self._AlwaysHome()) == "east"
+
+    def test_point_differential_breaks_a_tied_record(self):
+        champions = [("east", 58, 100), ("west", 58, 250)]
+
+        assert season_simulation._simulate_finals(champions, {}, 0.0, self._AlwaysHome()) == "west"

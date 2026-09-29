@@ -6,6 +6,7 @@ per-(constructor, race) training row builder.
 import pytest
 
 from library.features.f1 import (
+    _sum_forms,
     build_constructor_event_features,
     build_driver_event_features,
     build_sprint_event_features,
@@ -333,3 +334,11 @@ class TestBuildSprintEventFeatures:
         row = build_sprint_event_features(event, participant, prior_sprint_results=[], constructor_sprint_results=constructor_sprint)
 
         assert row["constructor_avg_finish_position"] == 1
+
+
+class TestSumForms:
+    def test_empty_input_is_an_empty_dict(self):
+        assert _sum_forms([]) == {}
+
+    def test_sums_each_key_treating_none_as_zero(self):
+        assert _sum_forms([{"points": 10.0, "finish": None}, {"points": 5.0, "finish": 3}]) == {"points": 15.0, "finish": 3}

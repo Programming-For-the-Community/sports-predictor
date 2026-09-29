@@ -54,10 +54,6 @@ _add_label = common.add_label
 _naive_prediction = common.naive_prediction
 
 
-def _feature_columns(df):
-    return training_common.feature_columns(df, NON_FEATURE_COLUMNS)
-
-
 def train(s3: S3Manager, df, score_target: str) -> dict:
     return common.train(
         s3, df, score_target, sport=SPORT, candidates=CANDIDATES,

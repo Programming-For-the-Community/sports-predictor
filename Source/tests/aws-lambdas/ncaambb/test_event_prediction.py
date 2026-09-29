@@ -265,3 +265,19 @@ class TestComputeAndCachePlayerProp:
         put_error_cached.assert_called_once()
         assert put_error_cached.call_args.args[2] == "NoPromotedModelError"
         clear_in_progress.assert_called_once()
+
+
+class TestCommonDelegation:
+    def test_snapshot_event_passes_this_sports_own_predict_event(self):
+        with patch.object(event_prediction.common, "snapshot_event", return_value=3) as snapshot:
+            assert event_prediction.snapshot_event("storage", "s3", "table", "401") == 3
+
+        snapshot.assert_called_once_with(
+            "storage", "s3", "table", "401", event_prediction.SPORT, event_prediction.predict_event,
+        )
+
+    def test_get_cached_model_is_scoped_to_this_sport(self):
+        with patch.object(event_prediction.common, "get_cached_model", return_value=("model", {})) as get_cached:
+            assert event_prediction.get_cached_model({}, "s3", "win-probability") == ("model", {})
+
+        get_cached.assert_called_once_with({}, "s3", event_prediction.SPORT, "win-probability")

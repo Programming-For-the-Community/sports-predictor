@@ -11,7 +11,7 @@ live_scores is registered on sys.path by conftest.py.
 import json
 from datetime import datetime, timedelta, timezone
 from io import BytesIO
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 from botocore.exceptions import ClientError
 
@@ -405,3 +405,14 @@ class TestGetLiveScores:
         result = live_scores.get_live_scores(s3, BUCKET)
 
         assert result == {"events": {}}
+
+
+class TestCommonDelegation:
+    def test_cache_reads_and_writes_use_this_sports_own_key(self):
+        s3 = MagicMock()
+        with patch.object(live_scores.common, "get_cache", return_value={"events": {}}) as get_cache,              patch.object(live_scores.common, "put_cache") as put_cache:
+            assert live_scores._get_cache(s3, "bucket") == {"events": {}}
+            live_scores._put_cache(s3, "bucket", {"events": {}})
+
+        get_cache.assert_called_once_with(s3, "bucket", live_scores.LIVE_SCORES_CACHE_KEY)
+        put_cache.assert_called_once_with(s3, "bucket", live_scores.LIVE_SCORES_CACHE_KEY, {"events": {}})

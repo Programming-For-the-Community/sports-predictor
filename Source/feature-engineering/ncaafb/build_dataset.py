@@ -297,11 +297,7 @@ _write_parquet = build_dataset_common.write_parquet
 
 
 def _write_dataset(s3: S3Manager, key: str, rows: list[dict], label: str) -> None:
-    if not rows:
-        raise RuntimeError(f"{label} produced 0 rows -- refusing to overwrite s3://{s3.bucket}/{key} with an empty dataset")
-    logger.info("Writing %d %s rows to Parquet...", len(rows), label)
-    s3.put_bytes(key, _write_parquet(rows), content_type="application/octet-stream")
-    logger.info("Wrote %d %s rows to s3://%s/%s", len(rows), label, s3.bucket, key)
+    build_dataset_common.write_dataset(s3, key, rows, label, logger)
 
 
 _lookback_since_date = build_dataset_common.lookback_since_date
@@ -324,15 +320,7 @@ def main() -> None:
     _write_dataset(s3, EVENT_FEATURES_KEY, build_event_dataset(storage, window, since_date=since_date), "event")
 
     logger.info("Building player-level dataset...")
-    player_rows = build_player_dataset(storage, window, since_date=since_date)
-    player_row_count = len(player_rows)
-    if not player_row_count:
-        raise RuntimeError(f"build_player_dataset produced 0 rows -- refusing to overwrite s3://{bucket}/{PLAYER_FEATURES_KEY}")
-    logger.info("Writing %d player feature rows to Parquet...", player_row_count)
-    player_parquet = _write_parquet(player_rows)
-    del player_rows  # free the largest of the three row lists before its own upload
-    s3.put_bytes(PLAYER_FEATURES_KEY, player_parquet, content_type="application/octet-stream")
-    logger.info("Wrote %d player feature rows to s3://%s/%s", player_row_count, bucket, PLAYER_FEATURES_KEY)
+    _write_dataset(s3, PLAYER_FEATURES_KEY, build_player_dataset(storage, window, since_date=since_date), "player")
 
     logger.info("Building team-week ranking dataset...")
     _write_dataset(s3, RANKING_FEATURES_KEY, build_ranking_dataset(storage, since_date=since_date), "ranking")

@@ -1,12 +1,15 @@
 """
-Unit tests for library.parsing's us_eastern_date/us_eastern_date_from_iso
--- the UTC-to-Eastern calendar-date conversion every sport's normalizer
-uses for event_date, instead of truncating a raw UTC timestamp (which is
-off by one day for any event starting at/after 8pm Eastern).
+Unit tests for library.parsing: parse_number/parse_clock_to_seconds, and
+us_eastern_date/us_eastern_date_from_iso -- the UTC-to-Eastern
+calendar-date conversion every sport's normalizer uses for event_date,
+instead of truncating a raw UTC timestamp (which is off by one day for
+any event starting at/after 8pm Eastern).
 """
 from datetime import datetime, timezone
 
-from library.parsing import us_eastern_date, us_eastern_date_from_iso
+import pytest
+
+from library.parsing import parse_clock_to_seconds, parse_number, us_eastern_date, us_eastern_date_from_iso
 
 
 class TestUsEasternDate:
@@ -35,3 +38,18 @@ class TestUsEasternDateFromIso:
     def test_matches_direct_datetime_conversion(self):
         moment = datetime(2026, 9, 3, 23, 0, tzinfo=timezone.utc)
         assert us_eastern_date_from_iso("2026-09-03T23:00Z") == us_eastern_date(moment)
+
+
+class TestParseNumber:
+    @pytest.mark.parametrize("raw, expected", [("12", 12), ("-3", -3), ("4.5", 4.5), ("--", "--"), ("1.2.3", "1.2.3"), (7, 7), (None, None)])
+    def test_converts_numeric_strings_and_keeps_everything_else(self, raw, expected):
+        result = parse_number(raw)
+
+        assert result == expected
+        assert type(result) is type(expected)
+
+
+class TestParseClockToSeconds:
+    @pytest.mark.parametrize("raw, expected", [("23:45", 1425), ("0:07", 7), ("--", "--"), ("ab:cd", "ab:cd"), (None, None), (95, 95)])
+    def test_converts_mm_ss_and_keeps_everything_else(self, raw, expected):
+        assert parse_clock_to_seconds(raw) == expected

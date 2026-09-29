@@ -4,11 +4,13 @@ logic -- grouping, history-filtering, and Parquet assembly. The actual
 feature math is tested in tests/library/features/test_nfl.py; FeatureStorage
 is mocked here so these tests only cover build_dataset.py's own wiring.
 """
+import contextlib
 import io
 import json
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pandas as pd
+import pytest
 
 import build_dataset
 
@@ -345,3 +347,32 @@ class TestLookbackSinceDate:
         from datetime import date, timedelta
         expected = (date.today() - timedelta(days=10 * 366)).isoformat()
         assert since_date == expected
+
+
+class TestMain:
+    _BUILDERS = ("build_event_dataset", "build_player_dataset")
+
+    def _run(self, monkeypatch, rows_for):
+        monkeypatch.setenv("MODEL_ARTIFACTS_BUCKET_NAME", "models")
+        monkeypatch.delenv("TRAINING_LOOKBACK_SEASONS", raising=False)
+        s3 = MagicMock()
+        s3.bucket = "models"
+        with contextlib.ExitStack() as stack:
+            stack.enter_context(patch.object(build_dataset, "FeatureStorage"))
+            stack.enter_context(patch.object(build_dataset, "S3Manager", return_value=s3))
+            for name in self._BUILDERS:
+                stack.enter_context(patch.object(build_dataset, name, return_value=rows_for(name)))
+            build_dataset.main()
+        return s3
+
+    def test_writes_every_dataset_to_its_own_key(self, monkeypatch):
+        s3 = self._run(monkeypatch, lambda name: [{"source": name}])
+
+        assert [c.args[0] for c in s3.put_bytes.call_args_list] == [
+            build_dataset.EVENT_FEATURES_KEY,
+            build_dataset.PLAYER_FEATURES_KEY,
+        ]
+
+    def test_an_empty_event_dataset_raises_instead_of_overwriting_it(self, monkeypatch):
+        with pytest.raises(RuntimeError, match="event produced 0 rows"):
+            self._run(monkeypatch, lambda name: [] if name == "build_event_dataset" else [{"source": name}])

@@ -54,6 +54,7 @@ import pandas as pd
 
 from library.aws import xray
 from library.aws.s3_manager import S3Manager
+from library.features import build_dataset_common
 from library.features.f1 import (
     DEFAULT_CIRCUIT_HISTORY_WINDOW,
     build_constructor_event_features,
@@ -277,12 +278,8 @@ def _write_parquet(rows: list[dict]) -> bytes:
     return buffer.getvalue()
 
 
-def _write_dataset(s3: S3Manager, bucket: str, key: str, rows: list[dict], label: str) -> None:
-    if not rows:
-        raise RuntimeError(f"{label} produced 0 rows -- refusing to overwrite s3://{bucket}/{key} with an empty dataset")
-    logger.info("Writing %d %s rows to Parquet...", len(rows), label)
-    s3.put_bytes(key, _write_parquet(rows), content_type="application/octet-stream")
-    logger.info("Wrote %d %s rows to s3://%s/%s", len(rows), label, bucket, key)
+def _write_dataset(s3: S3Manager, key: str, rows: list[dict], label: str) -> None:
+    build_dataset_common.write_dataset(s3, key, rows, label, logger, serialize=_write_parquet)
 
 
 def _lookback_since_date() -> str | None:
@@ -313,14 +310,14 @@ def main() -> None:
     s3 = S3Manager(bucket, region=region)
 
     driver_rows = build_driver_dataset(storage, window, circuit_window, since_date=since_date)
-    _write_dataset(s3, bucket, DRIVER_FEATURES_KEY, driver_rows, "driver")
+    _write_dataset(s3, DRIVER_FEATURES_KEY, driver_rows, "driver")
 
     constructor_rows = build_constructor_dataset(storage, window, since_date=since_date)
-    _write_dataset(s3, bucket, CONSTRUCTOR_FEATURES_KEY, constructor_rows, "constructor")
+    _write_dataset(s3, CONSTRUCTOR_FEATURES_KEY, constructor_rows, "constructor")
 
     sprint_rows = build_sprint_dataset(storage, window, since_date=since_date)
     if sprint_rows:
-        _write_dataset(s3, bucket, SPRINT_FEATURES_KEY, sprint_rows, "sprint")
+        _write_dataset(s3, SPRINT_FEATURES_KEY, sprint_rows, "sprint")
     else:
         # Real, expected early on -- Sprint format only exists 2021+, and
         # even within that window most rounds AREN'T Sprint weekends (a

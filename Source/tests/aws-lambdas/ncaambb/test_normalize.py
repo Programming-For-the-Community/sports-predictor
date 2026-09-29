@@ -175,3 +175,14 @@ class TestLambdaHandler:
             result = ncaambb_normalize.lambda_handler(event, None)
 
         assert result == {"processed": 1, "failed": 1}
+
+
+class TestProcessBoxscorePlayerEntities:
+    def test_every_player_entity_in_the_box_score_is_upserted(self):
+        storage = MagicMock()
+        entities = [{"entity_id": "p1"}, {"entity_id": "p2"}]
+        with patch.object(ncaambb_normalize, "_get_storage", return_value=storage),              patch.object(ncaambb_normalize, "boxscore_to_player_game_stats", return_value=([{"row": 1}], entities)),              patch.object(ncaambb_normalize, "boxscore_to_team_game_stats", return_value=[]):
+            ncaambb_normalize._process_boxscore({}, "ncaambb/boxscore/2026/401.json")
+
+        assert [c.args[0] for c in storage.upsert_player_entity.call_args_list] == entities
+        storage.write_player_game_stats.assert_called_once_with([{"row": 1}])

@@ -11,7 +11,7 @@ S3Manager are mocked here so these tests only cover build_dataset.py's
 own wiring.
 """
 import io
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pandas as pd
 import pytest
@@ -483,11 +483,11 @@ class TestWriteDataset:
     def test_raises_on_empty_rows(self):
         s3 = MagicMock()
         with pytest.raises(RuntimeError):
-            build_dataset._write_dataset(s3, "bucket", "some/key.parquet", [], "test")
+            build_dataset._write_dataset(s3, "some/key.parquet", [], "test")
 
     def test_writes_a_non_empty_dataset(self):
         s3 = MagicMock()
-        build_dataset._write_dataset(s3, "bucket", "some/key.parquet", [{"a": 1}], "test")
+        build_dataset._write_dataset(s3, "some/key.parquet", [{"a": 1}], "test")
         s3.put_bytes.assert_called_once()
         assert s3.put_bytes.call_args.args[0] == "some/key.parquet"
 
@@ -506,3 +506,50 @@ class TestLookbackSinceDate:
         from datetime import date, timedelta
         expected = (date.today() - timedelta(days=10 * 366)).isoformat()
         assert since_date == expected
+
+
+class TestMain:
+    def test_writes_all_five_datasets_from_one_snapshot_load(self, monkeypatch):
+        monkeypatch.setenv("MODEL_ARTIFACTS_BUCKET_NAME", "models")
+        monkeypatch.setenv("RAW_BUCKET_NAME", "raw")
+        monkeypatch.delenv("TRAINING_LOOKBACK_SEASONS", raising=False)
+        s3, raw_s3 = MagicMock(), MagicMock()
+        s3.bucket = "models"
+        with patch.object(build_dataset, "FeatureStorage"),              patch.object(build_dataset, "S3Manager", side_effect=lambda bucket, region=None: {"models": s3, "raw": raw_s3}[bucket]),              patch.object(build_dataset, "load_season_stat_snapshots", return_value=[{"season": 2026}]) as load_snapshots,              patch.object(build_dataset, "build_golfer_dataset", return_value=[{"g": 1}]) as golfer,              patch.object(build_dataset, "build_round_dataset", return_value=[{"r": 1}]),              patch.object(build_dataset, "build_cutline_dataset", return_value=[{"c": 1}]),              patch.object(build_dataset, "build_match_and_cup_datasets", return_value=([{"m": 1}], [{"cup": 1}])):
+            build_dataset.main()
+
+        load_snapshots.assert_called_once_with(raw_s3)
+        assert golfer.call_args.args[3] == [{"season": 2026}]
+        assert [c.args[0] for c in s3.put_bytes.call_args_list] == [
+            build_dataset.GOLFER_FEATURES_KEY,
+            build_dataset.ROUND_FEATURES_KEY,
+            build_dataset.CUTLINE_FEATURES_KEY,
+            build_dataset.MATCH_FEATURES_KEY,
+            build_dataset.CUP_FEATURES_KEY,
+        ]
+
+
+class TestBuildCupRosters:
+    def test_ignores_rows_with_no_parent_or_no_role(self):
+        rosters = build_dataset._build_cup_rosters([
+            {"parent_event_id": None, "participants": [{"role": "home", "golfer_entity_ids": ["x"]}]},
+            {"parent_event_id": "cup", "participants": [
+                {"role": "home", "golfer_entity_ids": ["a", "b"]},
+                {"role": None, "golfer_entity_ids": ["ghost"]},
+                {"role": "away", "golfer_entity_ids": ["c"]},
+            ]},
+        ])
+
+        assert {parent: dict(sides) for parent, sides in rosters.items()} == {"cup": {"home": {"a", "b"}, "away": {"c"}}}
+
+
+class TestProcessTimelineEventMalformed:
+    def test_a_match_missing_a_side_builds_no_row(self):
+        match_rows, cup_rows = [], []
+
+        build_dataset._process_timeline_event(
+            {"event_type": "match_play", "participants": [{"role": "home", "golfer_entity_ids": ["a"]}]},
+            {}, {}, 5, match_rows, cup_rows,
+        )
+
+        assert match_rows == [] and cup_rows == []

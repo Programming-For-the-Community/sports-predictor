@@ -1,79 +1,66 @@
 """
-Integration tests for the NFL backfill ESPN client and normalization layer.
-
-These tests hit the real ESPN public API and verify that both the raw
-responses have the expected shape AND that normalize.py maps them into
-the schema this project writes to AWS. No AWS credentials are needed --
-the storage layer is never touched here.
-
-Run from the repo root:
-    pytest Source/tests/data-backfills/nfl/
-
-All ESPN calls are made once per session via module-scoped fixtures so
-the rate limiter is only hit a handful of times across the full suite.
-
-ESPN's site API occasionally returns a transient 403 unrelated to
-request content. HttpClient's own retry-with-backoff tries to ride it
-out; _fetch_or_skip below is the last line of defense for whenever that
-backoff window still isn't enough: a persistent block after retries is
-treated as "ESPN unreachable from here right now" (skip, not fail)
-rather than a code defect. A real schema regression still fails loudly
--- this only catches the "couldn't reach ESPN at all" case, via
-HttpClient's own RuntimeError.
+Tests for the NFL backfill ESPN client and normalization layer, run against
+hand-built ESPN responses (see ../_espn_payloads.py) through the real
+NFLClient with its HTTP session faked -- no network access. Covers both
+the endpoints/params the client requests and how normalize.py maps each
+response into this project's schema.
 """
 import pytest
 
+from _espn_payloads import fake_session, football_summary, scoreboard_event, scoreboard_payload, teams_payload
 from library.http.nfl import NFLClient
 import normalize
 
 TEST_SEASON = 2024
 TEST_SEASON_TYPE = 2   # regular season
 TEST_WEEK = 1
+EVENT_ID = "401671789"
 
 
-def _fetch_or_skip(description: str, fetch):
-    try:
-        return fetch()
-    except RuntimeError as exc:
-        pytest.skip(f"ESPN unreachable from this network ({description}): {exc}")
-
-
-# ---------------------------------------------------------------------------
-# Shared fixtures -- one real API call per fixture for the entire test run
-# ---------------------------------------------------------------------------
-
-@pytest.fixture(scope="module")
+@pytest.fixture
 def client():
-    return NFLClient()
+    nfl_client = NFLClient(min_interval_seconds=0)
+    nfl_client._session = fake_session({
+        "teams": teams_payload(32),
+        "scoreboard": scoreboard_payload(scoreboard_event(EVENT_ID, "2024-09-06T00:20Z", "12", "33", "27", "20")),
+        "summary": football_summary(EVENT_ID, "2024-09-06T00:20Z", "12", "33"),
+    })
+    return nfl_client
 
 
-@pytest.fixture(scope="module")
+@pytest.fixture
 def teams_response(client):
-    return _fetch_or_skip("GET teams", client.get_teams)
+    return client.get_teams()
 
 
-@pytest.fixture(scope="module")
+@pytest.fixture
 def scoreboard_response(client):
-    return _fetch_or_skip(
-        "GET scoreboard", lambda: client.get_scoreboard(TEST_SEASON, TEST_SEASON_TYPE, TEST_WEEK),
-    )
+    return client.get_scoreboard(TEST_SEASON, TEST_SEASON_TYPE, TEST_WEEK)
 
 
-@pytest.fixture(scope="module")
+@pytest.fixture
 def first_event(scoreboard_response):
-    events = scoreboard_response.get("events", [])
-    assert events, "ESPN returned no events for the test week -- pick a different week"
-    return events[0]
+    return scoreboard_response["events"][0]
 
 
-@pytest.fixture(scope="module")
+@pytest.fixture
 def summary_response(client, first_event):
-    return _fetch_or_skip("GET summary", lambda: client.get_summary(first_event["id"]))
+    return client.get_summary(first_event["id"])
 
 
-# ---------------------------------------------------------------------------
-# NFL client -- verify the API is reachable and returns expected structure
-# ---------------------------------------------------------------------------
+class TestRequests:
+    def test_each_call_hits_its_own_endpoint_and_params(self, client):
+        client.get_teams()
+        client.get_scoreboard(TEST_SEASON, TEST_SEASON_TYPE, TEST_WEEK)
+        client.get_summary(EVENT_ID)
+
+        calls = [(c.args[0].rsplit("/", 1)[-1], c.kwargs["params"]) for c in client._session.get.call_args_list]
+        assert calls == [
+            ("teams", {}),
+            ("scoreboard", {"dates": TEST_SEASON, "seasontype": TEST_SEASON_TYPE, "week": TEST_WEEK}),
+            ("summary", {"event": EVENT_ID}),
+        ]
+
 
 class TestNFLClient:
     def test_get_teams_returns_32_nfl_teams(self, teams_response):

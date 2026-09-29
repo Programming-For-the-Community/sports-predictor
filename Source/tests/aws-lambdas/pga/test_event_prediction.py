@@ -338,6 +338,73 @@ class TestFieldSortKey:
         entries.sort(key=event_prediction._field_sort_key)
         assert "projected_score_to_par" in entries[0]["predictions"]
 
+    def test_a_golfer_with_no_predictions_sorts_last(self):
+        entries = [
+            {"predictions": {}},
+            {"predictions": {"top_10_probability": {"value": 0.01}}},
+        ]
+        entries.sort(key=event_prediction._field_sort_key)
+        assert entries[-1]["predictions"] == {}
+
+
+class TestPredictCupEvent:
+    def _cup_event(self, status="scheduled"):
+        return {
+            "event_key": "SPORT#PGA#EVENT#500", "event_id": "500", "event_type": "cup", "status": status,
+            "tournament_name": "Presidents Cup",
+            "participants": [
+                {"entity_id": "1", "role": "home", "result": {"won": True, "halved": False}},
+                {"entity_id": "2", "role": "away", "result": {"won": False, "halved": False}},
+            ],
+        }
+
+    def _predict(self, event, storage, probability=0.62):
+        with patch.object(event_prediction.live_features, "build_live_cup_features", return_value={"event": event, "features": {"f": 1}}) as build, \
+             patch.object(event_prediction.model_loader, "load_current_model", return_value=(MagicMock(), {"version": 4})), \
+             patch.object(event_prediction.model_loader, "predict", return_value=probability):
+            result = event_prediction.predict_cup_event(storage, MagicMock(), MagicMock(), "500")
+        build.assert_called_once_with(storage, event_prediction.SPORT, "500")
+        return result
+
+    def test_scores_the_cup_model_and_names_each_team(self):
+        storage = MagicMock()
+        storage.get_entity.side_effect = lambda sport, entity_id, entity_type: {"1": {"name": "USA"}, "2": {"name": "International"}}[entity_id]
+
+        result = self._predict(self._cup_event(), storage)
+
+        assert result["event_type"] == "cup"
+        assert result["event_key"] == "SPORT#PGA#EVENT#500"
+        assert result["predictions"] == {"cup_win_probability": {"value": 0.62, "model_version": 4}}
+        assert result["home"] == {"entity_id": "1", "name": "USA"}
+        assert result["away"] == {"entity_id": "2", "name": "International"}
+        assert "actual" not in result
+        assert {c.args[2] for c in storage.get_entity.call_args_list} == {"team"}
+
+    def test_unknown_team_entity_leaves_name_none(self):
+        storage = MagicMock()
+        storage.get_entity.return_value = None
+
+        result = self._predict(self._cup_event(), storage)
+
+        assert result["home"] == {"entity_id": "1", "name": None}
+
+    def test_completed_cup_carries_the_real_result(self):
+        storage = MagicMock()
+        storage.get_entity.return_value = None
+
+        result = self._predict(self._cup_event(status="completed"), storage)
+
+        assert result["actual"] == {"home_won": True, "halved": False}
+
+    def test_no_promoted_cup_model_leaves_predictions_empty(self):
+        storage = MagicMock()
+        storage.get_entity.return_value = None
+        with patch.object(event_prediction.live_features, "build_live_cup_features", return_value={"event": self._cup_event(), "features": {"f": 1}}), \
+             patch.object(event_prediction.model_loader, "load_current_model", side_effect=model_loader.NoPromotedModelError("none")):
+            result = event_prediction.predict_cup_event(storage, MagicMock(), MagicMock(), "500")
+
+        assert result["predictions"] == {}
+
 
 class TestPredictMatchEvent:
     def _match_event(self, status="scheduled"):

@@ -242,3 +242,8 @@ class TestRunScheduled:
             result = season_projection.run_scheduled(MagicMock(), s3)
         s3.put_json.assert_not_called()
         assert result == {"sport": "pga", "skipped": True}
+
+
+class TestScoreRemainingEventsWithNothingLeft:
+    def test_scores_nothing_when_no_events_remain(self):
+        assert season_projection._score_remaining_events(MagicMock(), [], [], [], [], None, {}, 2026) == {}

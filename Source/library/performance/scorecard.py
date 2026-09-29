@@ -284,6 +284,14 @@ def _called_right_share(members: list[ChanceSample]) -> float | None:
     return _mean([1.0 if (s.probability >= 0.5) == s.happened else 0.0 for s in members])
 
 
+def _chance_tier(lo: float) -> str:
+    if lo >= 0.6:
+        return "HIGH"
+    if lo >= 0.4:
+        return "MED"
+    return "LOW"
+
+
 def _chance_bands(samples: list[ChanceSample]) -> list[dict]:
     bands = []
     for index in range(len(CHANCE_EDGES) - 1):
@@ -291,8 +299,7 @@ def _chance_bands(samples: list[ChanceSample]) -> list[dict]:
         last = index == len(CHANCE_EDGES) - 2
         members = [s for s in samples if s.probability >= lo and (s.probability <= hi if last else s.probability < hi)]
         called_right = sum(1 for s in members if (s.probability >= 0.5) == s.happened)
-        tag = "HIGH" if lo >= 0.6 else "MED" if lo >= 0.4 else "LOW"
-        bands.append(_band(tag, len(members), called_right, lo=lo, hi=hi))
+        bands.append(_band(_chance_tier(lo), len(members), called_right, lo=lo, hi=hi))
     return bands
 
 

@@ -574,3 +574,22 @@ class TestIsWorseThanBaseline:
 
     def test_none_when_no_comparable_baseline_exists_at_all(self):
         assert backtest._is_worse_than_baseline({"log_loss": 0.6}, {}, "log_loss") is None
+
+
+class TestEvaluateForTask:
+    def test_unknown_task_raises(self):
+        predictions, actuals = np.array([1.0]), np.array([1.0])
+        with pytest.raises(ValueError, match="Unknown task: 'ranking'"):
+            backtest._evaluate_for_task("ranking", predictions, actuals)
+
+
+class TestReleaseCandidateResources:
+    def test_shuts_down_lokys_reusable_executor(self):
+        with patch("joblib.externals.loky.get_reusable_executor") as get_executor:
+            backtest._release_candidate_resources()
+
+        get_executor.return_value.shutdown.assert_called_once_with(wait=True, kill_workers=True)
+
+    def test_a_failed_shutdown_is_swallowed(self):
+        with patch("joblib.externals.loky.get_reusable_executor", side_effect=RuntimeError("no pool")):
+            backtest._release_candidate_resources()

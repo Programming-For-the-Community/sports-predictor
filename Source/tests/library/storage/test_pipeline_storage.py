@@ -24,7 +24,7 @@ def storage_env(monkeypatch):
     monkeypatch.setenv("TEAM_GAME_STATS_TABLE_NAME", "test-team-game-stats")
 
 
-def _make_storage(storage_env):
+def _make_storage(_storage_env):
     mock_entities = MagicMock()
     with patch("library.storage.pipeline_storage.S3Manager"), \
          patch("library.storage.pipeline_storage.DynamoDBTable") as mock_table_cls:
@@ -33,7 +33,7 @@ def _make_storage(storage_env):
     return storage, mock_entities
 
 
-def _make_storage_with_events(storage_env):
+def _make_storage_with_events(_storage_env):
     mock_events = MagicMock()
     with patch("library.storage.pipeline_storage.S3Manager"), \
          patch("library.storage.pipeline_storage.DynamoDBTable") as mock_table_cls:
@@ -191,3 +191,51 @@ class TestGetEntity:
         mock_entities.get_item.return_value = None
 
         assert storage.get_entity("ncaafb", "999", "team") is None
+
+
+class TestRequiredEnvironment:
+    def test_missing_variable_raises_with_its_name(self, storage_env, monkeypatch):
+        monkeypatch.delenv("EVENTS_TABLE_NAME")
+
+        with patch("library.storage.pipeline_storage.S3Manager"), \
+             patch("library.storage.pipeline_storage.DynamoDBTable"), \
+             pytest.raises(RuntimeError, match="EVENTS_TABLE_NAME"):
+            PipelineStorage()
+
+
+class TestPassThroughs:
+    def _storage(self):
+        lake = MagicMock()
+        entities, player_stats, team_stats = MagicMock(), MagicMock(), MagicMock()
+        with patch("library.storage.pipeline_storage.S3Manager", return_value=lake), \
+             patch("library.storage.pipeline_storage.DynamoDBTable", side_effect=[entities, MagicMock(), player_stats, team_stats]):
+            storage = PipelineStorage()
+        return storage, lake, entities, player_stats, team_stats
+
+    def test_raw_data_lake_calls(self, storage_env):
+        storage, lake, *_ = self._storage()
+        lake.object_exists.return_value = True
+        lake.get_json.return_value = {"cached": 1}
+
+        assert storage.raw_object_exists("k") is True
+        storage.put_raw_json("k", {"a": 1})
+        assert storage.get_raw_json("k") == {"cached": 1}
+
+        lake.object_exists.assert_called_once_with("k")
+        lake.put_json.assert_called_once_with("k", {"a": 1})
+
+    def test_upsert_entity_writes_unconditionally(self, storage_env):
+        storage, _, entities, *_ = self._storage()
+
+        storage.upsert_entity({"entity_key": "x"})
+
+        entities.put_item.assert_called_once_with({"entity_key": "x"})
+
+    def test_game_stats_batch_write_with_their_own_key_names(self, storage_env):
+        storage, _, _, player_stats, team_stats = self._storage()
+
+        storage.write_player_game_stats([{"p": 1}])
+        storage.write_team_game_stats([{"t": 1}])
+
+        player_stats.batch_write.assert_called_once_with([{"p": 1}], key_names=["event_key", "player_key"])
+        team_stats.batch_write.assert_called_once_with([{"t": 1}], key_names=["event_key", "team_key"])

@@ -62,6 +62,24 @@ class TestEnrichGames:
         assert games[0]["home_coach"] is None
         assert games[0]["away_coach"] is None
 
+    def test_teams_fetch_failure_omits_coach_and_rank_fields_without_raising(self):
+        games = [{"id": "1", "homeId": "2", "awayId": "52"}]
+        mock_client = MagicMock()
+        mock_client.get_rankings.return_value = [{"polls": [
+            {"poll": "AP Top 25", "ranks": [{"school": "Georgia", "rank": 1}]},
+        ]}]
+
+        with patch("enrichment.attach_venue_indoor"), \
+             patch("enrichment.get_cached_teams", side_effect=Exception("CFBD timeout")), \
+             patch("enrichment.get_cached_coaches", return_value=[
+                 _coach("Kirby", "Smart", "Georgia", 2025, 11, 1, hire_year=2016),
+             ]):
+            enrich_games(games, 2025, 4, mock_client, MagicMock(), "bucket")  # must not raise
+
+        # With no team->school mapping, neither side's coach or rank can be resolved.
+        assert games[0]["home_coach"] is None
+        assert games[0]["home_current_rank"] is None
+
     def test_rankings_fetch_failure_omits_rank_fields_without_raising(self):
         games = [{"id": "1", "homeId": "2", "awayId": "52"}]
         mock_client = MagicMock()

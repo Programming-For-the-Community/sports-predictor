@@ -80,6 +80,7 @@ class TestLambdaHandlerWeekResolution:
         ]
 
         with patch.object(ncaafb_ingest, "CFBDClient", return_value=mock_client), \
+             patch.object(ncaafb_ingest, "_s3", _make_s3()[0]), \
              patch.object(ncaafb_ingest, "get_cached_teams"), \
              patch.object(ncaafb_ingest.enrichment, "get_cached_coaches"):
             result = ncaafb_ingest.lambda_handler({}, None)
@@ -116,6 +117,7 @@ class TestLambdaHandlerCacheRefresh:
         mock_client.get_calendar.return_value = []
 
         with patch.object(ncaafb_ingest, "CFBDClient", return_value=mock_client), \
+             patch.object(ncaafb_ingest, "_s3", _make_s3()[0]), \
              patch.object(ncaafb_ingest, "get_cached_teams"), \
              patch.object(ncaafb_ingest.enrichment, "get_cached_coaches"):
             result = ncaafb_ingest.lambda_handler({}, None)
@@ -127,6 +129,7 @@ class TestLambdaHandlerCacheRefresh:
         mock_client.get_calendar.return_value = []
 
         with patch.object(ncaafb_ingest, "CFBDClient", return_value=mock_client), \
+             patch.object(ncaafb_ingest, "_s3", _make_s3()[0]), \
              patch.object(ncaafb_ingest, "get_cached_teams", side_effect=Exception("CFBD timeout")), \
              patch.object(ncaafb_ingest.enrichment, "get_cached_coaches"):
             result = ncaafb_ingest.lambda_handler({}, None)
@@ -138,6 +141,7 @@ class TestLambdaHandlerCacheRefresh:
         mock_client.get_calendar.return_value = []
 
         with patch.object(ncaafb_ingest, "CFBDClient", return_value=mock_client), \
+             patch.object(ncaafb_ingest, "_s3", _make_s3()[0]), \
              patch.object(ncaafb_ingest, "get_cached_teams"), \
              patch.object(ncaafb_ingest.enrichment, "get_cached_coaches", side_effect=Exception("CFBD timeout")):
             result = ncaafb_ingest.lambda_handler({}, None)
@@ -243,6 +247,27 @@ class TestLambdaHandlerBoxScores:
         assert result["processed"] == 1
         assert result["failed"] == 1
         mock_client.get_game_team_stats.assert_called_once()
+
+    def test_team_box_score_failure_is_counted_not_raised(self):
+        mock_client = MagicMock()
+        mock_client.get_games.return_value = [_game(completed=True)]
+        mock_client.get_game_player_stats.return_value = [{"id": "1"}, {"id": "not-this-week"}]
+        mock_client.get_game_team_stats.side_effect = Exception("CFBD timeout")
+        mock_s3 = MagicMock()
+
+        with patch.object(ncaafb_ingest, "CFBDClient", return_value=mock_client), \
+             patch.object(ncaafb_ingest, "_s3", mock_s3), \
+             patch.object(ncaafb_ingest, "get_cached_teams"), \
+             patch.object(ncaafb_ingest.enrichment, "get_cached_coaches"), \
+             patch.object(ncaafb_ingest.enrichment, "enrich_games"):
+            result = ncaafb_ingest.lambda_handler({"season": 2025, "week": 4, "season_type": "regular"}, None)
+
+        assert result["processed"] == 1
+        assert result["failed"] == 1
+        written = {c.kwargs["Key"]: json.loads(c.kwargs["Body"]) for c in mock_s3.put_object.call_args_list}
+        player_box_scores = written["ncaafb/boxscore/2025/regular/4.json"]
+        assert "home_id" in player_box_scores[0]
+        assert "home_id" not in player_box_scores[1]  # no matching game this week -- left unannotated
 
     def test_games_are_written_before_box_scores_are_considered(self):
         mock_client = MagicMock()

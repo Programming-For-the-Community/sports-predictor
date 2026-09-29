@@ -456,6 +456,63 @@ class TestRefresh:
 
         assert result == {"polled": 0}
 
+    def test_an_empty_field_leaderboard_is_skipped_not_errored(self):
+        storage = MagicMock()
+        storage.get_all_events.return_value = [self._current_field_event("1")]
+        client = MagicMock()
+        client.get_leaderboard.return_value = {"events": []}
+        s3 = _make_s3()
+
+        result = live_scores.refresh(storage, s3, BUCKET, client, SPORT)
+
+        assert result == {"polled": 0}
+
+    def test_an_empty_match_cup_leaderboard_is_skipped_not_errored(self):
+        storage = MagicMock()
+        storage.get_all_events.return_value = [self._current_match_row("t-match-10951", "t")]
+        client = MagicMock()
+        client.get_leaderboard.return_value = {}
+        s3 = _make_s3()
+
+        result = live_scores.refresh(storage, s3, BUCKET, client, SPORT)
+
+        assert result == {"polled": 0}
+
+    def test_one_match_cup_tournaments_fetch_failure_does_not_kill_the_others(self):
+        storage = MagicMock()
+        storage.get_all_events.return_value = [
+            self._current_match_row("a-match-1", "a"),
+            self._current_match_row("b-match-10951", "b"),
+        ]
+        client = MagicMock()
+
+        def _get_leaderboard(tournament_id):
+            if tournament_id == "a":
+                raise RuntimeError("ESPN hiccup")
+            return {"events": [_espn_cup_event("b")]}
+
+        client.get_leaderboard.side_effect = _get_leaderboard
+        s3 = _make_s3()
+
+        live_scores.refresh(storage, s3, BUCKET, client, SPORT)
+
+        cached = json.loads(s3._store[live_scores.LIVE_SCORES_CACHE_KEY])
+        assert cached["events"]
+        assert not any(event_id.startswith("a") for event_id in cached["events"])
+
+    def test_a_match_row_with_no_parent_tournament_is_never_polled(self):
+        storage = MagicMock()
+        orphan = self._current_match_row("x-match-1", "x")
+        orphan["parent_event_id"] = None
+        storage.get_all_events.return_value = [orphan]
+        client = MagicMock()
+        s3 = _make_s3()
+
+        result = live_scores.refresh(storage, s3, BUCKET, client, SPORT)
+
+        assert result == {"polled": 0}
+        client.get_leaderboard.assert_not_called()
+
     def test_a_field_and_a_match_cup_tournament_are_both_polled_in_one_tick(self):
         storage = MagicMock()
         storage.get_all_events.return_value = [

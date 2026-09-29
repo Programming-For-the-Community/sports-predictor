@@ -256,3 +256,14 @@ class TestLambdaHandler:
             ncaambb_schedule_sync.lambda_handler({}, None)
 
         mock_s3.put_object.assert_not_called()
+
+
+class TestEntitiesTable:
+    def test_built_once_from_the_environment(self, monkeypatch):
+        monkeypatch.setenv("ENTITIES_TABLE_NAME", "entities")
+        monkeypatch.setenv("AWS_REGION", "us-east-1")
+        monkeypatch.setattr(ncaambb_schedule_sync, "_entities", None)
+        with patch.object(ncaambb_schedule_sync, "DynamoDBTable") as table_cls:
+            assert ncaambb_schedule_sync._get_entities() is ncaambb_schedule_sync._get_entities()
+
+        table_cls.assert_called_once_with("entities", region="us-east-1")

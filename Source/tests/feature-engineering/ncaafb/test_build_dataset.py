@@ -5,11 +5,13 @@ team-week ranking walk. The actual feature math is tested in
 tests/library/features/test_ncaafb_*.py; FeatureStorage is mocked here so
 these tests only cover build_dataset.py's own wiring.
 """
+import contextlib
 import io
 import json
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pandas as pd
+import pytest
 
 import build_dataset
 
@@ -277,3 +279,61 @@ class TestLookbackSinceDate:
         from datetime import date, timedelta
         expected = (date.today() - timedelta(days=8 * 366)).isoformat()
         assert since_date == expected
+
+
+class TestMain:
+    _BUILDERS = ("build_event_dataset", "build_player_dataset", "build_ranking_dataset")
+
+    def _run(self, monkeypatch, rows_for):
+        monkeypatch.setenv("MODEL_ARTIFACTS_BUCKET_NAME", "models")
+        monkeypatch.delenv("TRAINING_LOOKBACK_SEASONS", raising=False)
+        s3 = MagicMock()
+        s3.bucket = "models"
+        with contextlib.ExitStack() as stack:
+            stack.enter_context(patch.object(build_dataset, "FeatureStorage"))
+            stack.enter_context(patch.object(build_dataset, "S3Manager", return_value=s3))
+            for name in self._BUILDERS:
+                stack.enter_context(patch.object(build_dataset, name, return_value=rows_for(name)))
+            build_dataset.main()
+        return s3
+
+    def test_writes_every_dataset_to_its_own_key(self, monkeypatch):
+        s3 = self._run(monkeypatch, lambda name: [{"source": name}])
+
+        assert [c.args[0] for c in s3.put_bytes.call_args_list] == [
+            build_dataset.EVENT_FEATURES_KEY,
+            build_dataset.PLAYER_FEATURES_KEY,
+            build_dataset.RANKING_FEATURES_KEY,
+        ]
+
+    def test_an_empty_event_dataset_raises_instead_of_overwriting_it(self, monkeypatch):
+        with pytest.raises(RuntimeError, match="event produced 0 rows"):
+            self._run(monkeypatch, lambda name: [] if name == "build_event_dataset" else [{"source": name}])
+
+
+class TestUpdateEventHistory:
+    def test_appends_only_the_box_score_rows_that_exist(self):
+        from collections import defaultdict
+        team_history, team_box_history = defaultdict(list), defaultdict(list)
+        event = {"event_key": "E1"}
+
+        build_dataset._update_event_history(
+            event, "home", "away", team_history, team_box_history, {("E1", "away"): {"yds": 300}}, [],
+        )
+
+        assert team_history == {"home": [event], "away": [event]}
+        assert team_box_history == {"away": [{"yds": 300}]}
+
+
+class TestBuildRankingDatasetMalformedEvents:
+    def test_skips_an_event_missing_a_side(self):
+        storage = MagicMock()
+        storage.get_all_events.return_value = [
+            {"event_key": "E1", "event_date": "2025-09-01", "season": 2025, "participants": [{"entity_id": "1", "role": "home"}]},
+            {"event_key": "E2", "event_date": "2025-09-02", "season": 2025,
+             "participants": [{"entity_id": "1", "role": "home"}, {"entity_id": "2", "role": "away"}]},
+        ]
+        with patch.object(build_dataset, "compute_elo_ratings", return_value=({}, {})),              patch.object(build_dataset, "build_team_week_features", side_effect=lambda team_id, event, elo, history: {"team_id": team_id, "event_key": event["event_key"]}):
+            rows = build_dataset.build_ranking_dataset(storage)
+
+        assert rows == [{"team_id": "1", "event_key": "E2"}, {"team_id": "2", "event_key": "E2"}]

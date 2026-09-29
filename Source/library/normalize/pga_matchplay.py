@@ -176,7 +176,13 @@ def _match_participant(competitor: dict) -> dict:
     # as both "entity_id" and its own single-element golfer_entity_ids,
     # so downstream feature code can treat both event shapes uniformly
     # without branching on event_type again.
-    entity_id = str(team["id"]) if team and team.get("id") is not None else (golfer_ids[0] if golfer_ids else None)
+    if team and team.get("id") is not None:
+        entity_id = str(team["id"])
+    elif golfer_ids:
+        entity_id = golfer_ids[0]
+    else:
+        entity_id = None
+
     return {
         "entity_id": entity_id,
         "role": competitor.get("homeAway"),

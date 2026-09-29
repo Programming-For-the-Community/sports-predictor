@@ -51,70 +51,82 @@ String _championshipLabel(bool isNba, bool isNcaafb, bool isNcaambb) {
   return _StandingsLabels.sb;
 }
 
+// NCAAFB/NCAA MBB only -- one column carries both the real rank and the
+// ranking model's own opinion (real -> model, same arrow convention
+// _LeaderboardCard uses for current -> projected), rather than spending a
+// whole extra column on the comparison.
+Widget _rankCell(BuildContext context, String sport, TeamStanding team) {
+  final real = team.currentRank;
+  final model = team.modelRank;
+  return FittedBox(
+    fit: BoxFit.scaleDown,
+    child: RichText(
+      textAlign: TextAlign.center,
+      maxLines: 1,
+      softWrap: false,
+      text: TextSpan(
+        children: [
+          TextSpan(text: real != null ? '#$real' : '--', style: AppTextStyles.metricValue(color: AppColors.inkMute)),
+          if (model != null) ...[
+            TextSpan(text: ' → ', style: AppTextStyles.microLabel(color: AppColors.inkMute)),
+            TextSpan(text: '#$model', style: AppTextStyles.metricValue(color: AppColors.cyan)),
+          ],
+        ],
+      ),
+    ),
+  );
+}
+
+Widget _teamCell(BuildContext context, String sport, TeamStanding team) {
+  final info = teamDisplayFor(sport, team.teamId, team.abbreviation, apiColor: team.color);
+  return Row(
+    children: [
+      TeamColorDot(color: info.primary),
+      if (info.primary != null) const SizedBox(width: 10),
+      Flexible(
+        child: Text(info.abbreviation, style: AppTextStyles.body(color: AppColors.ink)),
+      ),
+    ],
+  );
+}
+
+Widget _projectedCell(BuildContext context, String sport, TeamStanding team) => Text(
+      // Rounded to whole games -- projectedWins/Losses are Monte Carlo
+      // averages, not a real final record.
+      '${team.projectedWins.round()}-${team.projectedLosses.round()}',
+      style: AppTextStyles.metricValue(color: AppColors.cyan),
+      textAlign: TextAlign.center,
+    );
+
+Widget _recordCell(BuildContext context, String sport, TeamStanding team) => Text(
+      // Ties only appended when non-zero (always 0 for NBA).
+      team.ties > 0 ? '${team.wins}-${team.losses}-${team.ties}' : '${team.wins}-${team.losses}',
+      style: AppTextStyles.metricValue(),
+      textAlign: TextAlign.center,
+    );
+
+// NBA swaps DIV% for PLAY-IN%, its extra playoff-seeding tier.
+_StandingsColumn _divisionColumn(bool isNba, bool isCollege) {
+  if (isNba) {
+    return _StandingsColumn(_StandingsLabels.playIn, 2, (context, sport, team) => _PercentText(team.playInProbability ?? 0.0));
+  }
+  return _StandingsColumn(
+    isCollege ? _StandingsLabels.conf : _StandingsLabels.div,
+    2, (context, sport, team) => _PercentText(team.divisionWinnerProbability),
+  );
+}
+
 List<_StandingsColumn> _standingsColumns(String sport) {
   final isNcaafb = sport == SportIds.ncaafb;
   final isNba = sport == SportIds.nba;
   final isNcaambb = sport == SportIds.ncaambb;
+  final isCollege = isNcaafb || isNcaambb;
   return [
-    // NCAAFB/NCAA MBB only -- one column carries both the real rank and
-    // the ranking model's own opinion (real -> model, same arrow
-    // convention _LeaderboardCard uses for current -> projected), rather
-    // than spending a whole extra column on the comparison.
-    if (isNcaafb || isNcaambb)
-      _StandingsColumn(_StandingsLabels.rank, 3, (context, sport, team) {
-        final real = team.currentRank;
-        final model = team.modelRank;
-        return FittedBox(
-          fit: BoxFit.scaleDown,
-          child: RichText(
-            textAlign: TextAlign.center,
-            maxLines: 1,
-            softWrap: false,
-            text: TextSpan(
-              children: [
-                TextSpan(text: real != null ? '#$real' : '--', style: AppTextStyles.metricValue(color: AppColors.inkMute)),
-                if (model != null) ...[
-                  TextSpan(text: ' → ', style: AppTextStyles.microLabel(color: AppColors.inkMute)),
-                  TextSpan(text: '#$model', style: AppTextStyles.metricValue(color: AppColors.cyan)),
-                ],
-              ],
-            ),
-          ),
-        );
-      }),
-    _StandingsColumn(_StandingsLabels.team, 3, (context, sport, team) {
-      final info = teamDisplayFor(sport, team.teamId, team.abbreviation, apiColor: team.color);
-      return Row(
-        children: [
-          TeamColorDot(color: info.primary),
-          if (info.primary != null) const SizedBox(width: 10),
-          Flexible(
-            child: Text(info.abbreviation, style: AppTextStyles.body(color: AppColors.ink)),
-          ),
-        ],
-      );
-    }),
-    _StandingsColumn(_StandingsLabels.proj, 2, (context, sport, team) => Text(
-          // Rounded to whole games -- projectedWins/Losses are Monte Carlo
-          // averages, not a real final record.
-          '${team.projectedWins.round()}-${team.projectedLosses.round()}',
-          style: AppTextStyles.metricValue(color: AppColors.cyan),
-          textAlign: TextAlign.center,
-        )),
-    _StandingsColumn(_StandingsLabels.rec, 2, (context, sport, team) => Text(
-          // Ties only appended when non-zero (always 0 for NBA).
-          team.ties > 0 ? '${team.wins}-${team.losses}-${team.ties}' : '${team.wins}-${team.losses}',
-          style: AppTextStyles.metricValue(),
-          textAlign: TextAlign.center,
-        )),
-    // NBA swaps DIV% for PLAY-IN%, its extra playoff-seeding tier.
-    if (isNba)
-      _StandingsColumn(_StandingsLabels.playIn, 2, (context, sport, team) => _PercentText(team.playInProbability ?? 0.0))
-    else
-      _StandingsColumn(
-        isNcaafb || isNcaambb ? _StandingsLabels.conf : _StandingsLabels.div,
-        2, (context, sport, team) => _PercentText(team.divisionWinnerProbability),
-      ),
+    if (isCollege) const _StandingsColumn(_StandingsLabels.rank, 3, _rankCell),
+    const _StandingsColumn(_StandingsLabels.team, 3, _teamCell),
+    const _StandingsColumn(_StandingsLabels.proj, 2, _projectedCell),
+    const _StandingsColumn(_StandingsLabels.rec, 2, _recordCell),
+    _divisionColumn(isNba, isCollege),
     _StandingsColumn(
       _playoffLabel(isNba, isNcaafb, isNcaambb),
       2, (context, sport, team) => _PercentText(team.playoffProbability),

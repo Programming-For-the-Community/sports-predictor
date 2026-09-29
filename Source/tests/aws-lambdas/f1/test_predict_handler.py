@@ -61,3 +61,19 @@ class TestComputeAndCacheDispatch:
         response = f1_predict.lambda_handler({"resource": "/f1/unknown"}, None)
 
         assert response["status"] == "error"
+
+
+class TestLazySingletons:
+    def test_each_client_is_built_once_from_the_environment(self, monkeypatch):
+        monkeypatch.setenv("MODEL_ARTIFACTS_BUCKET_NAME", "models")
+        monkeypatch.setenv("PREDICTIONS_TABLE_NAME", "predictions")
+        monkeypatch.setenv("AWS_REGION", "us-east-1")
+        with patch.object(f1_predict, "FeatureStorage") as storage_cls,              patch.object(f1_predict, "S3Manager") as s3_cls,              patch.object(f1_predict, "DynamoDBTable") as table_cls:
+            for _ in range(2):
+                assert f1_predict._get_storage() is storage_cls.return_value
+                assert f1_predict._get_model_bucket() is s3_cls.return_value
+                assert f1_predict._get_predictions_table() is table_cls.return_value
+
+        storage_cls.assert_called_once_with()
+        s3_cls.assert_called_once_with("models", region="us-east-1")
+        table_cls.assert_called_once_with("predictions", region="us-east-1")

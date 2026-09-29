@@ -228,6 +228,19 @@ class TestProcessWeek:
         assert result["failures"][0]["week"] == 4
         client.get_game_team_stats.assert_called_once()
 
+    def test_team_box_score_failure_is_recorded_not_raised(self):
+        client = MagicMock()
+        client.get_games.return_value = [_game(completed=True)]
+        client.get_game_player_stats.return_value = []
+        client.get_game_team_stats.side_effect = Exception("CFBD timeout")
+        storage = MagicMock()
+
+        result = backfill.process_week(client, storage, 2025, "regular", 4, **self._kwargs())
+
+        assert result["games_failed"] == 1
+        assert result["failures"] == [{"season": 2025, "week": 4, "error": "CFBD timeout"}]
+        storage.write_team_game_stats.assert_not_called()
+
     def test_event_write_failure_for_one_game_does_not_block_others(self):
         client = MagicMock()
         client.get_games.return_value = [_game(game_id="1"), _game(game_id="2")]

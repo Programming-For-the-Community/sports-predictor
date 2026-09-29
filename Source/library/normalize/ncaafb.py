@@ -56,11 +56,11 @@ def _stat_field_name(category: str, type_name: str) -> str:
 
 def _split_compound_value(value) -> tuple | None:
     text = str(value)
-    sep = "/" if "/" in text else "-" if "-" in text else None
-    if sep is None:
-        return None
-    parts = text.split(sep, 1)
-    return (parse_number(parts[0]), parse_number(parts[1])) if len(parts) == 2 else None
+    for sep in ("/", "-"):
+        if sep in text:
+            first, second = text.split(sep, 1)
+            return parse_number(first), parse_number(second)
+    return None
 
 
 def _resolve_team_id(box_score: dict, home_away: str | None) -> str | None:

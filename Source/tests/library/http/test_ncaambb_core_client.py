@@ -238,6 +238,19 @@ class TestResolveConferenceMembership:
 
         assert result == {"275": "Big Ten"}
 
+    def test_a_conference_with_no_name_or_no_teams_link_is_skipped(self):
+        client = self._client(
+            conference_refs=["ref/groups/2", "ref/groups/3"],
+            details={
+                "ref/groups/2": {"isConference": True, "teams": {"$ref": "ref/groups/2/teams"}},
+                "ref/groups/3": {"isConference": True, "shortName": "Big Ten"},
+            },
+            team_refs={},
+        )
+
+        assert resolve_conference_membership(client, 2026) == {}
+        client.get_group_team_refs.assert_not_called()
+
 
 class TestCurrentApPollPointer:
     def test_picks_the_ap_entry_by_type_not_position(self):

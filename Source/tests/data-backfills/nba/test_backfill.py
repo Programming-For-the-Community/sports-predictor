@@ -160,6 +160,18 @@ class TestProcessGame:
 
         storage.put_raw_json.assert_called_once_with("nba/boxscore/2025/401705127.json", client.get_summary.return_value)
 
+    def test_every_player_entity_in_the_box_score_is_upserted(self):
+        storage = MagicMock()
+        storage.raw_object_exists.return_value = False
+        entities = [{"entity_id": "p1"}, {"entity_id": "p2"}]
+
+        with patch.object(backfill.normalize, "boxscore_to_player_game_stats", return_value=([{"row": 1}], entities)), \
+             patch.object(backfill.normalize, "boxscore_to_team_game_stats", return_value=[]):
+            backfill.process_game(MagicMock(), storage, 2025, "401705127")
+
+        assert [c.args[0] for c in storage.upsert_player_entity.call_args_list] == entities
+        storage.write_player_game_stats.assert_called_once_with([{"row": 1}])
+
 
 class TestProcessSeason:
     def test_sums_results_across_every_date_in_the_season(self):

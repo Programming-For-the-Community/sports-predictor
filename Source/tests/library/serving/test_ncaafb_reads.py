@@ -113,6 +113,23 @@ class TestListEvents:
 
         assert {e["event_id"] for e in result["events"]} == {"e2"}
 
+    def test_scheduled_is_empty_when_only_past_dated_events_remain(self):
+        storage = MagicMock()
+        yesterday = us_eastern_date(datetime.now(timezone.utc) - timedelta(days=1))
+        storage.get_all_events.return_value = [_event("e1", yesterday, "61", "52", week=5)]
+
+        result = ncaafb_reads.list_events(storage, MagicMock(), "ncaafb", "scheduled")
+
+        assert result["events"] == []
+
+    def test_any_other_status_queries_without_a_bound(self):
+        storage = MagicMock()
+        storage.get_all_events.return_value = []
+
+        ncaafb_reads.list_events(storage, MagicMock(), "ncaafb", "in_progress")
+
+        storage.get_all_events.assert_called_once_with("ncaafb", status="in_progress")
+
     def test_a_late_game_still_in_progress_past_midnight_keeps_its_week_listed(self):
         # Real bug (2026-09-27): a 10pm CT kickoff was still being played
         # after midnight Eastern, dated the day before; the list dropped it

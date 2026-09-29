@@ -432,3 +432,35 @@ class TestMain:
             backfill.main()  # should not raise despite one batch failing
 
         mock_storage.put_raw_json.assert_not_called()
+
+
+class TestSprintAndPitstopFailures:
+    def test_a_cached_but_empty_sprint_file_writes_nothing(self):
+        storage = MagicMock()
+        storage.raw_object_exists.return_value = True
+        storage.get_raw_json.return_value = {"MRData": {"RaceTable": {"Races": [{"SprintResults": []}]}}}
+
+        backfill._fetch_and_process_sprint(MagicMock(), storage, 2024, 5)
+
+        storage.upsert_event.assert_not_called()
+        storage.upsert_entity.assert_not_called()
+
+    def test_a_sprint_fetch_failure_is_logged_not_raised(self):
+        storage = MagicMock()
+        storage.raw_object_exists.return_value = False
+        client = MagicMock()
+        client.get_sprint.side_effect = RuntimeError("Jolpica 500")
+
+        backfill._fetch_and_process_sprint(client, storage, 2024, 5)
+
+        storage.upsert_event.assert_not_called()
+
+    def test_a_pitstop_fetch_failure_is_logged_not_raised(self):
+        storage = MagicMock()
+        storage.raw_object_exists.return_value = False
+        client = MagicMock()
+        client.get_pitstops.side_effect = RuntimeError("Jolpica 500")
+
+        backfill._cache_pitstops(client, storage, 2024, 5)
+
+        storage.put_raw_json.assert_not_called()

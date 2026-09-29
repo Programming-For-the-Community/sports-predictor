@@ -8,6 +8,9 @@ project-pga-onboarding memory), not a guessed shape.
 import pytest
 
 from library.normalize.pga_matchplay import (
+    _competitor_golfers,
+    _match_participant,
+    _uses_team_layer,
     is_exhibition,
     is_individual_match_play,
     is_supported_match_play,
@@ -231,8 +234,27 @@ class TestLeaderboardEventToCupEventItem:
         assert leaderboard_event_to_cup_event_item(_wgc_event(), "pga") is None
 
     def test_raises_for_unsupported_event(self):
+        event = _the_match_event()
         with pytest.raises(ValueError):
-            leaderboard_event_to_cup_event_item(_the_match_event(), "pga")
+            leaderboard_event_to_cup_event_item(event, "pga")
+
+    def test_a_summary_competitor_with_no_team_id_is_skipped(self):
+        summary = _cup_summary_entry()
+        summary["competitors"][1]["team"] = {}
+        item = leaderboard_event_to_cup_event_item(_cup_event(sessions=[[summary], [_team_match_entry()]]), "pga")
+        assert [p["entity_id"] for p in item["participants"]] == ["1"]
+
+
+class TestMalformedShapes:
+    def test_no_matches_or_no_competitors_means_no_team_layer(self):
+        assert _uses_team_layer([_cup_summary_entry()]) is False
+        assert _uses_team_layer([_team_match_entry(competitors=[])]) is False
+
+    def test_a_competitor_with_neither_roster_nor_athlete_has_no_golfers(self):
+        assert _competitor_golfers({"homeAway": "home"}) == []
+
+    def test_a_participant_with_no_team_and_no_golfers_has_no_entity_id(self):
+        assert _match_participant({"homeAway": "home"})["entity_id"] is None
 
 
 class TestLeaderboardEventToMatchEventItems:
@@ -311,8 +333,9 @@ class TestLeaderboardEventToMatchEventItems:
         assert len(items) == 3
 
     def test_raises_for_unsupported_event(self):
+        event = _the_match_event()
         with pytest.raises(ValueError):
-            leaderboard_event_to_match_event_items(_the_match_event(), "pga")
+            leaderboard_event_to_match_event_items(event, "pga")
 
     def test_finished_match_status_maps_to_completed_even_with_no_completed_key(self):
         """Real crash, 2026-08-27 (project-pga-onboarding memory): a real
@@ -338,6 +361,12 @@ class TestLeaderboardEventToMatchplayTeamEntities:
 
     def test_empty_for_individual_match_play(self):
         assert leaderboard_event_to_matchplay_team_entities(_wgc_event(), "pga") == []
+
+    def test_a_summary_competitor_with_no_team_id_is_skipped(self):
+        summary = _cup_summary_entry()
+        summary["competitors"][0]["team"] = {}
+        entities = leaderboard_event_to_matchplay_team_entities(_cup_event(sessions=[[summary], [_team_match_entry()]]), "pga")
+        assert [e["entity_id"] for e in entities] == ["3"]
 
 
 class TestLeaderboardEventToMatchplayPlayerEntities:

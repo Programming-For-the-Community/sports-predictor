@@ -237,6 +237,9 @@ class TestFieldSortKey:
         better = self._entry(win_probability={"value": 0.9})
         assert event_prediction._field_sort_key(better) < event_prediction._field_sort_key(worse)
 
+    def test_a_driver_with_no_predictions_sorts_last(self):
+        assert event_prediction._field_sort_key(self._entry()) > event_prediction._field_sort_key(self._entry(win_probability={"value": 0.0}))
+
 
 class TestPredictSprintEvent:
     def test_scores_every_driver_no_constructors(self):
@@ -250,6 +253,19 @@ class TestPredictSprintEvent:
         assert result["event_type"] == "sprint"
         assert "constructors" not in result
         assert result["field"][0]["predictions"]["win_probability"]["value"] == 0.5
+
+    def test_a_driver_with_a_stored_result_carries_it_as_actual(self):
+        storage = MagicMock()
+        storage.get_entity.return_value = None
+        built = _built_sprint_features()
+        built["event"]["participants"] = [{"entity_id": "max_verstappen", "result": {"status": "finished", "finish_position": 1}}]
+        with patch.object(event_prediction.live_features, "build_live_sprint_features", return_value=built), \
+             patch.object(event_prediction.model_loader, "load_current_model", return_value=(MagicMock(), {"version": 1})), \
+             patch.object(event_prediction.model_loader, "predict", return_value=0.5):
+            result = event_prediction.predict_sprint_event(storage, MagicMock(), MagicMock(), "2024-5-sprint")
+
+        assert result["field"][0]["actual"]["finish_position"] == 1
+        assert result["field"][0]["actual"]["status"] == "finished"
 
 
 class TestPredictEventDispatch:

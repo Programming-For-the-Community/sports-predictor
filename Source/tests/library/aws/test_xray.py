@@ -62,9 +62,10 @@ class TestIndependentSegment:
 
     def test_marks_fault_and_reraises_on_exception(self):
         with patch.object(xray, "_xray") as mock_xray:
+            error = ValueError("boom")
             with pytest.raises(ValueError):
                 with xray.independent_segment("nfl-train-win-probability-model"):
-                    raise ValueError("boom")
+                    raise error
 
         document = json.loads(mock_xray.put_trace_segments.call_args.kwargs["TraceSegmentDocuments"][0])
         assert document["fault"] is True

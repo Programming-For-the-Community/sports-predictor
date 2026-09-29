@@ -261,3 +261,29 @@ class TestBuildProjectedFieldFeatures:
 
         assert set(rows) == {"max_verstappen", "lewis_hamilton"}
         assert rows["max_verstappen"]["constructor_entity_id"] == "red_bull"
+
+
+class TestLiveFeatureHistoryWindows:
+    def _events(self):
+        return [
+            {"participants": [
+                {"entity_id": "d1", "constructor_entity_id": "c1", "result": {"finish_position": i, "qualifying": {"position": i}}},
+                {"entity_id": "d2", "constructor_entity_id": "c1", "result": {"finish_position": i + 10, "qualifying": {"position": i + 10}}},
+            ]}
+            for i in range(1, 5)
+        ]
+
+    def test_driver_histories_stop_at_the_window(self):
+        assert [r["finish_position"] for r in live_features._driver_results(self._events(), "d1", 2)] == [1, 2]
+        assert [q["position"] for q in live_features._driver_qualifying_history(self._events(), "d1", 2)] == [1, 2]
+
+    def test_constructor_histories_pool_both_drivers_and_stop_at_the_window(self):
+        assert [r["finish_position"] for r in live_features._constructor_pooled_results(self._events(), "c1", 3)] == [1, 11, 2]
+        assert [q["position"] for q in live_features._constructor_pooled_qualifying(self._events(), "c1", 3)] == [1, 11, 2]
+
+    def test_sprint_features_for_an_unknown_event_raise_not_found(self):
+        storage = MagicMock()
+        storage.get_event.return_value = None
+
+        with pytest.raises(live_features.EventNotFoundError):
+            live_features.build_live_sprint_features(storage, "f1", "missing")

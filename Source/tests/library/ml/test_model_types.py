@@ -6,6 +6,8 @@ sklearn/xgboost estimator classes are always mocked -- same boundary
 Source/tests/model-training/nfl's existing tests already draw around real
 fitting, just now scoped to the adapters these were refactored out of.
 """
+import sys
+import types
 from unittest.mock import MagicMock, patch
 
 import numpy as np
@@ -78,9 +80,10 @@ class TestBinaryLogLossScorer:
         )
         X_val = pd.DataFrame({"a": [1.5, 2.5]})
         y_val = pd.Series([0, 0])
+        scorer = get_scorer("neg_log_loss")
 
         with pytest.raises(ValueError, match="y_true contains only one label"):
-            get_scorer("neg_log_loss")(model, X_val, y_val)
+            scorer(model, X_val, y_val)
 
 
 class TestXGBoostAdapterPredict:
@@ -103,8 +106,9 @@ class TestXGBoostAdapterPredict:
 
     def test_base_adapter_refuses_to_train_without_a_task(self):
         adapter = model_types.XGBoostAdapter()
+        features, labels = _df(), pd.Series([0, 1, 0, 1])
         with pytest.raises(NotImplementedError):
-            adapter.tune_and_fit(_df(), pd.Series([0, 1, 0, 1]))
+            adapter.tune_and_fit(features, labels)
 
 
 class TestXGBoostAdapterSerialization:
@@ -342,6 +346,12 @@ class TestXGBoostRegressorAdapter:
 
 
 class TestLogisticRegressionAdapter:
+    def test_pipeline_imputes_and_scales_before_the_model(self):
+        pipeline = model_types.LogisticRegressionAdapter()._build_pipeline()
+
+        assert [name for name, _ in pipeline.steps] == ["impute", "scale", "model"]
+        assert pipeline.named_steps["model"].solver == "liblinear"
+
     def _mock_pipeline(self, coefficients=(0.5, -0.3)):
         mock_pipeline = MagicMock()
         mock_pipeline.set_params.return_value = mock_pipeline
@@ -392,6 +402,12 @@ class TestLogisticRegressionAdapter:
 
 
 class TestElasticNetAdapter:
+    def test_pipeline_imputes_and_scales_before_the_model(self):
+        pipeline = model_types.ElasticNetAdapter()._build_pipeline()
+
+        assert [name for name, _ in pipeline.steps] == ["impute", "scale", "model"]
+        assert pipeline.named_steps["model"].max_iter == 5000
+
     def _mock_pipeline(self, coefficients=(0.5, -0.3)):
         mock_pipeline = MagicMock()
         mock_pipeline.set_params.return_value = mock_pipeline
@@ -679,6 +695,20 @@ class TestLightGBMAdapters:
         importances = adapter.feature_importances(mock_estimator, ["a", "b"])
 
         assert list(importances.items()) == [("b", 5.0), ("a", 1.0)]
+
+    def test_classifier_feature_importances_are_sorted_descending(self):
+        mock_estimator = MagicMock()
+        mock_estimator.feature_importances_ = np.array([2.0, 7.0, 3.0])
+
+        importances = model_types.LightGBMClassifierAdapter().feature_importances(mock_estimator, ["a", "b", "c"])
+
+        assert list(importances) == ["b", "c", "a"]
+
+    def test_estimator_classes_come_from_the_lightgbm_package_at_call_time(self):
+        fake_lightgbm = types.SimpleNamespace(LGBMClassifier="classifier-cls", LGBMRegressor="regressor-cls")
+
+        with patch.dict(sys.modules, {"lightgbm": fake_lightgbm}):
+            assert model_types._lgbm_estimator_classes() == ("classifier-cls", "regressor-cls")
 
     def test_serialize_and_deserialize_round_trip_via_joblib(self):
         # _JoblibSerializedAdapter's shared behavior, same as

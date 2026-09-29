@@ -578,7 +578,7 @@ class _MLPAdapterBase(_JoblibSerializedAdapter):
         model.fit(X_train, y_train)
         return model, best_params
 
-    def feature_importances(self, estimator: Pipeline, feature_columns: list[str]) -> dict[str, float]:
+    def feature_importances(self, _estimator: Pipeline, _feature_columns: list[str]) -> dict[str, float]:
         # MLPs have no native feature-importance concept the way trees or
         # linear coefficients do; an empty dict is honest about that.
         return {}
@@ -637,9 +637,9 @@ class LightGBMClassifierAdapter(_JoblibSerializedAdapter):
     algorithm = "lightgbm_classifier"
 
     def tune_and_fit(self, X_train: pd.DataFrame, y_train: pd.Series) -> tuple[Any, dict]:
-        LGBMClassifier, _ = _lgbm_estimator_classes()
+        lgbm_classifier_cls, _ = _lgbm_estimator_classes()
         search = _run_randomized_search_with_early_stopping(
-            LGBMClassifier(objective="binary", n_jobs=1, verbosity=-1, random_state=_LGBM_RANDOM_STATE),
+            lgbm_classifier_cls(objective="binary", n_jobs=1, verbosity=-1, random_state=_LGBM_RANDOM_STATE),
             param_distributions=_LGBM_PARAM_DISTRIBUTIONS,
             X=X_train, y=y_train,
             scoring=_BINARY_LOG_LOSS_SCORER,
@@ -651,7 +651,7 @@ class LightGBMClassifierAdapter(_JoblibSerializedAdapter):
             label="lightgbm_classifier",
         )
         _log_search_convergence("lightgbm_classifier", search)
-        model = LGBMClassifier(objective="binary", verbosity=-1, random_state=_LGBM_RANDOM_STATE, **search.best_params_)
+        model = lgbm_classifier_cls(objective="binary", verbosity=-1, random_state=_LGBM_RANDOM_STATE, **search.best_params_)
         model.fit(X_train, y_train)
         return model, search.best_params_
 
@@ -670,9 +670,9 @@ class LightGBMRegressorAdapter(_JoblibSerializedAdapter):
     algorithm = "lightgbm_regressor"
 
     def tune_and_fit(self, X_train: pd.DataFrame, y_train: pd.Series) -> tuple[Any, dict]:
-        _, LGBMRegressor = _lgbm_estimator_classes()
+        _, lgbm_regressor_cls = _lgbm_estimator_classes()
         search = _run_randomized_search_with_early_stopping(
-            LGBMRegressor(objective="regression", n_jobs=1, verbosity=-1, random_state=_LGBM_RANDOM_STATE),
+            lgbm_regressor_cls(objective="regression", n_jobs=1, verbosity=-1, random_state=_LGBM_RANDOM_STATE),
             param_distributions=_LGBM_PARAM_DISTRIBUTIONS,
             X=X_train, y=y_train,
             scoring="neg_root_mean_squared_error",
@@ -684,7 +684,7 @@ class LightGBMRegressorAdapter(_JoblibSerializedAdapter):
             label="lightgbm_regressor",
         )
         _log_search_convergence("lightgbm_regressor", search)
-        model = LGBMRegressor(objective="regression", verbosity=-1, random_state=_LGBM_RANDOM_STATE, **search.best_params_)
+        model = lgbm_regressor_cls(objective="regression", verbosity=-1, random_state=_LGBM_RANDOM_STATE, **search.best_params_)
         model.fit(X_train, y_train)
         return model, search.best_params_
 

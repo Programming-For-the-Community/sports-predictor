@@ -545,3 +545,32 @@ def test_the_handler_imports_with_only_what_the_lambda_bundles():
     result = subprocess.run([_sys.executable, "-c", code], env=env, capture_output=True, text=True, timeout=60)
 
     assert result.returncode == 0, result.stderr[-2000:]
+
+
+class TestLazySingletons:
+    def test_each_client_is_built_once_from_the_environment(self, monkeypatch):
+        monkeypatch.setenv("MODEL_ARTIFACTS_BUCKET_NAME", "models")
+        monkeypatch.setenv("PREDICTIONS_TABLE_NAME", "predictions")
+        monkeypatch.setenv("AWS_REGION", "us-east-1")
+        with patch.object(shared_predict_read, "FeatureStorage") as storage_cls, \
+             patch.object(shared_predict_read, "S3Manager") as s3_cls, \
+             patch.object(shared_predict_read, "DynamoDBTable") as table_cls:
+            for _ in range(2):
+                assert shared_predict_read._get_storage() is storage_cls.return_value
+                assert shared_predict_read._get_model_bucket() is s3_cls.return_value
+                assert shared_predict_read._get_predictions_table() is table_cls.return_value
+
+        storage_cls.assert_called_once_with()
+        s3_cls.assert_called_once_with("models", region="us-east-1")
+        table_cls.assert_called_once_with("predictions", region="us-east-1")
+
+    def test_one_predict_invoker_per_sport_named_from_its_own_env_var(self, monkeypatch):
+        monkeypatch.setenv("NBA_PREDICT_FUNCTION_NAME", "proj-nba-predict")
+        monkeypatch.setenv("PGA_PREDICT_FUNCTION_NAME", "proj-pga-predict")
+        monkeypatch.setenv("AWS_REGION", "us-east-1")
+        with patch.object(shared_predict_read, "LambdaInvoker", side_effect=lambda name, region: MagicMock(name=name)) as invoker_cls:
+            nba = shared_predict_read._get_predict_invoker("nba")
+            assert shared_predict_read._get_predict_invoker("nba") is nba
+            assert shared_predict_read._get_predict_invoker("pga") is not nba
+
+        assert [c.args for c in invoker_cls.call_args_list] == [("proj-nba-predict",), ("proj-pga-predict",)]

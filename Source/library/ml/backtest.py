@@ -105,6 +105,65 @@ def _is_worse_than_baseline(metadata: dict, naive_baseline_metrics: dict, promot
     return None
 
 
+def _load_resumed_progress(s3: S3Manager, sport: str, model_name: str, run_id: str) -> tuple[list[dict], list[dict]]:
+    """(evaluated, promotions) left by an earlier attempt of run_id, or two
+    empty lists for a fresh run."""
+    progress = training_common.load_run_progress(s3, sport, model_name, run_id)
+    if progress is None:
+        return [], []
+    logger.info(
+        "Resuming %s/%s run %s -- %d candidate(s) already settled by an earlier attempt.",
+        sport, model_name, run_id, len(progress["evaluated"]),
+    )
+    return progress["evaluated"], progress["promotions"]
+
+
+def _evaluate_for_task(task: str, predictions: Any, y_test: Any) -> dict:
+    if task == "classification":
+        return training_common.evaluate_holdout(predictions, y_test)
+    if task == "regression":
+        return training_common.evaluate_regression_holdout(predictions, y_test)
+    raise ValueError(f"Unknown task: {task!r} (expected 'classification' or 'regression')")
+
+
+def _record_losing_candidate(
+    s3: S3Manager,
+    sport: str,
+    model_name: str,
+    run_id: str,
+    algorithm: str,
+    evaluated: list[dict],
+    promotions: list[dict],
+    ranked_so_far: list[dict],
+    promotion_metric: str,
+) -> None:
+    logger.info(
+        "%s/%s candidate %s did not beat current production -- not persisted, moving to next candidate.",
+        sport, model_name, algorithm,
+    )
+    training_common.save_run_progress(s3, sport, model_name, run_id, evaluated, promotions)
+    if promotions:
+        # A losing candidate is still real signal about this run -- keep
+        # whichever card is currently live refreshed with it immediately,
+        # rather than only at promotion time or (worse) only if
+        # _run_backtest's own end-of-run backfill is ever reached at all.
+        training_common.update_promoted_candidates(
+            s3, sport, model_name, promotions[-1]["version"], ranked_so_far, promotion_metric,
+        )
+
+
+def _warn_if_worse_than_baseline(
+    sport: str, model_name: str, algorithm: str, metadata: dict, naive_baseline_metrics: dict, promotion_metric: str,
+) -> None:
+    if _is_worse_than_baseline(metadata, naive_baseline_metrics, promotion_metric):
+        logger.warning(
+            "%s/%s candidate %s is about to be promoted despite scoring WORSE than the naive baseline "
+            "on %s -- likely means this target isn't learnable with current features/data, not "
+            "necessarily a training bug. Promoting anyway (still beats/ties current production).",
+            sport, model_name, algorithm, promotion_metric,
+        )
+
+
 def run_backtest(
     s3: S3Manager,
     sport: str,
@@ -211,17 +270,7 @@ def _run_backtest(
     X_train, y_train, X_test, y_test = split
     display_metric = "accuracy" if task == "classification" else "mae"
 
-    progress = training_common.load_run_progress(s3, sport, model_name, run_id)
-    if progress is None:
-        evaluated = []
-        promotions = []
-    else:
-        evaluated = progress["evaluated"]
-        promotions = progress["promotions"]
-        logger.info(
-            "Resuming %s/%s run %s -- %d candidate(s) already settled by an earlier attempt.",
-            sport, model_name, run_id, len(evaluated),
-        )
+    evaluated, promotions = _load_resumed_progress(s3, sport, model_name, run_id)
     already_evaluated = {entry["algorithm"] for entry in evaluated}
 
     for adapter in candidates:
@@ -238,12 +287,7 @@ def _run_backtest(
             estimator, best_params = adapter.tune_and_fit(X_train, y_train)
             training_seconds = time.perf_counter() - tune_and_fit_started
             predictions = adapter.predict(estimator, X_test)
-            if task == "classification":
-                metrics = training_common.evaluate_holdout(predictions, y_test)
-            elif task == "regression":
-                metrics = training_common.evaluate_regression_holdout(predictions, y_test)
-            else:
-                raise ValueError(f"Unknown task: {task!r} (expected 'classification' or 'regression')")
+            metrics = _evaluate_for_task(task, predictions, y_test)
 
             logger.info(
                 "%s/%s candidate %s: %s (training_seconds=%.1f)", sport, model_name, adapter.algorithm,
@@ -279,30 +323,15 @@ def _run_backtest(
             }
 
             if not training_common.would_beat_current(s3, sport, model_name, metadata, promotion_metric):
-                logger.info(
-                    "%s/%s candidate %s did not beat current production -- not persisted, moving to next candidate.",
-                    sport, model_name, adapter.algorithm,
+                _record_losing_candidate(
+                    s3, sport, model_name, run_id, adapter.algorithm,
+                    evaluated, promotions, ranked_so_far, promotion_metric,
                 )
-                training_common.save_run_progress(s3, sport, model_name, run_id, evaluated, promotions)
-                if promotions:
-                    # A losing candidate is still real signal about this run --
-                    # keep whichever card is currently live refreshed with it
-                    # immediately, rather than only at promotion time or (worse)
-                    # only if this function's own end-of-run backfill is ever
-                    # reached at all.
-                    training_common.update_promoted_candidates(
-                        s3, sport, model_name, promotions[-1]["version"], ranked_so_far, promotion_metric,
-                    )
                 continue
 
-            worse_than_baseline = _is_worse_than_baseline(metadata, naive_baseline_metrics, promotion_metric)
-            if worse_than_baseline:
-                logger.warning(
-                    "%s/%s candidate %s is about to be promoted despite scoring WORSE than the naive baseline "
-                    "on %s -- likely means this target isn't learnable with current features/data, not "
-                    "necessarily a training bug. Promoting anyway (still beats/ties current production).",
-                    sport, model_name, adapter.algorithm, promotion_metric,
-                )
+            _warn_if_worse_than_baseline(
+                sport, model_name, adapter.algorithm, metadata, naive_baseline_metrics, promotion_metric,
+            )
 
             card = training_common.save_model_artifact(
                 s3, sport, model_name, adapter.algorithm,
@@ -327,8 +356,8 @@ def _run_backtest(
             _release_candidate_resources()
 
     # Every candidate's result -- win or lose -- was already written onto
-    # whichever card was live at the time (the would_beat_current branch
-    # above for a loss, save_model_artifact's own metadata for a win), so
+    # whichever card was live at the time (_record_losing_candidate for a
+    # loss, save_model_artifact's own metadata for a win), so
     # there's nothing left to backfill here. Just keep the in-memory
     # return value consistent with what's now in S3, for any caller that
     # reads promotions[-1] directly rather than re-fetching the card.

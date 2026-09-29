@@ -155,9 +155,16 @@ def _next_week_events(scheduled: list[dict]) -> list[dict]:
 def _round_label(event: dict) -> str | None:
     """None for a regular-season game; "CFP" for a real 12-team playoff
     game (is_playoff_game); "Bowl" for any other postseason game."""
+    label: str | None = None
+
     if event.get("season_type") != "postseason":
-        return None
-    return "CFP" if is_playoff_game(event) else "Bowl" if is_bowl_game(event) else None
+        label = None
+    elif is_playoff_game(event):
+        label = "CFP"
+    elif is_bowl_game(event):
+        label = "Bowl"
+    
+    return label
 
 
 def list_events(storage, predictions_table, sport: str, status: str) -> dict:

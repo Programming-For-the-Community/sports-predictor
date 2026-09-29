@@ -134,6 +134,9 @@ class TestFeatureColumns:
 
         assert "avg_fumbles_recovered" in columns
 
+    def test_a_target_in_neither_side_has_no_opposing_categories(self):
+        assert train_player_prop_model._opposing_side_categories("fumbles_recovered") == set()
+
 
 class TestTrain:
     def test_calls_run_backtest_with_regression_task_and_every_candidate(self):

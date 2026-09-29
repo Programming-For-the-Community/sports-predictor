@@ -91,6 +91,7 @@ PGA_SPECS: dict[str, FieldModelSpec] = {
     **{f"round-{n}": FieldModelSpec(scorecard.KIND_AMOUNT, _pga_round_score(n)) for n in (1, 2, 3, 4)},
 }
 
+
 def _f1_constructor_won(event: dict, constructor_id: str) -> bool | None:
     """Did this constructor win the race? -- the winning driver's constructor."""
     winner = next((p for p in event.get("participants", []) if (p.get("result") or {}).get("finish_position") == 1), None)
@@ -144,6 +145,30 @@ def _predictions_by_entity(rows: list[dict], model_name: str) -> dict[str, dict]
     return latest
 
 
+def _actual_for(spec: FieldModelSpec, event: dict, participants: dict[str, dict], entity: str) -> float | bool | None:
+    if spec.entity_actual is not None:
+        return spec.entity_actual(event, entity)
+    participant = participants.get(entity)
+    return spec.actual(participant) if participant is not None else None
+
+
+def _sample_for(spec: FieldModelSpec, period: Period, predicted, actual, entity: str) -> ChanceSample | AmountSample:
+    if spec.kind == scorecard.KIND_CHANCE:
+        return ChanceSample(period, predicted, bool(actual), (entity,))
+    return AmountSample(period, predicted, actual, (entity,))
+
+
+def _event_samples(event: dict, specs: dict[str, FieldModelSpec], rows: list[dict], samples: dict[str, list]) -> None:
+    period = period_for(event)
+    participants = {p["entity_id"]: p for p in event.get("participants", [])}
+    for model_name, spec in specs.items():
+        for entity, row in _predictions_by_entity(rows, model_name).items():
+            actual = _actual_for(spec, event, participants, entity)
+            if actual is not None:
+                sample = _sample_for(spec, period, row["predicted_value"]["value"], actual, entity)
+                samples.setdefault(model_name, []).append(sample)
+
+
 def collect_samples(sport: str, events: list[dict], raw_rows_by_event: dict[str, list[dict]]) -> dict[str, list]:
     """{model_name: [samples]} across every completed event of the sport."""
     specs_by_type, _ = SPORTS[sport]
@@ -153,23 +178,8 @@ def collect_samples(sport: str, events: list[dict], raw_rows_by_event: dict[str,
         raw_rows = raw_rows_by_event.get(event["event_key"], [])
         if specs is None or not raw_rows:
             continue
-        period = period_for(event)
-        participants = {p["entity_id"]: p for p in event.get("participants", [])}
-        for model_name, spec in specs.items():
-            rows, _ = pregame_rows(raw_rows, FINAL_PREGAME)
-            for entity, row in _predictions_by_entity(rows, model_name).items():
-                if spec.entity_actual is not None:
-                    actual = spec.entity_actual(event, entity)
-                else:
-                    participant = participants.get(entity)
-                    actual = spec.actual(participant) if participant is not None else None
-                if actual is None:
-                    continue
-                predicted = row["predicted_value"]["value"]
-                if spec.kind == scorecard.KIND_CHANCE:
-                    samples.setdefault(model_name, []).append(ChanceSample(period, predicted, bool(actual), (entity,)))
-                else:
-                    samples.setdefault(model_name, []).append(AmountSample(period, predicted, actual, (entity,)))
+        rows, _ = pregame_rows(raw_rows, FINAL_PREGAME)
+        _event_samples(event, specs, rows, samples)
     return samples
 
 

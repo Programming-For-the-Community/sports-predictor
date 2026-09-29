@@ -20,7 +20,7 @@ def storage_env(monkeypatch):
     monkeypatch.setenv("TEAM_GAME_STATS_TABLE_NAME", "test-team-game-stats")
 
 
-def _make_storage(storage_env):
+def _make_storage(_storage_env):
     mock_entities = MagicMock()
     mock_events = MagicMock()
     mock_stats = MagicMock()
@@ -354,3 +354,23 @@ class TestGetTeamEntities:
         call = mock_entities.query.call_args
         assert call.args[0] == Key("team_key").eq("SPORT#NFL#TEAM#KC")
         assert call.kwargs["index_name"] == "team-index"
+
+
+class TestRequiredEnvironment:
+    def test_missing_variable_raises_with_its_name(self, storage_env, monkeypatch):
+        monkeypatch.delenv("PLAYER_GAME_STATS_TABLE_NAME")
+
+        with patch("library.storage.feature_storage.DynamoDBTable"), \
+             pytest.raises(RuntimeError, match="PLAYER_GAME_STATS_TABLE_NAME"):
+            FeatureStorage()
+
+
+class TestGetPlayerGameStatsBeforeDate:
+    def test_before_date_narrows_the_key_condition(self, storage_env):
+        storage, _, _, mock_stats, _ = _make_storage(storage_env)
+
+        storage.get_player_game_stats("p1", before_date="2025-10-01", limit=5)
+
+        condition = mock_stats.query.call_args.args[0]
+        assert condition == Key("entity_id").eq("p1") & Key("event_date").lt("2025-10-01")
+        assert mock_stats.query.call_args.kwargs == {"index_name": "entity-history", "scan_index_forward": False, "limit": 5}

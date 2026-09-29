@@ -351,3 +351,24 @@ class TestIsCurrentOrUpcoming:
     def test_a_past_game_without_a_usable_kickoff_does_not(self):
         assert not common.is_current_or_upcoming({"event_date": "2026-09-26"}, self.NOW)
         assert not common.is_current_or_upcoming(self._event("2026-09-26", "not a time"), self.NOW)
+
+
+class TestMalformedEventsAndRows:
+    _ONE_SIDED = {"participants": [{"entity_id": "1", "role": "home"}]}
+
+    def test_actual_result_is_none_without_both_sides(self):
+        assert common._actual_result(self._ONE_SIDED) is None
+
+    def test_basketball_leaders_comparison_is_none_without_both_sides(self):
+        assert common._basketball_leaders_comparison(MagicMock(), [], "nba", self._ONE_SIDED) is None
+
+    def test_predicted_stats_ignore_stats_with_no_leader_category(self):
+        rows = [
+            {"model_key": "MODEL#player-prop-points#v1#PLAYER#p1", "predicted_value": {"value": 20.0}},
+            {"model_key": "MODEL#player-prop-blocks#v1#PLAYER#p1", "predicted_value": {"value": 2.0}},
+            {"model_key": "MODEL#win-probability#v1", "predicted_value": {"home_win_probability": 0.5}},
+        ]
+
+        result = common._predicted_stats_by_entity_category(rows, {"points": "scoring"})
+
+        assert result == {("p1", "scoring"): {"points": 20.0}}

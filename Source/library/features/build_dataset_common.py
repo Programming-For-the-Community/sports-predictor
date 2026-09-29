@@ -152,6 +152,21 @@ def write_parquet(rows: list[dict]) -> bytes:
     return buffer.getvalue()
 
 
+def write_dataset(s3, key: str, rows: list[dict], label: str, logger, serialize: Callable[[list[dict]], bytes] = write_parquet) -> None:
+    """Serializes rows and uploads them to s3://{s3.bucket}/{key}, raising
+    instead of overwriting the existing dataset with an empty one. Clears
+    `rows` once serialized so a large row list isn't held in memory during
+    the upload."""
+    if not rows:
+        raise RuntimeError(f"{label} produced 0 rows -- refusing to overwrite s3://{s3.bucket}/{key} with an empty dataset")
+    row_count = len(rows)
+    logger.info("Writing %d %s rows to Parquet...", row_count, label)
+    body = serialize(rows)
+    rows.clear()
+    s3.put_bytes(key, body, content_type="application/octet-stream")
+    logger.info("Wrote %d %s rows to s3://%s/%s", row_count, label, s3.bucket, key)
+
+
 def lookback_since_date() -> str | None:
     """Converts TRAINING_LOOKBACK_SEASONS (a season count) into an
     approximate since_date FeatureStorage's GSI queries can filter on --

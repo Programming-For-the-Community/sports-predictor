@@ -57,6 +57,7 @@ import pandas as pd
 
 from library.aws import xray
 from library.aws.s3_manager import S3Manager
+from library.features import build_dataset_common
 from library.features.pga import (
     DEFAULT_COURSE_HISTORY_WINDOW,
     build_cup_event_features,
@@ -419,12 +420,8 @@ def _write_parquet(rows: list[dict]) -> bytes:
     return buffer.getvalue()
 
 
-def _write_dataset(s3: S3Manager, bucket: str, key: str, rows: list[dict], label: str) -> None:
-    if not rows:
-        raise RuntimeError(f"{label} produced 0 rows -- refusing to overwrite s3://{bucket}/{key} with an empty dataset")
-    logger.info("Writing %d %s rows to Parquet...", len(rows), label)
-    s3.put_bytes(key, _write_parquet(rows), content_type="application/octet-stream")
-    logger.info("Wrote %d %s rows to s3://%s/%s", len(rows), label, bucket, key)
+def _write_dataset(s3: S3Manager, key: str, rows: list[dict], label: str) -> None:
+    build_dataset_common.write_dataset(s3, key, rows, label, logger, serialize=_write_parquet)
 
 
 def _lookback_since_date() -> str | None:
@@ -460,17 +457,17 @@ def main() -> None:
     logger.info("Loaded %d season-stats snapshot(s)", len(snapshots))
 
     golfer_rows = build_golfer_dataset(storage, window, course_window, snapshots, since_date=since_date)
-    _write_dataset(s3, bucket, GOLFER_FEATURES_KEY, golfer_rows, "golfer")
+    _write_dataset(s3, GOLFER_FEATURES_KEY, golfer_rows, "golfer")
 
     round_rows = build_round_dataset(storage, window, since_date=since_date)
-    _write_dataset(s3, bucket, ROUND_FEATURES_KEY, round_rows, "round")
+    _write_dataset(s3, ROUND_FEATURES_KEY, round_rows, "round")
 
     cutline_rows = build_cutline_dataset(storage, course_window, since_date=since_date)
-    _write_dataset(s3, bucket, CUTLINE_FEATURES_KEY, cutline_rows, "cutline")
+    _write_dataset(s3, CUTLINE_FEATURES_KEY, cutline_rows, "cutline")
 
     match_rows, cup_rows = build_match_and_cup_datasets(storage, window, since_date=since_date)
-    _write_dataset(s3, bucket, MATCH_FEATURES_KEY, match_rows, "match")
-    _write_dataset(s3, bucket, CUP_FEATURES_KEY, cup_rows, "cup")
+    _write_dataset(s3, MATCH_FEATURES_KEY, match_rows, "match")
+    _write_dataset(s3, CUP_FEATURES_KEY, cup_rows, "cup")
 
     logger.info("Feature engineering complete.")
 

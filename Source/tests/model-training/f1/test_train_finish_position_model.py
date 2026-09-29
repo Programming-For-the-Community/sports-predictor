@@ -9,6 +9,7 @@ algorithm fitting.
 from unittest.mock import MagicMock, patch
 
 import pandas as pd
+import pytest
 
 import train_finish_position_model
 
@@ -80,3 +81,21 @@ class TestTrain:
         call = mock_run.call_args
         assert "naive_baseline_rmse" in call.kwargs["naive_baseline_metrics"]
         assert "naive_baseline_mae" in call.kwargs["naive_baseline_metrics"]
+
+
+class TestMain:
+    def test_requires_bucket_env_var(self, monkeypatch):
+        monkeypatch.delenv("MODEL_ARTIFACTS_BUCKET_NAME", raising=False)
+
+        with pytest.raises(KeyError):
+            train_finish_position_model.main()
+
+    def test_loads_features_and_delegates_to_train(self, monkeypatch):
+        monkeypatch.setenv("MODEL_ARTIFACTS_BUCKET_NAME", "test-bucket")
+        df, mock_s3 = MagicMock(), MagicMock()
+
+        with patch.object(train_finish_position_model, "S3Manager", return_value=mock_s3),              patch.object(train_finish_position_model.training_common, "load_features", return_value=df) as mock_load,              patch.object(train_finish_position_model, "train") as mock_train:
+            train_finish_position_model.main()
+
+        mock_load.assert_called_once_with(mock_s3, train_finish_position_model.DRIVER_FEATURES_KEY)
+        mock_train.assert_called_once_with(mock_s3, df)

@@ -1,78 +1,65 @@
 """
-Integration tests for the PGA backfill ESPN client and normalization
-layer.
-
-These tests hit the real ESPN public API and verify that both the raw
-responses have the expected shape AND that normalize.py maps them into
-the schema this project writes to AWS. No AWS credentials are needed --
-the storage layer is never touched here.
-
-Run from the repo root:
-    pytest Source/tests/data-backfills/pga/
-
-All ESPN calls are made once per session via module-scoped fixtures so
-the rate limiter is only hit a handful of times across the full suite.
-
-TEST_DATE/TEST_EVENT_ID are a fixed, well-in-the-past completed
-tournament (the 2021 AT&T Pebble Beach Pro-Am) so the suite stays
-deterministic regardless of today's actual PGA schedule -- confirmed live
-2026-08-24 to still return STATUS_FINAL.
-
-A persistent ESPN block after HttpClient's own retry-with-backoff is
-treated as "unreachable from here right now" (skip) rather than a code
-defect (fail), via _fetch_or_skip below.
+Tests for the PGA backfill ESPN client and normalization layer, run against
+hand-built ESPN responses (see ../_espn_payloads.py) through the real
+PGAClient with its HTTP session faked -- no network access. Covers both
+the endpoints/params the client requests and how normalize.py maps a
+leaderboard into this project's schema.
 """
 import pytest
 
+from _espn_payloads import fake_session, golf_competitor, golf_leaderboard_event
 from library.http.pga import PGAClient
 import normalize
 
-TEST_DATE = "20210214"  # 2021 AT&T Pebble Beach Pro-Am, well in the past
+TEST_DATE = "20210214"
+EVENT_ID = "401219478"
 
 
-def _fetch_or_skip(description: str, fetch):
-    try:
-        return fetch()
-    except RuntimeError as exc:
-        pytest.skip(f"ESPN unreachable from this network ({description}): {exc}")
-
-
-# ---------------------------------------------------------------------------
-# Shared fixtures -- one real API call per fixture for the entire test run
-# ---------------------------------------------------------------------------
-
-@pytest.fixture(scope="module")
+@pytest.fixture
 def client():
-    return PGAClient()
+    competitors = [golf_competitor(str(1000 + i), f"T{i}" if i % 3 else str(i), f"-{20 - i}") for i in range(1, 12)]
+    competitors.append(golf_competitor("2000", "-", "+4", status_name="STATUS_CUT"))
+    pga_client = PGAClient(min_interval_seconds=0)
+    pga_client._session = fake_session({
+        "pga/scoreboard": {
+            "events": [{"id": EVENT_ID}],
+            "leagues": [{"calendar": [{"id": str(400000000 + i)} for i in range(45)]}],
+        },
+        "leaderboard": {"events": [golf_leaderboard_event(EVENT_ID, competitors)]},
+    })
+    return pga_client
 
 
-@pytest.fixture(scope="module")
+@pytest.fixture
 def scoreboard_response(client):
-    return _fetch_or_skip("GET scoreboard", lambda: client.get_scoreboard_for_date(TEST_DATE))
+    return client.get_scoreboard_for_date(TEST_DATE)
 
 
-@pytest.fixture(scope="module")
+@pytest.fixture
 def first_event_id(scoreboard_response):
-    events = scoreboard_response.get("events", [])
-    assert events, "ESPN returned no events for the test date -- pick a different date"
-    return events[0]["id"]
+    return scoreboard_response["events"][0]["id"]
 
 
-@pytest.fixture(scope="module")
+@pytest.fixture
 def leaderboard_response(client, first_event_id):
-    return _fetch_or_skip("GET leaderboard", lambda: client.get_leaderboard(first_event_id))
+    return client.get_leaderboard(first_event_id)
 
 
-@pytest.fixture(scope="module")
+@pytest.fixture
 def leaderboard_event(leaderboard_response):
-    events = leaderboard_response.get("events", [])
-    assert events, "ESPN returned no events in the leaderboard response"
-    return events[0]
+    return leaderboard_response["events"][0]
 
 
-# ---------------------------------------------------------------------------
-# PGA client -- verify the API is reachable and returns expected structure
-# ---------------------------------------------------------------------------
+class TestRequests:
+    def test_each_call_hits_its_own_endpoint_and_params(self, client):
+        client.get_scoreboard_for_date(TEST_DATE)
+        client.get_leaderboard(EVENT_ID)
+
+        urls = [c.args[0] for c in client._session.get.call_args_list]
+        assert urls[0].endswith("/pga/scoreboard")
+        assert urls[1].endswith("/leaderboard")
+        assert [c.kwargs["params"] for c in client._session.get.call_args_list] == [{"dates": TEST_DATE}, {"event": EVENT_ID}]
+
 
 class TestPGAClient:
     def test_get_scoreboard_has_events(self, scoreboard_response):

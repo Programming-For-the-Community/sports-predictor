@@ -127,3 +127,9 @@ class TestLambdaHandler:
             pga_schedule_sync.lambda_handler({}, None)
 
         mock_s3.put_object.assert_not_called()
+
+
+class TestInRefreshWindow:
+    def test_an_unparseable_or_missing_start_date_is_always_refreshed(self):
+        assert pga_schedule_sync._in_refresh_window("not-a-date", date(2026, 9, 1)) is True
+        assert pga_schedule_sync._in_refresh_window(None, date(2026, 9, 1)) is True

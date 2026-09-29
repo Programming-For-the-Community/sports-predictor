@@ -1,73 +1,61 @@
 """
-Integration tests for the NBA backfill ESPN client and normalization layer.
-
-These tests hit the real ESPN public API and verify that both the raw
-responses have the expected shape AND that normalize.py maps them into
-the schema this project writes to AWS. No AWS credentials are needed --
-the storage layer is never touched here.
-
-Run from the repo root:
-    pytest Source/tests/data-backfills/nba/
-
-All ESPN calls are made once per session via module-scoped fixtures so
-the rate limiter is only hit a handful of times across the full suite.
-
-TEST_DATE is a fixed, well-in-the-past regular-season date so the suite
-stays deterministic regardless of today's actual NBA schedule.
-
-A persistent ESPN block after HttpClient's own retry-with-backoff is
-treated as "unreachable from here right now" (skip) rather than a code
-defect (fail), via _fetch_or_skip below.
+Tests for the NBA backfill ESPN client and normalization layer, run against
+hand-built ESPN responses (see ../_espn_payloads.py) through the real
+NBAClient with its HTTP session faked -- no network access. Covers both
+the endpoints/params the client requests and how normalize.py maps each
+response into this project's schema.
 """
 import pytest
 
+from _espn_payloads import basketball_summary, fake_session, scoreboard_event, scoreboard_payload, teams_payload
 from library.http.nba import NBAClient
 import normalize
 
-TEST_DATE = "20250115"  # 2024-25 regular season, well in the past
+TEST_DATE = "20250115"
+EVENT_ID = "401705127"
 
 
-def _fetch_or_skip(description: str, fetch):
-    try:
-        return fetch()
-    except RuntimeError as exc:
-        pytest.skip(f"ESPN unreachable from this network ({description}): {exc}")
-
-
-# ---------------------------------------------------------------------------
-# Shared fixtures -- one real API call per fixture for the entire test run
-# ---------------------------------------------------------------------------
-
-@pytest.fixture(scope="module")
+@pytest.fixture
 def client():
-    return NBAClient()
+    nba_client = NBAClient(min_interval_seconds=0)
+    nba_client._session = fake_session({
+        "teams": teams_payload(30),
+        "scoreboard": scoreboard_payload(scoreboard_event(EVENT_ID, "2025-01-16T00:30Z", "13", "2", "112", "105")),
+        "summary": basketball_summary(EVENT_ID, "2025-01-16T00:30Z", "13", "2"),
+    })
+    return nba_client
 
 
-@pytest.fixture(scope="module")
+@pytest.fixture
 def teams_response(client):
-    return _fetch_or_skip("GET teams", client.get_teams)
+    return client.get_teams()
 
 
-@pytest.fixture(scope="module")
+@pytest.fixture
 def scoreboard_response(client):
-    return _fetch_or_skip("GET scoreboard", lambda: client.get_scoreboard_for_date(TEST_DATE))
+    return client.get_scoreboard_for_date(TEST_DATE)
 
 
-@pytest.fixture(scope="module")
+@pytest.fixture
 def first_event(scoreboard_response):
-    events = scoreboard_response.get("events", [])
-    assert events, "ESPN returned no events for the test date -- pick a different date"
-    return events[0]
+    return scoreboard_response["events"][0]
 
 
-@pytest.fixture(scope="module")
+@pytest.fixture
 def summary_response(client, first_event):
-    return _fetch_or_skip("GET summary", lambda: client.get_summary(first_event["id"]))
+    return client.get_summary(first_event["id"])
 
 
-# ---------------------------------------------------------------------------
-# NBA client -- verify the API is reachable and returns expected structure
-# ---------------------------------------------------------------------------
+class TestRequests:
+    def test_each_call_hits_its_own_endpoint_and_params(self, client):
+        client.get_teams()
+        client.get_scoreboard_for_date(TEST_DATE)
+        client.get_summary(EVENT_ID)
+
+        calls = [(c.args[0].rsplit("/", 1)[-1], c.kwargs["params"]) for c in client._session.get.call_args_list]
+        assert calls == [("teams", {}), ("scoreboard", {"dates": TEST_DATE}), ("summary", {"event": EVENT_ID})]
+        assert "basketball/nba" in client._session.get.call_args_list[0].args[0]
+
 
 class TestNBAClient:
     def test_get_teams_returns_30_nba_teams(self, teams_response):

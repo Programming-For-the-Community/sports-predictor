@@ -323,3 +323,28 @@ class TestMultiRecordResilience:
             }, None)
 
         assert result == {"processed": 1, "failed": 1}
+
+
+class TestNormalizeHelpers:
+    def test_storage_is_built_once(self, monkeypatch):
+        monkeypatch.setattr(f1_normalize, "_storage", None)
+        with patch.object(f1_normalize, "PipelineStorage") as storage_cls:
+            assert f1_normalize._get_storage() is f1_normalize._get_storage()
+
+        storage_cls.assert_called_once_with()
+
+    def test_try_read_json_reraises_errors_other_than_not_found(self):
+        denied = ClientError({"Error": {"Code": "AccessDenied"}}, "GetObject")
+        with patch.object(f1_normalize, "_read_json", side_effect=denied), pytest.raises(ClientError):
+            f1_normalize._try_read_json("bucket", "key")
+
+    def test_try_read_json_is_none_for_a_missing_object(self):
+        missing = ClientError({"Error": {"Code": "NoSuchKey"}}, "GetObject")
+        with patch.object(f1_normalize, "_read_json", side_effect=missing):
+            assert f1_normalize._try_read_json("bucket", "key") is None
+
+    def test_qualifying_payload_with_no_season_or_round_writes_nothing(self):
+        with patch.object(f1_normalize, "_get_storage") as get_storage:
+            f1_normalize._process_qualifying({"MRData": {"RaceTable": {}}}, "f1/qualifying/x.json", "bucket")
+
+        get_storage.assert_not_called()

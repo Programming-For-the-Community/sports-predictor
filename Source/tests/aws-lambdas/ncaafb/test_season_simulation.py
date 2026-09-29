@@ -265,3 +265,11 @@ class TestSimulateSeason:
         )
 
         assert result[self.STRONG_TEAM]["projected_wins"] == pytest.approx(5.0)
+
+
+class TestProjectMatchupSeedOrder:
+    def test_the_better_seed_is_always_listed_first_as_host(self):
+        result = season_simulation.project_matchup("low", "top", 6, 1, {"low": 1500.0, "top": 1500.0}, 0.0)
+
+        assert (result["team_a"], result["seed_a"]) == ("top", 1)
+        assert (result["team_b"], result["seed_b"]) == ("low", 6)

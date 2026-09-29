@@ -114,6 +114,15 @@ class TestGameTeamStatsToTeamGameStats:
 
         assert items[0]["stat_line"] == {"penalties": 4, "penalty_yards": 50}
 
+    def test_a_compound_category_without_a_separator_is_kept_whole(self):
+        box_score = _team_box_score(teams=[
+            {"teamId": 2, "team": "Georgia", "homeAway": "home", "stats": [{"category": "thirdDownEff", "stat": "7"}]},
+        ])
+
+        items = game_team_stats_to_team_game_stats(box_score, "ncaafb")
+
+        assert items[0]["stat_line"] == {"third_down_eff": 7}
+
     def test_team_block_with_no_teamid_and_unresolvable_home_away_is_skipped(self):
         box_score = _team_box_score(teams=[
             {"team": "Neutral", "homeAway": "unknown", "stats": [{"category": "turnovers", "stat": "1"}]},

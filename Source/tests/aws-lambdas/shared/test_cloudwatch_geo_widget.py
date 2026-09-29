@@ -48,6 +48,10 @@ class TestBucket:
     def test_a_small_share_gets_the_bottom_nonzero_bucket(self):
         assert handler._bucket(1, 100) == 1
 
+    def test_middle_shares_get_the_middle_buckets(self):
+        assert handler._bucket(60, 100) == 3
+        assert handler._bucket(30, 100) == 2
+
 
 class TestAcceptedCountsByState:
     def test_parses_logs_insights_rows_into_a_state_count_map(self):
@@ -96,6 +100,19 @@ class TestRunLogsInsightsQuery:
         client.start_query.return_value = {"queryId": "q-1"}
         client.get_query_results.return_value = {"status": "Failed", "results": []}
         assert handler._run_logs_insights_query(client, ["lg"], "filter true", 0, 1000) == []
+
+    def test_polls_until_the_query_completes(self, monkeypatch):
+        client = MagicMock()
+        client.start_query.return_value = {"queryId": "q-1"}
+        client.get_query_results.side_effect = [
+            {"status": "Running"},
+            {"status": "Complete", "results": [[{"field": "region", "value": "CA"}]]},
+        ]
+        sleeps = []
+        monkeypatch.setattr(handler.time, "sleep", sleeps.append)
+
+        assert handler._run_logs_insights_query(client, ["lg"], "filter true", 0, 1000) == [{"region": "CA"}]
+        assert sleeps == [0.5]
 
 
 class TestAcceptedHotspots:
@@ -146,6 +163,9 @@ class TestInterpHeatColor:
         low = handler._interp_heat_color(50)
         high = handler._interp_heat_color(220)
         assert high[3] > low[3]
+
+    def test_a_value_past_the_last_stop_gets_the_hottest_stop(self):
+        assert handler._interp_heat_color(300) == handler._HEAT_COLOR_STOPS[-1][1]
 
 
 class TestPinpointLayer:

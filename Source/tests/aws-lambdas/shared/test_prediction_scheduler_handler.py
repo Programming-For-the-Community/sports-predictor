@@ -34,3 +34,21 @@ def test_handler_runs_a_tick_and_returns_its_summary(monkeypatch):
     assert call["FunctionName"] == "proj-nfl-predict"
     assert call["InvocationType"] == "Event"
     assert json.loads(call["Payload"]) == {"detail-type": "SnapshotPrediction", "event_id": "1"}
+
+
+def test_each_client_is_built_once_from_the_environment(monkeypatch):
+    monkeypatch.setenv("EVENTS_TABLE_NAME", "events")
+    monkeypatch.setenv("PREDICTIONS_TABLE_NAME", "predictions")
+    monkeypatch.setenv("AWS_REGION", "us-east-1")
+    for name in ("_lambda_client", "_events_table", "_predictions_table"):
+        monkeypatch.setattr(shared_prediction_scheduler, name, None)
+    with patch.object(shared_prediction_scheduler.boto3, "client") as client_factory, \
+         patch.object(shared_prediction_scheduler, "DynamoDBTable", side_effect=lambda name, region: (name, region)):
+        for _ in range(2):
+            assert shared_prediction_scheduler._get_lambda_client() is client_factory.return_value
+            assert shared_prediction_scheduler._get_events_table() == ("events", "us-east-1")
+            assert shared_prediction_scheduler._get_predictions_table() == ("predictions", "us-east-1")
+
+    client_factory.assert_called_once()
+    assert client_factory.call_args.args == ("lambda",)
+    assert client_factory.call_args.kwargs["region_name"] == "us-east-1"

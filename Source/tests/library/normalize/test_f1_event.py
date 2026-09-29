@@ -331,6 +331,13 @@ class TestQualifyingPayloadToResults:
         assert results["d"]["q1_seconds"] is None
         assert results["d"]["best_seconds"] is None
 
+    def test_a_row_with_no_driver_id_is_dropped(self):
+        driverless = {"position": "2", "Driver": {}, "Constructor": {"constructorId": "c"}, "Q1": "1:30.000"}
+
+        results = qualifying_payload_to_results(_qualifying_payload(_POLE, driverless))
+
+        assert list(results) == ["max_verstappen"]
+
 
 class TestMergeQualifyingIntoEvent:
     def test_merges_qualifying_onto_matching_participants_by_entity_id(self):

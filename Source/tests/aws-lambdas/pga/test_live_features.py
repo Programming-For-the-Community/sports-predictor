@@ -342,3 +342,50 @@ class TestBuildLiveCupFeatures:
         # home roster is the UNION across both sessions (1085, 1086, 1087)
         assert result["features"]["home_avg_score_to_par"] == pytest.approx((-4 + -6 + -2) / 3)
         assert result["features"]["away_avg_score_to_par"] == pytest.approx((0 + -1) / 2)
+
+    def test_a_session_participant_with_no_role_is_left_out_of_the_roster(self):
+        target = _cup_event("999", "2026-09-22", home_id="1", away_id="3")
+        session = _match_event(
+            "999-match-1", "2026-09-22", "999",
+            {"entity_id": "1", "role": "home", "golfer_entity_ids": ["1085"]},
+            {"entity_id": "3", "role": "away", "golfer_entity_ids": ["2001"]},
+        )
+        session["participants"].append({"entity_id": "x", "golfer_entity_ids": ["9999"]})
+        past = _field_event("998", "2026-08-01", [
+            _participant("1085", score_to_par=-4), _participant("2001", score_to_par=0), _participant("9999", score_to_par=-20),
+        ])
+
+        result = live_features.build_live_cup_features(_storage(target, [target, session, past]), "pga", "999")
+
+        assert result["features"]["home_avg_score_to_par"] == pytest.approx(-4)
+        assert result["features"]["away_avg_score_to_par"] == pytest.approx(0)
+
+    def test_raises_not_found_for_an_unknown_event(self):
+        storage = _storage(None, [])
+        with pytest.raises(live_features.EventNotFoundError):
+            live_features.build_live_cup_features(storage, "pga", "999")
+
+    def test_raises_malformed_for_a_non_cup_event(self):
+        target = _field_event("999", "2026-09-22", [])
+        storage = _storage(target, [target])
+        with pytest.raises(live_features.MalformedEventError, match="not 'cup'"):
+            live_features.build_live_cup_features(storage, "pga", "999")
+
+    def test_raises_malformed_when_a_side_is_missing(self):
+        target = _cup_event("999", "2026-09-22")
+        target["participants"] = target["participants"][:1]
+        storage = _storage(target, [target])
+        with pytest.raises(live_features.MalformedEventError, match="home/away"):
+            live_features.build_live_cup_features(storage, "pga", "999")
+
+
+class TestPriorSameRoundResults:
+    def test_stops_at_the_window(self):
+        events = [
+            _field_event(str(i), f"2026-0{i}-01", [_participant("g", rounds=[_round(1, score_to_par=-i)])])
+            for i in range(1, 5)
+        ]
+
+        results = live_features._prior_same_round_results(events, "g", 1, 2)
+
+        assert [r["score_to_par"] for r in results] == [-1, -2]

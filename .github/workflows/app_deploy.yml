@@ -49,7 +49,7 @@ jobs:
     name: Run NFL backfill tests
     uses: ./.github/workflows/run_python_tests.yml
     with:
-      test_path: 'Source/tests/data-backfills/nfl/'
+      test_path: 'Source/tests/data-backfills/nfl/ Source/tests/migrations/'
       requirements_files: 'Source/data-backfills/nfl/requirements-dev.txt'
 
   test-nfl-feature-engineering:
@@ -85,6 +85,11 @@ jobs:
         Source/tests/aws-lambdas/nfl/test_live_features_leader_candidates.py
         Source/tests/aws-lambdas/nfl/test_live_features_depth_chart.py
         Source/tests/aws-lambdas/nfl/test_live_features_roster.py
+        Source/tests/aws-lambdas/nfl/test_predict_bracket.py
+        Source/tests/aws-lambdas/nfl/test_predict_snapshot.py
+        Source/tests/aws-lambdas/nfl/test_season_projection.py
+        Source/tests/aws-lambdas/nfl/test_season_projection_edge_cases.py
+        Source/tests/aws-lambdas/nfl/test_season_simulation.py
       requirements_files: 'Source/aws-lambdas/nfl/predict/requirements.in Source/aws-lambdas/nfl/predict/requirements-nodeps.in'
 
   test-predict-read:
@@ -159,6 +164,8 @@ jobs:
         Source/tests/aws-lambdas/ncaafb/test_live_features.py
         Source/tests/aws-lambdas/ncaafb/test_event_prediction.py
         Source/tests/aws-lambdas/ncaafb/test_predict_handler.py
+        Source/tests/aws-lambdas/ncaafb/test_predict_bracket.py
+        Source/tests/aws-lambdas/ncaafb/test_season_projection_edge_cases.py
         Source/tests/aws-lambdas/ncaafb/test_season_simulation.py
         Source/tests/aws-lambdas/ncaafb/test_season_projection.py
       requirements_files: 'Source/aws-lambdas/ncaafb/predict/requirements.in Source/aws-lambdas/ncaafb/predict/requirements-nodeps.in'
@@ -224,6 +231,9 @@ jobs:
         Source/tests/aws-lambdas/nba/test_live_features.py
         Source/tests/aws-lambdas/nba/test_event_prediction.py
         Source/tests/aws-lambdas/nba/test_predict_handler.py
+        Source/tests/aws-lambdas/nba/test_event_prediction_common.py
+        Source/tests/aws-lambdas/nba/test_predict_bracket.py
+        Source/tests/aws-lambdas/nba/test_season_projection_edge_cases.py
         Source/tests/aws-lambdas/nba/test_season_simulation.py
         Source/tests/aws-lambdas/nba/test_predict_season_simulation.py
       requirements_files: 'Source/aws-lambdas/nba/predict/requirements.in Source/aws-lambdas/nba/predict/requirements-nodeps.in'
@@ -287,6 +297,8 @@ jobs:
         Source/tests/aws-lambdas/ncaambb/test_live_features.py
         Source/tests/aws-lambdas/ncaambb/test_event_prediction.py
         Source/tests/aws-lambdas/ncaambb/test_predict_handler.py
+        Source/tests/aws-lambdas/ncaambb/test_season_projection.py
+        Source/tests/aws-lambdas/ncaambb/test_season_simulation.py
       requirements_files: 'Source/aws-lambdas/ncaambb/predict/requirements.in Source/aws-lambdas/ncaambb/predict/requirements-nodeps.in'
 
   test-ncaambb-live-scores:
@@ -348,6 +360,7 @@ jobs:
         Source/tests/aws-lambdas/pga/test_live_features.py
         Source/tests/aws-lambdas/pga/test_event_prediction.py
         Source/tests/aws-lambdas/pga/test_predict_handler.py
+        Source/tests/aws-lambdas/pga/test_predict_snapshot.py
         Source/tests/aws-lambdas/pga/test_season_simulation.py
         Source/tests/aws-lambdas/pga/test_season_projection.py
       requirements_files: 'Source/aws-lambdas/pga/predict/requirements.in Source/aws-lambdas/pga/predict/requirements-nodeps.in'
@@ -415,6 +428,7 @@ jobs:
         Source/tests/aws-lambdas/f1/test_live_features.py
         Source/tests/aws-lambdas/f1/test_event_prediction.py
         Source/tests/aws-lambdas/f1/test_predict_handler.py
+        Source/tests/aws-lambdas/f1/test_predict_snapshot.py
         Source/tests/aws-lambdas/f1/test_season_simulation.py
         Source/tests/aws-lambdas/f1/test_season_projection.py
       requirements_files: 'Source/aws-lambdas/f1/predict/requirements.in Source/aws-lambdas/f1/predict/requirements-nodeps.in'

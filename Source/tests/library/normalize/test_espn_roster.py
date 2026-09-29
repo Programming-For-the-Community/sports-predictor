@@ -134,6 +134,13 @@ class TestRosterToTeamInjuries:
 
         assert roster_to_team_injuries(roster) == [{"entity_id": "1", "status": "Doubtful"}]
 
+    def test_athlete_with_no_id_is_skipped(self):
+        anonymous = _athlete_with_injury("1", "Out")
+        del anonymous["id"]
+        roster = _roster(groups=[anonymous, _athlete_with_injury("2", "Out")])
+
+        assert roster_to_team_injuries(roster) == [{"entity_id": "2", "status": "Out"}]
+
     def test_works_with_nfl_style_grouped_roster_too(self):
         roster = {
             "team": {"id": "1"}, "timestamp": "2026-01-01T00:00Z",

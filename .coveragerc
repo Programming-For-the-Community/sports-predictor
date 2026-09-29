@@ -12,3 +12,17 @@
 # checkout to, removes the ambiguity entirely.
 relative_files = True
 source = Source
+# Test code isn't production code -- measuring it inflates the total.
+omit =
+    Source/tests/*
+
+[report]
+# Also applied at report time, so data recorded before [run]'s omit (or by
+# an older checkout) still reports production code only.
+omit =
+    Source/tests/*
+# Script-launch lines only run when a file is executed directly, and
+# patch_sklearn() only where the optional sklearnex package is installed.
+exclude_also =
+    if __name__ == .__main__.:
+    patch_sklearn\(\)

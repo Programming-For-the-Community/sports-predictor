@@ -6,7 +6,7 @@ normalized name, event by calendar date) plus the refresh/caching logic.
 """
 import json
 from datetime import datetime, timedelta, timezone
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 from botocore.exceptions import ClientError
 
@@ -344,3 +344,22 @@ class TestGetLiveScores:
             "Body": MagicMock(read=lambda: json.dumps({"fetched_at": old, "events": {"2026-2": {"state": "in"}}}).encode()),
         }
         assert live_scores.get_live_scores(s3, "bucket") == {"events": {}}
+
+
+class TestLiveScoresEdgeCases:
+    def test_a_competitor_with_no_name_is_skipped(self):
+        competition = {"competitors": [{"athlete": {}}, {"athlete": {"fullName": "Max Verstappen"}, "order": 1}]}
+
+        participants = live_scores._competition_participants(competition, {"max verstappen": "max_verstappen"}, {})
+
+        assert list(participants) == ["max_verstappen"]
+
+    def test_a_finished_session_already_stored_as_final_is_left_alone(self):
+        competition = {"type": {"abbreviation": "Race"}, "date": "2026-03-08T05:00Z", "status": {"type": {"state": "post"}}}
+        events_out = {}
+
+        live_scores._apply_competition_state(
+            competition, "Australian GP", {("2026-03-08", "field"): "2026-1"}, set(), {}, {}, events_out,
+        )
+
+        assert events_out == {}

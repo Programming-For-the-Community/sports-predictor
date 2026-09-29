@@ -354,3 +354,38 @@ class TestDecimalConversion:
 
         assert result[0]["score"] == 27 and isinstance(result[0]["score"], int)
         assert result[1]["score"] == 20.5 and isinstance(result[1]["score"], float)
+
+
+class TestFloatToDecimalOnWrite:
+    def test_put_item_converts_nested_floats(self):
+        table, mock_boto_table = _make_table()
+
+        table.put_item({"id": "1", "rating": 0.1, "stats": {"avg": 2.5}, "history": [1.25, 3]})
+
+        item = mock_boto_table.put_item.call_args.kwargs["Item"]
+        assert item == {"id": "1", "rating": Decimal("0.1"), "stats": {"avg": Decimal("2.5")}, "history": [Decimal("1.25"), 3]}
+        assert isinstance(item["history"][1], int)
+
+
+class TestBatchWrite:
+    def test_empty_items_never_opens_a_batch(self):
+        table, mock_boto_table = _make_table()
+
+        table.batch_write([], key_names=["event_key"])
+
+        mock_boto_table.batch_writer.assert_not_called()
+
+    def test_writes_each_item_converted_with_overwrite_keys(self):
+        table, mock_boto_table = _make_table()
+        batch = mock_boto_table.batch_writer.return_value.__enter__.return_value
+
+        table.batch_write(
+            [{"event_key": "a", "player_key": "p1", "yards": 12.5}, {"event_key": "a", "player_key": "p2"}],
+            key_names=["event_key", "player_key"],
+        )
+
+        mock_boto_table.batch_writer.assert_called_once_with(overwrite_by_pkeys=["event_key", "player_key"])
+        assert [c.kwargs["Item"] for c in batch.put_item.call_args_list] == [
+            {"event_key": "a", "player_key": "p1", "yards": Decimal("12.5")},
+            {"event_key": "a", "player_key": "p2"},
+        ]

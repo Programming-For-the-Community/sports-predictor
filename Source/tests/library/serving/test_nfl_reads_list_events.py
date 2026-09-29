@@ -67,6 +67,14 @@ class TestListEvents:
 
         storage.get_all_events.assert_called_once_with("nfl", status="completed", limit=nfl_reads.RECENT_EVENTS_LIMIT)
 
+    def test_any_other_status_queries_without_a_bound(self):
+        storage = MagicMock()
+        storage.get_all_events.return_value = []
+
+        nfl_reads.list_events(storage, MagicMock(), "nfl", "in_progress")
+
+        storage.get_all_events.assert_called_once_with("nfl", status="in_progress")
+
     def test_participants_carry_name_and_abbreviation_from_their_entity(self):
         storage = MagicMock()
         storage.get_all_events.return_value = [_scheduled_event("EVT#1", 2025, _future(4), "12", "24")]

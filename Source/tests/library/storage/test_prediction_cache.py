@@ -201,3 +201,26 @@ class TestInProgressClaim:
         prediction_cache.clear_in_progress(s3, "predictions-cache/nfl/events/E1.json")
 
         s3.delete_object.assert_called_once_with("predictions-cache/nfl/events/E1.json.in-progress")
+
+
+class TestErrorEntries:
+    def test_put_error_cached_writes_a_timestamped_error_entry(self):
+        s3 = MagicMock()
+
+        prediction_cache.put_error_cached(s3, "cache/key.json", "EventNotFoundError", "no such event")
+
+        key, entry = s3.put_json.call_args.args
+        assert key == "cache/key.json"
+        assert entry["error_type"] == "EventNotFoundError"
+        assert entry["error"] == "no such event"
+        assert abs(entry["cached_at_epoch"] - time.time()) < 5
+
+    def test_is_error_entry_only_for_entries_with_an_error_type(self):
+        assert prediction_cache.is_error_entry({"error_type": "X"}) is True
+        assert prediction_cache.is_error_entry({"result": {}}) is False
+
+    def test_error_entry_expires_after_its_own_ttl(self):
+        now = time.time()
+
+        assert prediction_cache.is_error_entry_fresh({"cached_at_epoch": now - 10}) is True
+        assert prediction_cache.is_error_entry_fresh({"cached_at_epoch": now - prediction_cache.ERROR_TTL_SECONDS - 1}) is False

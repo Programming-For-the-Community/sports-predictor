@@ -46,8 +46,9 @@ class TestAddLabel:
         assert list(df[train_score_model.LABEL_COLUMN]) == [7, 8, 9]
 
     def test_unknown_target_raises(self):
+        df = _make_df(3)
         with pytest.raises(ValueError):
-            train_score_model._add_label(_make_df(3), "total_points")
+            train_score_model._add_label(df, "total_points")
 
 
 class TestTrain:

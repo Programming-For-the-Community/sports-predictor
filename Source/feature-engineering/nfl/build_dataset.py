@@ -205,6 +205,10 @@ _write_parquet = build_dataset_common.write_parquet
 _lookback_since_date = build_dataset_common.lookback_since_date
 
 
+def _write_dataset(s3: S3Manager, key: str, rows: list[dict], label: str) -> None:
+    build_dataset_common.write_dataset(s3, key, rows, label, logger)
+
+
 def main() -> None:
     window = int(os.environ.get("ROLLING_WINDOW", 5))
     bucket = os.environ["MODEL_ARTIFACTS_BUCKET_NAME"]
@@ -219,29 +223,10 @@ def main() -> None:
     s3 = S3Manager(bucket, region=region)
 
     logger.info("Building event-level dataset...")
-    event_rows = build_event_dataset(storage, window, since_date=since_date)
-    if not event_rows:
-        raise RuntimeError(
-            "build_event_dataset produced 0 rows -- refusing to overwrite "
-            f"s3://{bucket}/{EVENT_FEATURES_KEY} with an empty dataset",
-        )
-    logger.info("Writing %d event feature rows to Parquet...", len(event_rows))
-    s3.put_bytes(EVENT_FEATURES_KEY, _write_parquet(event_rows), content_type="application/octet-stream")
-    logger.info("Wrote %d event feature rows to s3://%s/%s", len(event_rows), bucket, EVENT_FEATURES_KEY)
+    _write_dataset(s3, EVENT_FEATURES_KEY, build_event_dataset(storage, window, since_date=since_date), "event")
 
     logger.info("Building player-level dataset...")
-    player_rows = build_player_dataset(storage, window, since_date=since_date)
-    player_row_count = len(player_rows)
-    if not player_row_count:
-        raise RuntimeError(
-            "build_player_dataset produced 0 rows -- refusing to overwrite "
-            f"s3://{bucket}/{PLAYER_FEATURES_KEY} with an empty dataset",
-        )
-    logger.info("Writing %d player feature rows to Parquet...", player_row_count)
-    player_parquet = _write_parquet(player_rows)
-    del player_rows  # free the ~150K-row list before the S3 upload
-    s3.put_bytes(PLAYER_FEATURES_KEY, player_parquet, content_type="application/octet-stream")
-    logger.info("Wrote %d player feature rows to s3://%s/%s", player_row_count, bucket, PLAYER_FEATURES_KEY)
+    _write_dataset(s3, PLAYER_FEATURES_KEY, build_player_dataset(storage, window, since_date=since_date), "player")
 
     logger.info("Feature engineering complete.")
 

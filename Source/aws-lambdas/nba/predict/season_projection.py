@@ -613,36 +613,14 @@ def _project_series_round(
     real_series: dict[frozenset, list[dict]], storage: FeatureStorage, s3, predictions_table,
     current_ratings: dict[str, float], home_advantage: float,
 ) -> tuple[dict, list[tuple[str, int | None]]]:
-    """Best-of-7 sibling of _project_bracket_round -- resolves one round's
-    worth of series slots via _resolve_series_matchup instead of a single
-    game each."""
+    """Resolves one round's worth of best-of-7 series slots via
+    _resolve_series_matchup, returning that round's display dict alongside
+    [(advancing_team, its_own_seed), ...] for the next round to consume."""
     matchups = []
     advancing = []
     for team_a, team_b, seed_a, seed_b in pairs:
         matchup = _resolve_series_matchup(
             team_a, team_b, seed_a, seed_b, real_series, storage, s3, predictions_table,
-            current_ratings, home_advantage,
-        )
-        matchups.append(matchup)
-        winner = matchup["predicted_winner"] if matchup["status"] != "final" else matchup["actual_winner"]
-        winner_seed = seed_a if winner == team_a else seed_b
-        advancing.append((winner, winner_seed))
-    return {"round": round_name, "matchups": matchups}, advancing
-
-
-def _project_bracket_round(
-    round_name: str, pairs: list[tuple[str, str, int | None, int | None]],
-    real_matchups: dict[frozenset, dict], storage: FeatureStorage, s3, predictions_table,
-    current_ratings: dict[str, float], home_advantage: float,
-) -> tuple[dict, list[tuple[str, int | None]]]:
-    """Resolves one round's worth of (team_a, team_b, seed_a, seed_b)
-    slots, returning that round's display dict alongside
-    [(advancing_team, its_own_seed), ...] for the next round to consume."""
-    matchups = []
-    advancing = []
-    for team_a, team_b, seed_a, seed_b in pairs:
-        matchup = _resolve_matchup(
-            team_a, team_b, seed_a, seed_b, real_matchups, storage, s3, predictions_table,
             current_ratings, home_advantage,
         )
         matchups.append(matchup)
@@ -667,7 +645,7 @@ def _project_conference_bracket_reconciled(
     best-of-7). Returns (rounds, champion)."""
     # Play-In is built game-by-game (unlike the other rounds), since
     # game 3's own participants depend on games 1/2's own results --
-    # _project_bracket_round's own "resolve a static list of pairs" shape
+    # _project_series_round's own "resolve a static list of pairs" shape
     # doesn't fit a round with an internal dependency like that.
     game1 = _resolve_matchup(
         seed_7, seed_8, 7, 8, real_matchups, storage, s3, predictions_table, current_ratings, home_advantage,

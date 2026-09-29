@@ -222,3 +222,10 @@ class TestStandingsSnapshot:
 
         assert result["standings_captured"] is False
         assert result["processed"] == 1
+
+
+class TestIngestRacesInWindow:
+    def test_a_race_with_no_date_is_skipped(self):
+        schedule = {"MRData": {"RaceTable": {"Races": [{"round": "1"}, {"round": "2", "date": "2026-03-08"}]}}}
+
+        assert f1_ingest._races_in_window(schedule, date(2026, 3, 9)) == [{"round": "2", "date": "2026-03-08"}]

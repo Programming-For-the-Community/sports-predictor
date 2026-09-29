@@ -59,7 +59,7 @@ jobs:
       (needs.approval.result == 'success' || needs.approval.result == 'skipped')
     uses: ./.github/workflows/run_python_tests.yml
     with:
-      test_path: 'Source/tests/data-backfills/nfl/'
+      test_path: 'Source/tests/data-backfills/nfl/ Source/tests/migrations/'
       requirements_files: 'Source/data-backfills/nfl/requirements-dev.txt'
 
   test-feature-engineering:
@@ -107,6 +107,11 @@ jobs:
         Source/tests/aws-lambdas/nfl/test_live_features_leader_candidates.py
         Source/tests/aws-lambdas/nfl/test_live_features_depth_chart.py
         Source/tests/aws-lambdas/nfl/test_live_features_roster.py
+        Source/tests/aws-lambdas/nfl/test_predict_bracket.py
+        Source/tests/aws-lambdas/nfl/test_predict_snapshot.py
+        Source/tests/aws-lambdas/nfl/test_season_projection.py
+        Source/tests/aws-lambdas/nfl/test_season_projection_edge_cases.py
+        Source/tests/aws-lambdas/nfl/test_season_simulation.py
       # Both requirements files are installed so xgboost is importable in this test job.
       requirements_files: 'Source/aws-lambdas/nfl/predict/requirements.in Source/aws-lambdas/nfl/predict/requirements-nodeps.in'
 

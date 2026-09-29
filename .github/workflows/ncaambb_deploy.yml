@@ -112,6 +112,8 @@ jobs:
         Source/tests/aws-lambdas/ncaambb/test_live_features.py
         Source/tests/aws-lambdas/ncaambb/test_event_prediction.py
         Source/tests/aws-lambdas/ncaambb/test_predict_handler.py
+        Source/tests/aws-lambdas/ncaambb/test_season_projection.py
+        Source/tests/aws-lambdas/ncaambb/test_season_simulation.py
       requirements_files: 'Source/aws-lambdas/ncaambb/predict/requirements.in Source/aws-lambdas/ncaambb/predict/requirements-nodeps.in'
 
   test-live-scores:

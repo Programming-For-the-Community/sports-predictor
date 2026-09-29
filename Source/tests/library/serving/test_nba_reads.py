@@ -41,6 +41,14 @@ def _event(event_key, event_date, home_id, away_id, status="scheduled", season=2
 
 
 class TestListEvents:
+    def test_any_other_status_queries_without_a_bound(self):
+        storage = MagicMock()
+        storage.get_all_events.return_value = []
+
+        nba_reads.list_events(storage, MagicMock(), "nba", "in_progress")
+
+        storage.get_all_events.assert_called_once_with("nba", status="in_progress")
+
     def test_scheduled_returns_only_the_soonest_date(self):
         storage = MagicMock()
         predictions_table = MagicMock()

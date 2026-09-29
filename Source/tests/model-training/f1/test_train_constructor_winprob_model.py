@@ -8,6 +8,7 @@ tournament itself or any real algorithm fitting.
 from unittest.mock import MagicMock, patch
 
 import pandas as pd
+import pytest
 
 import train_constructor_winprob_model
 
@@ -66,3 +67,21 @@ class TestTrain:
         assert len(call.kwargs["split"].X_train) == 8
         assert len(call.kwargs["split"].X_test) == 2
         assert call.kwargs["split"].y_train.name == "label_win"
+
+
+class TestMain:
+    def test_requires_bucket_env_var(self, monkeypatch):
+        monkeypatch.delenv("MODEL_ARTIFACTS_BUCKET_NAME", raising=False)
+
+        with pytest.raises(KeyError):
+            train_constructor_winprob_model.main()
+
+    def test_loads_features_and_delegates_to_train(self, monkeypatch):
+        monkeypatch.setenv("MODEL_ARTIFACTS_BUCKET_NAME", "test-bucket")
+        df, mock_s3 = MagicMock(), MagicMock()
+
+        with patch.object(train_constructor_winprob_model, "S3Manager", return_value=mock_s3),              patch.object(train_constructor_winprob_model.training_common, "load_features", return_value=df) as mock_load,              patch.object(train_constructor_winprob_model, "train") as mock_train:
+            train_constructor_winprob_model.main()
+
+        mock_load.assert_called_once_with(mock_s3, train_constructor_winprob_model.CONSTRUCTOR_FEATURES_KEY)
+        mock_train.assert_called_once_with(mock_s3, df)

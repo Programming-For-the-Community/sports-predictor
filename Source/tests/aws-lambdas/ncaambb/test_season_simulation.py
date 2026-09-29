@@ -335,3 +335,34 @@ class TestSimulateSeason:
         # 4 conferences x 10 simulations = 40 conference-championship credits total.
         total_champion_credits = sum(row["conference_tournament_champion_probability"] for row in result.values())
         assert abs(total_champion_credits - 4.0) * 10 < 1e-6
+
+
+class TestProjectMatchupSeedOrder:
+    def test_the_better_seed_is_always_listed_first_as_host(self):
+        result = ss.project_matchup("low", "top", 6, 1, {"low": 1500.0, "top": 1500.0}, 0.0)
+
+        assert (result["team_a"], result["seed_a"]) == ("top", 1)
+        assert (result["team_b"], result["seed_b"]) == ("low", 6)
+
+
+class TestSimulationEdgeCases:
+    def test_a_remaining_game_with_an_untracked_team_is_skipped(self):
+        from collections import Counter
+        wins, losses, conf_wins, conf_losses = Counter(), Counter(), Counter(), Counter()
+
+        ss._simulate_regular_season_games(
+            [("a", "unknown", True)], {"a"}, wins, losses, conf_wins, conf_losses, {}, 0.0, 20.0, random.Random(1),
+        )
+
+        assert wins == losses == conf_wins == conf_losses == Counter()
+
+    def test_an_eight_team_region_credits_its_sweet_16_survivors(self):
+        from collections import Counter
+        sweet_16, elite_eight, final_four = Counter(), Counter(), Counter()
+        region = [f"t{i}" for i in range(8)]
+
+        champions = ss._simulate_regions({"East": region}, {}, random.Random(3), sweet_16, elite_eight, final_four)
+
+        assert sum(sweet_16.values()) == 4
+        assert sum(elite_eight.values()) == 2
+        assert list(final_four) == champions

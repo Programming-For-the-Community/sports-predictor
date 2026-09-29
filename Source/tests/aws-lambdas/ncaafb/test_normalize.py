@@ -342,6 +342,13 @@ class TestNormalizeLambdaHandler:
 
         assert result == {"processed": 1, "failed": 1}
 
+    def test_reports_how_many_stale_scheduled_events_it_canceled(self, caplog):
+        with patch.object(ncaafb_normalize, "_get_storage"),              patch.object(ncaafb_normalize, "_cancel_stale_scheduled_events", return_value=2),              caplog.at_level("INFO"):
+            result = ncaafb_normalize.lambda_handler({"Records": []}, None)
+
+        assert result == {"processed": 0, "failed": 0}
+        assert "Canceled 2 stale scheduled event(s)" in caplog.text
+
     def test_url_decodes_s3_object_key(self):
         mock_s3 = MagicMock()
         mock_s3.get_object.return_value = _s3_response([])

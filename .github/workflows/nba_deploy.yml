@@ -91,6 +91,9 @@ jobs:
         Source/tests/aws-lambdas/nba/test_live_features.py
         Source/tests/aws-lambdas/nba/test_event_prediction.py
         Source/tests/aws-lambdas/nba/test_predict_handler.py
+        Source/tests/aws-lambdas/nba/test_event_prediction_common.py
+        Source/tests/aws-lambdas/nba/test_predict_bracket.py
+        Source/tests/aws-lambdas/nba/test_season_projection_edge_cases.py
         Source/tests/aws-lambdas/nba/test_season_simulation.py
         Source/tests/aws-lambdas/nba/test_predict_season_simulation.py
       requirements_files: 'Source/aws-lambdas/nba/predict/requirements.in Source/aws-lambdas/nba/predict/requirements-nodeps.in'

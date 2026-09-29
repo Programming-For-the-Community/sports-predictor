@@ -224,3 +224,10 @@ class TestChanceRecord:
         record = scorecard.chance_record("m", 1, samples, None)
 
         assert record["vs_baseline_pct"] == pytest.approx((1.0 - 0.9) / 0.9 * 100)
+
+
+class TestActualsWithNoResultYet:
+    @pytest.mark.parametrize("actual", [field_events._pga_top(10), field_events._f1_finish_within(3)])
+    def test_a_participant_with_no_status_is_not_graded(self, actual):
+        assert actual({"result": {"finish_position": 1}}) is None
+        assert actual({}) is None

@@ -7,7 +7,7 @@ tests/library/features/test_f1.py -- FeatureStorage/S3Manager are mocked
 here so these tests only cover build_dataset.py's own wiring.
 """
 import io
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pandas as pd
 
@@ -329,3 +329,27 @@ class TestLookbackSinceDate:
         from datetime import date, timedelta
         expected = (date.today() - timedelta(days=15 * 366)).isoformat()
         assert since_date == expected
+
+
+class TestMain:
+    def _run(self, monkeypatch, sprint_rows):
+        monkeypatch.setenv("MODEL_ARTIFACTS_BUCKET_NAME", "models")
+        monkeypatch.delenv("TRAINING_LOOKBACK_SEASONS", raising=False)
+        s3 = MagicMock()
+        s3.bucket = "models"
+        with patch.object(build_dataset, "FeatureStorage"),              patch.object(build_dataset, "S3Manager", return_value=s3),              patch.object(build_dataset, "build_driver_dataset", return_value=[{"d": 1}]),              patch.object(build_dataset, "build_constructor_dataset", return_value=[{"c": 1}]),              patch.object(build_dataset, "build_sprint_dataset", return_value=sprint_rows):
+            build_dataset.main()
+        return [c.args[0] for c in s3.put_bytes.call_args_list]
+
+    def test_writes_driver_constructor_and_sprint_datasets(self, monkeypatch):
+        assert self._run(monkeypatch, [{"s": 1}]) == [
+            build_dataset.DRIVER_FEATURES_KEY,
+            build_dataset.CONSTRUCTOR_FEATURES_KEY,
+            build_dataset.SPRINT_FEATURES_KEY,
+        ]
+
+    def test_no_sprint_data_yet_skips_only_the_sprint_dataset(self, monkeypatch):
+        assert self._run(monkeypatch, []) == [
+            build_dataset.DRIVER_FEATURES_KEY,
+            build_dataset.CONSTRUCTOR_FEATURES_KEY,
+        ]
