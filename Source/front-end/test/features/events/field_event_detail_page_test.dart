@@ -6,6 +6,7 @@ import 'package:front_end/core/data/field_events_repository.dart';
 import 'package:front_end/core/data/live_scores_repository.dart';
 import 'package:front_end/core/models/field_live_score.dart';
 import 'package:front_end/core/models/field_prediction.dart';
+import 'package:front_end/core/widgets/prediction_freshness_badge.dart';
 import 'package:front_end/features/events/field_event_detail_page.dart';
 
 Map<String, dynamic> _fieldResponse() => {
@@ -147,5 +148,47 @@ void main() {
 
     expect(predictionCalls, 3);
     expect(find.text('Computing prediction...'), findsNothing);
+  });
+
+  Widget page(Future<PgaEventPrediction> Function() prediction, {String eventId = '401811963'}) => ProviderScope(
+        retry: (retryCount, error) => null,
+        overrides: [
+          fieldEventPredictionProvider.overrideWith((ref, query) => prediction()),
+          fieldLiveScoresProvider.overrideWith((ref, sport) async => const <String, FieldLiveEventState>{}),
+        ],
+        child: MaterialApp(home: Scaffold(body: FieldEventDetailPage(sportId: 'pga', eventId: eventId))),
+      );
+
+  testWidgets('shows the computing retry while the prediction is still computing', (tester) async {
+    await tester.pumpWidget(page(() async => throw const PredictionComputingException(600)));
+    await tester.pump();
+    await tester.pump();
+
+    expect(find.text('Computing prediction...'), findsOneWidget);
+    await tester.pump(const Duration(minutes: 20));
+    await tester.pumpWidget(const SizedBox());
+  });
+
+  testWidgets('a stale field prediction shows the freshness badge', (tester) async {
+    await tester.pumpWidget(page(() async => parsePgaEventPrediction({..._fieldResponse(), 'stale': true, 'retry_after_seconds': 600})));
+    await tester.pump();
+    await tester.pump();
+
+    expect(find.byType(PredictionFreshnessBadge), findsOneWidget);
+    await tester.pump(const Duration(minutes: 20));
+    await tester.pumpWidget(const SizedBox());
+  });
+
+  testWidgets('a stale two-sided prediction shows the freshness badge', (tester) async {
+    await tester.pumpWidget(page(
+      () async => parsePgaEventPrediction({..._twoSidedResponse(), 'stale': true, 'retry_after_seconds': 600}),
+      eventId: '401465497-match-10951',
+    ));
+    await tester.pump();
+    await tester.pump();
+
+    expect(find.byType(PredictionFreshnessBadge), findsOneWidget);
+    await tester.pump(const Duration(minutes: 20));
+    await tester.pumpWidget(const SizedBox());
   });
 }

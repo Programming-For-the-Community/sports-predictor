@@ -6,6 +6,7 @@ import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_text_styles.dart';
 import '../../core/widgets/f1_status_pill.dart';
 import '../../core/widgets/fit_text.dart';
+import 'leaderboard_sort.dart';
 
 /// F1's own driver leaderboard table -- column-spec pattern, same shape
 /// as field_leaderboard_table.dart's own _LeaderboardColumn (PGA's). A
@@ -229,21 +230,8 @@ List<_LeaderboardColumn> _columns({required bool isSprint, required bool compact
 /// precedent field_leaderboard_table.dart's own _sortedByStanding
 /// establishes. A stable sort: ties within either group preserve the
 /// original (server) order rather than reshuffling arbitrarily.
-List<F1DriverPrediction> _sortedByLiveOrder(List<F1DriverPrediction> field, Map<String, F1DriverLiveResult> liveResults) {
-  final indexed = [for (var i = 0; i < field.length; i++) (index: i, entry: field[i])];
-  indexed.sort((a, b) {
-    final aOrder = liveResults[a.entry.entityId]?.order;
-    final bOrder = liveResults[b.entry.entityId]?.order;
-    if (aOrder != null && bOrder != null) {
-      final cmp = aOrder.compareTo(bOrder);
-      return cmp != 0 ? cmp : a.index.compareTo(b.index);
-    }
-    if (aOrder != null) return -1;
-    if (bOrder != null) return 1;
-    return a.index.compareTo(b.index);
-  });
-  return [for (final e in indexed) e.entry];
-}
+List<F1DriverPrediction> _sortedByLiveOrder(List<F1DriverPrediction> field, Map<String, F1DriverLiveResult> liveResults) =>
+    sortedByNullableKey(field, (e) => liveResults[e.entityId]?.order);
 
 /// Once a race is actually over, row order should reflect the real
 /// result, not stay frozen at whatever order the pre-race prediction
@@ -259,22 +247,8 @@ List<F1DriverPrediction> _sortedByLiveOrder(List<F1DriverPrediction> field, Map<
 /// every classified driver, stable amongst themselves in field's own
 /// original order -- same "ties preserve original order" rule
 /// _sortedByLiveOrder already follows.
-List<F1DriverPrediction> _sortedByActualResult(List<F1DriverPrediction> field, bool isSprint) {
-  final indexed = [for (var i = 0; i < field.length; i++) (index: i, entry: field[i])];
-  int? position(F1DriverPrediction e) => isSprint ? e.actual?.gridPosition : e.actual?.finishPosition;
-  indexed.sort((a, b) {
-    final aPos = position(a.entry);
-    final bPos = position(b.entry);
-    if (aPos != null && bPos != null) {
-      final cmp = aPos.compareTo(bPos);
-      return cmp != 0 ? cmp : a.index.compareTo(b.index);
-    }
-    if (aPos != null) return -1;
-    if (bPos != null) return 1;
-    return a.index.compareTo(b.index);
-  });
-  return [for (final e in indexed) e.entry];
-}
+List<F1DriverPrediction> _sortedByActualResult(List<F1DriverPrediction> field, bool isSprint) =>
+    sortedByNullableKey(field, (e) => isSprint ? e.actual?.gridPosition : e.actual?.finishPosition);
 
 List<F1DriverPrediction> _sortedField(
   List<F1DriverPrediction> field, bool isSprint, Map<String, F1DriverLiveResult> liveResults,

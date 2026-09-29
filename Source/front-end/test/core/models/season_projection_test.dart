@@ -140,4 +140,102 @@ void main() {
 
     expect(matchup.status, 'projected');
   });
+
+  Map<String, dynamic> matchupJson(String a, String b) => {'team_a': a, 'team_b': b, 'status': 'final', 'actual_winner': a};
+
+  test('parses cup, bracket, cup_bracket, march_madness_bracket and conference_brackets', () {
+    final season = SeasonProjection.fromJson({
+      'sport': 'nba',
+      'season': 2026,
+      'cup': {
+        'groups': {
+          'East A': [
+            {'team_id': '1', 'name': 'Celtics', 'abbreviation': 'BOS', 'color': '007A33', 'group_wins': 3, 'group_losses': 1,
+             'group_winner_probability': 0.7, 'knockout_probability': 0.8, 'cup_finalist_probability': 0.3,
+             'champion_probability': 0.2},
+            {'team_id': '2'},
+          ],
+        },
+      },
+      'bracket': {
+        'conferences': {
+          'East': [
+            {'round': 'First Round', 'matchups': [matchupJson('1', '8')]},
+          ],
+        },
+        'super_bowl': matchupJson('1', '9'),
+        'champion': '1',
+        'team_names': {
+          '1': {'name': 'Celtics', 'abbreviation': 'BOS', 'color': '007A33'},
+        },
+      },
+      'cup_bracket': {
+        'rounds': [
+          {'round': 'Quarterfinals', 'matchups': [matchupJson('1', '2')]},
+        ],
+      },
+      'march_madness_bracket': {
+        'first_four': [matchupJson('60', '61')],
+        'regions': {
+          'East': {'rounds': [{'round': 'Round of 64', 'matchups': [matchupJson('1', '60')]}], 'champion': '1'},
+        },
+        'final_four': [matchupJson('1', '5')],
+        'championship': matchupJson('1', '9'),
+        'champion': '1',
+        'team_names': {'60': {'abbreviation': 'SMU'}},
+      },
+      'conference_brackets': [
+        {'conference': 'Big East', 'bracket': {'rounds': [{'round': 'Final', 'matchups': [matchupJson('1', '2')]}]}},
+      ],
+    });
+
+    final group = season.cup!.groups['East A']!;
+    expect(group.first.displayName, 'BOS');
+    expect(group.first.groupWins, 3);
+    expect(group.first.championProbability, 0.2);
+    expect(group.last.displayName, '2');
+    expect(group.last.groupWinnerProbability, 0.0);
+
+    final bracket = season.bracket!;
+    expect(bracket.conferences['East']!.single.matchups.single.isFinal, isTrue);
+    expect(bracket.finalMatchup!.teamB, '9');
+    expect(bracket.rounds, isNull);
+    expect(bracket.champion, '1');
+    expect(bracket.teamNames['1']!.abbreviation, 'BOS');
+
+    expect(season.cupBracket!.rounds!.single.round, 'Quarterfinals');
+    expect(season.cupBracket!.conferences, isEmpty);
+    expect(season.cupBracket!.finalMatchup, isNull);
+
+    final mm = season.marchMadnessBracket!;
+    expect(mm.firstFour.single.teamA, '60');
+    expect(mm.regions['East']!.champion, '1');
+    expect(mm.regions['East']!.rounds.single.round, 'Round of 64');
+    expect(mm.finalFour.single.teamB, '5');
+    expect(mm.championship!.teamB, '9');
+    expect(mm.champion, '1');
+    expect(mm.teamNames['60']!.abbreviation, 'SMU');
+
+    expect(season.conferenceBrackets!.single.conference, 'Big East');
+    expect(season.conferenceBrackets!.single.bracket.rounds!.single.round, 'Final');
+  });
+
+  test('cup displayName falls back from abbreviation to name', () {
+    expect(CupTeamStanding.fromJson({'team_id': '1', 'name': 'Celtics'}).displayName, 'Celtics');
+  });
+
+  test('bracket projection reads finals/championship as the cross-conference matchup', () {
+    expect(BracketProjection.fromJson({'finals': matchupJson('1', '2')}).finalMatchup!.teamB, '2');
+    expect(BracketProjection.fromJson({'championship': matchupJson('3', '4')}).finalMatchup!.teamB, '4');
+  });
+
+  test('an empty march madness bracket defaults every collection', () {
+    final mm = MarchMadnessBracket.fromJson({});
+
+    expect(mm.firstFour, isEmpty);
+    expect(mm.regions, isEmpty);
+    expect(mm.finalFour, isEmpty);
+    expect(mm.championship, isNull);
+    expect(mm.teamNames, isEmpty);
+  });
 }

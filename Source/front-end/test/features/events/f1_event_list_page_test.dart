@@ -183,4 +183,24 @@ void main() {
       await tester.pump(const Duration(seconds: 31));
     });
   });
+
+  testWidgets('pull-to-refresh refetches, and Upcoming can be re-selected after Completed', (tester) async {
+    var calls = 0;
+    await tester.pumpWidget(_page(eventsFor: (status) {
+      calls++;
+      return [];
+    }));
+    await tester.pumpAndSettle();
+    final initial = calls;
+
+    await tester.widget<RefreshIndicator>(find.byType(RefreshIndicator)).onRefresh();
+    await tester.pumpAndSettle();
+    expect(calls, greaterThan(initial));
+
+    await tester.tap(find.text('Completed'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Upcoming/Current'));
+    await tester.pumpAndSettle();
+    expect(find.text('Coming Soon'), findsOneWidget);
+  });
 }

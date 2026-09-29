@@ -14,6 +14,7 @@ import 'package:front_end/core/data/f1_events_repository.dart';
 import 'package:front_end/core/data/f1_season_repository.dart';
 import 'package:front_end/core/data/field_events_repository.dart';
 import 'package:front_end/core/data/live_scores_repository.dart';
+import 'package:front_end/core/data/model_performance_repository.dart';
 import 'package:front_end/core/data/models_repository.dart';
 import 'package:front_end/core/data/pga_season_repository.dart';
 import 'package:front_end/core/data/season_repository.dart';
@@ -30,6 +31,7 @@ import 'package:front_end/features/events/field_event_detail_page.dart';
 import 'package:front_end/features/events/field_event_list_page.dart';
 import 'package:front_end/features/home/home_page.dart';
 import 'package:front_end/features/models/model_cards_page.dart';
+import 'package:front_end/features/performance/model_performance_page.dart';
 import 'package:front_end/features/season/f1_season_page.dart';
 import 'package:front_end/features/season/pga_season_page.dart';
 import 'package:front_end/features/season/season_page.dart';
@@ -165,6 +167,7 @@ void main() {
         f1EventsListProvider.overrideWith((ref, query) async => const []),
         fieldEventsListProvider.overrideWith((ref, query) async => const []),
         modelsListProvider.overrideWith((ref, sport) async => const []),
+        modelPerformanceProvider.overrideWith((ref, sport) async => throw StateError('not needed for this test')),
         eventPredictionProvider.overrideWith((ref, query) async => throw StateError('not needed for this test')),
         f1EventPredictionProvider.overrideWith((ref, query) async => throw StateError('not needed for this test')),
         fieldEventPredictionProvider.overrideWith((ref, query) async => throw StateError('not needed for this test')),
@@ -236,6 +239,13 @@ void main() {
       addTearDown(container.dispose);
       await pumpAtRoute(tester, container, AppRoutes.models(SportIds.nfl));
       expect(find.byType(ModelCardsPage), findsOneWidget);
+    });
+
+    testWidgets('the performance route renders ModelPerformancePage', (tester) async {
+      final container = buildRouterContainer();
+      addTearDown(container.dispose);
+      await pumpAtRoute(tester, container, AppRoutes.performance(SportIds.nfl));
+      expect(find.byType(ModelPerformancePage), findsOneWidget);
     });
 
     testWidgets('a plain head-to-head sports season route renders SeasonPage', (tester) async {

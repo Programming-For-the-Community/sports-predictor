@@ -345,4 +345,10 @@ void main() {
       }
     });
   });
+
+  testWidgets('an empty field says so', (tester) async {
+    await tester.pumpWidget(const MaterialApp(home: Scaffold(body: FieldLeaderboardTable(field: []))));
+
+    expect(find.text('No field available yet.'), findsOneWidget);
+  });
 }

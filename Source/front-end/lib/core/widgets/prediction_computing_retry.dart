@@ -96,7 +96,14 @@ class _PredictionComputingRetryState extends ConsumerState<PredictionComputingRe
     );
 
     if (widget.compact) {
-      return Row(mainAxisSize: MainAxisSize.min, children: [spinner, const SizedBox(width: 8), label]);
+      return Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          spinner,
+          const SizedBox(width: 8),
+          Flexible(child: DefaultTextStyle.merge(maxLines: 1, overflow: TextOverflow.ellipsis, child: label)),
+        ],
+      );
     }
     return Center(
       child: Column(

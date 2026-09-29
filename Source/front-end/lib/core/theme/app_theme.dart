@@ -6,9 +6,7 @@ import 'app_text_styles.dart';
 /// ThemeData wiring design/FRONTEND_STYLE.md's tokens into Flutter's
 /// Material theme. The app is dark-only by design (the "Arena" aesthetic
 /// has no light variant) -- there is no light ThemeData to toggle to.
-class AppTheme {
-  AppTheme._();
-
+abstract final class AppTheme {
   static ThemeData get dark {
     final base = ThemeData.dark(useMaterial3: true);
     return base.copyWith(

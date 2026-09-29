@@ -2,9 +2,7 @@ import 'package:flutter/material.dart';
 
 /// Color tokens from design/FRONTEND_STYLE.md's "Arena" visual language.
 /// Never hardcode a hex value outside this file -- reference these names.
-class AppColors {
-  AppColors._();
-
+abstract final class AppColors {
   // Surfaces
   static const bg = Color(0xFF0a0e17);
   static const bgDeep = Color(0xFF070a12);

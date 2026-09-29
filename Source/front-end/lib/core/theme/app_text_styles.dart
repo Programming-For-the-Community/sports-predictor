@@ -6,9 +6,7 @@ import 'app_colors.dart';
 /// Type scale from design/FRONTEND_STYLE.md. Two families only: Space
 /// Grotesk for headings/prose/names, IBM Plex Mono for measured values and
 /// labels -- never mix the two roles.
-class AppTextStyles {
-  AppTextStyles._();
-
+abstract final class AppTextStyles {
   static TextStyle _display({
     required double size,
     required FontWeight weight,

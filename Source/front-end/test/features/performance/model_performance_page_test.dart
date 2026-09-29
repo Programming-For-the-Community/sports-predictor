@@ -172,4 +172,18 @@ void main() {
       expect(heights.length, greaterThan(1), reason: 'one card per row keeps each at its own natural height');
     });
   }
+
+  testWidgets('pull-to-refresh refetches the performance', (tester) async {
+    var calls = 0;
+    await tester.pumpWidget(_page(() async {
+      calls++;
+      return _performance([pickRecord()]);
+    }));
+    await tester.pumpAndSettle();
+
+    await tester.widget<RefreshIndicator>(find.byType(RefreshIndicator)).onRefresh();
+    await tester.pumpAndSettle();
+
+    expect(calls, 2);
+  });
 }

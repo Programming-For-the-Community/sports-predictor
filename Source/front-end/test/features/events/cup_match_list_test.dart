@@ -94,4 +94,15 @@ void main() {
       expect(tester.takeException(), isNull);
     });
   }
+
+  testWidgets('shows the load error', (tester) async {
+    await tester.pumpWidget(ProviderScope(
+      retry: (retryCount, error) => null,
+      overrides: [fieldChildEventsProvider.overrideWith((ref, query) async => throw Exception('down'))],
+      child: const MaterialApp(home: Scaffold(body: CupMatchList(sport: 'pga', cupEventId: '401824815'))),
+    ));
+    await tester.pumpAndSettle();
+
+    expect(find.text("Couldn't load matches: Exception: down"), findsOneWidget);
+  });
 }

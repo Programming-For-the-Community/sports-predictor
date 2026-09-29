@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter_test/flutter_test.dart';
@@ -98,5 +99,16 @@ void main() {
       expect(tokens.accessToken, 'access-2');
       expect(tokens.refreshToken, 'refresh-original');
     });
+  });
+
+  testWidgets('a Cognito call that never answers times out', (tester) async {
+    final client = CognitoAuthClient(httpClient: MockClient((request) => Completer<http.Response>().future));
+
+    Object? error;
+    client.initiateAuth(username: 'u', password: 'p').then<void>((_) {}, onError: (Object e) => error = e);
+    await tester.pump(const Duration(seconds: 16));
+
+    expect(error, isA<CognitoException>().having((e) => e.type, 'type', 'TimeoutError'));
+    expect(error.toString(), startsWith('CognitoException(TimeoutError: '));
   });
 }

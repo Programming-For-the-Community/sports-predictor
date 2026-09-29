@@ -6,6 +6,7 @@ import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_text_styles.dart';
 import '../../core/widgets/field_status_pill.dart';
 import '../../core/widgets/fit_text.dart';
+import 'leaderboard_sort.dart';
 
 /// PGA's own leaderboard table -- column-spec pattern, same shape as
 /// season_page.dart's own _StandingsTable/_StandingsColumn (chosen over
@@ -186,21 +187,8 @@ double? _standingScoreToPar(FieldParticipantPrediction entry, FieldParticipantLi
 /// off this round) -- per the user's explicit request. A stable sort:
 /// ties within either group preserve the original (server) order rather
 /// than reshuffling arbitrarily.
-List<FieldParticipantPrediction> _sortedByStanding(List<FieldParticipantPrediction> field, Map<String, FieldParticipantLiveResult> liveResults) {
-  final indexed = [for (var i = 0; i < field.length; i++) (index: i, entry: field[i])];
-  indexed.sort((a, b) {
-    final aStanding = _standingScoreToPar(a.entry, liveResults[a.entry.entityId]);
-    final bStanding = _standingScoreToPar(b.entry, liveResults[b.entry.entityId]);
-    if (aStanding != null && bStanding != null) {
-      final cmp = aStanding.compareTo(bStanding);
-      return cmp != 0 ? cmp : a.index.compareTo(b.index);
-    }
-    if (aStanding != null) return -1; // has a real standing -> ranks above one that doesn't
-    if (bStanding != null) return 1;
-    return a.index.compareTo(b.index); // neither has a standing -- preserve projected order
-  });
-  return [for (final e in indexed) e.entry];
-}
+List<FieldParticipantPrediction> _sortedByStanding(List<FieldParticipantPrediction> field, Map<String, FieldParticipantLiveResult> liveResults) =>
+    sortedByNullableKey(field, (e) => _standingScoreToPar(e, liveResults[e.entityId]));
 
 class FieldLeaderboardTable extends StatelessWidget {
   const FieldLeaderboardTable({super.key, required this.field, this.liveResults = const {}, this.par});

@@ -72,15 +72,22 @@ const _usTimeZones = {
 /// "UTC±N" outside the continental US/AK/HI.
 String localTimezoneLabel() {
   final now = DateTime.now();
-  final janOffset = DateTime(now.year, 1, 15).timeZoneOffset;
-  final julOffset = DateTime(now.year, 7, 15).timeZoneOffset;
+  return timezoneLabelFor(
+    now.timeZoneOffset,
+    DateTime(now.year, 1, 15).timeZoneOffset,
+    DateTime(now.year, 7, 15).timeZoneOffset,
+  );
+}
+
+/// localTimezoneLabel's own logic, given the current, mid-January and
+/// mid-July UTC offsets.
+String timezoneLabelFor(Duration offset, Duration janOffset, Duration julOffset) {
   final standardOffset = janOffset <= julOffset ? janOffset : julOffset;
-  final isDst = now.timeZoneOffset != standardOffset;
+  final isDst = offset != standardOffset;
 
   final names = _usTimeZones[standardOffset.inHours];
   if (names != null) return isDst ? names.$2 : names.$1;
 
-  final offset = now.timeZoneOffset;
   final sign = offset.isNegative ? '-' : '+';
   return 'UTC$sign${offset.abs().inHours}';
 }

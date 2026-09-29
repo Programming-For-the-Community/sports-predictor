@@ -48,7 +48,7 @@ class ModelCardGrid<T> extends StatelessWidget {
     final cards = [for (final item in row) cardBuilder(item)];
     // A single column has nothing to equalize against.
     if (perRow == 1) return SizedBox(width: width, child: cards.single);
-    return _EqualHeightRow(cardWidth: width, gap: _cardSpacing, children: cards);
+    return _EqualHeightRow(cardWidth: width, children: cards);
   }
 
   /// `items` split into consecutive rows of `perRow` (the last may be shorter).
@@ -68,19 +68,16 @@ class ModelCardGrid<T> extends StatelessWidget {
 /// width (a LayoutBuilder). A card sees a bounded height only on that second
 /// pass, which is how ModelCardFrame knows to push its footer to the bottom.
 class _EqualHeightRow extends MultiChildRenderObjectWidget {
-  const _EqualHeightRow({required this.cardWidth, required this.gap, required super.children});
+  const _EqualHeightRow({required this.cardWidth, required super.children});
 
   final double cardWidth;
-  final double gap;
 
   @override
-  RenderObject createRenderObject(BuildContext context) => _RenderEqualHeightRow(cardWidth, gap);
+  RenderObject createRenderObject(BuildContext context) => _RenderEqualHeightRow(cardWidth);
 
   @override
   void updateRenderObject(BuildContext context, _RenderEqualHeightRow renderObject) {
-    renderObject
-      ..cardWidth = cardWidth
-      ..gap = gap;
+    renderObject.cardWidth = cardWidth;
   }
 }
 
@@ -88,21 +85,13 @@ class _EqualHeightRowParentData extends ContainerBoxParentData<RenderBox> {}
 
 class _RenderEqualHeightRow extends RenderBox
     with ContainerRenderObjectMixin<RenderBox, _EqualHeightRowParentData>, RenderBoxContainerDefaultsMixin<RenderBox, _EqualHeightRowParentData> {
-  _RenderEqualHeightRow(this._cardWidth, this._gap);
+  _RenderEqualHeightRow(this._cardWidth);
 
   double _cardWidth;
   double get cardWidth => _cardWidth;
   set cardWidth(double value) {
     if (value == _cardWidth) return;
     _cardWidth = value;
-    markNeedsLayout();
-  }
-
-  double _gap;
-  double get gap => _gap;
-  set gap(double value) {
-    if (value == _gap) return;
-    _gap = value;
     markNeedsLayout();
   }
 
@@ -122,9 +111,9 @@ class _RenderEqualHeightRow extends RenderBox
     for (var child = firstChild; child != null; child = childAfter(child)) {
       child.layout(BoxConstraints.tightFor(width: cardWidth, height: height), parentUsesSize: true);
       (child.parentData! as _EqualHeightRowParentData).offset = Offset(x, 0);
-      x += cardWidth + gap;
+      x += cardWidth + _cardSpacing;
     }
-    size = constraints.constrain(Size(math.max(0, x - gap), height));
+    size = constraints.constrain(Size(math.max(0, x - _cardSpacing), height));
   }
 
   @override

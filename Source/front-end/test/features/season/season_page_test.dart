@@ -69,6 +69,50 @@ void main() {
     expect(find.text('PLAY-IN%'), findsNothing);
   });
 
+  testWidgets('filters conferences, switches tabs back to Standings, and refreshes', (tester) async {
+    var loads = 0;
+    final projection = SeasonProjection(
+      sport: 'nba',
+      season: 2026,
+      standings: [
+        TeamStanding(
+          teamId: '2', division: 'Eastern Atlantic', wins: 10, losses: 5, ties: 0, projectedWins: 55.0, projectedLosses: 27.0,
+          divisionWinnerProbability: 0.2, playoffProbability: 0.7, championshipProbability: 0.05,
+        ),
+        TeamStanding(
+          teamId: '7', division: 'Western Northwest', wins: 12, losses: 3, ties: 0, projectedWins: 60.0, projectedLosses: 22.0,
+          divisionWinnerProbability: 0.3, playoffProbability: 0.8, championshipProbability: 0.08,
+        ),
+      ],
+      leaderboards: const {},
+    );
+    await tester.pumpWidget(ProviderScope(
+      overrides: [
+        seasonProjectionProvider.overrideWith((ref, sport) async {
+          loads++;
+          return projection;
+        }),
+      ],
+      child: const MaterialApp(home: Scaffold(body: SeasonPage(sportId: 'nba'))),
+    ));
+    await tester.pumpAndSettle();
+
+    await tester.enterText(find.byType(TextField), 'west');
+    await tester.pumpAndSettle();
+    expect(find.text('EASTERN'), findsNothing);
+    expect(find.text('WESTERN'), findsOneWidget);
+
+    await tester.tap(find.text('Player Prop Leaders'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Standings & Playoff Odds'));
+    await tester.pumpAndSettle();
+    expect(find.text('WESTERN'), findsOneWidget);
+
+    await tester.widget<RefreshIndicator>(find.byType(RefreshIndicator)).onRefresh();
+    await tester.pumpAndSettle();
+    expect(loads, 2);
+  });
+
   testWidgets('nba standings group by conference only, not the 3 divisions within each', (tester) async {
     final projection = SeasonProjection(
       sport: 'nba',

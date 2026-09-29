@@ -207,6 +207,25 @@ void main() {
     expect(repo.state, isA<AuthAuthenticated>());
   });
 
+  test('a persisted session near expiry refreshes on restore and persists the new tokens', () async {
+    SharedPreferences.setMockInitialValues({
+      'cognito_tokens': jsonEncode(CognitoTokens(
+        accessToken: 'a', idToken: 'old-id', refreshToken: 'r',
+        expiresAt: DateTime.now().add(const Duration(seconds: 5)),
+      ).toJson()),
+      'last_activity_at': DateTime.now().toIso8601String(),
+    });
+    final repo = AuthRepository(
+      authClient: CognitoAuthClient(httpClient: MockClient((r) async => _tokenResponse(id: 'refreshed', refresh: null))),
+    );
+
+    final state = await _firstRealState(repo);
+
+    expect(state, isA<AuthAuthenticated>());
+    final prefs = await SharedPreferences.getInstance();
+    expect(prefs.getString('cognito_tokens'), contains('refreshed'));
+  });
+
   test('logout clears state and persisted storage', () async {
     final repo = AuthRepository(authClient: CognitoAuthClient(httpClient: MockClient((r) async => _tokenResponse())));
     await _firstRealState(repo);

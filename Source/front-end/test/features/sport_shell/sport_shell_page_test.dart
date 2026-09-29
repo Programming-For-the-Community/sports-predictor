@@ -106,4 +106,23 @@ void main() {
       expect(sport.hasPerformanceTab, isTrue, reason: sport.id);
     }
   });
+
+  testWidgets('the back button returns home from a sport tab', (tester) async {
+    final router = GoRouter(
+      initialLocation: '/nfl/events',
+      routes: [
+        GoRoute(path: '/', builder: (context, state) => const Text('home page')),
+        GoRoute(
+          path: '/nfl/events',
+          builder: (context, state) => SportShellPage(sportId: 'nfl', sportConfigOverride: _configWithPerformance, child: const SizedBox()),
+        ),
+      ],
+    );
+    await tester.pumpWidget(MaterialApp.router(routerConfig: router));
+
+    await tester.tap(find.byIcon(Icons.arrow_back));
+    await tester.pumpAndSettle();
+
+    expect(find.text('home page'), findsOneWidget);
+  });
 }

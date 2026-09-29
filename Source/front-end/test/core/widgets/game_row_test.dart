@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:go_router/go_router.dart';
 
 import 'package:front_end/core/data/events_repository.dart';
 import 'package:front_end/core/models/event.dart';
@@ -8,6 +9,7 @@ import 'package:front_end/core/models/live_score.dart';
 import 'package:front_end/core/models/prediction.dart';
 import 'package:front_end/core/theme/app_colors.dart';
 import 'package:front_end/core/widgets/game_row.dart';
+import 'package:front_end/core/widgets/prediction_computing_retry.dart';
 import 'package:front_end/core/widgets/win_probability_bar.dart';
 
 // Locates a Text widget rendering exactly `text` in exactly `color` --
@@ -441,6 +443,112 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(_textStyled('--', AppColors.cyan), findsNWidgets(2));
+    });
+  });
+
+  group('GameRow states', () {
+    Widget row(SportEvent event, {Future<EventPrediction> Function()? prediction, double? width}) => ProviderScope(
+          retry: (retryCount, error) => null,
+          overrides: [
+            if (prediction != null) eventPredictionProvider.overrideWith((ref, query) => prediction()),
+          ],
+          child: MaterialApp(
+            home: Scaffold(body: SizedBox(width: width ?? 800, child: GameRow(sport: 'nfl', event: event))),
+          ),
+        );
+
+    testWidgets('a prediction load error shows --', (tester) async {
+      await tester.pumpWidget(row(_scheduledEvent(), prediction: () async => throw Exception('bad')));
+      await tester.pumpAndSettle();
+
+      expect(find.text('--'), findsWidgets);
+    });
+
+    testWidgets('a still-computing prediction shows the compact retry', (tester) async {
+      await tester.pumpWidget(row(_scheduledEvent(), prediction: () async => throw const PredictionComputingException(600)));
+      await tester.pump();
+      await tester.pump();
+
+      expect(find.byType(PredictionComputingRetry), findsOneWidget);
+      await tester.pump(const Duration(minutes: 20));
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    testWidgets('a stale prediction re-fetches once its freshness retry fires', (tester) async {
+      var calls = 0;
+      await tester.pumpWidget(row(_scheduledEvent(), prediction: () async {
+        calls++;
+        return const EventPrediction(
+          homeWinProbability: 0.68, homeWinProbabilityModelVersion: 3, margin: 6.5, homeScore: 27.4, awayScore: 20.9,
+          leaders: null, stale: true, staleRetryAfterSeconds: 60,
+        );
+      }));
+      await tester.pump();
+      await tester.pump();
+
+      await tester.pump(const Duration(minutes: 5));
+      await tester.pump();
+
+      expect(calls, greaterThan(1));
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    testWidgets('a completed event with no recorded prediction says so', (tester) async {
+      final event = _completedEvent();
+      final noComparison = SportEvent(
+        eventId: event.eventId,
+        eventDate: event.eventDate,
+        kickoffTime: event.kickoffTime,
+        status: event.status,
+        week: event.week,
+        round: null,
+        participants: event.participants,
+        predictionComparison: null,
+        leadersComparison: null,
+      );
+      await tester.pumpWidget(row(noComparison));
+      await tester.pumpAndSettle();
+
+      expect(find.text('No prediction recorded'), findsOneWidget);
+    });
+
+    testWidgets('a narrow row still shows the venue line', (tester) async {
+      await tester.pumpWidget(row(
+        _scheduledEvent(venueName: 'Arrowhead Stadium', venueCity: 'Kansas City', venueState: 'MO'),
+        prediction: () async => const EventPrediction(
+          homeWinProbability: 0.5, homeWinProbabilityModelVersion: 3, margin: 0, homeScore: 21, awayScore: 21, leaders: null,
+        ),
+        width: 360,
+      ));
+      await tester.pumpAndSettle();
+
+      expect(find.textContaining('Arrowhead Stadium'), findsOneWidget);
+    });
+
+    testWidgets('tapping the row navigates to the event detail route', (tester) async {
+      final router = GoRouter(routes: [
+        GoRoute(path: '/', builder: (_, __) => Scaffold(body: GameRow(sport: 'nfl', event: _completedEvent()))),
+        GoRoute(path: '/nfl/events/:id', builder: (_, state) => Text('detail ${state.pathParameters['id']}')),
+      ]);
+      await tester.pumpWidget(ProviderScope(child: MaterialApp.router(routerConfig: router)));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byType(GameRow));
+      await tester.pumpAndSettle();
+
+      expect(find.text('detail 401547419'), findsOneWidget);
+    });
+  });
+
+  group('timezoneLabelFor', () {
+    test('names a US zone, standard or daylight', () {
+      expect(timezoneLabelFor(const Duration(hours: -5), const Duration(hours: -5), const Duration(hours: -4)), 'EST');
+      expect(timezoneLabelFor(const Duration(hours: -4), const Duration(hours: -5), const Duration(hours: -4)), 'EDT');
+    });
+
+    test('falls back to UTC+/-N outside the US', () {
+      expect(timezoneLabelFor(const Duration(hours: 2), const Duration(hours: 1), const Duration(hours: 2)), 'UTC+2');
+      expect(timezoneLabelFor(const Duration(hours: -3), const Duration(hours: -3), const Duration(hours: -3)), 'UTC-3');
     });
   });
 }

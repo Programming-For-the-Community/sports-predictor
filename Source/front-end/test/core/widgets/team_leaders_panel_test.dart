@@ -289,4 +289,35 @@ void main() {
     final valueY = tester.getTopLeft(find.textContaining('31 PTS 27')).dy;
     expect(valueY, greaterThan(nameY));
   });
+
+  testWidgets('a compared player with no prediction for a stat shows -- in that cell', (tester) async {
+    tester.view.physicalSize = const Size(360, 1400);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.reset);
+    const comparison = EventLeadersComparison(
+      home: TeamLeadersComparison({
+        'passing': [
+          PlayerStatLineComparison(
+            entityId: '1', name: 'Ty Simpson',
+            predicted: {'passing_yards': 241, 'passing_touchdowns': 1.7}, actual: {'passing_yards': 268, 'passing_touchdowns': 2},
+          ),
+          PlayerStatLineComparison(
+            entityId: '4', name: 'Backup QB',
+            predicted: {'passing_yards': 40}, actual: {'passing_yards': 12},
+          ),
+        ],
+        'rushing': [],
+        'receiving': [],
+        'sacks': [],
+      }),
+      away: TeamLeadersComparison({'passing': [], 'rushing': [], 'receiving': [], 'sacks': []}),
+    );
+
+    await tester.pumpWidget(
+      wrap(const TeamLeadersComparisonPanel(sport: 'ncaafb', homeAbbr: 'UGA', awayAbbr: 'BAMA', comparison: comparison)),
+    );
+
+    expect(find.text('--'), findsWidgets);
+    expect(tester.takeException(), isNull);
+  });
 }

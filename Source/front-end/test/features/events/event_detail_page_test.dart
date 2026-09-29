@@ -8,6 +8,7 @@ import 'package:front_end/core/models/event.dart';
 import 'package:front_end/core/models/event_leaders.dart';
 import 'package:front_end/core/models/live_score.dart';
 import 'package:front_end/core/models/prediction.dart';
+import 'package:front_end/core/widgets/prediction_freshness_badge.dart';
 import 'package:front_end/features/events/event_detail_page.dart';
 
 const _prediction = EventPrediction(
@@ -324,5 +325,99 @@ void main() {
 
     expect(predictionCalls, 3);
     expect(find.text('Computing prediction...'), findsNothing);
+  });
+
+  Widget page({
+    required Future<List<SportEvent>> Function(String status) events,
+    Future<EventPrediction> Function()? prediction,
+  }) =>
+      ProviderScope(
+        retry: (retryCount, error) => null,
+        overrides: [
+          eventsListProvider.overrideWith((ref, query) => events(query.status)),
+          eventPredictionProvider.overrideWith((ref, query) => (prediction ?? () async => _prediction)()),
+          liveScoresProvider.overrideWith((ref, sport) async => const <String, LiveEventState>{}),
+        ],
+        child: const MaterialApp(home: Scaffold(body: EventDetailPage(sportId: 'nfl', eventId: '401547417'))),
+      );
+
+  testWidgets('shows the scheduled-list load error', (tester) async {
+    await tester.pumpWidget(page(events: (status) async => status == 'scheduled' ? throw Exception('down') : []));
+    await tester.pumpAndSettle();
+
+    expect(find.text("Couldn't load events: Exception: down"), findsOneWidget);
+  });
+
+  testWidgets('shows the completed-list load error', (tester) async {
+    await tester.pumpWidget(page(events: (status) async => status == 'completed' ? throw Exception('down') : []));
+    await tester.pumpAndSettle();
+
+    expect(find.text("Couldn't load events: Exception: down"), findsOneWidget);
+  });
+
+  testWidgets('a completed event with no leaders comparison says so', (tester) async {
+    final completed = SportEvent(
+      eventId: '401547417',
+      eventDate: '2026-09-14',
+      kickoffTime: '2026-09-14T17:00:00Z',
+      status: 'completed',
+      week: 2,
+      round: null,
+      participants: const [
+        Participant(entityId: '12', role: 'home', result: ParticipantResult(score: 24, won: true)),
+        Participant(entityId: '13', role: 'away', result: ParticipantResult(score: 17, won: false)),
+      ],
+      predictionComparison: null,
+      leadersComparison: null,
+    );
+    await tester.pumpWidget(page(events: (status) async => status == 'completed' ? [completed] : []));
+    await tester.pumpAndSettle();
+
+    expect(find.text('No player-prop predictions were recorded for this game.'), findsOneWidget);
+  });
+
+  testWidgets('shows a non-computing prediction error', (tester) async {
+    await tester.pumpWidget(page(
+      events: (status) async => status == 'scheduled' ? [_scheduledEvent('2026-09-14T17:00:00Z')] : [],
+      prediction: () async => throw Exception('bad'),
+    ));
+    await tester.pumpAndSettle();
+
+    expect(find.text("Couldn't load prediction: Exception: bad"), findsOneWidget);
+  });
+
+  testWidgets('shows the computing retry while a prediction is still computing', (tester) async {
+    await tester.pumpWidget(page(
+      events: (status) async => status == 'scheduled' ? [_scheduledEvent('2026-09-14T17:00:00Z')] : [],
+      prediction: () async => throw const PredictionComputingException(600),
+    ));
+    await tester.pump();
+    await tester.pump();
+
+    expect(find.text('Computing prediction...'), findsOneWidget);
+    await tester.pump(const Duration(minutes: 20));
+    await tester.pumpWidget(const SizedBox());
+  });
+
+  testWidgets('a stale prediction shows the freshness badge', (tester) async {
+    await tester.pumpWidget(page(
+      events: (status) async => status == 'scheduled' ? [_scheduledEvent('2026-09-14T17:00:00Z')] : [],
+      prediction: () async => const EventPrediction(
+        homeWinProbability: 0.62,
+        homeWinProbabilityModelVersion: 9,
+        margin: 4.5,
+        homeScore: 27.3,
+        awayScore: 22.8,
+        leaders: null,
+        stale: true,
+        staleRetryAfterSeconds: 600,
+      ),
+    ));
+    await tester.pump();
+    await tester.pump();
+
+    expect(find.byType(PredictionFreshnessBadge), findsOneWidget);
+    await tester.pump(const Duration(minutes: 20));
+    await tester.pumpWidget(const SizedBox());
   });
 }

@@ -76,4 +76,11 @@ void main() {
     expect(second.dx, first.dx);
     expect(second.dy, greaterThan(first.dy));
   });
+
+  testWidgets('at phone width a card with no bands shows just its best result', (tester) async {
+    await pumpAtWidth(tester, 390, _page([pickRecord(bands: const [])]));
+
+    expect(find.byType(ModelPerformanceCardView), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
 }

@@ -5,9 +5,7 @@
 /// client). CI generates config/prod.json from live Terraform outputs via
 /// scripts/render_frontend_config.sh immediately before `flutter build web`
 /// -- see config/prod.json.example for the shape it must match.
-class AppConfig {
-  AppConfig._();
-
+abstract final class AppConfig {
   static const apiBaseUrl = String.fromEnvironment('API_BASE_URL');
   static const cognitoUserPoolId = String.fromEnvironment('COGNITO_USER_POOL_ID');
   static const cognitoClientId = String.fromEnvironment('COGNITO_CLIENT_ID');

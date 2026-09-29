@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:go_router/go_router.dart';
 
 import 'package:front_end/core/data/live_scores_repository.dart';
 import 'package:front_end/core/models/f1_live_score.dart';
@@ -147,5 +148,45 @@ void main() {
 
     expect(find.text('ACTIVE'), findsOneWidget);
     expect(find.text('LIVE'), findsNothing);
+  });
+
+  Widget pgaCard(PgaLiveEventState state) => ProviderScope(
+        overrides: [pgaLiveScoresProvider.overrideWith((ref, sport) async => {'401': state})],
+        child: MaterialApp(home: Scaffold(body: SportCard(sport: _pga))),
+      );
+
+  testWidgets('a PGA cup that has not finished shows LIVE', (tester) async {
+    await tester.pumpWidget(pgaCard(PgaTwoSidedLiveState(const TwoSidedLiveEventState(eventType: 'cup', status: 'in_progress'))));
+    await tester.pump();
+
+    expect(find.text('LIVE'), findsOneWidget);
+  });
+
+  testWidgets('a PGA match-play event is LIVE only while a side is in progress', (tester) async {
+    await tester.pumpWidget(pgaCard(PgaTwoSidedLiveState(const TwoSidedLiveEventState(
+      eventType: 'match_play',
+      status: 'in_progress',
+      participants: {'1': TwoSidedParticipantLiveResult(status: 'in_progress')},
+    ))));
+    await tester.pump();
+
+    expect(find.text('LIVE'), findsOneWidget);
+  });
+
+  testWidgets('tapping an active sport opens its events route', (tester) async {
+    final router = GoRouter(routes: [
+      GoRoute(path: '/', builder: (_, __) => const Scaffold(body: SportCard(sport: _nfl))),
+      GoRoute(path: '/nfl/events', builder: (_, __) => const Text('nfl events')),
+    ]);
+    await tester.pumpWidget(ProviderScope(
+      overrides: [liveScoresProvider.overrideWith((ref, sport) async => const {})],
+      child: MaterialApp.router(routerConfig: router),
+    ));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byType(SportCard));
+    await tester.pumpAndSettle();
+
+    expect(find.text('nfl events'), findsOneWidget);
   });
 }

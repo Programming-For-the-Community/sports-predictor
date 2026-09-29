@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -181,5 +182,16 @@ void main() {
     addTearDown(container.dispose);
 
     expect(container.read(apiClientProvider), isA<ApiClient>());
+  });
+
+  testWidgets('a request that never answers times out with an ApiException', (tester) async {
+    final built = _buildClient(['token-1'], (request) => Completer<http.Response>().future);
+
+    Object? error;
+    built.client.get('/nfl/events').then<void>((_) {}, onError: (Object e) => error = e);
+    await tester.pump(const Duration(seconds: 31));
+
+    expect(error, isA<ApiException>().having((e) => e.statusCode, 'statusCode', 0));
+    expect(error.toString(), startsWith('ApiException(0: Request to'));
   });
 }

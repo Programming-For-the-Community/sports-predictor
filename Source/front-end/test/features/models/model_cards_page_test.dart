@@ -92,4 +92,18 @@ void main() {
       expect(secondTop, greaterThan(firstTop));
     });
   });
+
+  testWidgets('pull-to-refresh refetches the models', (tester) async {
+    var calls = 0;
+    await tester.pumpWidget(_page(models: () async {
+      calls++;
+      return [];
+    }));
+    await tester.pumpAndSettle();
+
+    await tester.widget<RefreshIndicator>(find.byType(RefreshIndicator)).onRefresh();
+    await tester.pumpAndSettle();
+
+    expect(calls, 2);
+  });
 }

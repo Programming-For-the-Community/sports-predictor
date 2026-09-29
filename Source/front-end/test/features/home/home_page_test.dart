@@ -68,4 +68,21 @@ void main() {
 
     expect(headToHeadCalls, greaterThan(initialCalls));
   });
+
+  testWidgets('Sign out logs the user out', (tester) async {
+    final authRepo = AuthRepository(authClient: CognitoAuthClient(httpClient: MockClient((r) async => http.Response('{}', 200))));
+    await tester.pumpWidget(ProviderScope(
+      overrides: [
+        ...overrides(onLiveScoresCall: () {}, onPgaLiveScoresCall: () {}).skip(1),
+        authRepositoryProvider.overrideWith((ref) => authRepo),
+      ],
+      child: const MaterialApp(home: HomePage()),
+    ));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Sign out'));
+    await tester.pumpAndSettle();
+
+    expect(authRepo.state, isA<AuthUnauthenticated>());
+  });
 }
