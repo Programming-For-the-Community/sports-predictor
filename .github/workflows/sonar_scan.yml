@@ -219,16 +219,17 @@ jobs:
           if [ -n "${{ steps.merge_coverage.outputs.report_path }}" ]; then
             ARGS="$ARGS -Dsonar.python.coverage.reportPaths=${{ steps.merge_coverage.outputs.report_path }}"
           fi
-          # sonar.dart.coverage.reportPaths, by analogy with sonar.python.
-          # coverage.reportPaths above (same LANGUAGE.coverage.reportPaths
-          # shape SonarQube's own Python/JS/TS coverage import uses) --
-          # SonarQube Cloud's own Dart support is newer/less documented
-          # than Python's, so double-check the dashboard's own Coverage
-          # tab actually populates after this lands; an unrecognized -D
-          # property is silently ignored by the scanner, not a hard
-          # failure, so this is a safe attempt either way.
+          # flutter test records SF: paths relative to Source/front-end
+          # (lib/...); rewritten here to repo-root-relative so they match
+          # sonar.sources=Source. sonar.dart.lcov.reportPaths is the
+          # documented Dart property -- the scanner silently ignores an
+          # unrecognized one.
           if [ -f dart-coverage/lcov.info ]; then
-            ARGS="$ARGS -Dsonar.dart.coverage.reportPaths=dart-coverage/lcov.info"
+            sed -i 's#^SF:\(lib/\)#SF:Source/front-end/\1#' dart-coverage/lcov.info
+            echo "::group::lcov.info -- sample of recorded source paths"
+            grep '^SF:' dart-coverage/lcov.info | head -5
+            echo "::endgroup::"
+            ARGS="$ARGS -Dsonar.dart.lcov.reportPaths=dart-coverage/lcov.info"
           fi
           echo "args=$ARGS" >> "$GITHUB_OUTPUT"
 
