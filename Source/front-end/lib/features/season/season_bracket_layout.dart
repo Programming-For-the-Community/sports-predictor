@@ -103,25 +103,32 @@ List<double> _assignRoundSlots(int matchupCount, List<double> desired) {
 List<BracketConnection> _bracketConnectorsForRound(
   int r, List<BracketMatchup> matchups, List<BracketRound> rounds, List<List<double>> slots, List<double> roundSlots,
 ) {
+  return [
+    for (var i = 0; i < matchups.length; i++) ..._matchupConnections(rounds, slots, matchups[i], r, roundSlots[i]),
+  ];
+}
+
+/// One matchup's connector lines: for each side, searches back through
+/// earlier rounds until it finds the game that side came from.
+List<BracketConnection> _matchupConnections(
+  List<BracketRound> rounds, List<List<double>> slots, BracketMatchup matchup, int r, double toSlot,
+) {
   final connections = <BracketConnection>[];
-  for (var i = 0; i < matchups.length; i++) {
-    final matchup = matchups[i];
-    for (final side in [matchup.teamA, matchup.teamB]) {
-      if (side == null) continue; // A bye side has no earlier-round game to trace a connector back to.
-      for (var back = r - 1; back >= 0; back--) {
-        final foundIndex = rounds[back].matchups.indexWhere((m) => m.teamA == side || m.teamB == side);
-        if (foundIndex != -1) {
-          final source = rounds[back].matchups[foundIndex];
-          // A bye source has no card rendered for it (see the card loop
-          // in _BracketTree) -- nothing to draw a connector line from.
-          // The team wasn't playing yet, it was awarded the round
-          // automatically; this is where its own bracket path actually
-          // starts, so search no further back either.
-          if (source.teamA != null && source.teamB != null) {
-            connections.add(BracketConnection(back, slots[back][foundIndex], r, roundSlots[i]));
-          }
-          break;
+  for (final side in [matchup.teamA, matchup.teamB]) {
+    if (side == null) continue; // A bye side has no earlier-round game to trace a connector back to.
+    for (var back = r - 1; back >= 0; back--) {
+      final foundIndex = rounds[back].matchups.indexWhere((m) => m.teamA == side || m.teamB == side);
+      if (foundIndex != -1) {
+        final source = rounds[back].matchups[foundIndex];
+        // A bye source has no card rendered for it (see the card loop
+        // in _BracketTree) -- nothing to draw a connector line from.
+        // The team wasn't playing yet, it was awarded the round
+        // automatically; this is where its own bracket path actually
+        // starts, so search no further back either.
+        if (source.teamA != null && source.teamB != null) {
+          connections.add(BracketConnection(back, slots[back][foundIndex], r, toSlot));
         }
+        break;
       }
     }
   }
@@ -160,48 +167,44 @@ BracketSlotLayout computeBracketSlotLayout(List<BracketRound> rounds) {
   final layoutA = computeBracketSlotLayout(roundsA);
   final layoutB = computeBracketSlotLayout(roundsB);
   final roundCount = roundsA.length < roundsB.length ? roundsA.length : roundsB.length;
+  final offset = _maxSlot(layoutA) + 1 + BracketDimensions.labelSeamGapSlots;
+  final last = roundCount - 1;
 
-  var maxSlotA = 0.0;
-  for (final roundSlots in layoutA.slots) {
-    for (final slot in roundSlots) {
-      if (slot > maxSlotA) maxSlotA = slot;
-    }
-  }
-  final offset = maxSlotA + 1 + BracketDimensions.labelSeamGapSlots;
-
-  final slots = <List<double>>[];
-  final connections = <BracketConnection>[
-    ...layoutA.connections,
-    for (final c in layoutB.connections) BracketConnection(c.fromRound, c.fromSlot + offset, c.toRound, c.toSlot + offset),
+  final slots = [
+    for (var r = 0; r < roundCount; r++) [...layoutA.slots[r], for (final slot in layoutB.slots[r]) slot + offset],
   ];
-  for (var r = 0; r < roundCount; r++) {
-    slots.add([...layoutA.slots[r], for (final slot in layoutB.slots[r]) slot + offset]);
-  }
+  final connections = [...layoutA.connections, for (final c in layoutB.connections) _shifted(c, offset)];
 
   // The championship's two sides are each conference's own last-round
-  // winner -- trace which matchup produced it so the championship card
-  // converges at the right height.
-  double? sourceSlot(List<BracketRound> rounds, List<double> lastRoundSlots, double bandOffset) {
-    final lastMatchups = rounds[roundCount - 1].matchups;
-    for (var j = 0; j < lastMatchups.length; j++) {
-      final previous = lastMatchups[j];
-      final winner = previous.isFinal ? previous.actualWinner : previous.predictedWinner;
-      if (winner != null && (winner == finalMatchup.teamA || winner == finalMatchup.teamB)) {
-        return lastRoundSlots[j] + bandOffset;
-      }
-    }
-    return null;
-  }
-
+  // winner -- converge the championship card between the matchups that
+  // produced them.
   final finalSources = [
-    sourceSlot(roundsA, layoutA.slots[roundCount - 1], 0),
-    sourceSlot(roundsB, layoutB.slots[roundCount - 1], offset),
+    _championshipSourceSlot(roundsA[last], layoutA.slots[last], finalMatchup, 0),
+    _championshipSourceSlot(roundsB[last], layoutB.slots[last], finalMatchup, offset),
   ].whereType<double>().toList();
   final finalSlot = finalSources.isEmpty ? 0.0 : finalSources.reduce((a, b) => a + b) / finalSources.length;
-  for (final source in finalSources) {
-    connections.add(BracketConnection(roundCount - 1, source, roundCount, finalSlot));
-  }
+  connections.addAll([for (final source in finalSources) BracketConnection(last, source, roundCount, finalSlot)]);
   slots.add([finalSlot]);
 
   return (layout: BracketSlotLayout(slots, connections), conferenceBOffset: offset);
+}
+
+/// The layout's lowest (largest) slot, 0 for an empty layout.
+double _maxSlot(BracketSlotLayout layout) =>
+    layout.slots.expand((round) => round).fold(0.0, (highest, slot) => slot > highest ? slot : highest);
+
+BracketConnection _shifted(BracketConnection c, double offset) =>
+    BracketConnection(c.fromRound, c.fromSlot + offset, c.toRound, c.toSlot + offset);
+
+/// The slot (plus `bandOffset`) of the last-round matchup whose winner --
+/// actual if final, else predicted -- plays in the championship; null if
+/// none does.
+double? _championshipSourceSlot(
+  BracketRound lastRound, List<double> lastRoundSlots, BracketMatchup finalMatchup, double bandOffset,
+) {
+  final index = lastRound.matchups.indexWhere((m) {
+    final winner = m.isFinal ? m.actualWinner : m.predictedWinner;
+    return winner != null && (winner == finalMatchup.teamA || winner == finalMatchup.teamB);
+  });
+  return index == -1 ? null : lastRoundSlots[index] + bandOffset;
 }

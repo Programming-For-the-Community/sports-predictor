@@ -4,21 +4,17 @@
 # this is the mechanism that makes "no NAT Gateway" viable for the
 # architecture (see docs/ARCHITECTURE.md).
 #
-# Private route table only -- the EC2 training track's own task traffic
-# (sfn-training-orchestrator.tf's RunTrainingTask/RunTrainingTaskOnDemand)
-# runs its NetworkConfiguration in the PRIVATE subnets specifically so it reaches
-# S3/DynamoDB through these endpoints, not a public route -- see that file's
-# own comment. The EC2 hosts themselves (ec2-training-asg.tf) still launch
-# into the public subnets (needed for ECR pull/agent registration, the same
-# reason Fargate's own training tasks sit there), but that's the host's
-# network path, not the task's; the two are independently configurable for
-# EC2 launch type + awsvpc mode, and the task's own traffic never needs to
-# touch a public route at all.
+# Attached to both route tables, so anything in the VPC reaches S3 and
+# DynamoDB over the endpoints rather than the internet gateway: private
+# Lambdas and tasks (including the EC2 training track's own task traffic --
+# sfn-training-orchestrator.tf runs its NetworkConfiguration in the private
+# subnets), and the public-subnet EC2 training hosts (ec2-training-asg.tf) and
+# Fargate tasks, whose S3 traffic includes ECR image-layer downloads.
 resource "aws_vpc_endpoint" "s3" {
   vpc_id            = var.vpc_id
   service_name      = "com.amazonaws.${var.region}.s3"
   vpc_endpoint_type = "Gateway"
-  route_table_ids   = [aws_route_table.private.id]
+  route_table_ids   = [aws_route_table.private.id, aws_route_table.public.id]
 
   tags = merge(local.common_tags, {
     Sport     = "shared"
@@ -31,7 +27,7 @@ resource "aws_vpc_endpoint" "dynamodb" {
   vpc_id            = var.vpc_id
   service_name      = "com.amazonaws.${var.region}.dynamodb"
   vpc_endpoint_type = "Gateway"
-  route_table_ids   = [aws_route_table.private.id]
+  route_table_ids   = [aws_route_table.private.id, aws_route_table.public.id]
 
   tags = merge(local.common_tags, {
     Sport     = "shared"

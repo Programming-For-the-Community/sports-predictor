@@ -61,12 +61,17 @@ resource "aws_launch_template" "ec2_training" {
   EOF
   )
 
-  tag_specifications {
-    resource_type = "instance"
-    tags = merge(local.common_tags, {
-      Sport     = "shared"
-      Component = "training"
-    })
+  # The ASGs' own propagate_at_launch tags reach only the instance, never
+  # its root volume or network interface -- those are tagged here.
+  dynamic "tag_specifications" {
+    for_each = ["instance", "volume", "network-interface"]
+    content {
+      resource_type = tag_specifications.value
+      tags = merge(local.common_tags, {
+        Sport     = "shared"
+        Component = "training"
+      })
+    }
   }
 
   tags = merge(local.common_tags, {

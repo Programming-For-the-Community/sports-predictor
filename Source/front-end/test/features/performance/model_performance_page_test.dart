@@ -113,34 +113,50 @@ void main() {
     expect(find.textContaining("Couldn't load performance"), findsOneWidget);
   });
 
-  testWidgets('on a 1366px laptop the cards sit two to a row without crashing', (tester) async {
-    tester.view.physicalSize = const Size(1366, 1800);
+  Future<void> pumpDesktop(WidgetTester tester, double width) async {
+    tester.view.physicalSize = Size(width, 2400);
     tester.view.devicePixelRatio = 1.0;
     addTearDown(tester.view.reset);
-
     await tester.pumpWidget(_page(() async => _performance(fullNflSet())));
     await tester.pumpAndSettle();
-
     expect(tester.takeException(), isNull);
-    final first = tester.getRect(find.byType(ModelPerformanceCardView).at(0));
-    final second = tester.getTopLeft(find.byType(ModelPerformanceCardView).at(1));
-    expect(first.width, 620);
-    expect(second.dy, first.top);
-    expect(second.dx, greaterThan(first.right));
+  }
+
+  Rect cardRect(WidgetTester tester, int i) => tester.getRect(find.byType(ModelPerformanceCardView).at(i));
+
+  testWidgets('on a 1366px laptop the cards sit two to a row, filling the width', (tester) async {
+    await pumpDesktop(tester, 1366);
+
+    final first = cardRect(tester, 0);
+    final second = cardRect(tester, 1);
+    expect(second.top, first.top);
+    expect(first.width, second.width);
+    expect(second.right, closeTo(1366 - 24, 0.5), reason: 'the row reaches the page padding -- no empty strip');
+  });
+
+  testWidgets('on a 1920px screen the cards sit three to a row', (tester) async {
+    await pumpDesktop(tester, 1920);
+
+    final tops = [for (var i = 0; i < 3; i++) cardRect(tester, i).top];
+    expect(tops.toSet(), hasLength(1));
+    expect(cardRect(tester, 3).top, greaterThan(cardRect(tester, 0).bottom));
+  });
+
+  testWidgets('cards in the same row are the same height, with recent weeks lined up along the bottom', (tester) async {
+    await pumpDesktop(tester, 1920);
+
+    final row = [for (var i = 0; i < 3; i++) cardRect(tester, i)];
+    expect(row.map((r) => r.height).toSet(), hasLength(1));
+    final recentBottoms = [
+      for (final label in find.text('RECENT WEEKS').evaluate().take(3)) tester.getRect(find.byWidget(label.widget)).top,
+    ];
+    expect(recentBottoms.toSet(), hasLength(1));
   });
 
   testWidgets('on a narrower desktop window the cards are one to a row', (tester) async {
-    tester.view.physicalSize = const Size(1100, 1800);
-    tester.view.devicePixelRatio = 1.0;
-    addTearDown(tester.view.reset);
+    await pumpDesktop(tester, 1100);
 
-    await tester.pumpWidget(_page(() async => _performance(fullNflSet())));
-    await tester.pumpAndSettle();
-
-    expect(tester.takeException(), isNull);
-    final first = tester.getRect(find.byType(ModelPerformanceCardView).at(0));
-    final second = tester.getTopLeft(find.byType(ModelPerformanceCardView).at(1));
-    expect(second.dy, greaterThan(first.bottom));
+    expect(cardRect(tester, 1).top, greaterThan(cardRect(tester, 0).bottom));
   });
 
   for (final width in [320.0, 360.0, 375.0, 390.0]) {
@@ -152,6 +168,8 @@ void main() {
         for (var i = 0; i < 6; i++) tester.getTopLeft(find.byType(ModelPerformanceCardView).at(i)).dx,
       };
       expect(xs, hasLength(1), reason: 'every card starts at the same left edge -- a single column');
+      final heights = {for (var i = 0; i < 6; i++) tester.getSize(find.byType(ModelPerformanceCardView).at(i)).height};
+      expect(heights.length, greaterThan(1), reason: 'one card per row keeps each at its own natural height');
     });
   }
 }

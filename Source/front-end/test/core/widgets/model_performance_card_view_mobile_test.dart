@@ -20,7 +20,6 @@ Widget _page(List<ModelPerformanceRecord> records, {bool isWeekly = true}) => Ma
         body: SingleChildScrollView(
           padding: const EdgeInsets.all(24),
           child: ModelCardGrid<ModelPerformanceRecord>(
-            equalHeight: false,
             items: records,
             cardBuilder: (record) => ModelPerformanceCardView(record: record, isWeekly: isWeekly),
           ),

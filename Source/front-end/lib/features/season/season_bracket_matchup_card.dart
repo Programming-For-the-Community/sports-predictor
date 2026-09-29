@@ -55,9 +55,7 @@ class BracketMatchupCard extends StatelessWidget {
             seed: matchup.seedA,
             teamNames: teamNames,
             isWinner: winner == matchup.teamA,
-            // A series' running win count takes priority over a single
-            // game's score, shown throughout (including 0-0).
-            score: matchup.isSeries ? matchup.winsA : (matchup.isFinal ? matchup.actualHomeScore : null),
+            score: _rowScore(matchup.winsA, matchup.actualHomeScore),
           ),
           const SizedBox(height: 4),
           _BracketTeamRow(
@@ -66,7 +64,7 @@ class BracketMatchupCard extends StatelessWidget {
             seed: matchup.seedB,
             teamNames: teamNames,
             isWinner: winner == matchup.teamB,
-            score: matchup.isSeries ? matchup.winsB : (matchup.isFinal ? matchup.actualAwayScore : null),
+            score: _rowScore(matchup.winsB, matchup.actualAwayScore),
           ),
           const SizedBox(height: 6),
           // Shrinks the wrapped status text to fit whatever vertical space
@@ -89,6 +87,13 @@ class BracketMatchupCard extends StatelessWidget {
         ],
       ),
     );
+  }
+
+  /// A series' running win count takes priority over a single game's score,
+  /// shown throughout (including 0-0); a single game shows its score once final.
+  int? _rowScore(int? seriesWins, int? finalScore) {
+    if (matchup.isSeries) return seriesWins;
+    return matchup.isFinal ? finalScore : null;
   }
 
   String _teamLabel(String teamId) {

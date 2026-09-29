@@ -8,11 +8,18 @@ import '../theme/app_text_styles.dart';
 /// Performance tab (season/last-period results) both fill `children` with
 /// their own content, so the two always look like one family of cards.
 class ModelCardFrame extends StatelessWidget {
-  const ModelCardFrame({super.key, required this.title, required this.badges, required this.children});
+  const ModelCardFrame({super.key, required this.title, required this.badges, required this.children, this.footer});
 
   final String title;
   final List<String> badges;
   final List<Widget> children;
+
+  /// Full-width content under `children`. When the card is stretched to a
+  /// taller row (ModelCardGrid's equal-height rows), the spare space goes
+  /// above it, so footers line up along the bottom of the row.
+  final Widget? footer;
+
+  static const _footerGap = 20.0;
 
   @override
   Widget build(BuildContext context) {
@@ -23,14 +30,22 @@ class ModelCardFrame extends StatelessWidget {
         borderRadius: BorderRadius.circular(18),
         border: Border.all(color: AppColors.border),
       ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Tooltip(message: title, child: Text(title, style: AppTextStyles.cardTitle())),
-          const SizedBox(height: 8),
-          Wrap(spacing: 8, runSpacing: 8, children: [for (final badge in badges) ModelCardBadge(text: badge)]),
-          ...children,
-        ],
+      child: LayoutBuilder(
+        builder: (context, constraints) => Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Tooltip(message: title, child: Text(title, style: AppTextStyles.cardTitle())),
+            const SizedBox(height: 8),
+            Wrap(spacing: 8, runSpacing: 8, children: [for (final badge in badges) ModelCardBadge(text: badge)]),
+            ...children,
+            if (footer != null) ...[
+              // Only a stretched card has a bounded height to fill.
+              if (constraints.hasBoundedHeight) const Spacer(),
+              const SizedBox(height: _footerGap),
+              footer!,
+            ],
+          ],
+        ),
       ),
     );
   }
