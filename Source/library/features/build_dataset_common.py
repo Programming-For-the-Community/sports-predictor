@@ -3,10 +3,9 @@ Shared feature-engineering build_dataset.py boilerplate (nfl/nba/ncaafb/
 ncaambb -- confirmed byte-identical before sharing here, aside from
 ncaafb's own build_player_dataset, which additionally threads team
 coordinates through build_player_features and stays local for that
-reason). The actual event-row feature-building logic
-(build_event_dataset/_build_event_row) stays fully per-sport throughout
--- NFL/NCAAFB track QB/RB/WR leader histories NBA/NCAAMBB have no
-equivalent for.
+reason). Each sport's own build_event_features stays per-sport;
+build_team_event_rows drives all four, with NFL/NCAAFB also passing
+`leaders` for their QB/RB/WR leader histories.
 
 Each sport's own build_dataset.py keeps `build_player_dataset`/
 `_write_parquet`/`_lookback_since_date` under their original, tested
@@ -72,14 +71,47 @@ def index_team_game_stats(team_game_stats: list[dict]) -> dict[tuple[str, str], 
     return {(row["event_key"], row["team_id"]): row for row in team_game_stats}
 
 
+def group_player_games_by_event_and_team(player_games: list[dict]) -> dict[tuple[str, str], list[dict]]:
+    by_event_team: dict[tuple[str, str], list[dict]] = defaultdict(list)
+    for game in player_games:
+        by_event_team[(game["event_key"], game["team_id"])].append(game)
+    return by_event_team
+
+
+def _leader_position_games(
+    team_games: list[dict], leaders: dict[str, Callable], leader_history: dict[str, dict[str, list[dict]]],
+    window: int, identified: list[tuple[str, dict]],
+) -> dict[str, list[dict]]:
+    """{position: that team's leader's prior games, most-recent-first},
+    empty for a position with no identifiable leader. Each identified
+    leader game is appended to `identified`."""
+    position_games = {}
+    for position, identify in leaders.items():
+        game = identify(team_games)
+        if game:
+            identified.append((position, game))
+            position_games[position] = leader_history[position][game["entity_id"]][-window:][::-1]
+        else:
+            position_games[position] = []
+    return position_games
+
+
 def build_team_event_rows(
     events: list[dict], team_game_stats: list[dict], window: int, build_event_features: Callable, logger,
+    *, player_games: list[dict] = (), leaders: dict[str, Callable] | None = None,
 ) -> list[dict]:
     """One event-feature row per event with both a home and an away side,
     built in a single chronological pass: each team's own game and box-score
     histories grow one game at a time rather than being re-filtered from the
-    full history for every game."""
+    full history for every game.
+
+    `leaders` ({position: identify_fn}) also passes each side's identified
+    leader's prior games as home_position_games/away_position_games. Leader
+    history is keyed by player entity_id, so it follows a player across a
+    trade."""
     team_game_stats_by_event_team = index_team_game_stats(team_game_stats)
+    player_games_by_event_team = group_player_games_by_event_and_team(player_games) if leaders else {}
+    leader_history: dict[str, dict[str, list[dict]]] = {position: defaultdict(list) for position in leaders or {}}
     elo_ratings, _ = compute_elo_ratings(events)  # only the pre-game side is used here
     events_ascending = sorted(events, key=lambda e: e.get("event_date", ""))
 
@@ -96,11 +128,20 @@ def build_team_event_rows(
             continue
 
         home_id, away_id = home["entity_id"], away["entity_id"]
+        identified: list[tuple[str, dict]] = []
+        leader_kwargs = {
+            f"{side}_position_games": _leader_position_games(
+                player_games_by_event_team.get((event["event_key"], team_id), []), leaders, leader_history, window,
+                identified,
+            )
+            for side, team_id in (("home", home_id), ("away", away_id))
+        } if leaders else {}
         # Most-recent-first, capped at `window` -- O(window), not O(len(history)).
         rows.append(build_event_features(
             event, elo_ratings, team_history[home_id][-window:][::-1], team_history[away_id][-window:][::-1], window,
             home_team_box_stats=team_box_history[home_id][-window:][::-1],
             away_team_box_stats=team_box_history[away_id][-window:][::-1],
+            **leader_kwargs,
         ))
 
         for team_id in (home_id, away_id):
@@ -108,6 +149,8 @@ def build_team_event_rows(
             box_row = team_game_stats_by_event_team.get((event["event_key"], team_id))
             if box_row:
                 team_box_history[team_id].append(box_row)
+        for position, game in identified:
+            leader_history[position][game["entity_id"]].append(game)
 
         if i % 500 == 0 or i == total:
             logger.info("Built event features: %d/%d", i, total)

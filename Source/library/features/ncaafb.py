@@ -22,7 +22,7 @@ already-fetched rows and returns numbers.
   with CFBD's own AP Top 25 rank when enrichment attached one to that
   team's game that week.
 """
-from library.features import geo
+from library.features import football, geo
 from library.features.common import (
     DEFAULT_ROLLING_WINDOW,
     _identify_leader,
@@ -31,6 +31,7 @@ from library.features.common import (
     average_opponent_elo,
     current_streak,
     kickoff_hour_utc,
+    player_perspective,
     rest_days,
     rolling_player_stat_averages,
     rolling_team_scoring_averages,
@@ -125,15 +126,6 @@ def build_event_features(
     home_scoring = rolling_team_scoring_averages(home_team_events, home_id, window)
     away_scoring = rolling_team_scoring_averages(away_team_events, away_id, window)
 
-    home_position_games = home_position_games or {}
-    away_position_games = away_position_games or {}
-    home_qb_stats = rolling_player_stat_averages(home_position_games.get("qb") or [], window)
-    away_qb_stats = rolling_player_stat_averages(away_position_games.get("qb") or [], window)
-    home_rb_stats = rolling_player_stat_averages(home_position_games.get("rb") or [], window)
-    away_rb_stats = rolling_player_stat_averages(away_position_games.get("rb") or [], window)
-    home_wr_stats = rolling_player_stat_averages(home_position_games.get("wr") or [], window)
-    away_wr_stats = rolling_player_stat_averages(away_position_games.get("wr") or [], window)
-
     home_box_stats = rolling_player_stat_averages(home_team_box_stats or [], window)
     away_box_stats = rolling_player_stat_averages(away_team_box_stats or [], window)
     home_third_down_pct = _rate(home_box_stats, "avg_third_down_conversions", "avg_third_down_attempts")
@@ -166,28 +158,7 @@ def build_event_features(
         "away_avg_points_scored": away_scoring["avg_points_scored"],
         "away_avg_points_allowed": away_scoring["avg_points_allowed"],
         "away_games_played": away_scoring["games_played"],
-        "home_qb_avg_passing_yards": home_qb_stats.get("avg_passing_yards"),
-        "home_qb_avg_passing_tds": home_qb_stats.get("avg_passing_touchdowns"),
-        "home_qb_avg_interceptions": home_qb_stats.get("avg_passing_interceptions"),
-        "home_qb_games_played": home_qb_stats["games_played"],
-        "away_qb_avg_passing_yards": away_qb_stats.get("avg_passing_yards"),
-        "away_qb_avg_passing_tds": away_qb_stats.get("avg_passing_touchdowns"),
-        "away_qb_avg_interceptions": away_qb_stats.get("avg_passing_interceptions"),
-        "away_qb_games_played": away_qb_stats["games_played"],
-        "home_rb_avg_rushing_yards": home_rb_stats.get("avg_rushing_yards"),
-        "home_rb_avg_rushing_tds": home_rb_stats.get("avg_rushing_touchdowns"),
-        "home_rb_games_played": home_rb_stats["games_played"],
-        "away_rb_avg_rushing_yards": away_rb_stats.get("avg_rushing_yards"),
-        "away_rb_avg_rushing_tds": away_rb_stats.get("avg_rushing_touchdowns"),
-        "away_rb_games_played": away_rb_stats["games_played"],
-        "home_wr_avg_receiving_yards": home_wr_stats.get("avg_receiving_yards"),
-        "home_wr_avg_receiving_tds": home_wr_stats.get("avg_receiving_touchdowns"),
-        "home_wr_avg_receptions": home_wr_stats.get("avg_receiving_receptions"),
-        "home_wr_games_played": home_wr_stats["games_played"],
-        "away_wr_avg_receiving_yards": away_wr_stats.get("avg_receiving_yards"),
-        "away_wr_avg_receiving_tds": away_wr_stats.get("avg_receiving_touchdowns"),
-        "away_wr_avg_receptions": away_wr_stats.get("avg_receiving_receptions"),
-        "away_wr_games_played": away_wr_stats["games_played"],
+        **football.leader_columns(home_position_games or {}, away_position_games or {}, window),
         "home_avg_turnovers": home_box_stats.get("avg_turnovers"),
         "home_avg_total_yards": home_box_stats.get("avg_total_yards"),
         "home_avg_possession_time_seconds": home_box_stats.get("avg_possession_time_seconds"),
@@ -236,19 +207,9 @@ def build_player_features(
     it. No raw season_type column, same reasoning as build_event_features'
     own docstring -- is_bowl_game/is_playoff_game below already carry the
     signal as usable numeric features."""
-    participants = event["participants"]
-    home = next(p for p in participants if p.get("role") == "home")
-    away = next(p for p in participants if p.get("role") == "away")
-    home_id, away_id = home["entity_id"], away["entity_id"]
-    team_id = player_game["team_id"]
-    is_home = team_id == home_id
-    opponent_id = away_id if is_home else home_id
-
-    ratings = elo_ratings.get(event["event_key"], {})
-    home_elo = ratings.get("home_pre_rating")
-    away_elo = ratings.get("away_pre_rating")
-    own_elo = home_elo if is_home else away_elo
-    opponent_elo = away_elo if is_home else home_elo
+    home_id, away_id, team_id, is_home, opponent_id, own_elo, opponent_elo = player_perspective(
+        event, player_game, elo_ratings,
+    )
 
     home_travel_km, away_travel_km = geo.travel_distances_km(away_id, home_id, None, team_coordinates, {})
     own_travel_km = home_travel_km if is_home else away_travel_km

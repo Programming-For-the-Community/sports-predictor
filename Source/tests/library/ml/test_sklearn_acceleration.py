@@ -22,3 +22,11 @@ def test_does_nothing_when_sklearnex_is_missing(monkeypatch):
     monkeypatch.setitem(sys.modules, "sklearnex", None)
 
     assert sklearn_acceleration.patch_sklearn_if_available() is False
+
+
+def test_does_nothing_when_sklearnex_cannot_patch_this_sklearn(monkeypatch):
+    fake = types.ModuleType("sklearnex")
+    fake.patch_sklearn = MagicMock(side_effect=ModuleNotFoundError("No module named 'sklearn.externals.joblib'"))
+    monkeypatch.setitem(sys.modules, "sklearnex", fake)
+
+    assert sklearn_acceleration.patch_sklearn_if_available() is False

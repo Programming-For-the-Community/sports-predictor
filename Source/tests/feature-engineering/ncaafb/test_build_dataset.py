@@ -311,20 +311,6 @@ class TestMain:
             self._run(monkeypatch, lambda name: [] if name == "build_event_dataset" else [{"source": name}])
 
 
-class TestUpdateEventHistory:
-    def test_appends_only_the_box_score_rows_that_exist(self):
-        from collections import defaultdict
-        team_history, team_box_history = defaultdict(list), defaultdict(list)
-        event = {"event_key": "E1"}
-
-        build_dataset._update_event_history(
-            event, "home", "away", team_history, team_box_history, {("E1", "away"): {"yds": 300}}, [],
-        )
-
-        assert team_history == {"home": [event], "away": [event]}
-        assert team_box_history == {"away": [{"yds": 300}]}
-
-
 class TestBuildRankingDatasetMalformedEvents:
     def test_skips_an_event_missing_a_side(self):
         storage = MagicMock()

@@ -31,42 +31,10 @@ RANKING_MODEL_NAME = "national-ranking"
 
 
 def _current_season_events(storage: FeatureStorage) -> tuple[list[dict], list[dict], list[dict], int | None]:
-    """(scheduled, all_completed, completed, current_season) -- scheduled/
-    completed are scoped to just current_season, all_completed is the full
-    (unscoped) history compute_elo_ratings needs for its own season-
-    boundary regression."""
-    scheduled = storage.get_all_events(SPORT, status="scheduled")
-    all_completed = storage.get_all_events(SPORT, status="completed")
-    current_season = max(
-        (e.get("season") for e in scheduled + all_completed if e.get("season") is not None), default=None,
-    )
-    scheduled = [e for e in scheduled if e.get("season") == current_season]
-    completed = [e for e in all_completed if e.get("season") == current_season]
-    return scheduled, all_completed, completed, current_season
+    return season_projection_common.current_season_events(storage, SPORT, lambda _event: True)
 
 
-def _record_game_result(
-    event: dict, entity_id: str, opponent_id: str,
-    wins: dict[str, int], losses: dict[str, int], ties: dict[str, int], point_differential: dict[str, int],
-    team_last_completed_date: dict[str, str],
-) -> None:
-    """Credits entity_id's own side of one completed game into
-    wins/losses/ties/point_differential and updates
-    team_last_completed_date -- no-op if either side's own score is
-    missing."""
-    participant = next(p for p in event["participants"] if p.get("entity_id") == entity_id)
-    opponent = next(p for p in event["participants"] if p.get("entity_id") == opponent_id)
-    score = (participant.get("result") or {}).get("score")
-    opponent_score = (opponent.get("result") or {}).get("score")
-    if score is None or opponent_score is None:
-        return
-    wins[entity_id] = wins.get(entity_id, 0) + (1 if score > opponent_score else 0)
-    losses[entity_id] = losses.get(entity_id, 0) + (1 if score < opponent_score else 0)
-    ties[entity_id] = ties.get(entity_id, 0) + (1 if score == opponent_score else 0)
-    point_differential[entity_id] = point_differential.get(entity_id, 0) + (score - opponent_score)
-    event_date = event.get("event_date", "")
-    if event_date > team_last_completed_date.get(entity_id, ""):
-        team_last_completed_date[entity_id] = event_date
+_record_game_result = season_projection_common.record_game_result_with_ties
 
 
 def _completed_game_records(completed: list[dict]) -> tuple[dict, dict, dict, dict, dict, dict, dict]:

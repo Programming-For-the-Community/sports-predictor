@@ -44,28 +44,7 @@ def _current_season_events(storage: FeatureStorage) -> tuple[list[dict], list[di
     return season_projection_common.current_season_events(storage, SPORT, is_real_franchise_matchup)
 
 
-def _record_game_result(
-    event: dict, entity_id: str, opponent_id: str,
-    wins: dict[str, int], losses: dict[str, int], ties: dict[str, int], point_differential: dict[str, int],
-    team_last_completed_date: dict[str, str],
-) -> None:
-    """Credits entity_id's own side of one completed game into
-    wins/losses/ties/point_differential and updates
-    team_last_completed_date -- no-op if either side's own score is
-    missing."""
-    participant = next(p for p in event["participants"] if p.get("entity_id") == entity_id)
-    opponent = next(p for p in event["participants"] if p.get("entity_id") == opponent_id)
-    score = (participant.get("result") or {}).get("score")
-    opponent_score = (opponent.get("result") or {}).get("score")
-    if score is None or opponent_score is None:
-        return
-    wins[entity_id] = wins.get(entity_id, 0) + (1 if score > opponent_score else 0)
-    losses[entity_id] = losses.get(entity_id, 0) + (1 if score < opponent_score else 0)
-    ties[entity_id] = ties.get(entity_id, 0) + (1 if score == opponent_score else 0)
-    point_differential[entity_id] = point_differential.get(entity_id, 0) + (score - opponent_score)
-    event_date = event.get("event_date", "")
-    if event_date > team_last_completed_date.get(entity_id, ""):
-        team_last_completed_date[entity_id] = event_date
+_record_game_result = season_projection_common.record_game_result_with_ties
 
 
 def _completed_game_records(completed: list[dict]) -> tuple[dict, dict, dict, dict, dict]:
@@ -171,51 +150,28 @@ def _depth_chart_feature_rows(
     player_team: dict[str, str],
 ) -> tuple[dict[str, dict], dict[str, set[str]]]:
     """(feature_row_cache, stat_candidates) pre-populated from the
-    depth-chart-sourced rows -- build_live_event_leader_candidates already
-    returns a full live feature row per candidate. Mutates player_team in
-    place with any depth-chart candidate not already covered by this
-    season's own stat lines."""
-    feature_row_cache: dict[str, dict] = {}
-    stat_candidates: dict[str, set[str]] = {stat: set(current_totals_by_stat[stat]) for stat in PLAYER_PROP_STATS}
-    for category, rows in _season_wide_candidate_rows(storage, season_inputs).items():
-        for row in rows:
-            entity_id = row["entity_id"]
-            feature_row_cache[entity_id] = row
-            player_team.setdefault(entity_id, row.get("team_id"))
-            for stat in event_prediction.LEADER_CATEGORY_STATS[category]:
-                stat_candidates[stat].add(entity_id)
-    return feature_row_cache, stat_candidates
+    depth-chart-sourced rows. Mutates player_team in place."""
+    return season_projection_common.season_wide_feature_rows(
+        _season_wide_candidate_rows(storage, season_inputs), PLAYER_PROP_STATS, event_prediction.LEADER_CATEGORY_STATS,
+        current_totals_by_stat, player_team,
+    )
 
 
 def _fill_remaining_feature_rows(
     storage: FeatureStorage, season_inputs: dict, player_team: dict[str, str],
     feature_row_cache: dict[str, dict], remaining: set[str],
 ) -> None:
-    """Builds a live feature row for any candidate not already covered by
-    the depth-chart pass (this-season stats exist, but they weren't in
-    their team's depth-chart snapshot -- a backup who got real volume,
-    say) -- mutates feature_row_cache in place."""
-    def _build_row(entity_id: str) -> tuple[str, dict | None]:
-        next_event_key = season_inputs["team_next_event"].get(player_team.get(entity_id))
-        if next_event_key is None:
-            return entity_id, None
-        try:
-            feature_row = live_features.build_live_player_features(
-                storage, SPORT, next_event_key, entity_id,
-                current_ratings=season_inputs["current_ratings"],
-                team_last_event_dates=season_inputs["team_last_completed_date"],
-            )
-            return entity_id, feature_row
-        except live_features.EventNotFoundError:
-            return entity_id, None
-        except Exception:
-            logger.exception("Failed to build live features for %s", entity_id)
-            return entity_id, None
+    """Live feature rows for candidates the season-wide pass didn't cover
+    -- mutates feature_row_cache in place."""
+    def build_row(next_event_key: str, entity_id: str) -> dict:
+        return live_features.build_live_player_features(
+            storage, SPORT, next_event_key, entity_id, current_ratings=season_inputs["current_ratings"],
+            team_last_event_dates=season_inputs["team_last_completed_date"],
+        )
 
-    with ThreadPoolExecutor(max_workers=max(1, min(len(remaining), 10))) as executor:
-        for entity_id, feature_row in executor.map(_build_row, remaining):
-            if feature_row is not None:
-                feature_row_cache[entity_id] = feature_row
+    season_projection_common.fill_remaining_feature_rows(
+        season_inputs, player_team, feature_row_cache, remaining, build_row, live_features.EventNotFoundError, logger,
+    )
 
 
 def _project_stat_leaderboard(

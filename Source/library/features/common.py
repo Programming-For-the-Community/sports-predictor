@@ -10,6 +10,7 @@ build_event_features, etc.).
 """
 import math
 from datetime import date, datetime
+from typing import NamedTuple
 
 DEFAULT_ROLLING_WINDOW = 5
 DEFAULT_STARTING_RATING = 1500.0
@@ -397,6 +398,32 @@ def _season_record(team_events: list[dict], team_id: str) -> tuple[int, int]:
     return wins, losses
 
 
+
+class PlayerPerspective(NamedTuple):
+    home_id: str
+    away_id: str
+    team_id: str
+    is_home: bool
+    opponent_id: str
+    own_elo: float | None
+    opponent_elo: float | None
+
+
+def player_perspective(event: dict, player_game: dict, elo_ratings: dict[str, dict[str, float]]) -> PlayerPerspective:
+    """player_game's own side of event: its team, opponent and each side's
+    pre-game Elo."""
+    participants = event["participants"]
+    home_id = next(p for p in participants if p.get("role") == "home")["entity_id"]
+    away_id = next(p for p in participants if p.get("role") == "away")["entity_id"]
+    team_id = player_game["team_id"]
+    is_home = team_id == home_id
+    ratings = elo_ratings.get(event["event_key"], {})
+    home_elo, away_elo = ratings.get("home_pre_rating"), ratings.get("away_pre_rating")
+    return PlayerPerspective(
+        home_id, away_id, team_id, is_home, away_id if is_home else home_id,
+        home_elo if is_home else away_elo, away_elo if is_home else home_elo,
+    )
+
 def average_opponent_elo(
     team_events: list[dict], team_id: str, elo_ratings: dict[str, dict[str, float]]
 ) -> float | None:
@@ -595,19 +622,9 @@ def build_basketball_player_features(
     build_basketball_event_features' own extra_fields_fn (NBA: is_
     divisional_game/is_international_game/travel_km; NCAA MBB: is_
     conference_game only)."""
-    participants = event["participants"]
-    home = next(p for p in participants if p.get("role") == "home")
-    away = next(p for p in participants if p.get("role") == "away")
-    home_id, away_id = home["entity_id"], away["entity_id"]
-    team_id = player_game["team_id"]
-    is_home = team_id == home_id
-    opponent_id = away_id if is_home else home_id
-
-    ratings = elo_ratings.get(event["event_key"], {})
-    home_elo = ratings.get("home_pre_rating")
-    away_elo = ratings.get("away_pre_rating")
-    own_elo = home_elo if is_home else away_elo
-    opponent_elo = away_elo if is_home else home_elo
+    home_id, away_id, team_id, is_home, opponent_id, own_elo, opponent_elo = player_perspective(
+        event, player_game, elo_ratings,
+    )
 
     averages = rolling_player_stat_averages(prior_games, window)
     return {

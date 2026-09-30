@@ -5,6 +5,7 @@ top-10 leaderboard (NFL/NBA); per-team rolling stats and batched
 ranking-model scoring (NCAAFB/NCAA MBB).
 """
 from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor
 from types import ModuleType
 
 import pandas as pd
@@ -90,6 +91,76 @@ def project_stat_leaderboard(
         if entity and entity.get("name"):
             row["name"] = entity["name"]
     return top
+
+
+def record_game_result_with_ties(
+    event: dict, entity_id: str, opponent_id: str,
+    wins: dict[str, int], losses: dict[str, int], ties: dict[str, int], point_differential: dict[str, int],
+    team_last_completed_date: dict[str, str],
+) -> None:
+    """Credits entity_id's own side of one completed game into
+    wins/losses/ties/point_differential and updates
+    team_last_completed_date -- no-op if either side's own score is
+    missing."""
+    participant = next(p for p in event["participants"] if p.get("entity_id") == entity_id)
+    opponent = next(p for p in event["participants"] if p.get("entity_id") == opponent_id)
+    score = (participant.get("result") or {}).get("score")
+    opponent_score = (opponent.get("result") or {}).get("score")
+    if score is None or opponent_score is None:
+        return
+    wins[entity_id] = wins.get(entity_id, 0) + (1 if score > opponent_score else 0)
+    losses[entity_id] = losses.get(entity_id, 0) + (1 if score < opponent_score else 0)
+    ties[entity_id] = ties.get(entity_id, 0) + (1 if score == opponent_score else 0)
+    point_differential[entity_id] = point_differential.get(entity_id, 0) + (score - opponent_score)
+    event_date = event.get("event_date", "")
+    if event_date > team_last_completed_date.get(entity_id, ""):
+        team_last_completed_date[entity_id] = event_date
+
+
+def season_wide_feature_rows(
+    candidate_rows: dict[str, list[dict]], stats: list[str], leader_category_stats: dict[str, list[str]],
+    current_totals_by_stat: dict[str, dict[str, float]], player_team: dict[str, str],
+) -> tuple[dict[str, dict], dict[str, set[str]]]:
+    """(feature_row_cache, stat_candidates) pre-populated from
+    candidate_rows ({leader category: [live feature row, ...]}). Mutates
+    player_team in place with any candidate not already covered by this
+    season's own stat lines."""
+    feature_row_cache: dict[str, dict] = {}
+    stat_candidates: dict[str, set[str]] = {stat: set(current_totals_by_stat[stat]) for stat in stats}
+    for category, rows in candidate_rows.items():
+        for row in rows:
+            entity_id = row["entity_id"]
+            feature_row_cache[entity_id] = row
+            player_team.setdefault(entity_id, row.get("team_id"))
+            for stat in leader_category_stats[category]:
+                stat_candidates[stat].add(entity_id)
+    return feature_row_cache, stat_candidates
+
+
+def fill_remaining_feature_rows(
+    season_inputs: dict, player_team: dict[str, str], feature_row_cache: dict[str, dict], remaining: set[str],
+    build_row: Callable[[str, str], dict], event_not_found: type[Exception], logger,
+) -> None:
+    """Builds a live feature row -- build_row(next_event_key, entity_id)
+    -- for every remaining candidate whose team has a next event, in
+    parallel; mutates feature_row_cache in place. A candidate whose row
+    fails to build is left out."""
+    def _build_row(entity_id: str) -> tuple[str, dict | None]:
+        next_event_key = season_inputs["team_next_event"].get(player_team.get(entity_id))
+        if next_event_key is None:
+            return entity_id, None
+        try:
+            return entity_id, build_row(next_event_key, entity_id)
+        except event_not_found:
+            return entity_id, None
+        except Exception:
+            logger.exception("Failed to build live features for %s", entity_id)
+            return entity_id, None
+
+    with ThreadPoolExecutor(max_workers=max(1, min(len(remaining), 10))) as executor:
+        for entity_id, feature_row in executor.map(_build_row, remaining):
+            if feature_row is not None:
+                feature_row_cache[entity_id] = feature_row
 
 
 def team_rolling_stats(

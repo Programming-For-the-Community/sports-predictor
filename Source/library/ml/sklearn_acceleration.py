@@ -11,7 +11,7 @@ def patch_sklearn_if_available() -> bool:
     """True when sklearnex was found and applied."""
     try:
         from sklearnex import patch_sklearn
+        patch_sklearn()
     except ImportError:
         return False
-    patch_sklearn()
     return True
