@@ -149,16 +149,19 @@ class TestScheduledSeasonProjection:
     on Terraform/scheduler-nba-season-projection.tf's weekly direct
     EventBridge Scheduler invoke and writes it to S3."""
 
-    def test_writes_the_season_projection_to_s3_under_the_expected_key(self):
-        nba_predict._storage = MagicMock()
-        nba_predict._model_bucket = MagicMock()
-        nba_predict._predictions_table = MagicMock()
-        nba_predict._predictions_table.query.return_value = []
-        nba_predict._storage.get_all_events.side_effect = lambda sport, status: {
+    def test_writes_the_season_projection_to_s3_under_the_expected_key(self, monkeypatch):
+        storage = MagicMock()
+        monkeypatch.setattr(nba_predict, "_storage", storage)
+        model_bucket = MagicMock()
+        monkeypatch.setattr(nba_predict, "_model_bucket", model_bucket)
+        predictions_table = MagicMock()
+        monkeypatch.setattr(nba_predict, "_predictions_table", predictions_table)
+        predictions_table.query.return_value = []
+        storage.get_all_events.side_effect = lambda sport, status: {
             "completed": [_completed_event("E1", 2026, "13", "12", 112, 100)],
             "scheduled": [],
         }[status]
-        nba_predict._storage.get_all_player_game_stats.return_value = []
+        storage.get_all_player_game_stats.return_value = []
 
         simulated = {
             "13": {"projected_wins": 55.0, "division_winner_probability": 0.8, "play_in_probability": 0.1,
@@ -171,60 +174,69 @@ class TestScheduledSeasonProjection:
             response = nba_predict.lambda_handler({"detail-type": "ScheduledSeasonProjection"}, None)
 
         assert response == {"status": "ok"}
-        nba_predict._model_bucket.put_json.assert_called_once()
-        key, body = nba_predict._model_bucket.put_json.call_args[0]
+        model_bucket.put_json.assert_called_once()
+        key, body = model_bucket.put_json.call_args[0]
         assert key == "season-projections/nba/latest.json"
         assert body["season"] == 2026
         assert [row["team_id"] for row in body["standings"]] == ["13", "12"]
         assert body["standings"][0]["wins"] == 1
         assert body["cup"] is None
 
-    def test_cup_is_none_when_the_seasons_groups_are_not_in_the_table(self):
-        nba_predict._storage = MagicMock()
-        nba_predict._model_bucket = MagicMock()
-        nba_predict._predictions_table = MagicMock()
-        nba_predict._predictions_table.query.return_value = []
-        nba_predict._storage.get_all_events.side_effect = lambda sport, status: {
+    def test_cup_is_none_when_the_seasons_groups_are_not_in_the_table(self, monkeypatch):
+        storage = MagicMock()
+        monkeypatch.setattr(nba_predict, "_storage", storage)
+        model_bucket = MagicMock()
+        monkeypatch.setattr(nba_predict, "_model_bucket", model_bucket)
+        predictions_table = MagicMock()
+        monkeypatch.setattr(nba_predict, "_predictions_table", predictions_table)
+        predictions_table.query.return_value = []
+        storage.get_all_events.side_effect = lambda sport, status: {
             "completed": [_completed_event("E1", 2099, "13", "12", 112, 100)],
             "scheduled": [],
         }[status]
-        nba_predict._storage.get_all_player_game_stats.return_value = []
+        storage.get_all_player_game_stats.return_value = []
 
         with patch.object(season_simulation, "simulate_season", return_value={}):
             nba_predict.lambda_handler({"detail-type": "ScheduledSeasonProjection"}, None)
 
-        body = nba_predict._model_bucket.put_json.call_args[0][1]
+        body = model_bucket.put_json.call_args[0][1]
         assert body["cup"] is None
 
-    def test_cup_groups_are_populated_when_the_season_is_in_the_table(self):
-        nba_predict._storage = MagicMock()
-        nba_predict._model_bucket = MagicMock()
-        nba_predict._predictions_table = MagicMock()
-        nba_predict._predictions_table.query.return_value = []
-        nba_predict._storage.get_all_events.side_effect = lambda sport, status: {
+    def test_cup_groups_are_populated_when_the_season_is_in_the_table(self, monkeypatch):
+        storage = MagicMock()
+        monkeypatch.setattr(nba_predict, "_storage", storage)
+        model_bucket = MagicMock()
+        monkeypatch.setattr(nba_predict, "_model_bucket", model_bucket)
+        predictions_table = MagicMock()
+        monkeypatch.setattr(nba_predict, "_predictions_table", predictions_table)
+        predictions_table.query.return_value = []
+        storage.get_all_events.side_effect = lambda sport, status: {
             "completed": [_completed_event("E1", 2026, "13", "12", 112, 100)],
             "scheduled": [],
         }[status]
-        nba_predict._storage.get_all_player_game_stats.return_value = []
-        nba_predict._storage.get_entity.return_value = None
+        storage.get_all_player_game_stats.return_value = []
+        storage.get_entity.return_value = None
 
         with patch.object(season_simulation, "simulate_season", return_value={}):
             nba_predict.lambda_handler({"detail-type": "ScheduledSeasonProjection"}, None)
 
-        body = nba_predict._model_bucket.put_json.call_args[0][1]
+        body = model_bucket.put_json.call_args[0][1]
         assert "Eastern B" in body["cup"]["groups"]  # BOS's real group -- see CUP_GROUPS[2026]
         assert len(body["cup"]["groups"]["Eastern B"]) == 5
 
-    def test_cup_is_none_when_building_it_raises_but_the_write_still_happens(self):
-        nba_predict._storage = MagicMock()
-        nba_predict._model_bucket = MagicMock()
-        nba_predict._predictions_table = MagicMock()
-        nba_predict._predictions_table.query.return_value = []
-        nba_predict._storage.get_all_events.side_effect = lambda sport, status: {
+    def test_cup_is_none_when_building_it_raises_but_the_write_still_happens(self, monkeypatch):
+        storage = MagicMock()
+        monkeypatch.setattr(nba_predict, "_storage", storage)
+        model_bucket = MagicMock()
+        monkeypatch.setattr(nba_predict, "_model_bucket", model_bucket)
+        predictions_table = MagicMock()
+        monkeypatch.setattr(nba_predict, "_predictions_table", predictions_table)
+        predictions_table.query.return_value = []
+        storage.get_all_events.side_effect = lambda sport, status: {
             "completed": [_completed_event("E1", 2026, "13", "12", 112, 100)],
             "scheduled": [],
         }[status]
-        nba_predict._storage.get_all_player_game_stats.return_value = []
+        storage.get_all_player_game_stats.return_value = []
 
         simulated = {"13": {"projected_wins": 1.0}}
         with patch.object(season_simulation, "simulate_season", return_value=simulated), \
@@ -232,42 +244,48 @@ class TestScheduledSeasonProjection:
             response = nba_predict.lambda_handler({"detail-type": "ScheduledSeasonProjection"}, None)
 
         assert response == {"status": "ok"}
-        body = nba_predict._model_bucket.put_json.call_args[0][1]
+        body = model_bucket.put_json.call_args[0][1]
         assert body["cup"] is None
         assert body["standings"] != []  # the cup failure didn't take standings down with it
 
-    def test_leaderboards_is_none_when_building_them_fails_but_standings_still_write(self):
-        nba_predict._storage = MagicMock()
-        nba_predict._model_bucket = MagicMock()
-        nba_predict._predictions_table = MagicMock()
-        nba_predict._predictions_table.query.return_value = []
-        nba_predict._storage.get_all_events.side_effect = lambda sport, status: {
+    def test_leaderboards_is_none_when_building_them_fails_but_standings_still_write(self, monkeypatch):
+        storage = MagicMock()
+        monkeypatch.setattr(nba_predict, "_storage", storage)
+        model_bucket = MagicMock()
+        monkeypatch.setattr(nba_predict, "_model_bucket", model_bucket)
+        predictions_table = MagicMock()
+        monkeypatch.setattr(nba_predict, "_predictions_table", predictions_table)
+        predictions_table.query.return_value = []
+        storage.get_all_events.side_effect = lambda sport, status: {
             "completed": [_completed_event("E1", 2026, "13", "12", 112, 100)],
             "scheduled": [],
         }[status]
-        nba_predict._storage.get_all_player_game_stats.side_effect = RuntimeError("boom")
+        storage.get_all_player_game_stats.side_effect = RuntimeError("boom")
 
         with patch.object(season_simulation, "simulate_season", return_value={}), \
              patch.object(season_simulation, "simulate_cup", return_value=None):
             nba_predict.lambda_handler({"detail-type": "ScheduledSeasonProjection"}, None)
 
-        body = nba_predict._model_bucket.put_json.call_args[0][1]
+        body = model_bucket.put_json.call_args[0][1]
         assert body["leaderboards"] is None
         assert body["standings"] == []
 
-    def test_leaderboards_include_player_names_and_are_capped_at_ten(self):
-        nba_predict._storage = MagicMock()
-        nba_predict._model_bucket = MagicMock()
-        nba_predict._predictions_table = MagicMock()
-        nba_predict._predictions_table.query.return_value = []
-        nba_predict._storage.get_all_events.side_effect = lambda sport, status: {
+    def test_leaderboards_include_player_names_and_are_capped_at_ten(self, monkeypatch):
+        storage = MagicMock()
+        monkeypatch.setattr(nba_predict, "_storage", storage)
+        model_bucket = MagicMock()
+        monkeypatch.setattr(nba_predict, "_model_bucket", model_bucket)
+        predictions_table = MagicMock()
+        monkeypatch.setattr(nba_predict, "_predictions_table", predictions_table)
+        predictions_table.query.return_value = []
+        storage.get_all_events.side_effect = lambda sport, status: {
             "completed": [_completed_event("E1", 2026, "13", "12", 112, 100)],
             "scheduled": [_scheduled_event("E2", 2026, "2025-11-21", "13", "2")],
         }[status]
-        nba_predict._storage.get_all_player_game_stats.return_value = [
+        storage.get_all_player_game_stats.return_value = [
             {"entity_id": "p1", "team_id": "13", "event_key": "E1", "stat_line": {"points": 27}},
         ]
-        nba_predict._storage.get_entity.return_value = {"entity_id": "p1", "name": "Jayson Tatum"}
+        storage.get_entity.return_value = {"entity_id": "p1", "name": "Jayson Tatum"}
 
         with patch.object(season_simulation, "simulate_season", return_value={}), \
              patch.object(season_simulation, "simulate_cup", return_value=None), \
@@ -276,29 +294,32 @@ class TestScheduledSeasonProjection:
              patch.object(model_loader, "predict", return_value=25.0):
             nba_predict.lambda_handler({"detail-type": "ScheduledSeasonProjection"}, None)
 
-        body = nba_predict._model_bucket.put_json.call_args[0][1]
+        body = model_bucket.put_json.call_args[0][1]
         scoring_leaders = body["leaderboards"]["points"]
         assert len(scoring_leaders) <= 10
         assert scoring_leaders[0]["name"] == "Jayson Tatum"
         # current 27 + one remaining game projected at 25/game
         assert scoring_leaders[0]["projected_total"] == pytest.approx(52.0)
 
-    def test_leaderboards_include_season_wide_candidates_with_zero_recorded_stats(self):
+    def test_leaderboards_include_season_wide_candidates_with_zero_recorded_stats(self, monkeypatch):
         # The pre-season case: no completed games yet this season, so
         # current_totals_by_stat is empty for every stat -- candidates
         # must come entirely from each team's own next-event recent-
         # volume search (build_live_event_leader_candidates), not
         # season_player_stats.
-        nba_predict._storage = MagicMock()
-        nba_predict._model_bucket = MagicMock()
-        nba_predict._predictions_table = MagicMock()
-        nba_predict._predictions_table.query.return_value = []
-        nba_predict._storage.get_all_events.side_effect = lambda sport, status: {
+        storage = MagicMock()
+        monkeypatch.setattr(nba_predict, "_storage", storage)
+        model_bucket = MagicMock()
+        monkeypatch.setattr(nba_predict, "_model_bucket", model_bucket)
+        predictions_table = MagicMock()
+        monkeypatch.setattr(nba_predict, "_predictions_table", predictions_table)
+        predictions_table.query.return_value = []
+        storage.get_all_events.side_effect = lambda sport, status: {
             "completed": [],
             "scheduled": [_scheduled_event("E2", 2026, "2025-10-22", "13", "2")],
         }[status]
-        nba_predict._storage.get_all_player_game_stats.return_value = []
-        nba_predict._storage.get_entity.return_value = {"entity_id": "p1", "name": "Jayson Tatum"}
+        storage.get_all_player_game_stats.return_value = []
+        storage.get_entity.return_value = {"entity_id": "p1", "name": "Jayson Tatum"}
 
         candidates = {
             "home": {"scoring": [{"entity_id": "p1", "team_id": "13"}], "rebounding": [], "assists": []},
@@ -312,7 +333,7 @@ class TestScheduledSeasonProjection:
              patch.object(model_loader, "predict", return_value=22.0):
             nba_predict.lambda_handler({"detail-type": "ScheduledSeasonProjection"}, None)
 
-        body = nba_predict._model_bucket.put_json.call_args[0][1]
+        body = model_bucket.put_json.call_args[0][1]
         scoring_leaders = body["leaderboards"]["points"]
         assert len(scoring_leaders) == 1
         assert scoring_leaders[0]["entity_id"] == "p1"

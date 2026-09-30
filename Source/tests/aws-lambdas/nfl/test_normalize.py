@@ -11,6 +11,7 @@ import json
 
 import nfl_normalize
 from unittest.mock import MagicMock, patch
+from library.normalize import espn_handler
 
 # nfl_normalize's own _storage singleton is reset before/after every test
 # in this directory by conftest.py's own _reset_nfl_singletons fixture.
@@ -46,7 +47,7 @@ class TestDispatch:
 
         with patch.object(nfl_normalize, "_s3", mock_s3), \
              patch("nfl_normalize.PipelineStorage", return_value=mock_storage), \
-             patch.object(nfl_normalize, "team_to_entity", return_value=entity_stub):
+             patch.object(espn_handler, "team_to_entity", return_value=entity_stub):
             nfl_normalize._dispatch("test-bucket", "nfl/teams.json")
 
         assert mock_storage.upsert_entity.call_count == 2
@@ -60,7 +61,7 @@ class TestDispatch:
 
         with patch.object(nfl_normalize, "_s3", mock_s3), \
              patch("nfl_normalize.PipelineStorage", return_value=mock_storage), \
-             patch.object(nfl_normalize, "scoreboard_event_to_event_item", return_value=event_stub):
+             patch.object(espn_handler, "scoreboard_event_to_event_item", return_value=event_stub):
             nfl_normalize._dispatch("test-bucket", "nfl/scoreboard/2025/2/5.json")
 
         assert mock_storage.upsert_event.call_count == 3
@@ -76,8 +77,8 @@ class TestDispatch:
 
         with patch.object(nfl_normalize, "_s3", mock_s3), \
              patch("nfl_normalize.PipelineStorage", return_value=mock_storage), \
-             patch.object(nfl_normalize, "boxscore_to_player_game_stats", return_value=(stats, entities)), \
-             patch.object(nfl_normalize, "boxscore_to_team_game_stats", return_value=team_stats):
+             patch.object(espn_handler, "boxscore_to_player_game_stats", return_value=(stats, entities)), \
+             patch.object(espn_handler, "boxscore_to_team_game_stats", return_value=team_stats):
             nfl_normalize._dispatch("test-bucket", "nfl/boxscore/2025/401547603.json")
 
         mock_storage.upsert_player_entity.assert_called_once_with(entities[0])
@@ -94,7 +95,7 @@ class TestDispatch:
 
         with patch.object(nfl_normalize, "_s3", mock_s3), \
              patch("nfl_normalize.PipelineStorage", return_value=mock_storage), \
-             patch.object(nfl_normalize, "roster_to_player_entities", return_value=entities):
+             patch.object(espn_handler, "roster_to_player_entities", return_value=entities):
             nfl_normalize._dispatch("test-bucket", "nfl/roster/23.json")
 
         assert mock_storage.upsert_player_entity.call_count == 2
@@ -124,7 +125,7 @@ class TestDispatch:
 
         with patch.object(nfl_normalize, "_s3", mock_s3), \
              patch("nfl_normalize.PipelineStorage", return_value=mock_storage), \
-             patch.object(nfl_normalize, "scoreboard_event_to_event_item"):
+             patch.object(espn_handler, "scoreboard_event_to_event_item"):
             nfl_normalize._dispatch("test-bucket", "nfl/scoreboard/2025/2/5.json")
 
         mock_storage.upsert_event.assert_not_called()
@@ -216,7 +217,7 @@ class TestNormalizeLambdaHandler:
 
         with patch.object(nfl_normalize, "_s3", mock_s3), \
              patch("nfl_normalize.PipelineStorage", return_value=mock_storage), \
-             patch.object(nfl_normalize, "scoreboard_event_to_event_item", return_value={"pk": "e"}):
+             patch.object(espn_handler, "scoreboard_event_to_event_item", return_value={"pk": "e"}):
             result = nfl_normalize.lambda_handler(event, None)
 
         assert result == {"processed": 2, "failed": 0}
@@ -239,7 +240,7 @@ class TestNormalizeLambdaHandler:
 
         with patch.object(nfl_normalize, "_s3", mock_s3), \
              patch("nfl_normalize.PipelineStorage", return_value=mock_storage), \
-             patch.object(nfl_normalize, "scoreboard_event_to_event_item", return_value={"pk": "e"}):
+             patch.object(espn_handler, "scoreboard_event_to_event_item", return_value={"pk": "e"}):
             result = nfl_normalize.lambda_handler(event, None)
 
         assert result == {"processed": 1, "failed": 1}
@@ -283,7 +284,7 @@ class TestNormalizeLambdaHandler:
 
         with patch.object(nfl_normalize, "_s3", mock_s3), \
              patch("nfl_normalize.PipelineStorage", mock_storage_cls), \
-             patch.object(nfl_normalize, "scoreboard_event_to_event_item", return_value={"pk": "e"}):
+             patch.object(espn_handler, "scoreboard_event_to_event_item", return_value={"pk": "e"}):
             nfl_normalize.lambda_handler(event, None)
 
         assert mock_storage_cls.call_count == 1

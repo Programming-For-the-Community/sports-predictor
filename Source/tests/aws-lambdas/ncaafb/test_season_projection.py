@@ -193,12 +193,15 @@ class TestScheduledSeasonProjection:
         for i in range(6)
     ]
 
-    def test_writes_the_season_projection_to_s3_under_the_expected_key(self):
-        ncaafb_predict._storage = MagicMock()
-        ncaafb_predict._model_bucket = MagicMock()
-        ncaafb_predict._predictions_table = MagicMock()
-        ncaafb_predict._predictions_table.query.return_value = []
-        ncaafb_predict._storage.get_all_events.side_effect = lambda sport, status: {
+    def test_writes_the_season_projection_to_s3_under_the_expected_key(self, monkeypatch):
+        storage = MagicMock()
+        monkeypatch.setattr(ncaafb_predict, "_storage", storage)
+        model_bucket = MagicMock()
+        monkeypatch.setattr(ncaafb_predict, "_model_bucket", model_bucket)
+        predictions_table = MagicMock()
+        monkeypatch.setattr(ncaafb_predict, "_predictions_table", predictions_table)
+        predictions_table.query.return_value = []
+        storage.get_all_events.side_effect = lambda sport, status: {
             "completed": [_completed_event("E1", 2025, "12", "24", 27, 20)],
             "scheduled": [],
         }[status]
@@ -207,8 +210,8 @@ class TestScheduledSeasonProjection:
             response = ncaafb_predict.lambda_handler({"detail-type": "ScheduledSeasonProjection"}, None)
 
         assert response == {"status": "ok"}
-        ncaafb_predict._model_bucket.put_json.assert_called_once()
-        key, body = ncaafb_predict._model_bucket.put_json.call_args[0]
+        model_bucket.put_json.assert_called_once()
+        key, body = model_bucket.put_json.call_args[0]
         assert key == "season-projections/ncaafb/latest.json"
         assert body["season"] == 2025
         assert body["standings"][0]["wins"] == 1
@@ -216,12 +219,15 @@ class TestScheduledSeasonProjection:
         # Team outcomes only -- no player-prop leaderboard.
         assert "leaderboards" not in body
 
-    def test_fewer_than_twelve_tracked_teams_skips_simulation_but_still_writes_standings(self):
-        ncaafb_predict._storage = MagicMock()
-        ncaafb_predict._model_bucket = MagicMock()
-        ncaafb_predict._predictions_table = MagicMock()
-        ncaafb_predict._predictions_table.query.return_value = []
-        ncaafb_predict._storage.get_all_events.side_effect = lambda sport, status: {
+    def test_fewer_than_twelve_tracked_teams_skips_simulation_but_still_writes_standings(self, monkeypatch):
+        storage = MagicMock()
+        monkeypatch.setattr(ncaafb_predict, "_storage", storage)
+        model_bucket = MagicMock()
+        monkeypatch.setattr(ncaafb_predict, "_model_bucket", model_bucket)
+        predictions_table = MagicMock()
+        monkeypatch.setattr(ncaafb_predict, "_predictions_table", predictions_table)
+        predictions_table.query.return_value = []
+        storage.get_all_events.side_effect = lambda sport, status: {
             "completed": [_completed_event("E1", 2025, "12", "24", 27, 20)],
             "scheduled": [],
         }[status]
@@ -233,16 +239,19 @@ class TestScheduledSeasonProjection:
         simulate_season.assert_not_called()
         ranking_calls = [call for call in load_current_model.call_args_list if call.args[2] == season_projection.RANKING_MODEL_NAME]
         assert ranking_calls == []
-        body = ncaafb_predict._model_bucket.put_json.call_args[0][1]
+        body = model_bucket.put_json.call_args[0][1]
         assert body["standings"][0]["wins"] == 1
         assert "projected_wins" not in body["standings"][0]
 
-    def test_no_promoted_ranking_model_skips_simulation_but_still_writes_standings(self):
-        ncaafb_predict._storage = MagicMock()
-        ncaafb_predict._model_bucket = MagicMock()
-        ncaafb_predict._predictions_table = MagicMock()
-        ncaafb_predict._predictions_table.query.return_value = []
-        ncaafb_predict._storage.get_all_events.side_effect = lambda sport, status: {
+    def test_no_promoted_ranking_model_skips_simulation_but_still_writes_standings(self, monkeypatch):
+        storage = MagicMock()
+        monkeypatch.setattr(ncaafb_predict, "_storage", storage)
+        model_bucket = MagicMock()
+        monkeypatch.setattr(ncaafb_predict, "_model_bucket", model_bucket)
+        predictions_table = MagicMock()
+        monkeypatch.setattr(ncaafb_predict, "_predictions_table", predictions_table)
+        predictions_table.query.return_value = []
+        storage.get_all_events.side_effect = lambda sport, status: {
             "completed": self.TWELVE_TEAM_EVENTS,
             "scheduled": [],
         }[status]
@@ -251,15 +260,18 @@ class TestScheduledSeasonProjection:
             response = ncaafb_predict.lambda_handler({"detail-type": "ScheduledSeasonProjection"}, None)
 
         assert response == {"status": "ok"}
-        body = ncaafb_predict._model_bucket.put_json.call_args[0][1]
+        body = model_bucket.put_json.call_args[0][1]
         assert "projected_wins" not in body["standings"][0]
 
-    def test_simulation_runs_and_standings_include_projected_fields_when_enough_teams_are_tracked(self):
-        ncaafb_predict._storage = MagicMock()
-        ncaafb_predict._model_bucket = MagicMock()
-        ncaafb_predict._predictions_table = MagicMock()
-        ncaafb_predict._predictions_table.query.return_value = []
-        ncaafb_predict._storage.get_all_events.side_effect = lambda sport, status: {
+    def test_simulation_runs_and_standings_include_projected_fields_when_enough_teams_are_tracked(self, monkeypatch):
+        storage = MagicMock()
+        monkeypatch.setattr(ncaafb_predict, "_storage", storage)
+        model_bucket = MagicMock()
+        monkeypatch.setattr(ncaafb_predict, "_model_bucket", model_bucket)
+        predictions_table = MagicMock()
+        monkeypatch.setattr(ncaafb_predict, "_predictions_table", predictions_table)
+        predictions_table.query.return_value = []
+        storage.get_all_events.side_effect = lambda sport, status: {
             "completed": self.TWELVE_TEAM_EVENTS,
             "scheduled": [],
         }[status]
@@ -277,24 +289,27 @@ class TestScheduledSeasonProjection:
             ncaafb_predict.lambda_handler({"detail-type": "ScheduledSeasonProjection"}, None)
 
         simulate_season.assert_called_once()
-        body = ncaafb_predict._model_bucket.put_json.call_args[0][1]
+        body = model_bucket.put_json.call_args[0][1]
         assert body["standings"][0]["projected_wins"] == 8.0
         # t0 has the lowest (best) score -- rank 1.
         by_team = {row["team_id"]: row for row in body["standings"]}
         assert by_team["t0"]["model_rank"] == 1
         assert by_team["t11"]["model_rank"] == 12
 
-    def test_current_rank_comes_from_the_real_ingested_rank_not_the_model(self):
+    def test_current_rank_comes_from_the_real_ingested_rank_not_the_model(self, monkeypatch):
         events = [
             _completed_event(f"E{i}", 2025, f"t{2*i}", f"t{2*i+1}", 27, 20, home_conference=f"C{i % 3}", away_conference=f"C{(i + 1) % 3}")
             for i in range(6)
         ]
         events[0]["home_current_rank"] = 3
-        ncaafb_predict._storage = MagicMock()
-        ncaafb_predict._model_bucket = MagicMock()
-        ncaafb_predict._predictions_table = MagicMock()
-        ncaafb_predict._predictions_table.query.return_value = []
-        ncaafb_predict._storage.get_all_events.side_effect = lambda sport, status: {
+        storage = MagicMock()
+        monkeypatch.setattr(ncaafb_predict, "_storage", storage)
+        model_bucket = MagicMock()
+        monkeypatch.setattr(ncaafb_predict, "_model_bucket", model_bucket)
+        predictions_table = MagicMock()
+        monkeypatch.setattr(ncaafb_predict, "_predictions_table", predictions_table)
+        predictions_table.query.return_value = []
+        storage.get_all_events.side_effect = lambda sport, status: {
             "completed": events,
             "scheduled": [],
         }[status]
@@ -302,7 +317,7 @@ class TestScheduledSeasonProjection:
         with patch.object(model_loader, "load_current_model", side_effect=model_loader.NoPromotedModelError("nope")):
             ncaafb_predict.lambda_handler({"detail-type": "ScheduledSeasonProjection"}, None)
 
-        body = ncaafb_predict._model_bucket.put_json.call_args[0][1]
+        body = model_bucket.put_json.call_args[0][1]
         by_team = {row["team_id"]: row for row in body["standings"]}
         assert by_team["t0"]["current_rank"] == 3
         # No promoted model this run -- the model's own opinion is absent,
@@ -310,17 +325,20 @@ class TestScheduledSeasonProjection:
         assert by_team["t0"]["model_rank"] is None
         assert by_team["t1"]["current_rank"] is None
 
-    def test_a_model_rankings_failure_does_not_lose_the_rest_of_the_run(self):
+    def test_a_model_rankings_failure_does_not_lose_the_rest_of_the_run(self, monkeypatch):
         # Regression: model_rank is computed in its own try/except,
         # separate from simulate_season above it -- a bug here shouldn't
         # cost the run its already-working simulation output, and
         # standings should still get written (just without model_rank)
         # rather than the whole invocation failing.
-        ncaafb_predict._storage = MagicMock()
-        ncaafb_predict._model_bucket = MagicMock()
-        ncaafb_predict._predictions_table = MagicMock()
-        ncaafb_predict._predictions_table.query.return_value = []
-        ncaafb_predict._storage.get_all_events.side_effect = lambda sport, status: {
+        storage = MagicMock()
+        monkeypatch.setattr(ncaafb_predict, "_storage", storage)
+        model_bucket = MagicMock()
+        monkeypatch.setattr(ncaafb_predict, "_model_bucket", model_bucket)
+        predictions_table = MagicMock()
+        monkeypatch.setattr(ncaafb_predict, "_predictions_table", predictions_table)
+        predictions_table.query.return_value = []
+        storage.get_all_events.side_effect = lambda sport, status: {
             "completed": self.TWELVE_TEAM_EVENTS,
             "scheduled": [],
         }[status]
@@ -332,6 +350,6 @@ class TestScheduledSeasonProjection:
             response = ncaafb_predict.lambda_handler({"detail-type": "ScheduledSeasonProjection"}, None)
 
         assert response == {"status": "ok"}
-        body = ncaafb_predict._model_bucket.put_json.call_args[0][1]
+        body = model_bucket.put_json.call_args[0][1]
         assert body["standings"][0]["projected_wins"] == 8.0
         assert body["standings"][0]["model_rank"] is None

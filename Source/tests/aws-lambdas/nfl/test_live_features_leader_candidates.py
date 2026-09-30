@@ -114,7 +114,8 @@ class TestBuildLiveEventLeaderCandidates:
         candidates = live_features.build_live_event_leader_candidates(storage, "nfl", "E3")
 
         home = candidates["home"]
-        assert len(home["passing"]) == 1 and home["passing"][0]["entity_id"] == "qb1"
+        assert len(home["passing"]) == 1
+        assert home["passing"][0]["entity_id"] == "qb1"
         # rb1 is also receiving-eligible (RB counts toward WR, see
         # _LEADER_POSITIONS) -- with exactly 3 receiving-eligible players
         # for 3 slots, all three show up, wr1/wr2 ranked ahead of rb1's

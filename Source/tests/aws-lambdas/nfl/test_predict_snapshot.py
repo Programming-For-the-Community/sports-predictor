@@ -42,6 +42,6 @@ def test_snapshots_only_rows_recorded_by_this_compute():
 def test_writes_nothing_when_the_compute_recorded_nothing():
     table = _Table([])
 
-    with patch.object(event_prediction.common, "compute_and_cache_event", lambda *a, **k: None):
+    with patch.object(event_prediction.common, "compute_and_cache_event", return_value=None):
         assert event_prediction.snapshot_event(None, None, table, "1") == 0
     assert table.rows == []

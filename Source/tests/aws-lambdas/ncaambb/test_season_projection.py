@@ -23,6 +23,7 @@ from library.serving import model_loader
 import ncaambb_predict
 import season_projection
 import season_simulation
+from library.ml import model_types
 
 
 def _completed_event(event_key, season, home_id, away_id, home_score, away_score, *,
@@ -362,7 +363,7 @@ class TestBatchScoreTeams:
             "avg_points_scored": {}, "avg_points_allowed": {}, "win_streak": {}, "strength_of_schedule": {},
         }
 
-        with patch.object(season_projection, "ADAPTERS", {"fake": fake_adapter}):
+        with patch.dict(model_types.ADAPTERS, {"fake": fake_adapter}):
             result = season_projection._batch_score_teams(
                 MagicMock(), model_card, ["12", "24"], season_inputs,
                 {"12": 10, "24": 5}, {"12": 5, "24": 10}, {"12": 1600.0, "24": 1500.0},
@@ -379,7 +380,7 @@ class TestBatchScoreTeams:
             "avg_points_scored": {}, "avg_points_allowed": {}, "win_streak": {}, "strength_of_schedule": {},
         }
 
-        with patch.object(season_projection, "ADAPTERS", {"fake": fake_adapter}):
+        with patch.dict(model_types.ADAPTERS, {"fake": fake_adapter}):
             result = season_projection._batch_score_teams(
                 MagicMock(), model_card, ["12"], season_inputs, {}, {}, {},
             )
@@ -686,7 +687,7 @@ class TestResolveMatchup:
         storage = MagicMock()
         s3 = MagicMock()
 
-        with patch.object(season_projection, "event_prediction") as mock_event_prediction:
+        with patch.object(season_projection.event_prediction, "compute_and_cache_event") as compute_and_cache_event:
             matchup = season_projection._resolve_matchup(
                 "t1", "t2", 1, 2, {frozenset({"t1", "t2"}): real_event}, storage, s3, predictions_table,
                 {}, 0.0,
@@ -695,7 +696,7 @@ class TestResolveMatchup:
         assert matchup["status"] == "scheduled"
         assert matchup["team_a"] == "t1"
         assert matchup["team_b"] == "t2"
-        mock_event_prediction.compute_and_cache_event.assert_called_once()
+        compute_and_cache_event.assert_called_once()
 
 
 class TestPredictedWinnerAndProbability:
@@ -725,7 +726,7 @@ class TestScheduledMatchupRow:
         ]
         real_event = _scheduled_event("E1", 2026, "2026-03-14", "t1", "t2", tournament_note="ACC Tournament")
 
-        with patch.object(season_projection, "event_prediction") as mock_event_prediction:
+        with patch.object(season_projection.event_prediction, "compute_and_cache_event") as compute_and_cache_event:
             row = season_projection._scheduled_matchup_row(
                 real_event, "E1", "t1", "t2", 1, 2, MagicMock(), MagicMock(), predictions_table,
             )
@@ -734,7 +735,7 @@ class TestScheduledMatchupRow:
             "status": "scheduled", "team_a": "t1", "team_b": "t2", "seed_a": 1, "seed_b": 2,
             "predicted_winner": "t1", "win_probability": 0.6,
         }
-        mock_event_prediction.compute_and_cache_event.assert_not_called()
+        compute_and_cache_event.assert_not_called()
 
     def test_nothing_logged_yet_computes_and_caches_then_re_reads(self):
         predictions_table = MagicMock()
@@ -747,10 +748,10 @@ class TestScheduledMatchupRow:
         storage = MagicMock()
         s3 = MagicMock()
 
-        with patch.object(season_projection, "event_prediction") as mock_event_prediction:
+        with patch.object(season_projection.event_prediction, "compute_and_cache_event") as compute_and_cache_event:
             row = season_projection._scheduled_matchup_row(real_event, "E1", "t1", "t2", 1, 2, storage, s3, predictions_table)
 
-        mock_event_prediction.compute_and_cache_event.assert_called_once_with(storage, s3, predictions_table, "401")
+        compute_and_cache_event.assert_called_once_with(storage, s3, predictions_table, "401")
         assert row["predicted_winner"] == "t1"
         assert row["win_probability"] == 0.6
 
@@ -759,8 +760,8 @@ class TestScheduledMatchupRow:
         predictions_table.query.return_value = []
         real_event = _scheduled_event("E1", 2026, "2026-03-14", "t1", "t2", tournament_note="ACC Tournament")
 
-        with patch.object(season_projection, "event_prediction") as mock_event_prediction:
-            mock_event_prediction.compute_and_cache_event.side_effect = Exception("model load failed")
+        with patch.object(season_projection.event_prediction, "compute_and_cache_event") as compute_and_cache_event:
+            compute_and_cache_event.side_effect = Exception("model load failed")
             row = season_projection._scheduled_matchup_row(
                 real_event, "E1", "t1", "t2", 1, 2, MagicMock(), MagicMock(), predictions_table,
             )
@@ -878,9 +879,10 @@ class TestScheduledSeasonProjection:
         ncaambb_predict._predictions_table.query.return_value = []
         ncaambb_predict._storage.get_all_events.side_effect = lambda sport, status: {"completed": completed, "scheduled": scheduled}[status]
 
-    def test_writes_the_season_projection_to_s3_under_the_expected_key(self):
+    def test_writes_the_season_projection_to_s3_under_the_expected_key(self, monkeypatch):
         self._rig([_completed_event("E1", 2026, "12", "24", 70, 60)], [])
-        ncaambb_predict._raw_bucket = _raw_bucket({"12": "ACC", "24": "ACC"})
+        raw_bucket = _raw_bucket({"12": "ACC", "24": "ACC"})
+        monkeypatch.setattr(ncaambb_predict, "_raw_bucket", raw_bucket)
 
         with patch.object(model_loader, "load_current_model", side_effect=model_loader.NoPromotedModelError("nope")):
             response = ncaambb_predict.lambda_handler({"detail-type": "ScheduledSeasonProjection"}, None)
@@ -895,11 +897,12 @@ class TestScheduledSeasonProjection:
         # Team outcomes only -- no player-prop leaderboard.
         assert "leaderboards" not in body
 
-    def test_current_rank_comes_from_the_cached_ap_poll_not_the_model(self):
+    def test_current_rank_comes_from_the_cached_ap_poll_not_the_model(self, monkeypatch):
         self._rig([_completed_event("E1", 2026, "12", "24", 70, 60)], [])
-        ncaambb_predict._raw_bucket = _raw_bucket({"12": "ACC", "24": "ACC"})
-        ncaambb_predict._raw_bucket.list_keys.return_value = ["ncaambb/rankings/2026/2/5.json"]
-        ncaambb_predict._raw_bucket.get_json.side_effect = lambda key: {
+        raw_bucket = _raw_bucket({"12": "ACC", "24": "ACC"})
+        monkeypatch.setattr(ncaambb_predict, "_raw_bucket", raw_bucket)
+        raw_bucket.list_keys.return_value = ["ncaambb/rankings/2026/2/5.json"]
+        raw_bucket.get_json.side_effect = lambda key: {
             "ncaambb/conference-membership/2026.json": {"season": 2026, "team_conference": {"12": "ACC", "24": "ACC"}},
             "ncaambb/rankings/2026/2/5.json": {"ranks": [{"team": {"$ref": ".../teams/12?lang=en"}, "current": 4}]},
         }[key]
@@ -916,9 +919,10 @@ class TestScheduledSeasonProjection:
         # independent of the real rank above.
         assert by_team["12"]["model_rank"] is None
 
-    def test_no_tracked_teams_skips_simulation_but_still_writes_an_empty_projection(self):
+    def test_no_tracked_teams_skips_simulation_but_still_writes_an_empty_projection(self, monkeypatch):
         self._rig([], [])
-        ncaambb_predict._raw_bucket = _raw_bucket(None)
+        raw_bucket = _raw_bucket(None)
+        monkeypatch.setattr(ncaambb_predict, "_raw_bucket", raw_bucket)
 
         response = ncaambb_predict.lambda_handler({"detail-type": "ScheduledSeasonProjection"}, None)
 
@@ -928,7 +932,7 @@ class TestScheduledSeasonProjection:
         assert body["conference_brackets"] == []
         assert body["march_madness_bracket"] is None
 
-    def test_a_missing_conference_cache_writes_an_empty_standings_this_run(self):
+    def test_a_missing_conference_cache_writes_an_empty_standings_this_run(self, monkeypatch):
         # A brand-new season the cache hasn't caught up to yet -- standings
         # are derived from team_conference's own keys (same "no known
         # conference simply excludes a team" precedent NCAAFB's own
@@ -936,7 +940,8 @@ class TestScheduledSeasonProjection:
         # degrades to no standings at all for this one run rather than
         # crashing, self-correcting the next time schedule-sync writes it.
         self._rig([_completed_event("E1", 2026, "12", "24", 70, 60)], [])
-        ncaambb_predict._raw_bucket = _raw_bucket(None)
+        raw_bucket = _raw_bucket(None)
+        monkeypatch.setattr(ncaambb_predict, "_raw_bucket", raw_bucket)
 
         response = ncaambb_predict.lambda_handler({"detail-type": "ScheduledSeasonProjection"}, None)
 
@@ -944,9 +949,10 @@ class TestScheduledSeasonProjection:
         body = ncaambb_predict._model_bucket.put_json.call_args[0][1]
         assert body["standings"] == []
 
-    def test_no_promoted_ranking_model_skips_simulation_but_still_writes_standings(self):
+    def test_no_promoted_ranking_model_skips_simulation_but_still_writes_standings(self, monkeypatch):
         self._rig([_completed_event("E1", 2026, "12", "24", 70, 60)], [])
-        ncaambb_predict._raw_bucket = _raw_bucket({"12": "ACC", "24": "ACC"})
+        raw_bucket = _raw_bucket({"12": "ACC", "24": "ACC"})
+        monkeypatch.setattr(ncaambb_predict, "_raw_bucket", raw_bucket)
 
         with patch.object(model_loader, "load_current_model", side_effect=model_loader.NoPromotedModelError("nope")):
             response = ncaambb_predict.lambda_handler({"detail-type": "ScheduledSeasonProjection"}, None)
@@ -957,9 +963,10 @@ class TestScheduledSeasonProjection:
         assert body["conference_brackets"] == []
         assert body["march_madness_bracket"] is None
 
-    def test_simulation_and_brackets_run_when_a_ranking_model_is_promoted(self):
+    def test_simulation_and_brackets_run_when_a_ranking_model_is_promoted(self, monkeypatch):
         self._rig([_completed_event("E1", 2026, "12", "24", 70, 60)], [])
-        ncaambb_predict._raw_bucket = _raw_bucket({"12": "ACC", "24": "ACC"})
+        raw_bucket = _raw_bucket({"12": "ACC", "24": "ACC"})
+        monkeypatch.setattr(ncaambb_predict, "_raw_bucket", raw_bucket)
 
         simulated = {"12": {"projected_wins": 20.0, "national_champion_probability": 0.01}, "24": {"projected_wins": 15.0, "national_champion_probability": 0.0}}
 
@@ -979,9 +986,10 @@ class TestScheduledSeasonProjection:
         assert body["conference_brackets"] == [{"conference": "ACC", "bracket": {"rounds": [], "champion": "12"}}]
         assert body["march_madness_bracket"] == {"rounds": [], "champion": "12"}
 
-    def test_a_model_rankings_failure_does_not_lose_the_rest_of_the_run(self):
+    def test_a_model_rankings_failure_does_not_lose_the_rest_of_the_run(self, monkeypatch):
         self._rig([_completed_event("E1", 2026, "12", "24", 70, 60)], [])
-        ncaambb_predict._raw_bucket = _raw_bucket({"12": "ACC", "24": "ACC"})
+        raw_bucket = _raw_bucket({"12": "ACC", "24": "ACC"})
+        monkeypatch.setattr(ncaambb_predict, "_raw_bucket", raw_bucket)
         simulated = {"12": {"projected_wins": 20.0}, "24": {"projected_wins": 15.0}}
 
         with patch.object(model_loader, "load_current_model", return_value=(MagicMock(), _model_card(1))), \

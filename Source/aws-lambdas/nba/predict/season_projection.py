@@ -15,16 +15,15 @@ from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 
-from boto3.dynamodb.conditions import Key
-
 import event_prediction
 import live_features
 import season_simulation
 from library.features.common import compute_elo_ratings
 from library.features.nba_teams import TEAM_DIVISIONS, is_real_franchise_matchup
-from library.serving import model_loader
-from library.serving.common import enrich_bracket_team_names, enrich_team_standings, latest_matching_row
-from library.serving.nba_reads import WIN_PROBABILITY_MODEL, _actual_result, _home_and_away
+from library.serving import bracket_projection
+from library.serving import season_projection_common
+from library.serving.common import enrich_bracket_team_names, enrich_team_standings
+from library.serving.nba_reads import _actual_result, _home_and_away
 from library.storage.feature_storage import FeatureStorage
 from library.storage.season_projections import season_projection_key
 
@@ -55,23 +54,7 @@ CUP_GROUP_PLAY_NOTE = "NBA Cup - Group Play"
 
 
 def _current_season_events(storage: FeatureStorage) -> tuple[list[dict], list[dict], list[dict], int | None]:
-    """(scheduled, all_completed, completed, current_season) -- scheduled/
-    completed are scoped to just current_season, all_completed is the full
-    (unscoped) history compute_elo_ratings needs for its own season-
-    boundary regression."""
-    # Excludes the All-Star Game and any other exhibition matchup -- its
-    # roster "teams" aren't real franchises (see
-    # library.features.nba_teams.is_real_franchise_matchup), so a played
-    # one would otherwise count as a real win/loss and Elo update for a
-    # non-existent team_id.
-    scheduled = [e for e in storage.get_all_events(SPORT, status="scheduled") if is_real_franchise_matchup(e)]
-    all_completed = [e for e in storage.get_all_events(SPORT, status="completed") if is_real_franchise_matchup(e)]
-    current_season = max(
-        (e.get("season") for e in scheduled + all_completed if e.get("season") is not None), default=None,
-    )
-    scheduled = [e for e in scheduled if e.get("season") == current_season]
-    completed = [e for e in all_completed if e.get("season") == current_season]
-    return scheduled, all_completed, completed, current_season
+    return season_projection_common.current_season_events(storage, SPORT, is_real_franchise_matchup)
 
 
 def _record_game_result(
@@ -197,22 +180,7 @@ def _season_wide_candidate_rows(storage: FeatureStorage, season_inputs: dict) ->
 
 
 def _current_season_totals(season_player_stats: list[dict]) -> tuple[dict[str, str], dict[str, dict[str, float]]]:
-    """(player_team, current_totals_by_stat) from this season's own
-    completed-game stat lines."""
-    player_team: dict[str, str] = {}
-    for row in season_player_stats:
-        player_team.setdefault(row["entity_id"], row.get("team_id"))
-
-    current_totals_by_stat: dict[str, dict[str, float]] = {stat: {} for stat in PLAYER_PROP_STATS}
-    for row in season_player_stats:
-        entity_id = row["entity_id"]
-        stat_line = row.get("stat_line", {})
-        for stat in PLAYER_PROP_STATS:
-            value = stat_line.get(stat)
-            if value is not None:
-                totals = current_totals_by_stat[stat]
-                totals[entity_id] = totals.get(entity_id, 0) + value
-    return player_team, current_totals_by_stat
+    return season_projection_common.current_season_totals(season_player_stats, PLAYER_PROP_STATS)
 
 
 def _season_wide_feature_rows(
@@ -269,35 +237,10 @@ def _project_stat_leaderboard(
     current_totals_by_stat: dict[str, dict[str, float]], feature_row_cache: dict[str, dict],
     player_team: dict[str, str],
 ) -> list[dict]:
-    """Top-10 leaderboard for one player-prop stat -- current season-to-
-    date total plus (their own model's prediction for their team's next
-    scheduled game * games remaining)."""
-    current_totals = {entity_id: current_totals_by_stat[stat].get(entity_id, 0.0) for entity_id in candidates}
-    model_name = event_prediction.model_name_to_prop(stat)
-    try:
-        booster, model_card = event_prediction.get_cached_model(model_cache, s3, model_name)
-    except model_loader.NoPromotedModelError:
-        booster = None
-
-    per_game_projections: dict[str, float] = {}
-    if booster is not None:
-        for entity_id in candidates:
-            feature_row = feature_row_cache.get(entity_id)
-            if feature_row is not None:
-                prediction = model_loader.predict(booster, model_card, feature_row)
-                per_game_projections[entity_id] = event_prediction.non_negative(prediction)
-
-    games_remaining = {
-        entity_id: season_inputs["games_remaining"].get(player_team.get(entity_id), 0)
-        for entity_id in candidates
-    }
-
-    top = season_simulation.project_leaderboard(current_totals, per_game_projections, games_remaining, top_n=10)
-    for row in top:
-        entity = storage.get_entity(SPORT, row["entity_id"], "player")
-        if entity and entity.get("name"):
-            row["name"] = entity["name"]
-    return top
+    return season_projection_common.project_stat_leaderboard(
+        storage, SPORT, s3, model_cache, season_inputs, stat, candidates, current_totals_by_stat, feature_row_cache,
+        player_team, event_prediction=event_prediction, project_leaderboard=season_simulation.project_leaderboard,
+    )
 
 
 def _leaderboards(storage: FeatureStorage, s3, model_cache: dict, season_inputs: dict) -> dict:
@@ -365,26 +308,18 @@ def _cup_bracket_payload(storage: FeatureStorage, season_inputs: dict) -> dict |
     return enrich_bracket_team_names(storage, SPORT, bracket)
 
 
+_BRACKET = bracket_projection.BracketResolver(
+    event_prediction=event_prediction, season_simulation=season_simulation, logger=logger,
+)
+_logged_win_probability = bracket_projection.logged_win_probability
+_predicted_winner_and_probability = bracket_projection.predicted_winner_and_probability
+_completed_matchup_row = bracket_projection.completed_matchup_row
+_scheduled_matchup_row = _BRACKET.scheduled_matchup_row
+_resolve_matchup = _BRACKET.resolve_matchup
+
+
 def _real_postseason_matchups(storage: FeatureStorage, current_season: int | None) -> dict[frozenset, dict]:
-    """{frozenset({home_id, away_id}): event} for every real playoff or
-    play-in game (season_type in POSTSEASON_TYPES) this season, scheduled
-    or completed -- _resolve_matchup checks here before falling back to
-    the model's own deterministic pick for a bracket slot. Play-In only --
-    every other round is a best-of-7 series (see _real_postseason_series),
-    where a single "the" event per pair doesn't make sense (a real series
-    is more than one game between the same two teams); this stays a
-    single-event-per-pair lookup because Play-In genuinely is single
-    elimination."""
-    result: dict[frozenset, dict] = {}
-    for status in ("scheduled", "completed"):
-        for event in storage.get_all_events(SPORT, status=status):
-            if event.get("season") != current_season or event.get("season_type") not in POSTSEASON_TYPES:
-                continue
-            home_away = _home_and_away(event)
-            if home_away is None:
-                continue
-            result[frozenset(home_away)] = event
-    return result
+    return bracket_projection.real_postseason_matchups(storage, SPORT, current_season, lambda event: event.get("season_type") in POSTSEASON_TYPES)
 
 
 def _real_postseason_series(storage: FeatureStorage, current_season: int | None) -> dict[frozenset, list[dict]]:
@@ -407,91 +342,6 @@ def _real_postseason_series(storage: FeatureStorage, current_season: int | None)
     for games in by_pair.values():
         games.sort(key=lambda e: e.get("event_date") or "")
     return by_pair
-
-
-def _logged_win_probability(predictions_table, event_key_value: str) -> dict | None:
-    """This event's own logged win-probability prediction, or None if
-    nobody's ever requested one."""
-    rows = predictions_table.query(Key("event_key").eq(event_key_value))
-    row = latest_matching_row(rows, WIN_PROBABILITY_MODEL)
-    return row["predicted_value"] if row else None
-
-
-def _resolve_matchup(
-    team_a: str, team_b: str, seed_a: int | None, seed_b: int | None,
-    real_matchups: dict[frozenset, dict], storage: FeatureStorage, s3, predictions_table,
-    current_ratings: dict[str, float], home_advantage: float,
-) -> dict:
-    """Resolves one bracket slot: (1) no real game exists yet -- the
-    model's own deterministic pick ("status": "projected"); (2) a real
-    game exists and is completed -- the actual result plus whatever was
-    originally predicted, if anyone ever requested one ("status":
-    "final"); (3) a real game exists, not yet played -- computed on the
-    spot right here if nobody's viewed it yet ("status": "scheduled")."""
-    real_event = real_matchups.get(frozenset((team_a, team_b)))
-    if real_event is None:
-        matchup = season_simulation.project_matchup(team_a, team_b, seed_a, seed_b, current_ratings, home_advantage)
-        matchup["status"] = "projected"
-        return matchup
-
-    event_key_value = real_event["event_key"]
-    home_id, away_id = _home_and_away(real_event)
-
-    if real_event.get("status") == "completed":
-        return _completed_matchup_row(real_event, event_key_value, home_id, away_id, seed_a, seed_b, predictions_table)
-
-    return _scheduled_matchup_row(
-        real_event, event_key_value, home_id, away_id, seed_a, seed_b, storage, s3, predictions_table,
-    )
-
-
-def _predicted_winner_and_probability(
-    logged: dict | None, home_id: str, away_id: str,
-) -> tuple[str | None, float | None]:
-    """(predicted_winner, win_probability) from a logged win-probability
-    prediction, or (None, None) if none was ever logged."""
-    if logged is None:
-        return None, None
-    probability = logged["home_win_probability"]
-    predicted_winner = home_id if probability >= 0.5 else away_id
-    win_probability = probability if predicted_winner == home_id else 1 - probability
-    return predicted_winner, win_probability
-
-
-def _completed_matchup_row(
-    real_event: dict, event_key_value: str, home_id: str, away_id: str, seed_a: int | None, seed_b: int | None,
-    predictions_table,
-) -> dict:
-    actual = _actual_result(real_event)
-    logged = _logged_win_probability(predictions_table, event_key_value)
-    predicted_winner, win_probability = _predicted_winner_and_probability(logged, home_id, away_id)
-    return {
-        "status": "final",
-        "team_a": home_id, "team_b": away_id, "seed_a": seed_a, "seed_b": seed_b,
-        "predicted_winner": predicted_winner, "win_probability": win_probability,
-        "actual_winner": home_id if actual["home_won"] else away_id,
-        "actual_home_score": actual["home_score"], "actual_away_score": actual["away_score"],
-    }
-
-
-def _scheduled_matchup_row(
-    real_event: dict, event_key_value: str, home_id: str, away_id: str, seed_a: int | None, seed_b: int | None,
-    storage: FeatureStorage, s3, predictions_table,
-) -> dict:
-    logged = _logged_win_probability(predictions_table, event_key_value)
-    if logged is None:
-        try:
-            event_prediction.compute_and_cache_event(storage, s3, predictions_table, real_event["event_id"])
-            logged = _logged_win_probability(predictions_table, event_key_value)
-        except Exception:
-            logger.exception("Failed computing a live prediction for bracket game %s", event_key_value)
-
-    predicted_winner, win_probability = _predicted_winner_and_probability(logged, home_id, away_id)
-    return {
-        "status": "scheduled",
-        "team_a": home_id, "team_b": away_id, "seed_a": seed_a, "seed_b": seed_b,
-        "predicted_winner": predicted_winner, "win_probability": win_probability,
-    }
 
 
 def _series_record(team_a: str, team_b: str, games: list[dict]) -> tuple[int, int]:

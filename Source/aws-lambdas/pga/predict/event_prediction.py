@@ -38,32 +38,12 @@ _ROUND_MODEL_KEY_RE = re.compile(r"^MODEL#round-([1-4])#v(\d+)#GOLFER#(.+)$")
 _ROUND_SNAPSHOT_KEY_RE = re.compile(r"^SNAPSHOT#final_pregame#MODEL#round-([1-4])#v(\d+)#GOLFER#(.+)$")
 
 
-def get_cached_model(model_cache: dict, s3, model_name: str):
-    """Loads each distinct model at most once per request."""
-    return common.get_cached_model(model_cache, s3, SPORT, model_name)
-
-
-def record_prediction(predictions_table, event_key_value: str, model_key: str, value) -> None:
-    predictions_table.put_item({
-        "event_key": event_key_value,
-        "model_key": model_key,
-        "predicted_value": value,
-        "generated_at": datetime.now(timezone.utc).isoformat(),
-    })
-
-
-def _score(model_cache: dict, s3, predictions_table, event_key_value: str, model_name: str, feature_row: dict, record_suffix: str) -> dict | None:
-    """{"value": ..., "model_version": ...}, or None if model_name has no
-    promoted version. Callers tolerate a missing model per-key."""
-    try:
-        estimator, model_card = get_cached_model(model_cache, s3, model_name)
-    except model_loader.NoPromotedModelError:
-        return None
-    value = model_loader.predict(estimator, model_card, feature_row)
-    record_prediction(
-        predictions_table, event_key_value, f"MODEL#{model_name}#v{model_card['version']}#{record_suffix}", {"value": value},
+def _score(
+    model_cache: dict, s3, predictions_table, event_key_value: str, model_name: str, feature_row: dict, record_suffix: str,
+) -> dict | None:
+    return common.score_and_record(
+        model_cache, s3, predictions_table, event_key_value, SPORT, model_name, feature_row, record_suffix,
     )
-    return {"value": value, "model_version": model_card["version"]}
 
 
 def _field_projected_score_to_par(scored: dict, golfer_row: dict) -> dict:
@@ -362,19 +342,10 @@ def compute_and_cache_event(storage, s3, predictions_table, event_id: str) -> No
     """Background worker triggered by predict-read on a cache miss/stale
     refresh. A recognized error gets a short-lived negative cache entry;
     any other exception propagates after the in-progress claim clears."""
-    event_key_value = build_event_key(SPORT, event_id)
-    cache_key = prediction_cache.event_prediction_cache_key(SPORT, event_key_value)
-    try:
-        try:
-            result = predict_event(storage, s3, predictions_table, event_id)
-        except (live_features.EventNotFoundError, live_features.MalformedEventError, model_loader.NoPromotedModelError) as exc:
-            prediction_cache.put_error_cached(s3, cache_key, type(exc).__name__, str(exc))
-            return
-        model_versions = prediction_cache.current_model_versions(s3, SPORT, model_versions_for(result["event_type"]))
-        # Fresh fetch so the fingerprint reflects the event state this
-        # prediction was actually computed against.
-        event = storage.get_event(event_key_value)
-        extra_fingerprint = rounds_fingerprint(event) if event is not None else None
-        prediction_cache.put_cached(s3, cache_key, result, model_versions, result.get("status"), extra_fingerprint)
-    finally:
-        prediction_cache.clear_in_progress(s3, cache_key)
+    common.compute_and_cache_field_event(
+        storage, s3, predictions_table, event_id, SPORT, predict_event,
+        recognized_errors=(
+            live_features.EventNotFoundError, live_features.MalformedEventError, model_loader.NoPromotedModelError,
+        ),
+        model_names_for=model_versions_for, fingerprint=rounds_fingerprint,
+    )

@@ -72,61 +72,12 @@ RANKING_FEATURES_KEY = "ncaambb/training-data/ranking_features.parquet"
 _RANKING_KEY_RE = re.compile(r"^ncaambb/rankings/(\d+)/(\d+)/(\d+)\.json$")
 
 
-_index_team_game_stats = build_dataset_common.index_team_game_stats
-
-
 def build_event_dataset(storage: FeatureStorage, window: int, since_date: str | None = None) -> list[dict]:
-    """Walks events in a single chronological pass, growing each team's
-    own history one game at a time rather than re-filtering that team's
-    whole history for every game."""
     events = storage.get_all_events(SPORT, since_date=since_date)
     logger.info("Loaded %d completed events", len(events))
-
-    team_game_stats_by_event_team = _index_team_game_stats(
-        storage.get_all_team_game_stats(SPORT, since_date=since_date))
-
-    elo_ratings, _ = compute_elo_ratings(events)  # only the pre-game side is used here
-    events_ascending = sorted(events, key=lambda e: e.get("event_date", ""))
-
-    team_history: dict[str, list[dict]] = defaultdict(list)  # ascending, grows as we go
-    team_box_history: dict[str, list[dict]] = defaultdict(list)  # keyed by team_id, ascending
-    total = len(events_ascending)
-    rows = []
-    for i, event in enumerate(events_ascending, start=1):
-        participants = event.get("participants", [])
-        home = next((p for p in participants if p.get("role") == "home"), None)
-        away = next((p for p in participants if p.get("role") == "away"), None)
-        if home is None or away is None:
-            logger.debug("Skipping event %s -- missing home/away role", event.get("event_key"))
-            continue
-
-        home_id, away_id = home["entity_id"], away["entity_id"]
-        # Most-recent-first, capped at `window` -- O(window), not O(len(history)).
-        home_history = team_history[home_id][-window:][::-1]
-        away_history = team_history[away_id][-window:][::-1]
-        home_box_history = team_box_history[home_id][-window:][::-1]
-        away_box_history = team_box_history[away_id][-window:][::-1]
-
-        rows.append(build_event_features(
-            event, elo_ratings, home_history, away_history, window,
-            home_team_box_stats=home_box_history, away_team_box_stats=away_box_history,
-        ))
-
-        team_history[home_id].append(event)
-        team_history[away_id].append(event)
-
-        event_key = event["event_key"]
-        home_box_row = team_game_stats_by_event_team.get((event_key, home_id))
-        away_box_row = team_game_stats_by_event_team.get((event_key, away_id))
-        if home_box_row:
-            team_box_history[home_id].append(home_box_row)
-        if away_box_row:
-            team_box_history[away_id].append(away_box_row)
-
-        if i % 500 == 0 or i == total:
-            logger.info("Built event features: %d/%d", i, total)
-
-    return rows
+    return build_dataset_common.build_team_event_rows(
+        events, storage.get_all_team_game_stats(SPORT, since_date=since_date), window, build_event_features, logger,
+    )
 
 
 def build_player_dataset(storage: FeatureStorage, window: int, since_date: str | None = None) -> list[dict]:

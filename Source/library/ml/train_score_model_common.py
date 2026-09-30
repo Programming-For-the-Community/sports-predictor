@@ -18,11 +18,13 @@ which file's own `backtest.run_backtest(...)` call reads it, unlike
 library.normalize.dispatch's own constraint (see that module's docstring
 for the contrasting case where sharing was NOT safe).
 """
+import os
+
 import pandas as pd
 from sklearn.metrics import mean_absolute_error, root_mean_squared_error
 
 from library.aws.s3_manager import S3Manager
-from library.ml import backtest, training_common
+from library.ml import backtest, model_types, training_common
 
 MODEL_NAMES = {
     "margin": "score-margin",
@@ -117,3 +119,34 @@ def train(
         promotion_metric=PROMOTION_METRIC,
         run_id=training_common.resolve_run_id(),
     )
+
+
+class ScoreJob:
+    """A head-to-head sport's whole score-model training script, one model per
+    SCORE_TARGET. `namespace` is the script module's globals() (see
+    training_common.TrainingScript)."""
+
+    def __init__(
+        self, namespace: dict, sport: str, features_key: str, *,
+        extra_non_feature_columns: frozenset[str] = frozenset(), include_lightgbm: bool = True,
+    ) -> None:
+        self.non_feature_columns = training_common.EVENT_IDENTIFIER_COLUMNS | extra_non_feature_columns
+        self.candidates = model_types.regressor_candidates(include_lightgbm=include_lightgbm)
+        self._namespace = namespace
+        self._sport = sport
+        self._script = training_common.TrainingScript(
+            namespace, features_key=features_key, row_noun="event",
+            target=lambda: os.environ["SCORE_TARGET"], model_name_for=model_name,
+        )
+
+    def feature_columns(self, df: pd.DataFrame) -> list[str]:
+        return training_common.feature_columns(df, self.non_feature_columns)
+
+    def train(self, s3: S3Manager, df: pd.DataFrame, score_target: str) -> dict:
+        return train(
+            s3, df, score_target, sport=self._sport, candidates=self.candidates,
+            non_feature_columns=self.non_feature_columns, logger=self._namespace["logger"],
+        )
+
+    def main(self) -> None:
+        self._script.main()

@@ -10,7 +10,6 @@ NCAAFB live-score cache Lambda. Two distinct triggers, one function:
 Its own Lambda/IAM role keeps ingest's once-daily batch shape and
 predict-read's light cold-start shape both unchanged.
 """
-import json
 import logging
 import os
 
@@ -29,11 +28,6 @@ logger = logging.getLogger("ncaafb-live-scores")
 SPORT = "ncaafb"
 RAW_BUCKET = os.environ["RAW_BUCKET_NAME"]
 
-_CORS_HEADERS = {
-    "Access-Control-Allow-Origin": "*",
-    "Content-Type": "application/json",
-}
-
 # Initialized once per container lifetime, reused across warm invocations.
 _s3 = boto3.client("s3", config=DEFAULT_CONFIG)
 _storage: FeatureStorage | None = None
@@ -43,10 +37,6 @@ def _get_storage() -> FeatureStorage:
     return lambda_singletons.get_or_create(globals(), "_storage", FeatureStorage)
 
 
-def _response(status_code: int, body: dict) -> dict:
-    return {"statusCode": status_code, "headers": _CORS_HEADERS, "body": json.dumps(body)}
-
-
 lambda_handler = make_lambda_handler(
-    SPORT, NcaafbEspnClient, _get_storage, _s3, RAW_BUCKET, live_scores, logger, _response,
+    SPORT, NcaafbEspnClient, _get_storage, _s3, RAW_BUCKET, live_scores, logger,
 )

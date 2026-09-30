@@ -13,7 +13,6 @@ same reasoning as every other sport's own live-scores Lambda. See
 live_scores.py's own docstring for why this is ESPN-sourced even though
 every other F1 Lambda is Jolpica-sourced.
 """
-import json
 import logging
 import os
 from datetime import datetime, timezone
@@ -33,11 +32,6 @@ logger = logging.getLogger("f1-live-scores")
 SPORT = "f1"
 RAW_BUCKET = os.environ["RAW_BUCKET_NAME"]
 
-_CORS_HEADERS = {
-    "Access-Control-Allow-Origin": "*",
-    "Content-Type": "application/json",
-}
-
 # Initialized once per container lifetime, reused across warm invocations.
 _s3 = boto3.client("s3", config=DEFAULT_CONFIG)
 _storage: FeatureStorage | None = None
@@ -47,10 +41,6 @@ def _get_storage() -> FeatureStorage:
     return lambda_singletons.get_or_create(globals(), "_storage", FeatureStorage)
 
 
-def _response(status_code: int, body: dict) -> dict:
-    return {"statusCode": status_code, "headers": _CORS_HEADERS, "body": json.dumps(body)}
-
-
 def _current_season() -> tuple[int]:
     # F1 seasons run within a single calendar year (unlike NBA/NHL), so
     # "current year" is always the right season to poll.
@@ -58,6 +48,6 @@ def _current_season() -> tuple[int]:
 
 
 lambda_handler = make_lambda_handler(
-    SPORT, F1EspnClient, _get_storage, _s3, RAW_BUCKET, live_scores, logger, _response,
+    SPORT, F1EspnClient, _get_storage, _s3, RAW_BUCKET, live_scores, logger,
     refresh_extra_args=_current_season,
 )

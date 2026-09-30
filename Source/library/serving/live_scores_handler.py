@@ -4,10 +4,9 @@ confirmed byte-for-byte identical shape across all 6 sports (nfl/nba/
 ncaafb/ncaambb/pga/f1) except SPORT, the ESPN/Jolpica client class, and
 (F1 only) an extra `season` argument passed to `refresh`.
 
-Each per-sport handler.py still owns its own `_get_storage`/`_s3`/
-`_response`/`_CORS_HEADERS` (small, and already covered by
-library.aws.lambda_singletons for the singleton-getter part) -- only the
-routing/dispatch body below is shared. `live_scores_module` is passed as
+Each per-sport handler.py still owns its own `_get_storage`/`_s3` --
+only the routing/dispatch body below is shared. Responses default to
+library.serving.api_response.json_response. `live_scores_module` is passed as
 the actual per-sport `live_scores` module object (not a specific function
 reference) so `patch.object(live_scores, "refresh", ...)` in tests --
 which mutates that module's own __dict__ -- is still visible here: this
@@ -15,11 +14,12 @@ resolves `.refresh`/`.get_live_scores` via attribute lookup at CALL time,
 same as every per-sport handler.py's own prior `live_scores.refresh(...)`
 call did.
 """
+from library.serving.api_response import json_response
 
 
 def make_lambda_handler(
-    sport: str, client_factory, get_storage, s3, raw_bucket: str, live_scores_module, logger, response_fn,
-    refresh_extra_args=lambda: (),
+    sport: str, client_factory, get_storage, s3, raw_bucket: str, live_scores_module, logger,
+    response_fn=json_response, refresh_extra_args=lambda: (),
 ):
     resource = f"/{sport}/live-scores"
 

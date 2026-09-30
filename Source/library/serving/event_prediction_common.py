@@ -221,6 +221,50 @@ def compute_and_cache_event(storage, s3, predictions_table, event_id: str, sport
         prediction_cache.clear_in_progress(s3, cache_key)
 
 
+def compute_and_cache_field_event(
+    storage, s3, predictions_table, event_id: str, sport: str, predict_event_fn, *,
+    recognized_errors: tuple[type[Exception], ...], model_names_for, fingerprint,
+) -> None:
+    """compute_and_cache_event for a field sport (F1/PGA): the cached result
+    carries the prediction's own status, the current version of every model
+    `model_names_for(event_type)` lists, and `fingerprint(event)` of the
+    event state it was computed against. `recognized_errors` get a
+    short-lived negative cache entry."""
+    event_key_value = build_event_key(sport, event_id)
+    cache_key = prediction_cache.event_prediction_cache_key(sport, event_key_value)
+    try:
+        try:
+            result = predict_event_fn(storage, s3, predictions_table, event_id)
+        except recognized_errors as exc:
+            prediction_cache.put_error_cached(s3, cache_key, type(exc).__name__, str(exc))
+            return
+        model_versions = prediction_cache.current_model_versions(s3, sport, model_names_for(result["event_type"]))
+        # Fresh fetch so the fingerprint reflects the event state this
+        # prediction was actually computed against.
+        event = storage.get_event(event_key_value)
+        extra_fingerprint = fingerprint(event) if event is not None else None
+        prediction_cache.put_cached(s3, cache_key, result, model_versions, result.get("status"), extra_fingerprint)
+    finally:
+        prediction_cache.clear_in_progress(s3, cache_key)
+
+
+def score_and_record(
+    model_cache: dict, s3, predictions_table, event_key_value: str, sport: str, model_name: str,
+    feature_row: dict, record_suffix: str,
+) -> dict | None:
+    """{"value": ..., "model_version": ...} with the prediction recorded under
+    MODEL#{model_name}#v{version}#{record_suffix}, or None if model_name has
+    no promoted version -- callers tolerate a missing model per key."""
+    try:
+        estimator, model_card = get_cached_model(model_cache, s3, sport, model_name)
+    except model_loader.NoPromotedModelError:
+        return None
+    value = model_loader.predict(estimator, model_card, feature_row)
+    model_key = f"MODEL#{model_name}#v{model_card['version']}#{record_suffix}"
+    record_prediction(predictions_table, event_key_value, model_key, {"value": value})
+    return {"value": value, "model_version": model_card["version"]}
+
+
 def snapshot_event(storage, s3, predictions_table, event_id: str, sport: str, predict_event_fn) -> int:
     """Fresh compute for one event (which also refreshes the S3 cache viewers
     read), then copies exactly the rows that compute recorded to the event's
@@ -253,3 +297,45 @@ def compute_and_cache_player_prop(
         prediction_cache.put_cached(s3, cache_key, result, model_version, (event or {}).get("status"))
     finally:
         prediction_cache.clear_in_progress(s3, cache_key)
+
+
+class HeadToHeadEntryPoints:
+    """A head-to-head sport's five event_prediction entry points, bound to
+    its own score/win-probability models. `namespace` is the sport
+    module's globals(): predict_event_leaders, predict_event and
+    predict_player_prop are looked up there at call time, so each entry
+    point always reaches the module's current (possibly patched)
+    function."""
+
+    def __init__(self, namespace: dict, sport: str, score_models: dict, win_probability_model: str) -> None:
+        self._namespace = namespace
+        self._sport = sport
+        self._score_models = score_models
+        self._win_probability_model = win_probability_model
+
+    def predict_event(self, storage, s3, predictions_table, event_id: str) -> dict:
+        return predict_event(
+            storage, s3, predictions_table, event_id, self._sport,
+            self._score_models, self._win_probability_model, self._namespace["predict_event_leaders"],
+        )
+
+    def predict_player_prop(self, storage, s3, predictions_table, event_id: str, entity_id: str, target_stat: str) -> dict:
+        return predict_player_prop(storage, s3, predictions_table, event_id, entity_id, target_stat, self._sport)
+
+    def compute_and_cache_event(self, storage, s3, predictions_table, event_id: str) -> None:
+        """Background worker triggered by predict-read on a cache miss or
+        stale refresh -- see the module-level compute_and_cache_event."""
+        compute_and_cache_event(storage, s3, predictions_table, event_id, self._sport, self._namespace["predict_event"])
+
+    def snapshot_event(self, storage, s3, predictions_table, event_id: str) -> int:
+        """Pre-kickoff snapshot for one event -- see the module-level snapshot_event."""
+        return snapshot_event(storage, s3, predictions_table, event_id, self._sport, self._namespace["predict_event"])
+
+    def compute_and_cache_player_prop(
+        self, storage, s3, predictions_table, event_id: str, entity_id: str, target_stat: str,
+    ) -> None:
+        """compute_and_cache_event's counterpart for one player-prop stat."""
+        compute_and_cache_player_prop(
+            storage, s3, predictions_table, event_id, entity_id, target_stat, self._sport,
+            self._namespace["predict_player_prop"],
+        )

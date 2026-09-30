@@ -740,3 +740,27 @@ class TestAdaptersRegistry:
         # shared instance is safe to use for both a classifier-task and a
         # regressor-task promoted model without knowing which.
         assert model_types.ADAPTERS["xgboost"].task is None
+
+
+class TestCandidateFactories:
+    def test_classifier_candidates_cover_every_classifier_algorithm(self):
+        assert [type(c) for c in model_types.classifier_candidates()] == [
+            model_types.XGBoostClassifierAdapter, model_types.LogisticRegressionAdapter,
+            model_types.RandomForestClassifierAdapter, model_types.MLPClassifierAdapter,
+            model_types.LightGBMClassifierAdapter,
+        ]
+
+    def test_regressor_candidates_cover_every_regressor_algorithm(self):
+        assert [type(c) for c in model_types.regressor_candidates()] == [
+            model_types.XGBoostRegressorAdapter, model_types.ElasticNetAdapter,
+            model_types.RandomForestRegressorAdapter, model_types.MLPRegressorAdapter,
+            model_types.LightGBMRegressorAdapter,
+        ]
+
+    def test_lightgbm_can_be_left_out(self):
+        assert model_types.LightGBMClassifierAdapter not in map(type, model_types.classifier_candidates(include_lightgbm=False))
+        assert model_types.LightGBMRegressorAdapter not in map(type, model_types.regressor_candidates(include_lightgbm=False))
+
+    def test_every_call_builds_fresh_instances(self):
+        first, second = model_types.classifier_candidates(), model_types.classifier_candidates()
+        assert all(a is not b for a, b in zip(first, second))

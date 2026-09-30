@@ -24,27 +24,14 @@ Usage:
     python train_cup_winprob_model.py
 """
 import logging
-import os
 
-try:
-    # Must run before any sklearn import (including the one directly
-    # below). XGBoost and LightGBM both have their own native
-    # optimization and aren't affected either way.
-    from sklearnex import patch_sklearn
-    patch_sklearn()
-except ImportError:
-    pass
+from library.ml.sklearn_acceleration import patch_sklearn_if_available
 
-from library.aws.s3_manager import S3Manager
-from library.ml import backtest, training_common
+# Must run before any sklearn import below.
+patch_sklearn_if_available()
+
+from library.ml import backtest, model_types, training_common
 from library.ml import train_classifier_model_common as classifier_common
-from library.ml.model_types import (
-    LightGBMClassifierAdapter,
-    LogisticRegressionAdapter,
-    MLPClassifierAdapter,
-    RandomForestClassifierAdapter,
-    XGBoostClassifierAdapter,
-)
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger("pga-train-model")
@@ -60,45 +47,17 @@ CUP_FEATURES_KEY = "pga/training-data/cup_features.parquet"
 NON_FEATURE_COLUMNS = {"event_key", "event_date", "tournament_name"}
 LABEL_COLUMN = "label_home_won"
 
-CANDIDATES = [
-    XGBoostClassifierAdapter(),
-    LogisticRegressionAdapter(),
-    RandomForestClassifierAdapter(),
-    MLPClassifierAdapter(),
-    LightGBMClassifierAdapter(),
-]
+CANDIDATES = model_types.classifier_candidates()
 
-
-def _feature_columns(df):
-    return training_common.feature_columns(df, NON_FEATURE_COLUMNS)
-
-
-def train(s3: S3Manager, df) -> dict:
-    """Runs the full candidate tournament and returns run_backtest's
-    result ({"promotions": [card, ...], "candidates": [summary, ...]}).
-
-    A halved (tied) Cup has label_home_won=None (library/features/pga.py's
-    build_cup_event_features) -- dropped before the split, same "filter at
-    train time, keep the raw dataset complete" convention
-    train_cutline_model.py's own cut_count > 0 filter uses."""
-    return classifier_common.train(
-        s3, df, SPORT, MODEL_NAME,
-        label_column=LABEL_COLUMN, non_feature_columns=NON_FEATURE_COLUMNS,
-        candidates=CANDIDATES, logger=logger,
-        drop_null_label=True, coerce_int_label=True,
-    )
-
-
-def main() -> None:
-    bucket = os.environ["MODEL_ARTIFACTS_BUCKET_NAME"]
-    region = os.environ.get("AWS_REGION")
-    s3 = S3Manager(bucket, region=region)
-
-    logger.info("Loading %s training data from s3://%s/%s", MODEL_NAME, bucket, CUP_FEATURES_KEY)
-    df = training_common.load_features(s3, CUP_FEATURES_KEY)
-    logger.info("Loaded %d cup rows", len(df))
-
-    train(s3, df)
+_job = training_common.ModelJob(
+    globals(),
+    trainer=classifier_common.train, sport=SPORT, model_name=MODEL_NAME, features_key=CUP_FEATURES_KEY,
+    row_noun="cup", label_column=LABEL_COLUMN, non_feature_columns=NON_FEATURE_COLUMNS, candidates=CANDIDATES,
+    drop_null_label=True, coerce_int_label=True,
+)
+_feature_columns = _job.feature_columns
+train = _job.train
+main = _job.main
 
 
 if __name__ == "__main__":

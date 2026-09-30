@@ -28,18 +28,13 @@ only this sport's own feature-column exclusions and candidate algorithm
 list stay here.
 """
 import logging
-import os
 
-try:
-    # Must run before any sklearn import (including the one directly below).
-    from sklearnex import patch_sklearn
-    patch_sklearn()
-except ImportError:
-    pass
+from library.ml.sklearn_acceleration import patch_sklearn_if_available
 
-from library.aws.s3_manager import S3Manager
+# Must run before any sklearn import below.
+patch_sklearn_if_available()
+
 from library.ml import backtest, train_score_model_common as common, training_common
-from library.ml.model_types import ElasticNetAdapter, MLPRegressorAdapter, RandomForestRegressorAdapter, XGBoostRegressorAdapter
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger("nfl-train-model")
@@ -47,50 +42,19 @@ logger = logging.getLogger("nfl-train-model")
 SPORT = "nfl"
 EVENT_FEATURES_KEY = "nfl/training-data/event_features.parquet"
 
-# Identifiers, never model inputs.
-NON_FEATURE_COLUMNS = {"event_key", "event_date", "home_entity_id", "away_entity_id", "venue_city", "venue_state"}
+_job = common.ScoreJob(
+    globals(), SPORT, EVENT_FEATURES_KEY,
+    extra_non_feature_columns=frozenset({"venue_city", "venue_state"}), include_lightgbm=False,
+)
+NON_FEATURE_COLUMNS = _job.non_feature_columns
 LABEL_COLUMN = common.LABEL_COLUMN
-SUMMARY_METRICS = common.SUMMARY_METRICS
-PROMOTION_METRIC = common.PROMOTION_METRIC
-
-# Each target versions independently (nfl/score-margin/, nfl/home-score/, nfl/away-score/).
-MODEL_NAMES = common.MODEL_NAMES
-
-CANDIDATES = [
-    XGBoostRegressorAdapter(),
-    ElasticNetAdapter(),
-    RandomForestRegressorAdapter(),
-    MLPRegressorAdapter(),
-]
-
+CANDIDATES = _job.candidates
 _model_name = common.model_name
 _add_label = common.add_label
 _naive_prediction = common.naive_prediction
-
-
-def _feature_columns(df):
-    return training_common.feature_columns(df, NON_FEATURE_COLUMNS)
-
-
-def train(s3: S3Manager, df, score_target: str) -> dict:
-    return common.train(
-        s3, df, score_target, sport=SPORT, candidates=CANDIDATES,
-        non_feature_columns=NON_FEATURE_COLUMNS, logger=logger,
-    )
-
-
-def main() -> None:
-    bucket = os.environ["MODEL_ARTIFACTS_BUCKET_NAME"]
-    score_target = os.environ["SCORE_TARGET"]
-    region = os.environ.get("AWS_REGION")
-    s3 = S3Manager(bucket, region=region)
-    model_name = _model_name(score_target)
-
-    logger.info("Loading %s training data from s3://%s/%s", model_name, bucket, EVENT_FEATURES_KEY)
-    df = training_common.load_features(s3, EVENT_FEATURES_KEY)
-    logger.info("Loaded %d event rows", len(df))
-
-    train(s3, df, score_target)
+_feature_columns = _job.feature_columns
+train = _job.train
+main = _job.main
 
 
 if __name__ == "__main__":

@@ -72,6 +72,49 @@ def index_team_game_stats(team_game_stats: list[dict]) -> dict[tuple[str, str], 
     return {(row["event_key"], row["team_id"]): row for row in team_game_stats}
 
 
+def build_team_event_rows(
+    events: list[dict], team_game_stats: list[dict], window: int, build_event_features: Callable, logger,
+) -> list[dict]:
+    """One event-feature row per event with both a home and an away side,
+    built in a single chronological pass: each team's own game and box-score
+    histories grow one game at a time rather than being re-filtered from the
+    full history for every game."""
+    team_game_stats_by_event_team = index_team_game_stats(team_game_stats)
+    elo_ratings, _ = compute_elo_ratings(events)  # only the pre-game side is used here
+    events_ascending = sorted(events, key=lambda e: e.get("event_date", ""))
+
+    team_history: dict[str, list[dict]] = defaultdict(list)  # ascending, grows as we go
+    team_box_history: dict[str, list[dict]] = defaultdict(list)
+    total = len(events_ascending)
+    rows = []
+    for i, event in enumerate(events_ascending, start=1):
+        participants = event.get("participants", [])
+        home = next((p for p in participants if p.get("role") == "home"), None)
+        away = next((p for p in participants if p.get("role") == "away"), None)
+        if home is None or away is None:
+            logger.debug("Skipping event %s -- missing home/away role", event.get("event_key"))
+            continue
+
+        home_id, away_id = home["entity_id"], away["entity_id"]
+        # Most-recent-first, capped at `window` -- O(window), not O(len(history)).
+        rows.append(build_event_features(
+            event, elo_ratings, team_history[home_id][-window:][::-1], team_history[away_id][-window:][::-1], window,
+            home_team_box_stats=team_box_history[home_id][-window:][::-1],
+            away_team_box_stats=team_box_history[away_id][-window:][::-1],
+        ))
+
+        for team_id in (home_id, away_id):
+            team_history[team_id].append(event)
+            box_row = team_game_stats_by_event_team.get((event["event_key"], team_id))
+            if box_row:
+                team_box_history[team_id].append(box_row)
+
+        if i % 500 == 0 or i == total:
+            logger.info("Built event features: %d/%d", i, total)
+
+    return rows
+
+
 def build_player_dataset(
     storage, sport: str, window: int, build_player_features_fn, logger,
     since_date: str | None = None, filter_fn=None,

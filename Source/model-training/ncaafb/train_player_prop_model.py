@@ -15,20 +15,14 @@ Usage:
     TARGET_STAT=passing_yards python train_player_prop_model.py
 """
 import logging
-import os
 
-try:
-    from sklearnex import patch_sklearn
-    patch_sklearn()
-except ImportError:
-    pass
+from library.ml.sklearn_acceleration import patch_sklearn_if_available
 
-import pandas as pd
+# Must run before any sklearn import below.
+patch_sklearn_if_available()
 
-from library.aws.s3_manager import S3Manager
 from library.ml import backtest, training_common
 from library.ml import train_player_prop_model_common as player_prop_common
-from library.ml.model_types import ElasticNetAdapter, MLPRegressorAdapter, RandomForestRegressorAdapter, XGBoostRegressorAdapter
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger("ncaafb-train-model")
@@ -36,94 +30,24 @@ logger = logging.getLogger("ncaafb-train-model")
 SPORT = "ncaafb"
 PLAYER_FEATURES_KEY = "ncaafb/training-data/player_features.parquet"
 
-NON_FEATURE_COLUMNS = {"event_key", "player_key", "entity_id", "team_id", "opponent_id", "event_date"}
-LABEL_COLUMN = "label_target_stat"
-
-CANDIDATES = [
-    XGBoostRegressorAdapter(),
-    ElasticNetAdapter(),
-    RandomForestRegressorAdapter(),
-    MLPRegressorAdapter(),
-]
-
-MIN_PRIOR_GAMES_WITH_STAT = 2
-MIN_AVG_FRACTION_OF_MEDIAN = 0.35
-MIN_NON_NULL_FRACTION = 0.05
-
-# CFBD's box-score categories: passing, rushing, receiving, fumbles,
-# defensive, kicking, punting. "fumbles"/"kicking"/"punting" are in
-# neither set here, left to MIN_NON_NULL_FRACTION to decide their fate.
-OFFENSIVE_CATEGORIES = {"passing", "rushing", "receiving"}
-DEFENSIVE_CATEGORIES = {"defensive"}
-
-
+_job = player_prop_common.PlayerPropJob(
+    globals(), SPORT, PLAYER_FEATURES_KEY, include_lightgbm=False,
+    offensive_categories=frozenset({"passing", "rushing", "receiving"}),
+    defensive_categories=frozenset({"defensive"}),
+)
+NON_FEATURE_COLUMNS = player_prop_common.PLAYER_IDENTIFIER_COLUMNS
+LABEL_COLUMN = player_prop_common.LABEL_COLUMN
+MIN_PRIOR_GAMES_WITH_STAT = player_prop_common.MIN_PRIOR_GAMES_WITH_STAT
+CANDIDATES = _job.candidates
 _model_name = player_prop_common.model_name
-
-
-def _filter_to_target_stat(df: pd.DataFrame, target_stat: str) -> pd.DataFrame:
-    return player_prop_common.filter_to_target_stat(
-        df, target_stat, label_column=LABEL_COLUMN,
-        min_prior_games_with_stat=MIN_PRIOR_GAMES_WITH_STAT,
-        min_avg_fraction_of_median=MIN_AVG_FRACTION_OF_MEDIAN,
-    )
-
-
-def _stat_category(stat_key: str) -> str | None:
-    for category in OFFENSIVE_CATEGORIES | DEFENSIVE_CATEGORIES:
-        if stat_key == category or stat_key.startswith(f"{category}_"):
-            return category
-    return None
-
-
-def _opposing_side_categories(target_stat: str) -> set[str]:
-    target_category = _stat_category(target_stat)
-    if target_category in OFFENSIVE_CATEGORIES:
-        return DEFENSIVE_CATEGORIES
-    if target_category in DEFENSIVE_CATEGORIES:
-        return OFFENSIVE_CATEGORIES
-    return set()
-
-
-def _strip_metric_prefix(column: str) -> str:
-    if column.startswith("avg_"):
-        return column.removeprefix("avg_")
-    if column.startswith("games_with_"):
-        return column.removeprefix("games_with_")
-    return column
-
-
-def _feature_columns(df: pd.DataFrame, target_stat: str) -> list[str]:
-    candidates = training_common.feature_columns(df, NON_FEATURE_COLUMNS)
-    minimum_non_null = len(df) * MIN_NON_NULL_FRACTION
-    candidates = [col for col in candidates if df[col].notna().sum() >= minimum_non_null]
-
-    opposing_categories = _opposing_side_categories(target_stat)
-    return [col for col in candidates if _stat_category(_strip_metric_prefix(col)) not in opposing_categories]
-
-
-def train(s3: S3Manager, df: pd.DataFrame, target_stat: str) -> dict:
-    """Runs the full candidate tournament and returns run_backtest's
-    result ({"promotions": [card, ...], "candidates": [summary, ...]})."""
-    df = _filter_to_target_stat(df, target_stat)
-    return player_prop_common.train(
-        s3, df, target_stat, sport=SPORT, candidates=CANDIDATES,
-        label_column=LABEL_COLUMN, logger=logger,
-        feature_columns_fn=lambda d: _feature_columns(d, target_stat),
-    )
-
-
-def main() -> None:
-    bucket = os.environ["MODEL_ARTIFACTS_BUCKET_NAME"]
-    target_stat = os.environ["TARGET_STAT"]
-    region = os.environ.get("AWS_REGION")
-    s3 = S3Manager(bucket, region=region)
-    model_name = _model_name(target_stat)
-
-    logger.info("Loading %s training data from s3://%s/%s", model_name, bucket, PLAYER_FEATURES_KEY)
-    df = training_common.load_features(s3, PLAYER_FEATURES_KEY)
-    logger.info("Loaded %d player-game rows", len(df))
-
-    train(s3, df, target_stat)
+_filter_to_target_stat = _job.filter_to_target_stat
+_feature_columns = _job.feature_columns
+train = _job.train
+main = _job.main
+OFFENSIVE_CATEGORIES = _job.offensive_categories
+DEFENSIVE_CATEGORIES = _job.defensive_categories
+_stat_category = _job.stat_category
+_opposing_side_categories = _job.opposing_side_categories
 
 
 if __name__ == "__main__":

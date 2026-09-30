@@ -6,22 +6,20 @@ scripts before sharing here, differing only in SPORT/MODEL_NAME/
 LABEL_COLUMN/NON_FEATURE_COLUMNS/CANDIDATES and whether the label needs a
 pre-split notna filter + int coercion).
 
-Each script's own train_*.py keeps `main()` and `train(s3, df)` (patches
-S3Manager/training_common/train by attribute on ITS OWN module -- see each
-test file's own patch.object calls) and its own CANDIDATES/
-NON_FEATURE_COLUMNS/LABEL_COLUMN config, calling into `train()` below via a
-thin wrapper. Safe to share `train()` itself because it only calls through
-`backtest`/`training_common` as MODULE references, not individually-
-imported bare function names -- patching `train_X_model.backtest.
-run_backtest` mutates the one shared `library.ml.backtest` module object
-regardless of which file's own `backtest.run_backtest(...)` call reads it
-(same precedent as `train_score_model_common.py`).
+Each script keeps its own config and calls into `train()` below, which only
+reaches `backtest`/`training_common` as MODULE references -- so patching
+`train_X_model.backtest.run_backtest` in a test patches the one shared
+`library.ml.backtest` module every caller reads. WinProbabilityJob is the
+whole script for a head-to-head sport's win-probability model.
 """
 from library.aws.s3_manager import S3Manager
-from library.ml import backtest, training_common
+from library.ml import backtest, model_types, training_common
 
 SUMMARY_METRICS = ["accuracy", "log_loss", "naive_baseline_accuracy"]
 PROMOTION_METRIC = "log_loss"
+
+WIN_PROBABILITY_MODEL_NAME = "win-probability"
+HOME_WON_LABEL = "label_home_won"
 
 
 def train(
@@ -77,3 +75,39 @@ def train(
         promotion_metric=PROMOTION_METRIC,
         run_id=training_common.resolve_run_id(),
     )
+
+
+def _home_win_rate(y_test) -> float:
+    """The naive baseline for a home-win label: always predict the holdout's own home-win rate."""
+    return float(y_test.mean())
+
+
+class WinProbabilityJob:
+    """A head-to-head sport's whole win-probability training script. `namespace`
+    is the script module's globals() (see training_common.TrainingScript)."""
+
+    def __init__(
+        self, namespace: dict, sport: str, features_key: str, *,
+        extra_non_feature_columns: frozenset[str] = frozenset(), include_lightgbm: bool = True,
+    ) -> None:
+        self.non_feature_columns = training_common.EVENT_IDENTIFIER_COLUMNS | extra_non_feature_columns
+        self.label_column = HOME_WON_LABEL
+        self.candidates = model_types.classifier_candidates(include_lightgbm=include_lightgbm)
+        self._namespace = namespace
+        self._sport = sport
+        self._script = training_common.TrainingScript(
+            namespace, features_key=features_key, row_noun="event", model_name=WIN_PROBABILITY_MODEL_NAME,
+        )
+
+    def feature_columns(self, df) -> list[str]:
+        return training_common.feature_columns(df, self.non_feature_columns)
+
+    def train(self, s3: S3Manager, df) -> dict:
+        return train(
+            s3, df, self._sport, WIN_PROBABILITY_MODEL_NAME,
+            label_column=self.label_column, non_feature_columns=self.non_feature_columns,
+            candidates=self.candidates, logger=self._namespace["logger"], naive_baseline_fn=_home_win_rate,
+        )
+
+    def main(self) -> None:
+        self._script.main()

@@ -94,7 +94,7 @@ class TestMain:
         monkeypatch.setenv("MODEL_ARTIFACTS_BUCKET_NAME", "test-bucket")
         df, mock_s3 = MagicMock(), MagicMock()
 
-        with patch.object(train_finish_position_model, "S3Manager", return_value=mock_s3),              patch.object(train_finish_position_model.training_common, "load_features", return_value=df) as mock_load,              patch.object(train_finish_position_model, "train") as mock_train:
+        with patch.object(train_finish_position_model.training_common, "S3Manager", return_value=mock_s3),              patch.object(train_finish_position_model.training_common, "load_features", return_value=df) as mock_load,              patch.object(train_finish_position_model, "train") as mock_train:
             train_finish_position_model.main()
 
         mock_load.assert_called_once_with(mock_s3, train_finish_position_model.DRIVER_FEATURES_KEY)

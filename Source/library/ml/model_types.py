@@ -702,8 +702,8 @@ class LightGBMRegressorAdapter(_JoblibSerializedAdapter):
 # Keyed by model_card["algorithm"]. Serving dispatches a promoted model
 # card's "algorithm" field through this registry to deserialize/predict
 # it. Only covers predict/serialize/deserialize/feature_importances;
-# training scripts import the classifier/regressor-specific classes
-# directly to build their own candidate lists. XGBoostAdapter's
+# training scripts build their candidate lists from classifier_candidates/
+# regressor_candidates below instead. XGBoostAdapter's
 # predict/serialize/deserialize are identical regardless of task, so one
 # shared instance covers both here; every other algorithm needs a
 # distinct registry entry per task.
@@ -718,3 +718,29 @@ ADAPTERS: dict[str, ModelAdapter] = {
     "lightgbm_classifier": LightGBMClassifierAdapter(),
     "lightgbm_regressor": LightGBMRegressorAdapter(),
 }
+
+
+def classifier_candidates(*, include_lightgbm: bool = True) -> list[ModelAdapter]:
+    """A fresh classification-task candidate tournament for run_backtest."""
+    candidates = [
+        XGBoostClassifierAdapter(),
+        LogisticRegressionAdapter(),
+        RandomForestClassifierAdapter(),
+        MLPClassifierAdapter(),
+    ]
+    if include_lightgbm:
+        candidates.append(LightGBMClassifierAdapter())
+    return candidates
+
+
+def regressor_candidates(*, include_lightgbm: bool = True) -> list[ModelAdapter]:
+    """A fresh regression-task candidate tournament for run_backtest."""
+    candidates = [
+        XGBoostRegressorAdapter(),
+        ElasticNetAdapter(),
+        RandomForestRegressorAdapter(),
+        MLPRegressorAdapter(),
+    ]
+    if include_lightgbm:
+        candidates.append(LightGBMRegressorAdapter())
+    return candidates

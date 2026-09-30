@@ -26,28 +26,23 @@ Lambda, resolved from a small per-sport env-var map.
 No ML dependencies -- zip-packaged, not any predict Lambda's container
 image.
 """
-import json
 import logging
 import os
 
-from library.aws import lambda_singletons
 from library.aws.dynamodb_table import DynamoDBTable
 from library.aws.lambda_invoker import LambdaInvoker
 from library.aws.s3_manager import S3Manager
+from library.aws.serving_resources import ServingResources
 from library.schema.keys import event_key as build_event_key
 from library.serving import f1_reads, nba_reads, ncaafb_reads, ncaambb_reads, nfl_reads, pga_reads
+from library.serving.api_response import json_response
 from library.serving.common import list_models
-from library.serving.predict_read_handler import RETRY_AFTER_SECONDS, make_multi_sport_lambda_handler
+from library.serving.predict_read_handler import make_multi_sport_lambda_handler
 from library.storage import prediction_cache
 from library.storage.feature_storage import FeatureStorage
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s", force=True)  # AWS Lambda pre-attaches a root handler, so basicConfig() is otherwise a silent no-op
 logger = logging.getLogger("predict-read")
-
-_CORS_HEADERS = {
-    "Access-Control-Allow-Origin": "*",
-    "Content-Type": "application/json",
-}
 
 # Lazy singletons, shared across every sport, reused across warm invocations.
 _storage: FeatureStorage | None = None
@@ -67,22 +62,10 @@ _PREDICT_FUNCTION_NAME_ENV_VARS = {
 }
 
 
-def _get_storage() -> FeatureStorage:
-    return lambda_singletons.get_or_create(globals(), "_storage", FeatureStorage)
-
-
-def _get_model_bucket() -> S3Manager:
-    return lambda_singletons.get_or_create(
-        globals(), "_model_bucket",
-        lambda: S3Manager(os.environ["MODEL_ARTIFACTS_BUCKET_NAME"], region=os.environ.get("AWS_REGION")),
-    )
-
-
-def _get_predictions_table() -> DynamoDBTable:
-    return lambda_singletons.get_or_create(
-        globals(), "_predictions_table",
-        lambda: DynamoDBTable(os.environ["PREDICTIONS_TABLE_NAME"], region=os.environ.get("AWS_REGION")),
-    )
+_resources = ServingResources(globals())
+_get_storage = _resources.storage
+_get_model_bucket = _resources.model_bucket
+_get_predictions_table = _resources.predictions_table
 
 
 def _get_predict_invoker(sport: str) -> LambdaInvoker:
@@ -90,10 +73,6 @@ def _get_predict_invoker(sport: str) -> LambdaInvoker:
         function_name = os.environ[_PREDICT_FUNCTION_NAME_ENV_VARS[sport]]
         _predict_invokers[sport] = LambdaInvoker(function_name, region=os.environ.get("AWS_REGION"))
     return _predict_invokers[sport]
-
-
-def _response(status_code: int, body: dict) -> dict:
-    return {"statusCode": status_code, "headers": _CORS_HEADERS, "body": json.dumps(body)}
 
 
 def _team_sport_freshness_inputs(sport: str):
@@ -200,5 +179,5 @@ lambda_handler = make_multi_sport_lambda_handler(
     sport_configs=SPORT_CONFIGS,
     namespace=globals(),
     logger=logger,
-    response_fn=_response,
+    response_fn=json_response,
 )

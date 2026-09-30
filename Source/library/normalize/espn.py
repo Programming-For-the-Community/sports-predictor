@@ -35,6 +35,30 @@ def team_to_entity(team: dict, sport: str) -> dict:
 # postponed game defaults to "scheduled" and sits there permanently.
 # STATUS_UNCONTESTED is ESPN's status name for a game vacated because one
 # side couldn't field a team, distinct from a genuine forfeit.
+# ESPN box-score stat keys that pack two numbers into one string, per sport
+# family -- passed to boxscore_to_player_game_stats/boxscore_to_team_game_stats.
+# three_pointers_made/three_point_attempts match the sport registry's own
+# player-prop TARGET_STAT names (Terraform/dynamodb-sport-registry.tf).
+BASKETBALL_COMPOUND_KEY_SPLITS: dict[str, tuple[str, str]] = {
+    "fieldGoalsMade-fieldGoalsAttempted": ("field_goals_made", "field_goal_attempts"),
+    "threePointFieldGoalsMade-threePointFieldGoalsAttempted": ("three_pointers_made", "three_point_attempts"),
+    "freeThrowsMade-freeThrowsAttempted": ("free_throws_made", "free_throw_attempts"),
+}
+FOOTBALL_PLAYER_COMPOUND_KEY_SPLITS: dict[str, tuple[str, str]] = {
+    "completions/passingAttempts": ("completions", "passing_attempts"),
+    "sacks-sackYardsLost": ("sacks_taken", "sack_yards_lost"),
+    "fieldGoalsMade/fieldGoalAttempts": ("field_goals_made", "field_goal_attempts"),
+    "extraPointsMade/extraPointAttempts": ("extra_points_made", "extra_point_attempts"),
+}
+FOOTBALL_TEAM_COMPOUND_KEY_SPLITS: dict[str, tuple[str, str]] = {
+    "thirdDownEff": ("third_down_conversions", "third_down_attempts"),
+    "fourthDownEff": ("fourth_down_conversions", "fourth_down_attempts"),
+    "completionAttempts": ("completions", "pass_attempts"),
+    "redZoneAttempts": ("red_zone_conversions", "red_zone_attempts"),
+    "sacksYardsLost": ("sacks_taken", "sack_yards_lost"),
+    "totalPenaltiesYards": ("penalties", "penalty_yards"),
+}
+
 _NON_PLAYED_STATUS_NAMES = {
     "STATUS_CANCELED", "STATUS_POSTPONED", "STATUS_SUSPENDED", "STATUS_FORFEIT", "STATUS_UNCONTESTED",
 }
@@ -199,6 +223,32 @@ def roster_to_player_entities(roster: dict, sport: str) -> list[dict]:
 
 # ESPN's current-injury-report status vocabulary.
 _CURRENT_INJURY_STATUSES = {"Questionable", "Doubtful", "Out"}
+
+
+def league_team_ids(teams_response: dict) -> list[str]:
+    """Every team id in a league's get_teams() response -- not derived from
+    any date's scoreboard, so it works the same in the off-season or on a
+    night with no games."""
+    leagues = teams_response.get("sports", [{}])[0].get("leagues", [{}])
+    teams = leagues[0].get("teams", []) if leagues else []
+    return [t["team"]["id"] for t in teams if t.get("team", {}).get("id")]
+
+
+def attach_injuries(events: list[dict], injuries_by_team: dict[str, list[dict]]) -> None:
+    """Sets home_injuries/away_injuries on each raw scoreboard event in
+    place, from the same ingest run's roster fetch -- the fields
+    scoreboard_event_to_event_item reads. A team missing from
+    injuries_by_team (its roster fetch failed) leaves that side unset rather
+    than an empty list, keeping "never checked" distinct from "checked,
+    nobody's hurt"."""
+    for evt in events:
+        competitions = evt.get("competitions") or [{}]
+        for competitor in competitions[0].get("competitors", []):
+            team_id = str(competitor.get("team", {}).get("id", ""))
+            role = competitor.get("homeAway")
+            if role not in ("home", "away") or team_id not in injuries_by_team:
+                continue
+            evt[f"{role}_injuries"] = injuries_by_team[team_id]
 
 
 def roster_to_team_injuries(roster: dict) -> list[dict]:

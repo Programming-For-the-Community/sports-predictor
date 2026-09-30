@@ -242,3 +242,31 @@ def get_live_scores(s3, bucket: str, cache_key: str) -> dict:
         return {"events": {}}
 
     return {"events": cache.get("events", {})}
+
+
+class SportLiveScores:
+    """One sport's live-scores cache: its S3 cache key, box-score
+    compound-stat-key splits, and live box-score fetch parallelism, bound
+    to the functions above."""
+
+    def __init__(self, cache_key: str, compound_key_splits: dict[str, tuple[str, str]], boxscore_max_workers: int) -> None:
+        self._cache_key = cache_key
+        self._compound_key_splits = compound_key_splits
+        self._boxscore_max_workers = boxscore_max_workers
+
+    def get_cache(self, s3, bucket: str) -> dict | None:
+        return get_cache(s3, bucket, self._cache_key)
+
+    def put_cache(self, s3, bucket: str, payload: dict) -> None:
+        put_cache(s3, bucket, self._cache_key, payload)
+
+    def live_player_stats(self, client, sport: str, event_id: str) -> dict[str, dict]:
+        return live_player_stats(client, sport, event_id, self._compound_key_splits)
+
+    def refresh(self, storage, s3, bucket: str, client, sport: str) -> dict:
+        return refresh(
+            storage, s3, bucket, client, sport, self._cache_key, self._compound_key_splits, self._boxscore_max_workers,
+        )
+
+    def get_live_scores(self, s3, bucket: str) -> dict:
+        return get_live_scores(s3, bucket, self._cache_key)

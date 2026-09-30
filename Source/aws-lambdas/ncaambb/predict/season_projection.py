@@ -37,17 +37,14 @@ import logging
 import re
 from datetime import date, datetime, timezone
 
-import pandas as pd
-from boto3.dynamodb.conditions import Key
-
 import event_prediction
 import season_simulation
-from library.features.common import DEFAULT_HOME_ADVANTAGE, compute_elo_ratings, current_streak, average_opponent_elo, rolling_team_scoring_averages
+from library.features.common import DEFAULT_HOME_ADVANTAGE, compute_elo_ratings
 from library.http.ncaambb_core import ap_poll_to_rank_by_team
-from library.ml.model_types import ADAPTERS
-from library.serving import model_loader
-from library.serving.common import enrich_bracket_team_names, enrich_team_standings, latest_matching_row
-from library.serving.ncaambb_reads import WIN_PROBABILITY_MODEL, _actual_result, _home_and_away
+from library.serving import bracket_projection
+from library.serving import model_loader, season_projection_common
+from library.serving.common import enrich_bracket_team_names, enrich_team_standings
+from library.serving.ncaambb_reads import _home_and_away
 from library.storage.feature_storage import FeatureStorage
 from library.storage.season_projections import season_projection_key
 
@@ -211,22 +208,7 @@ def _completed_game_records(completed: list[dict]) -> tuple[dict, dict, dict, di
     return wins, losses, point_differential, team_last_completed_date, conference_wins, conference_losses, completed_by_team
 
 
-def _team_rolling_stats(
-    completed_by_team: dict[str, list[dict]], pre_game_ratings: dict[str, float],
-) -> tuple[dict, dict, dict, dict]:
-    """(avg_points_scored, avg_points_allowed, win_streak,
-    strength_of_schedule), one entry per team with >=1 completed game."""
-    avg_points_scored: dict[str, float | None] = {}
-    avg_points_allowed: dict[str, float | None] = {}
-    win_streak: dict[str, int] = {}
-    strength_of_schedule: dict[str, float | None] = {}
-    for team_id, team_events in completed_by_team.items():
-        scoring = rolling_team_scoring_averages(team_events, team_id, window=len(team_events))
-        avg_points_scored[team_id] = scoring["avg_points_scored"]
-        avg_points_allowed[team_id] = scoring["avg_points_allowed"]
-        win_streak[team_id] = current_streak(team_events, team_id)
-        strength_of_schedule[team_id] = average_opponent_elo(team_events, team_id, pre_game_ratings)
-    return avg_points_scored, avg_points_allowed, win_streak, strength_of_schedule
+_team_rolling_stats = season_projection_common.team_rolling_stats
 
 
 def _remaining_game_inputs(
@@ -314,20 +296,11 @@ def _ranking_feature_row(team_id: str, wins: dict, losses: dict, ratings: dict, 
 
 
 def _batch_score_teams(estimator, model_card: dict, teams: list[str], season_inputs: dict, wins: dict, losses: dict, ratings: dict) -> dict[str, float]:
-    """Scores every team in one batched adapter.predict call (not one call per team).
-    Bypasses model_loader.predict's single-row wrapper; same NaN-for-missing coercion, vectorized."""
-    feature_columns = model_card["feature_columns"]
-    rows = []
-    for team_id in teams:
-        row = _ranking_feature_row(team_id, wins, losses, ratings, season_inputs)
-        rows.append({
-            column: float(row[column]) if isinstance(row.get(column), (int, float)) else float("nan")
-            for column in feature_columns
-        })
-    X = pd.DataFrame(rows, columns=feature_columns, index=teams)
-    adapter = ADAPTERS[model_card["algorithm"]]
-    predictions = adapter.predict(estimator, X)
-    return dict(zip(teams, (float(value) for value in predictions)))
+    """Scores every team in one batched adapter.predict call (not one call per team)."""
+    return season_projection_common.score_rows(
+        estimator, model_card,
+        {team_id: _ranking_feature_row(team_id, wins, losses, ratings, season_inputs) for team_id in teams},
+    )
 
 
 def _current_model_scores(estimator, model_card: dict, teams: list[str], season_inputs: dict) -> dict[str, float]:
@@ -347,9 +320,7 @@ def _model_rankings(estimator, model_card: dict, teams: list[str], season_inputs
     """The national-ranking model's own opinion of today's ranking --
     shown alongside the real AP poll rank (_latest_ap_poll_ranks) for
     comparison, not in place of it."""
-    scores = _current_model_scores(estimator, model_card, teams, season_inputs)
-    ranked = sorted(teams, key=lambda team_id: scores[team_id])
-    return {team_id: rank for rank, team_id in enumerate(ranked, start=1)}
+    return season_projection_common.rank_by_score(teams, _current_model_scores(estimator, model_card, teams, season_inputs))
 
 
 _RANKINGS_CACHE_KEY_RE = re.compile(r"^ncaambb/rankings/\d+/(\d+)/(\d+)\.json$")
@@ -380,134 +351,19 @@ def _latest_ap_poll_ranks(raw_bucket, season: int | None) -> dict[str, int]:
     return ap_poll_to_rank_by_team(raw_bucket.get_json(latest_key))
 
 
+_BRACKET = bracket_projection.BracketResolver(
+    event_prediction=event_prediction, season_simulation=season_simulation, logger=logger,
+)
+_logged_win_probability = bracket_projection.logged_win_probability
+_predicted_winner_and_probability = bracket_projection.predicted_winner_and_probability
+_completed_matchup_row = bracket_projection.completed_matchup_row
+_scheduled_matchup_row = _BRACKET.scheduled_matchup_row
+_resolve_matchup = _BRACKET.resolve_matchup
+_project_bracket_round = _BRACKET.project_bracket_round
+
+
 def _real_postseason_matchups(storage: FeatureStorage, current_season: int | None, predicate) -> dict[frozenset, dict]:
-    """{frozenset({home_id, away_id}): event} for every real postseason
-    game (conference tournament or March Madness, selected by `predicate`)
-    this season, scheduled or completed."""
-    result: dict[frozenset, dict] = {}
-    for status in ("scheduled", "completed"):
-        for event in storage.get_all_events(SPORT, status=status):
-            if event.get("season") != current_season or not predicate(event):
-                continue
-            home_away = _home_and_away(event)
-            if home_away is None:
-                continue
-            result[frozenset(home_away)] = event
-    return result
-
-
-def _logged_win_probability(predictions_table, event_key_value: str) -> dict | None:
-    rows = predictions_table.query(Key("event_key").eq(event_key_value))
-    row = latest_matching_row(rows, WIN_PROBABILITY_MODEL)
-    return row["predicted_value"] if row else None
-
-
-def _resolve_matchup(
-    team_a: str, team_b: str | None, seed_a: int | None, seed_b: int | None,
-    real_matchups: dict[frozenset, dict], storage: FeatureStorage, s3, predictions_table,
-    current_ratings: dict[str, float], home_advantage: float,
-) -> dict:
-    """Resolves one bracket slot -- a 3-state design: (1) no real game
-    exists yet -- the model's own deterministic pick ("status":
-    "projected"); (2) a real game exists and is completed -- the actual
-    result plus whatever was originally predicted, if anyone ever
-    requested one ("status": "final"); (3) a real game exists, not yet
-    played -- computed on the spot right here if nobody's viewed it yet
-    ("status": "scheduled"). Copied in shape, unchanged, from NCAAFB's
-    own _resolve_matchup -- see this module's own docstring.
-
-    A bye (team_b is None -- only possible in a conference bracket, March
-    Madness never has one after First Four) always resolves as
-    "projected": there's no real game to look up."""
-    if team_b is None:
-        return {
-            "status": "projected", "team_a": team_a, "seed_a": seed_a, "team_b": None, "seed_b": None,
-            "predicted_winner": team_a, "win_probability": 1.0,
-        }
-
-    real_event = real_matchups.get(frozenset((team_a, team_b)))
-    if real_event is None:
-        matchup = season_simulation.project_matchup(team_a, team_b, seed_a, seed_b, current_ratings, home_advantage)
-        matchup["status"] = "projected"
-        return matchup
-
-    event_key_value = real_event["event_key"]
-    home_id, away_id = _home_and_away(real_event)
-
-    if real_event.get("status") == "completed":
-        return _completed_matchup_row(real_event, event_key_value, home_id, away_id, seed_a, seed_b, predictions_table)
-
-    return _scheduled_matchup_row(
-        real_event, event_key_value, home_id, away_id, seed_a, seed_b, storage, s3, predictions_table,
-    )
-
-
-def _predicted_winner_and_probability(
-    logged: dict | None, home_id: str, away_id: str,
-) -> tuple[str | None, float | None]:
-    """(predicted_winner, win_probability) from a logged win-probability
-    prediction, or (None, None) if none was ever logged."""
-    if logged is None:
-        return None, None
-    probability = logged["home_win_probability"]
-    predicted_winner = home_id if probability >= 0.5 else away_id
-    win_probability = probability if predicted_winner == home_id else 1 - probability
-    return predicted_winner, win_probability
-
-
-def _completed_matchup_row(
-    real_event: dict, event_key_value: str, home_id: str, away_id: str, seed_a: int | None, seed_b: int | None,
-    predictions_table,
-) -> dict:
-    actual = _actual_result(real_event)
-    logged = _logged_win_probability(predictions_table, event_key_value)
-    predicted_winner, win_probability = _predicted_winner_and_probability(logged, home_id, away_id)
-    return {
-        "status": "final",
-        "team_a": home_id, "team_b": away_id, "seed_a": seed_a, "seed_b": seed_b,
-        "predicted_winner": predicted_winner, "win_probability": win_probability,
-        "actual_winner": home_id if actual["home_won"] else away_id,
-        "actual_home_score": actual["home_score"], "actual_away_score": actual["away_score"],
-    }
-
-
-def _scheduled_matchup_row(
-    real_event: dict, event_key_value: str, home_id: str, away_id: str, seed_a: int | None, seed_b: int | None,
-    storage: FeatureStorage, s3, predictions_table,
-) -> dict:
-    logged = _logged_win_probability(predictions_table, event_key_value)
-    if logged is None:
-        try:
-            event_prediction.compute_and_cache_event(storage, s3, predictions_table, real_event["event_id"])
-            logged = _logged_win_probability(predictions_table, event_key_value)
-        except Exception:
-            logger.exception("Failed computing a live prediction for bracket game %s", event_key_value)
-
-    predicted_winner, win_probability = _predicted_winner_and_probability(logged, home_id, away_id)
-    return {
-        "status": "scheduled",
-        "team_a": home_id, "team_b": away_id, "seed_a": seed_a, "seed_b": seed_b,
-        "predicted_winner": predicted_winner, "win_probability": win_probability,
-    }
-
-
-def _project_bracket_round(
-    round_name: str, pairs: list[tuple[str, str | None, int | None, int | None]],
-    real_matchups: dict[frozenset, dict], storage: FeatureStorage, s3, predictions_table,
-    current_ratings: dict[str, float], home_advantage: float,
-) -> tuple[dict, list[tuple[str, int | None]]]:
-    matchups = []
-    advancing = []
-    for team_a, team_b, seed_a, seed_b in pairs:
-        matchup = _resolve_matchup(
-            team_a, team_b, seed_a, seed_b, real_matchups, storage, s3, predictions_table,
-            current_ratings, home_advantage,
-        )
-        matchups.append(matchup)
-        winner = matchup["predicted_winner"] if matchup["status"] != "final" else matchup["actual_winner"]
-        winner_seed = seed_a if winner == team_a else seed_b
-        advancing.append((winner, winner_seed))
-    return {"round": round_name, "matchups": matchups}, advancing
+    return bracket_projection.real_postseason_matchups(storage, SPORT, current_season, predicate)
 
 
 def _reconcile_single_elim_bracket(

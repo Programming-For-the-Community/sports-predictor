@@ -45,6 +45,7 @@ The two sport "shapes" for ComputeAndCachePrediction, preserved exactly:
     falls through to the unrecognized-invocation branch below, matching
     each of these sports' own original combined `and` condition exactly.
 """
+from library.aws import lambda_singletons
 from library.logging_safety import safe_log_value
 
 
@@ -81,3 +82,28 @@ def make_lambda_handler(
         return {"status": "error", "message": "Unrecognized invocation"}
 
     return lambda_handler
+
+
+def make_event_prediction_lambda_handler(
+    *, resources, event_prediction, run_scheduled_fn, logger, player_props: bool, extra_warmups=(),
+):
+    """make_lambda_handler wired to a sport's own event_prediction module,
+    each entry point called with `resources.all()` (storage, model bucket,
+    predictions table) ahead of its own arguments. `resources` is the
+    handler's library.aws.serving_resources.ServingResources;
+    `extra_warmups` are any further singleton getters the warmup ping
+    should create."""
+
+    def compute_and_cache_player_prop(event_id, entity_id, stat):
+        return event_prediction.compute_and_cache_player_prop(*resources.all(), event_id, entity_id, stat)
+
+    return make_lambda_handler(
+        warmup_fn=lambda: lambda_singletons.warm(
+            resources.storage, resources.model_bucket, resources.predictions_table, *extra_warmups,
+        ),
+        run_scheduled_fn=run_scheduled_fn,
+        compute_and_cache_event_fn=lambda event_id: event_prediction.compute_and_cache_event(*resources.all(), event_id),
+        compute_and_cache_player_prop_fn=compute_and_cache_player_prop if player_props else None,
+        snapshot_event_fn=lambda event_id: event_prediction.snapshot_event(*resources.all(), event_id),
+        logger=logger,
+    )

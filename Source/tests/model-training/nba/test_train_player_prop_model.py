@@ -271,7 +271,7 @@ class TestMain:
         df = _make_df(10, target_stat="points")
         mock_s3 = MagicMock()
 
-        with patch.object(train_player_prop_model, "S3Manager", return_value=mock_s3), \
+        with patch.object(train_player_prop_model.training_common, "S3Manager", return_value=mock_s3), \
              patch.object(train_player_prop_model.training_common, "load_features", return_value=df) as mock_load, \
              patch.object(train_player_prop_model, "train", return_value=_fake_result()) as mock_train:
             train_player_prop_model.main()

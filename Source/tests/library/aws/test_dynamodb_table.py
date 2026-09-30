@@ -352,8 +352,10 @@ class TestDecimalConversion:
 
         result = table.scan()
 
-        assert result[0]["score"] == 27 and isinstance(result[0]["score"], int)
-        assert result[1]["score"] == 20.5 and isinstance(result[1]["score"], float)
+        assert result[0]["score"] == 27
+        assert isinstance(result[0]["score"], int)
+        assert result[1]["score"] == 20.5
+        assert isinstance(result[1]["score"], float)
 
 
 class TestFloatToDecimalOnWrite:

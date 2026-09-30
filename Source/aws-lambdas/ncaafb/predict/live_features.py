@@ -33,11 +33,10 @@ optional pass-through accepted by every public function here and threaded
 into get_team_events/_live_elo_ratings calls, so one event-prediction
 request can share a single fetch instead of each function re-querying.
 """
-from concurrent.futures import ThreadPoolExecutor
 from datetime import date
 
 from library.features.common import compute_elo_ratings
-from library.features.live_orchestration import EventNotFoundError, MalformedEventError
+from library.features.live_orchestration import EventNotFoundError, MalformedEventError, box_score_candidate_ids
 from library.features.live_orchestration import home_away_ids as _home_away_ids
 from library.features.live_orchestration import is_roster_entry_fresh
 from library.features.live_orchestration import live_elo_ratings as _live_elo_ratings
@@ -231,39 +230,11 @@ def _box_score_candidate_ids(
     storage, sport: str, team_id: str, before_date: str, current_season: int | None, stat_key: str,
     events: list[dict] | None = None, reference_date: str | None = None,
 ) -> list[str]:
-    """Every still-rostered entity_id credited with stat_key at least once in team_id's box
-    score history, walking most-recent-first, bounded the same as _presumptive_leader
-    (current season plus SEASON_LOOKBACK prior).
-
-    Two phases: first collect every distinct candidate id from box scores,
-    then check roster membership (_still_on_team, one GetItem each)
-    concurrently, since a team's SEASON_LOOKBACK-bounded box-score history
-    can hold dozens of distinct candidates for a single category.
-    reference_date is today by default (see _still_on_team) -- threaded
-    through so every candidate in one request is judged against the same
-    moment, and so tests can pin it."""
-    team_events = storage.get_team_events(sport, team_id, before_date=before_date, events=events)
-    seen: set[str] = set()
-    ordered_ids: list[str] = []
-    for event in team_events:
-        season = event.get("season")
-        if season is not None and current_season is not None and season < current_season - SEASON_LOOKBACK:
-            break
-        for row in _team_player_games_for_event(storage, team_id, event["event_key"]):
-            entity_id = row.get("entity_id")
-            if entity_id is None or entity_id in seen or stat_key not in row.get("stat_line", {}):
-                continue
-            seen.add(entity_id)
-            ordered_ids.append(entity_id)
-
-    if not ordered_ids:
-        return []
-    with ThreadPoolExecutor(max_workers=min(len(ordered_ids), 16)) as executor:
-        still_rostered = dict(zip(
-            ordered_ids,
-            executor.map(lambda entity_id: _still_on_team(storage, sport, entity_id, team_id, reference_date), ordered_ids),
-        ))
-    return [entity_id for entity_id in ordered_ids if still_rostered[entity_id]]
+    return box_score_candidate_ids(
+        storage, sport, team_id, before_date, current_season, stat_key,
+        season_lookback=SEASON_LOOKBACK, events=events,
+        still_on_team=lambda entity_id: _still_on_team(storage, sport, entity_id, team_id, reference_date),
+    )
 
 
 def build_live_event_leader_candidates(

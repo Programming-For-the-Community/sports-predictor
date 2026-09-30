@@ -5,6 +5,8 @@ tests/library/performance/.
 import sys
 from unittest.mock import patch
 
+from library.aws import serving_resources
+
 shared_model_performance = sys.modules["shared_model_performance"]
 
 
@@ -59,9 +61,9 @@ def test_each_client_is_built_once_from_the_environment(monkeypatch):
     monkeypatch.setenv("AWS_REGION", "us-east-1")
     for name in ("_storage", "_model_bucket", "_predictions_table"):
         monkeypatch.setattr(shared_model_performance, name, None)
-    with patch.object(shared_model_performance, "FeatureStorage") as storage_cls, \
-         patch.object(shared_model_performance, "S3Manager") as s3_cls, \
-         patch.object(shared_model_performance, "DynamoDBTable") as table_cls:
+    with patch.object(serving_resources, "FeatureStorage") as storage_cls, \
+         patch.object(serving_resources, "S3Manager") as s3_cls, \
+         patch.object(serving_resources, "DynamoDBTable") as table_cls:
         for _ in range(2):
             assert shared_model_performance._get_storage() is storage_cls.return_value
             assert shared_model_performance._get_model_bucket() is s3_cls.return_value

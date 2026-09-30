@@ -6,6 +6,7 @@ single-argument API.
 Player entities during backfill come from box scores only, via
 boxscore_to_player_game_stats; there is no roster-based entity seeding.
 """
+from library.normalize import espn
 from library.normalize.espn import (
     team_to_entity as _team_to_entity,
     scoreboard_event_to_event_item as _scoreboard_event_to_event_item,
@@ -15,12 +16,7 @@ from library.normalize.espn import (
 
 SPORT = "nba"
 
-# Both team- and player-level box scores use identical compound-key strings.
-_COMPOUND_KEY_SPLITS: dict[str, tuple[str, str]] = {
-    "fieldGoalsMade-fieldGoalsAttempted": ("field_goals_made", "field_goal_attempts"),
-    "threePointFieldGoalsMade-threePointFieldGoalsAttempted": ("three_pointers_made", "three_point_attempts"),
-    "freeThrowsMade-freeThrowsAttempted": ("free_throws_made", "free_throw_attempts"),
-}
+_COMPOUND_KEY_SPLITS = espn.BASKETBALL_COMPOUND_KEY_SPLITS
 
 
 def team_to_entity(team: dict) -> dict:

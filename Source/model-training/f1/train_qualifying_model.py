@@ -27,26 +27,16 @@ Usage:
     python train_qualifying_model.py
 """
 import logging
-import os
 
-try:
-    from sklearnex import patch_sklearn
-    patch_sklearn()
-except ImportError:
-    pass
+from library.ml.sklearn_acceleration import patch_sklearn_if_available
+
+# Must run before any sklearn import below.
+patch_sklearn_if_available()
 
 import pandas as pd
 
-from library.aws.s3_manager import S3Manager
-from library.ml import backtest, training_common
+from library.ml import backtest, model_types, training_common
 from library.ml import train_regressor_model_common as regressor_common
-from library.ml.model_types import (
-    ElasticNetAdapter,
-    LightGBMRegressorAdapter,
-    MLPRegressorAdapter,
-    RandomForestRegressorAdapter,
-    XGBoostRegressorAdapter,
-)
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger("f1-train-model")
@@ -58,44 +48,22 @@ DRIVER_FEATURES_KEY = "f1/training-data/driver_features.parquet"
 NON_FEATURE_COLUMNS = {"event_key", "entity_id", "constructor_entity_id", "event_date", "circuit_id"}
 LABEL_COLUMN = "label_qualifying_position"
 
-CANDIDATES = [
-    XGBoostRegressorAdapter(),
-    ElasticNetAdapter(),
-    RandomForestRegressorAdapter(),
-    MLPRegressorAdapter(),
-    LightGBMRegressorAdapter(),
-]
+CANDIDATES = model_types.regressor_candidates()
 
 
 def _filter_to_scored_rows(df: pd.DataFrame) -> pd.DataFrame:
     return df[df[LABEL_COLUMN].notna()].copy()
 
 
-def _feature_columns(df: pd.DataFrame) -> list[str]:
-    return training_common.feature_columns(df, NON_FEATURE_COLUMNS)
-
-
-def train(s3: S3Manager, df: pd.DataFrame) -> dict:
-    """Runs the full candidate tournament and returns run_backtest's
-    result ({"promotions": [card, ...], "candidates": [summary, ...]})."""
-    df = _filter_to_scored_rows(df)
-    return regressor_common.train(
-        s3, df, SPORT, MODEL_NAME,
-        label_column=LABEL_COLUMN, non_feature_columns=NON_FEATURE_COLUMNS,
-        candidates=CANDIDATES, logger=logger,
-    )
-
-
-def main() -> None:
-    bucket = os.environ["MODEL_ARTIFACTS_BUCKET_NAME"]
-    region = os.environ.get("AWS_REGION")
-    s3 = S3Manager(bucket, region=region)
-
-    logger.info("Loading %s training data from s3://%s/%s", MODEL_NAME, bucket, DRIVER_FEATURES_KEY)
-    df = training_common.load_features(s3, DRIVER_FEATURES_KEY)
-    logger.info("Loaded %d driver-race rows", len(df))
-
-    train(s3, df)
+_job = training_common.ModelJob(
+    globals(),
+    trainer=regressor_common.train, sport=SPORT, model_name=MODEL_NAME, features_key=DRIVER_FEATURES_KEY,
+    row_noun="driver-race", label_column=LABEL_COLUMN, non_feature_columns=NON_FEATURE_COLUMNS, candidates=CANDIDATES,
+    prepare=_filter_to_scored_rows,
+)
+_feature_columns = _job.feature_columns
+train = _job.train
+main = _job.main
 
 
 if __name__ == "__main__":

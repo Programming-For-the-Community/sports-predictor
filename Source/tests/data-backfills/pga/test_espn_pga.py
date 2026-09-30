@@ -123,7 +123,8 @@ class TestNormalizeEventItem:
     def test_event_date_is_iso_format(self, leaderboard_event):
         item = normalize.leaderboard_event_to_event_item(leaderboard_event)
         assert len(item["event_date"]) == 10
-        assert item["event_date"][4] == "-" and item["event_date"][7] == "-"
+        assert item["event_date"][4] == "-"
+        assert item["event_date"][7] == "-"
 
 
 # ---------------------------------------------------------------------------

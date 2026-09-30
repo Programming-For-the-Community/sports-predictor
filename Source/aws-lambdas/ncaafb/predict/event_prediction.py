@@ -80,31 +80,9 @@ def predict_event_leaders(storage, s3, predictions_table, event_key_value: str, 
     return {"home": team_leaders(candidates["home"]), "away": team_leaders(candidates["away"])}
 
 
-def predict_event(storage, s3, predictions_table, event_id: str) -> dict:
-    return common.predict_event(
-        storage, s3, predictions_table, event_id, SPORT, SCORE_MODELS, WIN_PROBABILITY_MODEL, predict_event_leaders,
-    )
-
-
-def predict_player_prop(storage, s3, predictions_table, event_id: str, entity_id: str, target_stat: str) -> dict:
-    return common.predict_player_prop(storage, s3, predictions_table, event_id, entity_id, target_stat, SPORT)
-
-
-def compute_and_cache_event(storage, s3, predictions_table, event_id: str) -> None:
-    """Background worker triggered by predict-read on a cache miss/stale-refresh. Computes
-    predict_event and writes the result to the S3 prediction cache. A recognized,
-    possibly-transient error (event not ingested, no model promoted) gets a short-lived
-    negative cache entry; any other exception propagates after the in-progress claim clears."""
-    common.compute_and_cache_event(storage, s3, predictions_table, event_id, SPORT, predict_event)
-
-
-def snapshot_event(storage, s3, predictions_table, event_id: str) -> int:
-    """Pre-kickoff snapshot for one event -- see common.snapshot_event."""
-    return common.snapshot_event(storage, s3, predictions_table, event_id, SPORT, predict_event)
-
-
-def compute_and_cache_player_prop(storage, s3, predictions_table, event_id: str, entity_id: str, target_stat: str) -> None:
-    """Same role as compute_and_cache_event, for one player-prop stat."""
-    common.compute_and_cache_player_prop(
-        storage, s3, predictions_table, event_id, entity_id, target_stat, SPORT, predict_player_prop,
-    )
+_entry_points = common.HeadToHeadEntryPoints(globals(), SPORT, SCORE_MODELS, WIN_PROBABILITY_MODEL)
+predict_event = _entry_points.predict_event
+predict_player_prop = _entry_points.predict_player_prop
+compute_and_cache_event = _entry_points.compute_and_cache_event
+snapshot_event = _entry_points.snapshot_event
+compute_and_cache_player_prop = _entry_points.compute_and_cache_player_prop

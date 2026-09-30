@@ -25,8 +25,10 @@ class TestBoundaryData:
         ca_points = [pt for ring in handler.STATE_RINGS["CA"] for pt in ring]
         lons = [p[0] for p in ca_points]
         lats = [p[1] for p in ca_points]
-        assert -125 < min(lons) and max(lons) < -113
-        assert 32 < min(lats) and max(lats) < 43
+        assert -125 < min(lons)
+        assert max(lons) < -113
+        assert 32 < min(lats)
+        assert max(lats) < 43
 
     def test_most_countries_resolved_to_a_real_iso_alpha_2_code(self):
         # A handful of disputed/unrecognized territories (no ISO code at

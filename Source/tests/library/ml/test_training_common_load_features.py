@@ -51,11 +51,9 @@ class TestLoadFeatures:
         s3 = MagicMock()
         s3.get_bytes.return_value = b"not a parquet file"
 
-        with patch("library.ml.training_common.time.sleep"):
-            try:
-                training_common.load_features(s3, "nfl/training-data/event_features.parquet")
-                assert False, "expected RuntimeError"
-            except RuntimeError as exc:
-                assert isinstance(exc.__cause__, pyarrow.ArrowInvalid)
+        with patch("library.ml.training_common.time.sleep"), pytest.raises(RuntimeError) as exc_info:
+            training_common.load_features(s3, "nfl/training-data/event_features.parquet")
+
+        assert isinstance(exc_info.value.__cause__, pyarrow.ArrowInvalid)
 
         assert s3.get_bytes.call_count == training_common.LOAD_FEATURES_MAX_ATTEMPTS

@@ -78,7 +78,7 @@ from library.aws.account import get_account_id
 from library.aws.boto_config import DEFAULT_CONFIG
 from library.http.ncaambb import NCAAMBBClient
 from library.http.ncaambb_core import NCAAMBBCoreClient, current_ap_poll_pointer
-from library.normalize.espn import roster_to_team_injuries
+from library.normalize.espn import attach_injuries, league_team_ids, roster_to_team_injuries
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s", force=True)  # AWS Lambda pre-attaches a root handler, so basicConfig() is otherwise a silent no-op
 logger = logging.getLogger("ncaambb-ingest")
@@ -113,13 +113,7 @@ def _put_json(key: str, payload: dict) -> None:
     logger.info("Wrote s3://%s/%s", RAW_BUCKET, key)
 
 
-def _team_ids(teams_response: dict) -> list[str]:
-    """Every D1 team id from a get_teams() response -- not derived from
-    any date's scoreboard, so this works identically in the off-season or
-    on a night with no games at all."""
-    leagues = teams_response.get("sports", [{}])[0].get("leagues", [{}])
-    teams = leagues[0].get("teams", []) if leagues else []
-    return [t["team"]["id"] for t in teams if t.get("team", {}).get("id")]
+_team_ids = league_team_ids
 
 
 def _fetch_one_roster(client: NCAAMBBClient, team_id: str) -> list[dict]:
@@ -162,31 +156,7 @@ def _fetch_rosters(client: NCAAMBBClient, team_ids: list[str]) -> tuple[int, int
     return fetched, failed, injuries_by_team
 
 
-def _attach_injuries(events: list[dict], injuries_by_team: dict[str, list[dict]]) -> None:
-    """Attaches home_injuries/away_injuries onto each scoreboard event
-    dict in place, from the same run's roster fetch above.
-    library.normalize.espn.scoreboard_event_to_event_item already reads
-    home_injuries/away_injuries off the event dict generically (shared
-    across every sport), so no normalize-side change is needed once this
-    is set.
-
-    Forward-only: only events processed by an ingest run from here
-    forward carry this field -- historical backfilled events never had a
-    same-day roster fetch to attach.
-
-    Best-effort: a team missing from injuries_by_team (its own roster
-    fetch failed above) simply leaves that side's field unset rather than
-    writing an empty list, preserving the "never checked" vs. "checked,
-    nobody's hurt" distinction scoreboard_event_to_event_item's own
-    docstring documents."""
-    for evt in events:
-        competitions = evt.get("competitions") or [{}]
-        for competitor in competitions[0].get("competitors", []):
-            team_id = str(competitor.get("team", {}).get("id", ""))
-            role = competitor.get("homeAway")
-            if role not in ("home", "away") or team_id not in injuries_by_team:
-                continue
-            evt[f"{role}_injuries"] = injuries_by_team[team_id]
+_attach_injuries = attach_injuries
 
 
 def _fetch_current_ap_poll(client: NCAAMBBClient, core_client: NCAAMBBCoreClient) -> bool:

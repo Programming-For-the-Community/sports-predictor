@@ -26,6 +26,7 @@ import time
 from unittest.mock import MagicMock, patch
 
 import shared_predict_read
+from library.aws import serving_resources
 from library.schema.keys import event_key as build_event_key
 from library.storage.model_artifacts import current_version_key
 
@@ -552,9 +553,9 @@ class TestLazySingletons:
         monkeypatch.setenv("MODEL_ARTIFACTS_BUCKET_NAME", "models")
         monkeypatch.setenv("PREDICTIONS_TABLE_NAME", "predictions")
         monkeypatch.setenv("AWS_REGION", "us-east-1")
-        with patch.object(shared_predict_read, "FeatureStorage") as storage_cls, \
-             patch.object(shared_predict_read, "S3Manager") as s3_cls, \
-             patch.object(shared_predict_read, "DynamoDBTable") as table_cls:
+        with patch.object(serving_resources, "FeatureStorage") as storage_cls, \
+             patch.object(serving_resources, "S3Manager") as s3_cls, \
+             patch.object(serving_resources, "DynamoDBTable") as table_cls:
             for _ in range(2):
                 assert shared_predict_read._get_storage() is storage_cls.return_value
                 assert shared_predict_read._get_model_bucket() is s3_cls.return_value

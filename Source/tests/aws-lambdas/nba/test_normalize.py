@@ -15,6 +15,7 @@ import json
 from unittest.mock import MagicMock, patch
 
 import nba_normalize
+from library.normalize import espn_handler
 
 # nba_normalize's own _storage singleton is reset before/after every test
 # in this directory by conftest.py's own _reset_nba_singletons fixture.
@@ -52,7 +53,7 @@ class TestDispatch:
 
         with patch.object(nba_normalize, "_s3", mock_s3), \
              patch("nba_normalize.PipelineStorage", return_value=mock_storage), \
-             patch.object(nba_normalize, "scoreboard_event_to_event_item", return_value=event_stub):
+             patch.object(espn_handler, "scoreboard_event_to_event_item", return_value=event_stub):
             nba_normalize._dispatch("test-bucket", "nba/scoreboard/20260114.json")
 
         assert mock_storage.upsert_event.call_count == 2
@@ -180,7 +181,7 @@ class TestProcessBoxscorePlayerEntities:
     def test_every_player_entity_in_the_box_score_is_upserted(self):
         storage = MagicMock()
         entities = [{"entity_id": "p1"}, {"entity_id": "p2"}]
-        with patch.object(nba_normalize, "_get_storage", return_value=storage),              patch.object(nba_normalize, "boxscore_to_player_game_stats", return_value=([{"row": 1}], entities)),              patch.object(nba_normalize, "boxscore_to_team_game_stats", return_value=[]):
+        with patch.object(nba_normalize, "_storage", storage),              patch.object(espn_handler, "boxscore_to_player_game_stats", return_value=([{"row": 1}], entities)),              patch.object(espn_handler, "boxscore_to_team_game_stats", return_value=[]):
             nba_normalize._process_boxscore({}, "nba/boxscore/2026/401.json")
 
         assert [c.args[0] for c in storage.upsert_player_entity.call_args_list] == entities

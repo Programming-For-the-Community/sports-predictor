@@ -17,9 +17,9 @@ import event_prediction
 
 class TestWarmup:
     def test_warmup_ping_touches_singletons_and_skips_routing(self):
-        with patch.object(ncaafb_predict, "_get_storage") as mock_storage, \
-             patch.object(ncaafb_predict, "_get_model_bucket") as mock_bucket, \
-             patch.object(ncaafb_predict, "_get_predictions_table") as mock_table:
+        with patch.object(ncaafb_predict._resources, "storage") as mock_storage, \
+             patch.object(ncaafb_predict._resources, "model_bucket") as mock_bucket, \
+             patch.object(ncaafb_predict._resources, "predictions_table") as mock_table:
             response = ncaafb_predict.lambda_handler({"warmup": True}, None)
 
         assert response == {"status": "warm"}
@@ -30,9 +30,9 @@ class TestWarmup:
 
 class TestComputeAndCacheDispatch:
     def test_event_route_calls_compute_and_cache_event(self):
-        with patch.object(ncaafb_predict, "_get_storage"), \
-             patch.object(ncaafb_predict, "_get_model_bucket"), \
-             patch.object(ncaafb_predict, "_get_predictions_table"), \
+        with patch.object(ncaafb_predict._resources, "storage"), \
+             patch.object(ncaafb_predict._resources, "model_bucket"), \
+             patch.object(ncaafb_predict._resources, "predictions_table"), \
              patch.object(event_prediction, "compute_and_cache_event") as mock_compute:
             response = ncaafb_predict.lambda_handler(
                 {"detail-type": "ComputeAndCachePrediction", "route": "event", "event_id": "401520281"}, None,
@@ -43,9 +43,9 @@ class TestComputeAndCacheDispatch:
         assert mock_compute.call_args.args[-1] == "401520281"
 
     def test_player_prop_route_calls_compute_and_cache_player_prop(self):
-        with patch.object(ncaafb_predict, "_get_storage"), \
-             patch.object(ncaafb_predict, "_get_model_bucket"), \
-             patch.object(ncaafb_predict, "_get_predictions_table"), \
+        with patch.object(ncaafb_predict._resources, "storage"), \
+             patch.object(ncaafb_predict._resources, "model_bucket"), \
+             patch.object(ncaafb_predict._resources, "predictions_table"), \
              patch.object(event_prediction, "compute_and_cache_player_prop") as mock_compute:
             response = ncaafb_predict.lambda_handler(
                 {

@@ -3,22 +3,25 @@ Shared event/roster plumbing for nfl/nba/ncaafb/ncaambb's own predict/
 live_features.py -- home/away participant extraction, live (in-progress)
 Elo lookups, recent-stat-volume ranking, and roster-freshness checking are
 identical shapes across all four team sports (module-private helpers there,
-made public here since this module is now their shared home). Each sport's
+made public here since this module is now their shared home), as is the
+box-score leader-candidate search (box_score_candidate_ids). Each sport's
 own live_features.py re-exports these directly and keeps its own
 build_live_event_features/build_live_player_features/
 build_live_event_leader_candidates plus presumptive-leader selection --
 those differ genuinely per sport: NFL's depth-chart/injury-based selection
 has no equivalent elsewhere, NCAAFB has a geo travel-distance feature the
 others don't, and each sport's own roster-staleness day threshold and
-`_still_on_team`/`_box_score_candidate_ids` shape (NBA checks team_id only;
-NCAAFB/NCAAMBB additionally require a freshness recheck) are kept separate
-rather than merged -- see `is_roster_entry_fresh` below, which takes that
-threshold as an argument rather than assuming a shared constant.
+`_still_on_team` check (NBA checks team_id only; NCAAFB/NCAAMBB
+additionally require a freshness recheck) are kept separate rather than
+merged -- see `is_roster_entry_fresh` below, which takes that threshold as
+an argument rather than assuming a shared constant.
 
 PGA and F1 are explicitly out of scope -- their live_features.py is a
 structurally different shape (per-competitor field iteration, no home/away
 concept, multiple event types).
 """
+from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor
 from datetime import date
 
 from library.features.common import DEFAULT_STARTING_RATING, compute_elo_ratings
@@ -95,6 +98,38 @@ def team_previous_event_date(
 
 def team_player_games_for_event(storage, team_id: str, event_key: str) -> list[dict]:
     return [row for row in storage.get_player_game_stats_for_event(event_key) if row.get("team_id") == team_id]
+
+
+def box_score_candidate_ids(
+    storage, sport: str, team_id: str, before_date: str, current_season: int | None, stat_key: str, *,
+    season_lookback: int, still_on_team: Callable[[str], bool], events: list[dict] | None = None,
+) -> list[str]:
+    """Every entity_id credited with stat_key at least once in team_id's
+    box-score history that `still_on_team(entity_id)` confirms, most-recent
+    first, bounded to the current season plus season_lookback prior. The
+    distinct ids are collected first (no I/O beyond the already-fetched
+    rows), then roster membership is checked concurrently -- sequential
+    checks are a real latency source once a team's history holds dozens of
+    candidates for one category."""
+    team_events = storage.get_team_events(sport, team_id, before_date=before_date, events=events)
+    seen: set[str] = set()
+    ordered_ids: list[str] = []
+    for event in team_events:
+        season = event.get("season")
+        if season is not None and current_season is not None and season < current_season - season_lookback:
+            break
+        for row in team_player_games_for_event(storage, team_id, event["event_key"]):
+            entity_id = row.get("entity_id")
+            if entity_id is None or entity_id in seen or stat_key not in row.get("stat_line", {}):
+                continue
+            seen.add(entity_id)
+            ordered_ids.append(entity_id)
+
+    if not ordered_ids:
+        return []
+    with ThreadPoolExecutor(max_workers=min(len(ordered_ids), 16)) as executor:
+        still_rostered = dict(zip(ordered_ids, executor.map(still_on_team, ordered_ids)))
+    return [entity_id for entity_id in ordered_ids if still_rostered[entity_id]]
 
 
 def is_roster_entry_fresh(entity: dict, reference_date: str, staleness_days: int) -> bool:

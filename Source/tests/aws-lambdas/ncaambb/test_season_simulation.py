@@ -162,7 +162,8 @@ class TestSelectMarchMadnessField:
         auto_bids, at_large = ss.select_march_madness_field(model_scores, conference_champions)
 
         assert auto_bids == ["t1", "t2"]
-        assert "t1" not in at_large and "t2" not in at_large
+        assert "t1" not in at_large
+        assert "t2" not in at_large
 
     def test_at_large_fills_the_rest_of_the_field_best_score_first(self):
         model_scores = {f"t{i}": float(i) for i in range(1, 6)}

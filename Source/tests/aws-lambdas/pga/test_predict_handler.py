@@ -12,13 +12,14 @@ from unittest.mock import patch
 import event_prediction
 import pga_predict
 import season_projection
+from library.aws import serving_resources
 
 
 class TestScheduledSeasonProjectionDispatch:
     def test_dispatches_to_season_projections_own_run_scheduled(self):
-        with patch.object(pga_predict, "_get_storage"), \
-             patch.object(pga_predict, "_get_model_bucket"), \
-             patch.object(pga_predict, "_get_predictions_table"), \
+        with patch.object(pga_predict._resources, "storage"), \
+             patch.object(pga_predict._resources, "model_bucket"), \
+             patch.object(pga_predict._resources, "predictions_table"), \
              patch.object(season_projection, "run_scheduled", return_value={"sport": "pga", "season": 2026}) as mock_run:
             response = pga_predict.lambda_handler({"detail-type": "ScheduledSeasonProjection"}, None)
 
@@ -28,9 +29,9 @@ class TestScheduledSeasonProjectionDispatch:
 
 class TestWarmup:
     def test_warmup_ping_touches_singletons_and_skips_routing(self):
-        with patch.object(pga_predict, "_get_storage") as mock_storage, \
-             patch.object(pga_predict, "_get_model_bucket") as mock_bucket, \
-             patch.object(pga_predict, "_get_predictions_table") as mock_table:
+        with patch.object(pga_predict._resources, "storage") as mock_storage, \
+             patch.object(pga_predict._resources, "model_bucket") as mock_bucket, \
+             patch.object(pga_predict._resources, "predictions_table") as mock_table:
             response = pga_predict.lambda_handler({"warmup": True}, None)
 
         assert response == {"status": "warm"}
@@ -41,9 +42,9 @@ class TestWarmup:
 
 class TestComputeAndCacheDispatch:
     def test_event_route_calls_compute_and_cache_event(self):
-        with patch.object(pga_predict, "_get_storage"), \
-             patch.object(pga_predict, "_get_model_bucket"), \
-             patch.object(pga_predict, "_get_predictions_table"), \
+        with patch.object(pga_predict._resources, "storage"), \
+             patch.object(pga_predict._resources, "model_bucket"), \
+             patch.object(pga_predict._resources, "predictions_table"), \
              patch.object(event_prediction, "compute_and_cache_event") as mock_compute:
             response = pga_predict.lambda_handler(
                 {"detail-type": "ComputeAndCachePrediction", "route": "event", "event_id": "401811963"}, None,
@@ -71,7 +72,7 @@ class TestLazySingletons:
         monkeypatch.setenv("MODEL_ARTIFACTS_BUCKET_NAME", "models")
         monkeypatch.setenv("PREDICTIONS_TABLE_NAME", "predictions")
         monkeypatch.setenv("AWS_REGION", "us-east-1")
-        with patch.object(pga_predict, "FeatureStorage") as storage_cls,              patch.object(pga_predict, "S3Manager") as s3_cls,              patch.object(pga_predict, "DynamoDBTable") as table_cls:
+        with patch.object(serving_resources, "FeatureStorage") as storage_cls,              patch.object(serving_resources, "S3Manager") as s3_cls,              patch.object(serving_resources, "DynamoDBTable") as table_cls:
             for _ in range(2):
                 assert pga_predict._get_storage() is storage_cls.return_value
                 assert pga_predict._get_model_bucket() is s3_cls.return_value

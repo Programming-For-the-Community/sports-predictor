@@ -12,12 +12,12 @@ ESPN scoreboard response -- no crosswalk needed.
 Thin wrapper around library.serving.live_scores_common (confirmed
 byte-identical logic across nfl/nba/ncaafb/ncaambb before sharing there) --
 only this sport's own cache key/compound-stat-key shape/worker count stay
-here. `refresh`/`get_live_scores` stay real module-level functions (not
-just re-exported common.* names) since handler.py's own tests patch them
-by attribute.
+here. `refresh`/`get_live_scores` are module attributes handler.py looks
+up at call time, so tests can patch them.
 """
 import logging
 
+from library.normalize import espn
 from library.serving import live_scores_common as common
 from library.serving.live_scores_common import POLL_SAFETY_CAP_AFTER_KICKOFF, POLL_START_BEFORE_KICKOFF, STALE_AFTER
 
@@ -25,14 +25,7 @@ logger = logging.getLogger("ncaafb-live-scores")
 
 LIVE_SCORES_CACHE_KEY = "ncaafb/cache/live-scores/latest.json"
 
-# ESPN's site API returns these stats as a single compound key
-# ("made/attempted" or "made-yardsLost"); split into separate fields here.
-_COMPOUND_KEY_SPLITS: dict[str, tuple[str, str]] = {
-    "completions/passingAttempts": ("completions", "passing_attempts"),
-    "sacks-sackYardsLost": ("sacks_taken", "sack_yards_lost"),
-    "fieldGoalsMade/fieldGoalAttempts": ("field_goals_made", "field_goal_attempts"),
-    "extraPointsMade/extraPointAttempts": ("extra_points_made", "extra_point_attempts"),
-}
+_COMPOUND_KEY_SPLITS = espn.FOOTBALL_PLAYER_COMPOUND_KEY_SPLITS
 
 # A Saturday with several games live at once shouldn't pay each event's
 # own boxscore-fetch latency serially against this Lambda's own timeout.
@@ -43,21 +36,9 @@ _candidate_events = common.candidate_events
 _extract_live_state = common.extract_live_state
 
 
-def _get_cache(s3, bucket: str) -> dict | None:
-    return common.get_cache(s3, bucket, LIVE_SCORES_CACHE_KEY)
-
-
-def _put_cache(s3, bucket: str, payload: dict) -> None:
-    common.put_cache(s3, bucket, LIVE_SCORES_CACHE_KEY, payload)
-
-
-def _live_player_stats(client, sport: str, event_id: str) -> dict[str, dict]:
-    return common.live_player_stats(client, sport, event_id, _COMPOUND_KEY_SPLITS)
-
-
-def refresh(storage, s3, bucket: str, client, sport: str) -> dict:
-    return common.refresh(storage, s3, bucket, client, sport, LIVE_SCORES_CACHE_KEY, _COMPOUND_KEY_SPLITS, BOXSCORE_MAX_WORKERS)
-
-
-def get_live_scores(s3, bucket: str) -> dict:
-    return common.get_live_scores(s3, bucket, LIVE_SCORES_CACHE_KEY)
+_live = common.SportLiveScores(LIVE_SCORES_CACHE_KEY, _COMPOUND_KEY_SPLITS, BOXSCORE_MAX_WORKERS)
+_get_cache = _live.get_cache
+_put_cache = _live.put_cache
+_live_player_stats = _live.live_player_stats
+refresh = _live.refresh
+get_live_scores = _live.get_live_scores

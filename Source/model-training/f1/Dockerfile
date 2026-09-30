@@ -36,9 +36,8 @@ FROM python:3.12-slim AS runtime
 # training image -- see model-training/pga/Dockerfile's own comment).
 RUN apt-get update && \
     apt-get install -y --no-install-recommends libgomp1 && \
-    rm -rf /var/lib/apt/lists/*
-
-RUN useradd --no-create-home --uid 10001 train-model
+    rm -rf /var/lib/apt/lists/* && \
+    useradd --no-create-home --uid 10001 train-model
 
 WORKDIR /app
 

@@ -23,16 +23,18 @@ def _api_event(resource: str) -> dict:
 
 
 class TestDispatch:
-    def test_refresh_trigger_calls_live_scores_refresh_not_the_api_route(self):
-        ncaafb_live_scores._storage = MagicMock()
+    def test_refresh_trigger_calls_live_scores_refresh_not_the_api_route(self, monkeypatch):
+        storage = MagicMock()
+        monkeypatch.setattr(ncaafb_live_scores, "_storage", storage)
         with patch.object(live_scores, "refresh", return_value={"polled": 1}) as mock_refresh:
             result = ncaafb_live_scores.lambda_handler({"detail-type": "LiveScoreRefresh"}, None)
 
         assert result == {"polled": 1}
         mock_refresh.assert_called_once()
 
-    def test_live_scores_route_returns_cached_events(self):
-        ncaafb_live_scores._storage = MagicMock()
+    def test_live_scores_route_returns_cached_events(self, monkeypatch):
+        storage = MagicMock()
+        monkeypatch.setattr(ncaafb_live_scores, "_storage", storage)
         with patch.object(live_scores, "get_live_scores", return_value={"events": {"1": {"live": True}}}):
             response = ncaafb_live_scores.lambda_handler(_api_event("/ncaafb/live-scores"), None)
 
@@ -44,8 +46,9 @@ class TestDispatch:
 
         assert response["statusCode"] == 404
 
-    def test_an_unhandled_exception_returns_500_not_a_raw_traceback(self):
-        ncaafb_live_scores._storage = MagicMock()
+    def test_an_unhandled_exception_returns_500_not_a_raw_traceback(self, monkeypatch):
+        storage = MagicMock()
+        monkeypatch.setattr(ncaafb_live_scores, "_storage", storage)
         with patch.object(live_scores, "get_live_scores", side_effect=RuntimeError("boom")):
             response = ncaafb_live_scores.lambda_handler(_api_event("/ncaafb/live-scores"), None)
 

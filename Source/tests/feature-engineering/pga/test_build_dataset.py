@@ -552,4 +552,5 @@ class TestProcessTimelineEventMalformed:
             {}, {}, 5, match_rows, cup_rows,
         )
 
-        assert match_rows == [] and cup_rows == []
+        assert match_rows == []
+        assert cup_rows == []

@@ -8,6 +8,7 @@ from unittest.mock import MagicMock, patch
 
 import season_projection
 import season_simulation
+from library.ml import model_types
 
 _NO_SIDES = {"event_key": "X", "event_id": "X", "season": 2025, "is_playoff_game": True, "status": "completed", "participants": []}
 
@@ -79,7 +80,7 @@ class TestBatchScoreTeams:
         adapter.predict.return_value = [0.9, 0.2]
         model_card = {"algorithm": "fake", "feature_columns": ["wins", "avg_points_scored"]}
 
-        with patch.dict(season_projection.ADAPTERS, {"fake": adapter}):
+        with patch.dict(model_types.ADAPTERS, {"fake": adapter}):
             scores = season_projection._batch_score_teams(
                 "estimator", model_card, ["a", "b"], season_inputs, {"a": 5}, {"b": 2}, {},
             )

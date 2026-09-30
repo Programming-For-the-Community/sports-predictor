@@ -127,6 +127,38 @@ def _event_start_snapshot_due(event: dict, now: datetime, schedule: SportSchedul
     return _claim(predictions_table, event["event_key"], START_MARKER, now, RETRY_AFTER)
 
 
+_SNAPSHOT = "snapshot"
+_REFRESH = "refresh"
+
+
+def _kickoff_action(event: dict, now: datetime, schedule: SportSchedule, predictions_table) -> str | None:
+    """Snapshot inside SNAPSHOT_LEAD of kickoff, refresh inside
+    REFRESH_LEAD, each only once its marker is claimed."""
+    kickoff_raw = event.get("kickoff_time")
+    if not kickoff_raw:
+        return None
+    until = _parse_time(kickoff_raw) - now
+    if until <= timedelta(0):
+        return None
+    if until <= SNAPSHOT_LEAD:
+        if snapshots.has_snapshot(predictions_table, event["event_key"]):
+            return None
+        return _SNAPSHOT if _claim(predictions_table, event["event_key"], SNAPSHOT_MARKER, now, RETRY_AFTER) else None
+    if (
+        until <= REFRESH_LEAD
+        and schedule.ingest_payload is not None
+        and _claim(predictions_table, event["event_key"], REFRESH_MARKER, now, None)
+    ):
+        return _REFRESH
+    return None
+
+
+def _event_action(event: dict, now: datetime, schedule: SportSchedule, predictions_table) -> str | None:
+    if schedule.event_start_snapshot_utc_hour is not None:
+        return _SNAPSHOT if _event_start_snapshot_due(event, now, schedule, predictions_table) else None
+    return _kickoff_action(event, now, schedule, predictions_table)
+
+
 def run_tick(
     now: datetime, sports: dict[str, SportSchedule], list_events: Callable[[str], list[dict]], predictions_table,
     invoke: Callable[[str, dict], None], project: str,
@@ -138,25 +170,12 @@ def run_tick(
         refresh_payloads: dict[tuple, dict] = {}
         snapshot_events: list[dict] = []
         for event in list_events(sport):
-            if schedule.event_start_snapshot_utc_hour is not None:
-                if _event_start_snapshot_due(event, now, schedule, predictions_table):
-                    snapshot_events.append(event)
-                continue
-            kickoff_raw = event.get("kickoff_time")
-            if not kickoff_raw:
-                continue
-            until = _parse_time(kickoff_raw) - now
-            if until <= timedelta(0):
-                continue
-            if until <= SNAPSHOT_LEAD:
-                if snapshots.has_snapshot(predictions_table, event["event_key"]):
-                    continue
-                if _claim(predictions_table, event["event_key"], SNAPSHOT_MARKER, now, RETRY_AFTER):
-                    snapshot_events.append(event)
-            elif until <= REFRESH_LEAD and schedule.ingest_payload is not None:
-                if _claim(predictions_table, event["event_key"], REFRESH_MARKER, now, None):
-                    payload = schedule.ingest_payload(event)
-                    refresh_payloads[tuple(sorted(payload.items()))] = payload
+            action = _event_action(event, now, schedule, predictions_table)
+            if action == _SNAPSHOT:
+                snapshot_events.append(event)
+            elif action == _REFRESH:
+                payload = schedule.ingest_payload(event)
+                refresh_payloads[tuple(sorted(payload.items()))] = payload
 
         for payload in refresh_payloads.values():
             invoke(f"{project}-{sport}-ingest", payload)

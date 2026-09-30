@@ -8,7 +8,8 @@ instead of a model object -- covered directly here rather than only
 indirectly through a training script's own tests, since they're no
 longer coupled to any one script.
 """
-from unittest.mock import MagicMock
+import logging
+from unittest.mock import MagicMock, patch
 
 import numpy as np
 import pandas as pd
@@ -351,3 +352,84 @@ class TestRunProgress:
         training_common.clear_run_progress(mock_s3, "ncaafb", "score-margin", "run-2")
 
         mock_s3.delete_object.assert_called_once_with("training-runs/ncaafb/score-margin/run-2/progress.json")
+
+
+class TestLoadLoggedFeatures:
+    def test_loads_the_key_and_logs_where_from_and_how_many_rows(self, caplog):
+        s3 = MagicMock()
+        s3.bucket = "models"
+        df = pd.DataFrame({"a": [1, 2, 3]})
+
+        with patch.object(training_common, "load_features", return_value=df) as load,                 caplog.at_level(logging.INFO, logger="test-train"):
+            result = training_common.load_logged_features(s3, "nfl/x.parquet", "win-probability", "event", logging.getLogger("test-train"))
+
+        assert result is df
+        load.assert_called_once_with(s3, "nfl/x.parquet")
+        assert "Loading win-probability training data from s3://models/nfl/x.parquet" in caplog.text
+        assert "Loaded 3 event rows" in caplog.text
+
+
+class TestTrainingScript:
+    def _namespace(self):
+        return {"train": MagicMock(), "logger": logging.getLogger("test-script")}
+
+    def test_loads_the_dataset_and_trains_on_it(self, monkeypatch):
+        monkeypatch.setenv("MODEL_ARTIFACTS_BUCKET_NAME", "models")
+        monkeypatch.setenv("AWS_REGION", "us-east-2")
+        namespace = self._namespace()
+        script = training_common.TrainingScript(namespace, features_key="k", row_noun="event", model_name="win-probability")
+
+        with patch.object(training_common, "S3Manager") as s3_cls,                 patch.object(training_common, "load_logged_features", return_value="df") as load:
+            script.main()
+
+        s3_cls.assert_called_once_with("models", region="us-east-2")
+        load.assert_called_once_with(s3_cls.return_value, "k", "win-probability", "event", namespace["logger"])
+        namespace["train"].assert_called_once_with(s3_cls.return_value, "df")
+
+    def test_a_per_run_target_names_the_model_and_is_passed_to_train(self, monkeypatch):
+        monkeypatch.setenv("MODEL_ARTIFACTS_BUCKET_NAME", "models")
+        namespace = self._namespace()
+        script = training_common.TrainingScript(
+            namespace, features_key="k", row_noun="event", target=lambda: "margin", model_name_for=lambda t: f"score-{t}",
+        )
+
+        with patch.object(training_common, "S3Manager") as s3_cls,                 patch.object(training_common, "load_logged_features", return_value="df") as load:
+            script.main()
+
+        assert load.call_args.args[2] == "score-margin"
+        namespace["train"].assert_called_once_with(s3_cls.return_value, "df", "margin")
+
+
+class TestModelJob:
+    def test_prepares_then_trains_with_the_scripts_config(self):
+        trainer = MagicMock(return_value={"promotions": []})
+        namespace = {"logger": logging.getLogger("test-job")}
+        job = training_common.ModelJob(
+            namespace, trainer=trainer, sport="f1", model_name="podium-probability", features_key="k", row_noun="driver-race",
+            label_column="label_podium", non_feature_columns={"event_key"}, candidates=["c"],
+            prepare=lambda df: df[df["label_podium"].notna()], drop_null_label=True,
+        )
+        df = pd.DataFrame({"event_key": ["a", "b"], "x": [1, 2], "label_podium": [1.0, None]})
+
+        assert job.train("s3", df) == {"promotions": []}
+        assert job.feature_columns(df) == ["x"]
+        prepared = trainer.call_args.args[1]
+        assert list(prepared["event_key"]) == ["a"]
+        assert trainer.call_args.args[2:] == ("f1", "podium-probability")
+        assert trainer.call_args.kwargs == {
+            "label_column": "label_podium", "non_feature_columns": {"event_key"}, "candidates": ["c"],
+            "logger": namespace["logger"], "drop_null_label": True,
+        }
+
+    def test_main_runs_the_training_script(self, monkeypatch):
+        monkeypatch.setenv("MODEL_ARTIFACTS_BUCKET_NAME", "models")
+        namespace = {"logger": logging.getLogger("test-job"), "train": MagicMock()}
+        job = training_common.ModelJob(
+            namespace, trainer=MagicMock(), sport="f1", model_name="m", features_key="k", row_noun="row",
+            label_column="l", non_feature_columns=set(), candidates=[],
+        )
+
+        with patch.object(training_common, "S3Manager"),                 patch.object(training_common, "load_logged_features", return_value="df"):
+            job.main()
+
+        namespace["train"].assert_called_once()

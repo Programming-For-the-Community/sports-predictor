@@ -165,7 +165,8 @@ class TestNormalizeScoreboardEvent:
         item = normalize.scoreboard_event_to_event_item(first_event)
         # Should be YYYY-MM-DD (10 chars)
         assert len(item["event_date"]) == 10
-        assert item["event_date"][4] == "-" and item["event_date"][7] == "-"
+        assert item["event_date"][4] == "-"
+        assert item["event_date"][7] == "-"
 
 
 # ---------------------------------------------------------------------------

@@ -14,12 +14,11 @@ An optional {"sports": ["nfl"]} payload runs just those sports.
 """
 import json
 import logging
-import os
 from datetime import date
 
-from library.aws import lambda_singletons
 from library.aws.dynamodb_table import DynamoDBTable
 from library.aws.s3_manager import S3Manager
+from library.aws.serving_resources import ServingResources
 from library.performance import runner
 from library.storage.feature_storage import FeatureStorage
 
@@ -32,23 +31,10 @@ _storage: FeatureStorage | None = None
 _model_bucket: S3Manager | None = None
 _predictions_table: DynamoDBTable | None = None
 
-
-def _get_storage() -> FeatureStorage:
-    return lambda_singletons.get_or_create(globals(), "_storage", FeatureStorage)
-
-
-def _get_model_bucket() -> S3Manager:
-    return lambda_singletons.get_or_create(
-        globals(), "_model_bucket",
-        lambda: S3Manager(os.environ["MODEL_ARTIFACTS_BUCKET_NAME"], region=os.environ.get("AWS_REGION")),
-    )
-
-
-def _get_predictions_table() -> DynamoDBTable:
-    return lambda_singletons.get_or_create(
-        globals(), "_predictions_table",
-        lambda: DynamoDBTable(os.environ["PREDICTIONS_TABLE_NAME"], region=os.environ.get("AWS_REGION")),
-    )
+_resources = ServingResources(globals())
+_get_storage = _resources.storage
+_get_model_bucket = _resources.model_bucket
+_get_predictions_table = _resources.predictions_table
 
 
 def lambda_handler(event, context):

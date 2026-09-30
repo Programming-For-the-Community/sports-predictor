@@ -129,16 +129,19 @@ class TestScheduledSeasonProjection:
     computes the projection on the weekly direct EventBridge Scheduler
     invoke and writes it to S3."""
 
-    def test_writes_the_season_projection_to_s3_under_the_expected_key(self):
-        nfl_predict._storage = MagicMock()
-        nfl_predict._model_bucket = MagicMock()
-        nfl_predict._predictions_table = MagicMock()
-        nfl_predict._predictions_table.query.return_value = []
-        nfl_predict._storage.get_all_events.side_effect = lambda sport, status: {
+    def test_writes_the_season_projection_to_s3_under_the_expected_key(self, monkeypatch):
+        storage = MagicMock()
+        monkeypatch.setattr(nfl_predict, "_storage", storage)
+        model_bucket = MagicMock()
+        monkeypatch.setattr(nfl_predict, "_model_bucket", model_bucket)
+        predictions_table = MagicMock()
+        monkeypatch.setattr(nfl_predict, "_predictions_table", predictions_table)
+        predictions_table.query.return_value = []
+        storage.get_all_events.side_effect = lambda sport, status: {
             "completed": [_completed_event("E1", 2025, "12", "24", 27, 20)],
             "scheduled": [],
         }[status]
-        nfl_predict._storage.get_all_player_game_stats.return_value = []
+        storage.get_all_player_game_stats.return_value = []
 
         simulated = {
             "12": {"projected_wins": 11.0, "division_winner_probability": 0.8, "playoff_probability": 0.9, "championship_probability": 0.2},
@@ -148,45 +151,51 @@ class TestScheduledSeasonProjection:
             response = nfl_predict.lambda_handler({"detail-type": "ScheduledSeasonProjection"}, None)
 
         assert response == {"status": "ok"}
-        nfl_predict._model_bucket.put_json.assert_called_once()
-        key, body = nfl_predict._model_bucket.put_json.call_args[0]
+        model_bucket.put_json.assert_called_once()
+        key, body = model_bucket.put_json.call_args[0]
         assert key == "season-projections/nfl/latest.json"
         assert body["season"] == 2025
         assert [row["team_id"] for row in body["standings"]] == ["12", "24"]
         assert body["standings"][0]["wins"] == 1
         assert body["standings"][0]["ties"] == 0
 
-    def test_leaderboards_is_none_when_building_them_fails_but_standings_still_write(self):
-        nfl_predict._storage = MagicMock()
-        nfl_predict._model_bucket = MagicMock()
-        nfl_predict._predictions_table = MagicMock()
-        nfl_predict._predictions_table.query.return_value = []
-        nfl_predict._storage.get_all_events.side_effect = lambda sport, status: {
+    def test_leaderboards_is_none_when_building_them_fails_but_standings_still_write(self, monkeypatch):
+        storage = MagicMock()
+        monkeypatch.setattr(nfl_predict, "_storage", storage)
+        model_bucket = MagicMock()
+        monkeypatch.setattr(nfl_predict, "_model_bucket", model_bucket)
+        predictions_table = MagicMock()
+        monkeypatch.setattr(nfl_predict, "_predictions_table", predictions_table)
+        predictions_table.query.return_value = []
+        storage.get_all_events.side_effect = lambda sport, status: {
             "completed": [_completed_event("E1", 2025, "12", "24", 27, 20)],
             "scheduled": [],
         }[status]
-        nfl_predict._storage.get_all_player_game_stats.side_effect = RuntimeError("boom")
+        storage.get_all_player_game_stats.side_effect = RuntimeError("boom")
 
         with patch.object(season_simulation, "simulate_season", return_value={}):
             nfl_predict.lambda_handler({"detail-type": "ScheduledSeasonProjection"}, None)
 
-        body = nfl_predict._model_bucket.put_json.call_args[0][1]
+        body = model_bucket.put_json.call_args[0][1]
         assert body["leaderboards"] is None
         assert body["standings"] == []
 
-    def test_leaderboards_include_player_names_and_are_capped_at_ten(self):
-        nfl_predict._storage = MagicMock()
-        nfl_predict._model_bucket = MagicMock()
-        nfl_predict._predictions_table = MagicMock()
-        nfl_predict._predictions_table.query.return_value = []
-        nfl_predict._storage.get_all_events.side_effect = lambda sport, status: {
+    def test_leaderboards_include_player_names_and_are_capped_at_ten(self, monkeypatch):
+        storage = MagicMock()
+        monkeypatch.setattr(nfl_predict, "_storage", storage)
+        model_bucket = MagicMock()
+        monkeypatch.setattr(nfl_predict, "_model_bucket", model_bucket)
+        predictions_table = MagicMock()
+        monkeypatch.setattr(nfl_predict, "_predictions_table", predictions_table)
+        predictions_table.query.return_value = []
+        storage.get_all_events.side_effect = lambda sport, status: {
             "completed": [_completed_event("E1", 2025, "12", "24", 27, 20)],
             "scheduled": [_scheduled_event("E2", 2025, "2025-09-21", "12", "7")],
         }[status]
-        nfl_predict._storage.get_all_player_game_stats.return_value = [
+        storage.get_all_player_game_stats.return_value = [
             {"entity_id": "qb1", "team_id": "12", "event_key": "E1", "stat_line": {"passing_yards": 300}},
         ]
-        nfl_predict._storage.get_entity.return_value = {"entity_id": "qb1", "name": "Patrick Mahomes"}
+        storage.get_entity.return_value = {"entity_id": "qb1", "name": "Patrick Mahomes"}
 
         with patch.object(season_simulation, "simulate_season", return_value={}), \
              patch.object(live_features, "build_live_player_features", return_value={"entity_id": "qb1"}), \
@@ -194,28 +203,31 @@ class TestScheduledSeasonProjection:
              patch.object(model_loader, "predict", return_value=280.0):
             nfl_predict.lambda_handler({"detail-type": "ScheduledSeasonProjection"}, None)
 
-        body = nfl_predict._model_bucket.put_json.call_args[0][1]
+        body = model_bucket.put_json.call_args[0][1]
         passing_leaders = body["leaderboards"]["passing_yards"]
         assert len(passing_leaders) <= 10
         assert passing_leaders[0]["name"] == "Patrick Mahomes"
         # current 300 + one remaining game projected at 280/game
         assert passing_leaders[0]["projected_total"] == pytest.approx(580.0)
 
-    def test_leaderboards_include_season_wide_candidates_with_zero_recorded_stats(self):
+    def test_leaderboards_include_season_wide_candidates_with_zero_recorded_stats(self, monkeypatch):
         # The pre-season case: no completed games yet this season, so
         # current_totals_by_stat is empty for every stat -- candidates
         # must come entirely from each team's own next-event depth chart
         # (build_live_event_leader_candidates), not season_player_stats.
-        nfl_predict._storage = MagicMock()
-        nfl_predict._model_bucket = MagicMock()
-        nfl_predict._predictions_table = MagicMock()
-        nfl_predict._predictions_table.query.return_value = []
-        nfl_predict._storage.get_all_events.side_effect = lambda sport, status: {
+        storage = MagicMock()
+        monkeypatch.setattr(nfl_predict, "_storage", storage)
+        model_bucket = MagicMock()
+        monkeypatch.setattr(nfl_predict, "_model_bucket", model_bucket)
+        predictions_table = MagicMock()
+        monkeypatch.setattr(nfl_predict, "_predictions_table", predictions_table)
+        predictions_table.query.return_value = []
+        storage.get_all_events.side_effect = lambda sport, status: {
             "completed": [],
             "scheduled": [_scheduled_event("E2", 2026, "2026-09-10", "12", "7")],
         }[status]
-        nfl_predict._storage.get_all_player_game_stats.return_value = []
-        nfl_predict._storage.get_entity.return_value = {"entity_id": "qb1", "name": "Patrick Mahomes"}
+        storage.get_all_player_game_stats.return_value = []
+        storage.get_entity.return_value = {"entity_id": "qb1", "name": "Patrick Mahomes"}
 
         candidates = {
             "home": {"passing": [{"entity_id": "qb1", "team_id": "12"}], "receiving": [], "rushing": [], "sacks": []},
@@ -228,7 +240,7 @@ class TestScheduledSeasonProjection:
              patch.object(model_loader, "predict", return_value=265.0):
             nfl_predict.lambda_handler({"detail-type": "ScheduledSeasonProjection"}, None)
 
-        body = nfl_predict._model_bucket.put_json.call_args[0][1]
+        body = model_bucket.put_json.call_args[0][1]
         passing_leaders = body["leaderboards"]["passing_yards"]
         assert len(passing_leaders) == 1
         assert passing_leaders[0]["entity_id"] == "qb1"

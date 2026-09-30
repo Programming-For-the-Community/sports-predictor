@@ -9,7 +9,6 @@ NFL live-score cache Lambda. Two distinct triggers, one function:
     behind the same Cognito authorizer as every other NFL route -- serves
     whatever live_scores.refresh last cached.
 """
-import json
 import logging
 import os
 
@@ -28,11 +27,6 @@ logger = logging.getLogger("nfl-live-scores")
 SPORT = "nfl"
 RAW_BUCKET = os.environ["RAW_BUCKET_NAME"]
 
-_CORS_HEADERS = {
-    "Access-Control-Allow-Origin": "*",
-    "Content-Type": "application/json",
-}
-
 # Initialized once per container lifetime, reused across warm invocations.
 _s3 = boto3.client("s3", config=DEFAULT_CONFIG)
 _storage: FeatureStorage | None = None
@@ -42,8 +36,4 @@ def _get_storage() -> FeatureStorage:
     return lambda_singletons.get_or_create(globals(), "_storage", FeatureStorage)
 
 
-def _response(status_code: int, body: dict) -> dict:
-    return {"statusCode": status_code, "headers": _CORS_HEADERS, "body": json.dumps(body)}
-
-
-lambda_handler = make_lambda_handler(SPORT, NFLClient, _get_storage, _s3, RAW_BUCKET, live_scores, logger, _response)
+lambda_handler = make_lambda_handler(SPORT, NFLClient, _get_storage, _s3, RAW_BUCKET, live_scores, logger)

@@ -17,6 +17,7 @@ import logging
 import os
 import time
 import uuid
+from collections.abc import Callable
 from datetime import datetime, timezone
 
 import numpy as np
@@ -70,6 +71,94 @@ def load_features(s3: S3Manager, key: str) -> pd.DataFrame:
             if attempt < LOAD_FEATURES_MAX_ATTEMPTS:
                 time.sleep(LOAD_FEATURES_BACKOFF_SECONDS)
     raise RuntimeError(f"Failed reading {key} as parquet after {LOAD_FEATURES_MAX_ATTEMPTS} attempts") from last_exc
+
+
+def load_logged_features(
+    s3: S3Manager, key: str, label: str, row_noun: str, run_logger: logging.Logger,
+) -> pd.DataFrame:
+    """load_features, logged the way every training script's main() reports
+    its dataset: which model it's for, where it's read from, and how many
+    `row_noun` rows came back."""
+    run_logger.info("Loading %s training data from s3://%s/%s", label, s3.bucket, key)
+    df = load_features(s3, key)
+    run_logger.info("Loaded %d %s rows", len(df), row_noun)
+    return df
+
+
+# Identifier columns every head-to-head sport's event_features dataset
+# carries -- never model inputs.
+EVENT_IDENTIFIER_COLUMNS = frozenset({"event_key", "event_date", "home_entity_id", "away_entity_id"})
+
+
+class TrainingScript:
+    """A training script's main(): build the model-artifacts bucket, load and
+    log its dataset, then train. `namespace` is the script module's
+    globals() -- its train and logger are looked up there at run time, so
+    the script's own (possibly patched) names are what runs.
+
+    `target`, when given, resolves the run's target from the environment
+    (a score target, a stat, a round number) before anything else, and is
+    passed to train() after the dataset; `model_name_for(target)` names the
+    model in the log line. Otherwise the log line uses `model_name`."""
+
+    def __init__(
+        self, namespace: dict, *, features_key: str, row_noun: str, model_name: str | None = None,
+        target: Callable[[], object] | None = None, model_name_for: Callable[[object], str] | None = None,
+    ) -> None:
+        self._namespace = namespace
+        self._features_key = features_key
+        self._row_noun = row_noun
+        self._model_name = model_name
+        self._target = target
+        self._model_name_for = model_name_for
+
+    def main(self) -> None:
+        namespace = self._namespace
+        target_args = () if self._target is None else (self._target(),)
+        s3 = S3Manager(os.environ["MODEL_ARTIFACTS_BUCKET_NAME"], region=os.environ.get("AWS_REGION"))
+        label = self._model_name_for(*target_args) if target_args else self._model_name
+        df = load_logged_features(s3, self._features_key, label, self._row_noun, namespace["logger"])
+        namespace["train"](s3, df, *target_args)
+
+
+class ModelJob:
+    """A single-model training script: `trainer` is a train_*_model_common.train
+    taking (s3, df, sport, model_name, *, label_column, non_feature_columns,
+    candidates, logger, ...), called with `train_options` as its remaining
+    keyword arguments. `prepare(df)`, when given, filters the dataset first.
+    `namespace` is the script module's globals() (see TrainingScript)."""
+
+    def __init__(
+        self, namespace: dict, *, trainer: Callable[..., dict], sport: str, model_name: str,
+        features_key: str, row_noun: str, label_column: str, non_feature_columns: set[str], candidates: list,
+        prepare: Callable[[pd.DataFrame], pd.DataFrame] | None = None, **train_options,
+    ) -> None:
+        self._namespace = namespace
+        self._trainer = trainer
+        self._sport = sport
+        self._model_name = model_name
+        self._label_column = label_column
+        self._non_feature_columns = non_feature_columns
+        self._candidates = candidates
+        self._prepare = prepare
+        self._train_options = train_options
+        self._script = TrainingScript(namespace, features_key=features_key, row_noun=row_noun, model_name=model_name)
+
+    def feature_columns(self, df: pd.DataFrame) -> list[str]:
+        return feature_columns(df, self._non_feature_columns)
+
+    def train(self, s3: S3Manager, df: pd.DataFrame) -> dict:
+        """Runs the full candidate tournament and returns run_backtest's result."""
+        if self._prepare is not None:
+            df = self._prepare(df)
+        return self._trainer(
+            s3, df, self._sport, self._model_name,
+            label_column=self._label_column, non_feature_columns=self._non_feature_columns,
+            candidates=self._candidates, logger=self._namespace["logger"], **self._train_options,
+        )
+
+    def main(self) -> None:
+        self._script.main()
 
 
 def feature_columns(df: pd.DataFrame, non_feature_columns: set[str]) -> list[str]:

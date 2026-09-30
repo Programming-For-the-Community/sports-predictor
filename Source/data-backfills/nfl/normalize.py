@@ -3,6 +3,7 @@ NFL-specific normalization: thin wrappers over library.normalize.espn that
 bind the sport string and compound stat-key map so callers get the same
 simple single-argument API regardless of which shared function does the work.
 """
+from library.normalize import espn
 from library.normalize.espn import (
     team_to_entity as _team_to_entity,
     scoreboard_event_to_event_item as _scoreboard_event_to_event_item,
@@ -12,22 +13,9 @@ from library.normalize.espn import (
 
 SPORT = "nfl"
 
-# ESPN box score stat keys that pack two numbers into one string.
-_COMPOUND_KEY_SPLITS: dict[str, tuple[str, str]] = {
-    "completions/passingAttempts": ("completions", "passing_attempts"),
-    "sacks-sackYardsLost": ("sacks_taken", "sack_yards_lost"),
-    "fieldGoalsMade/fieldGoalAttempts": ("field_goals_made", "field_goal_attempts"),
-    "extraPointsMade/extraPointAttempts": ("extra_points_made", "extra_point_attempts"),
-}
+_COMPOUND_KEY_SPLITS = espn.FOOTBALL_PLAYER_COMPOUND_KEY_SPLITS
 
-_TEAM_COMPOUND_KEY_SPLITS: dict[str, tuple[str, str]] = {
-    "thirdDownEff": ("third_down_conversions", "third_down_attempts"),
-    "fourthDownEff": ("fourth_down_conversions", "fourth_down_attempts"),
-    "completionAttempts": ("completions", "pass_attempts"),
-    "redZoneAttempts": ("red_zone_conversions", "red_zone_attempts"),
-    "sacksYardsLost": ("sacks_taken", "sack_yards_lost"),
-    "totalPenaltiesYards": ("penalties", "penalty_yards"),
-}
+_TEAM_COMPOUND_KEY_SPLITS = espn.FOOTBALL_TEAM_COMPOUND_KEY_SPLITS
 
 
 def team_to_entity(team: dict) -> dict:
