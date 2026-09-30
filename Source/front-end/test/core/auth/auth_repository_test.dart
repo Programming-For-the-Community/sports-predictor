@@ -2,11 +2,12 @@ import 'dart:convert';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
-import 'package:http/testing.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:front_end/core/auth/auth_repository.dart';
 import 'package:front_end/core/auth/cognito_auth_client.dart';
+
+import '../../support/cognito_srp_test_support.dart';
 
 http.Response _tokenResponse({String access = 'access', String id = 'id', String? refresh = 'refresh', int expiresIn = 3600}) {
   final result = <String, dynamic>{'AccessToken': access, 'IdToken': id, 'ExpiresIn': expiresIn};
@@ -22,7 +23,7 @@ void main() {
   });
 
   test('starts unauthenticated when nothing is persisted', () async {
-    final repo = AuthRepository(authClient: CognitoAuthClient(httpClient: MockClient((r) async => _tokenResponse())));
+    final repo = AuthRepository(authClient: CognitoAuthClient(srpFactory: FakeCognitoSrp.new, httpClient: srpAwareMockClient((r) async => _tokenResponse())));
 
     final state = await _firstRealState(repo);
 
@@ -31,7 +32,7 @@ void main() {
 
   test('login success moves state to AuthAuthenticated', () async {
     final repo = AuthRepository(
-      authClient: CognitoAuthClient(httpClient: MockClient((r) async => _tokenResponse(access: 'a1'))),
+      authClient: CognitoAuthClient(srpFactory: FakeCognitoSrp.new, httpClient: srpAwareMockClient((r) async => _tokenResponse(access: 'a1'))),
     );
     await _firstRealState(repo);
 
@@ -45,7 +46,8 @@ void main() {
     var challengeIssued = false;
     final repo = AuthRepository(
       authClient: CognitoAuthClient(
-        httpClient: MockClient((request) async {
+        srpFactory: FakeCognitoSrp.new,
+        httpClient: srpAwareMockClient((request) async {
           if (!challengeIssued) {
             challengeIssued = true;
             return http.Response(
@@ -68,7 +70,7 @@ void main() {
   });
 
   test('respondToNewPassword outside the challenge state throws', () async {
-    final repo = AuthRepository(authClient: CognitoAuthClient(httpClient: MockClient((r) async => _tokenResponse())));
+    final repo = AuthRepository(authClient: CognitoAuthClient(srpFactory: FakeCognitoSrp.new, httpClient: srpAwareMockClient((r) async => _tokenResponse())));
     await _firstRealState(repo);
 
     expect(() => repo.respondToNewPassword('whatever'), throwsStateError);
@@ -78,7 +80,8 @@ void main() {
     var refreshCalls = 0;
     final repo = AuthRepository(
       authClient: CognitoAuthClient(
-        httpClient: MockClient((request) async {
+        srpFactory: FakeCognitoSrp.new,
+        httpClient: srpAwareMockClient((request) async {
           final body = jsonDecode(request.body) as Map<String, dynamic>;
           if (body['AuthFlow'] == 'REFRESH_TOKEN_AUTH') {
             refreshCalls++;
@@ -102,7 +105,8 @@ void main() {
     var refreshCalls = 0;
     final repo = AuthRepository(
       authClient: CognitoAuthClient(
-        httpClient: MockClient((request) async {
+        srpFactory: FakeCognitoSrp.new,
+        httpClient: srpAwareMockClient((request) async {
           final body = jsonDecode(request.body) as Map<String, dynamic>;
           if (body['AuthFlow'] == 'REFRESH_TOKEN_AUTH') {
             refreshCalls++;
@@ -126,7 +130,8 @@ void main() {
   test('getValidIdToken transitions to AuthUnauthenticated when the refresh token itself is rejected', () async {
     final repo = AuthRepository(
       authClient: CognitoAuthClient(
-        httpClient: MockClient((request) async {
+        srpFactory: FakeCognitoSrp.new,
+        httpClient: srpAwareMockClient((request) async {
           final body = jsonDecode(request.body) as Map<String, dynamic>;
           if (body['AuthFlow'] == 'REFRESH_TOKEN_AUTH') {
             return http.Response(
@@ -158,7 +163,7 @@ void main() {
       ).toJson()),
       'last_activity_at': staleActivity.toIso8601String(),
     });
-    final repo = AuthRepository(authClient: CognitoAuthClient(httpClient: MockClient((r) async => _tokenResponse())));
+    final repo = AuthRepository(authClient: CognitoAuthClient(srpFactory: FakeCognitoSrp.new, httpClient: srpAwareMockClient((r) async => _tokenResponse())));
 
     final state = await _firstRealState(repo);
 
@@ -169,7 +174,7 @@ void main() {
 
   test('getValidIdToken forces re-login once inactivityTtl has passed, even with a still-valid token', () async {
     final repo = AuthRepository(
-      authClient: CognitoAuthClient(httpClient: MockClient((r) async => _tokenResponse(expiresIn: 3600))),
+      authClient: CognitoAuthClient(srpFactory: FakeCognitoSrp.new, httpClient: srpAwareMockClient((r) async => _tokenResponse(expiresIn: 3600))),
     );
     await _firstRealState(repo);
     await repo.login(username: 'chamar', password: 'hunter2');
@@ -196,7 +201,7 @@ void main() {
       ).toJson()),
       'last_activity_at': DateTime.now().toIso8601String(),
     });
-    final repo = AuthRepository(authClient: CognitoAuthClient(httpClient: MockClient((r) async => _tokenResponse())));
+    final repo = AuthRepository(authClient: CognitoAuthClient(srpFactory: FakeCognitoSrp.new, httpClient: srpAwareMockClient((r) async => _tokenResponse())));
 
     // No await on _firstRealState here -- mirrors a page that builds and
     // fetches immediately on a browser refresh, before _restoreSession's
@@ -216,7 +221,7 @@ void main() {
       'last_activity_at': DateTime.now().toIso8601String(),
     });
     final repo = AuthRepository(
-      authClient: CognitoAuthClient(httpClient: MockClient((r) async => _tokenResponse(id: 'refreshed', refresh: null))),
+      authClient: CognitoAuthClient(srpFactory: FakeCognitoSrp.new, httpClient: srpAwareMockClient((r) async => _tokenResponse(id: 'refreshed', refresh: null))),
     );
 
     final state = await _firstRealState(repo);
@@ -227,7 +232,7 @@ void main() {
   });
 
   test('logout clears state and persisted storage', () async {
-    final repo = AuthRepository(authClient: CognitoAuthClient(httpClient: MockClient((r) async => _tokenResponse())));
+    final repo = AuthRepository(authClient: CognitoAuthClient(srpFactory: FakeCognitoSrp.new, httpClient: srpAwareMockClient((r) async => _tokenResponse())));
     await _firstRealState(repo);
     await repo.login(username: 'chamar', password: 'hunter2');
     expect(repo.state, isA<AuthAuthenticated>());
@@ -240,7 +245,7 @@ void main() {
   });
 
   test('recordActivity resets a session that would otherwise have gone inactive', () async {
-    final repo = AuthRepository(authClient: CognitoAuthClient(httpClient: MockClient((r) async => _tokenResponse())));
+    final repo = AuthRepository(authClient: CognitoAuthClient(srpFactory: FakeCognitoSrp.new, httpClient: srpAwareMockClient((r) async => _tokenResponse())));
     await _firstRealState(repo);
     await repo.login(username: 'chamar', password: 'hunter2');
 
@@ -260,7 +265,7 @@ void main() {
   });
 
   test('recordActivity throttles repeated calls instead of writing every time', () async {
-    final repo = AuthRepository(authClient: CognitoAuthClient(httpClient: MockClient((r) async => _tokenResponse())));
+    final repo = AuthRepository(authClient: CognitoAuthClient(srpFactory: FakeCognitoSrp.new, httpClient: srpAwareMockClient((r) async => _tokenResponse())));
     await _firstRealState(repo);
     await repo.login(username: 'chamar', password: 'hunter2');
 
@@ -276,7 +281,7 @@ void main() {
   });
 
   test('recordActivity does nothing while unauthenticated', () async {
-    final repo = AuthRepository(authClient: CognitoAuthClient(httpClient: MockClient((r) async => _tokenResponse())));
+    final repo = AuthRepository(authClient: CognitoAuthClient(srpFactory: FakeCognitoSrp.new, httpClient: srpAwareMockClient((r) async => _tokenResponse())));
     await _firstRealState(repo);
     expect(repo.state, isA<AuthUnauthenticated>());
 

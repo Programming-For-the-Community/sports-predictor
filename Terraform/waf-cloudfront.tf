@@ -11,7 +11,7 @@ resource "aws_wafv2_web_acl" "cloudfront" {
   provider = aws.us_east_1
 
   name        = "${var.project}-cloudfront"
-  description = "Blocks known-malicious IPs in front of the CloudFront distribution."
+  description = "Blocks known-malicious IPs and per-IP request floods in front of the CloudFront distribution."
   scope       = "CLOUDFRONT"
 
   default_action {
@@ -40,6 +40,43 @@ resource "aws_wafv2_web_acl" "cloudfront" {
       metric_name                = "${var.project}-amazon-ip-reputation-list"
       sampled_requests_enabled   = true
     }
+  }
+
+  # One client IP's requests (pages, assets and API calls alike) over a
+  # rolling 5-minute window. Blocked requests get a 429, which the app's
+  # API client already retries with backoff.
+  rule {
+    name     = "per-ip-rate-limit"
+    priority = 1
+
+    action {
+      block {
+        custom_response {
+          response_code            = 429
+          custom_response_body_key = "rate-limited"
+        }
+      }
+    }
+
+    statement {
+      rate_based_statement {
+        limit                 = var.waf_rate_limit_per_ip
+        aggregate_key_type    = "IP"
+        evaluation_window_sec = 300
+      }
+    }
+
+    visibility_config {
+      cloudwatch_metrics_enabled = true
+      metric_name                = "${var.project}-per-ip-rate-limit"
+      sampled_requests_enabled   = true
+    }
+  }
+
+  custom_response_body {
+    key          = "rate-limited"
+    content      = jsonencode({ error = "Too many requests" })
+    content_type = "APPLICATION_JSON"
   }
 
   visibility_config {

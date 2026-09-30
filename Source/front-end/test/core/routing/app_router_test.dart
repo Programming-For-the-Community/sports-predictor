@@ -36,6 +36,8 @@ import 'package:front_end/features/season/f1_season_page.dart';
 import 'package:front_end/features/season/pga_season_page.dart';
 import 'package:front_end/features/season/season_page.dart';
 
+import '../../support/cognito_srp_test_support.dart';
+
 /// Regression coverage for app_router.dart's own redirect logic -- a real
 /// auth-flash bug was found and fixed here (a page's real content briefly
 /// rendering before the redirect resolved). Drives real AuthRepository
@@ -107,7 +109,7 @@ void main() {
 
   testWidgets('signing in from the login page redirects to home', (tester) async {
     final authRepo = AuthRepository(
-      authClient: CognitoAuthClient(httpClient: MockClient((r) async {
+      authClient: CognitoAuthClient(srpFactory: FakeCognitoSrp.new, httpClient: srpAwareMockClient((r) async {
         return http.Response(
           '{"AuthenticationResult": {"AccessToken": "a", "IdToken": "i", "RefreshToken": "r", "ExpiresIn": 3600}}',
           200,

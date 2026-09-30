@@ -442,10 +442,19 @@ resource "aws_api_gateway_stage" "main" {
   # API-level snapshot aws_api_gateway_documentation_version publishes.
   documentation_version = aws_api_gateway_documentation_version.main.version
 
+  access_log_settings {
+    destination_arn = aws_cloudwatch_log_group.api_gateway_access.arn
+    format          = local.api_gateway_access_log_format
+  }
+
   tags = merge(local.common_tags, {
     Sport     = "shared"
     Component = "serving"
   })
+
+  # API Gateway can only write stage logs once the account-level
+  # CloudWatch role (api-gateway-access-logs.tf) is set.
+  depends_on = [aws_api_gateway_account.main]
 }
 
 # Throttling only -- Cognito already authenticates every caller, no API key.

@@ -5,12 +5,13 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
-import 'package:http/testing.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:front_end/core/auth/auth_repository.dart';
 import 'package:front_end/core/auth/cognito_auth_client.dart';
 import 'package:front_end/features/auth/login_page.dart';
+
+import '../../support/cognito_srp_test_support.dart';
 
 Future<void> _pumpLoginPage(WidgetTester tester, {required http.Client httpClient}) async {
   SharedPreferences.setMockInitialValues({});
@@ -18,7 +19,7 @@ Future<void> _pumpLoginPage(WidgetTester tester, {required http.Client httpClien
     ProviderScope(
       overrides: [
         authRepositoryProvider.overrideWith(
-          (ref) => AuthRepository(authClient: CognitoAuthClient(httpClient: httpClient)),
+          (ref) => AuthRepository(authClient: CognitoAuthClient(srpFactory: FakeCognitoSrp.new, httpClient: httpClient)),
         ),
       ],
       child: const MaterialApp(home: LoginPage()),
@@ -31,7 +32,7 @@ void main() {
   testWidgets('shows an error message on incorrect credentials', (tester) async {
     await _pumpLoginPage(
       tester,
-      httpClient: MockClient((request) async {
+      httpClient: srpAwareMockClient((request) async {
         return http.Response(
           jsonEncode({'__type': 'NotAuthorizedException', 'message': 'bad creds'}),
           400,
@@ -50,7 +51,7 @@ void main() {
   testWidgets('switches to the new-password form on a NEW_PASSWORD_REQUIRED challenge', (tester) async {
     await _pumpLoginPage(
       tester,
-      httpClient: MockClient((request) async {
+      httpClient: srpAwareMockClient((request) async {
         return http.Response(
           jsonEncode({'ChallengeName': 'NEW_PASSWORD_REQUIRED', 'Session': 'sess-1'}),
           200,
@@ -70,7 +71,7 @@ void main() {
   testWidgets("shows Cognito's own message for any other error, submitting from the password field", (tester) async {
     await _pumpLoginPage(
       tester,
-      httpClient: MockClient((request) async => http.Response(
+      httpClient: srpAwareMockClient((request) async => http.Response(
             jsonEncode({'__type': 'TooManyRequestsException', 'message': 'Slow down'}),
             400,
           )),
@@ -89,7 +90,7 @@ void main() {
     var calls = 0;
     await _pumpLoginPage(
       tester,
-      httpClient: MockClient((request) async {
+      httpClient: srpAwareMockClient((request) async {
         calls++;
         if (calls == 1) {
           return http.Response(jsonEncode({'ChallengeName': 'NEW_PASSWORD_REQUIRED', 'Session': 'sess-1'}), 200);

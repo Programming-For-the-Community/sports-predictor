@@ -39,7 +39,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Configure AWS credentials from OIDC
-        uses: aws-actions/configure-aws-credentials@v4
+        uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a # v4.3.1
         with:
           role-to-assume: ${{ secrets.AWS_DEPLOY_SVC_ACCT_ARN }}
           aws-region: ${{ vars.AWS_RESOURCE_REGION }}
@@ -49,7 +49,7 @@ jobs:
         run: aws sts get-caller-identity
 
       - name: Download image artifact
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           name: ${{ inputs.artifact_name }}
 
@@ -82,3 +82,36 @@ jobs:
           docker push "$URI:$LATEST_TAG"
 
           echo "Pushed: $URI:$VERSIONED_TAG and $URI:$LATEST_TAG"
+
+      # The repository scans every image on push (ECR basic scanning, set on
+      # the shared repository outside this repo). Reports this image's
+      # findings in the job summary; never fails the deploy.
+      - name: Report ECR scan findings
+        env:
+          URI: ${{ secrets.ECR_URI }}
+          VERSIONED_TAG: ${{ inputs.versioned_tag }}
+          AWS_REGION: ${{ vars.AWS_RESOURCE_REGION }}
+        run: |
+          REPOSITORY=${URI#*/}
+
+          if ! aws ecr wait image-scan-complete --repository-name "$REPOSITORY" \
+              --image-id imageTag="$VERSIONED_TAG" --region "$AWS_REGION"; then
+            echo "::warning::ECR scan for $VERSIONED_TAG did not complete -- findings not reported"
+            exit 0
+          fi
+
+          COUNTS=$(aws ecr describe-image-scan-findings --repository-name "$REPOSITORY" \
+            --image-id imageTag="$VERSIONED_TAG" --region "$AWS_REGION" \
+            --query 'imageScanFindings.findingSeverityCounts' --output json)
+
+          {
+            echo "### ECR scan findings -- $VERSIONED_TAG"
+            echo '```json'
+            echo "${COUNTS:-null}"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          SEVERE=$(echo "${COUNTS:-null}" | jq '(.CRITICAL // 0) + (.HIGH // 0)')
+          if [ "$SEVERE" -gt 0 ]; then
+            echo "::warning::$VERSIONED_TAG has $SEVERE critical/high vulnerability finding(s) -- see the job summary"
+          fi

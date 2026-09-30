@@ -4,12 +4,12 @@ import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 
 import '../config/app_config.dart';
+import 'cognito_srp.dart';
 
 /// Raw HTTP client for the Cognito IDP endpoint -- no third-party SDK.
-/// The app client uses ALLOW_USER_PASSWORD_AUTH with no client secret (see
-/// Terraform/cognito-app-client.tf), so the entire auth surface is two JSON
-/// POSTs; pulling in a full SDK for that would trade a small amount of
-/// boilerplate for a real dependency-freshness risk.
+/// The app client allows only ALLOW_USER_SRP_AUTH and refresh, with no
+/// client secret (see Terraform/cognito-app-client.tf): sign-in is an SRP
+/// exchange (cognito_srp.dart), so the password itself is never sent.
 class CognitoException implements Exception {
   CognitoException(this.type, this.message);
 
@@ -82,11 +82,14 @@ class CognitoNewPasswordRequired extends CognitoAuthResult {
 }
 
 class CognitoAuthClient {
-  CognitoAuthClient({http.Client? httpClient}) : _httpClient = httpClient ?? http.Client();
+  CognitoAuthClient({http.Client? httpClient, CognitoSrp Function()? srpFactory})
+      : _httpClient = httpClient ?? http.Client(),
+        _srpFactory = srpFactory ?? (() => CognitoSrp(userPoolId: AppConfig.cognitoUserPoolId));
 
   static const _timeout = Duration(seconds: 15);
 
   final http.Client _httpClient;
+  final CognitoSrp Function() _srpFactory;
 
   Uri get _endpoint => Uri.https('cognito-idp.${AppConfig.awsRegion}.amazonaws.com', '/');
 
@@ -126,13 +129,41 @@ class CognitoAuthClient {
     return decoded;
   }
 
+  /// USER_SRP_AUTH: InitiateAuth with SRP_A, then answers Cognito's
+  /// PASSWORD_VERIFIER challenge with a signature derived from the password.
   Future<CognitoAuthResult> initiateAuth({required String username, required String password}) async {
-    final response = await _post('InitiateAuth', {
-      'AuthFlow': 'USER_PASSWORD_AUTH',
+    final srp = _srpFactory();
+    final challenge = await _post('InitiateAuth', {
+      'AuthFlow': 'USER_SRP_AUTH',
       'ClientId': AppConfig.cognitoClientId,
-      'AuthParameters': {'USERNAME': username, 'PASSWORD': password},
+      'AuthParameters': {'USERNAME': username, 'SRP_A': srp.srpA},
     });
-    return _resultFrom(response, username: username);
+    if (challenge['ChallengeName'] != 'PASSWORD_VERIFIER') {
+      throw CognitoException('UnexpectedChallenge', 'Expected PASSWORD_VERIFIER, got ${challenge['ChallengeName']}');
+    }
+
+    final parameters = challenge['ChallengeParameters'] as Map<String, dynamic>;
+    final userIdForSrp = parameters['USER_ID_FOR_SRP'] as String;
+    final secretBlock = parameters['SECRET_BLOCK'] as String;
+    final claim = srp.passwordClaim(
+      userIdForSrp: userIdForSrp,
+      password: password,
+      saltHex: parameters['SALT'] as String,
+      serverBHex: parameters['SRP_B'] as String,
+      secretBlock: secretBlock,
+    );
+    final response = await _post('RespondToAuthChallenge', {
+      'ChallengeName': 'PASSWORD_VERIFIER',
+      'ClientId': AppConfig.cognitoClientId,
+      if (challenge['Session'] != null) 'Session': challenge['Session'],
+      'ChallengeResponses': {
+        'USERNAME': userIdForSrp,
+        'PASSWORD_CLAIM_SECRET_BLOCK': secretBlock,
+        'PASSWORD_CLAIM_SIGNATURE': claim.signature,
+        'TIMESTAMP': claim.timestamp,
+      },
+    });
+    return _resultFrom(response, username: userIdForSrp);
   }
 
   Future<CognitoAuthResult> respondToNewPasswordChallenge({

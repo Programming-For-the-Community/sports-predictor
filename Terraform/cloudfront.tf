@@ -46,7 +46,8 @@ resource "aws_cloudfront_origin_access_control" "frontend" {
 }
 
 # Baseline security headers on every response -- HSTS, MIME-sniffing
-# protection, clickjacking protection, and a conservative Referrer-Policy.
+# protection, clickjacking protection, a conservative Referrer-Policy, a
+# Content-Security-Policy and a Permissions-Policy.
 resource "aws_cloudfront_response_headers_policy" "security_headers" {
   name = "${var.project}-security-headers"
 
@@ -72,12 +73,47 @@ resource "aws_cloudfront_response_headers_policy" "security_headers" {
       override                   = true
     }
 
+    # "X-XSS-Protection: 0" -- the legacy browser filter is itself
+    # exploitable; the Content-Security-Policy below replaces it.
     xss_protection {
-      protection = true
-      mode_block = true
+      protection = false
       override   = true
     }
+
+    content_security_policy {
+      content_security_policy = local.content_security_policy
+      override                = true
+    }
   }
+
+  custom_headers_config {
+    items {
+      header   = "Permissions-Policy"
+      value    = "camera=(), microphone=(), geolocation=(), payment=(), usb=()"
+      override = true
+    }
+  }
+}
+
+locals {
+  # Flutter web loads CanvasKit (JS + WebAssembly) from www.gstatic.com and
+  # sets inline <style> elements; google_fonts loads from the two Google
+  # Fonts hosts; the app calls Cognito directly and everything else
+  # same-origin through this distribution.
+  content_security_policy = join("; ", [
+    "default-src 'self'",
+    "script-src 'self' 'wasm-unsafe-eval' https://www.gstatic.com",
+    "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
+    "font-src 'self' https://fonts.gstatic.com",
+    "connect-src 'self' https://cognito-idp.${var.region}.amazonaws.com https://www.gstatic.com https://fonts.gstatic.com https://fonts.googleapis.com",
+    "img-src 'self' data: blob:",
+    "worker-src 'self' blob:",
+    "manifest-src 'self'",
+    "object-src 'none'",
+    "base-uri 'self'",
+    "frame-ancestors 'none'",
+    "form-action 'self'",
+  ])
 }
 
 resource "aws_cloudfront_distribution" "main" {
@@ -110,6 +146,13 @@ resource "aws_cloudfront_distribution" "main" {
       http_port              = 80
       https_port             = 443
       origin_ssl_protocols   = ["TLSv1.2"]
+    }
+
+    # Proves to the API's regional WAF (waf-api-gateway.tf) that the
+    # request came through this distribution.
+    custom_header {
+      name  = local.cloudfront_origin_secret_header
+      value = random_password.cloudfront_origin_secret.result
     }
   }
 

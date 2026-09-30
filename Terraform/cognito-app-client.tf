@@ -2,9 +2,9 @@
 # that can't safely store a secret (browser, mobile, desktop) uses a public
 # client.
 #
-# ALLOW_USER_PASSWORD_AUTH sends the password over TLS to Cognito directly
-# (simpler than SRP, no client-side crypto) and works from any frontend
-# without requiring IAM credentials.
+# ALLOW_USER_SRP_AUTH: sign-in is a Secure Remote Password exchange
+# (Source/front-end/lib/core/auth/cognito_srp.dart), so the password itself
+# is never sent to Cognito -- only a proof derived from it.
 #
 # prevent_user_existence_errors ensures both valid and invalid usernames
 # return the same error, preventing username enumeration.
@@ -15,7 +15,7 @@ resource "aws_cognito_user_pool_client" "web" {
   generate_secret = false
 
   explicit_auth_flows = [
-    "ALLOW_USER_PASSWORD_AUTH",
+    "ALLOW_USER_SRP_AUTH",
     "ALLOW_REFRESH_TOKEN_AUTH",
   ]
 

@@ -33,3 +33,34 @@ resource "aws_s3_bucket_server_side_encryption_configuration" "model_artifacts" 
     }
   }
 }
+
+# Keeps overwritten or deleted model artifacts (promoted model cards,
+# boosters) recoverable for 30 days.
+resource "aws_s3_bucket_versioning" "model_artifacts" {
+  bucket = aws_s3_bucket.model_artifacts.id
+
+  versioning_configuration {
+    status = "Enabled"
+  }
+}
+
+resource "aws_s3_bucket_lifecycle_configuration" "model_artifacts" {
+  bucket = aws_s3_bucket.model_artifacts.id
+
+  rule {
+    id     = "expire-noncurrent-versions"
+    status = "Enabled"
+
+    filter {}
+
+    noncurrent_version_expiration {
+      noncurrent_days = 30
+    }
+
+    abort_incomplete_multipart_upload {
+      days_after_initiation = 7
+    }
+  }
+
+  depends_on = [aws_s3_bucket_versioning.model_artifacts]
+}

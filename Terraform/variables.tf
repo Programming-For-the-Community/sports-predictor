@@ -32,6 +32,13 @@ variable "alert_email" {
   nullable    = false
 }
 
+variable "waf_rate_limit_per_ip" {
+  description = "Requests one client IP may make through CloudFront per 5 minutes before the WAF answers 429"
+  type        = number
+  default     = 1000
+  nullable    = false
+}
+
 variable "monthly_limit" {
   description = "Whole-project monthly budget limit in USD"
   type        = string
