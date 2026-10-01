@@ -27,6 +27,10 @@ Two kinds of model:
 Fewer than MIN_BAND_SAMPLE predictions in a band is flagged `early` -- the
 UI shows "too early" instead of a percentage that means nothing yet.
 
+Every record carries `history` (each finished period with the model version
+that made most of its predictions) and `versions` (each version's own figure
+over the predictions it made), for the per-version chart.
+
 A record built with an `entity_type` also carries `best`: the teams or players
 the model has been most accurate on (see _best). Each sample names the
 entities it counts toward in `entities`.
@@ -74,6 +78,7 @@ class PickSample:
     edge: float  # how sure the model was: |win probability - 0.5|
     baseline_correct: bool  # would "always pick the home side" have been right?
     entities: tuple[str, ...] = ()
+    version: int | None = None  # the model version that made the prediction
 
 
 @dataclass(frozen=True)
@@ -82,6 +87,7 @@ class AmountSample:
     predicted: float
     actual: float
     entities: tuple[str, ...] = ()
+    version: int | None = None
 
 
 @dataclass(frozen=True)
@@ -90,6 +96,7 @@ class ChanceSample:
     probability: float  # the chance we gave that it happens
     happened: bool
     entities: tuple[str, ...] = ()
+    version: int | None = None
 
 
 def _mean(values: list[float]) -> float | None:
@@ -97,17 +104,37 @@ def _mean(values: list[float]) -> float | None:
 
 
 def _by_period(samples: list, value_of, open_period: "Period | None" = None) -> list[dict]:
-    """Chronological [{"label", "value", "n"}] -- one entry per finished
-    period. `open_period` (one with games still to play) is left out: it
-    isn't "last week" yet. The season figures still count its graded games."""
-    grouped: dict[Period, list[float]] = {}
+    """Chronological [{"label", "value", "n", "version"}] -- one entry per
+    finished period. `open_period` (one with games still to play) is left out:
+    it isn't "last week" yet. The season figures still count its graded games."""
+    grouped: dict[Period, list] = {}
     for sample in samples:
         if sample.period != open_period:
-            grouped.setdefault(sample.period, []).append(value_of(sample))
+            grouped.setdefault(sample.period, []).append(sample)
     return [
-        {"label": period.label, "value": _mean(values), "n": len(values)}
-        for period, values in sorted(grouped.items(), key=lambda item: item[0].key)
+        {"label": period.label, "value": _mean([value_of(s) for s in members]), "n": len(members), "version": _main_version(members)}
+        for period, members in sorted(grouped.items(), key=lambda item: item[0].key)
     ]
+
+
+def _main_version(samples: list) -> int | None:
+    """The version that made most of these predictions -- the newer one on a
+    tie (a period a promotion landed in the middle of)."""
+    counts: dict[int, int] = {}
+    for sample in samples:
+        if sample.version is not None:
+            counts[sample.version] = counts.get(sample.version, 0) + 1
+    return max(counts, key=lambda version: (counts[version], version)) if counts else None
+
+
+def _by_version(samples: list, value_of) -> list[dict]:
+    """[{"version", "value", "n"}] oldest first -- each version's figure over
+    every prediction it made. Samples without a version are left out."""
+    grouped: dict[int, list[float]] = {}
+    for sample in samples:
+        if sample.version is not None:
+            grouped.setdefault(sample.version, []).append(value_of(sample))
+    return [{"version": version, "value": _mean(values), "n": len(values)} for version, values in sorted(grouped.items())]
 
 
 def _best(samples: list, score, entity_type: str, lower_is_better: bool) -> dict | None:
@@ -135,12 +162,16 @@ def _best(samples: list, score, entity_type: str, lower_is_better: bool) -> dict
     }
 
 
-def _headline(periods: list[dict], season_value: float | None, season_n: int) -> dict:
-    last = periods[-1] if periods else None
+def _headline(samples: list, value_of, open_period: "Period | None" = None) -> dict:
+    """The season figure, the last and recent periods, and the per-period and
+    per-version history -- every figure the mean of `value_of`."""
+    periods = _by_period(samples, value_of, open_period)
     return {
-        "season": {"value": season_value, "n": season_n},
-        "last_period": last,
+        "season": {"value": _mean([value_of(s) for s in samples]), "n": len(samples)},
+        "last_period": periods[-1] if periods else None,
         "periods": periods[-RECENT_PERIODS:],
+        "history": periods,
+        "versions": _by_version(samples, value_of),
     }
 
 
@@ -159,16 +190,20 @@ def pick_record(
     open_period: Period | None = None, entity_type: str | None = None,
 ) -> dict:
     record = _base(model_name, version, KIND_PICK, BAND_CONFIDENCE, count_noun)
-    accuracy = _mean([1.0 if s.correct else 0.0 for s in samples])
+    record.update(_headline(samples, _pick_hit, open_period))
+    accuracy = record["season"]["value"]
     baseline = _mean([1.0 if s.baseline_correct else 0.0 for s in samples])
-    record.update(_headline(_by_period(samples, lambda s: 1.0 if s.correct else 0.0, open_period), accuracy, len(samples)))
     record["vs_baseline_pct"] = (accuracy - baseline) / baseline * 100 if accuracy is not None and baseline else None
     record["at_training"] = at_training
     record["margin_of_error"] = None
     record["bands"] = [_pick_band(tag, floor, tiers, samples) for tag, floor in tiers]
     if entity_type is not None:
-        _put_best(record, "best", _best(samples, lambda m: _mean([1.0 if s.correct else 0.0 for s in m]), entity_type, lower_is_better=False))
+        _put_best(record, "best", _best(samples, lambda m: _mean([_pick_hit(s) for s in m]), entity_type, lower_is_better=False))
     return record
+
+
+def _pick_hit(sample: PickSample) -> float:
+    return 1.0 if sample.correct else 0.0
 
 
 def _put_best(record: dict, key: str, ranking: dict | None) -> None:
@@ -206,9 +241,8 @@ def amount_record(
     like sacks, a player who never records one is otherwise "most accurate"
     just because we predicted almost nothing for him."""
     record = _base(model_name, version, KIND_AMOUNT, BAND_PREDICTED_AMOUNT, count_noun)
-    misses = [abs(s.predicted - s.actual) for s in samples]
-    avg_miss = _mean(misses)
-    record.update(_headline(_by_period(samples, lambda s: abs(s.predicted - s.actual), open_period), avg_miss, len(samples)))
+    record.update(_headline(samples, _miss, open_period))
+    avg_miss = record["season"]["value"]
 
     actual_mean = _mean([s.actual for s in samples])
     baseline_miss = _mean([abs(s.actual - actual_mean) for s in samples]) if samples else None
@@ -224,8 +258,12 @@ def amount_record(
     return record
 
 
+def _miss(sample: AmountSample) -> float:
+    return abs(sample.predicted - sample.actual)
+
+
 def _avg_miss(members: list[AmountSample]) -> float | None:
-    return _mean([abs(s.predicted - s.actual) for s in members])
+    return _mean([_miss(s) for s in members])
 
 
 def _avg_miss_if_recorded(members: list[AmountSample]) -> float | None:
@@ -250,7 +288,7 @@ def _amount_bands(samples: list[AmountSample], tolerance: float | None) -> list[
         lo, hi = edges[index], edges[index + 1]
         last = index == len(AMOUNT_TIERS) - 1
         members = [s for s in samples if s.predicted >= lo and (s.predicted <= hi if last else s.predicted < hi)]
-        hits = sum(1 for s in members if abs(s.predicted - s.actual) <= tolerance)
+        hits = sum(1 for s in members if _miss(s) <= tolerance)
         bands.append(_band(tag, len(members), hits, lo=lo, hi=hi, bias=_bias(members)))
     return bands
 
@@ -263,14 +301,9 @@ def chance_record(
     50% = yes) was right; the baseline is always answering no, which is
     already right most of the time for a rare outcome like a top-10 finish."""
     record = _base(model_name, version, KIND_CHANCE, BAND_PREDICTED_CHANCE, count_noun)
-    correct = [1.0 if (s.probability >= 0.5) == s.happened else 0.0 for s in samples]
-    accuracy = _mean(correct)
+    record.update(_headline(samples, _called_right))
+    accuracy = record["season"]["value"]
     baseline = _mean([0.0 if s.happened else 1.0 for s in samples])
-    grouped: dict[Period, list[float]] = {}
-    for sample, hit in zip(samples, correct):
-        grouped.setdefault(sample.period, []).append(hit)
-    periods = [{"label": p.label, "value": _mean(v), "n": len(v)} for p, v in sorted(grouped.items(), key=lambda item: item[0].key)]
-    record.update(_headline(periods, accuracy, len(samples)))
     record["vs_baseline_pct"] = (accuracy - baseline) / baseline * 100 if accuracy is not None and baseline else None
     record["at_training"] = at_training
     record["margin_of_error"] = None
@@ -280,8 +313,13 @@ def chance_record(
     return record
 
 
+def _called_right(sample: ChanceSample) -> float:
+    """1 when the call (yes at 50% or more) matched what happened."""
+    return 1.0 if (sample.probability >= 0.5) == sample.happened else 0.0
+
+
 def _called_right_share(members: list[ChanceSample]) -> float | None:
-    return _mean([1.0 if (s.probability >= 0.5) == s.happened else 0.0 for s in members])
+    return _mean([_called_right(s) for s in members])
 
 
 def _chance_tier(lo: float) -> str:
@@ -298,7 +336,7 @@ def _chance_bands(samples: list[ChanceSample]) -> list[dict]:
         lo, hi = CHANCE_EDGES[index], CHANCE_EDGES[index + 1]
         last = index == len(CHANCE_EDGES) - 2
         members = [s for s in samples if s.probability >= lo and (s.probability <= hi if last else s.probability < hi)]
-        called_right = sum(1 for s in members if (s.probability >= 0.5) == s.happened)
+        called_right = sum(1 for s in members if _called_right(s))
         bands.append(_band(_chance_tier(lo), len(members), called_right, lo=lo, hi=hi))
     return bands
 

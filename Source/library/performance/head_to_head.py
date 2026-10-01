@@ -13,7 +13,7 @@ from datetime import date, timedelta
 
 from library.performance import scorecard
 from library.performance.scorecard import AmountSample, Period, PickSample
-from library.serving.common import SCORE_MODELS, WIN_PROBABILITY_MODEL, _actual_result, latest_matching_row
+from library.serving.common import SCORE_MODELS, WIN_PROBABILITY_MODEL, _actual_result, latest_matching_row, row_model_version
 
 FOOTBALL = {"nfl", "ncaafb"}
 
@@ -72,6 +72,7 @@ def collect_samples(sport: str, events: list[dict], rows_by_event: dict[str, lis
                 edge=abs(home_win_probability - 0.5),
                 baseline_correct=actual["home_won"],
                 entities=home + away,
+                version=row_model_version(win_row),
             ))
 
         actual_values = {
@@ -82,7 +83,7 @@ def collect_samples(sport: str, events: list[dict], rows_by_event: dict[str, lis
         for key, model_name in SCORE_MODELS.items():
             row = latest_matching_row(rows, model_name)
             if row is not None:
-                add(model_name, AmountSample(period, row["predicted_value"]["value"], actual_values[key], teams_for[key]))
+                add(model_name, AmountSample(period, row["predicted_value"]["value"], actual_values[key], teams_for[key], row_model_version(row)))
 
         _collect_player_props(add, period, rows, stats_by_event.get(event["event_key"], {}))
     return samples
@@ -106,7 +107,7 @@ def _collect_player_props(add, period: Period, rows: list[dict], actual_by_entit
         if not stat_line:
             continue
         actual_value = stat_line.get(stat_slug.replace("-", "_"), 0)
-        add(f"player-prop-{stat_slug}", AmountSample(period, row["predicted_value"]["value"], actual_value, (entity_id,)))
+        add(f"player-prop-{stat_slug}", AmountSample(period, row["predicted_value"]["value"], actual_value, (entity_id,), row_model_version(row)))
 
 
 def build_records(samples_by_model: dict[str, list], model_cards: list[dict], open_period: Period | None = None) -> list[dict]:

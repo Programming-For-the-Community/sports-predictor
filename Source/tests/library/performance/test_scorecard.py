@@ -1,7 +1,7 @@
 import pytest
 
 from library.performance import scorecard
-from library.performance.scorecard import AmountSample, Period, PickSample
+from library.performance.scorecard import AmountSample, ChanceSample, Period, PickSample
 
 WK1, WK2, WK3 = Period("2026-01", "Wk 1"), Period("2026-02", "Wk 2"), Period("2026-03", "Wk 3")
 
@@ -18,7 +18,7 @@ class TestPickRecord:
 
         assert record["kind"] == "pick"
         assert record["season"] == {"value": pytest.approx(4 / 6), "n": 6}
-        assert record["last_period"] == {"label": "Wk 3", "value": 0.5, "n": 2}
+        assert record["last_period"] == {"label": "Wk 3", "value": 0.5, "n": 2, "version": None}
         assert [p["value"] for p in record["periods"]] == [0.5, 1.0, 0.5]
         assert record["at_training"] == 0.66
 
@@ -29,7 +29,7 @@ class TestPickRecord:
 
         record = scorecard.pick_record("win-probability", 9, samples, None, open_period=WK3)
 
-        assert record["last_period"] == {"label": "Wk 2", "value": 0.5, "n": 2}
+        assert record["last_period"] == {"label": "Wk 2", "value": 0.5, "n": 2, "version": None}
         assert [p["label"] for p in record["periods"]] == ["Wk 2"]
         assert record["season"]["n"] == 3
 
@@ -100,7 +100,7 @@ class TestAmountRecord:
 
         assert record["kind"] == "amount"
         assert record["season"] == {"value": pytest.approx((5 + 5 + 0 + 6) / 4), "n": 4}
-        assert record["last_period"] == {"label": "Wk 2", "value": 3.0, "n": 2}
+        assert record["last_period"] == {"label": "Wk 2", "value": 3.0, "n": 2, "version": None}
 
     def test_vs_baseline_compares_against_predicting_the_seasons_average(self):
         samples = [_amount(WK1, 10, 10), _amount(WK1, 20, 20), _amount(WK1, 30, 30)]  # perfect model
@@ -258,3 +258,63 @@ class TestBest:
 
     def test_no_best_without_an_entity_type(self):
         assert "best" not in scorecard.pick_record("win-probability", 9, [_pick(WK1, True)], None)
+
+
+class TestVersionHistory:
+    def test_history_lists_every_finished_period_with_the_version_that_made_it(self):
+        weeks = [Period(f"2026-{w:02d}", f"Wk {w}") for w in range(1, 9)]
+        samples = [PickSample(week, True, 0.2, True, version=3 if i < 4 else 4) for i, week in enumerate(weeks)]
+
+        record = scorecard.pick_record("win-probability", 4, samples, None)
+
+        assert [(p["label"], p["version"]) for p in record["history"]] == [(f"Wk {w}", 3 if w <= 4 else 4) for w in range(1, 9)]
+        assert len(record["periods"]) == scorecard.RECENT_PERIODS
+
+    def test_a_period_split_between_versions_takes_the_one_that_made_most_of_it(self):
+        samples = [_amount_v(WK1, 3)] * 2 + [_amount_v(WK1, 4)]
+
+        assert scorecard.amount_record("score-margin", 4, samples, 2.0, 2.0)["history"][0]["version"] == 3
+
+    def test_an_even_split_goes_to_the_newer_version(self):
+        samples = [_amount_v(WK1, 3), _amount_v(WK1, 4)]
+
+        assert scorecard.amount_record("score-margin", 4, samples, 2.0, 2.0)["history"][0]["version"] == 4
+
+    def test_versions_give_each_version_its_own_figure_oldest_first(self):
+        samples = [AmountSample(WK1, 5, 3, version=4), AmountSample(WK1, 5, 1, version=4), AmountSample(WK2, 5, 6, version=3)]
+
+        versions = scorecard.amount_record("score-margin", 4, samples, 2.0, 2.0)["versions"]
+
+        assert versions == [{"version": 3, "value": 1.0, "n": 1}, {"version": 4, "value": 3.0, "n": 2}]
+
+    def test_samples_without_a_version_count_toward_the_season_but_not_any_version(self):
+        samples = [_pick(WK1, True), PickSample(WK1, False, 0.2, True, version=2)]
+
+        record = scorecard.pick_record("win-probability", 2, samples, None)
+
+        assert record["season"]["n"] == 2
+        assert record["versions"] == [{"version": 2, "value": 0.0, "n": 1}]
+        assert record["history"][0]["version"] == 2
+
+    def test_the_week_still_being_played_is_left_out_of_the_history(self):
+        record = scorecard.pick_record("win-probability", 9, [_pick(WK1, True), _pick(WK2, True)], None, open_period=WK2)
+
+        assert [p["label"] for p in record["history"]] == ["Wk 1"]
+
+    def test_chance_records_carry_history_and_versions_too(self):
+        samples = [ChanceSample(WK1, 0.7, True, version=5), ChanceSample(WK2, 0.7, False, version=5)]
+
+        record = scorecard.chance_record("top-10-probability", 5, samples, None)
+
+        assert [(p["label"], p["value"], p["version"]) for p in record["history"]] == [("Wk 1", 1.0, 5), ("Wk 2", 0.0, 5)]
+        assert record["versions"] == [{"version": 5, "value": 0.5, "n": 2}]
+
+    def test_no_samples_means_empty_history_and_versions(self):
+        record = scorecard.amount_record("score-margin", 1, [], 2.0, 2.0)
+
+        assert record["history"] == []
+        assert record["versions"] == []
+
+
+def _amount_v(period, version):
+    return AmountSample(period, 5, 3, version=version)

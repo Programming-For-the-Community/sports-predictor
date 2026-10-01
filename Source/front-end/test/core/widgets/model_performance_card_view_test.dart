@@ -41,10 +41,11 @@ void main() {
       for (final tier in ['HIGH', 'MED', 'LOW']) {
         expect(find.text(tier), findsOneWidget);
       }
+      final details = find.byType(ModelPerformanceDetails);
       expect(find.text('9 games'), findsOneWidget);
-      expect(find.text('89%'), findsOneWidget);
-      expect(find.text('69%'), findsOneWidget);
-      expect(find.text('50%'), findsOneWidget);
+      expect(find.descendant(of: details, matching: find.text('89%')), findsOneWidget);
+      expect(find.descendant(of: details, matching: find.text('69%')), findsOneWidget);
+      expect(find.descendant(of: details, matching: find.text('50%')), findsOneWidget);
       expect(find.textContaining('Share of picks that were right.'), findsOneWidget);
     });
 

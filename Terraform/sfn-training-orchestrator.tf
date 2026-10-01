@@ -79,13 +79,8 @@ resource "aws_sfn_state_machine" "training_orchestrator" {
   # same trace anyway, via CheckSeason's Lambda invoke handing its own
   # trace header down as a ContainerOverrides env var (season-gate's own
   # handler.py, library.aws.xray.linked_segment_from_env). RunTrainingTask/
-  # RunTrainingTaskOnDemand can't -- they run inside TrainAllTargets, a
-  # Distributed Map, and AWS doesn't propagate X-Ray trace context into a
-  # Distributed Map's child workflow executions at all -- so every
-  # training task instead emits its own independent, unlinked trace
-  # (library.ml.backtest.run_backtest, via library.aws.xray.
-  # independent_segment), correlatable by its training_run_id annotation
-  # but not graph-connected to this state machine's own trace.
+  # RunTrainingTaskOnDemand aren't traced: they run in private subnets with
+  # no route to the X-Ray API.
   tracing_configuration {
     enabled = true
   }

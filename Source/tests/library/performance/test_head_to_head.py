@@ -81,7 +81,8 @@ class TestCollectSamples:
         assert pick.correct is True
         assert pick.edge == pytest.approx(0.2)
         assert pick.baseline_correct is True
-        assert samples["score-margin"] == [AmountSample(pick.period, 5.0, 7, ("h", "a"))]
+        assert pick.version == 9
+        assert samples["score-margin"] == [AmountSample(pick.period, 5.0, 7, ("h", "a"), version=6)]
         assert samples["home-score"][0].actual == 27
         assert samples["away-score"][0].actual == 20
 
@@ -137,6 +138,8 @@ class TestCollectSamples:
         assert [(s.predicted, s.actual) for s in samples["player-prop-passing-yards"]] == [(280.0, 301)]
         # played but recorded no passing touchdowns -> 0, not skipped
         assert [(s.predicted, s.actual) for s in samples["player-prop-passing-touchdowns"]] == [(2.0, 0)]
+        assert [s.version for s in samples["player-prop-passing-yards"]] == [4]
+        assert [s.version for s in samples["player-prop-passing-touchdowns"]] == [3]
 
 
 class TestBuildRecords:

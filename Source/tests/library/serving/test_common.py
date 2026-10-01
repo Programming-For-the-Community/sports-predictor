@@ -12,10 +12,12 @@ for the through-list_events/through-build_season_projection integration.
 from datetime import datetime, timezone
 from unittest.mock import MagicMock
 
+import pytest
+
 from library.serving import common
 from library.serving.common import (
     enrich_bracket_team_names, enrich_participants, enrich_team_standings, latest_matching_row, list_models,
-    most_recent_event, prefetch_entities,
+    most_recent_event, prefetch_entities, row_model_version,
 )
 
 
@@ -47,6 +49,26 @@ class TestLatestMatchingRow:
         # the trailing "#" in the match is what anchors this.
         rows = [{"model_key": "MODEL#score-margin-extra#v1", "generated_at": "2026-01-01T00:00:00+00:00"}]
         assert latest_matching_row(rows, "score-margin") is None
+
+
+class TestRowModelVersion:
+    @pytest.mark.parametrize("model_key, expected", [
+        ("MODEL#win-probability#v4", 4),
+        ("MODEL#score-margin#v12", 12),
+        ("MODEL#player-prop-points#v3#PLAYER#1966", 3),
+        ("MODEL#top-10-probability#v1#GOLFER#9478", 1),
+    ])
+    def test_reads_the_version_out_of_the_key(self, model_key, expected):
+        assert row_model_version({"model_key": model_key}) == expected
+
+    @pytest.mark.parametrize("row", [
+        {"model_key": "MODEL#win-probability"},
+        {"model_key": "MODEL#win-probability#vX"},
+        {"model_key": "PREGAME#MODEL#win-probability#v4"},
+        {},
+    ])
+    def test_none_when_the_key_has_no_version(self, row):
+        assert row_model_version(row) is None
 
 
 class TestEnrichParticipants:

@@ -3,6 +3,14 @@ import 'package:front_end/core/models/model_performance.dart';
 PerformanceBand band(String tag, {double? lo, double? hi, int n = 10, double? pct = 0.5, bool early = false, double? bias}) =>
     PerformanceBand(tag: tag, lo: lo, hi: hi, n: n, pct: early ? null : pct, early: early, bias: early ? null : bias);
 
+/// A season's history: one period per (label, value, version), each graded on `n` predictions.
+List<PerformanceWindow> history(List<(String, double, int)> periods, {int n = 16}) =>
+    [for (final (label, value, version) in periods) PerformanceWindow(value: value, n: n, label: label, version: version)];
+
+/// Per-version figures: one per (version, value, n).
+List<PerformanceWindow> versionFigures(List<(int, double, int)> versions) =>
+    [for (final (version, value, n) in versions) PerformanceWindow(value: value, n: n, version: version)];
+
 /// Win-probability card: a pick model with the app's confidence tiers.
 ModelPerformanceRecord pickRecord({
   String modelName = 'win-probability',
@@ -29,6 +37,8 @@ ModelPerformanceRecord pickRecord({
       vsBaselinePct: vsBaselinePct,
       atTraining: atTraining,
       marginOfError: null,
+      history: history([('Wk 1', 0.62, 8), ('Wk 2', 0.69, 9), ('Wk 3', 0.75, 9)]),
+      versions: versionFigures([(8, 0.6, 16), (9, 0.71, 28)]),
       bands: bands ??
           [
             band('HIGH', lo: 0.13, n: 9, pct: 0.89),
@@ -66,6 +76,8 @@ ModelPerformanceRecord amountRecord({
       atTraining: atTraining,
       marginOfError: marginOfError,
       bias: bias,
+      history: history([('Wk 1', 11.9, 5), ('Wk 2', 10.4, 6), if (last != null) ('Wk 3', last, 6)]),
+      versions: versionFigures([(5, 11.92, 16), (6, 9.81, 32)]),
       bands: bands ??
           [
             band('LOW', lo: 0.5, hi: 6.0, n: 11, pct: 0.64, bias: 3.1),
@@ -98,6 +110,8 @@ ModelPerformanceRecord chanceRecord({
       atTraining: 0.804,
       marginOfError: null,
       countNoun: countNoun,
+      history: history([('Event 3', 0.79, 4), ('Event 4', 0.82, 5), ('Biltmore Championship', 0.839, 5)], n: 144),
+      versions: versionFigures([(4, 0.79, 140), (5, 0.83, 288)]),
       bands: bands ??
           [
             band('LOW', lo: 0, hi: 0.2, n: 402, pct: 0.94),

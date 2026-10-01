@@ -3,16 +3,11 @@
 # probabilities + Champion probability) and write it to S3. GET /pga/season
 # serves the cached result.
 #
-# Tuesday 14:00 UTC -- moved from Monday 2026-08-31 so this lands AFTER,
-# not before, that same week's schedule-sync (scheduler-pga-schedule-
-# sync.tf, Tue 10:00 UTC, itself deliberately Tuesday rather than Monday
-# for its own real reason -- see that file's own comment, not touched
-# here): the original Monday slot meant season-projection always ran a
-# full day BEFORE that week's own Tuesday sync, using a calendar up to 6
-# days stale. Tuesday still lands inside the original Mon-Wed (not
-# Thu-Sun, when a PGA Tour event is actually being played) window this
-# schedule was chosen to stay within -- distinct from every other sport's
-# own weekly season-projection schedule (NBA Fri, NCAAFB Thu, NFL Wed,
+# Tuesday 14:00 UTC: after that day's schedule-sync (scheduler-pga-
+# schedule-sync.tf, daily 10:00 UTC) so the projection uses a fresh
+# calendar, and inside the Mon-Wed window before a PGA Tour event is
+# played -- distinct from every other sport's own weekly season-projection
+# schedule (NBA Fri, NCAAFB Thu, NFL Wed,
 # NCAAMBB daily). aws_iam_role.eventbridge_invoke already covers
 # pga_predict's own ARN (iam-eventbridge-invoke.tf) -- no IAM edit needed
 # here.

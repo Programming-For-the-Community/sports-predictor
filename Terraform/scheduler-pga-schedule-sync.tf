@@ -3,28 +3,18 @@
 # through Step Functions. The Lambda discovers and syncs the whole
 # season's calendar internally in one invocation.
 #
-# Weekly, Tuesday 10:00 UTC -- not Monday: PGA tournaments are scheduled
-# to conclude Sunday, but a weather delay can push final-round (or
-# sudden-death playoff) holes to Monday, and a Monday run risks landing
-# mid-delay and capturing the tournament still in progress rather than
-# final. Tuesday gives that Monday spillover a full day to actually
-# finish before this Lambda's own refresh-window bookkeeping treats the
-# tournament as settled (daily ingest still refreshes it sooner in the
-# normal case -- see lambda-pga-ingest.tf -- this is the backstop for the
-# delayed one). Year-round, not gated to a season window (PGA has none --
-# see dynamodb-sport-registry.tf's pga_registry row), so this always
-# runs.
-#
-# scheduler-pga-season-projection.tf runs the same Tuesday, 4 hours after
-# this (14:00 UTC) -- moved there 2026-08-31 specifically so that weekly
-# projection always uses this same day's freshly synced calendar, not a
-# stale one from up to 6 days earlier.
+# Daily, 10:00 UTC. ESPN only publishes a tournament's field shortly
+# before it starts, and normalize skips a stroke-play leaderboard with no
+# competitors, so an upcoming tournament reaches the events table on the
+# first run after its field appears. Year-round, not gated to a season
+# window (PGA has none -- see dynamodb-sport-registry.tf's pga_registry
+# row). scheduler-pga-season-projection.tf runs at 14:00 UTC, after this.
 resource "aws_scheduler_schedule" "pga_schedule_sync" {
   name        = "${var.project}-pga-schedule-sync"
-  description = "Invokes the pga-schedule-sync Lambda weekly, Tue 10:00 UTC, to seed/refresh the current PGA season's tournament calendar."
+  description = "Invokes the pga-schedule-sync Lambda daily, 10:00 UTC, to seed/refresh the current PGA season's tournament calendar."
   group_name  = aws_scheduler_schedule_group.sports_predictor.name
 
-  schedule_expression          = "cron(0 10 ? * TUE *)"
+  schedule_expression          = "cron(0 10 * * ? *)"
   schedule_expression_timezone = "UTC"
 
   flexible_time_window {

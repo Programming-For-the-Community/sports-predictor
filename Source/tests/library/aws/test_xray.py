@@ -1,27 +1,15 @@
 """
 Unit tests for library.aws.xray -- direct-to-API X-Ray segment emission
-for short-lived batch tasks (feature-engineering, model-training), no
-daemon/sidecar. The module-level `_xray` boto3 client is patched
+for feature-engineering tasks, no daemon/sidecar. The module-level `_xray` boto3 client is patched
 directly, same pattern test_ec2_training_reaper.py uses for its own
 module-level clients.
 """
 import json
-import re
 from unittest.mock import patch
 
 import pytest
 
 from library.aws import xray
-
-
-class TestNewTraceId:
-    def test_matches_x_rays_own_trace_id_format(self):
-        assert re.fullmatch(r"1-[0-9a-f]{8}-[0-9a-f]{24}", xray.new_trace_id())
-
-    def test_two_calls_produce_different_ids(self):
-        first = xray.new_trace_id()
-        second = xray.new_trace_id()
-        assert first != second
 
 
 class TestCurrentTraceHeader:
@@ -39,47 +27,6 @@ class TestCurrentTraceHeader:
         assert xray.current_trace_header() is None
 
 
-class TestIndependentSegment:
-    def test_emits_one_segment_with_no_parent_id(self):
-        with patch.object(xray, "_xray") as mock_xray:
-            with xray.independent_segment("nfl-train-win-probability-model"):
-                pass
-
-        assert mock_xray.put_trace_segments.call_count == 1
-        document = json.loads(mock_xray.put_trace_segments.call_args.kwargs["TraceSegmentDocuments"][0])
-        assert document["name"] == "nfl-train-win-probability-model"
-        assert "parent_id" not in document
-        assert re.fullmatch(r"1-[0-9a-f]{8}-[0-9a-f]{24}", document["trace_id"])
-        assert document["start_time"] <= document["end_time"]
-
-    def test_carries_annotations(self):
-        with patch.object(xray, "_xray") as mock_xray:
-            with xray.independent_segment("pga-train-cup-winprob-model", annotations={"training_run_id": "run-123"}):
-                pass
-
-        document = json.loads(mock_xray.put_trace_segments.call_args.kwargs["TraceSegmentDocuments"][0])
-        assert document["annotations"] == {"training_run_id": "run-123"}
-
-    def test_marks_fault_and_reraises_on_exception(self):
-        with patch.object(xray, "_xray") as mock_xray:
-            error = ValueError("boom")
-            with pytest.raises(ValueError):
-                with xray.independent_segment("nfl-train-win-probability-model"):
-                    raise error
-
-        document = json.loads(mock_xray.put_trace_segments.call_args.kwargs["TraceSegmentDocuments"][0])
-        assert document["fault"] is True
-
-    def test_a_put_trace_segments_failure_is_swallowed_not_raised(self):
-        """A training run's own result shouldn't be lost over X-Ray being
-        unavailable -- same "log and move on" precedent every other best-
-        effort AWS write in this project follows."""
-        with patch.object(xray, "_xray") as mock_xray:
-            mock_xray.put_trace_segments.side_effect = RuntimeError("X-Ray unavailable")
-            with xray.independent_segment("nfl-train-win-probability-model"):
-                pass  # does not raise
-
-
 class TestLinkedSegment:
     def test_emits_a_subsegment_carrying_the_given_trace_and_parent_ids(self):
         with patch.object(xray, "_xray") as mock_xray:
@@ -90,6 +37,21 @@ class TestLinkedSegment:
         assert document["trace_id"] == "1-aaaaaaaa-bbbbbbbbbbbbbbbbbbbbbbbb"
         assert document["parent_id"] == "cccccccccccccccc"
         assert document["type"] == "subsegment"
+
+    def test_marks_fault_and_reraises_on_exception(self):
+        with patch.object(xray, "_xray") as mock_xray:
+            with pytest.raises(ValueError):
+                with xray.linked_segment("nfl-feature-engineering", "1-aaaaaaaa-bbbbbbbbbbbbbbbbbbbbbbbb", "cccccccccccccccc"):
+                    raise ValueError("boom")
+
+        document = json.loads(mock_xray.put_trace_segments.call_args.kwargs["TraceSegmentDocuments"][0])
+        assert document["fault"] is True
+
+    def test_a_put_trace_segments_failure_is_swallowed_not_raised(self):
+        with patch.object(xray, "_xray") as mock_xray:
+            mock_xray.put_trace_segments.side_effect = RuntimeError("X-Ray unavailable")
+            with xray.linked_segment("nfl-feature-engineering", "1-aaaaaaaa-bbbbbbbbbbbbbbbbbbbbbbbb", "cccccccccccccccc"):
+                pass  # does not raise
 
 
 class TestLinkedSegmentFromEnv:

@@ -6,6 +6,7 @@ import 'package:flutter_test/flutter_test.dart';
 
 import 'package:front_end/core/data/model_performance_repository.dart';
 import 'package:front_end/core/models/model_performance.dart';
+import 'package:front_end/core/widgets/model_performance_accordion.dart';
 import 'package:front_end/core/widgets/model_performance_card_view.dart';
 import 'package:front_end/features/performance/model_performance_page.dart';
 
@@ -160,18 +161,38 @@ void main() {
   });
 
   for (final width in [320.0, 360.0, 375.0, 390.0]) {
-    testWidgets('on a ${width.toInt()}px phone the cards are one column with no overflow or clipped text', (tester) async {
+    testWidgets('on a ${width.toInt()}px phone each model is a row that opens with no overflow or clipped text', (tester) async {
       await pumpAtWidth(tester, width, _page(() async => _performance(fullNflSet())));
 
+      expect(find.byType(ModelPerformanceAccordion), findsOneWidget);
+      expect(find.byType(ModelPerformanceCardView), findsNothing);
+      for (final name in ['Win Probability', 'Score Margin', 'Player Prop Passing Yards', 'Player Prop Rushing Touchdowns']) {
+        await tester.ensureVisible(find.text(name));
+        await tester.tap(find.text(name));
+        await tester.pumpAndSettle();
+        expect(find.byType(ModelPerformanceDetails), findsOneWidget, reason: '$name opens on its own');
+        expect(truncatedText(tester), isEmpty, reason: '$name, opened, clips no text at ${width}px');
+      }
       expect(tester.takeException(), isNull);
-      final xs = {
-        for (var i = 0; i < 6; i++) tester.getTopLeft(find.byType(ModelPerformanceCardView).at(i)).dx,
-      };
-      expect(xs, hasLength(1), reason: 'every card starts at the same left edge -- a single column');
-      final heights = {for (var i = 0; i < 6; i++) tester.getSize(find.byType(ModelPerformanceCardView).at(i)).height};
-      expect(heights.length, greaterThan(1), reason: 'one card per row keeps each at its own natural height');
     });
   }
+
+  testWidgets('with 600px or more for the cards (a tablet) the models are full cards in the grid', (tester) async {
+    await pumpAtWidth(tester, 648, _page(() async => _performance(fullNflSet())));
+
+    expect(find.byType(ModelPerformanceAccordion), findsNothing);
+    expect(find.byType(ModelPerformanceCardView), findsNWidgets(6));
+  });
+
+  testWidgets('a rolling-window sport labels the season column with its window', (tester) async {
+    await pumpAtWidth(
+      tester,
+      390,
+      _page(() async => ModelPerformance(sport: 'ncaambb', season: 2026, periodKind: 'week', windowDays: 7, models: [pickRecord()])),
+    );
+
+    expect(find.text('LAST 7 DAYS'), findsOneWidget);
+  });
 
   testWidgets('pull-to-refresh refetches the performance', (tester) async {
     var calls = 0;

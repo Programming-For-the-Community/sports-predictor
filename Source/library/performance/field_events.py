@@ -19,6 +19,7 @@ from typing import Callable
 
 from library.performance import scorecard
 from library.performance.scorecard import AmountSample, ChanceSample, Period
+from library.serving.common import row_model_version
 from library.serving.prediction_snapshots import FINAL_PREGAME, pregame_rows
 
 _FINISHED = "finished"
@@ -152,10 +153,11 @@ def _actual_for(spec: FieldModelSpec, event: dict, participants: dict[str, dict]
     return spec.actual(participant) if participant is not None else None
 
 
-def _sample_for(spec: FieldModelSpec, period: Period, predicted, actual, entity: str) -> ChanceSample | AmountSample:
+def _sample_for(spec: FieldModelSpec, period: Period, row: dict, actual, entity: str) -> ChanceSample | AmountSample:
+    predicted, version = row["predicted_value"]["value"], row_model_version(row)
     if spec.kind == scorecard.KIND_CHANCE:
-        return ChanceSample(period, predicted, bool(actual), (entity,))
-    return AmountSample(period, predicted, actual, (entity,))
+        return ChanceSample(period, predicted, bool(actual), (entity,), version)
+    return AmountSample(period, predicted, actual, (entity,), version)
 
 
 def _event_samples(event: dict, specs: dict[str, FieldModelSpec], rows: list[dict], samples: dict[str, list]) -> None:
@@ -165,7 +167,7 @@ def _event_samples(event: dict, specs: dict[str, FieldModelSpec], rows: list[dic
         for entity, row in _predictions_by_entity(rows, model_name).items():
             actual = _actual_for(spec, event, participants, entity)
             if actual is not None:
-                sample = _sample_for(spec, period, row["predicted_value"]["value"], actual, entity)
+                sample = _sample_for(spec, period, row, actual, entity)
                 samples.setdefault(model_name, []).append(sample)
 
 

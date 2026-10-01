@@ -6,11 +6,17 @@ import '../../core/models/model_performance.dart';
 import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_text_styles.dart';
 import '../../core/widgets/model_card_grid.dart';
+import '../../core/widgets/model_performance_accordion.dart';
 import '../../core/widgets/model_performance_card_view.dart';
 
 // The order a reader expects: the headline pick first, then the game-level
 // numbers, then everything else (player props) alphabetically.
 const _leadingModels = ['win-probability', 'score-margin', 'home-score', 'away-score'];
+
+// Below this width (the same compact breakpoint GameRow and MatchupHero use)
+// each model is a one-line row that opens into its card, instead of a column
+// of full cards.
+const _accordionBreakpoint = 600.0;
 
 List<ModelPerformanceRecord> orderedPerformanceModels(List<ModelPerformanceRecord> models) {
   int rank(ModelPerformanceRecord m) {
@@ -26,7 +32,8 @@ List<ModelPerformanceRecord> orderedPerformanceModels(List<ModelPerformanceRecor
 
 /// The per-sport Performance tab: one card per promoted model showing how it
 /// has done this season and in the most recent period. Same card shell and
-/// grid as the Models tab -- a single column on a phone.
+/// grid as the Models tab; on a phone, a list of one-line rows that each open
+/// into the card.
 class ModelPerformancePage extends ConsumerWidget {
   const ModelPerformancePage({super.key, required this.sportId});
 
@@ -54,17 +61,7 @@ class ModelPerformancePage extends ConsumerWidget {
               children: [
                 _Heading(performance: data),
                 const SizedBox(height: 20),
-                ModelCardGrid<ModelPerformanceRecord>(
-                  // Three across on a 1920px screen, two on a 1366px laptop.
-                  minCardWidth: 600,
-                  items: orderedPerformanceModels(data.models),
-                  cardBuilder: (record) => ModelPerformanceCardView(
-                    record: record,
-                    sport: sportId,
-                    isWeekly: data.isWeekly,
-                    seasonLabel: data.windowDays == null ? 'THIS SEASON' : 'LAST ${data.windowDays} DAYS',
-                  ),
-                ),
+                _Models(performance: data, sportId: sportId),
               ],
             );
           },
@@ -72,6 +69,38 @@ class ModelPerformancePage extends ConsumerWidget {
           error: (error, _) => Text('Couldn\'t load performance: $error', style: AppTextStyles.body(color: AppColors.neg)),
         ),
       ),
+    );
+  }
+}
+
+class _Models extends StatelessWidget {
+  const _Models({required this.performance, required this.sportId});
+
+  final ModelPerformance performance;
+  final String sportId;
+
+  @override
+  Widget build(BuildContext context) {
+    final records = orderedPerformanceModels(performance.models);
+    final windowDays = performance.windowDays;
+    final seasonLabel = windowDays == null ? 'THIS SEASON' : 'LAST $windowDays DAYS';
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        if (constraints.maxWidth < _accordionBreakpoint) {
+          return ModelPerformanceAccordion(records: records, isWeekly: performance.isWeekly, seasonLabel: seasonLabel, sport: sportId);
+        }
+        return ModelCardGrid<ModelPerformanceRecord>(
+          // Three across on a 1920px screen, two on a 1366px laptop.
+          minCardWidth: 600,
+          items: records,
+          cardBuilder: (record) => ModelPerformanceCardView(
+            record: record,
+            sport: sportId,
+            isWeekly: performance.isWeekly,
+            seasonLabel: seasonLabel,
+          ),
+        );
+      },
     );
   }
 }

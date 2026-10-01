@@ -13,6 +13,13 @@ class DeltaText {
   final DeltaTone tone;
 }
 
+/// The marker before a change: up for better, down for worse, a square for none.
+String deltaGlyph(DeltaTone tone) => switch (tone) {
+      DeltaTone.good => '▲ ',
+      DeltaTone.bad => '▼ ',
+      DeltaTone.flat => '■ ',
+    };
+
 String percent(double value, {int decimals = 1}) => '${(value * 100).toStringAsFixed(decimals)}%';
 
 String _amount(double value, int decimals) => value.toStringAsFixed(decimals);
@@ -27,23 +34,34 @@ String headlineLabel(ModelPerformanceRecord record) => record.isAmount ? 'AVG MI
 
 /// How last period compares with the season. For a pick, higher accuracy is
 /// better; for an amount, a smaller average miss is.
-DeltaText? describeDelta(ModelPerformanceRecord record, ModelDisplay display) {
+DeltaText? describeDelta(ModelPerformanceRecord record, ModelDisplay display) => _delta(record, display, compact: false);
+
+/// The same comparison cut down for a one-line row: just the size of the
+/// change ("7.4", "0.5"), its tone saying which way it went.
+DeltaText? compactDelta(ModelPerformanceRecord record, ModelDisplay display) => _delta(record, display, compact: true);
+
+DeltaText? _delta(ModelPerformanceRecord record, ModelDisplay display, {required bool compact}) {
   final last = record.lastPeriod?.value;
   final season = record.season.value;
   if (last == null || season == null) return null;
+  const same = DeltaText('same as season', DeltaTone.flat);
 
   if (!record.isAmount) {
     final points = (last - season) * 100;
-    if (points.abs() < 0.05) return const DeltaText('same as season', DeltaTone.flat);
-    final sign = points > 0 ? '+' : '-';
-    return DeltaText('$sign${points.abs().toStringAsFixed(1)} pts vs season', points > 0 ? DeltaTone.good : DeltaTone.bad);
+    if (points.abs() < 0.05) return compact ? const DeltaText('same', DeltaTone.flat) : same;
+    final tone = points > 0 ? DeltaTone.good : DeltaTone.bad;
+    final size = points.abs().toStringAsFixed(1);
+    return DeltaText(compact ? size : '${points > 0 ? '+' : '-'}$size pts vs season', tone);
   }
 
   final diff = last - season;
   final half = 0.5 / _pow10(display.missDecimals);
-  if (diff.abs() < half) return const DeltaText('same as season', DeltaTone.flat);
-  final size = '${_amount(diff.abs(), display.missDecimals)}${display.valueUnit.isEmpty ? '' : ' ${display.valueUnit}'}';
-  return diff < 0 ? DeltaText('$size closer', DeltaTone.good) : DeltaText('$size further off', DeltaTone.bad);
+  if (diff.abs() < half) return compact ? const DeltaText('same', DeltaTone.flat) : same;
+  final tone = diff < 0 ? DeltaTone.good : DeltaTone.bad;
+  final size = _amount(diff.abs(), display.missDecimals);
+  if (compact) return DeltaText(size, tone);
+  final sized = '$size${display.valueUnit.isEmpty ? '' : ' ${display.valueUnit}'}';
+  return DeltaText(diff < 0 ? '$sized closer' : '$sized further off', tone);
 }
 
 num _pow10(int exponent) {
@@ -52,6 +70,14 @@ num _pow10(int exponent) {
     result *= 10;
   }
   return result;
+}
+
+/// Title over the history chart: "ACCURACY BY WEEK AND MODEL VERSION", or
+/// for an amount "AVG MISS (PTS) BY EVENT AND MODEL VERSION · LOWER IS BETTER".
+String historyTitle(ModelPerformanceRecord record, ModelDisplay display, {required bool isWeekly}) {
+  final unit = record.isAmount && display.valueUnit.isNotEmpty ? ' (${display.valueUnit.toUpperCase()})' : '';
+  final title = '${headlineLabel(record)}$unit BY ${isWeekly ? 'WEEK' : 'EVENT'} AND MODEL VERSION';
+  return record.isAmount ? '$title · LOWER IS BETTER' : title;
 }
 
 /// "+14% BETTER" / "-3% WORSE" against the naive baseline, null when unknown.

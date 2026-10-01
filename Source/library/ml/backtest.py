@@ -17,7 +17,6 @@ import logging
 import time
 from typing import Any, NamedTuple
 
-from library.aws import xray
 from library.aws.s3_manager import S3Manager
 from library.ml import training_common
 from library.ml.model_types import ModelAdapter
@@ -26,7 +25,7 @@ logger = logging.getLogger("model-training")
 
 
 class HoldoutSplit(NamedTuple):
-    """Bundles the 4 train/test arrays run_backtest/_run_backtest need
+    """Bundles the 4 train/test arrays run_backtest needs
     into a single parameter -- keeping them as 4 separate ones pushed both
     functions 1 over SonarQube's 13-parameter limit."""
     X_train: Any
@@ -146,7 +145,7 @@ def _record_losing_candidate(
         # A losing candidate is still real signal about this run -- keep
         # whichever card is currently live refreshed with it immediately,
         # rather than only at promotion time or (worse) only if
-        # _run_backtest's own end-of-run backfill is ever reached at all.
+        # run_backtest's own end-of-run backfill is ever reached at all.
         training_common.update_promoted_candidates(
             s3, sport, model_name, promotions[-1]["version"], ranked_so_far, promotion_metric,
         )
@@ -165,37 +164,6 @@ def _warn_if_worse_than_baseline(
 
 
 def run_backtest(
-    s3: S3Manager,
-    sport: str,
-    model_name: str,
-    task: str,
-    split: HoldoutSplit,
-    candidates: list[ModelAdapter],
-    naive_baseline_metrics: dict,
-    extra_metadata: dict,
-    summary_metrics: list[str],
-    promotion_metric: str,
-    run_id: str,
-) -> dict:
-    """Thin wrapper around _run_backtest -- every train_*.py script's own
-    call funnels through here, so this is the one place a training run's
-    own X-Ray segment can be emitted without every one of the 30 scripts
-    needing its own instrumentation. independent_segment, not
-    linked_segment_from_env: TrainAllTargets (sfn-training-orchestrator.tf)
-    is a Distributed Map, and AWS doesn't propagate X-Ray trace context
-    into a Distributed Map's child workflow executions at all (see
-    library.aws.xray's own docstring) -- there's no parent trace to join.
-    Still correlatable across sport/target by the training_run_id
-    annotation, even though it won't show as a graph edge off
-    training_orchestrator in the X-Ray Trace Map."""
-    with xray.independent_segment(f"{sport}-train-{model_name}", annotations={"training_run_id": run_id}):
-        return _run_backtest(
-            s3, sport, model_name, task, split,
-            candidates, naive_baseline_metrics, extra_metadata, summary_metrics, promotion_metric, run_id,
-        )
-
-
-def _run_backtest(
     s3: S3Manager,
     sport: str,
     model_name: str,

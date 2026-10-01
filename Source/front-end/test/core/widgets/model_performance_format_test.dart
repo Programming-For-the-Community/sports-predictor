@@ -54,6 +54,55 @@ void main() {
     });
   });
 
+  group('compactDelta', () {
+    test('a pick gives just the size of the change in points, its tone the direction', () {
+      final up = compactDelta(pickRecord(season: 0.684, last: 0.75), pickDisplay)!;
+      final down = compactDelta(pickRecord(season: 0.75, last: 0.6), pickDisplay)!;
+
+      expect((up.text, up.tone), ('6.6', DeltaTone.good));
+      expect((down.text, down.tone), ('15.0', DeltaTone.bad));
+    });
+
+    test('an amount gives the size without its unit -- smaller miss good, larger bad', () {
+      final closer = compactDelta(amountRecord(season: 10.2, last: 8.9), marginDisplay)!;
+      final further = compactDelta(amountRecord(modelName: 'player-prop-passing-yards', season: 58.2, last: 61.4), yardsDisplay)!;
+
+      expect((closer.text, closer.tone), ('1.3', DeltaTone.good));
+      expect((further.text, further.tone), ('3.2', DeltaTone.bad));
+    });
+
+    test('no change is "same", and nothing to compare is null', () {
+      expect(compactDelta(pickRecord(season: 0.75, last: 0.75), pickDisplay)!.text, 'same');
+      expect(compactDelta(amountRecord(season: 9.0, last: 9.0), marginDisplay)!.tone, DeltaTone.flat);
+      expect(compactDelta(pickRecord(last: null), pickDisplay), isNull);
+    });
+  });
+
+  test('deltaGlyph marks better, worse and no change', () {
+    expect([for (final tone in DeltaTone.values) deltaGlyph(tone)], ['▲ ', '▼ ', '■ ']);
+  });
+
+  group('historyTitle', () {
+    test('accuracy by week for a weekly pick model', () {
+      expect(historyTitle(pickRecord(), pickDisplay, isWeekly: true), 'ACCURACY BY WEEK AND MODEL VERSION');
+    });
+
+    test('an amount names its unit and that lower is better', () {
+      expect(
+        historyTitle(amountRecord(modelName: 'player-prop-passing-yards'), yardsDisplay, isWeekly: true),
+        'AVG MISS (YDS) BY WEEK AND MODEL VERSION · LOWER IS BETTER',
+      );
+    });
+
+    test('a per-event sport says event, and a unitless amount has no brackets', () {
+      const unitless = ModelDisplay(countNoun: 'players', valueUnit: '', missDecimals: 1, rangeDecimals: 1);
+      expect(historyTitle(chanceRecord(), pickDisplay, isWeekly: false), 'ACCURACY BY EVENT AND MODEL VERSION');
+      expect(historyTitle(amountRecord(modelName: 'projected-finish-position'), modelDisplay('projected-finish-position'), isWeekly: false),
+          'AVG MISS (PLACES) BY EVENT AND MODEL VERSION · LOWER IS BETTER');
+      expect(historyTitle(amountRecord(), unitless, isWeekly: false), 'AVG MISS BY EVENT AND MODEL VERSION · LOWER IS BETTER');
+    });
+  });
+
   group('facts', () {
     test('vs baseline reads BETTER or WORSE with a rounded percent', () {
       expect(vsBaselineText(pickRecord(vsBaselinePct: 14.4)), '+14% BETTER');

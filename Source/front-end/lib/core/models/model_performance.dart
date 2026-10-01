@@ -14,7 +14,7 @@
 ///               thirds of the predicted values (`lo`..`hi`); each band's
 ///               `pct` is the share that landed within `marginOfError`.
 class PerformanceWindow {
-  const PerformanceWindow({required this.value, required this.n, this.label});
+  const PerformanceWindow({required this.value, required this.n, this.label, this.version});
 
   /// Null when nothing has been graded in the window.
   final double? value;
@@ -23,10 +23,15 @@ class PerformanceWindow {
   /// Short period name ("Wk 3") -- set on the last period, not the season.
   final String? label;
 
+  /// The model version behind the figure: the one that made most of a
+  /// period's predictions, or the version a per-version figure is for.
+  final int? version;
+
   factory PerformanceWindow.fromJson(Map<String, dynamic> json) => PerformanceWindow(
         value: (json['value'] as num?)?.toDouble(),
         n: json['n'] as int,
         label: json['label'] as String?,
+        version: json['version'] as int?,
       );
 }
 
@@ -121,6 +126,8 @@ class ModelPerformanceRecord {
     this.bias,
     this.countNoun,
     this.best,
+    this.history = const [],
+    this.versions = const [],
   });
 
   static const kindPick = 'pick';
@@ -158,6 +165,13 @@ class ModelPerformanceRecord {
   /// older scorecard.
   final BestRanking? best;
 
+  /// Every finished period this season, oldest first, each with the version
+  /// that made it. Empty from an older scorecard.
+  final List<PerformanceWindow> history;
+
+  /// Each version's own figure over the predictions it made, oldest first.
+  final List<PerformanceWindow> versions;
+
   bool get isPick => kind == kindPick;
 
   /// A number model (average miss); every other kind is graded right/wrong (accuracy).
@@ -171,9 +185,7 @@ class ModelPerformanceRecord {
         bandKind: json['band_kind'] as String,
         season: PerformanceWindow.fromJson(json['season'] as Map<String, dynamic>),
         lastPeriod: json['last_period'] == null ? null : PerformanceWindow.fromJson(json['last_period'] as Map<String, dynamic>),
-        periods: (json['periods'] as List<dynamic>? ?? [])
-            .map((p) => PerformanceWindow.fromJson(p as Map<String, dynamic>))
-            .toList(),
+        periods: _windows(json['periods']),
         vsBaselinePct: (json['vs_baseline_pct'] as num?)?.toDouble(),
         atTraining: (json['at_training'] as num?)?.toDouble(),
         marginOfError: (json['margin_of_error'] as num?)?.toDouble(),
@@ -183,8 +195,13 @@ class ModelPerformanceRecord {
         bands: (json['bands'] as List<dynamic>? ?? [])
             .map((b) => PerformanceBand.fromJson(b as Map<String, dynamic>))
             .toList(),
+        history: _windows(json['history']),
+        versions: _windows(json['versions']),
       );
 }
+
+List<PerformanceWindow> _windows(Object? json) =>
+    (json as List<dynamic>? ?? []).map((w) => PerformanceWindow.fromJson(w as Map<String, dynamic>)).toList();
 
 class ModelPerformance {
   const ModelPerformance({

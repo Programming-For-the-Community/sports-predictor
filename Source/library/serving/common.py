@@ -24,6 +24,7 @@ from library.storage.season_projections import season_projection_key
 WIN_PROBABILITY_MODEL = "win-probability"
 SCORE_MODELS = {"margin": "score-margin", "home_score": "home-score", "away_score": "away-score"}
 _PLAYER_PROP_MODEL_KEY_RE = re.compile(r"^MODEL#player-prop-([a-z-]+)#v\d+#PLAYER#(.+)$")
+_MODEL_KEY_VERSION_RE = re.compile(r"^MODEL#[a-z0-9-]+#v(\d+)(?:#|$)")
 
 # Every head-to-head sport's own list_events narrows a get_all_events call
 # down to just the single most recent (completed) or soonest (scheduled)
@@ -292,6 +293,13 @@ def latest_matching_row(rows: list[dict], model_prefix: str) -> dict | None:
     if not matches:
         return None
     return max(matches, key=lambda r: r.get("generated_at", ""))
+
+
+def row_model_version(row: dict) -> int | None:
+    """The model version a prediction row was made by, read from its
+    MODEL#{model}#v{version}... key. None for a key without one."""
+    match = _MODEL_KEY_VERSION_RE.match(row.get("model_key", ""))
+    return int(match.group(1)) if match else None
 
 
 def _prediction_comparison(rows: list[dict], event: dict) -> dict | None:

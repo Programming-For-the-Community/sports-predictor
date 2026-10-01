@@ -7,6 +7,7 @@ import '../theme/app_text_styles.dart';
 import 'model_card_frame.dart';
 import 'model_performance_best.dart';
 import 'model_performance_format.dart';
+import 'model_performance_history.dart';
 
 // Below this width (scaled by the system text size), a band row stacks its
 // tier/range/count line above its bar instead of putting all four cells on one line.
@@ -18,6 +19,19 @@ const _headlineStackWidth = 340.0;
 // From this width (scaled by the system text size) the "most accurate on" list
 // sits beside the bars instead of under them.
 const _bestBesideWidth = 540.0;
+
+/// The small chips under a model's name: its version and the last period.
+List<String> performanceBadges(ModelPerformanceRecord record) => [
+      if (record.version != null) 'v${record.version}',
+      if (record.lastPeriod?.label != null) record.lastPeriod!.label!,
+    ];
+
+/// The colour a last-period change is shown in.
+Color deltaToneColor(DeltaTone tone) => switch (tone) {
+      DeltaTone.good => AppColors.pos,
+      DeltaTone.bad => AppColors.neg,
+      DeltaTone.flat => AppColors.inkSub,
+    };
 
 /// One model's season and last-period results, in the same card shell as the
 /// Models tab's training cards (ModelCardFrame). Nothing here ellipsizes:
@@ -46,26 +60,44 @@ class ModelPerformanceCardView extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final display = modelDisplay(record.modelName);
     return ModelCardFrame(
       title: modelDisplayName(record.modelName),
-      badges: [
-        if (record.version != null) 'v${record.version}',
-        if (record.lastPeriod?.label != null) record.lastPeriod!.label!,
-      ],
-      footer: record.hasResults && record.periods.isNotEmpty
-          ? _RecentPeriods(record: record, display: display, isWeekly: isWeekly)
-          : null,
+      badges: performanceBadges(record),
+      footer: ModelPerformanceFooter.shows(record) ? ModelPerformanceFooter(record: record, isWeekly: isWeekly) : null,
       children: [
         const SizedBox(height: 20),
-        if (!record.hasResults) _EmptyState(noun: nounFor(record, display)) else _results(display),
+        ModelPerformanceDetails(record: record, isWeekly: isWeekly, seasonLabel: seasonLabel, sport: sport),
       ],
     );
+  }
+}
+
+/// Everything a performance card shows between its badges and its footer:
+/// the season/last-period boxes, the facts, the bars and "most accurate on"
+/// -- or the empty state before anything has been graded.
+class ModelPerformanceDetails extends StatelessWidget {
+  const ModelPerformanceDetails({
+    super.key,
+    required this.record,
+    required this.isWeekly,
+    this.seasonLabel = 'THIS SEASON',
+    this.sport = '',
+  });
+
+  final ModelPerformanceRecord record;
+  final bool isWeekly;
+  final String seasonLabel;
+  final String sport;
+
+  @override
+  Widget build(BuildContext context) {
+    final display = modelDisplay(record.modelName);
+    return record.hasResults ? _results(display) : _EmptyState(noun: nounFor(record, display));
   }
 
   /// The season/last-period boxes and facts span the card; below them the
   /// bars, with "most accurate on" beside them when the card is wide enough
-  /// and under them when it isn't. Recent periods is the frame's footer.
+  /// and under them when it isn't.
   Widget _results(ModelDisplay display) {
     final summary = [
       _Headline(record: record, display: display, isWeekly: isWeekly, seasonLabel: seasonLabel),
@@ -120,6 +152,32 @@ class ModelPerformanceCardView extends StatelessWidget {
         ],
       ),
     ];
+  }
+}
+
+/// The bottom of a performance card: the season-by-version chart, then the
+/// recent-period chips.
+class ModelPerformanceFooter extends StatelessWidget {
+  const ModelPerformanceFooter({super.key, required this.record, required this.isWeekly});
+
+  final ModelPerformanceRecord record;
+  final bool isWeekly;
+
+  static bool shows(ModelPerformanceRecord record) =>
+      record.hasResults && (record.periods.isNotEmpty || ModelPerformanceHistoryChart.shows(record));
+
+  @override
+  Widget build(BuildContext context) {
+    final display = modelDisplay(record.modelName);
+    final chart = ModelPerformanceHistoryChart.shows(record);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        if (chart) ModelPerformanceHistoryChart(record: record, display: display, isWeekly: isWeekly),
+        if (chart && record.periods.isNotEmpty) const SizedBox(height: 20),
+        if (record.periods.isNotEmpty) _RecentPeriods(record: record, display: display, isWeekly: isWeekly),
+      ],
+    );
   }
 }
 
@@ -248,24 +306,12 @@ class _StatBox extends StatelessWidget {
           Text(sample, style: AppTextStyles.body(color: AppColors.inkSub).copyWith(fontSize: 12.5)),
           if (delta != null) ...[
             const SizedBox(height: 4),
-            Text(_deltaGlyph(delta!) + delta!.text, style: AppTextStyles.metricValue(color: _toneColor(delta!.tone)).copyWith(fontSize: 12)),
+            Text(deltaGlyph(delta!.tone) + delta!.text, style: AppTextStyles.metricValue(color: deltaToneColor(delta!.tone)).copyWith(fontSize: 12)),
           ],
         ],
       ),
     );
   }
-
-  static String _deltaGlyph(DeltaText delta) => switch (delta.tone) {
-        DeltaTone.good => '▲ ',
-        DeltaTone.bad => '▼ ',
-        DeltaTone.flat => '■ ',
-      };
-
-  static Color _toneColor(DeltaTone tone) => switch (tone) {
-        DeltaTone.good => AppColors.pos,
-        DeltaTone.bad => AppColors.neg,
-        DeltaTone.flat => AppColors.inkSub,
-      };
 }
 
 class _Bands extends StatelessWidget {

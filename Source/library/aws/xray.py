@@ -1,23 +1,15 @@
 """
-Direct-to-API X-Ray segment emission for short-lived batch tasks
-(feature-engineering, model-training) -- one PutTraceSegments call per
-task, no X-Ray daemon/sidecar needed, matching this project's direct-
-boto3 style everywhere else in library/aws/.
+Direct-to-API X-Ray segment emission for feature-engineering tasks -- one
+PutTraceSegments call per task, no X-Ray daemon/sidecar needed, matching
+this project's direct-boto3 style everywhere else in library/aws/.
 
-Two shapes, matching the two positions a task can be in relative to
-sfn-training-orchestrator.tf's own trace:
+linked_segment/linked_segment_from_env join an existing trace as a
+connected node (RunFeatureEngineering, whose parent state -- ForEachSport
+-- is an inline Map, so Step Functions' own native Lambda tracing can hand
+a trace_id/parent_id down to it via CheckSeason's Lambda invoke).
 
-- linked_segment/linked_segment_from_env -- joins an existing trace as a
-  connected node (RunFeatureEngineering, whose parent state -- ForEachSport
-  -- is an inline Map, so Step Functions' own native Lambda tracing can
-  hand a trace_id/parent_id down to it via CheckSeason's Lambda invoke).
-- independent_segment -- a fresh, unlinked trace of its own (every
-  training task: TrainAllTargets is a Distributed Map, and AWS doesn't
-  propagate X-Ray trace context into a Distributed Map's child workflow
-  executions at all -- see AWS's own Step Functions X-Ray tracing docs --
-  so there's no parent trace context to inherit in the first place).
-  Still shows up as its own node in the X-Ray Trace Map, and is
-  correlatable across sport/target via the training_run_id annotation.
+Training tasks emit nothing: they run in private subnets whose security
+group only reaches S3/DynamoDB, so the X-Ray API is unreachable from them.
 """
 import json
 import logging
@@ -37,12 +29,6 @@ logger = logging.getLogger("xray")
 # in CI's test-collection environment (no AWS_REGION set there at all).
 _REGION = os.environ.get("AWS_REGION", "us-east-2")
 _xray = boto3.client("xray", region_name=_REGION, config=DEFAULT_CONFIG)
-
-
-def new_trace_id() -> str:
-    """A fresh X-Ray trace ID in AWS's own format: 1-{8 hex epoch
-    seconds}-{24 hex random}."""
-    return f"1-{int(time.time()):08x}-{secrets.token_hex(12)}"
 
 
 def _new_id() -> str:
@@ -126,11 +112,3 @@ def linked_segment_from_env(name: str, annotations: dict | None = None):
     with linked_segment(name, trace_id, parent_id, annotations=annotations):
         yield
 
-
-@contextmanager
-def independent_segment(name: str, annotations: dict | None = None):
-    """A fresh, unlinked trace of its own -- see this module's own
-    docstring for why every training task uses this instead of
-    linked_segment_from_env."""
-    with _segment(name, new_trace_id(), annotations=annotations):
-        yield

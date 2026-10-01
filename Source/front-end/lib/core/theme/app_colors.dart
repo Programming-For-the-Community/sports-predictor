@@ -31,6 +31,26 @@ abstract final class AppColors {
   static const live = Color(0xFF4ADE80);
   static const warn = Color(0xFFFFB454);
 
+  // Model versions on the Performance tab's history chart: slot
+  // ((version - 1) mod 12). Ordered so every neighbouring pair, slot 12 back
+  // to slot 1 included, stays apart for colour-blind and full-colour readers
+  // on this background; versionOlder is anything 12 or more behind the newest.
+  static const versionPalette = [
+    Color(0xFF7D5CC7),
+    Color(0xFFAF5B0B),
+    Color(0xFF17A7B4),
+    Color(0xFF737C06),
+    Color(0xFF0F7EAE),
+    Color(0xFF48AC51),
+    Color(0xFFB84379),
+    Color(0xFFB98C06),
+    Color(0xFF638EF5),
+    Color(0xFF038871),
+    Color(0xFFC46DC9),
+    Color(0xFFE56660),
+  ];
+  static const versionOlder = Color(0xFF3D4554);
+
   // Gradients
   static const brandMark = LinearGradient(
     begin: Alignment.topLeft,
