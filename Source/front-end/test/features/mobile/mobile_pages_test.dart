@@ -44,10 +44,12 @@ class _QuietNotifier extends DeviceNotifier {
 class _FakeInstaller implements AppUpdateInstaller {
   final controller = StreamController<OtaEvent>();
   AppRelease? installed;
+  String? username;
 
   @override
-  Stream<OtaEvent> install(AppRelease release) {
+  Stream<OtaEvent> install(AppRelease release, {String? username}) {
     installed = release;
+    this.username = username;
     return controller.stream;
   }
 }
@@ -178,6 +180,8 @@ void main() {
       installer.controller.add(OtaEvent(OtaStatus.DOWNLOADING, '50'));
       await tester.pump();
       expect(installer.installed?.versionCode, 47);
+      // Signed out in this test, so the download isn't tagged with a user.
+      expect(installer.username, isNull);
       expect(find.text('Downloading… 9.1 MB / 18.1 MB'), findsOneWidget);
 
       installer.controller.add(OtaEvent(OtaStatus.INSTALLING, null));

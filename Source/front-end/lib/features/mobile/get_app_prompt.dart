@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import '../../core/auth/auth_repository.dart';
 import '../../core/mobile/app_release.dart';
 import '../../core/mobile/app_updates.dart';
 import '../../core/theme/app_colors.dart';
@@ -37,7 +38,7 @@ Future<void> showInstallSheet(BuildContext context, AppRelease release) => showM
       builder: (context) => _InstallSheet(release: release),
     );
 
-class _InstallSheet extends StatelessWidget {
+class _InstallSheet extends ConsumerWidget {
   const _InstallSheet({required this.release});
 
   final AppRelease release;
@@ -49,7 +50,7 @@ class _InstallSheet extends StatelessWidget {
   ];
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final size = release.sizeBytes == null ? '' : ' · ${formatMegabytes(release.sizeBytes!)}';
     return SafeArea(
       child: Padding(
@@ -73,7 +74,11 @@ class _InstallSheet extends StatelessWidget {
             SizedBox(
               width: double.infinity,
               child: ElevatedButton(
-                onPressed: () => launchUrl(Uri.parse(appReleaseUrl), webOnlyWindowName: '_self'),
+                onPressed: () {
+                  final auth = ref.read(authRepositoryProvider);
+                  final username = auth is AuthAuthenticated ? auth.tokens.username : null;
+                  launchUrl(Uri.parse(appDownloadUrl(source: DownloadSource.web, username: username)), webOnlyWindowName: '_self');
+                },
                 child: Text('Download APK$size'),
               ),
             ),

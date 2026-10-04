@@ -189,7 +189,7 @@ class _BackgroundApi {
     final token = await idToken();
     if (token == null) throw StateError('Not signed in');
     final uri = Uri.parse('${AppConfig.apiBaseUrl}$path').replace(queryParameters: queryParameters);
-    final response = await _httpClient.get(uri, headers: {'Authorization': token}).timeout(_timeout);
+    final response = await _httpClient.get(uri, headers: {'Authorization': token, 'User-Agent': androidAppUserAgent}).timeout(_timeout);
     if (response.statusCode < 200 || response.statusCode >= 300) throw StateError('GET $uri returned ${response.statusCode}');
     return jsonDecode(response.body);
   }

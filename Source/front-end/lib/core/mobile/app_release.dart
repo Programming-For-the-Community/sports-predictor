@@ -11,10 +11,27 @@ const appReleasePath = '/app/sports-predictor.apk';
 
 String get appReleaseUrl => '${AppConfig.apiBaseUrl}$appReleasePath';
 
-/// CloudFront serves /app/* only to Android user agents
-/// (Terraform/cloudfront.tf's android_only function). Android browsers
-/// already send one; the app's own Dart and download clients send this.
-const androidAppUserAgent = 'SportsPredictor (Linux; Android)';
+/// Where a download came from, for the dashboard's download widgets.
+enum DownloadSource { web, update }
+
+/// The APK's URL tagged with who downloaded it and from where. CloudFront
+/// ignores the query when serving (its cache key has no query string) but
+/// logs it, which is the only way an anonymous APK request can be tied to a
+/// signed-in user (Terraform/cloudwatch-dashboard-application.tf).
+String appDownloadUrl({required DownloadSource source, String? username}) => Uri.parse(appReleaseUrl)
+    .replace(queryParameters: {'src': source.name, if (username != null) 'u': username})
+    .toString();
+
+/// The installed build's versionCode, passed by mobile_hosting.yml as
+/// --dart-define=APP_VERSION_CODE; 0 in a local build.
+const appVersionCode = int.fromEnvironment('APP_VERSION_CODE');
+
+/// Every request the Android app makes sends this. CloudFront serves
+/// /app/* only to Android user agents (Terraform/cloudfront.tf's
+/// android_only function), and predict-read logs it per signed-in request,
+/// which is how the dashboard tells app users and their installed version
+/// apart from the website.
+const androidAppUserAgent = 'SportsPredictor-Android/$appVersionCode (Linux; Android)';
 
 /// The published APK's S3 user metadata, as mobile_sync_deploy.yml writes it.
 class AppRelease {

@@ -215,7 +215,9 @@ class _AppUpdatesPageState extends ConsumerState<AppUpdatesPage> {
   void _startInstall(AppRelease release) {
     _install?.cancel();
     setState(() => _lastEvent = OtaEvent(OtaStatus.DOWNLOADING, '0'));
-    _install = ref.read(appUpdateInstallerProvider).install(release).listen(
+    final auth = ref.read(authRepositoryProvider);
+    final username = auth is AuthAuthenticated ? auth.tokens.username : null;
+    _install = ref.read(appUpdateInstallerProvider).install(release, username: username).listen(
           (event) => setState(() => _lastEvent = event),
           onError: (Object error) => setState(() => _lastEvent = OtaEvent(OtaStatus.INTERNAL_ERROR, '$error')),
         );

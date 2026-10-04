@@ -49,6 +49,18 @@ class CognitoTokens {
   /// rather than waiting for a request to fail.
   bool get isNearExpiry => DateTime.now().isAfter(expiresAt.subtract(const Duration(seconds: 60)));
 
+  /// `cognito:username` from the ID token's payload. Read without verifying
+  /// the signature -- only for labeling analytics, never for access.
+  String? get username {
+    try {
+      final payload = idToken.split('.')[1];
+      final claims = jsonDecode(utf8.decode(base64Url.decode(base64Url.normalize(payload)))) as Map<String, dynamic>;
+      return claims['cognito:username'] as String?;
+    } catch (_) {
+      return null;
+    }
+  }
+
   Map<String, dynamic> toJson() => {
         'accessToken': accessToken,
         'idToken': idToken,

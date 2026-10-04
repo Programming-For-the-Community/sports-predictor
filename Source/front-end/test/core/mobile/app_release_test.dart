@@ -64,6 +64,19 @@ void main() {
     });
   });
 
+  test('appDownloadUrl tags the download with its source and user', () {
+    final url = Uri.parse(appDownloadUrl(source: DownloadSource.web, username: 'chamar'));
+
+    expect(url.path, appReleasePath);
+    expect(url.queryParameters, {'src': 'web', 'u': 'chamar'});
+    expect(Uri.parse(appDownloadUrl(source: DownloadSource.update)).queryParameters, {'src': 'update'});
+  });
+
+  test('the app user agent names Android, so CloudFront serves /app/*', () {
+    expect(androidAppUserAgent, startsWith('SportsPredictor-Android/'));
+    expect(androidAppUserAgent, contains('Android)'));
+  });
+
   test('formatMegabytes', () {
     expect(formatMegabytes(18979225), '18.1 MB');
   });

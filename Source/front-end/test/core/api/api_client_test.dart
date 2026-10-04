@@ -12,6 +12,8 @@ import 'package:front_end/core/api/api_client.dart';
 import 'package:front_end/core/api/api_exception.dart';
 import 'package:front_end/core/auth/auth_repository.dart';
 import 'package:front_end/core/auth/cognito_auth_client.dart';
+import 'package:front_end/core/mobile/app_release.dart';
+import 'package:front_end/core/mobile/app_shell.dart';
 
 class _FakeAuthRepository extends AuthRepository {
   _FakeAuthRepository(this._tokens)
@@ -46,6 +48,37 @@ class _FakeAuthRepository extends AuthRepository {
 void main() {
   setUp(() {
     SharedPreferences.setMockInitialValues({});
+  });
+
+  test('the Android app identifies itself and its version on every request', () async {
+    final container = ProviderContainer(overrides: [
+      authRepositoryProvider.overrideWith((ref) => _FakeAuthRepository(['token-1'])),
+      appShellProvider.overrideWithValue(AppShell.androidApp),
+    ]);
+    addTearDown(container.dispose);
+    final ref = container.read(Provider<Ref>((ref) => ref));
+    late http.Request seen;
+    final client = ApiClient(ref, httpClient: MockClient((request) async {
+      seen = request;
+      return http.Response('{}', 200);
+    }));
+
+    await client.get('/nfl/events');
+
+    expect(seen.headers['User-Agent'], androidAppUserAgent);
+    expect(seen.headers['Authorization'], 'token-1');
+  });
+
+  test('the website sends no User-Agent of its own', () async {
+    late http.Request seen;
+    final built = _buildClient(['token-1'], (request) async {
+      seen = request;
+      return http.Response('{}', 200);
+    });
+
+    await built.client.get('/nfl/events');
+
+    expect(seen.headers.containsKey('User-Agent'), isFalse);
   });
 
   test('get() decodes a successful JSON response', () async {
