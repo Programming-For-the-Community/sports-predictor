@@ -10,7 +10,7 @@ file's siblings, one per concern.
 """
 import pytest
 
-from library.features.common import _mov_multiplier, compute_elo_ratings, expected_score
+from library.features.common import _mov_multiplier, compute_elo_ratings, compute_pre_game_scoring, expected_score
 
 
 def _event(event_key, event_date, home_id, away_id, home_score=None, away_score=None, season=None):
@@ -253,3 +253,33 @@ class TestExpectedScore:
         away = expected_score(1600, 1500, rating_advantage=-55)
 
         assert home == pytest.approx(1 - away)
+
+
+class TestPreGameScoring:
+    def test_each_side_averages_only_its_earlier_games(self):
+        events = [
+            _event("E1", "2025-09-07", "KC", "LAC", 30, 10),
+            _event("E2", "2025-09-14", "LAC", "KC", 20, 24),
+            _event("E3", "2025-09-21", "KC", "LAC"),
+        ]
+
+        pre_game = compute_pre_game_scoring(events)
+
+        assert pre_game["E1"]["home_pre_avg_points_scored"] is None
+        assert pre_game["E3"]["home_pre_avg_points_scored"] == 27
+        assert pre_game["E3"]["home_pre_avg_points_allowed"] == 15
+        assert pre_game["E3"]["away_pre_avg_points_scored"] == 15
+
+    def test_the_window_keeps_only_the_most_recent_games(self):
+        events = [_event(f"E{n}", f"2025-09-0{n}", "KC", "LAC", n, 0) for n in range(1, 4)]
+        events.append(_event("E9", "2025-09-09", "KC", "LAC"))
+
+        assert compute_pre_game_scoring(events, window=2)["E9"]["home_pre_avg_points_scored"] == 2.5
+
+    def test_elo_pre_game_entries_carry_the_scoring_averages(self):
+        events = [_event("E1", "2025-09-07", "KC", "LAC", 30, 10), _event("E2", "2025-09-14", "KC", "LAC", 20, 20)]
+
+        ratings, _ = compute_elo_ratings(events)
+
+        assert ratings["E2"]["home_pre_avg_points_scored"] == 30
+        assert "home_pre_rating" in ratings["E2"]

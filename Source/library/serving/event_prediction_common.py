@@ -16,7 +16,7 @@ from datetime import datetime, timezone
 import live_features
 from library.schema.keys import entity_key as build_entity_key
 from library.schema.keys import event_key as build_event_key
-from library.serving import model_loader, prediction_snapshots
+from library.serving import model_loader, prediction_snapshots, serving_features
 from library.storage import prediction_cache
 
 logger = logging.getLogger("event-prediction-common")
@@ -274,9 +274,12 @@ def snapshot_event(storage, s3, predictions_table, event_id: str, sport: str, pr
     rows snapshotted; 0 when the compute recorded nothing (event not ingested,
     no promoted model)."""
     started = datetime.now(timezone.utc).isoformat()
-    compute_and_cache_event(storage, s3, predictions_table, event_id, sport, predict_event_fn)
+    event_key_value = build_event_key(sport, event_id)
+    with serving_features.capturing() as captured:
+        compute_and_cache_event(storage, s3, predictions_table, event_id, sport, predict_event_fn)
+    serving_features.write(s3, sport, event_key_value, captured)
     return prediction_snapshots.snapshot_event_predictions(
-        predictions_table, build_event_key(sport, event_id), prediction_snapshots.FINAL_PREGAME, started,
+        predictions_table, event_key_value, prediction_snapshots.FINAL_PREGAME, started,
     )
 
 

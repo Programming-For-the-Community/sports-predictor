@@ -60,6 +60,13 @@ data "aws_iam_policy_document" "lambda_inference_permissions" {
     resources = ["arn:aws:s3:::${local.model_artifacts_bucket}/season-projections/*"]
   }
 
+  # library.serving.serving_features' per-event model inputs.
+  statement {
+    sid       = "WriteServingFeatures"
+    actions   = ["s3:PutObject"]
+    resources = ["arn:aws:s3:::${local.model_artifacts_bucket}/serving-features/*"]
+  }
+
   statement {
     sid = "ReadFeatureData"
     # BatchGetItem -- library.serving.common.prefetch_entities' own batched

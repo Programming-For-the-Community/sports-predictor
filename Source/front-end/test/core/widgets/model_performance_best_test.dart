@@ -58,10 +58,10 @@ ModelPerformanceRecord _withBands(ModelPerformanceRecord record) => ModelPerform
       ],
     });
 
-Widget _card(ModelPerformanceRecord record, {double width = 460}) => MaterialApp(
+Widget _card(ModelPerformanceRecord record, {double width = 460, String sport = 'ncaafb', bool isWeekly = true}) => MaterialApp(
       home: Scaffold(
         body: SingleChildScrollView(
-          child: SizedBox(width: width, child: ModelPerformanceCardView(record: record, isWeekly: true, sport: 'ncaafb')),
+          child: SizedBox(width: width, child: ModelPerformanceCardView(record: record, isWeekly: isWeekly, sport: sport)),
         ),
       ),
     );
@@ -144,6 +144,33 @@ void main() {
     expect(list.top, greaterThan(lastWeek.bottom), reason: 'summary boxes span the card above the list');
     expect(list.left, greaterThan(bars.right), reason: 'list is beside the bars');
     expect(list.top, closeTo(bars.top, 4), reason: 'list is level with the bars');
+  });
+
+  testWidgets('beside the bars, a long golfer name gets the full row and its value sits under it', (tester) async {
+    tester.view.physicalSize = const Size(1200, 1600);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.reset);
+    const name = 'Christiaan Bezuidenhout';
+    final record = ModelPerformanceRecord.fromJson({
+      'model_name': 'round-2', 'version': 8, 'kind': 'amount', 'band_kind': 'predicted_amount',
+      'season': {'value': 1.908, 'n': 29}, 'last_period': {'label': 'Tour Championship', 'value': 1.9, 'n': 29},
+      'periods': <dynamic>[],
+      'best': {'entity_type': 'player', 'entities': [_entity('4848', 0.12, 3, name: name), _entity('11', 0.4, 3, name: 'Scottie Scheffler')]},
+      'bands': [
+        {'tag': 'LOW', 'lo': null, 'hi': null, 'n': 18, 'pct': 0.6, 'early': false, 'bias': 0.2},
+        {'tag': 'MED', 'lo': null, 'hi': null, 'n': 10, 'pct': 0.5, 'early': false, 'bias': 0.4},
+        {'tag': 'HIGH', 'lo': null, 'hi': null, 'n': 1, 'pct': null, 'early': true, 'bias': null},
+      ],
+    });
+    await tester.pumpWidget(_card(record, width: 620, sport: 'pga', isWeekly: false));
+
+    final list = tester.getRect(find.text('MOST ACCURATE ON'));
+    final bars = tester.getRect(find.textContaining('LOW').first);
+    expect(list.left, greaterThan(bars.left), reason: 'list is beside the bars');
+    final nameRect = tester.getRect(find.text(name));
+    final valueRect = tester.getRect(find.text('avg miss'));
+    expect(valueRect.top, greaterThanOrEqualTo(nameRect.bottom), reason: 'value is under the name, not squeezing it');
+    expect(tester.takeException(), isNull, reason: 'no row overflows at half-card width');
   });
 
   testWidgets('on a narrow card the list stays under the results', (tester) async {

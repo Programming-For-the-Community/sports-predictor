@@ -8,7 +8,8 @@ row reads team box scores.
 from collections.abc import Callable
 from datetime import date, timedelta
 
-from library.features.common import compute_elo_ratings
+from library.features.common import TEAM_HISTORY_GAMES, compute_elo_ratings
+from library.features.matchup import live_matchup_columns
 from library.features.live_orchestration import (
     EventNotFoundError,
     home_away_ids,
@@ -54,12 +55,14 @@ class BasketballLiveFeatures:
             "event_date": event["event_date"],
             "stat_line": {},
         }
-        return self._build_player_features(
+        row = self._build_player_features(
             player_game, prior_games, event,
             live_elo_ratings(storage, sport, event, home_id, away_id, current_ratings, events),
             team_previous_event_date(storage, sport, team_id, event["event_date"], events),
             window,
         )
+        row.update(live_matchup_columns(storage, sport, player_game, home_id, away_id, prior_games, window, events))
+        return row
 
     def build_live_event_features(
         self, storage, sport: str, event_key: str, window: int | None = None, events: list[dict] | None = None,
@@ -79,7 +82,7 @@ class BasketballLiveFeatures:
 
         def team_rows(team_id: str) -> tuple[list[dict], list[dict]]:
             return (
-                storage.get_team_events(sport, team_id, before_date=before_date, limit=window, events=events),
+                storage.get_team_events(sport, team_id, before_date=before_date, limit=TEAM_HISTORY_GAMES, events=events),
                 storage.get_team_game_stats_for_team(
                     sport, team_id, before_date=before_date, limit=window, team_game_stats=team_game_stats,
                 ),

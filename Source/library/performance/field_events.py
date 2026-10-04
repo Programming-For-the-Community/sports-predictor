@@ -20,7 +20,7 @@ from typing import Callable
 from library.performance import scorecard
 from library.performance.scorecard import AmountSample, ChanceSample, Period
 from library.serving.common import row_model_version
-from library.serving.prediction_snapshots import FINAL_PREGAME, pregame_rows
+from library.serving.prediction_snapshots import FINAL_PREGAME, SOURCE_LEGACY, pregame_rows
 
 _FINISHED = "finished"
 
@@ -34,6 +34,8 @@ class FieldModelSpec:
     # For a model scored per something other than a participant (an F1
     # constructor): (event, entity id) -> bool | None.
     entity_actual: Callable[[dict, str], float | bool | None] | None = None
+    # False when a live (non-snapshot) row's value isn't comparable to the result.
+    grades_live_rows: bool = True
 
 
 def _finish(participant: dict) -> int | None:
@@ -88,7 +90,8 @@ def _f1_grid_position(participant: dict) -> float | None:
 PGA_SPECS: dict[str, FieldModelSpec] = {
     "top-10-probability": FieldModelSpec(scorecard.KIND_CHANCE, _pga_top(10)),
     "top-5-probability": FieldModelSpec(scorecard.KIND_CHANCE, _pga_top(5)),
-    "projected-score-to-par": FieldModelSpec(scorecard.KIND_AMOUNT, _pga_final_score),
+    # A live row holds only the remaining-rounds projection.
+    "projected-score-to-par": FieldModelSpec(scorecard.KIND_AMOUNT, _pga_final_score, grades_live_rows=False),
     **{f"round-{n}": FieldModelSpec(scorecard.KIND_AMOUNT, _pga_round_score(n)) for n in (1, 2, 3, 4)},
 }
 
@@ -180,7 +183,9 @@ def collect_samples(sport: str, events: list[dict], raw_rows_by_event: dict[str,
         raw_rows = raw_rows_by_event.get(event["event_key"], [])
         if specs is None or not raw_rows:
             continue
-        rows, _ = pregame_rows(raw_rows, FINAL_PREGAME)
+        rows, source = pregame_rows(raw_rows, FINAL_PREGAME)
+        if source == SOURCE_LEGACY:
+            specs = {name: spec for name, spec in specs.items() if spec.grades_live_rows}
         _event_samples(event, specs, rows, samples)
     return samples
 

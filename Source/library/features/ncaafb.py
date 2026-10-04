@@ -35,6 +35,7 @@ from library.features.common import (
     rest_days,
     rolling_player_stat_averages,
     rolling_team_scoring_averages,
+    team_scoring_columns,
 )
 
 
@@ -123,16 +124,16 @@ def build_event_features(
     home_elo = ratings.get("home_pre_rating")
     away_elo = ratings.get("away_pre_rating")
 
-    home_scoring = rolling_team_scoring_averages(home_team_events, home_id, window)
-    away_scoring = rolling_team_scoring_averages(away_team_events, away_id, window)
+    home_scoring = rolling_team_scoring_averages(home_team_events, home_id, window, as_of=event["event_date"], pre_game=elo_ratings)
+    away_scoring = rolling_team_scoring_averages(away_team_events, away_id, window, as_of=event["event_date"], pre_game=elo_ratings)
 
     home_box_stats = rolling_player_stat_averages(home_team_box_stats or [], window)
     away_box_stats = rolling_player_stat_averages(away_team_box_stats or [], window)
     home_third_down_pct = _rate(home_box_stats, "avg_third_down_conversions", "avg_third_down_attempts")
     away_third_down_pct = _rate(away_box_stats, "avg_third_down_conversions", "avg_third_down_attempts")
 
-    home_win_streak = current_streak(home_team_events, home_id)
-    away_win_streak = current_streak(away_team_events, away_id)
+    home_win_streak = current_streak(home_team_events[:window], home_id)
+    away_win_streak = current_streak(away_team_events[:window], away_id)
 
     # venue_city always None here -- see this module's own docstring on
     # why there's no international-venue table yet; every game computes
@@ -152,12 +153,7 @@ def build_event_features(
         "elo_diff": (home_elo - away_elo) if home_elo is not None and away_elo is not None else None,
         "home_rest_days": rest_days(event["event_date"], home_team_events[0]["event_date"]) if home_team_events else None,
         "away_rest_days": rest_days(event["event_date"], away_team_events[0]["event_date"]) if away_team_events else None,
-        "home_avg_points_scored": home_scoring["avg_points_scored"],
-        "home_avg_points_allowed": home_scoring["avg_points_allowed"],
-        "home_games_played": home_scoring["games_played"],
-        "away_avg_points_scored": away_scoring["avg_points_scored"],
-        "away_avg_points_allowed": away_scoring["avg_points_allowed"],
-        "away_games_played": away_scoring["games_played"],
+        **team_scoring_columns(home_scoring, away_scoring),
         **football.leader_columns(home_position_games or {}, away_position_games or {}, window),
         "home_avg_turnovers": home_box_stats.get("avg_turnovers"),
         "home_avg_total_yards": home_box_stats.get("avg_total_yards"),
@@ -214,7 +210,7 @@ def build_player_features(
     home_travel_km, away_travel_km = geo.travel_distances_km(away_id, home_id, None, team_coordinates, {})
     own_travel_km = home_travel_km if is_home else away_travel_km
 
-    averages = rolling_player_stat_averages(prior_games, window)
+    averages = rolling_player_stat_averages(prior_games, window, as_of=player_game["event_date"])
     return {
         "event_key": player_game["event_key"],
         "player_key": player_game["player_key"],

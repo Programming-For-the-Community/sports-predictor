@@ -187,11 +187,11 @@ jobs:
       sport: 'NCAAFB'
       feature_engineering_dockerfile_path: 'Source/feature-engineering/ncaafb/Dockerfile'
       feature_engineering_image_name: 'ncaafb-feature-engineering'
-      feature_engineering_image_version: '1.0.0'
+      feature_engineering_image_version: '2.0.0'
       # Also used by train_score_model.py/train_player_prop_model.py via a container command override.
       train_model_dockerfile_path: 'Source/model-training/ncaafb/Dockerfile'
       train_model_image_name: 'ncaafb-train-win-probability-model'
-      train_model_image_version: '1.0.0'
+      train_model_image_version: '2.0.0'
 
   ranking_model_build:
     name: National ranking model (build)
@@ -202,7 +202,7 @@ jobs:
       sport: 'NCAAFB'
       dockerfile_path: 'Source/model-training/ncaafb/Dockerfile.ranking'
       image_name: 'ncaafb-train-ranking-model'
-      image_version: '1.0.0'
+      image_version: '2.0.0'
 
   ai_hosting:
     name: AI hosting (build)
@@ -213,7 +213,7 @@ jobs:
       sport: 'NCAAFB'
       dockerfile_path: 'Source/aws-lambdas/ncaafb/predict/Dockerfile'
       image_name: 'ncaafb-predict'
-      image_version: '1.0.0'
+      image_version: '2.0.0'
       platform: 'linux/arm64'
 
   # Only ai_hosting is a real dependency here -- see app_deploy.yml's own

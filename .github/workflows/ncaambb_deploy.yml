@@ -201,11 +201,11 @@ jobs:
       sport: 'NCAA MBB'
       feature_engineering_dockerfile_path: 'Source/feature-engineering/ncaambb/Dockerfile'
       feature_engineering_image_name: 'ncaambb-feature-engineering'
-      feature_engineering_image_version: '1.0.0'
+      feature_engineering_image_version: '2.0.0'
       # Also used by train_score_model.py/train_player_prop_model.py via a container command override.
       train_model_dockerfile_path: 'Source/model-training/ncaambb/Dockerfile'
       train_model_image_name: 'ncaambb-train-win-probability-model'
-      train_model_image_version: '1.0.0'
+      train_model_image_version: '2.0.0'
 
   ranking_model_build:
     name: National ranking model (build)
@@ -216,7 +216,7 @@ jobs:
       sport: 'NCAA MBB'
       dockerfile_path: 'Source/model-training/ncaambb/Dockerfile.ranking'
       image_name: 'ncaambb-train-ranking-model'
-      image_version: '1.0.0'
+      image_version: '2.0.0'
 
   # Ensures infra never runs without ncaambb-predict-latest already in ECR.
   ai_hosting:
@@ -228,7 +228,7 @@ jobs:
       sport: 'NCAA MBB'
       dockerfile_path: 'Source/aws-lambdas/ncaambb/predict/Dockerfile'
       image_name: 'ncaambb-predict'
-      image_version: '1.0.0'
+      image_version: '2.0.0'
       platform: 'linux/arm64'
 
   # Only ai_hosting is a real dependency here -- see app_deploy.yml's own

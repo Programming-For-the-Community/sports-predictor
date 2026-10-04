@@ -13,6 +13,12 @@ from datetime import date, datetime
 from typing import NamedTuple
 
 DEFAULT_ROLLING_WINDOW = 5
+# A longer gap between two games is an off-season.
+OFFSEASON_GAP_DAYS = 60
+# Prior games an event builder receives per team, for the season-to-date averages.
+TEAM_HISTORY_GAMES = 40
+RECENT_GAMES = 3
+EWM_HALF_LIFE_GAMES = 3
 DEFAULT_STARTING_RATING = 1500.0
 DEFAULT_K_FACTOR = 20.0
 DEFAULT_HOME_ADVANTAGE = 55.0
@@ -109,7 +115,33 @@ def compute_elo_ratings(
     if as_of_season is not None and current_season is not None and as_of_season != current_season:
         ratings = _regress(ratings)
 
+    for event_key, scoring in compute_pre_game_scoring(events).items():
+        if event_key in pre_game_ratings:
+            pre_game_ratings[event_key].update(scoring)
     return pre_game_ratings, ratings
+
+
+def _side(event: dict, role: str) -> dict:
+    return next((p for p in event.get("participants", []) if p.get("role") == role), {})
+
+
+def compute_pre_game_scoring(events: list[dict], window: int = DEFAULT_ROLLING_WINDOW) -> dict[str, dict[str, float | None]]:
+    """event_key -> each side's average points scored and allowed over its
+    previous `window` scored games, as {home,away}_pre_avg_points_{scored,allowed}."""
+    history: dict[str, list[tuple[float, float]]] = {}
+    pre_game: dict[str, dict[str, float | None]] = {}
+    for event in sorted(events, key=lambda e: e["event_date"]):
+        record = {}
+        for role in ("home", "away"):
+            recent = history.get(_side(event, role).get("entity_id"), [])[-window:]
+            record.update({f"{role}_pre_{key}": value for key, value in _scoring_means(recent).items()})
+        pre_game[event["event_key"]] = record
+        for role in ("home", "away"):
+            team_id = _side(event, role).get("entity_id")
+            scores = _own_and_opponent_scores(event, team_id) if team_id is not None else None
+            if scores is not None:
+                history.setdefault(team_id, []).append(scores)
+    return pre_game
 
 
 def _process_elo_event(
@@ -197,27 +229,94 @@ def _own_and_opponent_scores(event: dict, entity_id: str) -> tuple[float, float]
     return own_score, opp_score
 
 
+def games_this_season(games: list[dict], as_of: str | None) -> int | None:
+    """How many of `games` (most recent first) came after the last off-season
+    gap before `as_of`, stopping at a game with no event_date; None without
+    `as_of`."""
+    if as_of is None:
+        return None
+    count, later = 0, as_of
+    for game in games:
+        played = game.get("event_date")
+        if played is None or rest_days(later, played) > OFFSEASON_GAP_DAYS:
+            break
+        count += 1
+        later = played
+    return count
+
+
+def _scoring_means(scores: list[tuple[float, float]], suffix: str = "") -> dict:
+    return {
+        f"avg_points_scored{suffix}": sum(own for own, _ in scores) / len(scores) if scores else None,
+        f"avg_points_allowed{suffix}": sum(opp for _, opp in scores) / len(scores) if scores else None,
+    }
+
+
+def _scored_events(events: list[dict], entity_id: str) -> list[tuple[dict, tuple[float, float]]]:
+    return [(event, scores) for event in events if (scores := _own_and_opponent_scores(event, entity_id)) is not None]
+
+
+def _ewm_means(scores: list[tuple[float, float]], suffix: str) -> dict:
+    """Recency-weighted _scoring_means: each older game counts half as much
+    every EWM_HALF_LIFE_GAMES games."""
+    weights = [0.5 ** (age / EWM_HALF_LIFE_GAMES) for age in range(len(scores))]
+    total = sum(weights)
+    return {
+        f"avg_points_scored{suffix}": sum(w * own for w, (own, _) in zip(weights, scores)) / total if scores else None,
+        f"avg_points_allowed{suffix}": sum(w * opp for w, (_, opp) in zip(weights, scores)) / total if scores else None,
+    }
+
+
+def _vs_opponent(event: dict, entity_id: str, scores: tuple[float, float], pre_game: dict) -> tuple[float, float] | None:
+    """(points scored minus what the opponent usually allowed, points allowed
+    minus what the opponent usually scored), from the opponent's pre-game averages."""
+    opponent = next((p for p in event.get("participants", []) if p.get("entity_id") != entity_id), {})
+    context = pre_game.get(event.get("event_key"), {})
+    usually_allowed = context.get(f"{opponent.get('role')}_pre_avg_points_allowed")
+    usually_scored = context.get(f"{opponent.get('role')}_pre_avg_points_scored")
+    if usually_allowed is None or usually_scored is None:
+        return None
+    return scores[0] - usually_allowed, scores[1] - usually_scored
+
+
 def rolling_team_scoring_averages(
-    team_events: list[dict], entity_id: str, window: int = DEFAULT_ROLLING_WINDOW
+    team_events: list[dict], entity_id: str, window: int = DEFAULT_ROLLING_WINDOW, as_of: str | None = None,
+    pre_game: dict | None = None,
 ) -> dict:
     """team_events: a team's own completed events, most recent first (see
     FeatureStorage.get_team_events), NOT including the event being scored.
     Averages points scored/allowed over up to the last `window` games;
-    None for either average if the team has no qualifying history yet."""
-    scored, allowed = [], []
-    for event in team_events[:window]:
-        scores = _own_and_opponent_scores(event, entity_id)
-        if scores is None:
-            continue
-        own_score, opp_score = scores
-        scored.append(own_score)
-        allowed.append(opp_score)
-
+    None for either average if the team has no qualifying history yet. With
+    `as_of` (the scored event's date), also the same averages over only this
+    season's games in the window, and over this season's games in all of
+    team_events; with `pre_game` (compute_elo_ratings' pre-game map), also
+    the averages relative to each opponent's usual. The last-RECENT_GAMES
+    and recency-weighted averages use all of team_events."""
+    all_scored = _scored_events(team_events, entity_id)
+    scored_events = _scored_events(team_events[:window], entity_id)
+    all_scores = [score for _, score in all_scored]
+    scores = [score for _, score in scored_events]
+    this_season = games_this_season([event for event, _ in scored_events], as_of)
+    season_to_date = games_this_season([event for event, _ in all_scored], as_of)
+    vs_opponent = [
+        adjusted for event, score in scored_events
+        if (adjusted := _vs_opponent(event, entity_id, score, pre_game or {})) is not None
+    ]
     return {
-        "avg_points_scored": sum(scored) / len(scored) if scored else None,
-        "avg_points_allowed": sum(allowed) / len(allowed) if allowed else None,
-        "games_played": len(scored),
+        **_scoring_means(scores),
+        "games_played": len(scores),
+        **_scoring_means(scores[:this_season or 0], "_this_season"),
+        "games_this_season": this_season,
+        **_scoring_means(vs_opponent, "_vs_opponent"),
+        **_scoring_means(all_scores[:RECENT_GAMES], f"_last{RECENT_GAMES}"),
+        **_ewm_means(all_scores, "_ewm"),
+        **_scoring_means(all_scores[:season_to_date or 0], "_season_to_date"),
     }
+
+
+def team_scoring_columns(home_scoring: dict, away_scoring: dict) -> dict:
+    """rolling_team_scoring_averages for both sides, as home_/away_ columns."""
+    return {f"{side}_{key}": value for side, scoring in (("home", home_scoring), ("away", away_scoring)) for key, value in scoring.items()}
 
 
 def current_streak(team_events: list[dict], entity_id: str) -> int:
@@ -250,7 +349,7 @@ def current_streak(team_events: list[dict], entity_id: str) -> int:
 
 
 def rolling_player_stat_averages(
-    player_games: list[dict], window: int = DEFAULT_ROLLING_WINDOW
+    player_games: list[dict], window: int = DEFAULT_ROLLING_WINDOW, as_of: str | None = None,
 ) -> dict:
     """player_games: a player's own completed games, most recent first (see
     FeatureStorage.get_player_game_stats), NOT including the game being
@@ -286,6 +385,7 @@ def rolling_player_stat_averages(
     averages.update({f"games_with_{key}": counts[key] for key in counts})
     averages["games_played"] = len(windowed)
     averages["starts"] = sum(1 for game in windowed if game.get("started"))
+    averages["games_this_season"] = games_this_season(windowed, as_of)
     return averages
 
 
@@ -522,8 +622,8 @@ def build_basketball_event_features(
     home_elo = ratings.get("home_pre_rating")
     away_elo = ratings.get("away_pre_rating")
 
-    home_scoring = rolling_team_scoring_averages(home_team_events, home_id, window)
-    away_scoring = rolling_team_scoring_averages(away_team_events, away_id, window)
+    home_scoring = rolling_team_scoring_averages(home_team_events, home_id, window, as_of=event["event_date"], pre_game=elo_ratings)
+    away_scoring = rolling_team_scoring_averages(away_team_events, away_id, window, as_of=event["event_date"], pre_game=elo_ratings)
 
     home_box_stats = rolling_player_stat_averages(home_team_box_stats or [], window)
     away_box_stats = rolling_player_stat_averages(away_team_box_stats or [], window)
@@ -548,8 +648,8 @@ def build_basketball_event_features(
     home_free_throw_pct = _rate(home_box_stats, "avg_free_throws_made", "avg_free_throw_attempts")
     away_free_throw_pct = _rate(away_box_stats, "avg_free_throws_made", "avg_free_throw_attempts")
 
-    home_win_streak = current_streak(home_team_events, home_id)
-    away_win_streak = current_streak(away_team_events, away_id)
+    home_win_streak = current_streak(home_team_events[:window], home_id)
+    away_win_streak = current_streak(away_team_events[:window], away_id)
 
     return {
         "event_key": event["event_key"],
@@ -562,12 +662,7 @@ def build_basketball_event_features(
         "elo_diff": (home_elo - away_elo) if home_elo is not None and away_elo is not None else None,
         "home_rest_days": rest_days(event["event_date"], home_team_events[0]["event_date"]) if home_team_events else None,
         "away_rest_days": rest_days(event["event_date"], away_team_events[0]["event_date"]) if away_team_events else None,
-        "home_avg_points_scored": home_scoring["avg_points_scored"],
-        "home_avg_points_allowed": home_scoring["avg_points_allowed"],
-        "home_games_played": home_scoring["games_played"],
-        "away_avg_points_scored": away_scoring["avg_points_scored"],
-        "away_avg_points_allowed": away_scoring["avg_points_allowed"],
-        "away_games_played": away_scoring["games_played"],
+        **team_scoring_columns(home_scoring, away_scoring),
         "home_avg_rebounds": rebounds_fn(home_box_stats),
         "home_avg_offensive_rebounds": home_box_stats.get("avg_offensive_rebounds"),
         "home_avg_defensive_rebounds": home_box_stats.get("avg_defensive_rebounds"),
@@ -626,7 +721,7 @@ def build_basketball_player_features(
         event, player_game, elo_ratings,
     )
 
-    averages = rolling_player_stat_averages(prior_games, window)
+    averages = rolling_player_stat_averages(prior_games, window, as_of=player_game["event_date"])
     return {
         "event_key": player_game["event_key"],
         "player_key": player_game["player_key"],

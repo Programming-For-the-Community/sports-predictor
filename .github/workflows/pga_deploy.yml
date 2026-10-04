@@ -213,7 +213,7 @@ jobs:
       # finish_position, every label_*, season_stats values) now goes
       # through a new _as_number() coercion -- a normalizer fix alone
       # can't protect against data already written before it existed.
-      feature_engineering_image_version: '1.1.1'
+      feature_engineering_image_version: '2.0.0'
       train_model_dockerfile_path: 'Source/model-training/pga/Dockerfile'
       train_model_image_name: 'pga-train-top10-model'
       # Bumped 2026-08-27, same afternoon: the _as_number() coercion above
@@ -243,7 +243,7 @@ jobs:
       # (the one that happened to crash first in the candidate
       # tournament) -- behaviorally a no-op for every other target/sport,
       # since none of them have ever had fewer than 9 training rows.
-      train_model_image_version: '1.1.2'
+      train_model_image_version: '2.0.0'
 
   ai_hosting:
     name: AI hosting (build)
@@ -254,7 +254,7 @@ jobs:
       sport: 'PGA'
       dockerfile_path: 'Source/aws-lambdas/pga/predict/Dockerfile'
       image_name: 'pga-predict'
-      image_version: '1.0.0'
+      image_version: '2.0.0'
       platform: 'linux/arm64'
 
   # Only ai_hosting is a real dependency here -- see app_deploy.yml's own

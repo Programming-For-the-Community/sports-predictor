@@ -23,7 +23,8 @@ from typing import Callable
 
 import pandas as pd
 
-from library.features.common import compute_elo_ratings
+from library.features import matchup
+from library.features.common import TEAM_HISTORY_GAMES, compute_elo_ratings
 
 LOG_INTERVAL = 20000  # rows between progress log lines
 
@@ -38,6 +39,8 @@ class _PlayerRowContext:
     build_player_features_fn: Callable
     logger: object
     total: int
+    sport: str
+    matchup_lookup: matchup.MatchupLookup
 
 
 def group_player_games_by_player(player_games: list[dict]) -> dict[str, list[dict]]:
@@ -96,6 +99,24 @@ def _leader_position_games(
     return position_games
 
 
+def _home_away_ids(event: dict) -> tuple[str, str] | None:
+    participants = event.get("participants", [])
+    home = next((p for p in participants if p.get("role") == "home"), None)
+    away = next((p for p in participants if p.get("role") == "away"), None)
+    return (home["entity_id"], away["entity_id"]) if home is not None and away is not None else None
+
+
+def _fold_into_team_history(
+    event: dict, team_ids: tuple[str, str], team_history: dict[str, list[dict]],
+    team_box_history: dict[str, list[dict]], box_by_event_team: dict,
+) -> None:
+    for team_id in team_ids:
+        team_history[team_id].append(event)
+        box_row = box_by_event_team.get((event["event_key"], team_id))
+        if box_row:
+            team_box_history[team_id].append(box_row)
+
+
 def build_team_event_rows(
     events: list[dict], team_game_stats: list[dict], window: int, build_event_features: Callable, logger,
     *, player_games: list[dict] = (), leaders: dict[str, Callable] | None = None,
@@ -120,14 +141,12 @@ def build_team_event_rows(
     total = len(events_ascending)
     rows = []
     for i, event in enumerate(events_ascending, start=1):
-        participants = event.get("participants", [])
-        home = next((p for p in participants if p.get("role") == "home"), None)
-        away = next((p for p in participants if p.get("role") == "away"), None)
-        if home is None or away is None:
+        ids = _home_away_ids(event)
+        if ids is None:
             logger.debug("Skipping event %s -- missing home/away role", event.get("event_key"))
             continue
 
-        home_id, away_id = home["entity_id"], away["entity_id"]
+        home_id, away_id = ids
         identified: list[tuple[str, dict]] = []
         leader_kwargs = {
             f"{side}_position_games": _leader_position_games(
@@ -136,19 +155,15 @@ def build_team_event_rows(
             )
             for side, team_id in (("home", home_id), ("away", away_id))
         } if leaders else {}
-        # Most-recent-first, capped at `window` -- O(window), not O(len(history)).
+        # Most-recent-first: team history capped at TEAM_HISTORY_GAMES, box scores at `window`.
         rows.append(build_event_features(
-            event, elo_ratings, team_history[home_id][-window:][::-1], team_history[away_id][-window:][::-1], window,
+            event, elo_ratings, team_history[home_id][-TEAM_HISTORY_GAMES:][::-1], team_history[away_id][-TEAM_HISTORY_GAMES:][::-1], window,
             home_team_box_stats=team_box_history[home_id][-window:][::-1],
             away_team_box_stats=team_box_history[away_id][-window:][::-1],
             **leader_kwargs,
         ))
 
-        for team_id in (home_id, away_id):
-            team_history[team_id].append(event)
-            box_row = team_game_stats_by_event_team.get((event["event_key"], team_id))
-            if box_row:
-                team_box_history[team_id].append(box_row)
+        _fold_into_team_history(event, ids, team_history, team_box_history, team_game_stats_by_event_team)
         for position, game in identified:
             leader_history[position][game["entity_id"]].append(game)
 
@@ -160,13 +175,15 @@ def build_team_event_rows(
 
 def build_player_dataset(
     storage, sport: str, window: int, build_player_features_fn, logger,
-    since_date: str | None = None, filter_fn=None,
+    since_date: str | None = None, filter_fn=None, events: list[dict] | None = None,
 ) -> list[dict]:
     """Same incremental-history approach as each sport's own
     build_event_dataset, per player instead of per team. filter_fn (e.g.
     is_real_franchise_matchup) is optional -- nba/nfl exclude exhibition
-    games this way, ncaambb doesn't need to (no exhibition concept)."""
-    events = storage.get_all_events(sport, since_date=since_date)
+    games this way, ncaambb doesn't need to (no exhibition concept).
+    `events` skips loading them when the caller already has them."""
+    if events is None:
+        events = storage.get_all_events(sport, since_date=since_date)
     if filter_fn is not None:
         events = [e for e in events if filter_fn(e)]
     events_by_key = {event["event_key"]: event for event in events}
@@ -181,6 +198,7 @@ def build_player_dataset(
     context = _PlayerRowContext(
         events_by_key, elo_ratings, previous_event_dates, window,
         build_player_features_fn, logger, len(player_games),
+        sport, matchup.InMemoryMatchupLookup(events, player_games),
     )
     rows: list[dict] = []
     seen = 0  # rows examined, including skipped ones
@@ -212,9 +230,13 @@ def get_player_rows(
         else:
             prior = history[-context.window:][::-1]  # most-recent-first, capped at window
             own_previous_event_date = context.previous_event_dates.get((game["team_id"], game["event_key"]))
-            rows.append(context.build_player_features_fn(
+            row = context.build_player_features_fn(
                 game, prior, event, context.elo_ratings, own_previous_event_date, context.window,
+            )
+            row.update(matchup.matchup_columns(
+                context.sport, game, matchup.opponent_in(event, game["team_id"]), prior, context.matchup_lookup, context.window,
             ))
+            rows.append(row)
             history.append(game)
 
         seen += 1

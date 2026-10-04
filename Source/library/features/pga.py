@@ -24,6 +24,43 @@ def _as_number(value):
     pyarrow's entire dataset write, not just that one row."""
     return value if isinstance(value, (int, float)) else None
 
+def _mean(values: list[float]) -> float | None:
+    return sum(values) / len(values) if values else None
+
+
+def _field_round_averages(event: dict) -> dict[int, float]:
+    """Round number -> the field's average score to par in that round."""
+    by_round: dict[int, list[float]] = {}
+    for participant in event.get("participants", []):
+        for round_result in (participant.get("result") or {}).get("rounds") or []:
+            score = _as_number(round_result.get("score_to_par"))
+            if score is not None and round_result.get("round") is not None:
+                by_round.setdefault(round_result["round"], []).append(score)
+    return {round_number: _mean(scores) for round_number, scores in by_round.items()}
+
+
+def field_results(event: dict) -> dict[str, dict]:
+    """entity_id -> that golfer's result, each round carrying the field's
+    average score to par for that round as field_avg_score_to_par."""
+    averages = _field_round_averages(event)
+    results = {}
+    for participant in event.get("participants", []):
+        result = participant.get("result") or {}
+        rounds = [{**r, "field_avg_score_to_par": averages.get(r.get("round"))} for r in result.get("rounds") or []]
+        results[participant.get("entity_id")] = {**result, "rounds": rounds}
+    return results
+
+
+def _vs_field(round_result: dict) -> float | None:
+    score = _as_number(round_result.get("score_to_par"))
+    field_average = _as_number(round_result.get("field_avg_score_to_par"))
+    return score - field_average if score is not None and field_average is not None else None
+
+
+def _rounds_vs_field(round_results: list[dict]) -> float | None:
+    return _mean([diff for r in round_results if (diff := _vs_field(r)) is not None])
+
+
 # Raw ESPN category name -> this project's snake_case feature column
 # name, for the 6 season-stat categories golfer_features.parquet carries
 # (season_* columns, build_golfer_event_features below). Only categories
@@ -70,6 +107,11 @@ def rolling_golfer_averages(golfer_results: list[dict], window: int = DEFAULT_RO
         "finish_rate": len(finished) / starts if starts else None,
         "avg_earnings": sum(earnings_values) / len(earnings_values) if earnings_values else None,
         "events_played": starts,
+        "avg_score_to_par_per_round": _mean([
+            r["score_to_par"] / len(r["rounds"]) for r in windowed
+            if isinstance(r.get("score_to_par"), (int, float)) and r.get("rounds")
+        ]),
+        "avg_strokes_vs_field": _rounds_vs_field([round_result for r in windowed for round_result in r.get("rounds") or []]),
     }
 
 
@@ -180,6 +222,7 @@ def rolling_round_averages(round_results: list[dict], window: int = DEFAULT_ROLL
     return {
         "avg_score_to_par": sum(score_to_par_values) / len(score_to_par_values) if score_to_par_values else None,
         "rounds_played": len(windowed),
+        "avg_strokes_vs_field": _rounds_vs_field(windowed),
     }
 
 

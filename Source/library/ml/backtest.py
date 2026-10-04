@@ -17,9 +17,15 @@ import logging
 import time
 from typing import Any, NamedTuple
 
+import numpy as np
+import pandas as pd
+
 from library.aws.s3_manager import S3Manager
-from library.ml import training_common
+from library.features.common import DEFAULT_ROLLING_WINDOW
+from library.ml import calibration, training_common
+from library.ml import target_baseline as target_baseline_module
 from library.ml.model_types import ModelAdapter
+from library.serving import model_loader
 
 logger = logging.getLogger("model-training")
 
@@ -104,6 +110,181 @@ def _is_worse_than_baseline(metadata: dict, naive_baseline_metrics: dict, promot
     return None
 
 
+CHAMPION_RESCORED = "rescored"
+CHAMPION_STORED = "stored"
+CHAMPION_THIS_RUN = "this_run"
+
+
+class RunOptions(NamedTuple):
+    """Optional per-run training choices: an Elo-implied target baseline a
+    regressor learns the correction to, and per-row training weights that
+    each candidate is also refit with once."""
+    target_baseline: dict | None = None
+    sample_weights: Any = None
+
+
+class Champion(NamedTuple):
+    """What a candidate must beat: `score` on the promotion metric, and how it
+    was obtained (one of the CHAMPION_* bases)."""
+    version: int
+    score: float
+    basis: str
+
+
+def _rescore(estimator: Any, card: dict, task: str, split: HoldoutSplit, metric: str, test_start: str | None) -> float | None:
+    """The production model's metric on this run's holdout, or None when it
+    trained on any holdout date or lacks a column the holdout has."""
+    trained_through = (card.get("train_date_range") or [None, None])[1]
+    if trained_through is None or test_start is None or trained_through >= test_start:
+        return None
+    columns = card["feature_columns"]
+    if any(column not in split.X_test.columns for column in columns):
+        return None
+    predictions = model_loader.card_predictions(estimator, card, split.X_test[columns])
+    return _evaluate_for_task(task, predictions, split.y_test)[metric]
+
+
+def _current_champion(
+    s3: S3Manager, sport: str, model_name: str, task: str, split: HoldoutSplit, metric: str, test_start: str | None,
+) -> Champion | None:
+    version = training_common.get_current_version(s3, sport, model_name)
+    if version is None:
+        return None
+    card = training_common.load_model_card(s3, sport, model_name, version)
+    try:
+        estimator, _ = model_loader.load_current_model(s3, sport, model_name)
+        score = _rescore(estimator, card, task, split, metric, test_start)
+    except Exception:  # noqa: BLE001
+        logger.warning("Could not re-score %s/%s v%d on this holdout.", sport, model_name, version, exc_info=True)
+        score = None
+    champion = Champion(version, card[metric], CHAMPION_STORED) if score is None else Champion(version, score, CHAMPION_RESCORED)
+    logger.info("%s/%s champion: v%d %s=%.5f (%s).", sport, model_name, version, metric, champion.score, champion.basis)
+    return champion
+
+
+def _promotion_decision(champion: Champion | None, score: float, metric: str) -> dict:
+    if champion is None:
+        return {"promoted": True, "challenger": score}
+    return {
+        "promoted": training_common.beats(score, champion.score, metric),
+        "challenger": score,
+        "champion_version": champion.version,
+        "champion": champion.score,
+        "champion_basis": champion.basis,
+        "required_margin": training_common.PROMOTION_MARGINS.get(metric, 0.0),
+    }
+
+
+# Most recent share of the training rows a classifier's calibration is fitted on.
+CALIBRATION_FRACTION = 0.2
+
+
+def _fit_calibration(adapter: ModelAdapter, params: dict, X_train: Any, y_train: Any, weights: Any = None) -> dict | None:
+    """Platt scaling fitted on the most recent CALIBRATION_FRACTION of the
+    training rows, predicted by a refit on the rest with the same params."""
+    cut = int(len(X_train) * (1 - CALIBRATION_FRACTION))
+    try:
+        estimator = adapter.fit(X_train.iloc[:cut], y_train.iloc[:cut], params, None if weights is None else weights[:cut])
+        return calibration.fit_platt(adapter.predict(estimator, X_train.iloc[cut:]), y_train.iloc[cut:])
+    except Exception:  # noqa: BLE001
+        logger.warning("Could not fit a calibration for %s -- keeping it uncalibrated.", adapter.algorithm, exc_info=True)
+        return None
+
+
+def _calibrated(
+    adapter: ModelAdapter, params: dict, split: HoldoutSplit, predictions: Any, metrics: dict, promotion_metric: str,
+    weights: Any = None,
+) -> tuple[Any, dict, dict | None]:
+    """(predictions, metrics, calibration): the calibrated versions when they
+    improve promotion_metric on the holdout, else the inputs and None."""
+    fitted = _fit_calibration(adapter, params, split.X_train, split.y_train, weights)
+    if fitted is None:
+        return predictions, metrics, None
+    calibrated = calibration.apply(fitted, predictions)
+    calibrated_metrics = _evaluate_for_task("classification", calibrated, split.y_test)
+    if calibrated_metrics[promotion_metric] < metrics[promotion_metric]:
+        return calibrated, calibrated_metrics, fitted
+    return predictions, metrics, None
+
+
+def _recency_weighted(
+    adapter: ModelAdapter, params: dict, split: HoldoutSplit, test_offset: Any, weights: Any,
+    task: str, promotion_metric: str, fitted: tuple[Any, Any, dict],
+) -> tuple[Any, Any, dict, bool]:
+    """(estimator, predictions, metrics, weighted): a refit with `weights`
+    when it improves promotion_metric on the holdout, else `fitted` as given."""
+    estimator, predictions, metrics = fitted
+    try:
+        weighted = adapter.fit(split.X_train, split.y_train, params, weights)
+    except Exception:  # noqa: BLE001
+        logger.warning("Could not refit %s with recency weights -- keeping it unweighted.", adapter.algorithm, exc_info=True)
+        return estimator, predictions, metrics, False
+    weighted_predictions = adapter.predict(weighted, split.X_test) + test_offset
+    weighted_metrics = _evaluate_for_task(task, weighted_predictions, split.y_test)
+    if weighted_metrics[promotion_metric] < metrics[promotion_metric]:
+        return weighted, weighted_predictions, weighted_metrics, True
+    return estimator, predictions, metrics, False
+
+
+class _CandidateFit(NamedTuple):
+    estimator: Any
+    params: dict
+    predictions: Any
+    metrics: dict
+    training_seconds: float
+    calibration: dict | None
+    recency_weighted: bool
+
+
+def _fit_candidate(
+    adapter: ModelAdapter, task: str, fit_split: HoldoutSplit, split: HoldoutSplit, test_offset: Any,
+    options: RunOptions, promotion_metric: str,
+) -> _CandidateFit:
+    """Tunes and fits one candidate on fit_split (labels net of any target
+    baseline), then keeps a recency-weighted refit and a calibration where
+    each improves promotion_metric on the holdout."""
+    started = time.perf_counter()
+    estimator, params = adapter.tune_and_fit(fit_split.X_train, fit_split.y_train)
+    training_seconds = time.perf_counter() - started
+    predictions = adapter.predict(estimator, fit_split.X_test) + test_offset
+    metrics = _evaluate_for_task(task, predictions, fit_split.y_test)
+    weighted = False
+    if options.sample_weights is not None:
+        estimator, predictions, metrics, weighted = _recency_weighted(
+            adapter, params, fit_split, test_offset, options.sample_weights, task, promotion_metric,
+            (estimator, predictions, metrics),
+        )
+    fitted_calibration = None
+    if task == "classification":
+        predictions, metrics, fitted_calibration = _calibrated(
+            adapter, params, split, predictions, metrics, promotion_metric, options.sample_weights if weighted else None,
+        )
+    return _CandidateFit(estimator, params, predictions, metrics, training_seconds, fitted_calibration, weighted)
+
+
+def _season_stage(X: pd.DataFrame) -> pd.Series | None:
+    """This season's games behind each row (the fewer side's for an event row),
+    or None when the rows don't carry it."""
+    if "games_this_season" in X.columns:
+        return X["games_this_season"]
+    sides = ["home_games_this_season", "away_games_this_season"]
+    return X[sides].min(axis=1, skipna=False) if set(sides) <= set(X.columns) else None
+
+
+def _holdout_by_season_stage(task: str, predictions: Any, split: HoldoutSplit) -> dict | None:
+    """Holdout metrics for rows whose rolling window isn't yet full of this
+    season's games, and for the rest."""
+    stage = _season_stage(split.X_test)
+    if stage is None:
+        return None
+    by_stage = {}
+    for name, mask in (("early_season", stage < DEFAULT_ROLLING_WINDOW), ("rest_of_season", stage >= DEFAULT_ROLLING_WINDOW)):
+        rows = mask.to_numpy()
+        if rows.any():
+            by_stage[name] = {"rows": int(rows.sum()), **_evaluate_for_task(task, np.asarray(predictions)[rows], split.y_test[rows])}
+    return by_stage
+
+
 def _load_resumed_progress(s3: S3Manager, sport: str, model_name: str, run_id: str) -> tuple[list[dict], list[dict]]:
     """(evaluated, promotions) left by an earlier attempt of run_id, or two
     empty lists for a fresh run."""
@@ -137,7 +318,7 @@ def _record_losing_candidate(
     promotion_metric: str,
 ) -> None:
     logger.info(
-        "%s/%s candidate %s did not beat current production -- not persisted, moving to next candidate.",
+        "%s/%s candidate %s did not beat the champion by the required margin -- not persisted, moving to next candidate.",
         sport, model_name, algorithm,
     )
     training_common.save_run_progress(s3, sport, model_name, run_id, evaluated, promotions)
@@ -158,7 +339,7 @@ def _warn_if_worse_than_baseline(
         logger.warning(
             "%s/%s candidate %s is about to be promoted despite scoring WORSE than the naive baseline "
             "on %s -- likely means this target isn't learnable with current features/data, not "
-            "necessarily a training bug. Promoting anyway (still beats/ties current production).",
+            "necessarily a training bug. Promoting anyway (still beats the champion).",
             sport, model_name, algorithm, promotion_metric,
         )
 
@@ -175,6 +356,7 @@ def run_backtest(
     summary_metrics: list[str],
     promotion_metric: str,
     run_id: str,
+    options: RunOptions = RunOptions(),
 ) -> dict:
     """task: "classification" or "regression" -- decides whether holdout
     metrics come from evaluate_holdout (accuracy/log_loss) or
@@ -188,21 +370,18 @@ def run_backtest(
     mid-tournament and relaunched with the same run_id picks up where it
     left off instead of redoing already-decided candidates.
 
-    Every candidate gets tuned and fit on the identical holdout split, and
-    every candidate is compared against whatever's currently hosted right
-    now (training_common.would_beat_current/promote_if_better both read
-    the live current.json pointer fresh, never a cached value from
-    earlier in this run) the moment it finishes, in candidate list order.
-    Only replaces what's live if it's genuinely at least as good (no
-    percentage tolerance). An earlier candidate's own win in this same
-    run is a real comparison target for a later one, same as a previous
-    month's production version would be.
+    Every candidate gets tuned and fit on the identical holdout split and is
+    compared, in candidate list order, against the champion: the production
+    model re-scored once on this holdout (its stored score when it can't be),
+    or an earlier winner of this run. A candidate must beat it by
+    training_common.PROMOTION_MARGINS; the decision is written to the
+    winner's card as promotion_decision.
 
     A candidate that doesn't win is never persisted to S3 at all -- but its
     result is still real signal about this run, so whichever card is
     currently live (if this run has promoted anything yet) gets refreshed
     with it immediately via training_common.update_promoted_candidates,
-    right after that candidate's would_beat_current comparison resolves.
+    right after that candidate's promotion decision resolves.
     Combined with every `candidates` summary already listing every
     algorithm in `candidates` -- win, lose, or not yet reached, the latter
     as a None/"not_evaluated" placeholder rather than being left off (see
@@ -236,10 +415,17 @@ def run_backtest(
     algorithm tried this run, win or lose.
     """
     X_train, y_train, X_test, y_test = split
+    test_offset = target_baseline_module.apply(options.target_baseline, X_test)
+    fit_split = HoldoutSplit(X_train, y_train - target_baseline_module.apply(options.target_baseline, X_train), X_test, y_test)
     display_metric = "accuracy" if task == "classification" else "mae"
 
     evaluated, promotions = _load_resumed_progress(s3, sport, model_name, run_id)
     already_evaluated = {entry["algorithm"] for entry in evaluated}
+    if promotions:
+        champion = Champion(promotions[-1]["version"], promotions[-1][promotion_metric], CHAMPION_THIS_RUN)
+    else:
+        test_start = (extra_metadata.get("test_date_range") or [None])[0]
+        champion = _current_champion(s3, sport, model_name, task, split, promotion_metric, test_start)
 
     for adapter in candidates:
         if adapter.algorithm in already_evaluated:
@@ -250,12 +436,9 @@ def run_backtest(
             continue
 
         logger.info("Tuning and fitting %s/%s candidate: %s", sport, model_name, adapter.algorithm)
-        tune_and_fit_started = time.perf_counter()
         try:
-            estimator, best_params = adapter.tune_and_fit(X_train, y_train)
-            training_seconds = time.perf_counter() - tune_and_fit_started
-            predictions = adapter.predict(estimator, X_test)
-            metrics = _evaluate_for_task(task, predictions, y_test)
+            fit = _fit_candidate(adapter, task, fit_split, split, test_offset, options, promotion_metric)
+            estimator, metrics, training_seconds = fit.estimator, fit.metrics, fit.training_seconds
 
             logger.info(
                 "%s/%s candidate %s: %s (training_seconds=%.1f)", sport, model_name, adapter.algorithm,
@@ -285,12 +468,17 @@ def run_backtest(
                 # was actually trained on.
                 "feature_columns": list(X_train.columns),
                 "feature_importances": adapter.feature_importances(estimator, list(X_train.columns)),
-                "hyperparameters": best_params,
+                "holdout_by_season_stage": _holdout_by_season_stage(task, fit.predictions, split),
+                "hyperparameters": fit.params,
+                "calibration": fit.calibration,
+                "target_baseline": options.target_baseline,
+                "recency_weighted": fit.recency_weighted,
                 "candidates": ranked_so_far,
                 "candidates_ranked_by": promotion_metric,
             }
 
-            if not training_common.would_beat_current(s3, sport, model_name, metadata, promotion_metric):
+            decision = _promotion_decision(champion, metrics[promotion_metric], promotion_metric)
+            if not decision["promoted"]:
                 _record_losing_candidate(
                     s3, sport, model_name, run_id, adapter.algorithm,
                     evaluated, promotions, ranked_so_far, promotion_metric,
@@ -304,9 +492,10 @@ def run_backtest(
             card = training_common.save_model_artifact(
                 s3, sport, model_name, adapter.algorithm,
                 adapter.serialize(estimator), adapter.artifact_filename,
-                metadata, summary_metrics,
+                {**metadata, "promotion_decision": decision}, summary_metrics,
             )
-            training_common.promote_if_better(s3, sport, model_name, card["version"], metadata, promotion_metric)
+            training_common.set_current_version(s3, sport, model_name, card["version"])
+            champion = Champion(card["version"], metrics[promotion_metric], CHAMPION_THIS_RUN)
             promotions.append(card)
             training_common.save_run_progress(s3, sport, model_name, run_id, evaluated, promotions)
             logger.info("%s/%s: %s (v%d) is now live.", sport, model_name, adapter.algorithm, card["version"])

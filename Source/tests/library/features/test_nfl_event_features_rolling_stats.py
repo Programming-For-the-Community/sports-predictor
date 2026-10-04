@@ -158,3 +158,15 @@ class TestBuildEventFeaturesRollingStats:
 
         assert row["home_win_streak"] == 2
         assert row["away_win_streak"] == 0
+
+    def test_win_streak_counts_only_the_window_when_given_deeper_history(self):
+        event = _event("E9", "2025-11-09", "KC", "LAC", 27, 20)
+        win = {"participants": [{"entity_id": "KC", "result": {"score": 27}}, {"entity_id": "DET", "result": {"score": 20}}]}
+        home_history = [{**win, "event_date": f"2025-10-{d:02d}"} for d in (26, 19, 12, 5, 1)] + [
+            {**win, "event_date": f"2025-09-{d:02d}"} for d in (21, 14, 7)
+        ]
+
+        row = build_event_features(event, {}, home_history, [], window=5)
+
+        assert row["home_win_streak"] == 5
+        assert row["home_avg_points_scored_season_to_date"] == 27

@@ -111,6 +111,7 @@ def train(
         summary_metrics=SUMMARY_METRICS,
         promotion_metric=PROMOTION_METRIC,
         run_id=training_common.resolve_run_id(),
+        options=backtest.RunOptions(sample_weights=training_common.recency_weights(train_df["event_date"])),
     )
 
 

@@ -1,12 +1,13 @@
 """
-library.serving.event_prediction_common._score_and_record_leader -- lives
+library.serving.event_prediction_common._score_and_record_leader and
+snapshot_event -- lives
 here rather than tests/library/serving since the module imports its
 sport's own live_features, which only resolves with a predict/ directory
 on sys.path (see this folder's conftest.py).
 """
 from unittest.mock import MagicMock, patch
 
-from library.serving import event_prediction_common, model_loader
+from library.serving import event_prediction_common, model_loader, prediction_snapshots, serving_features
 
 
 def _score(storage, predictions_table, stats=("points", "rebounds")):
@@ -44,3 +45,17 @@ class TestScoreAndRecordLeader:
         result = _score(storage, predictions_table, stats=("points",))
 
         assert result == {"entity_id": "p1", "points": 21.5}
+
+
+class TestSnapshotEvent:
+    def test_writes_the_inputs_the_snapshot_compute_used(self):
+        s3 = MagicMock()
+
+        def compute(storage, s3, predictions_table, event_id, sport, predict_event_fn):
+            serving_features.note({"model_name": "win-probability", "version": 4}, {}, {"home_elo": 1510.0})
+
+        with patch.object(event_prediction_common, "compute_and_cache_event", side_effect=compute),              patch.object(prediction_snapshots, "snapshot_event_predictions", return_value=3):
+            written = event_prediction_common.snapshot_event(MagicMock(), s3, MagicMock(), "77", "nba", MagicMock())
+
+        assert written == 3
+        s3.put_json.assert_called_once_with("serving-features/nba/77.json", {"win-probability#v4": {"home_elo": 1510.0}})

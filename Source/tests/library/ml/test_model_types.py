@@ -764,3 +764,11 @@ class TestCandidateFactories:
     def test_every_call_builds_fresh_instances(self):
         first, second = model_types.classifier_candidates(), model_types.classifier_candidates()
         assert all(a is not b for a, b in zip(first, second))
+
+
+class TestPipelineAdapter:
+    def test_a_subclass_must_build_its_own_pipeline(self):
+        adapter = model_types._PipelineAdapter()
+
+        with pytest.raises(NotImplementedError):
+            adapter._build_pipeline()

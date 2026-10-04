@@ -202,7 +202,7 @@ class TestEndToEndWithRealBacktest:
     """Lets run_backtest run for real, with each candidate adapter's
     tune_and_fit mocked, to prove train_win_probability_model.py's
     arguments thread through run_backtest -> save_model_artifact ->
-    promote_if_better end to end."""
+    set_current_version end to end."""
 
     def test_first_candidate_wins_and_no_worse_candidate_displaces_it(self, monkeypatch):
         monkeypatch.setenv("MODEL_ARTIFACTS_BUCKET_NAME", "test-bucket")

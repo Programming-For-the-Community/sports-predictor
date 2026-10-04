@@ -23,7 +23,9 @@ import time
 
 import pandas as pd
 
+from library.ml import calibration, target_baseline
 from library.ml.model_types import ADAPTERS
+from library.serving import serving_features
 from library.storage.model_artifacts import current_version_key, model_artifact_key
 
 MODEL_CARD_FILENAME = "model_card.json"
@@ -42,7 +44,7 @@ _model_cache: dict[tuple[str, str], tuple[float, tuple]] = {}
 
 class NoPromotedModelError(Exception):
     """model_name has never had a version promoted (library.ml.
-    training_common.promote_if_better never wrote a current.json for it)
+    training_common.set_current_version never wrote a current.json for it)
     -- distinct from a version existing but the artifact itself being
     missing or corrupt, which is a real bug rather than an expected
     state."""
@@ -116,7 +118,12 @@ def predict(estimator, model_card: dict, feature_row: dict) -> float:
         column: float(feature_row[column]) if isinstance(feature_row.get(column), (int, float)) else float("nan")
         for column in feature_columns
     }
+    serving_features.note(model_card, feature_row, row)
     X = pd.DataFrame([row], columns=feature_columns)
+    return float(card_predictions(estimator, model_card, X)[0])
 
-    adapter = ADAPTERS[model_card["algorithm"]]
-    return float(adapter.predict(estimator, X)[0])
+
+def card_predictions(estimator, model_card: dict, X: pd.DataFrame):
+    """The adapter's output with the card's calibration and target baseline applied."""
+    raw = ADAPTERS[model_card["algorithm"]].predict(estimator, X)
+    return calibration.apply(model_card.get("calibration"), raw) + target_baseline.apply(model_card.get("target_baseline"), X)

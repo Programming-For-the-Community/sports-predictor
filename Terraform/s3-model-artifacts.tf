@@ -62,5 +62,22 @@ resource "aws_s3_bucket_lifecycle_configuration" "model_artifacts" {
     }
   }
 
+  rule {
+    id     = "expire-serving-features"
+    status = "Enabled"
+
+    filter {
+      prefix = "serving-features/"
+    }
+
+    expiration {
+      days = 180
+    }
+
+    noncurrent_version_expiration {
+      noncurrent_days = 1
+    }
+  }
+
   depends_on = [aws_s3_bucket_versioning.model_artifacts]
 }

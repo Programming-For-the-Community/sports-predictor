@@ -2,6 +2,7 @@ import os
 import sys
 from unittest.mock import MagicMock
 
+import pytest
 from PIL import Image
 
 handler = sys.modules["shared_cloudwatch_geo_widget"]
@@ -152,6 +153,22 @@ class TestProject:
         x, y = handler._project(-96, 36.5, "-125,24,-67,49", 600, 260)
         assert round(x) == 300
         assert round(y) == 130
+
+
+class TestBorderRuns:
+    def test_an_ordinary_ring_is_one_closed_run(self):
+        ring = [[0, 0], [1, 0], [1, 1]]
+        assert handler._border_runs(ring) == [[[0, 0], [1, 0], [1, 1], [0, 0]]]
+
+    def test_a_segment_along_the_antimeridian_is_dropped(self):
+        ring = [[170, 60], [180, 60], [180, 70], [170, 70]]
+        runs = handler._border_runs(ring)
+        assert [[170, 60], [180, 60]] in runs
+        assert all(not (a[0] == 180 and b[0] == 180) for run in runs for a, b in zip(run, run[1:]))
+
+    def test_world_frame_is_aspect_matched_to_the_canvas(self):
+        west, south, east, north = (float(v) for v in handler._WORLD_BOUNDING_BOX.split(","))
+        assert (east - west) / (north - south) == pytest.approx(handler._MAP_WIDTH / handler._MAP_HEIGHT)
 
 
 class TestInterpHeatColor:

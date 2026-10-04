@@ -50,17 +50,20 @@ def live_elo_ratings(
     storage, sport: str, event: dict, home_id: str, away_id: str, current_ratings: dict | None = None,
     events: list[dict] | None = None,
 ) -> dict:
-    """A minimal elo_ratings dict containing just this one (not-yet-played)
-    event's key, mapped to each team's CURRENT rating (compute_elo_ratings'
-    second return value, not pre_game_ratings, which has no entry for a
-    future event).
+    """An elo_ratings dict for this one (not-yet-played) event, mapped to each
+    team's CURRENT rating (compute_elo_ratings' second return value, not
+    pre_game_ratings, which has no entry for a future event). When it
+    computes the ratings itself, it also carries every completed event's
+    pre-game entry, which event features read for opponent context.
 
     current_ratings/events are optional already-computed pass-throughs
     for a caller that's already paid for them."""
+    pre_game_ratings: dict = {}
     if current_ratings is None:
         completed_events = events if events is not None else storage.get_all_events(sport)
-        _, current_ratings = compute_elo_ratings(completed_events, as_of_season=event.get("season"))
+        pre_game_ratings, current_ratings = compute_elo_ratings(completed_events, as_of_season=event.get("season"))
     return {
+        **pre_game_ratings,
         event["event_key"]: {
             "home_pre_rating": current_ratings.get(home_id, DEFAULT_STARTING_RATING),
             "away_pre_rating": current_ratings.get(away_id, DEFAULT_STARTING_RATING),

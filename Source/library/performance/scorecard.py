@@ -299,18 +299,31 @@ def chance_record(
 ) -> dict:
     """A yes/no probability model. Accuracy is how often the call (more than
     50% = yes) was right; the baseline is always answering no, which is
-    already right most of the time for a rare outcome like a top-10 finish."""
+    already right most of the time for a rare outcome like a top-10 finish.
+    brier/brier_baseline (always stating the season's own rate) are not shown
+    in the app."""
     record = _base(model_name, version, KIND_CHANCE, BAND_PREDICTED_CHANCE, count_noun)
     record.update(_headline(samples, _called_right))
     accuracy = record["season"]["value"]
     baseline = _mean([0.0 if s.happened else 1.0 for s in samples])
     record["vs_baseline_pct"] = (accuracy - baseline) / baseline * 100 if accuracy is not None and baseline else None
+    record["brier"], record["brier_baseline"] = _brier(samples)
     record["at_training"] = at_training
     record["margin_of_error"] = None
     record["bands"] = _chance_bands(samples)
     if entity_type is not None:
         _put_best(record, "best", _best(samples, _called_right_share, entity_type, lower_is_better=False))
     return record
+
+
+def _brier(samples: list[ChanceSample]) -> tuple[float | None, float | None]:
+    """(model Brier score, base-rate Brier score); lower is better."""
+    outcomes = [1.0 if s.happened else 0.0 for s in samples]
+    rate = _mean(outcomes)
+    if rate is None:
+        return None, None
+    model = _mean([(s.probability - o) ** 2 for s, o in zip(samples, outcomes)])
+    return model, _mean([(rate - o) ** 2 for o in outcomes])
 
 
 def _called_right(sample: ChanceSample) -> float:

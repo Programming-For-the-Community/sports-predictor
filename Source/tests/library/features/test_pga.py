@@ -5,6 +5,7 @@ added 2026-08-25, the field-event counterpart to library.features.common's
 head-to-head rolling helpers.
 """
 from library.features.pga import (
+    field_results,
     SEASON_STAT_CATEGORIES,
     build_cup_event_features,
     build_cutline_event_features,
@@ -37,7 +38,20 @@ class TestRollingGolferAverages:
             "finish_rate": None,
             "avg_earnings": None,
             "events_played": 0,
+            "avg_score_to_par_per_round": None,
+            "avg_strokes_vs_field": None,
         }
+
+    def test_score_per_round_puts_a_missed_cut_on_the_same_scale_as_a_finish(self):
+        finished = {"score_to_par": -8, "rounds": [_round(n, -2) for n in range(1, 5)]}
+        missed_cut = {"score_to_par": 4, "rounds": [_round(1, 2), _round(2, 2)]}
+
+        assert rolling_golfer_averages([finished, missed_cut])["avg_score_to_par_per_round"] == 0
+
+    def test_strokes_vs_field_uses_each_rounds_field_average(self):
+        result = {"rounds": [{"round": 1, "score_to_par": -3, "field_avg_score_to_par": 1.0}, {"round": 2, "score_to_par": 2}]}
+
+        assert rolling_golfer_averages([result])["avg_strokes_vs_field"] == -4
 
     def test_averages_score_to_par_and_finish_position_over_real_finishes(self):
         history = [
@@ -88,6 +102,21 @@ class TestRollingGolferAverages:
         assert averages["avg_score_to_par"] is None
         assert averages["avg_earnings"] is None
         assert averages["events_played"] == 1  # still a real start
+
+
+class TestFieldResults:
+    def test_each_round_carries_that_rounds_field_average(self):
+        event = {"participants": [
+            {"entity_id": "1", "result": {"score_to_par": -3, "rounds": [_round(1, -3), _round(2, 0)]}},
+            {"entity_id": "2", "result": {"rounds": [_round(1, 1)]}},
+            {"entity_id": "3", "result": None},
+        ]}
+
+        results = field_results(event)
+
+        assert [r["field_avg_score_to_par"] for r in results["1"]["rounds"]] == [-1.0, 0.0]
+        assert results["1"]["score_to_par"] == -3
+        assert results["3"] == {"rounds": []}
 
 
 class TestInTournamentProgressFeatures:
@@ -344,7 +373,12 @@ class TestBuildGolferEventFeatures:
 class TestRollingRoundAverages:
     def test_no_history_returns_none_and_zero_rounds_played(self):
         averages = rolling_round_averages([])
-        assert averages == {"avg_score_to_par": None, "rounds_played": 0}
+        assert averages == {"avg_score_to_par": None, "rounds_played": 0, "avg_strokes_vs_field": None}
+
+    def test_strokes_vs_field_for_same_round_history(self):
+        rounds = [{"round": 3, "score_to_par": -1, "field_avg_score_to_par": 0.5}, {"round": 3, "score_to_par": 2, "field_avg_score_to_par": 1.5}]
+
+        assert rolling_round_averages(rounds)["avg_strokes_vs_field"] == -0.5
 
     def test_averages_score_to_par_over_past_rounds(self):
         history = [_round(1, score_to_par=-2), _round(1, score_to_par=-4)]

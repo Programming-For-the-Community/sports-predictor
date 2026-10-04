@@ -59,11 +59,21 @@ class TestPgaSamples:
     def test_final_score_is_graded_only_for_golfers_who_finished(self):
         samples, _ = self._samples(
             [_golfer("1", 3, score=-12), _golfer("2", None, status="cut", score=3)],
-            [_row("MODEL#projected-score-to-par#v4#GOLFER#1", -9.0), _row("MODEL#projected-score-to-par#v4#GOLFER#2", -1.0)],
+            [_row("SNAPSHOT#final_pregame#MODEL#projected-score-to-par#v4#GOLFER#1", -9.0),
+             _row("SNAPSHOT#final_pregame#MODEL#projected-score-to-par#v4#GOLFER#2", -1.0)],
         )
 
         assert [(s.predicted, s.actual) for s in samples["projected-score-to-par"]] == [(-9.0, -12)]
         assert [s.version for s in samples["projected-score-to-par"]] == [4]
+
+    def test_final_score_is_not_graded_from_live_rows_but_other_models_are(self):
+        samples, _ = self._samples(
+            [_golfer("1", 3, score=-12)],
+            [_row("MODEL#projected-score-to-par#v4#GOLFER#1", -2.0), _row("MODEL#top-10-probability#v5#GOLFER#1", 0.7)],
+        )
+
+        assert "projected-score-to-par" not in samples
+        assert [s.probability for s in samples["top-10-probability"]] == [0.7]
 
     def test_each_round_is_graded_against_its_forecast_in_the_one_pre_event_snapshot(self):
         rounds = [{"round": 1, "score_to_par": -4}, {"round": 2, "score_to_par": -2}]
@@ -225,6 +235,20 @@ class TestChanceRecord:
         record = scorecard.chance_record("m", 1, samples, None)
 
         assert record["vs_baseline_pct"] == pytest.approx((1.0 - 0.9) / 0.9 * 100)
+
+    def test_brier_against_always_stating_the_seasons_rate(self):
+        p = self._period(1)
+        samples = [ChanceSample(p, 0.05, False)] * 9 + [ChanceSample(p, 0.6, True)]
+
+        record = scorecard.chance_record("m", 1, samples, None)
+
+        assert record["brier"] == pytest.approx((9 * 0.05 ** 2 + 0.4 ** 2) / 10)
+        assert record["brier_baseline"] == pytest.approx((9 * 0.1 ** 2 + 0.9 ** 2) / 10)
+
+    def test_no_samples_has_no_brier(self):
+        record = scorecard.chance_record("m", 1, [], None)
+
+        assert (record["brier"], record["brier_baseline"]) == (None, None)
 
 
 class TestActualsWithNoResultYet:

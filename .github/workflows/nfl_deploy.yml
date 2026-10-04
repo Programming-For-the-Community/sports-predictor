@@ -248,10 +248,10 @@ jobs:
       sport: 'NFL'
       feature_engineering_dockerfile_path: 'Source/feature-engineering/nfl/Dockerfile'
       feature_engineering_image_name: 'nfl-feature-engineering'
-      feature_engineering_image_version: '1.0.0'
+      feature_engineering_image_version: '2.0.0'
       train_model_dockerfile_path: 'Source/model-training/nfl/Dockerfile'
       train_model_image_name: 'nfl-train-win-probability-model'
-      train_model_image_version: '1.0.0'
+      train_model_image_version: '2.0.0'
 
   ai_hosting:
     name: AI hosting (build)
@@ -262,7 +262,7 @@ jobs:
       sport: 'NFL'
       dockerfile_path: 'Source/aws-lambdas/nfl/predict/Dockerfile'
       image_name: 'nfl-predict'
-      image_version: '1.0.0'
+      image_version: '2.0.0'
       # Matches the nfl-predict Lambda's arm64 architecture.
       platform: 'linux/arm64'
 

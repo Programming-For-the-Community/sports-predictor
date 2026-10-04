@@ -20,7 +20,8 @@ omitted, each function fetches its own.
 """
 from datetime import date
 
-from library.features.common import compute_elo_ratings
+from library.features.common import TEAM_HISTORY_GAMES, compute_elo_ratings
+from library.features.matchup import live_matchup_columns
 from library.features.live_orchestration import EventNotFoundError, MalformedEventError
 from library.features.live_orchestration import home_away_ids as _home_away_ids
 from library.features.live_orchestration import is_roster_entry_fresh
@@ -202,8 +203,8 @@ def build_live_event_features(
     events = events if events is not None else storage.get_all_events(sport)
     team_game_stats = storage.get_all_team_game_stats(sport)
 
-    home_events = storage.get_team_events(sport, home_id, before_date=event["event_date"], limit=window, events=events)
-    away_events = storage.get_team_events(sport, away_id, before_date=event["event_date"], limit=window, events=events)
+    home_events = storage.get_team_events(sport, home_id, before_date=event["event_date"], limit=TEAM_HISTORY_GAMES, events=events)
+    away_events = storage.get_team_events(sport, away_id, before_date=event["event_date"], limit=TEAM_HISTORY_GAMES, events=events)
     home_box = storage.get_team_game_stats_for_team(sport, home_id, before_date=event["event_date"], limit=window, team_game_stats=team_game_stats)
     away_box = storage.get_team_game_stats_for_team(sport, away_id, before_date=event["event_date"], limit=window, team_game_stats=team_game_stats)
 
@@ -280,7 +281,7 @@ def _build_player_feature_row(
         "stat_line": {},  # unknown -- this is what's being predicted, not labeled
     }
 
-    return build_player_features(
+    row = build_player_features(
         player_game,
         prior_games,
         event,
@@ -288,6 +289,8 @@ def _build_player_feature_row(
         own_previous_event_date,
         window,
     )
+    row.update(live_matchup_columns(storage, sport, player_game, home_id, away_id, prior_games, window, events))
+    return row
 
 
 def build_live_player_features(

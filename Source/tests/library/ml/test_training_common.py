@@ -13,6 +13,7 @@ from unittest.mock import MagicMock, patch
 
 import numpy as np
 import pandas as pd
+import pytest
 
 from library.ml import training_common
 
@@ -101,102 +102,33 @@ class TestGetCurrentVersion:
         mock_s3.get_json.assert_called_once_with("nba/win-probability/current.json")
 
 
-class TestPromoteIfBetter:
-    def test_promotes_directly_when_nothing_is_currently_promoted(self):
+class TestBeats:
+    @pytest.mark.parametrize("score, expected", [(0.594, True), (0.595, False), (0.6, False), (0.61, False)])
+    def test_log_loss_needs_a_one_percent_improvement(self, score, expected):
+        assert training_common.beats(score, 0.6, "log_loss") is expected
+
+    def test_rmse_needs_a_half_percent_improvement(self):
+        assert training_common.beats(9.95, 10.0, "rmse")
+        assert not training_common.beats(9.96, 10.0, "rmse")
+
+    def test_a_metric_with_no_margin_promotes_on_a_tie(self):
+        assert training_common.beats(1.0, 1.0, "mae")
+
+
+class TestPointerAndCard:
+    def test_set_current_version_writes_the_sports_pointer(self):
         mock_s3 = MagicMock()
-        mock_s3.object_exists.return_value = False
 
-        promoted = training_common.promote_if_better(mock_s3, "nfl", "win-probability", 1, {"log_loss": 0.65}, "log_loss")
+        training_common.set_current_version(mock_s3, "nba", "win-probability", 9)
 
-        assert promoted is True
-        mock_s3.put_json.assert_called_once_with("nfl/win-probability/current.json", {"version": 1})
+        mock_s3.put_json.assert_called_once_with("nba/win-probability/current.json", {"version": 9})
 
-    def test_promotes_when_strictly_better_than_current(self):
+    def test_load_model_card_reads_that_versions_card(self):
         mock_s3 = MagicMock()
-        mock_s3.object_exists.return_value = True
-        mock_s3.get_json.return_value = {"version": 5, "log_loss": 0.65}
+        mock_s3.get_json.return_value = {"version": 3}
 
-        promoted = training_common.promote_if_better(mock_s3, "nfl", "win-probability", 6, {"log_loss": 0.60}, "log_loss")
-
-        assert promoted is True
-        mock_s3.put_json.assert_called_once_with("nfl/win-probability/current.json", {"version": 6})
-
-    def test_holds_back_even_a_slight_regression(self):
-        # No percentage tolerance -- a candidate must be genuinely at
-        # least as good, not just "not too much worse." An earlier
-        # version of this function allowed up to 2% worse through, which
-        # meant nearly every candidate passed regardless of true quality
-        # (see promote_if_better's own docstring for the full story).
-        mock_s3 = MagicMock()
-        mock_s3.object_exists.return_value = True
-        mock_s3.get_json.return_value = {"version": 5, "log_loss": 0.620}
-
-        promoted = training_common.promote_if_better(mock_s3, "nfl", "win-probability", 6, {"log_loss": 0.626}, "log_loss")
-
-        assert promoted is False
-        mock_s3.put_json.assert_not_called()
-
-    def test_promotes_on_an_exact_tie(self):
-        mock_s3 = MagicMock()
-        mock_s3.object_exists.return_value = True
-        mock_s3.get_json.return_value = {"version": 5, "log_loss": 0.620}
-
-        promoted = training_common.promote_if_better(mock_s3, "nfl", "win-probability", 6, {"log_loss": 0.620}, "log_loss")
-
-        assert promoted is True
-
-    def test_holds_back_a_meaningful_regression(self):
-        mock_s3 = MagicMock()
-        mock_s3.object_exists.return_value = True
-        mock_s3.get_json.return_value = {"version": 5, "log_loss": 0.60}
-
-        promoted = training_common.promote_if_better(mock_s3, "nfl", "win-probability", 6, {"log_loss": 0.70}, "log_loss")
-
-        assert promoted is False
-        mock_s3.put_json.assert_not_called()
-
-    def test_reads_the_current_versions_own_model_card_for_comparison(self):
-        mock_s3 = MagicMock()
-        mock_s3.object_exists.return_value = True
-        mock_s3.get_json.return_value = {"version": 5, "log_loss": 0.62}
-
-        training_common.promote_if_better(mock_s3, "nfl", "win-probability", 6, {"log_loss": 0.61}, "log_loss")
-
-        mock_s3.get_json.assert_called_with("nfl/win-probability/v5/model_card.json")
-
-    def test_gate_metric_is_parameterized_not_hardcoded_to_log_loss(self):
-        mock_s3 = MagicMock()
-        mock_s3.object_exists.return_value = True
-        mock_s3.get_json.return_value = {"version": 1, "rmse": 40.0}
-
-        promoted = training_common.promote_if_better(
-            mock_s3, "nfl", "player-prop-passing-yards", 2, {"rmse": 45.0}, "rmse",
-        )
-
-        assert promoted is False
-        mock_s3.put_json.assert_not_called()
-
-    def test_compares_across_different_algorithms_with_no_special_casing(self):
-        # The currently-promoted version was xgboost; the challenger is
-        # logistic_regression -- promote_if_better only ever compares the
-        # two versions' own metric value, never algorithm identity.
-        mock_s3 = MagicMock()
-        mock_s3.object_exists.return_value = True
-        mock_s3.get_json.return_value = {"version": 5, "algorithm": "xgboost", "log_loss": 0.65}
-
-        promoted = training_common.promote_if_better(
-            mock_s3, "nfl", "win-probability", 6, {"algorithm": "logistic_regression", "log_loss": 0.60}, "log_loss",
-        )
-
-        assert promoted is True
-
-    def test_scopes_the_pointer_key_to_the_given_sport(self):
-        mock_s3 = MagicMock()
-        mock_s3.object_exists.return_value = False
-
-        training_common.promote_if_better(mock_s3, "nba", "win-probability", 1, {"log_loss": 0.65}, "log_loss")
-
-        mock_s3.put_json.assert_called_once_with("nba/win-probability/current.json", {"version": 1})
+        assert training_common.load_model_card(mock_s3, "nfl", "home-score", 3) == {"version": 3}
+        mock_s3.get_json.assert_called_once_with("nfl/home-score/v3/model_card.json")
 
 
 class TestUpdatePromotedCandidates:
@@ -239,46 +171,6 @@ class TestUpdatePromotedCandidates:
         assert written_card["log_loss"] == 0.60
         assert written_card["feature_columns"] == ["a", "b"]
         assert written_card["trained_at"] == "2026-08-15T00:00:00Z"
-
-
-class TestWouldBeatCurrent:
-    """Read-only counterpart to promote_if_better -- used by
-    library.ml.backtest.run_backtest to decide whether a candidate is
-    worth persisting at all BEFORE writing anything to S3."""
-
-    def test_true_when_nothing_is_currently_promoted(self):
-        mock_s3 = MagicMock()
-        mock_s3.object_exists.return_value = False
-
-        assert training_common.would_beat_current(mock_s3, "nfl", "win-probability", {"log_loss": 0.65}, "log_loss") is True
-        mock_s3.put_json.assert_not_called()
-
-    def test_true_when_strictly_better_than_current(self):
-        mock_s3 = MagicMock()
-        mock_s3.object_exists.return_value = True
-        mock_s3.get_json.return_value = {"version": 5, "log_loss": 0.65}
-
-        assert training_common.would_beat_current(mock_s3, "nfl", "win-probability", {"log_loss": 0.60}, "log_loss") is True
-
-    def test_false_for_a_meaningful_regression(self):
-        mock_s3 = MagicMock()
-        mock_s3.object_exists.return_value = True
-        mock_s3.get_json.return_value = {"version": 5, "log_loss": 0.60}
-
-        assert training_common.would_beat_current(mock_s3, "nfl", "win-probability", {"log_loss": 0.70}, "log_loss") is False
-
-    def test_never_writes_anything(self):
-        """The whole point -- run_backtest calls this before deciding
-        whether to persist a candidate at all, so it must never itself
-        write to S3, win or lose."""
-        mock_s3 = MagicMock()
-        mock_s3.object_exists.return_value = True
-        mock_s3.get_json.return_value = {"version": 5, "log_loss": 0.60}
-
-        training_common.would_beat_current(mock_s3, "nfl", "win-probability", {"log_loss": 0.55}, "log_loss")
-        training_common.would_beat_current(mock_s3, "nfl", "win-probability", {"log_loss": 0.90}, "log_loss")
-
-        mock_s3.put_json.assert_not_called()
 
 
 class TestResolveRunId:

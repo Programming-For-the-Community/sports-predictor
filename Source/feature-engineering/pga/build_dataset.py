@@ -63,6 +63,7 @@ from library.features.pga import (
     build_cup_event_features,
     build_cutline_event_features,
     build_golfer_event_features,
+    field_results,
     build_match_event_features,
     build_round_event_features,
 )
@@ -143,8 +144,8 @@ def build_golfer_dataset(
         participants = event.get("participants", [])
         for participant in participants:
             rows.extend(_build_golfer_rows(event, participant, window, course_window, history, course_history, snapshots))
-        for participant in participants:
-            _update_golfer_history(event, participant, history, course_history)
+        for entity_id, result in field_results(event).items():
+            _update_golfer_history(event, entity_id, result, history, course_history)
 
         if i % 50 == 0 or i == total:
             logger.info("Built golfer features: %d/%d tournaments", i, total)
@@ -177,14 +178,12 @@ def _build_golfer_rows(
 
 
 def _update_golfer_history(
-    event: dict, participant: dict, history: dict[str, list[dict]], course_history: dict[tuple[str, str], list[dict]],
+    event: dict, entity_id: str, result: dict, history: dict[str, list[dict]], course_history: dict[tuple[str, str], list[dict]],
 ) -> None:
-    """Folds this participant's own now-final result into history/
-    course_history in place, once every row for this event has already
-    been built."""
+    """Folds this golfer's own now-final result (see field_results) into
+    history/course_history in place, once every row for this event has
+    already been built."""
     course_id = event.get("course_id")
-    entity_id = participant["entity_id"]
-    result = participant.get("result") or {}
     history[entity_id].append(result)
     if course_id is not None:
         course_history[(entity_id, course_id)].append(result)
@@ -225,8 +224,8 @@ def build_round_dataset(storage: FeatureStorage, window: int, since_date: str | 
         participants = event.get("participants", [])
         for participant in participants:
             rows.extend(_build_round_rows(event, participant, window, history, round_history))
-        for participant in participants:
-            _update_round_history(participant, history, round_history)
+        for entity_id, result in field_results(event).items():
+            _update_round_history(entity_id, result, history, round_history)
 
         if i % 50 == 0 or i == total:
             logger.info("Built round features: %d/%d tournaments", i, total)
@@ -255,13 +254,11 @@ def _build_round_rows(
 
 
 def _update_round_history(
-    participant: dict, history: dict[str, list[dict]], round_history: dict[tuple[str, int], list[dict]],
+    entity_id: str, result: dict, history: dict[str, list[dict]], round_history: dict[tuple[str, int], list[dict]],
 ) -> None:
-    """Folds this participant's own now-final tournament + round results
-    into history/round_history in place, once every row for this
-    tournament has already been built."""
-    entity_id = participant["entity_id"]
-    result = participant.get("result") or {}
+    """Folds this golfer's own now-final tournament + round results (see
+    field_results) into history/round_history in place, once every row for
+    this tournament has already been built."""
     history[entity_id].append(result)
     for round_result in result.get("rounds", []):
         round_history[(entity_id, round_result["round"])].append(round_result)
@@ -390,8 +387,8 @@ def _process_timeline_event(
     match_rows/cup_rows in place."""
     event_type = event.get("event_type")
     if event_type == "field":
-        for participant in event.get("participants", []):
-            history[participant["entity_id"]].append(participant.get("result") or {})
+        for entity_id, result in field_results(event).items():
+            history[entity_id].append(result)
         return
 
     participants = event.get("participants", [])

@@ -300,7 +300,7 @@ resource "aws_cloudwatch_dashboard" "application" {
         x      = 0
         y      = 77
         width  = 12
-        height = 9
+        height = 12
         properties = {
           endpoint = aws_lambda_function.cloudwatch_geo_widget.arn
           params   = { mode = "accepted" }
@@ -313,7 +313,7 @@ resource "aws_cloudwatch_dashboard" "application" {
         x      = 12
         y      = 77
         width  = 12
-        height = 9
+        height = 12
         properties = {
           endpoint = aws_lambda_function.cloudwatch_geo_widget.arn
           params   = { mode = "blocked" }
@@ -323,13 +323,13 @@ resource "aws_cloudwatch_dashboard" "application" {
       },
       # --- Who is using the app ---
       {
-        type       = "text", x = 0, y = 86, width = 24, height = 1
+        type       = "text", x = 0, y = 89, width = 24, height = 1
         properties = { markdown = "## Users -- who is signed in and what they view (username comes from the Cognito authorizer claims; requests logged before this shipped have no user)" }
       },
       {
         type   = "log"
         x      = 0
-        y      = 87
+        y      = 90
         width  = 12
         height = 7
         properties = {
@@ -351,7 +351,7 @@ resource "aws_cloudwatch_dashboard" "application" {
       {
         type   = "log"
         x      = 12
-        y      = 87
+        y      = 90
         width  = 12
         height = 7
         properties = {
@@ -370,7 +370,7 @@ resource "aws_cloudwatch_dashboard" "application" {
       {
         type   = "log"
         x      = 0
-        y      = 94
+        y      = 97
         width  = 12
         height = 7
         properties = {
@@ -392,7 +392,7 @@ resource "aws_cloudwatch_dashboard" "application" {
       {
         type   = "log"
         x      = 12
-        y      = 94
+        y      = 97
         width  = 12
         height = 7
         properties = {
@@ -414,7 +414,7 @@ resource "aws_cloudwatch_dashboard" "application" {
       {
         type   = "log"
         x      = 0
-        y      = 101
+        y      = 104
         width  = 12
         height = 7
         properties = {
@@ -436,7 +436,7 @@ resource "aws_cloudwatch_dashboard" "application" {
       {
         type   = "log"
         x      = 12
-        y      = 101
+        y      = 104
         width  = 12
         height = 7
         properties = {

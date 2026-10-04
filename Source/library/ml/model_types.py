@@ -199,6 +199,9 @@ class ModelAdapter(Protocol):
     algorithm: str
     artifact_filename: str
 
+    def fit(self, X_train: pd.DataFrame, y_train: pd.Series, params: dict, sample_weight=None) -> Any:
+        """Fits this algorithm with fixed hyperparameters (tune_and_fit's own final step)."""
+
     def tune_and_fit(self, X_train: pd.DataFrame, y_train: pd.Series) -> tuple[Any, dict]:
         """Searches this algorithm's own hyperparameter space and returns
         (fitted estimator, best hyperparameters) -- the search strategy
@@ -285,9 +288,12 @@ class XGBoostClassifierAdapter(XGBoostAdapter):
             label="xgboost_classifier",
         )
         _log_search_convergence("xgboost_classifier", search)
-        model = xgb.XGBClassifier(objective="binary:logistic", eval_metric="logloss", **search.best_params_)
-        model.fit(X_train, y_train)
-        return model.get_booster(), search.best_params_
+        return self.fit(X_train, y_train, search.best_params_), search.best_params_
+
+    def fit(self, X_train: pd.DataFrame, y_train: pd.Series, params: dict, sample_weight=None) -> xgb.Booster:
+        model = xgb.XGBClassifier(objective="binary:logistic", eval_metric="logloss", **params)
+        model.fit(X_train, y_train, sample_weight=sample_weight)
+        return model.get_booster()
 
 
 class XGBoostRegressorAdapter(XGBoostAdapter):
@@ -308,9 +314,12 @@ class XGBoostRegressorAdapter(XGBoostAdapter):
             label="xgboost_regressor",
         )
         _log_search_convergence("xgboost_regressor", search)
-        model = xgb.XGBRegressor(objective="reg:squarederror", **search.best_params_)
-        model.fit(X_train, y_train)
-        return model.get_booster(), search.best_params_
+        return self.fit(X_train, y_train, search.best_params_), search.best_params_
+
+    def fit(self, X_train: pd.DataFrame, y_train: pd.Series, params: dict, sample_weight=None) -> xgb.Booster:
+        model = xgb.XGBRegressor(objective="reg:squarederror", **params)
+        model.fit(X_train, y_train, sample_weight=sample_weight)
+        return model.get_booster()
 
 
 class _JoblibSerializedAdapter:
@@ -332,6 +341,18 @@ class _JoblibSerializedAdapter:
         return joblib.load(io.BytesIO(raw))
 
 
+class _PipelineAdapter(_JoblibSerializedAdapter):
+    """An adapter whose estimator is _build_pipeline() with a final "model" step."""
+
+    def _build_pipeline(self) -> Pipeline:
+        raise NotImplementedError
+
+    def fit(self, X_train: pd.DataFrame, y_train: pd.Series, params: dict, sample_weight=None) -> Pipeline:
+        model = self._build_pipeline().set_params(**{f"model__{k}": v for k, v in params.items()})
+        model.fit(X_train, y_train, **({} if sample_weight is None else {"model__sample_weight": sample_weight}))
+        return model
+
+
 # Exhaustive, not randomized -- 32 combinations is cheap enough to search
 # in full, unlike XGBoost's much larger space above. liblinear supports
 # both penalties without the extra l1_ratio parameter elasticnet would
@@ -347,7 +368,7 @@ _LOGISTIC_CV_SPLITS = 8
 _LOGISTIC_RANDOM_STATE = 42
 
 
-class LogisticRegressionAdapter(_JoblibSerializedAdapter):
+class LogisticRegressionAdapter(_PipelineAdapter):
     """A classification-only candidate for win-probability-type targets.
     scikit-learn's LogisticRegression can't handle NaN or differently
     scaled features natively, and L1/L2 regularization penalizes
@@ -378,9 +399,7 @@ class LogisticRegressionAdapter(_JoblibSerializedAdapter):
         search.fit(X_train, y_train)
         # Strips the pipeline step prefix ("model__C" -> "C").
         best_params = {key.removeprefix("model__"): value for key, value in search.best_params_.items()}
-        model = self._build_pipeline().set_params(**{f"model__{k}": v for k, v in best_params.items()})
-        model.fit(X_train, y_train)
-        return model, best_params
+        return self.fit(X_train, y_train, best_params), best_params
 
     def predict(self, estimator: Pipeline, X: pd.DataFrame) -> np.ndarray:
         return estimator.predict_proba(X)[:, 1]
@@ -404,7 +423,7 @@ _ELASTIC_NET_CV_SPLITS = 8
 _ELASTIC_NET_RANDOM_STATE = 42
 
 
-class ElasticNetAdapter(_JoblibSerializedAdapter):
+class ElasticNetAdapter(_PipelineAdapter):
     algorithm = "elastic_net"
 
     def _build_pipeline(self) -> Pipeline:
@@ -425,9 +444,7 @@ class ElasticNetAdapter(_JoblibSerializedAdapter):
         )
         search.fit(X_train, y_train)
         best_params = {key.removeprefix("model__"): value for key, value in search.best_params_.items()}
-        model = self._build_pipeline().set_params(**{f"model__{k}": v for k, v in best_params.items()})
-        model.fit(X_train, y_train)
-        return model, best_params
+        return self.fit(X_train, y_train, best_params), best_params
 
     def predict(self, estimator: Pipeline, X: pd.DataFrame) -> np.ndarray:
         return estimator.predict(X)
@@ -475,7 +492,7 @@ _RF_RANDOM_STATE = 42
 _RF_SEARCH_N_JOBS = _RF_CV_SPLITS
 
 
-class _RandomForestAdapterBase(_JoblibSerializedAdapter):
+class _RandomForestAdapterBase(_PipelineAdapter):
     _estimator_cls: Optional[type] = None
     _scoring = None
 
@@ -503,9 +520,7 @@ class _RandomForestAdapterBase(_JoblibSerializedAdapter):
         )
         _log_search_convergence(self.algorithm, search)
         best_params = {key.removeprefix("model__"): value for key, value in search.best_params_.items()}
-        model = self._build_pipeline().set_params(**{f"model__{k}": v for k, v in best_params.items()})
-        model.fit(X_train, y_train)
-        return model, best_params
+        return self.fit(X_train, y_train, best_params), best_params
 
     def feature_importances(self, estimator: Pipeline, feature_columns: list[str]) -> dict[str, float]:
         importances = estimator.named_steps["model"].feature_importances_
@@ -546,7 +561,7 @@ _MLP_CV_SPLITS = 8
 _MLP_RANDOM_STATE = 42
 
 
-class _MLPAdapterBase(_JoblibSerializedAdapter):
+class _MLPAdapterBase(_PipelineAdapter):
     _estimator_cls: Optional[type] = None
     _scoring = None
 
@@ -574,9 +589,7 @@ class _MLPAdapterBase(_JoblibSerializedAdapter):
         )
         _log_search_convergence(self.algorithm, search)
         best_params = {key.removeprefix("model__"): value for key, value in search.best_params_.items()}
-        model = self._build_pipeline().set_params(**{f"model__{k}": v for k, v in best_params.items()})
-        model.fit(X_train, y_train)
-        return model, best_params
+        return self.fit(X_train, y_train, best_params), best_params
 
     def feature_importances(self, _estimator: Pipeline, _feature_columns: list[str]) -> dict[str, float]:
         # MLPs have no native feature-importance concept the way trees or
@@ -651,9 +664,13 @@ class LightGBMClassifierAdapter(_JoblibSerializedAdapter):
             label="lightgbm_classifier",
         )
         _log_search_convergence("lightgbm_classifier", search)
-        model = lgbm_classifier_cls(objective="binary", verbosity=-1, random_state=_LGBM_RANDOM_STATE, **search.best_params_)
-        model.fit(X_train, y_train)
-        return model, search.best_params_
+        return self.fit(X_train, y_train, search.best_params_), search.best_params_
+
+    def fit(self, X_train: pd.DataFrame, y_train: pd.Series, params: dict, sample_weight=None) -> Any:
+        lgbm_classifier_cls, _ = _lgbm_estimator_classes()
+        model = lgbm_classifier_cls(objective="binary", verbosity=-1, random_state=_LGBM_RANDOM_STATE, **params)
+        model.fit(X_train, y_train, sample_weight=sample_weight)
+        return model
 
     def predict(self, estimator, X: pd.DataFrame) -> np.ndarray:
         return estimator.predict_proba(X)[:, 1]
@@ -684,9 +701,13 @@ class LightGBMRegressorAdapter(_JoblibSerializedAdapter):
             label="lightgbm_regressor",
         )
         _log_search_convergence("lightgbm_regressor", search)
-        model = lgbm_regressor_cls(objective="regression", verbosity=-1, random_state=_LGBM_RANDOM_STATE, **search.best_params_)
-        model.fit(X_train, y_train)
-        return model, search.best_params_
+        return self.fit(X_train, y_train, search.best_params_), search.best_params_
+
+    def fit(self, X_train: pd.DataFrame, y_train: pd.Series, params: dict, sample_weight=None) -> Any:
+        _, lgbm_regressor_cls = _lgbm_estimator_classes()
+        model = lgbm_regressor_cls(objective="regression", verbosity=-1, random_state=_LGBM_RANDOM_STATE, **params)
+        model.fit(X_train, y_train, sample_weight=sample_weight)
+        return model
 
     def predict(self, estimator, X: pd.DataFrame) -> np.ndarray:
         return estimator.predict(X)

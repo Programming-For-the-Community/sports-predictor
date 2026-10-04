@@ -18,6 +18,7 @@ from library.features.pga import (
     build_cup_event_features,
     build_cutline_event_features,
     build_golfer_event_features,
+    field_results,
     build_match_event_features,
     build_round_event_features,
 )
@@ -55,8 +56,7 @@ def _golfer_field_events(storage, sport: str, events: list[dict], entity_id: str
 
 
 def _golfer_result(event: dict, entity_id: str) -> dict:
-    participant = next((p for p in event.get("participants", []) if p.get("entity_id") == entity_id), None)
-    return (participant or {}).get("result") or {}
+    return field_results(event).get(entity_id) or {}
 
 
 def _results_from_events(field_events: list[dict], entity_id: str, window: int) -> list[dict]:

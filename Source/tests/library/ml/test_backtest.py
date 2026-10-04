@@ -7,8 +7,8 @@ including the first, is compared against whatever's currently live before
 being persisted/promoted -- no force-promotion; an interrupted-and-
 resumed run skips candidates an earlier attempt already settled) --
 library/ml/test_model_types.py covers the real adapters, library/ml/
-test_training_common.py covers save_model_artifact/promote_if_better/
-would_beat_current/the run-progress helpers themselves.
+test_training_common.py covers save_model_artifact/beats/the run-progress
+helpers themselves, and test_backtest_champion.py the champion comparison.
 """
 from unittest.mock import ANY, MagicMock, patch
 
@@ -39,6 +39,20 @@ class _FakeAdapter:
 
     def serialize(self, estimator):
         return f"{estimator}-bytes".encode()
+
+
+@pytest.fixture(autouse=True)
+def _no_production_model():
+    with patch.object(backtest, "_current_champion", return_value=None):
+        yield
+
+
+def _decide(*promoted):
+    """Each candidate's promotion decision in order; a single value applies to every candidate."""
+    outcomes = [{"promoted": p, "challenger": 0.0} for p in promoted]
+    if len(outcomes) == 1:
+        return patch.object(backtest, "_promotion_decision", return_value=outcomes[0])
+    return patch.object(backtest, "_promotion_decision", side_effect=outcomes)
 
 
 def _xy():
@@ -75,7 +89,7 @@ class TestRunBacktest:
         second = _FakeAdapter("logistic_regression", np.array([0.4, 0.6, 0.4, 0.6]))  # backwards
 
         with patch.object(backtest.training_common, "save_model_artifact", side_effect=_fake_save), \
-             patch.object(backtest.training_common, "would_beat_current", return_value=False):
+             _decide(False):
             _run([first, second])
 
         # Tuning/fitting happens for every candidate regardless of who
@@ -90,10 +104,10 @@ class TestRunBacktest:
         first = _FakeAdapter("logistic_regression", np.array([0.4, 0.6, 0.4, 0.6]))
 
         with patch.object(backtest.training_common, "save_model_artifact") as mock_save, \
-             patch.object(backtest.training_common, "would_beat_current", return_value=False) as mock_would_beat:
+             _decide(False) as mock_decide:
             result = _run([first])
 
-        mock_would_beat.assert_called_once()
+        mock_decide.assert_called_once()
         mock_save.assert_not_called()
         assert result["promotions"] == []
 
@@ -101,12 +115,12 @@ class TestRunBacktest:
         first = _FakeAdapter("xgboost", np.array([0.9, 0.1, 0.9, 0.1]))
 
         with patch.object(backtest.training_common, "save_model_artifact", side_effect=_fake_save) as mock_save, \
-             patch.object(backtest.training_common, "would_beat_current", return_value=True), \
-             patch.object(backtest.training_common, "promote_if_better") as mock_promote:
+             _decide(True), \
+             patch.object(backtest.training_common, "set_current_version") as mock_promote:
             result = _run([first])
 
         mock_save.assert_called_once()
-        mock_promote.assert_called_once_with(ANY, "nfl", "win-probability", 7, ANY, "log_loss")
+        mock_promote.assert_called_once_with(ANY, "nfl", "win-probability", 7)
         assert [c["algorithm"] for c in result["promotions"]] == ["xgboost"]
 
     def test_later_candidate_only_promoted_if_it_beats_current(self):
@@ -115,8 +129,8 @@ class TestRunBacktest:
         wins = _FakeAdapter("random_forest_regressor", np.array([0.9, 0.1, 0.9, 0.1]))
 
         with patch.object(backtest.training_common, "save_model_artifact", side_effect=_fake_save) as mock_save, \
-             patch.object(backtest.training_common, "promote_if_better") as mock_promote, \
-             patch.object(backtest.training_common, "would_beat_current", side_effect=[True, False, True]):
+             patch.object(backtest.training_common, "set_current_version") as mock_promote, \
+             _decide(True, False, True):
             result = _run([first, loses, wins])
 
         # first and wins both beat whatever was live when they ran; loses
@@ -132,8 +146,8 @@ class TestRunBacktest:
         loses = _FakeAdapter("logistic_regression", np.array([0.4, 0.6, 0.4, 0.6]))
 
         with patch.object(backtest.training_common, "save_model_artifact", side_effect=_fake_save) as mock_save, \
-             patch.object(backtest.training_common, "promote_if_better"), \
-             patch.object(backtest.training_common, "would_beat_current", side_effect=[True, False]):
+             patch.object(backtest.training_common, "set_current_version"), \
+             _decide(True, False):
             result = _run([first, loses])
 
         # Only the winning first candidate is ever saved.
@@ -151,7 +165,7 @@ class TestRunBacktest:
         adapter = _FakeAdapter("xgboost", np.array([0.4, 0.6, 0.4, 0.6]))  # backwards
 
         with patch.object(backtest.training_common, "save_model_artifact") as mock_save, \
-             patch.object(backtest.training_common, "would_beat_current", return_value=False):
+             _decide(False):
             result = _run([adapter])
 
         mock_save.assert_not_called()
@@ -166,8 +180,8 @@ class TestRunBacktest:
         adapter = _FakeAdapter("xgboost", np.array([0.9, 0.1, 0.9, 0.1]))
 
         with patch.object(backtest.training_common, "save_model_artifact", side_effect=_fake_save), \
-             patch.object(backtest.training_common, "would_beat_current", return_value=True), \
-             patch.object(backtest.training_common, "promote_if_better"):
+             _decide(True), \
+             patch.object(backtest.training_common, "set_current_version"):
             result = _run([adapter])
 
         assert result["promotions"][0]["feature_columns"] == ["a"]
@@ -184,8 +198,8 @@ class TestRunBacktest:
         adapter = _FakeAdapter("xgboost", np.array([0.9, 0.1, 0.9, 0.1]))
 
         with patch.object(backtest.training_common, "save_model_artifact", side_effect=_fake_save), \
-             patch.object(backtest.training_common, "would_beat_current", return_value=True), \
-             patch.object(backtest.training_common, "promote_if_better"):
+             _decide(True), \
+             patch.object(backtest.training_common, "set_current_version"):
             result = _run([adapter])
 
         assert result["candidates"][0]["training_seconds"] >= 0
@@ -204,7 +218,7 @@ class TestRunBacktest:
         lower_accuracy_better_log_loss = _FakeAdapter("xgboost", np.array([0.9, 0.1, 0.9, 0.1, 0.4]))
 
         with patch.object(backtest.training_common, "save_model_artifact", side_effect=_fake_save), \
-             patch.object(backtest.training_common, "would_beat_current", return_value=False):
+             _decide(False):
             result = _run(
                 [higher_accuracy, lower_accuracy_better_log_loss],
                 split=backtest.HoldoutSplit(X, y, X, y),
@@ -225,8 +239,8 @@ class TestRunBacktest:
         adapter = _FakeAdapter("xgboost", np.array([10.0, 20.0]))
 
         with patch.object(backtest.training_common, "save_model_artifact", side_effect=_fake_save), \
-             patch.object(backtest.training_common, "would_beat_current", return_value=True), \
-             patch.object(backtest.training_common, "promote_if_better"):
+             _decide(True), \
+             patch.object(backtest.training_common, "set_current_version"):
             result = _run(
                 [adapter], sport="nfl", model_name="score-margin",
                 split=backtest.HoldoutSplit(X_train, y_train, X_test, y_test),
@@ -248,7 +262,7 @@ class TestRunBacktest:
     def test_promoting_a_candidate_worse_than_baseline_logs_a_warning_but_still_promotes(self):
         # A perfect-vs-baseline candidate deliberately scored WORSE than
         # naive_baseline_rmse -- still wins (beats current production,
-        # which is what would_beat_current is mocked to say) and still
+        # which is what the promotion decision is mocked to say) and still
         # gets promoted, just with a loud warning logged. See
         # backtest._is_worse_than_baseline / run_backtest's own docstring
         # for why this is warn-only, not a hard block.
@@ -259,8 +273,8 @@ class TestRunBacktest:
         adapter = _FakeAdapter("xgboost", np.array([10.0, 20.0]))  # rmse=2.0
 
         with patch.object(backtest.training_common, "save_model_artifact", side_effect=_fake_save), \
-             patch.object(backtest.training_common, "would_beat_current", return_value=True), \
-             patch.object(backtest.training_common, "promote_if_better"), \
+             _decide(True), \
+             patch.object(backtest.training_common, "set_current_version"), \
              patch.object(backtest, "logger") as mock_logger:
             result = _run(
                 [adapter], sport="nfl", model_name="score-margin",
@@ -281,8 +295,8 @@ class TestRunBacktest:
         adapter = _FakeAdapter("xgboost", np.array([10.0, 20.0]))  # rmse=2.0
 
         with patch.object(backtest.training_common, "save_model_artifact", side_effect=_fake_save), \
-             patch.object(backtest.training_common, "would_beat_current", return_value=True), \
-             patch.object(backtest.training_common, "promote_if_better"), \
+             _decide(True), \
+             patch.object(backtest.training_common, "set_current_version"), \
              patch.object(backtest, "logger") as mock_logger:
             _run(
                 [adapter], sport="nfl", model_name="score-margin",
@@ -302,7 +316,7 @@ class TestRunBacktest:
              patch.object(backtest.training_common, "save_run_progress") as mock_save_progress, \
              patch.object(backtest.training_common, "clear_run_progress") as mock_clear, \
              patch.object(backtest.training_common, "save_model_artifact", side_effect=_fake_save), \
-             patch.object(backtest.training_common, "would_beat_current", return_value=False):
+             _decide(False):
             backtest.run_backtest(
                 s3=MagicMock(), sport="nfl", model_name="win-probability", task="classification",
                 split=backtest.HoldoutSplit(*_xy()),
@@ -336,8 +350,8 @@ class TestBackfillsPromotedCardWithFullTournament:
         third = _FakeAdapter("random_forest_regressor", np.array([0.6, 0.4, 0.6, 0.4]))  # never persisted
 
         with patch.object(backtest.training_common, "save_model_artifact", side_effect=_fake_save), \
-             patch.object(backtest.training_common, "would_beat_current", side_effect=[True, False, False]), \
-             patch.object(backtest.training_common, "promote_if_better"), \
+             _decide(True, False, False), \
+             patch.object(backtest.training_common, "set_current_version"), \
              patch.object(backtest.training_common, "update_promoted_candidates") as mock_update:
             result = _run([first, second, third])
 
@@ -362,8 +376,8 @@ class TestBackfillsPromotedCardWithFullTournament:
         better = _FakeAdapter("random_forest_regressor", np.array([0.95, 0.05, 0.95, 0.05]))
 
         with patch.object(backtest.training_common, "save_model_artifact", side_effect=_fake_save), \
-             patch.object(backtest.training_common, "would_beat_current", side_effect=[True, True]), \
-             patch.object(backtest.training_common, "promote_if_better"), \
+             _decide(True, True), \
+             patch.object(backtest.training_common, "set_current_version"), \
              patch.object(backtest.training_common, "update_promoted_candidates") as mock_update:
             result = _run([first, better])
 
@@ -381,7 +395,7 @@ class TestBackfillsPromotedCardWithFullTournament:
         loses = _FakeAdapter("xgboost", np.array([0.4, 0.6, 0.4, 0.6]))
 
         with patch.object(backtest.training_common, "save_model_artifact") as mock_save, \
-             patch.object(backtest.training_common, "would_beat_current", return_value=False), \
+             _decide(False), \
              patch.object(backtest.training_common, "update_promoted_candidates") as mock_update:
             result = _run([loses])
 
@@ -409,8 +423,8 @@ class TestBackfillsPromotedCardWithFullTournament:
             return {"model_name": model_name, "algorithm": algorithm, "version": 7, **metadata}
 
         with patch.object(backtest.training_common, "save_model_artifact", side_effect=_capture_save), \
-             patch.object(backtest.training_common, "would_beat_current", side_effect=[True, False, False]), \
-             patch.object(backtest.training_common, "promote_if_better"):
+             _decide(True, False, False), \
+             patch.object(backtest.training_common, "set_current_version"):
             _run([first, second, third])
 
         # The FIRST card written (at the moment xgboost was promoted, before
@@ -443,7 +457,7 @@ class TestResumability:
              patch.object(backtest.training_common, "save_run_progress"), \
              patch.object(backtest.training_common, "clear_run_progress"), \
              patch.object(backtest.training_common, "save_model_artifact", side_effect=_fake_save), \
-             patch.object(backtest.training_common, "would_beat_current", return_value=False):
+             _decide(False):
             already_ran = _FakeAdapter("xgboost", np.array([0.9, 0.1, 0.9, 0.1]))
             result = backtest.run_backtest(
                 s3=MagicMock(), sport="nfl", model_name="win-probability", task="classification",
@@ -469,13 +483,13 @@ class TestResumability:
 
         with patch.object(backtest.training_common, "load_run_progress", return_value={
             "evaluated": [{"algorithm": "xgboost", "score": 0.9, "rank_score": 0.05}],
-            "promotions": [{"algorithm": "xgboost", "version": 5}],
+            "promotions": [{"algorithm": "xgboost", "version": 5, "log_loss": 0.05}],
         }), \
              patch.object(backtest.training_common, "save_run_progress"), \
              patch.object(backtest.training_common, "clear_run_progress"), \
              patch.object(backtest.training_common, "save_model_artifact", side_effect=_fake_save), \
-             patch.object(backtest.training_common, "promote_if_better") as mock_promote, \
-             patch.object(backtest.training_common, "would_beat_current", return_value=True) as mock_would_beat:
+             patch.object(backtest.training_common, "set_current_version") as mock_promote, \
+             _decide(True) as mock_decide:
             result = backtest.run_backtest(
                 s3=MagicMock(), sport="nfl", model_name="win-probability", task="classification",
                 split=backtest.HoldoutSplit(*_xy()),
@@ -485,7 +499,7 @@ class TestResumability:
                 run_id="run-1",
             )
 
-        mock_would_beat.assert_called_once()
+        mock_decide.assert_called_once()
         mock_promote.assert_called_once()
         # promotions carries the earlier attempt's own promotion (loaded
         # from progress) plus this attempt's new one.
@@ -496,7 +510,7 @@ class TestResumability:
 
         with patch.object(backtest.training_common, "load_run_progress", return_value={
             "evaluated": [{"algorithm": "xgboost", "score": 0.9, "rank_score": 0.05}],
-            "promotions": [{"algorithm": "xgboost", "version": 5}],
+            "promotions": [{"algorithm": "xgboost", "version": 5, "log_loss": 0.05}],
         }), \
              patch.object(backtest.training_common, "save_run_progress") as mock_save_progress, \
              patch.object(backtest.training_common, "clear_run_progress") as mock_clear, \

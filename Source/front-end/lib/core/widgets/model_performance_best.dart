@@ -7,6 +7,10 @@ import '../theme/app_colors.dart';
 import '../theme/app_text_styles.dart';
 import 'model_performance_format.dart';
 
+// Below this width (scaled by the system text size) each entry's value sits
+// under its name instead of beside it.
+const _leaderInlineWidth = 340.0;
+
 /// "Most accurate on": the teams or players a model has done best with this
 /// season -- the leader highlighted, the rest listed under it.
 class ModelPerformanceBest extends StatelessWidget {
@@ -63,6 +67,28 @@ class _Leader extends StatelessWidget {
   Widget build(BuildContext context) {
     final team = teamDisplayFor(widget.sport, entity.entityId, entity.abbreviation, apiColor: entity.color);
     final markText = isTeam ? team.abbreviation : _initials(_nameOf(entity));
+    final mark = Container(
+      width: 40,
+      height: 40,
+      alignment: Alignment.center,
+      decoration: BoxDecoration(color: team.primary ?? AppColors.surface, borderRadius: BorderRadius.circular(10)),
+      child: FittedBox(
+        child: Padding(
+          padding: const EdgeInsets.all(4),
+          child: Text(markText, style: AppTextStyles.microLabel(color: AppColors.ink).copyWith(letterSpacing: 0.5)),
+        ),
+      ),
+    );
+    final name = Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(_nameOf(entity), style: AppTextStyles.body(color: AppColors.ink).copyWith(fontSize: 16, fontWeight: FontWeight.w600)),
+        Text(_sampleText(widget, entity.n), style: AppTextStyles.body(color: AppColors.inkSub).copyWith(fontSize: 12.5)),
+      ],
+    );
+    final value = Text(_valueText(widget, entity), style: AppTextStyles.metricValueLarge(color: AppColors.cyan));
+    final caption = Text(_valueCaption(widget, entity), style: AppTextStyles.body(color: AppColors.inkSub).copyWith(fontSize: 12));
+
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
       decoration: BoxDecoration(
@@ -70,39 +96,32 @@ class _Leader extends StatelessWidget {
         borderRadius: BorderRadius.circular(12),
         border: Border.all(color: AppColors.borderRaised),
       ),
-      child: Row(
-        children: [
-          Container(
-            width: 40,
-            height: 40,
-            alignment: Alignment.center,
-            decoration: BoxDecoration(color: team.primary ?? AppColors.surface, borderRadius: BorderRadius.circular(10)),
-            child: FittedBox(
-              child: Padding(
-                padding: const EdgeInsets.all(4),
-                child: Text(markText, style: AppTextStyles.microLabel(color: AppColors.ink).copyWith(letterSpacing: 0.5)),
-              ),
-            ),
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          if (constraints.maxWidth < _leaderInlineWidth * MediaQuery.textScalerOf(context).scale(1)) {
+            return Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(_nameOf(entity), style: AppTextStyles.body(color: AppColors.ink).copyWith(fontSize: 16, fontWeight: FontWeight.w600)),
-                Text(_sampleText(widget, entity.n), style: AppTextStyles.body(color: AppColors.inkSub).copyWith(fontSize: 12.5)),
+                Row(children: [mark, const SizedBox(width: 12), Expanded(child: name)]),
+                const SizedBox(height: 10),
+                Wrap(
+                  spacing: 8,
+                  crossAxisAlignment: WrapCrossAlignment.end,
+                  children: [value, Padding(padding: const EdgeInsets.only(bottom: 3), child: caption)],
+                ),
               ],
-            ),
-          ),
-          const SizedBox(width: 12),
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.end,
+            );
+          }
+          return Row(
             children: [
-              Text(_valueText(widget, entity), style: AppTextStyles.metricValueLarge(color: AppColors.cyan)),
-              Text(_valueCaption(widget, entity), style: AppTextStyles.body(color: AppColors.inkSub).copyWith(fontSize: 12)),
+              mark,
+              const SizedBox(width: 12),
+              Expanded(child: name),
+              const SizedBox(width: 12),
+              Column(crossAxisAlignment: CrossAxisAlignment.end, children: [value, caption]),
             ],
-          ),
-        ],
+          );
+        },
       ),
     );
   }
@@ -123,23 +142,39 @@ class _RankRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final name = Text(_nameOf(entity), style: AppTextStyles.body(color: AppColors.inkMid).copyWith(fontSize: 14));
+    final value = Text.rich(TextSpan(children: [
+      TextSpan(text: _valueText(widget, entity), style: AppTextStyles.metricValue(color: AppColors.ink).copyWith(fontSize: 13)),
+      TextSpan(
+        text: '  ${_sampleText(widget, entity.n)}',
+        style: AppTextStyles.body(color: AppColors.inkSub).copyWith(fontSize: 12),
+      ),
+    ]));
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 2, vertical: 9),
       decoration: const BoxDecoration(border: Border(bottom: BorderSide(color: AppColors.border))),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          SizedBox(width: 22, child: Text('$rank', style: AppTextStyles.metricValue(color: AppColors.inkMute).copyWith(fontSize: 12))),
-          Expanded(child: Text(_nameOf(entity), style: AppTextStyles.body(color: AppColors.inkMid).copyWith(fontSize: 14))),
-          const SizedBox(width: 12),
-          Text.rich(TextSpan(children: [
-            TextSpan(text: _valueText(widget, entity), style: AppTextStyles.metricValue(color: AppColors.ink).copyWith(fontSize: 13)),
-            TextSpan(
-              text: '  ${_sampleText(widget, entity.n)}',
-              style: AppTextStyles.body(color: AppColors.inkSub).copyWith(fontSize: 12),
-            ),
-          ])),
-        ],
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final stacked = constraints.maxWidth < _leaderInlineWidth * MediaQuery.textScalerOf(context).scale(1);
+          return Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              SizedBox(width: 22, child: Text('$rank', style: AppTextStyles.metricValue(color: AppColors.inkMute).copyWith(fontSize: 12))),
+              if (stacked)
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [name, const SizedBox(height: 2), value],
+                  ),
+                )
+              else ...[
+                Expanded(child: name),
+                const SizedBox(width: 12),
+                value,
+              ],
+            ],
+          );
+        },
       ),
     );
   }

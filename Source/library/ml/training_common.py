@@ -46,6 +46,12 @@ MODEL_CARD_FILENAME = "model_card.json"
 # used: predicting games that haven't happened yet from ones that have.
 TEST_FRACTION = 0.2
 
+# Weight of a training row a year older than the newest one; older rows decay geometrically.
+RECENCY_WEIGHT_PER_YEAR = 0.7
+
+# Relative improvement a candidate needs over production, per promotion metric.
+PROMOTION_MARGINS = {"log_loss": 0.01, "rmse": 0.005}
+
 
 def load_features(s3: S3Manager, key: str) -> pd.DataFrame:
     """Retries on a truncated/corrupt read (pyarrow.ArrowInvalid) rather
@@ -165,6 +171,13 @@ def feature_columns(df: pd.DataFrame, non_feature_columns: set[str]) -> list[str
     return [col for col in df.columns if col not in non_feature_columns and not col.startswith("label_")]
 
 
+def recency_weights(dates: pd.Series) -> np.ndarray:
+    """RECENCY_WEIGHT_PER_YEAR per year before the newest of `dates`."""
+    days = pd.to_datetime(dates)
+    age_years = (days.max() - days).dt.days.to_numpy(dtype=float) / 365.0
+    return RECENCY_WEIGHT_PER_YEAR ** age_years
+
+
 def chronological_split(
     df: pd.DataFrame, test_fraction: float, date_column: str = "event_date",
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
@@ -200,7 +213,7 @@ def evaluate_holdout(probabilities, y_test: pd.Series) -> dict:
         # float() casts -- sklearn returns numpy scalar types, which
         # json.dumps() (via S3Manager.put_json) can't serialize.
         "accuracy": float(accuracy_score(y_test, predictions)),
-        "log_loss": float(log_loss(y_test, probabilities)),
+        "log_loss": float(log_loss(y_test, probabilities, labels=[0, 1])),
     }
 
 
@@ -275,30 +288,14 @@ def update_promoted_candidates(
     about at promotion time.
 
     Every other field on the card is left untouched."""
-    key = model_artifact_key(sport, model_name, version, MODEL_CARD_FILENAME)
-    card = s3.get_json(key)
+    card = load_model_card(s3, sport, model_name, version)
     card["candidates"] = candidates
     card["candidates_ranked_by"] = candidates_ranked_by
-    s3.put_json(key, card)
+    s3.put_json(model_artifact_key(sport, model_name, version, MODEL_CARD_FILENAME), card)
     logger.info(
         "Updated %s/%s v%d's model card with the full %d-candidate run summary.",
         sport, model_name, version, len(candidates),
     )
-
-
-def would_beat_current(s3: S3Manager, sport: str, model_name: str, metadata: dict, metric: str) -> bool:
-    """Read-only counterpart to promote_if_better's own comparison --
-    answers "would this candidate get promoted" without writing anything,
-    so a caller can decide whether a candidate is even worth persisting
-    to S3 before calling save_model_artifact. Same rule as
-    promote_if_better: True if there's no current production version yet,
-    or metadata[metric] is genuinely at least as good as the current
-    production version's own metric value."""
-    current_version = get_current_version(s3, sport, model_name)
-    if current_version is None:
-        return True
-    current_card = s3.get_json(model_artifact_key(sport, model_name, current_version, MODEL_CARD_FILENAME))
-    return metadata[metric] <= current_card[metric]
 
 
 def resolve_run_id() -> str:
@@ -353,50 +350,16 @@ def get_current_version(s3: S3Manager, sport: str, model_name: str) -> int | Non
     return s3.get_json(key)["version"]
 
 
-def promote_if_better(s3: S3Manager, sport: str, model_name: str, version: int, metadata: dict, metric: str) -> bool:
-    """Points model_name's "current" pointer (current_version_key) at
-    `version` unless an existing production version already scores better
-    on `metric` -- guards against a retrain with bad luck silently
-    becoming production just because it's the newest. A held-back
-    version is still fully trained and versioned, never deleted -- only
-    not promoted -- so it stays available for manual review or promotion.
+def load_model_card(s3: S3Manager, sport: str, model_name: str, version: int) -> dict:
+    return s3.get_json(model_artifact_key(sport, model_name, version, MODEL_CARD_FILENAME))
 
-    Requires genuine improvement (new_score <= current_score, no
-    percentage slack).
 
-    `metric` must name a lower-is-better value present on both model
-    cards (log_loss for a classifier, rmse for a regressor) -- accuracy
-    or anything else higher-is-better would invert this comparison.
-    Algorithm-agnostic: `version`'s own algorithm doesn't have to match
-    whatever algorithm the currently-promoted version happens to be --
-    this only ever compares the two versions' own `metric` value.
+def set_current_version(s3: S3Manager, sport: str, model_name: str, version: int) -> None:
+    """Points model_name's production pointer at `version`."""
+    s3.put_json(current_version_key(sport, model_name), {"version": version})
 
-    Not a controlled A/B: the current production version's score was
-    measured on an older, now-stale holdout window, while `version`'s was
-    measured on a newer one that includes since-completed games -- so a
-    "win" here is against a moving target, not a perfectly fair rematch.
-    """
-    current_version = get_current_version(s3, sport, model_name)
-    if current_version is None:
-        logger.info("No existing production version for %s/%s -- promoting v%d directly.", sport, model_name, version)
-        s3.put_json(current_version_key(sport, model_name), {"version": version})
-        return True
 
-    current_card = s3.get_json(model_artifact_key(sport, model_name, current_version, MODEL_CARD_FILENAME))
-    current_score = current_card[metric]
-    new_score = metadata[metric]
-
-    if new_score <= current_score:
-        logger.info(
-            "Promoting %s/%s v%d (%s=%.4f) over current production v%d (%s=%.4f).",
-            sport, model_name, version, metric, new_score, current_version, metric, current_score,
-        )
-        s3.put_json(current_version_key(sport, model_name), {"version": version})
-        return True
-
-    logger.info(
-        "Holding back %s/%s v%d (%s=%.4f) -- current production v%d (%s=%.4f) is still better. "
-        "Still versioned and available, just not promoted automatically.",
-        sport, model_name, version, metric, new_score, current_version, metric, current_score,
-    )
-    return False
+def beats(score: float, champion_score: float, metric: str) -> bool:
+    """True when a lower-is-better `score` improves on `champion_score` by at
+    least PROMOTION_MARGINS[metric]."""
+    return score <= champion_score * (1 - PROMOTION_MARGINS.get(metric, 0.0))

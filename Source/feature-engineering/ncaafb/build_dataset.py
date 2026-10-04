@@ -107,49 +107,17 @@ def build_event_dataset(storage: FeatureStorage, window: int, since_date: str | 
     )
 
 
-_group_player_games_by_player = build_dataset_common.group_player_games_by_player
-_team_previous_event_dates = build_dataset_common.team_previous_event_dates
 
 
 def build_player_dataset(storage: FeatureStorage, window: int, since_date: str | None = None) -> list[dict]:
     """Same incremental per-player walk as build_event_dataset."""
     events = storage.get_all_events(SPORT, since_date=since_date)
-    events_by_key = {event["event_key"]: event for event in events}
     team_coordinates = _team_coordinates(storage, _team_ids(events))
-    elo_ratings, _ = compute_elo_ratings(events)
-    team_previous_event_dates = _team_previous_event_dates(events)
 
-    player_games = storage.get_all_player_game_stats(SPORT, since_date=since_date)
-    logger.info("Loaded %d player-game rows", len(player_games))
+    def player_features(game, prior, event, elo_ratings, own_previous_event_date, window):
+        return build_player_features(game, prior, event, elo_ratings, own_previous_event_date, team_coordinates, window)
 
-    games_by_player = _group_player_games_by_player(player_games)
-
-    total = len(player_games)
-    seen = 0
-    skipped = 0
-    rows = []
-    for games in games_by_player.values():
-        history: list[dict] = []
-        for game in games:
-            event = events_by_key.get(game["event_key"])
-            participants = event.get("participants", []) if event else []
-            has_home_and_away = any(p.get("role") == "home" for p in participants) and any(
-                p.get("role") == "away" for p in participants
-            )
-            if not has_home_and_away:
-                logger.debug("Skipping player-game %s -- event missing or missing home/away role", game["event_key"])
-                skipped += 1
-            else:
-                prior = history[-window:][::-1]
-                own_previous_event_date = team_previous_event_dates.get((game["team_id"], game["event_key"]))
-                rows.append(build_player_features(game, prior, event, elo_ratings, own_previous_event_date, team_coordinates, window))
-                history.append(game)
-
-            seen += 1
-            if seen % 20000 == 0 or seen == total:
-                logger.info("Built player features: %d/%d (%d skipped)", seen, total, skipped)
-
-    return rows
+    return build_dataset_common.build_player_dataset(storage, SPORT, window, player_features, logger, since_date=since_date, events=events)
 
 
 def build_ranking_dataset(storage: FeatureStorage, since_date: str | None = None) -> list[dict]:

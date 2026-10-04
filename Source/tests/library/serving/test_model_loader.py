@@ -205,3 +205,26 @@ class TestPredict:
 
         assert isinstance(result, float)
         assert 0.0 <= result <= 1.0
+
+    def test_a_card_without_calibration_or_baseline_serves_the_raw_prediction(self):
+        feature_columns = ["home_elo", "away_elo"]
+        booster = xgb.Booster()
+        booster.load_model(bytearray(_tiny_booster_bytes(feature_columns)))
+        model_card = {"algorithm": "xgboost", "feature_columns": feature_columns}
+        raw = model_loader.ADAPTERS["xgboost"].predict(booster, pd.DataFrame([[1550.0, 1490.0]], columns=feature_columns))
+
+        result = model_loader.predict(booster, model_card, {"home_elo": 1550.0, "away_elo": 1490.0, "home_elo_vs_field": 2.0})
+
+        assert result == pytest.approx(float(raw[0]))
+
+    def test_records_the_inputs_the_model_saw(self):
+        from library.serving import serving_features
+
+        feature_columns = ["home_elo", "away_elo"]
+        card = {"model_name": "win-probability", "version": 2, "algorithm": "xgboost", "feature_columns": feature_columns}
+        estimator = model_loader.ADAPTERS["xgboost"].deserialize(_tiny_booster_bytes(feature_columns))
+
+        with serving_features.capturing() as captured:
+            model_loader.predict(estimator, card, {"home_elo": 1500, "away_elo": "n/a", "label_home_won": 1})
+
+        assert captured == {"win-probability#v2": {"home_elo": 1500.0, "away_elo": None}}

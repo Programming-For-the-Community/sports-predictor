@@ -182,10 +182,10 @@ jobs:
       sport: 'F1'
       feature_engineering_dockerfile_path: 'Source/feature-engineering/f1/Dockerfile'
       feature_engineering_image_name: 'f1-feature-engineering'
-      feature_engineering_image_version: '1.0.0'
+      feature_engineering_image_version: '2.0.0'
       train_model_dockerfile_path: 'Source/model-training/f1/Dockerfile'
       train_model_image_name: 'f1-train-winprob-model'
-      train_model_image_version: '1.0.0'
+      train_model_image_version: '2.0.0'
 
   # Pushes f1-predict-latest. infra never runs without it already in
   # ECR -- aws_lambda_function.f1_predict is a container-image Lambda,
@@ -201,7 +201,7 @@ jobs:
       sport: 'F1'
       dockerfile_path: 'Source/aws-lambdas/f1/predict/Dockerfile'
       image_name: 'f1-predict'
-      image_version: '1.0.0'
+      image_version: '2.0.0'
       platform: 'linux/arm64'
 
   # Only ai_hosting is a real dependency here -- see app_deploy.yml's own

@@ -24,7 +24,7 @@ import pandas as pd
 from sklearn.metrics import mean_absolute_error, root_mean_squared_error
 
 from library.aws.s3_manager import S3Manager
-from library.ml import backtest, model_types, training_common
+from library.ml import backtest, model_types, target_baseline, training_common
 
 MODEL_NAMES = {
     "margin": "score-margin",
@@ -118,6 +118,10 @@ def train(
         summary_metrics=SUMMARY_METRICS,
         promotion_metric=PROMOTION_METRIC,
         run_id=training_common.resolve_run_id(),
+        options=backtest.RunOptions(
+            target_baseline=target_baseline.fit_elo_linear(X_train, y_train) if score_target == "margin" else None,
+            sample_weights=training_common.recency_weights(train_df["event_date"]),
+        ),
     )
 
 

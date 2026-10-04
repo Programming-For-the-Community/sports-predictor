@@ -116,7 +116,8 @@ class TestLiveFeatureHelpers:
         event = {"event_key": "E1", "event_date": "2025-10-12"}
 
         with patch.object(live_features, "build_player_features", return_value={"row": 1}) as build, \
-             patch.object(live_features, "_live_elo_ratings", return_value={}):
+             patch.object(live_features, "_live_elo_ratings", return_value={}), \
+             patch.object(live_features, "live_matchup_columns", return_value={}):
             row = live_features._build_player_feature_row(
                 storage, "nfl", event, "T1", "T2", "p1", "T1", [], 5, team_last_event_dates={"T1": "2025-10-05"},
             )

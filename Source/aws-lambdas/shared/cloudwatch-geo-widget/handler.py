@@ -109,9 +109,18 @@ _RENDER_HEIGHT = _MAP_HEIGHT * _SUPERSAMPLE
 # glow of their own off this frame.
 _CONUS_BOUNDING_BOX = "-125,24,-67,49"
 
-# Aspect-matched to _MAP_WIDTH/_MAP_HEIGHT so plain linear lon/lat ->
-# pixel scaling (_project) doesn't visibly distort country shapes.
-_WORLD_BOUNDING_BOX = "-131,-55,181,80"
+# Full -180..180 longitude span, latitude band aspect-matched to
+# _MAP_WIDTH/_MAP_HEIGHT so plain linear lon/lat -> pixel scaling
+# (_project) doesn't visibly distort country shapes.
+_WORLD_BOUNDING_BOX = "-180,-64,180,92"
+
+# Antarctica spans the whole frame's width along its bottom edge and never
+# carries traffic.
+_WORLD_EXCLUDED_COUNTRIES = {"AQ"}
+
+# Natural Earth splits antimeridian-crossing countries (RU, FJ) into rings
+# closed along lon +/-180 -- those edges are cuts, not real borders.
+_ANTIMERIDIAN_LON = 179.99
 
 _BACKGROUND_COLOR = (13, 20, 32)  # matches the widget's own wrapper div
 _BOUNDARY_COLOR = (90, 104, 128)
@@ -240,9 +249,26 @@ def _draw_reference_boundaries(draw: ImageDraw.ImageDraw, rings_by_feature: list
     width = max(1, _BOUNDARY_WIDTH_PX * _SUPERSAMPLE)
     for rings in rings_by_feature:
         for ring in rings:
-            points = [_project(lon, lat, bounding_box, _RENDER_WIDTH, _RENDER_HEIGHT) for lon, lat in ring]
-            if len(points) >= 2:
-                draw.line(points + [points[0]], fill=_BOUNDARY_COLOR, width=width)
+            for run in _border_runs(ring):
+                points = [_project(lon, lat, bounding_box, _RENDER_WIDTH, _RENDER_HEIGHT) for lon, lat in run]
+                draw.line(points, fill=_BOUNDARY_COLOR, width=width, joint="curve")
+
+
+def _border_runs(ring: list[list[float]]) -> list[list[list[float]]]:
+    """The closed ring as polylines, broken wherever a segment runs along
+    the antimeridian."""
+    closed = ring + [ring[0]]
+    runs, current = [], [closed[0]]
+    for prev, point in zip(closed, closed[1:]):
+        if abs(prev[0]) >= _ANTIMERIDIAN_LON and abs(point[0]) >= _ANTIMERIDIAN_LON:
+            if len(current) >= 2:
+                runs.append(current)
+            current = [point]
+        else:
+            current.append(point)
+    if len(current) >= 2:
+        runs.append(current)
+    return runs
 
 
 def _interp_heat_color(value: int) -> tuple[int, int, int, int]:
@@ -359,10 +385,13 @@ def _render_accepted_image(counts: dict[str, int]) -> bytes:
 
 
 def _render_blocked_image(counts_by_country: dict[str, int]) -> bytes:
-    canvas = Image.new("RGB", (_RENDER_WIDTH, _RENDER_HEIGHT), _BACKGROUND_COLOR)
-    _draw_reference_boundaries(ImageDraw.Draw(canvas), list(COUNTRY_RINGS.values()), _WORLD_BOUNDING_BOX)
+    """Borders are drawn over the fills so adjacent filled countries stay
+    distinguishable."""
+    canvas = Image.new("RGBA", (_RENDER_WIDTH, _RENDER_HEIGHT), _BACKGROUND_COLOR + (255,))
     choropleth = _choropleth_layer(_country_buckets(counts_by_country), _WORLD_BOUNDING_BOX)
-    composited = Image.alpha_composite(canvas.convert("RGBA"), choropleth).convert("RGB")
+    composited = Image.alpha_composite(canvas, choropleth).convert("RGB")
+    rings = [rings for code, rings in COUNTRY_RINGS.items() if code not in _WORLD_EXCLUDED_COUNTRIES]
+    _draw_reference_boundaries(ImageDraw.Draw(composited), rings, _WORLD_BOUNDING_BOX)
     final = _downscale(composited)
     _draw_legend(final)
     return _encode_jpeg(final)
