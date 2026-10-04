@@ -14,7 +14,10 @@ resource "aws_cognito_user_pool_client" "web" {
 
   generate_secret = false
 
-  explicit_auth_flows = ["ALLOW_USER_SRP_AUTH"]
+  explicit_auth_flows = [
+    "ALLOW_USER_SRP_AUTH",
+    "ALLOW_REFRESH_TOKEN_AUTH",
+  ]
 
   supported_identity_providers = ["COGNITO"]
 
@@ -35,21 +38,17 @@ resource "aws_cognito_user_pool_client" "web" {
 # refresh-token rotation. The app rotates on every launch and resume
 # (GetTokensFromRefreshToken -- the only refresh path once rotation is on;
 # Cognito rejects ALLOW_REFRESH_TOKEN_AUTH on a rotating client), and each
-# rotation issues a refresh token with
-# a fresh 30-day validity -- a rolling session that only ends after 30 days
-# away. The 60s grace period covers the app and its background job
-# rotating the same token at once. Rotation needs the Essentials or Plus
-# feature plan.
+# rotation issues a refresh token with a fresh 30-day validity -- a rolling
+# session that only ends after 30 days away. The 60s grace period covers
+# the app and its background job rotating the same token at once. Rotation
+# needs the Essentials or Plus feature plan.
 resource "aws_cognito_user_pool_client" "mobile" {
   name         = "${var.project}-mobile-client"
   user_pool_id = aws_cognito_user_pool.main.id
 
   generate_secret = false
 
-  explicit_auth_flows = [
-    "ALLOW_USER_SRP_AUTH",
-    "ALLOW_REFRESH_TOKEN_AUTH",
-  ]
+  explicit_auth_flows = ["ALLOW_USER_SRP_AUTH"]
 
   supported_identity_providers = ["COGNITO"]
 
