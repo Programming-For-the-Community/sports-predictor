@@ -7,9 +7,9 @@
 # The release state lives on the S3 object itself
 # (Terraform/s3-mobile-releases.tf): app/sports-predictor.apk carries
 # version-code and source-hash metadata. This build reads them to pick the
-# next versionCode, and skips entirely when Source/front-end and its config
-# are unchanged since the published APK, so users aren't prompted to
-# install an identical build.
+# next versionCode, and skips entirely when the files that make up the app
+# (lib/, android/, pubspec) and its config are unchanged since the
+# published APK, so users are only prompted when the app itself changes.
 #
 # Needs these repository secrets (see Source/front-end/android/README.md):
 # ANDROID_KEYSTORE_BASE64, ANDROID_KEYSTORE_PASSWORD, ANDROID_KEY_PASSWORD;
@@ -95,15 +95,24 @@ jobs:
           COGNITO_CLIENT_ID: ${{ steps.tf_config.outputs.cognito_mobile_client_id }}
         run: bash scripts/render_frontend_config.sh
 
-      # source-hash covers the app's committed source tree plus its rendered
-      # config, so a Cognito/API change also ships a new build.
+      # source-hash covers only what goes into the APK -- Dart code, the
+      # Android project (minus its Markdown), dependencies -- plus the
+      # rendered config, so a Cognito/API change also ships a new build.
+      # Tests, docs and web-only files don't, so editing them never prompts
+      # users to update.
       - name: Resolve version from the published APK
         id: version
         env:
           BUCKET: ${{ steps.tf_config.outputs.mobile_releases_bucket_name }}
           FORCE: ${{ inputs.force_release || false }}
         run: |
-          source_hash="$( { git rev-parse HEAD:Source/front-end; cat Source/front-end/config/prod.json; } | sha256sum | cut -d' ' -f1)"
+          app_files="$(git ls-tree -r HEAD -- \
+            Source/front-end/lib \
+            Source/front-end/android \
+            Source/front-end/pubspec.yaml \
+            Source/front-end/pubspec.lock \
+            | grep -v '\.md$')"
+          source_hash="$( { echo "$app_files"; cat Source/front-end/config/prod.json; } | sha256sum | cut -d' ' -f1)"
           if metadata="$(aws s3api head-object --bucket "$BUCKET" --key "$APK_KEY" --query Metadata --output json 2>/dev/null)"; then
             current_code="$(echo "$metadata" | jq -r '."version-code" // "0"')"
             current_hash="$(echo "$metadata" | jq -r '."source-hash" // ""')"
@@ -117,10 +126,20 @@ jobs:
             echo "released=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
-          version_name="$(sed -n 's/^version: *\([^+]*\).*/\1/p' Source/front-end/pubspec.yaml)"
+          # versionName is <major>.<minor>.<versionCode>: major and minor come
+          # from pubspec.yaml's `version:` (bumped by hand for bigger
+          # releases), the patch is always this build's versionCode.
+          version_code=$((current_code + 1))
+          major_minor="$(sed -n 's/^version: *\([0-9]*\.[0-9]*\).*/\1/p' Source/front-end/pubspec.yaml)"
+          if [ -z "$major_minor" ]; then
+            echo "::error::Could not read major.minor from pubspec.yaml's version: line"
+            exit 1
+          fi
+          version_name="$major_minor.$version_code"
+          echo "Releasing $version_name (versionCode $version_code)"
           {
             echo "released=true"
-            echo "version_code=$((current_code + 1))"
+            echo "version_code=$version_code"
             echo "version_name=$version_name"
             echo "source_hash=$source_hash"
           } >> "$GITHUB_OUTPUT"
@@ -166,10 +185,12 @@ jobs:
         working-directory: Source/front-end
         env:
           VERSION_CODE: ${{ steps.version.outputs.version_code }}
+          VERSION_NAME: ${{ steps.version.outputs.version_name }}
         run: |
           export JAVA_HOME="$JAVA_HOME_17_X64"
           flutter build apk --release \
             --target-platform android-arm64 \
+            --build-name="$VERSION_NAME" \
             --build-number="$VERSION_CODE" \
             --dart-define-from-file=config/prod.json \
             --dart-define=ANDROID_APP=true \
