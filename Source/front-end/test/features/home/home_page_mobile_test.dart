@@ -8,6 +8,9 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:front_end/core/auth/auth_repository.dart';
 import 'package:front_end/core/auth/cognito_auth_client.dart';
 import 'package:front_end/core/data/live_scores_repository.dart';
+import 'package:front_end/core/mobile/app_release.dart';
+import 'package:front_end/core/mobile/app_shell.dart';
+import 'package:front_end/core/mobile/app_updates.dart';
 import 'package:front_end/features/home/home_page.dart';
 
 import '../../support/mobile_viewport.dart';
@@ -24,6 +27,34 @@ void main() {
   setUp(() => SharedPreferences.setMockInitialValues({}));
 
   for (final width in mobileViewportWidths) {
+    testWidgets('header fits the Get app button in an Android browser at ${width}px wide', (tester) async {
+      await pumpAtWidth(
+        tester,
+        width,
+        ProviderScope(
+          overrides: [
+            appShellProvider.overrideWithValue(AppShell.androidBrowser),
+            appReleaseClientProvider.overrideWithValue(AppReleaseClient(
+              httpClient: MockClient((r) async => http.Response('', 200, headers: {
+                    'x-amz-meta-version-code': '2',
+                    'x-amz-meta-version-name': '1.0.0',
+                    'x-amz-meta-sha256': 'abc',
+                  })),
+            )),
+            authRepositoryProvider.overrideWith(
+              (ref) => AuthRepository(authClient: CognitoAuthClient(httpClient: MockClient((r) async => http.Response('{}', 200)))),
+            ),
+            liveScoresProvider.overrideWith((ref, sport) async => const {}),
+            pgaLiveScoresProvider.overrideWith((ref, sport) async => const {}),
+          ],
+          child: const MaterialApp(home: HomePage()),
+        ),
+      );
+
+      expect(find.text('Get app'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    });
+
     testWidgets('renders with no overflow at ${width}px wide', (tester) async {
       await pumpAtWidth(
         tester,

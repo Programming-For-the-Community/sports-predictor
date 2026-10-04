@@ -1,0 +1,130 @@
+# Top-level Android app deploy pipeline: push to a mobile/ branch prefix,
+# workflow_dispatch, workflow_call, an approval gate. Mirrors
+# frontend_deploy.yml.
+#
+# The APK and the website are one Flutter codebase, and the website's
+# "Get the Android app" prompt is how users first install the APK, so this
+# pipeline ships both: the APK (mobile_hosting.yml/mobile_sync_deploy.yml)
+# and the web build (frontend_hosting.yml/frontend_sync_deploy.yml).
+#
+# Exactly one SonarQube Cloud scan -- test-frontend runs `flutter test`
+# directly and `scan` gates both builds on it.
+
+name: Mobile Deploy
+
+on:
+  workflow_dispatch:
+    inputs:
+      force_release:
+        description: 'Publish a new APK even if the app source is unchanged'
+        required: false
+        type: boolean
+        default: false
+  push:
+    branches:
+      - 'mobile/**'
+  workflow_call:
+
+concurrency:
+  group: terraform-deploy-pipeline
+  cancel-in-progress: false
+
+permissions:
+  id-token: write
+  contents: read
+  actions: read
+
+env:
+  FLUTTER_VERSION: '3.29.3'
+
+jobs:
+  approval:
+    name: Await deployment approval
+    if: github.event_name != 'workflow_call'
+    runs-on: ubuntu-latest
+    environment: development
+    steps:
+      - name: Approved
+        run: echo "Deployment approved -- proceeding."
+
+  infra:
+    name: Apply shared infrastructure
+    needs: approval
+    if: |
+      always() &&
+      (needs.approval.result == 'success' || needs.approval.result == 'skipped')
+    uses: ./.github/workflows/tf_install.yml
+    secrets: inherit
+
+  test-frontend:
+    name: Run frontend tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2.23.0
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+
+      - name: Install dependencies
+        working-directory: Source/front-end
+        run: flutter pub get --enforce-lockfile
+
+      - name: Analyze
+        working-directory: Source/front-end
+        run: flutter analyze
+
+      - name: Test
+        working-directory: Source/front-end
+        run: flutter test --coverage
+
+      - name: Upload coverage data
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: dart-coverage
+          path: Source/front-end/coverage/lcov.info
+          retention-days: 1
+          if-no-files-found: ignore
+
+  scan:
+    name: SonarQube Cloud scan
+    needs: test-frontend
+    uses: ./.github/workflows/sonar_scan.yml
+    secrets: inherit
+    with:
+      environment: ${{ github.event.inputs.environment || 'development' }}
+      parent_workflow: ${{ github.workflow }}
+
+  build_mobile:
+    name: Mobile hosting (build)
+    needs: [infra, scan]
+    uses: ./.github/workflows/mobile_hosting.yml
+    secrets: inherit
+    with:
+      force_release: ${{ inputs.force_release || false }}
+
+  deploy_mobile:
+    name: Mobile hosting (deploy)
+    needs: [infra, build_mobile]
+    if: needs.build_mobile.outputs.released == 'true'
+    uses: ./.github/workflows/mobile_sync_deploy.yml
+    secrets: inherit
+    with:
+      source_run_id: ${{ github.run_id }}
+
+  build_frontend:
+    name: Frontend hosting (build)
+    needs: [infra, scan]
+    uses: ./.github/workflows/frontend_hosting.yml
+    secrets: inherit
+
+  deploy_frontend:
+    name: Frontend hosting (deploy)
+    needs: [infra, build_frontend]
+    uses: ./.github/workflows/frontend_sync_deploy.yml
+    secrets: inherit
+    with:
+      source_run_id: ${{ github.run_id }}

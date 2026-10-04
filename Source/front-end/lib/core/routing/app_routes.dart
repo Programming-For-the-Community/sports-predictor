@@ -6,6 +6,11 @@ abstract final class AppRoutes {
   static const login = '/login';
   static const splash = '/splash';
   static const home = '/';
+  static const settings = '/settings';
+  static const notificationSettings = '/settings/notifications';
+  static const appUpdates = '/settings/updates';
+  static String widgetSetup(int widgetId, String kind) => '/widget-setup?id=$widgetId&kind=$kind';
+  static const widgetSetupPath = '/widget-setup';
   static String events(String sport) => '/$sport/events';
   static String eventDetail(String sport, String eventId) => '/$sport/events/$eventId';
   static String models(String sport) => '/$sport/models';

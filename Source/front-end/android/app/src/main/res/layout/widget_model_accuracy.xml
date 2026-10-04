@@ -1,0 +1,70 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/widget_root"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@drawable/widget_background"
+    android:orientation="vertical"
+    android:padding="14dp">
+
+    <TextView
+        android:id="@+id/acc_header"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:ellipsize="end"
+        android:maxLines="1"
+        android:text="NFL · WIN PROBABILITY"
+        android:textAllCaps="true"
+        android:textColor="@color/widget_ink_sub"
+        android:textSize="10sp"
+        android:letterSpacing="0.06"/>
+
+    <TextView
+        android:id="@+id/acc_big"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="4dp"
+        android:text="68%"
+        android:textColor="@color/widget_ink"
+        android:textSize="30sp"
+        android:textStyle="bold"/>
+
+    <TextView
+        android:id="@+id/acc_season"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:maxLines="1"
+        android:text="right this season · 412 games"
+        android:textColor="@color/widget_ink_sub"
+        android:textSize="11sp"/>
+
+    <TextView
+        android:id="@+id/acc_last"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="6dp"
+        android:maxLines="1"
+        android:text="Wk 5: 75% (9/12)"
+        android:textColor="@color/widget_ink"
+        android:textSize="12sp"/>
+
+    <TextView
+        android:id="@+id/acc_trend"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:fontFamily="monospace"
+        android:maxLines="1"
+        android:text="▃▅▄▇"
+        android:textColor="@color/widget_cyan"
+        android:textSize="16sp"/>
+
+    <TextView
+        android:id="@+id/acc_message"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="6dp"
+        android:text="@string/widget_choose_sport"
+        android:textColor="@color/widget_ink_sub"
+        android:textSize="12sp"
+        android:visibility="gone"/>
+</LinearLayout>

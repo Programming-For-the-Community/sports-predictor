@@ -138,6 +138,28 @@ void main() {
       expect(tokens.accessToken, 'access-2');
       expect(tokens.refreshToken, 'refresh-original');
     });
+
+    test('rotates through GetTokensFromRefreshToken for the mobile client', () async {
+      final requests = <Map<String, dynamic>>[];
+      final client = CognitoAuthClient(
+        rotateRefreshTokens: true,
+        httpClient: _cognito(requests, [
+          http.Response(
+            jsonEncode({
+              'AuthenticationResult': {'AccessToken': 'access-2', 'IdToken': 'id-2', 'RefreshToken': 'refresh-2', 'ExpiresIn': 3600},
+            }),
+            200,
+          ),
+        ]),
+      );
+
+      final tokens = await client.refresh('refresh-original');
+
+      expect(requests.single['target'], 'AWSCognitoIdentityProviderService.GetTokensFromRefreshToken');
+      expect(requests.single['RefreshToken'], 'refresh-original');
+      expect(requests.single.containsKey('AuthFlow'), isFalse);
+      expect(tokens.refreshToken, 'refresh-2');
+    });
   });
 
   testWidgets('a Cognito call that never answers times out', (tester) async {

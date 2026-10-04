@@ -1,5 +1,6 @@
-# Top-level orchestrator for every component's deploy, across every sport
-# and the frontend. Triggers only on a push to main or manual dispatch.
+# Top-level orchestrator for every component's deploy, across every sport,
+# the frontend and the Android app. Triggers only on a push to main or
+# manual dispatch.
 #
 # Calls `tf_install.yml` exactly ONCE, not once per component, fed from
 # one shared `infra` job.
@@ -1058,6 +1059,23 @@ jobs:
     name: Frontend hosting (deploy)
     needs: [infra, frontend_build]
     uses: ./.github/workflows/frontend_sync_deploy.yml
+    secrets: inherit
+    with:
+      source_run_id: ${{ github.run_id }}
+
+  # Same Flutter source as the frontend. mobile_hosting.yml skips the build
+  # (released == 'false') when the app is unchanged since the published APK.
+  mobile_build:
+    name: Mobile hosting (build)
+    needs: [scan, infra]
+    uses: ./.github/workflows/mobile_hosting.yml
+    secrets: inherit
+
+  mobile_deploy:
+    name: Mobile hosting (deploy)
+    needs: [infra, mobile_build]
+    if: needs.mobile_build.outputs.released == 'true'
+    uses: ./.github/workflows/mobile_sync_deploy.yml
     secrets: inherit
     with:
       source_run_id: ${{ github.run_id }}

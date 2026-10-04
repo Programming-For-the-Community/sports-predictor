@@ -1,0 +1,205 @@
+# Builds the signed Android APK (arm64-v8a only). Runs standalone
+# (workflow_dispatch) or called from mobile_deploy.yml/app_deploy.yml
+# (workflow_call). Build-only -- the caller runs `flutter test` and its one
+# SonarQube scan, same split as frontend_hosting.yml. Uploading the APK is
+# mobile_sync_deploy.yml's job.
+#
+# The release state lives on the S3 object itself
+# (Terraform/s3-mobile-releases.tf): app/sports-predictor.apk carries
+# version-code and source-hash metadata. This build reads them to pick the
+# next versionCode, and skips entirely when Source/front-end and its config
+# are unchanged since the published APK, so users aren't prompted to
+# install an identical build.
+#
+# Needs these repository secrets (see Source/front-end/android/README.md):
+# ANDROID_KEYSTORE_BASE64, ANDROID_KEYSTORE_PASSWORD, ANDROID_KEY_PASSWORD;
+# and the repository variable ANDROID_KEY_ALIAS.
+
+name: Mobile Hosting
+
+on:
+  workflow_dispatch:
+    inputs:
+      force_release:
+        description: 'Publish a new build even if the app source is unchanged'
+        required: false
+        type: boolean
+        default: false
+  workflow_call:
+    inputs:
+      force_release:
+        required: false
+        type: boolean
+        default: false
+    outputs:
+      released:
+        description: "'true' when a new APK was built (mobile_sync_deploy.yml uploads only then)"
+        value: ${{ jobs.build-mobile.outputs.released }}
+
+env:
+  FLUTTER_VERSION: '3.29.3'
+  APK_KEY: app/sports-predictor.apk
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  build-mobile:
+    name: Build Android APK
+    runs-on: ubuntu-latest
+    outputs:
+      released: ${{ steps.version.outputs.released }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a # v4.3.1
+        with:
+          role-to-assume: ${{ secrets.AWS_DEPLOY_SVC_ACCT_ARN }}
+          aws-region: ${{ vars.AWS_RESOURCE_REGION }}
+          role-session-name: GitHubActions-${{ github.run_id }}
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd # v3.1.2
+        with:
+          cli_config_credentials_token: ${{ secrets.TF_API_TOKEN }}
+
+      - name: Terraform init
+        run: terraform -chdir=Terraform init -reconfigure
+
+      - name: Fetch config from Terraform outputs
+        id: tf_config
+        run: |
+          fetch() {
+            local name="$1"
+            local value
+            if ! value="$(terraform -chdir=Terraform output -raw "$name")" || [ -z "$value" ]; then
+              echo "::error::terraform output -raw $name did not produce a value"
+              exit 1
+            fi
+            echo "Resolved $name = $value"
+            echo "$name=$value" >> "$GITHUB_OUTPUT"
+          }
+          fetch api_endpoint
+          fetch cognito_user_pool_id
+          fetch cognito_mobile_client_id
+          fetch mobile_releases_bucket_name
+
+      - name: Render production config
+        working-directory: Source/front-end
+        env:
+          API_BASE_URL: ${{ steps.tf_config.outputs.api_endpoint }}
+          COGNITO_USER_POOL_ID: ${{ steps.tf_config.outputs.cognito_user_pool_id }}
+          COGNITO_CLIENT_ID: ${{ steps.tf_config.outputs.cognito_mobile_client_id }}
+        run: bash scripts/render_frontend_config.sh
+
+      # source-hash covers the app's committed source tree plus its rendered
+      # config, so a Cognito/API change also ships a new build.
+      - name: Resolve version from the published APK
+        id: version
+        env:
+          BUCKET: ${{ steps.tf_config.outputs.mobile_releases_bucket_name }}
+          FORCE: ${{ inputs.force_release || false }}
+        run: |
+          source_hash="$( { git rev-parse HEAD:Source/front-end; cat Source/front-end/config/prod.json; } | sha256sum | cut -d' ' -f1)"
+          if metadata="$(aws s3api head-object --bucket "$BUCKET" --key "$APK_KEY" --query Metadata --output json 2>/dev/null)"; then
+            current_code="$(echo "$metadata" | jq -r '."version-code" // "0"')"
+            current_hash="$(echo "$metadata" | jq -r '."source-hash" // ""')"
+          else
+            current_code=0
+            current_hash=""
+          fi
+          echo "Published versionCode=$current_code source-hash=$current_hash; this commit's source-hash=$source_hash"
+          if [ "$source_hash" = "$current_hash" ] && [ "$FORCE" != "true" ]; then
+            echo "::notice::App source unchanged since versionCode $current_code -- skipping the Android release"
+            echo "released=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          version_name="$(sed -n 's/^version: *\([^+]*\).*/\1/p' Source/front-end/pubspec.yaml)"
+          {
+            echo "released=true"
+            echo "version_code=$((current_code + 1))"
+            echo "version_name=$version_name"
+            echo "source_hash=$source_hash"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Set up Flutter
+        if: steps.version.outputs.released == 'true'
+        uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2.23.0
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+
+      - name: Install dependencies
+        if: steps.version.outputs.released == 'true'
+        working-directory: Source/front-end
+        run: flutter pub get --enforce-lockfile
+
+      - name: Write signing config
+        if: steps.version.outputs.released == 'true'
+        working-directory: Source/front-end/android
+        env:
+          KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ vars.ANDROID_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          if [ -z "$KEYSTORE_BASE64" ] || [ -z "$KEYSTORE_PASSWORD" ] || [ -z "$KEY_ALIAS" ] || [ -z "$KEY_PASSWORD" ]; then
+            echo "::error::Android signing secrets are missing -- see Source/front-end/android/README.md"
+            exit 1
+          fi
+          echo "$KEYSTORE_BASE64" | base64 --decode > app/release.jks
+          {
+            echo "storeFile=release.jks"
+            echo "storePassword=$KEYSTORE_PASSWORD"
+            echo "keyAlias=$KEY_ALIAS"
+            echo "keyPassword=$KEY_PASSWORD"
+          } > key.properties
+
+      # ANDROID_APP=true is what makes the build behave as the app
+      # (lib/core/mobile/app_shell.dart): rolling session, background
+      # checks, in-app updates.
+      - name: Build APK
+        if: steps.version.outputs.released == 'true'
+        working-directory: Source/front-end
+        env:
+          VERSION_CODE: ${{ steps.version.outputs.version_code }}
+        run: |
+          export JAVA_HOME="$JAVA_HOME_17_X64"
+          flutter build apk --release \
+            --target-platform android-arm64 \
+            --build-number="$VERSION_CODE" \
+            --dart-define-from-file=config/prod.json \
+            --dart-define=ANDROID_APP=true
+
+      - name: Describe release
+        if: steps.version.outputs.released == 'true'
+        env:
+          VERSION_CODE: ${{ steps.version.outputs.version_code }}
+          VERSION_NAME: ${{ steps.version.outputs.version_name }}
+          SOURCE_HASH: ${{ steps.version.outputs.source_hash }}
+        run: |
+          mkdir -p release
+          cp Source/front-end/build/app/outputs/flutter-apk/app-release.apk release/sports-predictor.apk
+          sha256="$(sha256sum release/sports-predictor.apk | cut -d' ' -f1)"
+          # S3 user metadata must be ASCII; this is shown as the update's notes.
+          notes="$(git log -1 --pretty=%s | iconv -f utf-8 -t ascii//TRANSLIT | tr -cd '[:print:]' | cut -c1-200)"
+          jq -n \
+            --arg versionCode "$VERSION_CODE" \
+            --arg versionName "$VERSION_NAME" \
+            --arg sha256 "$sha256" \
+            --arg sourceHash "$SOURCE_HASH" \
+            --arg notes "$notes" \
+            '{"version-code": $versionCode, "version-name": $versionName, "sha256": $sha256, "source-hash": $sourceHash, "notes": $notes}' \
+            > release/metadata.json
+          cat release/metadata.json
+
+      - name: Upload build artifact
+        if: steps.version.outputs.released == 'true'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: mobile-build
+          path: release
+          retention-days: 7

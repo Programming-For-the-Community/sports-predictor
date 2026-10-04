@@ -4,6 +4,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/auth/auth_repository.dart';
+import '../../core/mobile/app_shell.dart';
+import '../../core/mobile/app_updates.dart';
+import '../../core/mobile/local_notifications.dart';
 import '../../core/models/sport_config.dart';
 import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_text_styles.dart';
@@ -11,6 +14,8 @@ import '../../core/widgets/brand_mark.dart';
 import '../../core/widgets/page_glow.dart';
 import '../../core/widgets/responsive.dart';
 import '../../core/widgets/sport_card.dart';
+import '../mobile/get_app_prompt.dart';
+import '../mobile/update_banner.dart';
 
 class HomePage extends ConsumerStatefulWidget {
   const HomePage({super.key});
@@ -27,6 +32,8 @@ class _HomePageState extends ConsumerState<HomePage> with WidgetsBindingObserver
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     _liveScoresTimer = Timer.periodic(const Duration(seconds: 30), (_) => _refreshLiveScores());
+    // Asked here, once signed in, rather than over the login screen.
+    if (ref.read(appShellProvider) == AppShell.androidApp) ref.read(deviceNotifierProvider).requestPermission();
   }
 
   @override
@@ -43,7 +50,10 @@ class _HomePageState extends ConsumerState<HomePage> with WidgetsBindingObserver
   // per-sport Events page ever mounted to run that page's own poll.
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state == AppLifecycleState.resumed) _refreshLiveScores();
+    if (state == AppLifecycleState.resumed) {
+      _refreshLiveScores();
+      ref.invalidate(latestReleaseProvider);
+    }
   }
 
   void _refreshLiveScores() {
@@ -54,6 +64,7 @@ class _HomePageState extends ConsumerState<HomePage> with WidgetsBindingObserver
 
   @override
   Widget build(BuildContext context) {
+    final shell = ref.watch(appShellProvider);
     return Scaffold(
       backgroundColor: AppColors.bg,
       body: Stack(
@@ -78,12 +89,18 @@ class _HomePageState extends ConsumerState<HomePage> with WidgetsBindingObserver
                           style: AppTextStyles.sectionTitle(),
                         ),
                       ),
-                      TextButton(
-                        onPressed: () => ref.read(authRepositoryProvider.notifier).logout(),
-                        child: Text('Sign out', style: AppTextStyles.body(color: AppColors.inkSub)),
-                      ),
+                      if (shell == AppShell.androidBrowser) ...[const GetAppButton(), const SizedBox(width: 4)],
+                      // The Android app moves Sign out into Settings › Notifications.
+                      if (shell == AppShell.androidApp)
+                        const SettingsButton()
+                      else
+                        TextButton(
+                          onPressed: () => ref.read(authRepositoryProvider.notifier).logout(),
+                          child: Text('Sign out', style: AppTextStyles.body(color: AppColors.inkSub)),
+                        ),
                     ],
                   ),
+                  if (shell == AppShell.androidApp) ...[const SizedBox(height: 24), const UpdateBanner()],
                   const SizedBox(height: 40),
                   Text('Sports', style: AppTextStyles.pageH1()),
                   const SizedBox(height: 24),

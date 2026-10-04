@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- lib/core/theme/app_colors.dart -->
+<resources>
+    <color name="widget_bg">#EB0A0E17</color>
+    <color name="widget_border">#1FFFFFFF</color>
+    <color name="widget_ink">#FFEAF0F7</color>
+    <color name="widget_ink_sub">#FF8A96A8</color>
+    <color name="widget_cyan">#FF22D3EE</color>
+    <color name="widget_track">#33FF5C7A</color>
+</resources>

@@ -18,6 +18,11 @@ output "cognito_client_id" {
   value       = aws_cognito_user_pool_client.web.id
 }
 
+output "cognito_mobile_client_id" {
+  description = "Cognito App Client ID for the Android app (refresh-token rotation on) -- baked into the APK by mobile_hosting.yml"
+  value       = aws_cognito_user_pool_client.mobile.id
+}
+
 output "api_endpoint" {
   description = "The app's one public URL -- frontend at the root, API under /nfl/* -- both served via CloudFront (see cloudfront.tf)"
   value       = "https://${local.domain}"
@@ -26,6 +31,11 @@ output "api_endpoint" {
 output "frontend_bucket_name" {
   description = "Frontend static site S3 bucket name -- passed to frontend_sync_deploy.yml for `aws s3 sync`"
   value       = aws_s3_bucket.frontend.bucket
+}
+
+output "mobile_releases_bucket_name" {
+  description = "Android APK S3 bucket name -- passed to mobile_hosting.yml/mobile_sync_deploy.yml"
+  value       = aws_s3_bucket.mobile_releases.bucket
 }
 
 output "frontend_distribution_id" {

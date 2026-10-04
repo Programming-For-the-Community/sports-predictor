@@ -2,10 +2,12 @@ import 'dart:convert';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
+import 'package:http/testing.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:front_end/core/auth/auth_repository.dart';
 import 'package:front_end/core/auth/cognito_auth_client.dart';
+import 'package:front_end/core/auth/token_store.dart';
 
 import '../../support/cognito_srp_test_support.dart';
 
@@ -290,4 +292,117 @@ void main() {
     final prefs = await SharedPreferences.getInstance();
     expect(prefs.getString('last_activity_at'), isNull);
   });
+
+  group('rolling session (Android app)', () {
+    String persisted({String id = 'old-id', String refresh = 'r1', Duration expiresIn = const Duration(hours: 1)}) => jsonEncode(
+          CognitoTokens(accessToken: 'a', idToken: id, refreshToken: refresh, expiresAt: DateTime.now().add(expiresIn)).toJson(),
+        );
+
+    AuthRepository rolling(MockClientHandler handler, {TokenStore? store}) => AuthRepository(
+          authClient: CognitoAuthClient(srpFactory: FakeCognitoSrp.new, rotateRefreshTokens: true, httpClient: srpAwareMockClient(handler)),
+          tokenStore: store,
+          rollingSession: true,
+        );
+
+    test('restore rotates the refresh token even when the ID token is still fresh, restarting the 30 days', () async {
+      SharedPreferences.setMockInitialValues({'cognito_tokens': persisted()});
+      final repo = rolling((r) async => _tokenResponse(id: 'rotated-id', refresh: 'r2'));
+
+      expect(await _firstRealState(repo), isA<AuthAuthenticated>());
+
+      final prefs = await SharedPreferences.getInstance();
+      expect(jsonDecode(prefs.getString('cognito_tokens')!)['refreshToken'], 'r2');
+      final expiresAt = await repo.sessionExpiresAt();
+      expect(expiresAt!.difference(DateTime.now().add(sessionLifetime)).inMinutes.abs(), lessThan(1));
+    });
+
+    test('restore keeps the session when the refresh fails for a network reason', () async {
+      SharedPreferences.setMockInitialValues({'cognito_tokens': persisted(id: 'kept-id')});
+      final repo = rolling((r) async => throw http.ClientException('offline'));
+
+      final state = await _firstRealState(repo);
+
+      expect(state, isA<AuthAuthenticated>());
+      expect((state as AuthAuthenticated).tokens.idToken, 'kept-id');
+    });
+
+    test('restore signs out when Cognito rejects the refresh token', () async {
+      SharedPreferences.setMockInitialValues({'cognito_tokens': persisted()});
+      final repo = rolling((r) async => http.Response(jsonEncode({'__type': 'NotAuthorizedException', 'message': 'Refresh Token has expired'}), 400));
+
+      expect(await _firstRealState(repo), isA<AuthUnauthenticated>());
+      final prefs = await SharedPreferences.getInstance();
+      expect(prefs.getString('cognito_tokens'), isNull);
+    });
+
+    test('renewSession rotates with the stored refresh token, which the background job may have replaced', () async {
+      SharedPreferences.setMockInitialValues({'cognito_tokens': persisted()});
+      final sent = <String>[];
+      final repo = rolling((request) async {
+        final body = jsonDecode(request.body) as Map<String, dynamic>;
+        sent.add(body['RefreshToken'] as String);
+        return _tokenResponse(id: 'id-${sent.length}', refresh: 'r${sent.length + 1}');
+      });
+      await _firstRealState(repo);
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString('cognito_tokens', persisted(refresh: 'from-background'));
+
+      await repo.renewSession();
+
+      expect(sent, ['r1', 'from-background']);
+      expect((repo.state as AuthAuthenticated).tokens.idToken, 'id-2');
+    });
+
+    test('a network failure in getValidIdToken surfaces the error but keeps the session', () async {
+      SharedPreferences.setMockInitialValues({'cognito_tokens': persisted()});
+      var calls = 0;
+      final repo = rolling((r) async {
+        calls++;
+        if (calls == 1) return _tokenResponse(id: 'restored', refresh: 'r2', expiresIn: 30);
+        throw http.ClientException('offline');
+      });
+      await _firstRealState(repo);
+
+      await expectLater(repo.getValidIdToken(), throwsA(isA<http.ClientException>()));
+
+      expect(repo.state, isA<AuthAuthenticated>());
+    });
+
+    test('never applies inactivityTtl', () async {
+      SharedPreferences.setMockInitialValues({
+        'cognito_tokens': persisted(),
+        'last_activity_at': DateTime.now().subtract(const Duration(days: 10)).toIso8601String(),
+      });
+      final repo = rolling((r) async => _tokenResponse(id: 'rotated-id', refresh: 'r2'));
+
+      expect(await _firstRealState(repo), isA<AuthAuthenticated>());
+      expect(await repo.getValidIdToken(), 'rotated-id');
+    });
+
+    test('reads and writes tokens through the given TokenStore', () async {
+      final store = _MemoryTokenStore(persisted());
+      final repo = rolling((r) async => _tokenResponse(id: 'rotated-id', refresh: 'r2'), store: store);
+
+      await _firstRealState(repo);
+
+      expect(jsonDecode(store.value!)['refreshToken'], 'r2');
+      final prefs = await SharedPreferences.getInstance();
+      expect(prefs.getString('cognito_tokens'), isNull);
+    });
+  });
+}
+
+class _MemoryTokenStore implements TokenStore {
+  _MemoryTokenStore(this.value);
+
+  String? value;
+
+  @override
+  Future<String?> read() async => value;
+
+  @override
+  Future<void> write(String tokensJson) async => value = tokensJson;
+
+  @override
+  Future<void> delete() async => value = null;
 }

@@ -82,9 +82,15 @@ class CognitoNewPasswordRequired extends CognitoAuthResult {
 }
 
 class CognitoAuthClient {
-  CognitoAuthClient({http.Client? httpClient, CognitoSrp Function()? srpFactory})
+  CognitoAuthClient({http.Client? httpClient, CognitoSrp Function()? srpFactory, this.rotateRefreshTokens = false})
       : _httpClient = httpClient ?? http.Client(),
         _srpFactory = srpFactory ?? (() => CognitoSrp(userPoolId: AppConfig.cognitoUserPoolId));
+
+  /// True for the Android app's client (aws_cognito_user_pool_client.mobile),
+  /// which has refresh-token rotation on: every refresh returns a new
+  /// refresh token with a fresh 30-day lifetime. Rotation only works
+  /// through GetTokensFromRefreshToken, not REFRESH_TOKEN_AUTH.
+  final bool rotateRefreshTokens;
 
   static const _timeout = Duration(seconds: 15);
 
@@ -181,6 +187,14 @@ class CognitoAuthClient {
   }
 
   Future<CognitoTokens> refresh(String refreshToken) async {
+    if (rotateRefreshTokens) {
+      final response = await _post('GetTokensFromRefreshToken', {
+        'ClientId': AppConfig.cognitoClientId,
+        'RefreshToken': refreshToken,
+      });
+      final result = response['AuthenticationResult'] as Map<String, dynamic>;
+      return CognitoTokens.fromAuthenticationResult(result, fallbackRefreshToken: refreshToken);
+    }
     final response = await _post('InitiateAuth', {
       'AuthFlow': 'REFRESH_TOKEN_AUTH',
       'ClientId': AppConfig.cognitoClientId,
