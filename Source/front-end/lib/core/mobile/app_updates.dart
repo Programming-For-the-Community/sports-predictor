@@ -64,8 +64,8 @@ final updateBannerSnoozedProvider = FutureProvider<bool>((ref) => ref.watch(upda
 /// Downloads the APK, checks it against the release's sha256, then hands it
 /// to Android's installer, which always asks the user to confirm.
 class AppUpdateInstaller {
-  Stream<OtaEvent> install(AppRelease release) => OtaUpdate().execute(
-        appReleaseUrl,
+  Stream<OtaEvent> install(AppRelease release, {String? username}) => OtaUpdate().execute(
+        appDownloadUrl(source: DownloadSource.update, username: username),
         headers: const {'User-Agent': androidAppUserAgent},
         destinationFilename: 'sports-predictor-${release.versionCode}.apk',
         sha256checksum: release.sha256,

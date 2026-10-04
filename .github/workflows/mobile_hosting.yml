@@ -172,7 +172,8 @@ jobs:
             --target-platform android-arm64 \
             --build-number="$VERSION_CODE" \
             --dart-define-from-file=config/prod.json \
-            --dart-define=ANDROID_APP=true
+            --dart-define=ANDROID_APP=true \
+            --dart-define=APP_VERSION_CODE="$VERSION_CODE"
 
       - name: Describe release
         if: steps.version.outputs.released == 'true'

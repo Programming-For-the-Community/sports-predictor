@@ -16,6 +16,28 @@ locals {
   # lambda-cloudwatch-geo-widget.tf's own StartQuery calls pass
   # viewer_analytics_log_group_names directly instead.
   viewer_analytics_log_sources = join(" | ", [for lg in local.viewer_analytics_log_group_names : "SOURCE '${lg}'"])
+
+  # APK downloads in CloudFront's edge logs: GET (HEAD is the app's update
+  # check) of the APK, full (200) or ranged (206). Android's downloader can
+  # fetch one file in several ranged requests, so widgets count distinct
+  # client IPs, not requests. `src`/`u` are the query string the website and
+  # in-app updater add (front-end/lib/core/mobile/app_release.dart's
+  # appDownloadUrl) -- CloudFront ignores them when serving but logs them.
+  apk_download_filter = <<-QUERY
+    SOURCE '${aws_cloudwatch_log_group.cloudfront_edge_access_logs.name}'
+    | filter `cs-uri-stem` = "/app/sports-predictor.apk" and `cs-method` = "GET" and (`sc-status` = "200" or `sc-status` = "206")
+    | parse `cs-uri-query` /src=(?<source>[a-z]+)/
+    | parse `cs-uri-query` /u=(?<downloader>[^&]+)/
+  QUERY
+
+  # predict-read requests from the Android app, whose User-Agent is
+  # "SportsPredictor-Android/<versionCode> (Linux; Android)".
+  android_app_requests = <<-QUERY
+    ${local.viewer_analytics_log_sources}
+    | filter @message like /viewer_analytics/ and @message like /SportsPredictor-Android/
+    | parse @message '"username": "*"' as username
+    | parse @message '"user_agent": "SportsPredictor-Android/* ' as app_version
+  QUERY
 }
 
 resource "aws_cloudwatch_dashboard" "application" {
@@ -448,6 +470,116 @@ resource "aws_cloudwatch_dashboard" "application" {
             | filter @message like /viewer_analytics/
             | parse @message '"sport": "*"' as sport
             | stats count(*) as requests by bin(1h), sport
+          QUERY
+        }
+      },
+      # --- Android app ---
+      {
+        type       = "text", x = 0, y = 111, width = 24, height = 2
+        properties = { markdown = "## Android app\nDownloads come from CloudFront's edge logs: the download link carries the signed-in username (`u`) and whether it came from the website or the in-app updater (`src`). Installed versions come from the app's own signed-in API requests." }
+      },
+      {
+        type   = "log"
+        x      = 0
+        y      = 113
+        width  = 12
+        height = 6
+        properties = {
+          region = local.cloudfront_edge_logs_region
+          title  = "APK downloads per day (website vs in-app update)"
+          view   = "bar"
+          query  = <<-QUERY
+            ${local.apk_download_filter}
+            | stats count_distinct(`c-ip`) as downloads by bin(1d), source
+          QUERY
+        }
+      },
+      {
+        type   = "log"
+        x      = 12
+        y      = 113
+        width  = 12
+        height = 6
+        properties = {
+          region = local.cloudfront_edge_logs_region
+          title  = "APK downloads by user"
+          view   = "table"
+          query  = <<-QUERY
+            ${local.apk_download_filter}
+            | stats count_distinct(`c-ip`) as devices, latest(source) as last_source, max(@timestamp) as last_download by downloader
+            | sort last_download desc
+            | limit 25
+          QUERY
+        }
+      },
+      {
+        type   = "log"
+        x      = 0
+        y      = 119
+        width  = 24
+        height = 7
+        properties = {
+          region = local.cloudfront_edge_logs_region
+          title  = "Recent APK downloads"
+          view   = "table"
+          query  = <<-QUERY
+            ${local.apk_download_filter}
+            | display date, time, downloader, source, `c-country`, `sc-status`, `cs(User-Agent)`
+            | sort @timestamp desc
+            | limit 50
+          QUERY
+        }
+      },
+      {
+        type   = "log"
+        x      = 0
+        y      = 126
+        width  = 12
+        height = 7
+        properties = {
+          region = var.region
+          title  = "Installed app version by user"
+          view   = "table"
+          query  = <<-QUERY
+            ${local.android_app_requests}
+            | filter ispresent(username)
+            | stats latest(app_version) as installed_version, max(@timestamp) as last_seen, count(*) as requests by username
+            | sort last_seen desc
+            | limit 25
+          QUERY
+        }
+      },
+      {
+        type   = "log"
+        x      = 12
+        y      = 126
+        width  = 6
+        height = 7
+        properties = {
+          region = var.region
+          title  = "App users per version"
+          view   = "pie"
+          query  = <<-QUERY
+            ${local.android_app_requests}
+            | filter ispresent(username)
+            | stats count_distinct(username) as users by app_version
+          QUERY
+        }
+      },
+      {
+        type   = "log"
+        x      = 18
+        y      = 126
+        width  = 6
+        height = 7
+        properties = {
+          region = var.region
+          title  = "Daily active app users"
+          view   = "bar"
+          query  = <<-QUERY
+            ${local.android_app_requests}
+            | filter ispresent(username)
+            | stats count_distinct(username) as app_users by bin(1d)
           QUERY
         }
       },

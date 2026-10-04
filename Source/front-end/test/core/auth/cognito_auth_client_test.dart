@@ -114,6 +114,21 @@ void main() {
     });
   });
 
+  group('CognitoTokens.username', () {
+    String jwt(Map<String, Object?> claims) =>
+        'header.${base64Url.encode(utf8.encode(jsonEncode(claims))).replaceAll('=', '')}.signature';
+
+    test('reads cognito:username from the ID token payload', () {
+      final tokens = CognitoTokens(accessToken: 'a', idToken: jwt({'cognito:username': 'chamar', 'sub': 'x'}), refreshToken: 'r', expiresAt: DateTime.now());
+
+      expect(tokens.username, 'chamar');
+    });
+
+    test('is null for a malformed token', () {
+      expect(CognitoTokens(accessToken: 'a', idToken: 'not-a-jwt', refreshToken: 'r', expiresAt: DateTime.now()).username, isNull);
+    });
+  });
+
   group('CognitoAuthClient.refresh', () {
     test('falls back to the prior refresh token when Cognito omits one', () async {
       final client = CognitoAuthClient(

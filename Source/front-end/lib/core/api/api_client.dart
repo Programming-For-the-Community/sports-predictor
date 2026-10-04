@@ -7,6 +7,8 @@ import 'package:http/http.dart' as http;
 
 import '../auth/auth_repository.dart';
 import '../config/app_config.dart';
+import '../mobile/app_release.dart';
+import '../mobile/app_shell.dart';
 import 'api_exception.dart';
 
 /// Thin GET-only wrapper (every route this app calls today is a GET) around
@@ -37,15 +39,17 @@ class ApiClient {
 
   Future<dynamic> get(String path, {Map<String, String>? queryParameters}) async {
     final uri = Uri.parse('${AppConfig.apiBaseUrl}$path').replace(queryParameters: queryParameters);
+    // Browsers forbid setting User-Agent; the app identifies itself and its version.
+    final appHeaders = _ref.read(appShellProvider) == AppShell.androidApp ? {'User-Agent': androidAppUserAgent} : const <String, String>{};
     final stopwatch = Stopwatch()..start();
     debugPrint('[ApiClient] GET $uri -- requesting id token');
-    var response = await _send(uri, await _authHeader());
+    var response = await _send(uri, {...await _authHeader(), ...appHeaders});
 
     if (response.statusCode == 401) {
       // One reactive retry, covering clock skew between our proactive
       // refresh and the server's actual expiry check.
       debugPrint('[ApiClient] GET $uri -- got 401, retrying with a forced token refresh');
-      response = await _send(uri, await _authHeader(forceRefresh: true));
+      response = await _send(uri, {...await _authHeader(forceRefresh: true), ...appHeaders});
     }
 
     for (var attempt = 0; response.statusCode == 429 && attempt < _maxRetries429; attempt++) {
@@ -53,7 +57,7 @@ class ApiClient {
       final jittered = Duration(milliseconds: _random.nextInt(backoff.inMilliseconds + 1));
       debugPrint('[ApiClient] GET $uri -- got 429, retrying in ${jittered.inMilliseconds}ms (attempt ${attempt + 1}/$_maxRetries429)');
       await Future.delayed(jittered);
-      response = await _send(uri, await _authHeader());
+      response = await _send(uri, {...await _authHeader(), ...appHeaders});
     }
 
     final decoded = _decode(response);
