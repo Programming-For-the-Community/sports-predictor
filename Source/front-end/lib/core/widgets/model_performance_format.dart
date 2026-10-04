@@ -44,24 +44,29 @@ DeltaText? _delta(ModelPerformanceRecord record, ModelDisplay display, {required
   final last = record.lastPeriod?.value;
   final season = record.season.value;
   if (last == null || season == null) return null;
-  const same = DeltaText('same as season', DeltaTone.flat);
+  return record.isAmount ? _amountDelta(last - season, display, compact: compact) : _pickDelta(last - season, compact: compact);
+}
 
-  if (!record.isAmount) {
-    final points = (last - season) * 100;
-    if (points.abs() < 0.05) return compact ? const DeltaText('same', DeltaTone.flat) : same;
-    final tone = points > 0 ? DeltaTone.good : DeltaTone.bad;
-    final size = points.abs().toStringAsFixed(1);
-    return DeltaText(compact ? size : '${points > 0 ? '+' : '-'}$size pts vs season', tone);
-  }
+DeltaText _same({required bool compact}) =>
+    compact ? const DeltaText('same', DeltaTone.flat) : const DeltaText('same as season', DeltaTone.flat);
 
-  final diff = last - season;
-  final half = 0.5 / _pow10(display.missDecimals);
-  if (diff.abs() < half) return compact ? const DeltaText('same', DeltaTone.flat) : same;
+DeltaText _pickDelta(double diff, {required bool compact}) {
+  final points = diff * 100;
+  if (points.abs() < 0.05) return _same(compact: compact);
+  final tone = points > 0 ? DeltaTone.good : DeltaTone.bad;
+  final size = points.abs().toStringAsFixed(1);
+  if (compact) return DeltaText(size, tone);
+  final sign = points > 0 ? '+' : '-';
+  return DeltaText('$sign$size pts vs season', tone);
+}
+
+DeltaText _amountDelta(double diff, ModelDisplay display, {required bool compact}) {
+  if (diff.abs() < 0.5 / _pow10(display.missDecimals)) return _same(compact: compact);
   final tone = diff < 0 ? DeltaTone.good : DeltaTone.bad;
   final size = _amount(diff.abs(), display.missDecimals);
   if (compact) return DeltaText(size, tone);
-  final sized = '$size${display.valueUnit.isEmpty ? '' : ' ${display.valueUnit}'}';
-  return DeltaText(diff < 0 ? '$sized closer' : '$sized further off', tone);
+  final unit = display.valueUnit.isEmpty ? '' : ' ${display.valueUnit}';
+  return DeltaText(diff < 0 ? '$size$unit closer' : '$size$unit further off', tone);
 }
 
 num _pow10(int exponent) {

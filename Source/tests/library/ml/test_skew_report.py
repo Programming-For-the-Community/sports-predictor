@@ -128,15 +128,26 @@ def _cli():
 
 
 class TestCli:
-    def test_prints_the_summary_and_writes_the_full_report(self, tmp_path, capsys):
+    @pytest.fixture
+    def cli(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
         cli = _cli()
-        out = tmp_path / "report.json"
-
-        with patch.object(cli, "S3Manager") as s3_manager, \
+        with patch.object(cli, "S3Manager"), \
              patch.object(cli.skew_report, "load_captured", return_value={EVENT: {"win-probability#v1": {"home_elo": 1.0, "week": 3}}}), \
              patch.object(cli.skew_report, "load_training_rows", return_value=_rows()):
-            cli.main(["nfl", "--bucket", "artifacts", "--out", str(out)])
+            yield cli
 
-        s3_manager.assert_called_once_with("artifacts")
-        assert json.loads(out.read_text())["sport"] == "nfl"
+    def test_prints_the_summary_and_writes_the_full_report(self, cli, tmp_path, capsys):
+        cli.main(["nfl", "--bucket", "artifacts", "--out", "report.json"])
+
+        cli.S3Manager.assert_called_once_with("artifacts")
+        assert json.loads((tmp_path / "report.json").read_text())["sport"] == "nfl"
         assert capsys.readouterr().out.startswith("nfl: 1 events")
+
+    def test_an_output_path_outside_the_working_directory_is_refused(self, cli, tmp_path):
+        outside = str(tmp_path.parent / "report.json")
+
+        with pytest.raises(SystemExit):
+            cli.main(["nfl", "--bucket", "artifacts", "--out", outside])
+
+        assert not (tmp_path.parent / "report.json").exists()

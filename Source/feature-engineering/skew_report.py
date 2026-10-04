@@ -9,9 +9,18 @@ import argparse
 import json
 import os
 import sys
+from pathlib import Path
 
 from library.aws.s3_manager import S3Manager
 from library.ml import skew_report
+
+
+def _inside_working_directory(parser: argparse.ArgumentParser, path: str) -> Path:
+    """`path` resolved; exits with a usage error when it falls outside the working directory."""
+    resolved = Path(path).resolve()
+    if not resolved.is_relative_to(Path.cwd().resolve()):
+        parser.error(f"--out must be inside the working directory: {path}")
+    return resolved
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -26,7 +35,7 @@ def main(argv: list[str] | None = None) -> None:
         args.sport, skew_report.load_captured(s3, args.sport), skew_report.load_training_rows(s3, args.sport),
     )
     if args.out:
-        with open(args.out, "w", encoding="utf-8") as out:
+        with open(_inside_working_directory(parser, args.out), "w", encoding="utf-8") as out:
             json.dump(report, out, indent=2, default=str)
     sys.stdout.write(skew_report.summary(report) + "\n")
 

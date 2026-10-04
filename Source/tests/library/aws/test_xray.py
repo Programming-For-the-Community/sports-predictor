@@ -27,6 +27,11 @@ class TestCurrentTraceHeader:
         assert xray.current_trace_header() is None
 
 
+def _fail_inside(segment):
+    with segment:
+        raise ValueError("boom")
+
+
 class TestLinkedSegment:
     def test_emits_a_subsegment_carrying_the_given_trace_and_parent_ids(self):
         with patch.object(xray, "_xray") as mock_xray:
@@ -40,9 +45,9 @@ class TestLinkedSegment:
 
     def test_marks_fault_and_reraises_on_exception(self):
         with patch.object(xray, "_xray") as mock_xray:
+            segment = xray.linked_segment("nfl-feature-engineering", "1-aaaaaaaa-bbbbbbbbbbbbbbbbbbbbbbbb", "cccccccccccccccc")
             with pytest.raises(ValueError):
-                with xray.linked_segment("nfl-feature-engineering", "1-aaaaaaaa-bbbbbbbbbbbbbbbbbbbbbbbb", "cccccccccccccccc"):
-                    raise ValueError("boom")
+                _fail_inside(segment)
 
         document = json.loads(mock_xray.put_trace_segments.call_args.kwargs["TraceSegmentDocuments"][0])
         assert document["fault"] is True
