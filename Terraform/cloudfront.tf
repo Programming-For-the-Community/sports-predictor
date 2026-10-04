@@ -116,6 +116,24 @@ locals {
   ])
 }
 
+# /app/* (the Android APK) answers Android user agents only: Android
+# browsers name Android in theirs, and the app's own clients send
+# "SportsPredictor (Linux; Android)" (front-end/lib/core/mobile/app_release.dart).
+# Runs at viewer request, ahead of the cache, so every request is checked.
+resource "aws_cloudfront_function" "android_only" {
+  name    = "${var.project}-android-only"
+  runtime = "cloudfront-js-2.0"
+  comment = "Serves /app/* to Android user agents only"
+  publish = true
+  code    = <<-EOT
+    function handler(event) {
+      var ua = event.request.headers['user-agent'];
+      if (ua && ua.value.indexOf('Android') !== -1) return event.request;
+      return { statusCode: 403, statusDescription: 'Forbidden' };
+    }
+  EOT
+}
+
 resource "aws_cloudfront_distribution" "main" {
   enabled             = true
   default_root_object = "index.html"
@@ -127,6 +145,12 @@ resource "aws_cloudfront_distribution" "main" {
   origin {
     origin_id                = "frontend-s3"
     domain_name              = aws_s3_bucket.frontend.bucket_regional_domain_name
+    origin_access_control_id = aws_cloudfront_origin_access_control.frontend.id
+  }
+
+  origin {
+    origin_id                = "mobile-releases-s3"
+    domain_name              = aws_s3_bucket.mobile_releases.bucket_regional_domain_name
     origin_access_control_id = aws_cloudfront_origin_access_control.frontend.id
   }
 
@@ -181,6 +205,24 @@ resource "aws_cloudfront_distribution" "main" {
       # substitutes the origin's own domain as the Host header; API
       # Gateway's execute-api endpoint rejects a mismatched Host header.
       origin_request_policy_id = "b689b0a8-53d0-40ab-baf2-68738e2966ac"
+    }
+  }
+
+  # The APK is uploaded with `Cache-Control: no-cache`, so frontend_edge's
+  # 0s default TTL makes every request revalidate -- a new release is
+  # visible immediately, and HEAD requests return its current metadata.
+  ordered_cache_behavior {
+    path_pattern               = "/app/*"
+    target_origin_id           = "mobile-releases-s3"
+    viewer_protocol_policy     = "redirect-to-https"
+    allowed_methods            = ["GET", "HEAD"]
+    cached_methods             = ["GET", "HEAD"]
+    cache_policy_id            = aws_cloudfront_cache_policy.frontend_edge.id
+    response_headers_policy_id = aws_cloudfront_response_headers_policy.security_headers.id
+
+    function_association {
+      event_type   = "viewer-request"
+      function_arn = aws_cloudfront_function.android_only.arn
     }
   }
 

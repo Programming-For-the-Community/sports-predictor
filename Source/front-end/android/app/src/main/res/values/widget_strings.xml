@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="widget_accuracy_label">Model accuracy</string>
+    <string name="widget_accuracy_description">How often the win-probability model has picked the winner this season</string>
+    <string name="widget_picks_label">Today\'s top picks</string>
+    <string name="widget_picks_description">The model\'s most confident picks for one sport\'s next games</string>
+    <string name="widget_choose_sport">Tap to choose a sport</string>
+    <string name="widget_loading">Open the app to load</string>
+</resources>

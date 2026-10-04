@@ -4,14 +4,26 @@ import 'dart:convert';
 import 'package:flutter_riverpod/legacy.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../mobile/app_shell.dart';
 import 'cognito_auth_client.dart';
+import 'token_store.dart';
 
-const _prefsKey = 'cognito_tokens';
 const _lastActivityPrefsKey = 'last_activity_at';
+const _sessionRenewedAtPrefsKey = 'session_renewed_at';
 
-/// How long the app tolerates zero authenticated activity before forcing
-/// a fresh login, independent of whether the refresh token itself is
-/// still valid.
+/// How long a refresh token lasts -- refresh_token_validity on both Cognito
+/// app clients (Terraform/cognito-app-client.tf). On web it counts from the
+/// password sign-in; in the Android app every rotation restarts it.
+const sessionLifetime = Duration(days: 30);
+
+/// Records that sessionLifetime restarted now: a password sign-in, or a
+/// rotated refresh token (here or in background_checks.dart).
+Future<void> markSessionRenewed(SharedPreferences prefs) =>
+    prefs.setString(_sessionRenewedAtPrefsKey, DateTime.now().toIso8601String());
+
+/// How long the website tolerates zero authenticated activity before
+/// forcing a fresh login, independent of whether the refresh token itself
+/// is still valid. Not enforced in the Android app (rollingSession).
 const inactivityTtl = Duration(minutes: 30);
 
 /// How often recordActivity actually writes -- see its own docstring.
@@ -39,15 +51,23 @@ class AuthAuthenticated extends AuthState {
 }
 
 class AuthRepository extends StateNotifier<AuthState> {
-  AuthRepository({CognitoAuthClient? authClient, SharedPreferences? prefs})
+  AuthRepository({CognitoAuthClient? authClient, SharedPreferences? prefs, TokenStore? tokenStore, this.rollingSession = false})
       : _authClient = authClient ?? CognitoAuthClient(),
         _prefs = prefs,
+        _tokenStore = tokenStore,
         super(AuthInitial()) {
     _restoreSession();
   }
 
   final CognitoAuthClient _authClient;
   SharedPreferences? _prefs;
+  TokenStore? _tokenStore;
+
+  /// The Android app's session: no inactivityTtl, the refresh token is
+  /// rotated on every launch and resume (renewSession) so sessionLifetime
+  /// rolls, and only Cognito rejecting the refresh token signs the user
+  /// out -- a failed network call keeps the session.
+  final bool rollingSession;
 
   // Resolves once _restoreSession's very first pass finishes (regardless of
   // outcome). getValidIdToken awaits this before ever reading `state` --
@@ -60,9 +80,10 @@ class AuthRepository extends StateNotifier<AuthState> {
 
   Future<SharedPreferences> get _prefsInstance async => _prefs ??= await SharedPreferences.getInstance();
 
+  Future<TokenStore> get _tokens async => _tokenStore ??= PrefsTokenStore(await _prefsInstance);
+
   Future<void> _restoreSession() async {
-    final prefs = await _prefsInstance;
-    final raw = prefs.getString(_prefsKey);
+    final raw = await (await _tokens).read();
     if (raw == null) {
       state = AuthUnauthenticated();
       _restored.complete();
@@ -79,11 +100,16 @@ class AuthRepository extends StateNotifier<AuthState> {
     }
 
     var tokens = CognitoTokens.fromJson(jsonDecode(raw) as Map<String, dynamic>);
-    if (tokens.isNearExpiry) {
+    if (rollingSession || tokens.isNearExpiry) {
       try {
-        tokens = await _authClient.refresh(tokens.refreshToken);
-        await _persist(tokens);
-      } catch (_) {
+        tokens = await _refresh(tokens);
+      } catch (error) {
+        if (!_signsOut(error)) {
+          await _touchActivity();
+          state = AuthAuthenticated(tokens);
+          _restored.complete();
+          return;
+        }
         await _clear();
         state = AuthUnauthenticated();
         _restored.complete();
@@ -117,6 +143,7 @@ class AuthRepository extends StateNotifier<AuthState> {
     switch (result) {
       case CognitoAuthSuccess(:final tokens):
         await _persist(tokens);
+        await markSessionRenewed(await _prefsInstance);
         await _touchActivity();
         state = AuthAuthenticated(tokens);
       case CognitoNewPasswordRequired(:final session, :final username):
@@ -157,31 +184,72 @@ class AuthRepository extends StateNotifier<AuthState> {
       return current.tokens.idToken;
     }
     try {
-      final refreshed = await _authClient.refresh(current.tokens.refreshToken);
-      await _persist(refreshed);
+      final refreshed = await _refresh(current.tokens);
       state = AuthAuthenticated(refreshed);
       return refreshed.idToken;
-    } catch (_) {
-      await _clear();
-      state = AuthUnauthenticated();
+    } catch (error) {
+      if (_signsOut(error)) {
+        await _clear();
+        state = AuthUnauthenticated();
+      }
       rethrow;
     }
   }
+
+  /// Android app: called on every return to the foreground (app.dart).
+  /// Rotating the refresh token restarts sessionLifetime.
+  Future<void> renewSession() async {
+    if (!rollingSession) return;
+    await _restored.future;
+    final current = state;
+    if (current is! AuthAuthenticated) return;
+    try {
+      state = AuthAuthenticated(await _refresh(current.tokens));
+    } catch (error) {
+      if (_signsOut(error)) await logout();
+    }
+  }
+
+  Future<CognitoTokens> _refresh(CognitoTokens current) async {
+    var refreshToken = current.refreshToken;
+    if (rollingSession) {
+      // background_checks.dart may have rotated it since this isolate last
+      // read the store; the old one stops working after Cognito's grace period.
+      final stored = await (await _tokens).read();
+      if (stored != null) refreshToken = CognitoTokens.fromJson(jsonDecode(stored) as Map<String, dynamic>).refreshToken;
+    }
+    final refreshed = await _authClient.refresh(refreshToken);
+    await _persist(refreshed);
+    if (refreshed.refreshToken != refreshToken) await markSessionRenewed(await _prefsInstance);
+    return refreshed;
+  }
+
+  /// Web signs out on any failed refresh; the rolling session only when
+  /// Cognito rejects the refresh token itself (expired or revoked).
+  bool _signsOut(Object error) => !rollingSession || (error is CognitoException && error.type == 'NotAuthorizedException');
 
   Future<void> logout() async {
     await _clear();
     state = AuthUnauthenticated();
   }
 
+  /// When the current sign-in expires without another renewal. Null when
+  /// not signed in, or signed in before renewals were recorded.
+  Future<DateTime?> sessionExpiresAt() async {
+    if (state is! AuthAuthenticated) return null;
+    final raw = (await _prefsInstance).getString(_sessionRenewedAtPrefsKey);
+    return raw == null ? null : DateTime.parse(raw).add(sessionLifetime);
+  }
+
   Future<void> _persist(CognitoTokens tokens) async {
-    final prefs = await _prefsInstance;
-    await prefs.setString(_prefsKey, jsonEncode(tokens.toJson()));
+    await (await _tokens).write(jsonEncode(tokens.toJson()));
   }
 
   Future<void> _clear() async {
+    await (await _tokens).delete();
     final prefs = await _prefsInstance;
-    await prefs.remove(_prefsKey);
     await prefs.remove(_lastActivityPrefsKey);
+    await prefs.remove(_sessionRenewedAtPrefsKey);
   }
 
   Future<void> _touchActivity() async {
@@ -208,6 +276,7 @@ class AuthRepository extends StateNotifier<AuthState> {
   /// False when no activity has ever been recorded -- treated as active
   /// rather than instantly expiring the session.
   Future<bool> _isInactive() async {
+    if (rollingSession) return false;
     final prefs = await _prefsInstance;
     final raw = prefs.getString(_lastActivityPrefsKey);
     if (raw == null) return false;
@@ -217,5 +286,12 @@ class AuthRepository extends StateNotifier<AuthState> {
 }
 
 final authRepositoryProvider = StateNotifierProvider<AuthRepository, AuthState>((ref) {
+  if (ref.read(appShellProvider) == AppShell.androidApp) {
+    return AuthRepository(
+      authClient: CognitoAuthClient(rotateRefreshTokens: true),
+      tokenStore: SecureTokenStore(),
+      rollingSession: true,
+    );
+  }
   return AuthRepository();
 });

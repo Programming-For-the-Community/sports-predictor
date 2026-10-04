@@ -6,6 +6,7 @@ locals {
   raw_bucket_name         = "${var.project}-raw-data-lake-${var.account_id}"
   model_artifacts_bucket  = "${var.project}-model-artifacts-${var.account_id}"
   frontend_bucket         = "${var.project}-frontend-${var.account_id}"
+  mobile_releases_bucket  = "${var.project}-mobile-releases-${var.account_id}"
   entities_table          = "${var.project}-entities"
   events_table            = "${var.project}-events"
   player_game_stats_table = "${var.project}-player-game-stats"

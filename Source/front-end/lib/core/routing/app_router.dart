@@ -15,6 +15,9 @@ import 'app_routes.dart';
 import '../../features/auth/login_page.dart';
 import '../../features/auth/splash_page.dart';
 import '../../features/home/home_page.dart';
+import '../../features/mobile/settings_pages.dart';
+import '../../features/mobile/widget_setup_page.dart';
+import '../mobile/widget_data.dart';
 import '../../features/events/event_detail_page.dart';
 import '../../features/events/event_list_page.dart';
 import '../../features/events/f1_event_detail_page.dart';
@@ -120,6 +123,16 @@ final appRouterProvider = Provider<GoRouter>((ref) {
       GoRoute(path: AppRoutes.login, builder: (context, state) => const LoginPage()),
       GoRoute(path: AppRoutes.splash, builder: (context, state) => const SplashPage()),
       GoRoute(path: AppRoutes.home, builder: (context, state) => const HomePage()),
+      GoRoute(path: AppRoutes.settings, builder: (context, state) => const SettingsPage()),
+      GoRoute(path: AppRoutes.notificationSettings, builder: (context, state) => const NotificationSettingsPage()),
+      GoRoute(path: AppRoutes.appUpdates, builder: (context, state) => const AppUpdatesPage()),
+      GoRoute(
+        path: AppRoutes.widgetSetupPath,
+        builder: (context, state) => WidgetSetupPage(
+          widgetId: int.parse(state.uri.queryParameters['id']!),
+          kind: HomeWidgetKind.values.byName(state.uri.queryParameters['kind']!),
+        ),
+      ),
       ShellRoute(
         builder: (context, state, child) {
           final sportId = state.pathParameters['sport']!;
