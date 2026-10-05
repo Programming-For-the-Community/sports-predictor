@@ -249,6 +249,29 @@ void main() {
     expect(finished, isTrue);
   });
 
+  group('Widget setup offers', () {
+    Future<void> pumpSetup(WidgetTester tester, HomeWidgetKind kind) => _pump(tester, WidgetSetupPage(widgetId: 5, kind: kind), [
+          ..._overrides(shell: AppShell.androidApp),
+          widgetHostProvider.overrideWithValue(_FakeWidgetHost()),
+        ]);
+
+    testWidgets('player props only for the sports that have them', (tester) async {
+      await pumpSetup(tester, HomeWidgetKind.picksAndProps);
+
+      expect(find.text('NFL'), findsOneWidget);
+      expect(find.text('NBA'), findsOneWidget);
+      expect(find.text('PGA'), findsNothing);
+      expect(find.text('F1'), findsNothing);
+    });
+
+    testWidgets('the wide accuracy widget only for team sports', (tester) async {
+      await pumpSetup(tester, HomeWidgetKind.accuracyWide);
+
+      expect(find.text('NFL'), findsOneWidget);
+      expect(find.text('PGA'), findsNothing);
+    });
+  });
+
   group('Widget setup when something fails', () {
     Future<({_FakeWidgetHost host, bool Function() finished})> pumpSetup(WidgetTester tester, {required bool failRedraw}) async {
       final host = _FakeWidgetHost(failRedraw: failRedraw);

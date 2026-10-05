@@ -7,8 +7,8 @@ import android.widget.RemoteViews
 import com.professorchaos0802.sportspredictor.R
 import es.antonborri.home_widget.HomeWidgetProvider
 
-/** One sport's most confident picks for its next game day, tournament or race. */
-class TopPicksWidget : HomeWidgetProvider() {
+/** The player projections the model has been closest on for one sport's next game day. */
+class TopPropsWidget : HomeWidgetProvider() {
     override fun onUpdate(
         context: Context,
         appWidgetManager: AppWidgetManager,
@@ -21,16 +21,16 @@ class TopPicksWidget : HomeWidgetProvider() {
     }
 
     private fun render(context: Context, widgetData: SharedPreferences, widgetId: Int): RemoteViews {
-        val views = RemoteViews(context.packageName, R.layout.widget_top_picks)
+        val views = RemoteViews(context.packageName, R.layout.widget_top_props)
         val sport = widgetData.sportFor(widgetId)
         val data = sport?.let { widgetData.json("picks_$it") }
         views.openOnTap(context, R.id.widget_root, data?.optString("route")?.takeIf { it.isNotEmpty() })
-        views.bindPicksHeader(context.getString(R.string.widget_picks_label), data)
+        views.bindPicksHeader(context.getString(R.string.widget_props_label), data)
 
-        val picks = data?.optJSONArray("picks")
-        val message = picksMessage(context, sport, data, picks, R.string.widget_loading)
+        val props = data?.optJSONArray("props")
+        val message = picksMessage(context, sport, data, props, R.string.widget_props_none)
         views.bindPicksMessage(message)
-        views.bindPicks(pickRows, if (message == null) picks else null)
+        views.bindProps(context, propRows, if (message == null) props else null)
         return views
     }
 }

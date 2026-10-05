@@ -4,6 +4,15 @@
     <string name="widget_accuracy_description">How often the win-probability model has picked the winner this season</string>
     <string name="widget_picks_label">Today\'s top picks</string>
     <string name="widget_picks_description">The model\'s most confident picks for one sport\'s next games</string>
+    <string name="widget_accuracy_wide_label">Model accuracy and average miss</string>
+    <string name="widget_accuracy_wide_description">Winner accuracy by confidence level, with the average miss on score margin and team scores</string>
+    <string name="widget_by_confidence">By confidence</string>
+    <string name="widget_average_miss">Average miss</string>
+    <string name="widget_props_label">Top player props</string>
+    <string name="widget_props_description">The player projections the model has been closest on this season</string>
+    <string name="widget_props_none">No player props yet</string>
+    <string name="widget_both_label">Top picks and player props</string>
+    <string name="widget_both_description">The model\'s most confident winners and its closest player projections</string>
     <string name="widget_choose_sport">Tap to choose a sport</string>
     <string name="widget_loading">Open the app to load</string>
 </resources>

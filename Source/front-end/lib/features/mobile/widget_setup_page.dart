@@ -9,6 +9,7 @@ import '../../core/models/sport_config.dart';
 import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_text_styles.dart';
 import '../../core/widgets/page_glow.dart';
+import '../../static/prop_benchmarks.dart';
 import 'mobile_panel.dart';
 
 final widgetHostProvider = Provider<WidgetHost>((ref) => const DeviceWidgetHost());
@@ -57,9 +58,17 @@ class _WidgetSetupPageState extends ConsumerState<WidgetSetupPage> {
     }
   }
 
+  /// The wide accuracy widget lists the score models only team sports have.
+  bool _offers(SportConfig sport) => switch (widget.kind) {
+        HomeWidgetKind.accuracy => sport.hasPerformanceTab,
+        HomeWidgetKind.accuracyWide => sport.hasPerformanceTab && sport.eventShape == EventShape.headToHead,
+        HomeWidgetKind.topPicks => true,
+        HomeWidgetKind.topProps || HomeWidgetKind.picksAndProps => propStatsBySport.containsKey(sport.id),
+      };
+
   @override
   Widget build(BuildContext context) {
-    final sports = kSports.where((s) => s.active && (widget.kind == HomeWidgetKind.topPicks || s.hasPerformanceTab)).toList();
+    final sports = kSports.where((s) => s.active && _offers(s)).toList();
     return Scaffold(
       backgroundColor: AppColors.bg,
       body: Stack(

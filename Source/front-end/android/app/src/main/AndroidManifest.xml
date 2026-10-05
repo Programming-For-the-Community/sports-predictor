@@ -84,6 +84,42 @@
                 android:resource="@xml/top_picks_widget_info"/>
         </receiver>
 
+        <receiver
+            android:name=".widgets.TopPropsWidget"
+            android:label="@string/widget_props_label"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE"/>
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/top_props_widget_info"/>
+        </receiver>
+
+        <receiver
+            android:name=".widgets.PicksAndPropsWidget"
+            android:label="@string/widget_both_label"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE"/>
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/picks_and_props_widget_info"/>
+        </receiver>
+
+        <receiver
+            android:name=".widgets.ModelAccuracyWideWidget"
+            android:label="@string/widget_accuracy_wide_label"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE"/>
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/model_accuracy_wide_widget_info"/>
+        </receiver>
+
         <!-- ota_update: serves the downloaded APK to the system installer. -->
         <provider
             android:name="sk.fourq.otaupdate.OtaUpdateFileProvider"

@@ -185,6 +185,23 @@ class TestBuildRecords:
         assert names == {"win-probability"}
 
 
+class TestPlayerMisses:
+    _CARDS = [{"model_name": "score-margin", "version": 6, "mae": 10.8}, {"model_name": "player-prop-rushing-yards", "version": 3, "mae": 20.0}]
+
+    def _records(self):
+        events = [_event(str(week), 27, 20, week=week) for week in (1, 2, 3)]
+        rows = {e["event_key"]: _rows() + [_row("MODEL#player-prop-rushing-yards#v3#PLAYER#rb", {"value": 90.0})] for e in events}
+        stats = {e["event_key"]: {"rb": {"rushing_yards": 100}} for e in events}
+        document = head_to_head.build_head_to_head_scorecard("nfl", 2026, events, rows, stats, self._CARDS)
+        return {r["model_name"]: r for r in document["models"]}
+
+    def test_each_players_own_miss_is_published_on_prop_models_only(self):
+        records = self._records()
+
+        assert records["player-prop-rushing-yards"]["entity_misses"] == {"rb": {"value": 10.0, "n": 3}}
+        assert "entity_misses" not in records["score-margin"]
+
+
 def test_build_head_to_head_scorecard_marks_the_period_kind_as_week():
     document = head_to_head.build_head_to_head_scorecard("nfl", 2026, [], {}, {}, [])
 

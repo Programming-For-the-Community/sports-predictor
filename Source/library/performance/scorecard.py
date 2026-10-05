@@ -33,7 +33,8 @@ over the predictions it made), for the per-version chart.
 
 A record built with an `entity_type` also carries `best`: the teams or players
 the model has been most accurate on (see _best). Each sample names the
-entities it counts toward in `entities`.
+entities it counts toward in `entities`. An amount record built with
+`entity_misses` also carries every such entity's own average miss.
 """
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -44,6 +45,9 @@ BEST_COUNT = 5
 # An entity needs this many graded predictions to rank -- applied once any
 # entity has reached it, so the first weeks of a season still have a list.
 BEST_MIN_SAMPLE = 3
+# An entity needs this many graded predictions for its own average miss to be
+# published (see _entity_misses).
+ENTITY_MISS_MIN_SAMPLE = 3
 
 # (tag, minimum edge over a coin flip) -- the same tiers ConfidencePill in
 # the app's game cards uses (edge = |win probability - 0.5|), so the two
@@ -232,14 +236,15 @@ def _bias(samples: list["AmountSample"]) -> float | None:
 def amount_record(
     model_name: str, version: int | None, samples: list[AmountSample], at_training: float | None,
     margin_of_error: float | None, count_noun: str | None = None, open_period: Period | None = None,
-    entity_type: str | None = None, require_recorded_stat: bool = False,
+    entity_type: str | None = None, require_recorded_stat: bool = False, entity_misses: bool = False,
 ) -> dict:
     """`margin_of_error` is the model's usual miss (its mean absolute error at
     training). Without one -- an older model card -- the season's own average
     miss stands in for it. `require_recorded_stat` ranks only entities that
     recorded the stat in at least half their graded games -- for a rare stat
     like sacks, a player who never records one is otherwise "most accurate"
-    just because we predicted almost nothing for him."""
+    just because we predicted almost nothing for him. `entity_misses` adds
+    each entity's own average miss (see _entity_misses)."""
     record = _base(model_name, version, KIND_AMOUNT, BAND_PREDICTED_AMOUNT, count_noun)
     record.update(_headline(samples, _miss, open_period))
     avg_miss = record["season"]["value"]
@@ -255,7 +260,23 @@ def amount_record(
     if entity_type is not None:
         score = _avg_miss_if_recorded if require_recorded_stat else _avg_miss
         _put_best(record, "best", _best(samples, score, entity_type, lower_is_better=True))
+    if entity_misses:
+        record["entity_misses"] = _entity_misses(samples)
     return record
+
+
+def _entity_misses(samples: list[AmountSample]) -> dict[str, dict]:
+    """{entity_id: {"value": average miss, "n": graded predictions}} for every
+    entity with at least ENTITY_MISS_MIN_SAMPLE graded predictions."""
+    by_entity: dict[str, list[AmountSample]] = {}
+    for sample in samples:
+        for entity in sample.entities:
+            by_entity.setdefault(entity, []).append(sample)
+    return {
+        entity: {"value": round(_avg_miss(members), 3), "n": len(members)}
+        for entity, members in sorted(by_entity.items())
+        if len(members) >= ENTITY_MISS_MIN_SAMPLE
+    }
 
 
 def _miss(sample: AmountSample) -> float:

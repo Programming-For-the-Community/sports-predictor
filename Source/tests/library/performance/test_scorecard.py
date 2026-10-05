@@ -260,6 +260,28 @@ class TestBest:
         assert "best" not in scorecard.pick_record("win-probability", 9, [_pick(WK1, True)], None)
 
 
+class TestEntityMisses:
+    def test_each_entity_gets_its_own_average_miss_and_graded_count(self):
+        samples = [AmountSample(p, 250, 250 + miss, ("qb",)) for p, miss in ((WK1, 30), (WK2, -60), (WK3, 15))]
+        samples += [AmountSample(p, 90, 100, ("rb",)) for p in (WK1, WK2, WK3)]
+
+        record = scorecard.amount_record("player-prop-passing-yards", 4, samples, 50.0, 50.0, entity_type="player", entity_misses=True)
+
+        assert record["entity_misses"] == {"qb": {"value": 35.0, "n": 3}, "rb": {"value": 10.0, "n": 3}}
+
+    def test_an_entity_below_the_minimum_sample_is_left_out(self):
+        samples = [AmountSample(p, 90, 100, ("two-games",)) for p in (WK1, WK2)]
+
+        record = scorecard.amount_record("player-prop-rushing-yards", 4, samples, 20.0, 20.0, entity_type="player", entity_misses=True)
+
+        assert record["entity_misses"] == {}
+
+    def test_not_published_unless_asked_for(self):
+        samples = [AmountSample(p, 90, 100, ("rb",)) for p in (WK1, WK2, WK3)]
+
+        assert "entity_misses" not in scorecard.amount_record("player-prop-rushing-yards", 4, samples, 20.0, 20.0, entity_type="player")
+
+
 class TestVersionHistory:
     def test_history_lists_every_finished_period_with_the_version_that_made_it(self):
         weeks = [Period(f"2026-{w:02d}", f"Wk {w}") for w in range(1, 9)]

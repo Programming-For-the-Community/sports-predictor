@@ -20,45 +20,6 @@
         android:letterSpacing="0.06"/>
 
     <TextView
-        android:id="@+id/acc_big"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="4dp"
-        android:text="68%"
-        android:textColor="@color/widget_ink"
-        android:textSize="30sp"
-        android:textStyle="bold"/>
-
-    <TextView
-        android:id="@+id/acc_season"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:maxLines="1"
-        android:text="right this season · 412 games"
-        android:textColor="@color/widget_ink_sub"
-        android:textSize="11sp"/>
-
-    <TextView
-        android:id="@+id/acc_last"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="6dp"
-        android:maxLines="1"
-        android:text="Wk 5: 75% (9/12)"
-        android:textColor="@color/widget_ink"
-        android:textSize="12sp"/>
-
-    <TextView
-        android:id="@+id/acc_trend"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:fontFamily="monospace"
-        android:maxLines="1"
-        android:text="▃▅▄▇"
-        android:textColor="@color/widget_cyan"
-        android:textSize="16sp"/>
-
-    <TextView
         android:id="@+id/acc_message"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
@@ -67,4 +28,190 @@
         android:textColor="@color/widget_ink_sub"
         android:textSize="12sp"
         android:visibility="gone"/>
+
+    <LinearLayout
+        android:id="@+id/acc_body"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical">
+
+        <TextView
+            android:id="@+id/acc_big"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:maxLines="1"
+            android:text="68%"
+            android:textColor="@color/widget_ink"
+            android:textSize="30sp"
+            android:layout_marginTop="4dp"
+            android:textStyle="bold"/>
+
+        <TextView
+            android:id="@+id/acc_season"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:maxLines="1"
+            android:text="right this season · 77"
+            android:textColor="@color/widget_ink_sub"
+            android:textSize="11sp"/>
+
+        <TextView
+            android:id="@+id/acc_last"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:maxLines="1"
+            android:text="Wk 5: 75%"
+            android:textColor="@color/widget_ink"
+            android:textSize="12sp"
+            android:layout_marginTop="4dp"/>
+
+        <LinearLayout
+            android:id="@+id/acc_bands"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:orientation="vertical">
+
+            <FrameLayout
+                android:layout_width="match_parent"
+                android:layout_height="1dp"
+                android:background="@color/widget_border"/>
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="6dp"
+                android:letterSpacing="0.09"
+                android:maxLines="1"
+                android:text="@string/widget_by_confidence"
+                android:textAllCaps="true"
+                android:textColor="@color/widget_ink_sub"
+                android:textSize="9sp"
+                android:textStyle="bold"/>
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="3dp"
+                android:orientation="horizontal">
+
+                <LinearLayout
+                    android:id="@+id/acc_band1"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:layout_marginStart="0dp"
+                    android:orientation="vertical">
+
+                    <TextView
+                        android:id="@+id/acc_band1_tag"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:letterSpacing="0.08"
+                        android:maxLines="1"
+                        android:text="HIGH"
+                        android:textColor="@color/widget_ink_sub"
+                        android:textSize="9sp"/>
+
+                    <TextView
+                        android:id="@+id/acc_band1_pct"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:fontFamily="monospace"
+                        android:maxLines="1"
+                        android:text="81%"
+                        android:textColor="@color/widget_ink"
+                        android:textSize="13sp"/>
+
+                    <ProgressBar
+                        android:id="@+id/acc_band1_bar"
+                        style="?android:attr/progressBarStyleHorizontal"
+                        android:layout_width="match_parent"
+                        android:layout_height="4dp"
+                        android:layout_marginTop="2dp"
+                        android:max="100"
+                        android:progress="81"
+                        android:progressDrawable="@drawable/widget_pick_bar"/>
+                </LinearLayout>
+
+                <LinearLayout
+                    android:id="@+id/acc_band2"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:layout_marginStart="8dp"
+                    android:orientation="vertical">
+
+                    <TextView
+                        android:id="@+id/acc_band2_tag"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:letterSpacing="0.08"
+                        android:maxLines="1"
+                        android:text="MED"
+                        android:textColor="@color/widget_ink_sub"
+                        android:textSize="9sp"/>
+
+                    <TextView
+                        android:id="@+id/acc_band2_pct"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:fontFamily="monospace"
+                        android:maxLines="1"
+                        android:text="66%"
+                        android:textColor="@color/widget_ink"
+                        android:textSize="13sp"/>
+
+                    <ProgressBar
+                        android:id="@+id/acc_band2_bar"
+                        style="?android:attr/progressBarStyleHorizontal"
+                        android:layout_width="match_parent"
+                        android:layout_height="4dp"
+                        android:layout_marginTop="2dp"
+                        android:max="100"
+                        android:progress="66"
+                        android:progressDrawable="@drawable/widget_pick_bar"/>
+                </LinearLayout>
+
+                <LinearLayout
+                    android:id="@+id/acc_band3"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:layout_marginStart="8dp"
+                    android:orientation="vertical">
+
+                    <TextView
+                        android:id="@+id/acc_band3_tag"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:letterSpacing="0.08"
+                        android:maxLines="1"
+                        android:text="LOW"
+                        android:textColor="@color/widget_ink_sub"
+                        android:textSize="9sp"/>
+
+                    <TextView
+                        android:id="@+id/acc_band3_pct"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:fontFamily="monospace"
+                        android:maxLines="1"
+                        android:text="54%"
+                        android:textColor="@color/widget_ink"
+                        android:textSize="13sp"/>
+
+                    <ProgressBar
+                        android:id="@+id/acc_band3_bar"
+                        style="?android:attr/progressBarStyleHorizontal"
+                        android:layout_width="match_parent"
+                        android:layout_height="4dp"
+                        android:layout_marginTop="2dp"
+                        android:max="100"
+                        android:progress="54"
+                        android:progressDrawable="@drawable/widget_pick_bar"/>
+                </LinearLayout>
+            </LinearLayout>
+        </LinearLayout>
+    </LinearLayout>
 </LinearLayout>

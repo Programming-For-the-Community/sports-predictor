@@ -114,7 +114,8 @@ def build_records(samples_by_model: dict[str, list], model_cards: list[dict], op
     """One record per currently-promoted model -- a promoted model with no
     graded predictions yet still gets one (the UI shows "no graded games yet").
     `open_period` is the week still being played, kept out of the week-by-week
-    figures (see scorecard._by_period)."""
+    figures (see scorecard._by_period). A player-prop record also carries each
+    player's own average miss -- the app's player-props widgets rank by it."""
     records = []
     for card in sorted(model_cards, key=lambda c: c["model_name"]):
         name = card["model_name"]
@@ -131,6 +132,7 @@ def build_records(samples_by_model: dict[str, list], model_cards: list[dict], op
             records.append(scorecard.amount_record(
                 name, card.get("version"), samples, mae, mae, open_period=open_period,
                 entity_type="player" if is_prop else "team", require_recorded_stat=is_prop,
+                entity_misses=is_prop,
             ))
     return records
 

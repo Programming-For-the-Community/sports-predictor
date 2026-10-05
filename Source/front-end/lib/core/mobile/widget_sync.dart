@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 import 'package:home_widget/home_widget.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../../static/prop_benchmarks.dart';
 import '../api/api_routes.dart';
 import '../models/event.dart';
 import '../models/event_status.dart';
@@ -62,16 +63,17 @@ class DeviceWidgetHost implements WidgetHost {
   }
 }
 
-/// Accuracy moves once a day (the model-performance job); picks move when
-/// predictions are written.
+/// Accuracy moves once a day (the model-performance job). Picks follow the
+/// day's games as they start and reach halftime, so they refresh on every background run -- the interval
+/// sits just under the job's own so a run a few seconds early still counts.
 const accuracyRefreshInterval = Duration(hours: 6);
-const picksRefreshInterval = Duration(hours: 2);
+const picksRefreshInterval = Duration(minutes: 55);
 
 /// predict-read has no batch route, so a busy day (NCAA FB Saturday) is
-/// capped at this many prediction calls.
+/// capped at this many prediction calls (see gamesToPredict for which games).
 const maxPredictionRequests = 25;
 
-String _refreshedKey(HomeWidgetKind kind, String sportId) => 'widget_refreshed_${kind.name}_$sportId';
+String _refreshedKey(HomeWidgetKind kind, String sportId) => 'widget_refreshed_${kind.dataKey(sportId)}';
 
 /// Refreshes the data behind every placed widget whose copy is older than
 /// its interval (or all of them with [force]), then redraws.
@@ -83,8 +85,11 @@ Future<void> refreshWidgets({
   bool force = false,
 }) async {
   final wanted = await _placedSports(host);
+  // Kinds that share a stored copy refresh it once.
+  final refreshed = <String>{};
   for (final MapEntry(key: kind, value: sportIds) in wanted.entries) {
     for (final sportId in sportIds) {
+      if (!refreshed.add(kind.dataKey(sportId))) continue;
       if (force || _isStale(prefs, kind, sportId, now)) await _refreshOne(host, get, prefs, kind, sportId, now);
     }
     try {
@@ -107,7 +112,7 @@ Future<Map<HomeWidgetKind, Set<String>>> _placedSports(WidgetHost host) async {
 }
 
 bool _isStale(SharedPreferences prefs, HomeWidgetKind kind, String sportId, DateTime now) {
-  final interval = kind == HomeWidgetKind.accuracy ? accuracyRefreshInterval : picksRefreshInterval;
+  final interval = kind.showsAccuracy ? accuracyRefreshInterval : picksRefreshInterval;
   final last = DateTime.tryParse(prefs.getString(_refreshedKey(kind, sportId)) ?? '');
   return last == null || now.difference(last) >= interval;
 }
@@ -125,18 +130,17 @@ Future<void> _refreshOne(WidgetHost host, JsonGetter get, SharedPreferences pref
 /// One widget's data. A sport with nothing to show gets an `empty` message
 /// the widget displays instead.
 Future<Map<String, Object?>> fetchWidgetData(HomeWidgetKind kind, SportConfig sport, JsonGetter get, {required DateTime now}) async {
-  final data = switch (kind) {
-    HomeWidgetKind.accuracy => buildAccuracyData(
-        sport,
-        ModelPerformance.fromJson(await get(ApiRoutes.modelPerformance(sport.id)) as Map<String, dynamic>),
-        now: now,
-      ),
-    HomeWidgetKind.topPicks => await _fetchPicks(sport, get, now),
-  };
+  final data = kind.showsAccuracy
+      ? buildAccuracyData(
+          sport,
+          ModelPerformance.fromJson(await get(ApiRoutes.modelPerformance(sport.id)) as Map<String, dynamic>),
+          now: now,
+        )
+      : await _fetchPicks(sport, get, now);
   return data ??
       {
         'sport': sport.displayName,
-        'empty': kind == HomeWidgetKind.accuracy ? 'No graded games yet this season' : 'Nothing scheduled',
+        'empty': kind.showsAccuracy ? 'No graded games yet this season' : 'Nothing scheduled',
         'route': kind.routeFor(sport.id),
         'updated': now.toIso8601String(),
       };
@@ -177,13 +181,31 @@ Future<Map<String, Object?>?> _headToHeadPicks(SportConfig sport, List<Map<Strin
   final events = eventsJson.map(SportEvent.fromJson).toList();
   final day = nextGameDay(events.map((e) => e.eventDate), today);
   if (day == null) return null;
-  final dayEvents = events.where((e) => e.eventDate == day).take(maxPredictionRequests).toList();
+  final dayEvents = gamesToPredict(sport, events.where((e) => e.eventDate == day), now, limit: maxPredictionRequests);
   final predictions = <String, EventPrediction>{};
   for (final event in dayEvents) {
     final prediction = await _predictionOrNull(sport, event.eventId, get);
     if (prediction != null) predictions[event.eventId] = prediction;
   }
-  return buildHeadToHeadPicks(sport, day, dayEvents, predictions, todayEastern: today, now: now);
+  final props = propStatsBySport.containsKey(sport.id) ? await _topProps(sport, dayEvents, predictions, get) : null;
+  return buildHeadToHeadPicks(sport, day, dayEvents, predictions, todayEastern: today, now: now, props: props);
+}
+
+/// A failed scorecard read leaves the props empty rather than losing the picks.
+Future<List<Map<String, Object?>>> _topProps(
+  SportConfig sport,
+  List<SportEvent> events,
+  Map<String, EventPrediction> predictions,
+  JsonGetter get,
+) async {
+  if (predictions.values.every((prediction) => prediction.leaders == null)) return const [];
+  try {
+    final performance = ModelPerformance.fromJson(await get(ApiRoutes.modelPerformance(sport.id)) as Map<String, dynamic>);
+    return buildTopProps(sport, events, predictions, performance);
+  } catch (error) {
+    debugPrint('[Widgets] ${sport.id} player props failed: $error');
+    return const [];
+  }
 }
 
 /// One game's failed prediction is skipped rather than failing the whole day.

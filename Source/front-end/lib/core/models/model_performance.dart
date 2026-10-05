@@ -128,6 +128,7 @@ class ModelPerformanceRecord {
     this.best,
     this.history = const [],
     this.versions = const [],
+    this.entityMisses = const {},
   });
 
   static const kindPick = 'pick';
@@ -172,6 +173,10 @@ class ModelPerformanceRecord {
   /// Each version's own figure over the predictions it made, oldest first.
   final List<PerformanceWindow> versions;
 
+  /// Player-prop models only: each player's own average miss this season,
+  /// keyed by entity id. Only players with enough graded games are listed.
+  final Map<String, PerformanceWindow> entityMisses;
+
   bool get isPick => kind == kindPick;
 
   /// A number model (average miss); every other kind is graded right/wrong (accuracy).
@@ -197,6 +202,8 @@ class ModelPerformanceRecord {
             .toList(),
         history: _windows(json['history']),
         versions: _windows(json['versions']),
+        entityMisses: (json['entity_misses'] as Map<String, dynamic>? ?? {})
+            .map((entityId, miss) => MapEntry(entityId, PerformanceWindow.fromJson(miss as Map<String, dynamic>))),
       );
 }
 
