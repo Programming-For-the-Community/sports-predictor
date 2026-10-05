@@ -17,8 +17,11 @@ val keyProperties = Properties().apply {
 
 android {
     namespace = "com.professorchaos0802.sportspredictor"
-    compileSdk = flutter.compileSdkVersion
-    ndkVersion = flutter.ndkVersion
+    // The highest SDK/NDK the plugins compile against (flutter_secure_storage
+    // and ota_update need SDK 36; most plugins pin NDK 27). Both are
+    // backward compatible -- minSdk below still sets the oldest Android.
+    compileSdk = 36
+    ndkVersion = "27.0.12077973"
 
     compileOptions {
         // flutter_local_notifications needs java.time on older Android versions.

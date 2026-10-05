@@ -1,0 +1,6 @@
+# Notes for the next Android app update, shown to users in the update
+# notification and Settings > App updates (.github/workflows/mobile_hosting.yml).
+# Short, plain sentences about what's new or fixed -- no technical details;
+# keep it brief, it's read on a phone screen.
+# Lines starting with # are ignored; 200 characters max.
+Live football now shows who has the ball and the down. Fixed widget setup, bracket scrolling and leader cards.

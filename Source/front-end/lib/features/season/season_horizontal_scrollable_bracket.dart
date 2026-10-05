@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 /// One parent widget holding both the scrollable bracket and its
@@ -115,7 +116,13 @@ class _HorizontalScrollableBracketState extends State<HorizontalScrollableBracke
             : null;
 
         final viewportCap = (MediaQuery.sizeOf(context).height * _maxPaneHeightFraction).clamp(_minPaneHeight, _maxPaneHeight);
-        if (widget.height <= viewportCap) {
+        // On a phone or tablet (the app, or a mobile browser) a nested
+        // vertical pane traps every swipe: it fills most of the screen, so
+        // the page itself can't be scrolled to reveal the pane's bottom.
+        // Touch scrolls the bracket sideways directly, so the pinned bar
+        // isn't needed there -- the whole bracket renders inline.
+        final touchScreen = defaultTargetPlatform == TargetPlatform.android || defaultTargetPlatform == TargetPlatform.iOS;
+        if (touchScreen || widget.height <= viewportCap) {
           return Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [content, if (bar != null) ...[const SizedBox(height: _barGap), bar]],

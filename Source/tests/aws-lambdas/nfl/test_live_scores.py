@@ -139,6 +139,57 @@ class TestExtractLiveState:
         assert state["live"] is False
         assert state["completed"] is True
 
+    @staticmethod
+    def _with_situation(espn_event: dict, situation) -> dict:
+        competition = espn_event["competitions"][0]
+        competition["competitors"][0]["id"] = "16"
+        competition["competitors"][1]["id"] = "15"
+        competition["situation"] = situation
+        return espn_event
+
+    def test_a_live_game_carries_possession_and_down(self):
+        # Shape captured from ESPN's live NFL scoreboard, 2026-10-04 (MIA @ MIN).
+        espn_event = self._with_situation(
+            _espn_event("1", state="in", completed=False, detail="3:56 - 1st", home_score="10", away_score="7"),
+            {"possession": "15", "shortDownDistanceText": "3rd & 4", "possessionText": "MIN 48", "isRedZone": False,
+             "down": 3, "distance": 4, "yardLine": 48},
+        )
+
+        state = live_scores._extract_live_state(espn_event)
+
+        assert state["situation"] == {"possession": "away", "down_distance": "3rd & 4", "field_position": "MIN 48", "red_zone": False}
+
+    def test_red_zone_for_the_home_team(self):
+        espn_event = self._with_situation(
+            _espn_event("1", state="in", completed=False, detail="8:42 - 3rd", home_score="24", away_score="17"),
+            {"possession": "16", "shortDownDistanceText": "1st & Goal", "possessionText": "JAX 6", "isRedZone": True},
+        )
+
+        situation = live_scores._extract_live_state(espn_event)["situation"]
+
+        assert situation["possession"] == "home"
+        assert situation["red_zone"] is True
+
+    def test_no_situation_at_a_break_or_after_the_game(self):
+        halftime = _espn_event("1", state="in", completed=False, detail="Halftime", home_score="10", away_score="10")
+        final = self._with_situation(
+            _espn_event("1", state="post", completed=True, detail="Final", home_score="24", away_score="17"),
+            {"possession": "16", "shortDownDistanceText": "1st & 10"},
+        )
+
+        assert "situation" not in live_scores._extract_live_state(halftime)
+        assert "situation" not in live_scores._extract_live_state(final)
+
+    def test_an_unknown_possession_team_keeps_the_down_but_no_ball(self):
+        espn_event = self._with_situation(
+            _espn_event("1", state="in", completed=False, detail="2:00 - 2nd", home_score="3", away_score="0"),
+            {"possession": "999", "shortDownDistanceText": "2nd & 7", "possessionText": 39, "isRedZone": "no"},
+        )
+
+        assert live_scores._extract_live_state(espn_event)["situation"] == {
+            "possession": None, "down_distance": "2nd & 7", "field_position": None, "red_zone": False,
+        }
+
 
 class TestRefresh:
     def test_no_candidates_never_calls_espn(self):

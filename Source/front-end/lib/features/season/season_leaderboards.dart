@@ -46,7 +46,7 @@ class SeasonLeaderboards extends StatelessWidget {
     }
     return LayoutBuilder(
       builder: (context, constraints) {
-        final width = cardWidth(320, constraints.maxWidth);
+        final width = fillCardWidth(320, constraints.maxWidth, spacing: 20);
         return Wrap(
           spacing: 20,
           runSpacing: 20,
