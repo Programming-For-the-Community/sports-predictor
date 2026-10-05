@@ -6,17 +6,19 @@ Formerly `NFL_API.md` -- renamed and expanded to cover every onboarded sport und
 
 ## Base URL
 
-`https://<project>.<domain>` -- the CloudFront distribution's own domain (`local.domain` in `Terraform/locals.tf`, exposed as the `api_endpoint` Terraform output). CloudFront routes `/nfl/*`, `/ncaafb/*`, `/nba/*`, `/ncaambb/*`, `/pga/*`, `/f1/*` to API Gateway's own custom domain (`Terraform/api-gateway-domain.tf` -- not the raw `execute-api` hostname, which is disabled entirely) and everything else to the Flutter frontend's S3 bucket (`Terraform/cloudfront.tf`), so the frontend and API share one origin -- no CORS is involved in production traffic.
+`https://<project>.<domain>` -- the CloudFront distribution's own domain (`local.domain` in `Terraform/locals.tf`, exposed as the `api_endpoint` Terraform output). CloudFront routes `/nfl/*`, `/ncaafb/*`, `/nba/*`, `/ncaambb/*`, `/pga/*`, `/f1/*` to API Gateway's own custom domain (`Terraform/api-gateway-domain.tf` -- not the raw `execute-api` hostname, which is disabled entirely) `/app/*` to the Android APK's S3 bucket (see "Android APK" at the end), and everything else to the Flutter frontend's S3 bucket (`Terraform/cloudfront.tf`), so the frontend and API share one origin -- no CORS is involved in production traffic.
 
 ## Authentication
 
 Every route below requires a valid Cognito-issued JWT. API Gateway validates it via a `COGNITO_USER_POOLS` authorizer (`aws_api_gateway_authorizer.cognito`, `Terraform/api-gateway.tf`) before any Lambda ever runs -- no Lambda checks auth itself.
 
-Send the access token as the raw `Authorization` header value, **not** prefixed with `Bearer `:
+Send the **ID token** as the raw `Authorization` header value, **not** prefixed with `Bearer ` -- a `COGNITO_USER_POOLS` authorizer on a method with no `authorization_scopes` (true of every route here) validates ID tokens:
 
 ```
-Authorization: <access_token>
+Authorization: <id_token>
 ```
+
+Tokens from either Cognito app client are accepted -- `web` (the website) and `mobile` (the Android app); the authorizer checks the user pool, not the client.
 
 A missing or invalid token gets rejected by API Gateway directly (401/403) -- it never reaches a Lambda.
 
@@ -177,6 +179,12 @@ Cache-only -- never triggers a live ESPN call itself; served entirely from what 
       "away_score": 14,
       "player_stats": {
         "3139477": {"passing_yards": 210, "passing_touchdowns": 2}
+      },
+      "situation": {
+        "possession": "home",
+        "down_distance": "3rd & 4",
+        "field_position": "MIN 48",
+        "red_zone": false
       }
     }
   }
@@ -184,6 +192,8 @@ Cache-only -- never triggers a live ESPN call itself; served entirely from what 
 ```
 
 `player_stats` is only present for an event currently `live` -- best-effort per-player live stats for that event's predicted leaders, omitted (not `null`) if that fetch failed this tick. `events` is `{}` if nothing is currently in a live-poll window.
+
+`situation` (football only) is ESPN's live down-and-possession state, present only while the event is `live` and a play is pending -- omitted (not `null`) pre-game, at breaks, during reviews, after the game, and for every non-football sport. `possession` is `"home"`, `"away"`, or `null` when ESPN names neither team; `down_distance` and `field_position` are ESPN's own short display strings (e.g. `"1st & Goal"`, `"JAX 6"`, or just `"50"` at midfield), either may be `null`; `red_zone` is `true` inside the opponent's 20.
 
 ### `GET /nfl/predictions/events/{event_id}`
 
@@ -293,7 +303,7 @@ Same route, **different standings shape** -- reflects a 12-team CFP field instea
 
 ### `GET /ncaafb/live-scores`
 
-Identical contract to `/nfl/live-scores`.
+Identical contract to `/nfl/live-scores`, including the football `situation` block.
 
 ### `GET /ncaafb/predictions/events/{event_id}` and `.../players/{entity_id}`
 
@@ -356,7 +366,7 @@ Recomputed weekly, served from S3, same as NFL. **Genuinely different shape** --
 
 ### `GET /nba/live-scores`
 
-Identical contract to `/nfl/live-scores` -- `player_stats` keys are `points`/`rebounds`/`assists`/etc. instead of NFL's passing/rushing categories.
+Identical contract to `/nfl/live-scores` -- `player_stats` keys are `points`/`rebounds`/`assists`/etc. instead of NFL's passing/rushing categories, and there's never a `situation` block.
 
 ### `GET /nba/predictions/events/{event_id}` and `.../players/{entity_id}`
 
@@ -428,7 +438,7 @@ Recomputed **daily** (not weekly, like every other sport) -- NCAA MBB's much hig
 
 ### `GET /ncaambb/live-scores`
 
-Identical contract to `/nfl/live-scores` -- `player_stats` keys match NBA's (`points`/`rebounds`/etc.).
+Identical contract to `/nfl/live-scores` -- `player_stats` keys match NBA's (`points`/`rebounds`/etc.), and there's never a `situation` block.
 
 ### `GET /ncaambb/predictions/events/{event_id}` and `.../players/{entity_id}`
 
@@ -534,3 +544,25 @@ A usage plan throttles the whole API (all routes, all sports) to a 60 request/se
 ## CORS
 
 Production traffic never triggers a browser CORS check (frontend and API share one CloudFront origin). Every route above also has an `OPTIONS` preflight method (`authorization = "NONE"`, mock integration returning `Access-Control-Allow-Origin: *`) purely to support local frontend development, where `flutter run` serves the app from `http://localhost` while still calling the real deployed API cross-origin.
+
+## Android APK (`/app/*`)
+
+Not an API Gateway route -- CloudFront serves the APK straight from the mobile-releases S3 bucket (`Terraform/s3-mobile-releases.tf`), with no Cognito token, but only to Android user agents: a CloudFront Function (`aws_cloudfront_function.android_only`, `Terraform/cloudfront.tf`) answers `403` to everything else. The Android app sends `User-Agent: SportsPredictor-Android/<versionCode> (Linux; Android)`.
+
+### `HEAD /app/sports-predictor.apk`
+
+How the website's Get app button and the app's update check learn the current release. The object's S3 user metadata comes back as headers:
+
+| Header | Example | Meaning |
+|---|---|---|
+| `x-amz-meta-version-code` | `47` | Android versionCode; a release is newer when this is higher |
+| `x-amz-meta-version-name` | `1.0.47` | `<major>.<minor>.<versionCode>` |
+| `x-amz-meta-sha256` | `9f2c…` | Checked against the downloaded file before installing |
+| `x-amz-meta-notes` | `Live football now shows who has the ball…` | Short, user-facing release notes (`Source/front-end/RELEASE_NOTES.txt`) |
+| `x-amz-meta-source-hash` | | CI's fingerprint of the app's source, used to skip unchanged builds |
+
+A missing object is CloudFront's `403` page, never a `200`.
+
+### `GET /app/sports-predictor.apk?src=web|update&u=<username>`
+
+Downloads the APK. `src` and `u` don't change what's served (CloudFront's cache key ignores the query string) but are recorded in CloudFront's edge logs, which is how the application dashboard's "Android app" widgets attribute downloads to a user and to the website vs. the in-app updater.

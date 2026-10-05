@@ -132,10 +132,12 @@ void main() {
         tokenStore: tokens ?? _MemoryTokenStore(_tokens()),
         notifier: notifier,
         installedVersionCode: installed,
-        widgetHost: widgets ?? _FakeWidgetHost(),
-        httpClient: httpClient,
-        releaseClient: AppReleaseClient(httpClient: httpClient),
-        authClient: CognitoAuthClient(httpClient: httpClient),
+        clients: BackgroundClients(
+          widgetHost: widgets ?? _FakeWidgetHost(),
+          httpClient: httpClient,
+          releaseClient: AppReleaseClient(httpClient: httpClient),
+          authClient: CognitoAuthClient(httpClient: httpClient),
+        ),
         nowUtc: now ?? _wednesdayMorning,
       );
 

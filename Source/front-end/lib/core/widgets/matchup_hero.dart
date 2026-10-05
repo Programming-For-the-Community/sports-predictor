@@ -83,8 +83,6 @@ class MatchupHero extends StatelessWidget {
     final home = teamDisplay(sport, event.home);
     final away = teamDisplay(sport, event.away);
     final homeFavored = prediction.homeWinProbability >= 0.5;
-    final (:isLive, :isFinished, :homeLiveScore, :awayLiveScore, :homeLeading) = _liveMatchupState(liveState);
-    final situation = isLive ? liveState?.situation : null;
 
     return Container(
       padding: const EdgeInsets.all(28),
@@ -99,41 +97,7 @@ class MatchupHero extends StatelessWidget {
           return Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              Row(
-                children: [
-                  Expanded(
-                    child: _TeamColumn(
-                      color: away.primary,
-                      abbr: away.abbreviation,
-                      probability: 1 - prediction.homeWinProbability,
-                      favored: !homeFavored,
-                      predictedScore: prediction.awayScore,
-                      liveScore: awayLiveScore,
-                      leading: homeLeading == null ? null : !homeLeading,
-                      hasBall: situation?.awayHasBall ?? false,
-                    ),
-                  ),
-                  Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 16),
-                    // "@" reads as "away @ home"; away is the left column
-                    // above so this ordering matches that. This is the
-                    // only marker of which side is home/away.
-                    child: Text('@', style: AppTextStyles.sectionTitle(color: AppColors.inkMute)),
-                  ),
-                  Expanded(
-                    child: _TeamColumn(
-                      color: home.primary,
-                      abbr: home.abbreviation,
-                      probability: prediction.homeWinProbability,
-                      favored: homeFavored,
-                      predictedScore: prediction.homeScore,
-                      liveScore: homeLiveScore,
-                      leading: homeLeading,
-                      hasBall: situation?.homeHasBall ?? false,
-                    ),
-                  ),
-                ],
-              ),
+              _TeamColumns(home: home, away: away, prediction: prediction, liveState: liveState),
               if (event.venueLabel != null) ...[
                 const SizedBox(height: 12),
                 Center(child: _VenueLabel(label: event.venueLabel!)),
@@ -142,40 +106,7 @@ class MatchupHero extends StatelessWidget {
               // A plain divider -- each side's win probability is already
               // printed under its team.
               const Divider(height: 1, thickness: 1, color: AppColors.border),
-              // Live/final status (game clock, or FINAL once the game's
-              // over) is its own line, only present once live or
-              // finished -- separate from confidence, which lives with
-              // the PICK below instead of next to the game clock (that
-              // pairing read as describing the live game itself, not the
-              // model's own pre-game pick).
-              if (isLive || isFinished) ...[
-                const SizedBox(height: 12),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    isLive ? LiveStatusPill(dotOnly: compact) : FinalStatusPill(dotOnly: compact),
-                    // A finished game reads just FINAL.
-                    if (isLive && liveState!.detail != null) ...[
-                      const SizedBox(width: 8),
-                      // Flexible + wrapping -- ESPN's own detail text isn't
-                      // always a short clock ("Q3 08:14"); situational
-                      // strings ("End of 2nd Quarter", "Delayed: Weather")
-                      // can run long enough to overflow a phone-width card
-                      // otherwise.
-                      Flexible(
-                        child: Text(
-                          liveState!.detail!,
-                          style: AppTextStyles.body(color: AppColors.inkSub),
-                        ),
-                      ),
-                    ],
-                  ],
-                ),
-              ],
-              if (situation != null && situation.hasDown) ...[
-                const SizedBox(height: 6),
-                Center(child: FootballSituationText(situation: situation, separator: ' at ', textAlign: TextAlign.center)),
-              ],
+              _LiveStatus(liveState: liveState, compact: compact),
               const SizedBox(height: 24),
               Center(
                 child: Column(
@@ -208,6 +139,99 @@ class MatchupHero extends StatelessWidget {
           );
         },
       ),
+    );
+  }
+}
+
+/// Away column, "@", home column -- each team's color, name, score(s) and
+/// win probability, with the football by whichever side has the ball.
+class _TeamColumns extends StatelessWidget {
+  const _TeamColumns({required this.home, required this.away, required this.prediction, required this.liveState});
+
+  final NflTeam home;
+  final NflTeam away;
+  final EventPrediction prediction;
+  final LiveEventState? liveState;
+
+  @override
+  Widget build(BuildContext context) {
+    final homeFavored = prediction.homeWinProbability >= 0.5;
+    final (:isLive, isFinished: _, :homeLiveScore, :awayLiveScore, :homeLeading) = _liveMatchupState(liveState);
+    final situation = isLive ? liveState?.situation : null;
+    return Row(
+      children: [
+        Expanded(
+          child: _TeamColumn(
+            color: away.primary,
+            abbr: away.abbreviation,
+            probability: 1 - prediction.homeWinProbability,
+            favored: !homeFavored,
+            predictedScore: prediction.awayScore,
+            liveScore: awayLiveScore,
+            leading: homeLeading == null ? null : !homeLeading,
+            hasBall: situation?.awayHasBall ?? false,
+          ),
+        ),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          // "@" reads as "away @ home"; away is the left column above so
+          // this ordering matches that. This is the only marker of which
+          // side is home/away.
+          child: Text('@', style: AppTextStyles.sectionTitle(color: AppColors.inkMute)),
+        ),
+        Expanded(
+          child: _TeamColumn(
+            color: home.primary,
+            abbr: home.abbreviation,
+            probability: prediction.homeWinProbability,
+            favored: homeFavored,
+            predictedScore: prediction.homeScore,
+            liveScore: homeLiveScore,
+            leading: homeLeading,
+            hasBall: situation?.homeHasBall ?? false,
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+/// The LIVE pill + game clock (or just FINAL once the game's over), and for
+/// live football the down line under it. Renders nothing before kickoff.
+/// Kept apart from confidence, which belongs to the pre-game PICK below.
+class _LiveStatus extends StatelessWidget {
+  const _LiveStatus({required this.liveState, required this.compact});
+
+  final LiveEventState? liveState;
+  final bool compact;
+
+  @override
+  Widget build(BuildContext context) {
+    final state = liveState;
+    if (state == null || !(state.live || state.completed)) return const SizedBox.shrink();
+    final clock = state.live ? state.detail : null;
+    final situation = state.live ? state.situation : null;
+    return Column(
+      children: [
+        const SizedBox(height: 12),
+        Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            state.live ? LiveStatusPill(dotOnly: compact) : FinalStatusPill(dotOnly: compact),
+            if (clock != null) ...[
+              const SizedBox(width: 8),
+              // Flexible + wrapping -- ESPN's detail isn't always a short
+              // clock ("Q3 08:14"); "End of 2nd Quarter" or "Delayed:
+              // Weather" can overflow a phone-width card otherwise.
+              Flexible(child: Text(clock, style: AppTextStyles.body(color: AppColors.inkSub))),
+            ],
+          ],
+        ),
+        if (situation != null && situation.hasDown) ...[
+          const SizedBox(height: 6),
+          FootballSituationText(situation: situation, separator: ' at ', textAlign: TextAlign.center),
+        ],
+      ],
     );
   }
 }

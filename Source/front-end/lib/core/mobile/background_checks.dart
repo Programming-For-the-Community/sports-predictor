@@ -70,10 +70,7 @@ Future<void> runBackgroundChecks({
   required TokenStore tokenStore,
   required LocalNotifier notifier,
   required int installedVersionCode,
-  WidgetHost widgetHost = const DeviceWidgetHost(),
-  AppReleaseClient? releaseClient,
-  CognitoAuthClient? authClient,
-  http.Client? httpClient,
+  BackgroundClients clients = const BackgroundClients(),
   DateTime? nowUtc,
 }) async {
   // The foreground isolate may have changed settings since this isolate's
@@ -81,20 +78,30 @@ Future<void> runBackgroundChecks({
   await prefs.reload();
   final settings = NotificationSettings.read(prefs);
   if (settings.appUpdates) {
-    await _checkForUpdate(prefs, notifier, installedVersionCode, releaseClient ?? AppReleaseClient(httpClient: httpClient));
+    await _checkForUpdate(prefs, notifier, installedVersionCode, clients.release);
   }
-  final api = _BackgroundApi(
-    prefs,
-    tokenStore,
-    authClient ?? CognitoAuthClient(httpClient: httpClient, rotateRefreshTokens: true),
-    httpClient ?? http.Client(),
-  );
+  final api = _BackgroundApi(prefs, tokenStore, clients.auth, clients.httpOrDefault);
   final now = nowUtc ?? DateTime.now().toUtc();
   await _checkModelReports(prefs, notifier, settings, api, now);
   // Signed out: the widgets keep their last data.
   if (await api.idToken() != null) {
-    await refreshWidgets(host: widgetHost, get: api.getJson, prefs: prefs, now: now);
+    await refreshWidgets(host: clients.widgetHost, get: api.getJson, prefs: prefs, now: now);
   }
+}
+
+/// What the background job talks to: the network clients and the widget
+/// host. The defaults are the real ones; tests pass fakes.
+class BackgroundClients {
+  const BackgroundClients({this.widgetHost = const DeviceWidgetHost(), this.httpClient, this.releaseClient, this.authClient});
+
+  final WidgetHost widgetHost;
+  final http.Client? httpClient;
+  final AppReleaseClient? releaseClient;
+  final CognitoAuthClient? authClient;
+
+  http.Client get httpOrDefault => httpClient ?? http.Client();
+  AppReleaseClient get release => releaseClient ?? AppReleaseClient(httpClient: httpClient);
+  CognitoAuthClient get auth => authClient ?? CognitoAuthClient(httpClient: httpClient, rotateRefreshTokens: true);
 }
 
 Future<void> _checkForUpdate(SharedPreferences prefs, LocalNotifier notifier, int installedVersionCode, AppReleaseClient client) async {

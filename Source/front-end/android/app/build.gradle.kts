@@ -15,6 +15,13 @@ val keyProperties = Properties().apply {
     if (file.exists()) file.inputStream().use { load(it) }
 }
 
+// Release builds (the arm64 APK CI ships) resolve exactly the versions pinned
+// in app/gradle.lockfile; debug/profile builds for local phones and emulators
+// stay unlocked. See ../build.gradle.kts for regenerating.
+configurations.configureEach {
+    if (name.startsWith("release")) resolutionStrategy.activateDependencyLocking()
+}
+
 android {
     namespace = "com.professorchaos0802.sportspredictor"
     // The highest SDK/NDK the plugins compile against (flutter_secure_storage
@@ -59,6 +66,12 @@ android {
     buildTypes {
         release {
             signingConfig = signingConfigs.findByName("release") ?: signingConfigs.getByName("debug")
+            // R8 shrinking + obfuscation of the Java/Kotlin code. Classes the
+            // manifest names (activities, widget providers, receivers) are
+            // kept automatically; proguard-rules.pro holds anything else.
+            isMinifyEnabled = true
+            isShrinkResources = true
+            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
         }
     }
 }

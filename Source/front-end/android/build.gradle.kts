@@ -1,3 +1,11 @@
+// Resolved dependency versions are pinned in gradle.lockfile (this project
+// has none of its own) and app/gradle.lockfile (release configurations).
+// After changing a dependency or the Flutter version, regenerate with:
+//   ./gradlew :app:dependencies --write-locks -Ptarget-platform=android-arm64
+dependencyLocking {
+    lockAllConfigurations()
+}
+
 allprojects {
     repositories {
         google()
@@ -17,5 +25,7 @@ subprojects {
 }
 
 tasks.register<Delete>("clean") {
+    group = "build"
+    description = "Deletes the shared build directory."
     delete(rootProject.layout.buildDirectory)
 }

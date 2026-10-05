@@ -313,7 +313,7 @@ footer{
     <span><b>6</b> sports live</span>
     <span><b>3</b> serving Lambda types &times; sport</span>
     <span><b>EC2</b> Spot/on-demand training fleet</span>
-    <span><b>7</b> CloudWatch dashboards</span>
+    <span><b>3</b> CloudWatch dashboards</span>
     <span><b>25</b> alarms</span>
   </div>
 </header>
@@ -362,7 +362,11 @@ footer{
       <div class="stage-body">
         <div class="card client">
           <div class="badge client custom"><svg><use href="#i-browser"/></svg></div>
-          <div class="card-txt"><div class="name">Browser</div><div class="desc">Cognito-authenticated user</div></div>
+          <div class="card-txt"><div class="name">Browser</div><div class="desc">Cognito-authenticated user (web app client)</div></div>
+        </div>
+        <div class="card client">
+          <div class="badge client custom"><svg><use href="#i-browser"/></svg></div>
+          <div class="card-txt"><div class="name">Android app</div><div class="desc">Same Flutter app, sideloaded APK &mdash; mobile app client, rolling 30-day sign-in; hourly on-device job for notifications + widgets</div></div>
         </div>
       </div>
     </div>
@@ -392,6 +396,7 @@ footer{
       <div class="stage-label">Origin split &mdash; by path</div>
       <div class="stage-body">
         <div class="card storage compact"><div class="badge storage sm"><svg><use href="#i-s3"/></svg></div><div class="card-txt"><div class="name mono">/* &rarr; S3: Frontend</div><div class="desc">Flutter web build</div></div></div>
+        <div class="card storage compact"><div class="badge storage sm"><svg><use href="#i-s3"/></svg></div><div class="card-txt"><div class="name mono">/app/* &rarr; S3: Mobile releases</div><div class="desc">Android APK + release metadata; Android user agents only (CloudFront Function)</div></div></div>
         <div class="card network" style="position:relative">
           <span class="numbered">2</span>
           <div class="badge network"><svg><use href="#i-apigw"/></svg></div>
@@ -427,7 +432,7 @@ footer{
         </div>
         <div class="card compute compact">
           <div class="badge compute sm"><svg><use href="#i-lambda"/></svg></div>
-          <div class="card-txt"><div class="name mono">4c. {sport}-live-scores</div><div class="desc">zip, cache-only, no VPC &mdash; never writes predictions</div><div class="tagrow"><span class="tag x6">&times;6</span><span class="tag">no VPC</span></div></div>
+          <div class="card-txt"><div class="name mono">4c. {sport}-live-scores</div><div class="desc">zip, cache-only, no VPC &mdash; never writes predictions; football adds possession + down</div><div class="tagrow"><span class="tag x6">&times;6</span><span class="tag">no VPC</span></div></div>
         </div>
         <div class="satellite"><svg><use href="#i-eventbridge"/></svg>warmup schedule, 5 min &rarr; predict + predict-read</div>
       </div>
@@ -638,7 +643,7 @@ footer{
   </div>
 
   <div class="stat-strip">
-    <div class="stat"><b>7</b><span>CloudWatch dashboards</span></div>
+    <div class="stat"><b>3</b><span>CloudWatch dashboards</span></div>
     <div class="stat"><b>25</b><span>alarms, 18 concerns</span></div>
     <div class="stat"><b>3</b><span>X-Ray traced resources</span></div>
     <div class="stat"><b>2</b><span>AWS Budgets (total + per-sport)</span></div>
@@ -673,15 +678,11 @@ footer{
     </div>
   </div>
 
-  <div class="panel-head" style="margin-top:22px;"><h3 style="font-size:15px;font-weight:650;">7 CloudWatch dashboards</h3></div>
+  <div class="panel-head" style="margin-top:22px;"><h3 style="font-size:15px;font-weight:650;">3 CloudWatch dashboards</h3></div>
   <div style="display:grid; grid-template-columns:repeat(auto-fill,minmax(210px,1fr)); gap:10px;">
-    <div class="card observability compact"><div class="badge observability sm"><svg><use href="#i-cloudwatch"/></svg></div><div class="card-txt"><div class="name">Alert-state</div><div class="desc">all 25 alarms at a glance</div></div></div>
-    <div class="card observability compact"><div class="badge observability sm"><svg><use href="#i-cloudwatch"/></svg></div><div class="card-txt"><div class="name">API Gateway</div><div class="desc">volume / errors / latency</div></div></div>
-    <div class="card observability compact"><div class="badge observability sm"><svg><use href="#i-cloudwatch"/></svg></div><div class="card-txt"><div class="name">DynamoDB</div><div class="desc">capacity / throttling, &times;6 tables</div></div></div>
-    <div class="card observability compact"><div class="badge observability sm"><svg><use href="#i-cloudwatch"/></svg></div><div class="card-txt"><div class="name">ECS / Fargate</div><div class="desc">cluster + per-task-family utilization</div></div></div>
-    <div class="card observability compact"><div class="badge observability sm"><svg><use href="#i-cloudwatch"/></svg></div><div class="card-txt"><div class="name">Lambda observability</div><div class="desc">invocations / errors / duration / throttles</div></div></div>
-    <div class="card observability compact"><div class="badge observability sm"><svg><use href="#i-cloudwatch"/></svg></div><div class="card-txt"><div class="name">Step Functions</div><div class="desc">execution outcomes / duration</div></div></div>
-    <div class="card observability compact"><div class="badge observability sm"><svg><use href="#i-cloudwatch"/></svg></div><div class="card-txt"><div class="name">Viewer analytics</div><div class="desc">Logs Insights: location/browser/device</div></div></div>
+    <div class="card observability compact"><div class="badge observability sm"><svg><use href="#i-cloudwatch"/></svg></div><div class="card-txt"><div class="name">Alerts</div><div class="desc">every alarm at a glance, critical vs. warning tier</div></div></div>
+    <div class="card observability compact"><div class="badge observability sm"><svg><use href="#i-cloudwatch"/></svg></div><div class="card-txt"><div class="name">Application</div><div class="desc">Lambda invocations / errors / duration / throttles &middot; viewer analytics &middot; blocked traffic &middot; geo panels &middot; users &middot; Android app downloads + installed versions</div></div></div>
+    <div class="card observability compact"><div class="badge observability sm"><svg><use href="#i-cloudwatch"/></svg></div><div class="card-txt"><div class="name">Platform</div><div class="desc">API Gateway &middot; DynamoDB &middot; Step Functions &middot; ECS / Fargate &middot; security &amp; access</div></div></div>
   </div>
 
   <div class="flow" style="margin-top:26px;">

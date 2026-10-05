@@ -49,6 +49,10 @@ One workflow file per deploy target, matching the existing pattern: `<sport>_dat
 
 Add one `SportConfig` entry to `Source/front-end/lib/core/models/sport_config.dart`'s `kSports` list: `id` (must match the backend's own route prefix exactly — it's passed straight through as the API path segment), `displayName`, `eventShape`, `accentColor` (cyan for head-to-head, violet for field-event, per `design/FRONTEND_STYLE.md`), and `active: true`. That one flip is the entire frontend-activation step for a sport whose event shape already has a matching UI (head-to-head or plain field-event) — a genuinely new shape (like PGA's FedEx Cup points page, `usesFedexCupSeasonPage`) needs its own season-page route.
 
+The Android app picks the sport up from the same `kSports` entry — its widgets' sport picker and the notification settings list every active sport. Two app-specific additions:
+- **Weekly model report** — add the sport to `reportWeekday` in `Source/front-end/lib/core/mobile/model_report.dart`, on the same weekday as its schedule-sync (the report goes out at 10 AM Eastern that day). A sport missing from that map simply gets no weekly report.
+- **Top-picks widget** — head-to-head sports work as-is; a new field-event shape needs its own builder in `lib/core/mobile/widget_sync.dart`'s `_fetchPicks` (PGA and F1 each have one).
+
 ## Checklist
 
 - [ ] Event shape decided, data source picked and its real response shape verified live
@@ -62,6 +66,7 @@ Add one `SportConfig` entry to `Source/front-end/lib/core/models/sport_config.da
 - [ ] `cloudwatch-alarms.tf`'s `alarm_all_sports` (and `alarm_schedule_sync_sports`, if this sport has schedule-sync) includes the new sport
 - [ ] CI workflows created and wired into `app_deploy.yml`
 - [ ] `sport_config.dart`'s `kSports` entry added with `active: true`, `id` matching the backend route prefix exactly
+- [ ] Android app: weekly-report day added to `model_report.dart`'s `reportWeekday`; top-picks builder added if it's a new field-event shape; `RELEASE_NOTES.txt` updated
 - [ ] Mobile pass on this sport's event list/detail/leaderboard widgets once live data is flowing (see `design/FRONTEND_STYLE.md`'s responsiveness section) — every sport onboarded so far has needed at least one overflow fix once live-score content actually appeared
 
 ## Common pitfalls

@@ -54,13 +54,14 @@ pos          = Color(0xFF22D3EE)  // positive feature contribution (uses cyan)
 neg          = Color(0xFFFF5C7A)  // negative contribution / loss
 neg2         = Color(0xFFFF8FA3)  // gradient partner for neg
 live         = Color(0xFF4ADE80)  // "live / active" status dot + pill
-warn         = Color(0xFFFFB454)  // warming / preseason / off-cadence
+warn         = Color(0xFFFFB454)  // warming / preseason / off-cadence; possession football; pending app update
 ```
 
 Accent discipline: **cyan is the only call-to-attention color.** Violet is structural, not
 decorative — use it only to tag field-event sports and the occasional tertiary card (e.g.
 "Recent form"). Green (`--live`) and amber (`--warn`) are status semantics only, never brand
-accents.
+accents. Amber also marks two live-state signals: the possession football (which team has the
+ball) and the pending-update banner/dot in the Android app.
 
 ### Signature gradients
 
@@ -127,10 +128,24 @@ labels are UPPERCASE mono.
 - **Game row (list)** — full-width rounded card, `display:flex; flex-wrap:wrap`, with a 4px
   **left accent bar in the favored team's color**. Slot (mono) · a single team line (color dot +
   abbr + score per side, "away `@` home") · a win-probability split bar · margin (18px 700) · a
-  confidence pill. Hover brightens + lifts 1px.
+  confidence pill. Hover brightens + lifts 1px. Status in the bar's slot: upcoming games show
+  only the win-probability bar (no status text), live games the LIVE pill + clock, finished
+  games just FINAL (never ESPN's own "Final" text beside it).
 - **Matchup hero (detail)** — gradient-tinted panel, two columns of team + record + big
-  percentage (favored side gradient-clipped cyan), an `@` pill between, a 12px split bar, then a
+  percentage (favored side gradient-clipped cyan), an `@` pill between, a plain 1px `border`
+  divider under the venue (each side's percentage is already printed under its team), then a
   Pick / Pred margin / Pred total stat trio.
+- **Live football situation** (NFL/NCAAFB, live only) — an amber `PossessionBall` (14px oval,
+  white laces) marks the team with the ball: at the end of its line in the game row (a fixed
+  14px slot on both lines so scores never shift) and before the team name in the matchup hero
+  (only there — never on the down line). The down line is mono micro-label text: down and
+  distance in ink, then field position, then `Red zone` in `--neg` inside the 20 — joined with
+  ` · ` in lists, `1st & Goal at JAX 6` in the hero. On a phone the down line sits under the
+  clock; on a wide row, beside it. Both disappear whenever ESPN reports no situation (breaks,
+  reviews).
+- **Stacked leaders (phone, football)** — each player is a white live row over a cyan
+  predicted row; a 1px `border` hairline separates players (none above the first). No row
+  labels or color key.
 - **Feature attribution** — center-diverging horizontal bars from a faint 1px centerline:
   positive contributions extend right with `cyan-fill`, negative left with `neg-fill`, all
   rounded (`border-radius:999px`) and normalized so the largest magnitude ≈ half-width. Signed
@@ -154,7 +169,19 @@ labels are UPPERCASE mono.
 
 ## Responsiveness
 
-Intrinsic, **no hardcoded breakpoints**: use `LayoutBuilder` or `MediaQuery` for type and padding scaling, `Wrap` with `spacing`/`runSpacing` for card grids (minimum child width ~340 logical px), and `Wrap` + `Flexible` on rows. The page scrolls via a top-level `SingleChildScrollView` or `CustomScrollView`; never trap scroll inside a fixed-height inner widget.
+Intrinsic, **no hardcoded breakpoints**: use `LayoutBuilder` or `MediaQuery` for type and padding scaling, `Wrap` with `spacing`/`runSpacing` for card grids (minimum child width ~340 logical px), and `Wrap` + `Flexible` on rows. When a grid's cards should fill the row, size them with `fillCardWidth` (`core/widgets/responsive.dart`) so the row stretches evenly instead of leaving a strip of empty space at the right edge. The page scrolls via a top-level `SingleChildScrollView` or `CustomScrollView`; never trap scroll inside a fixed-height inner widget. The one exception, the season bracket's pinned-scrollbar pane, applies on desktop only — on touch screens (Android/iOS, app or mobile browser) the bracket renders inline, since a nested pane there traps every swipe.
+
+## Android app
+
+The Android app is the same Flutter UI with a few additions that only exist there (`AppShell.androidApp`):
+
+- **Header** — a settings gear (with an amber dot while an update is pending) replaces Sign out; Sign out lives in Settings › Notifications, beside when the 30-day sign-in expires.
+- **Update banner** — an amber-tinted strip on Home, "vX is ready", with Later / Update; Later hides it for a day.
+- **Settings pages** — Notifications (per-sport weekly-report switches), App updates (installed vs. latest, notes, Download & install with progress), built from `MobilePanel` surfaces.
+- **Home-screen widgets** — native Android layouts (`android/app/src/main/res/layout/widget_*.xml`) in the same palette: `bg` at ~92% opacity, 20dp radius, ink text, cyan values, cyan-over-muted-red pick bars. Each has a sport picker on placement.
+- **Website, Android browsers only** — a small outlined cyan "Get app" pill in the header next to Sign out.
+
+User-facing release notes (update notification, App updates page) come from `Source/front-end/RELEASE_NOTES.txt`: one or two short sentences about features and fixes, never technical detail — they're read on a phone screen.
 
 ## Do / Don't
 

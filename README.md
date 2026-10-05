@@ -11,7 +11,8 @@ Built for a single user, not a public product — the frontend and API sit at a 
 - [Data Schema](design/DATA_SCHEMA.md) — entity/event/prediction schema, DynamoDB table design, sport registry shape, S3 key conventions
 - [Data Sources](design/DATA_SOURCES.md) — free data source per sport, update cadence, auth requirements, API key handling
 - [Tagging Strategy](design/TAGGING_STRATEGY.md) — AWS resource tagging convention for cost tracking in Billing/Cost Explorer
-- [Frontend Style](design/FRONTEND_STYLE.md) — the Flutter Web app's "Arena" visual language (design tokens, components, data-viz conventions)
+- [Frontend Style](design/FRONTEND_STYLE.md) — the Flutter app's "Arena" visual language, website and Android app alike (design tokens, components, data-viz conventions)
+- [Android app](Source/front-end/android/README.md) — building the APK locally, release signing, how releases are versioned and published, and the user-facing release notes
 - [Onboarding a New Sport](design/ONBOARDING_NEW_SPORT.md) — the runbook for adding sport #7 and beyond: build order, naming convention, Terraform/CI checklist, common pitfalls
 
 **[docs/](docs/)** — as-built reference for the API contract and per-sport model details:
@@ -27,7 +28,7 @@ Source/
   data-backfills/    # one-time historical backfill jobs, run as standalone Fargate tasks
   feature-engineering/  # Fargate entrypoints building training Parquet datasets per sport
   model-training/    # training scripts per sport/target, run on the EC2 training fleet
-  front-end/         # Flutter Web app
+  front-end/         # Flutter app: the website, and the Android APK (front-end/android/README.md)
   tests/             # mirrors the structure above
 Terraform/           # all infrastructure -- one file per resource/resource-group, no modules
 design/, docs/       # see Documentation above

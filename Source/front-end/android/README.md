@@ -43,7 +43,28 @@ has to uninstall and reinstall, so keep an offline backup.
 ## Releases
 
 `mobile_deploy.yml` (push to `mobile/**`) and `app_deploy.yml` (push to
-`main`) build and publish. The versionCode is one more than the published
-APK's `version-code` metadata; the build is skipped when `Source/front-end`
-and its config haven't changed since that APK. The versionName comes from
-`pubspec.yaml`'s `version:`.
+`main`) build and publish.
+
+- **versionCode** is one more than the published APK's `version-code`
+  metadata.
+- **versionName** is `<major>.<minor>.<versionCode>`. Major and minor come
+  from `pubspec.yaml`'s `version:` and are bumped by hand for bigger releases.
+- **A build is skipped** unless the files that make up the app changed since
+  the published APK: `lib/`, `android/` (Markdown aside), `pubspec.yaml`,
+  `pubspec.lock`, or the rendered config. Tests, docs, web-only files and the
+  backend never publish an update.
+- **Release notes** shown to users come from `../RELEASE_NOTES.txt`: one short
+  line about features or fixes, no technical detail. Update it with every
+  change that affects the app.
+
+## Dependency lockfile
+
+Release builds resolve exactly the versions pinned in `app/gradle.lockfile`
+(debug builds for local phones and emulators are not locked). After adding or
+upgrading a plugin, or changing the Flutter version, regenerate it or the
+release build fails on the mismatch:
+
+```sh
+cd android
+./gradlew :app:dependencies --write-locks -Ptarget-platform=android-arm64
+```
