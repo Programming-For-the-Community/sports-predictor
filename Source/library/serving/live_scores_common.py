@@ -85,12 +85,45 @@ def extract_live_state(espn_event: dict) -> dict:
     competition = espn_event["competitions"][0]
     status_type = competition.get("status", {}).get("type", {})
     scores = {c.get("homeAway"): parse_number(c.get("score")) for c in competition.get("competitors", [])}
-    return {
+    state = {
         "live": status_type.get("state") == "in",
         "completed": bool(status_type.get("completed")),
         "detail": status_type.get("shortDetail"),
         "home_score": scores.get("home"),
         "away_score": scores.get("away"),
+    }
+    situation = _football_situation(competition) if state["live"] else None
+    if situation is not None:
+        state["situation"] = situation
+    return state
+
+
+def _football_situation(competition: dict) -> dict | None:
+    """Which side has the ball, and the down, from ESPN's `situation` block
+    -- football only, and only while a play is pending (absent pre-game, at
+    breaks, during reviews and after the game). `possession` is ESPN's team
+    id, mapped here to "home"/"away"."""
+    situation = competition.get("situation")
+    if not isinstance(situation, dict):
+        return None
+    sides = {}
+    for competitor in competition.get("competitors", []):
+        team_id = competitor.get("id") or (competitor.get("team") or {}).get("id")
+        if team_id is not None:
+            sides[str(team_id)] = competitor.get("homeAway")
+    possession_id = situation.get("possession")
+    possession = sides.get(str(possession_id)) if possession_id is not None else None
+    down_distance = situation.get("shortDownDistanceText")
+    field_position = situation.get("possessionText")
+    if possession not in ("home", "away"):
+        possession = None
+    if possession is None and not down_distance:
+        return None
+    return {
+        "possession": possession,
+        "down_distance": down_distance if isinstance(down_distance, str) and down_distance else None,
+        "field_position": field_position if isinstance(field_position, str) and field_position else None,
+        "red_zone": situation.get("isRedZone") is True,
     }
 
 

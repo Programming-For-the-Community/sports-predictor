@@ -9,8 +9,8 @@ import '../../static/nfl_team_colors.dart';
 import 'confidence_pill.dart';
 import 'final_status_pill.dart';
 import 'live_status_pill.dart';
+import 'possession_ball.dart';
 import 'team_color_dot.dart';
-import 'win_probability_bar.dart';
 
 /// design/FRONTEND_STYLE.md's "Matchup hero (detail)" component: two
 /// columns of team + score (win probability % small underneath), a split
@@ -84,6 +84,7 @@ class MatchupHero extends StatelessWidget {
     final away = teamDisplay(sport, event.away);
     final homeFavored = prediction.homeWinProbability >= 0.5;
     final (:isLive, :isFinished, :homeLiveScore, :awayLiveScore, :homeLeading) = _liveMatchupState(liveState);
+    final situation = isLive ? liveState?.situation : null;
 
     return Container(
       padding: const EdgeInsets.all(28),
@@ -109,6 +110,7 @@ class MatchupHero extends StatelessWidget {
                       predictedScore: prediction.awayScore,
                       liveScore: awayLiveScore,
                       leading: homeLeading == null ? null : !homeLeading,
+                      hasBall: situation?.awayHasBall ?? false,
                     ),
                   ),
                   Padding(
@@ -127,6 +129,7 @@ class MatchupHero extends StatelessWidget {
                       predictedScore: prediction.homeScore,
                       liveScore: homeLiveScore,
                       leading: homeLeading,
+                      hasBall: situation?.homeHasBall ?? false,
                     ),
                   ),
                 ],
@@ -136,7 +139,9 @@ class MatchupHero extends StatelessWidget {
                 Center(child: _VenueLabel(label: event.venueLabel!)),
               ],
               const SizedBox(height: 20),
-              WinProbabilityBar(homeWinProbability: prediction.homeWinProbability, height: 12),
+              // A plain divider -- each side's win probability is already
+              // printed under its team.
+              const Divider(height: 1, thickness: 1, color: AppColors.border),
               // Live/final status (game clock, or FINAL once the game's
               // over) is its own line, only present once live or
               // finished -- separate from confidence, which lives with
@@ -149,7 +154,8 @@ class MatchupHero extends StatelessWidget {
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
                     isLive ? LiveStatusPill(dotOnly: compact) : FinalStatusPill(dotOnly: compact),
-                    if (liveState!.detail != null) ...[
+                    // A finished game reads just FINAL.
+                    if (isLive && liveState!.detail != null) ...[
                       const SizedBox(width: 8),
                       // Flexible + wrapping -- ESPN's own detail text isn't
                       // always a short clock ("Q3 08:14"); situational
@@ -165,6 +171,10 @@ class MatchupHero extends StatelessWidget {
                     ],
                   ],
                 ),
+              ],
+              if (situation != null && situation.hasDown) ...[
+                const SizedBox(height: 6),
+                Center(child: FootballSituationText(situation: situation, separator: ' at ', textAlign: TextAlign.center)),
               ],
               const SizedBox(height: 24),
               Center(
@@ -205,7 +215,7 @@ class MatchupHero extends StatelessWidget {
 class _TeamColumn extends StatelessWidget {
   const _TeamColumn({
     required this.color, required this.abbr, required this.probability, required this.favored,
-    required this.predictedScore, this.liveScore, this.leading,
+    required this.predictedScore, this.liveScore, this.leading, this.hasBall = false,
   });
   final Color? color;
   final String abbr;
@@ -220,6 +230,8 @@ class _TeamColumn extends StatelessWidget {
   // Whether this team is currently ahead on the live scoreboard -- null
   // pre-game or on a live tie, when neither side is "winning" yet.
   final bool? leading;
+  // Live football: this team has the ball.
+  final bool hasBall;
 
   @override
   Widget build(BuildContext context) {
@@ -266,7 +278,14 @@ class _TeamColumn extends StatelessWidget {
       children: [
         TeamColorDot(color: color, size: 10),
         const SizedBox(height: 8),
-        Text(abbr, style: AppTextStyles.cardTitle()),
+        Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (hasBall) ...[const PossessionBall(), const SizedBox(width: 6)],
+            // Flexible so a long name still shrinks within a narrow column.
+            Flexible(child: Text(abbr, style: AppTextStyles.cardTitle(), textAlign: TextAlign.center)),
+          ],
+        ),
         const SizedBox(height: 8),
         scoreDisplay,
         const SizedBox(height: 4),

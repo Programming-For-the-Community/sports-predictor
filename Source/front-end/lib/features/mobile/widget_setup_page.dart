@@ -34,17 +34,27 @@ class _WidgetSetupPageState extends ConsumerState<WidgetSetupPage> {
   Future<void> _choose(SportConfig sport) async {
     setState(() => _saving = sport.id);
     final host = ref.read(widgetHostProvider);
-    await host.setSport(widget.widgetId, sport.id);
     try {
-      final api = ref.read(apiClientProvider);
-      final data = await fetchWidgetData(widget.kind, sport, api.get, now: DateTime.now().toUtc());
-      await host.save(widget.kind.dataKey(sport.id), data);
+      await host.setSport(widget.widgetId, sport.id);
+      try {
+        final api = ref.read(apiClientProvider);
+        final data = await fetchWidgetData(widget.kind, sport, api.get, now: DateTime.now().toUtc());
+        await host.save(widget.kind.dataKey(sport.id), data);
+      } catch (error) {
+        // The sport is already saved, so the hourly background job fills
+        // the widget in later.
+        debugPrint('[WidgetSetup] first load for ${sport.id} failed: $error');
+      }
+      // Replaces the layout's sample preview with this widget's own state,
+      // even if that state is only "Open the app to load".
+      await host.redraw(widget.kind);
     } catch (error) {
-      // The hourly background job fills it in instead.
-      debugPrint('[WidgetSetup] first load for ${sport.id} failed: $error');
+      debugPrint('[WidgetSetup] setting up ${sport.id} failed: $error');
+    } finally {
+      // Always return to the home screen -- Android keeps the widget only
+      // once configuration is finished.
+      await ref.read(finishWidgetConfigureProvider)();
     }
-    await host.redraw(widget.kind);
-    await ref.read(finishWidgetConfigureProvider)();
   }
 
   @override

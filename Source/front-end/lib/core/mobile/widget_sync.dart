@@ -58,7 +58,7 @@ class DeviceWidgetHost implements WidgetHost {
 
   @override
   Future<void> redraw(HomeWidgetKind kind) async {
-    await HomeWidget.updateWidget(androidName: kind.androidName);
+    await HomeWidget.updateWidget(qualifiedAndroidName: kind.qualifiedAndroidName);
   }
 }
 
@@ -99,7 +99,11 @@ Future<void> refreshWidgets({
         debugPrint('[Widgets] ${kind.name} $sportId refresh failed: $error');
       }
     }
-    await host.redraw(kind);
+    try {
+      await host.redraw(kind);
+    } catch (error) {
+      debugPrint('[Widgets] ${kind.name} redraw failed: $error');
+    }
   }
 }
 

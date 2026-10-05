@@ -182,6 +182,10 @@ jobs:
       # checks, in-app updates.
       - name: Build APK
         if: steps.version.outputs.released == 'true'
+        # Gradle's release shrink/package stage prints nothing for several
+        # minutes on a fresh runner; this caps a genuine hang well below
+        # GitHub's 6-hour job default.
+        timeout-minutes: 30
         working-directory: Source/front-end
         env:
           VERSION_CODE: ${{ steps.version.outputs.version_code }}
@@ -206,8 +210,14 @@ jobs:
           mkdir -p release
           cp Source/front-end/build/app/outputs/flutter-apk/app-release.apk release/sports-predictor.apk
           sha256="$(sha256sum release/sports-predictor.apk | cut -d' ' -f1)"
-          # S3 user metadata must be ASCII; this is shown as the update's notes.
-          notes="$(git log -1 --pretty=%s | iconv -f utf-8 -t ascii//TRANSLIT | tr -cd '[:print:]' | cut -c1-200)"
+          # Shown to users in the update notification and Settings > App
+          # updates, so it comes from the hand-written, features-only
+          # Source/front-end/RELEASE_NOTES.txt, never the commit message.
+          # Joined to one line; S3 user metadata must be ASCII.
+          notes="$(grep -v '^#' Source/front-end/RELEASE_NOTES.txt | tr '\n' ' ' | iconv -f utf-8 -t ascii//TRANSLIT | tr -cd '[:print:]' | sed 's/  */ /g; s/^ //; s/ $//' | cut -c1-200)"
+          if [ -z "$notes" ]; then
+            notes="Improvements and fixes."
+          fi
           jq -n \
             --arg versionCode "$VERSION_CODE" \
             --arg versionName "$VERSION_NAME" \

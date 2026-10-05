@@ -55,6 +55,9 @@ class _FakeInstaller implements AppUpdateInstaller {
 }
 
 class _FakeWidgetHost implements WidgetHost {
+  _FakeWidgetHost({this.failRedraw = false});
+
+  final bool failRedraw;
   final sports = <int, String>{};
   final saved = <String, Map<String, Object?>>{};
   final redrawn = <HomeWidgetKind>[];
@@ -72,7 +75,10 @@ class _FakeWidgetHost implements WidgetHost {
   Future<void> save(String key, Map<String, Object?> data) async => saved[key] = data;
 
   @override
-  Future<void> redraw(HomeWidgetKind kind) async => redrawn.add(kind);
+  Future<void> redraw(HomeWidgetKind kind) async {
+    if (failRedraw) throw StateError('No Widget found');
+    redrawn.add(kind);
+  }
 }
 
 List<Override> _overrides({required AppShell shell, Map<String, String> releaseHeaders = _release, int installedCode = 41, DeviceNotifier? notifier}) => [
@@ -241,5 +247,38 @@ void main() {
     expect(host.saved['accuracy_nba']?['season_pct'], 0.66);
     expect(host.redrawn, [HomeWidgetKind.accuracy]);
     expect(finished, isTrue);
+  });
+
+  group('Widget setup when something fails', () {
+    Future<({_FakeWidgetHost host, bool Function() finished})> pumpSetup(WidgetTester tester, {required bool failRedraw}) async {
+      final host = _FakeWidgetHost(failRedraw: failRedraw);
+      var finished = false;
+      await _pump(tester, const WidgetSetupPage(widgetId: 3, kind: HomeWidgetKind.topPicks), [
+        ..._overrides(shell: AppShell.androidApp),
+        widgetHostProvider.overrideWithValue(host),
+        finishWidgetConfigureProvider.overrideWithValue(() async => finished = true),
+        apiClientProvider.overrideWithValue(buildTestApiClient((request) async => http.Response('{"error": "down"}', 502))),
+      ]);
+      await tester.tap(find.text('NFL'));
+      for (var i = 0; i < 5; i++) {
+        await tester.pump(const Duration(milliseconds: 50));
+      }
+      return (host: host, finished: () => finished);
+    }
+
+    testWidgets('a failed first load still saves the sport, redraws and closes', (tester) async {
+      final result = await pumpSetup(tester, failRedraw: false);
+
+      expect(result.host.sports[3], 'nfl');
+      expect(result.host.saved, isEmpty);
+      expect(result.host.redrawn, [HomeWidgetKind.topPicks]);
+      expect(result.finished(), isTrue);
+    });
+
+    testWidgets('a failed redraw still closes instead of spinning', (tester) async {
+      final result = await pumpSetup(tester, failRedraw: true);
+
+      expect(result.finished(), isTrue);
+    });
   });
 }

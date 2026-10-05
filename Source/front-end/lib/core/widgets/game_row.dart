@@ -14,6 +14,7 @@ import '../../static/nfl_team_colors.dart';
 import 'confidence_pill.dart';
 import 'final_status_pill.dart';
 import 'live_status_pill.dart';
+import 'possession_ball.dart';
 import 'prediction_computing_retry.dart';
 import 'prediction_freshness_badge.dart';
 import 'team_color_dot.dart';
@@ -153,6 +154,7 @@ class _PredictionAreaData {
     required this.isLive,
     required this.isFinal,
     required this.liveDetail,
+    this.situation,
   });
 
   final bool isCompleted;
@@ -165,6 +167,7 @@ class _PredictionAreaData {
   final bool isLive;
   final bool isFinal;
   final String? liveDetail;
+  final FootballSituation? situation;
 }
 
 /// A live event still gets the pick/margin/confidence summary (the
@@ -180,7 +183,7 @@ Widget _predictionArea(bool compact, _PredictionAreaData data) {
       : _LivePredictionSummary(
           prediction: data.prediction!, homeAbbr: data.homeAbbr, awayAbbr: data.awayAbbr,
           sport: data.sport, eventId: data.eventId, compact: compact,
-          isLive: data.isLive, isFinal: data.isFinal, liveDetail: data.liveDetail,
+          isLive: data.isLive, isFinal: data.isFinal, liveDetail: data.liveDetail, situation: data.situation,
         );
 }
 
@@ -262,6 +265,7 @@ class GameRow extends ConsumerWidget {
 
     final weekTime = _weekTimeColumn(event);
     final liveOrFinal = isLive || liveFinished;
+    final situation = isLive ? liveState?.situation : null;
     final matchup = _MatchupLine(
       awayColor: away.primary, awayAbbr: away.abbreviation,
       awayScore: _liveOrStoredScore(liveOrFinal, liveState?.awayScore, event.away.result?.score),
@@ -269,6 +273,7 @@ class GameRow extends ConsumerWidget {
       homeColor: home.primary, homeAbbr: home.abbreviation,
       homeScore: _liveOrStoredScore(liveOrFinal, liveState?.homeScore, event.home.result?.score),
       homePredictedScore: homePredictedScore,
+      situation: situation,
     );
     // Stadium name/city/state -- renders nothing when absent rather than
     // a blank line.
@@ -290,7 +295,7 @@ class GameRow extends ConsumerWidget {
     final predictionAreaData = _PredictionAreaData(
       isCompleted: isCompleted, comparison: comparison, homeAbbr: home.abbreviation, awayAbbr: away.abbreviation,
       prediction: prediction, sport: sport, eventId: event.eventId, isLive: isLive, isFinal: liveFinished,
-      liveDetail: liveState?.detail,
+      liveDetail: liveState?.detail, situation: situation,
     );
     Widget predictionArea(bool compact) => _predictionArea(compact, predictionAreaData);
 
@@ -323,7 +328,7 @@ class _LivePredictionSummary extends StatelessWidget {
   const _LivePredictionSummary({
     required this.prediction, required this.homeAbbr, required this.awayAbbr,
     required this.sport, required this.eventId, required this.compact, required this.isLive,
-    this.isFinal = false, this.liveDetail,
+    this.isFinal = false, this.liveDetail, this.situation,
   });
   final AsyncValue<EventPrediction> prediction;
   final String homeAbbr;
@@ -348,6 +353,7 @@ class _LivePredictionSummary extends StatelessWidget {
   // pre-game win-probability bar the instant isLive goes false.
   final bool isFinal;
   final String? liveDetail;
+  final FootballSituation? situation;
 
   /// The leading slot: the pre-game win-probability bar (Expanded, fills
   /// the row), or -- once live or finished -- the LIVE/FINAL pill(+
@@ -362,22 +368,35 @@ class _LivePredictionSummary extends StatelessWidget {
       return Expanded(child: WinProbabilityBar(homeWinProbability: homeWinProbability));
     }
     final statusPill = isLive ? LiveStatusPill(dotOnly: compact) : FinalStatusPill(dotOnly: compact);
-    return Flexible(
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          statusPill,
-          if (liveDetail != null && liveDetail!.isNotEmpty) ...[
-            const SizedBox(width: 8),
-            Flexible(
-              child: Text(
-                liveDetail!, style: AppTextStyles.body(color: AppColors.inkSub),
-                maxLines: 1, overflow: TextOverflow.ellipsis,
-              ),
+    // A finished game reads just FINAL -- ESPN's own detail text ("Final")
+    // would only repeat it.
+    final clock = isLive ? liveDetail : null;
+    final down = situation != null && situation!.hasDown ? FootballSituationText(situation: situation!) : null;
+    final statusRow = Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        statusPill,
+        if (clock != null && clock.isNotEmpty) ...[
+          const SizedBox(width: 8),
+          Flexible(
+            child: Text(
+              clock, style: AppTextStyles.body(color: AppColors.inkSub),
+              maxLines: 1, overflow: TextOverflow.ellipsis,
             ),
-          ],
+          ),
         ],
-      ),
+        // Room beside the clock on a wide row; its own line on a phone.
+        if (down != null && !compact) ...[const SizedBox(width: 10), Flexible(child: down)],
+      ],
+    );
+    return Flexible(
+      child: down != null && compact
+          ? Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [statusRow, const SizedBox(height: 2), down],
+            )
+          : statusRow,
     );
   }
 
@@ -521,6 +540,7 @@ class _MatchupLine extends StatelessWidget {
   const _MatchupLine({
     required this.awayColor, required this.awayAbbr, this.awayScore, this.awayPredictedScore,
     required this.homeColor, required this.homeAbbr, this.homeScore, this.homePredictedScore,
+    this.situation,
   });
   final Color? awayColor;
   final String awayAbbr;
@@ -530,23 +550,31 @@ class _MatchupLine extends StatelessWidget {
   final String homeAbbr;
   final double? homeScore;
   final double? homePredictedScore;
+  final FootballSituation? situation;
 
   @override
   Widget build(BuildContext context) {
+    final ball = situation;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       mainAxisSize: MainAxisSize.min,
       children: [
-        _TeamLine(color: awayColor, abbr: awayAbbr, score: awayScore, predictedScore: awayPredictedScore),
+        _TeamLine(
+          color: awayColor, abbr: awayAbbr, score: awayScore, predictedScore: awayPredictedScore,
+          hasBall: ball?.awayHasBall,
+        ),
         const SizedBox(height: 4),
-        _TeamLine(color: homeColor, abbr: homeAbbr, score: homeScore, predictedScore: homePredictedScore),
+        _TeamLine(
+          color: homeColor, abbr: homeAbbr, score: homeScore, predictedScore: homePredictedScore,
+          hasBall: ball?.homeHasBall,
+        ),
       ],
     );
   }
 }
 
 class _TeamLine extends StatelessWidget {
-  const _TeamLine({required this.color, required this.abbr, this.score, this.predictedScore});
+  const _TeamLine({required this.color, required this.abbr, this.score, this.predictedScore, this.hasBall});
   final Color? color;
   final String abbr;
   final double? score;
@@ -558,6 +586,10 @@ class _TeamLine extends StatelessWidget {
   // alone distinguishes the two numbers, matching the user's ask to drop
   // that clutter.
   final double? predictedScore;
+  // Live football with a known situation: true draws the football at the
+  // end of this line, false keeps the same empty slot so both lines stay
+  // aligned. Null (no situation) adds nothing.
+  final bool? hasBall;
 
   @override
   Widget build(BuildContext context) {
@@ -590,6 +622,10 @@ class _TeamLine extends StatelessWidget {
               overflow: TextOverflow.ellipsis,
             ),
           ),
+        ],
+        if (hasBall != null) ...[
+          const SizedBox(width: 6),
+          SizedBox(width: 14, child: hasBall! ? const PossessionBall() : null),
         ],
       ],
     );

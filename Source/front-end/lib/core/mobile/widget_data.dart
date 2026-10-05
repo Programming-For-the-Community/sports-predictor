@@ -18,6 +18,10 @@ enum HomeWidgetKind {
   final String androidName;
   final String title;
 
+  /// home_widget otherwise looks for the class directly under the app's
+  /// package, but the providers live in its `widgets` subpackage.
+  String get qualifiedAndroidName => 'com.professorchaos0802.sportspredictor.widgets.$androidName';
+
   /// Where a tap on the widget opens.
   String routeFor(String sportId) => switch (this) {
         HomeWidgetKind.accuracy => AppRoutes.performance(sportId),

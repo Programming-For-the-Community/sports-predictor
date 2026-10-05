@@ -11,6 +11,7 @@ class LiveEventState {
     required this.awayScore,
     this.completed = false,
     this.playerStats = const {},
+    this.situation,
   });
 
   // False for an event in its poll window but that hasn't actually
@@ -37,6 +38,9 @@ class LiveEventState {
   // final box score from the last tick it was fetched (see
   // live_scores.py's own refresh()). Absent/empty otherwise.
   final Map<String, Map<String, double>> playerStats;
+  // Football only, and only while a play is pending -- null pre-game, at
+  // breaks, during reviews, after the game, and for every other sport.
+  final FootballSituation? situation;
 
   factory LiveEventState.fromJson(Map<String, dynamic> json) => LiveEventState(
         live: json['live'] as bool,
@@ -47,7 +51,38 @@ class LiveEventState {
         playerStats: (json['player_stats'] as Map<String, dynamic>? ?? {}).map(
           (entityId, statLine) => MapEntry(entityId, _numericStats(statLine)),
         ),
+        situation: FootballSituation.fromJson(json['situation']),
       );
+}
+
+/// Who has the ball and the down, from ESPN's live scoreboard
+/// (library/serving/live_scores_common.py's _football_situation).
+class FootballSituation {
+  const FootballSituation({this.possession, this.downDistance, this.fieldPosition, this.redZone = false});
+
+  /// "home" or "away"; null when ESPN names neither team.
+  final String? possession;
+  final String? downDistance;
+  final String? fieldPosition;
+  final bool redZone;
+
+  bool get homeHasBall => possession == 'home';
+  bool get awayHasBall => possession == 'away';
+  bool get hasDown => downDistance != null || fieldPosition != null;
+
+  /// Null for anything that isn't a usable situation, so one odd value
+  /// never fails the whole live-scores response.
+  static FootballSituation? fromJson(Object? json) {
+    if (json is! Map<String, dynamic>) return null;
+    String? text(Object? value) => value is String && value.isNotEmpty ? value : null;
+    final possession = json['possession'];
+    return FootballSituation(
+      possession: possession == 'home' || possession == 'away' ? possession as String : null,
+      downDistance: text(json['down_distance']),
+      fieldPosition: text(json['field_position']),
+      redZone: json['red_zone'] == true,
+    );
+  }
 }
 
 /// A stat line's numeric values only -- ESPN sends placeholders like "--"

@@ -400,7 +400,10 @@ class _StackedComparisonSection extends StatelessWidget {
         defaultVerticalAlignment: TableCellVerticalAlignment.middle,
         children: [
           _headerRow(columns),
-          for (final player in players) ...[_actualRow(player, columns), _predictedRow(player, columns)],
+          for (var i = 0; i < players.length; i++) ...[
+            _actualRow(players[i], columns, divided: i > 0),
+            _predictedRow(players[i], columns, last: i == players.length - 1),
+          ],
         ],
       ),
     );
@@ -412,18 +415,23 @@ class _StackedComparisonSection extends StatelessWidget {
           columns.cell(key, Text(_statShortLabels[key] ?? key.toUpperCase(), style: AppTextStyles.microLabel())),
       ]);
 
-  TableRow _actualRow(PlayerStatLineComparison player, _StatColumns columns) {
+  /// [divided]: a hairline above every player after the first, so each
+  /// white live row and the blue predicted row under it read as one player.
+  TableRow _actualRow(PlayerStatLineComparison player, _StatColumns columns, {required bool divided}) {
     final style = AppTextStyles.metricValue(color: AppColors.ink);
-    return TableRow(children: [
+    return TableRow(
+        decoration: divided ? const BoxDecoration(border: Border(top: BorderSide(color: AppColors.border))) : null,
+        children: [
       Padding(padding: const EdgeInsets.only(top: 6), child: Text(player.displayName, style: AppTextStyles.body())),
       for (final key in columns.keys)
         columns.cell(key, Text(player.actual[key] != null ? statValueText(key, player.actual[key]!) : '--', style: style)),
     ]);
   }
 
-  TableRow _predictedRow(PlayerStatLineComparison player, _StatColumns columns) => TableRow(children: [
+  TableRow _predictedRow(PlayerStatLineComparison player, _StatColumns columns, {required bool last}) => TableRow(children: [
         const SizedBox.shrink(),
-        for (final key in columns.keys) _predictedCell(key, player.predicted[key], columns),
+        for (final key in columns.keys)
+          Padding(padding: EdgeInsets.only(bottom: last ? 0 : 6), child: _predictedCell(key, player.predicted[key], columns)),
       ]);
 
   Widget _predictedCell(String key, double? predicted, _StatColumns columns) {
