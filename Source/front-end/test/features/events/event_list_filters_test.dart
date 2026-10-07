@@ -12,6 +12,7 @@ import 'package:front_end/core/models/prediction.dart';
 import 'package:front_end/core/widgets/game_row.dart';
 import 'package:front_end/features/events/event_list_filters.dart';
 import 'package:front_end/features/events/event_list_page.dart';
+import 'package:front_end/static/confidence_tiers.dart';
 
 /// Kickoff given in the test machine's own local time, so slot labels don't
 /// depend on where the tests run.
@@ -92,7 +93,7 @@ void main() {
       await _pumpPage(
         tester,
         [_event('high', hour: 13), _event('med', hour: 13), _event('low', hour: 13), _event('loading', hour: 13)],
-        {'high': 0.80, 'med': 0.58, 'low': 0.52, 'loading': null},
+        {'high': ConfidenceTier.high.minProbability, 'med': ConfidenceTier.med.minProbability, 'low': 0.5, 'loading': null},
       );
       expect(_rowCount(tester), 4);
 
@@ -144,7 +145,7 @@ void main() {
     });
 
     testWidgets('says so when the filters leave nothing', (tester) async {
-      await _pumpPage(tester, [_event('a', hour: 13)], {'a': 0.52});
+      await _pumpPage(tester, [_event('a', hour: 13)], {'a': 0.5});
 
       await tester.tap(find.text('HIGH').first);
       await tester.pump();

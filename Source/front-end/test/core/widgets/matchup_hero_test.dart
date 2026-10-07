@@ -6,6 +6,9 @@ import 'package:front_end/core/models/live_score.dart';
 import 'package:front_end/core/models/prediction.dart';
 import 'package:front_end/core/theme/app_colors.dart';
 import 'package:front_end/core/widgets/matchup_hero.dart';
+import 'package:front_end/static/confidence_tiers.dart';
+
+final _tier = ConfidenceTier.forProbability(0.62).label;
 
 SportEvent _completedEvent() => SportEvent(
       eventId: '401547419',
@@ -71,10 +74,9 @@ void main() {
       expect(_textStyled('27', AppColors.cyan), findsOneWidget);
       expect(_textStyled('23', AppColors.cyan), findsOneWidget);
       // Confidence and the spread stay visible alongside the LIVE
-      // banner/clock, not replaced by it. homeWinProbability 0.62 -> edge
-      // 0.12 -> MED tier.
+      // banner/clock, not replaced by it.
       expect(find.text('Q2 04:12'), findsOneWidget);
-      expect(find.text('MED'), findsOneWidget);
+      expect(find.text(_tier), findsOneWidget);
       expect(find.text('HOME MARGIN'), findsOneWidget);
     });
 
@@ -87,7 +89,7 @@ void main() {
 
       final liveY = tester.getCenter(find.text('Q2 04:12')).dy;
       final pickLabelY = tester.getCenter(find.text('PICK')).dy;
-      final confidenceY = tester.getCenter(find.text('MED')).dy;
+      final confidenceY = tester.getCenter(find.text(_tier)).dy;
 
       expect(liveY, lessThan(pickLabelY));
       expect(confidenceY, greaterThan(pickLabelY));
@@ -107,9 +109,9 @@ void main() {
       ));
 
       expect(find.text('LIVE'), findsNothing);
-      expect(find.text('MED'), findsNothing);
+      expect(find.text(_tier), findsNothing);
       expect(find.byTooltip('LIVE'), findsOneWidget);
-      expect(find.byTooltip('MED'), findsOneWidget);
+      expect(find.byTooltip(_tier), findsOneWidget);
       // The rest of the card (game clock, spread) is unaffected.
       expect(find.text('Q2 04:12'), findsOneWidget);
       expect(find.text('HOME MARGIN'), findsOneWidget);

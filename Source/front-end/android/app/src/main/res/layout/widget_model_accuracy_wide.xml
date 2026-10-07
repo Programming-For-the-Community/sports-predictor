@@ -16,7 +16,7 @@
         android:text="NFL · WIN PROBABILITY"
         android:textAllCaps="true"
         android:textColor="@color/widget_ink_sub"
-        android:textSize="10sp"
+        android:textSize="@dimen/widget_text_caption"
         android:letterSpacing="0.06"/>
 
     <TextView
@@ -26,20 +26,21 @@
         android:layout_marginTop="6dp"
         android:text="@string/widget_choose_sport"
         android:textColor="@color/widget_ink_sub"
-        android:textSize="12sp"
+        android:textSize="@dimen/widget_text_body"
         android:visibility="gone"/>
 
     <LinearLayout
         android:id="@+id/acc_body"
         android:layout_width="match_parent"
-        android:layout_height="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
         android:layout_marginTop="2dp"
         android:orientation="horizontal">
 
         <LinearLayout
             android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_weight="5"
+            android:layout_height="match_parent"
+            android:layout_weight="3"
             android:orientation="vertical">
 
             <LinearLayout
@@ -55,7 +56,7 @@
                     android:maxLines="1"
                     android:text="68%"
                     android:textColor="@color/widget_ink"
-                    android:textSize="30sp"
+                    android:textSize="@dimen/widget_text_figure"
                     android:textStyle="bold"/>
 
                 <LinearLayout
@@ -71,7 +72,7 @@
                         android:maxLines="1"
                         android:text="of 77 games"
                         android:textColor="@color/widget_ink_sub"
-                        android:textSize="11sp"/>
+                        android:textSize="@dimen/widget_text_meta"/>
 
                     <TextView
                         android:id="@+id/acc_last"
@@ -80,11 +81,12 @@
                         android:maxLines="1"
                         android:text="Wk 5: 75%"
                         android:textColor="@color/widget_ink"
-                        android:textSize="12sp"/>
+                        android:textSize="@dimen/widget_text_body"/>
                 </LinearLayout>
             </LinearLayout>
 
             <TextView
+                android:id="@+id/acc_miss_title"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="6dp"
@@ -93,14 +95,15 @@
                 android:text="@string/widget_average_miss"
                 android:textAllCaps="true"
                 android:textColor="@color/widget_ink_sub"
-                android:textSize="9sp"
+                android:textSize="@dimen/widget_text_tag"
                 android:textStyle="bold"/>
 
             <LinearLayout
                 android:id="@+id/acc_miss1"
                 android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="3dp"
+                android:layout_height="0dp"
+                android:layout_weight="1"
+                android:gravity="center_vertical"
                 android:orientation="horizontal">
 
                 <TextView
@@ -112,7 +115,7 @@
                     android:maxLines="1"
                     android:text="Score Margin"
                     android:textColor="@color/widget_ink"
-                    android:textSize="12sp"/>
+                    android:textSize="@dimen/widget_text_body"/>
 
                 <TextView
                     android:id="@+id/acc_miss1_value"
@@ -123,14 +126,15 @@
                     android:maxLines="1"
                     android:text="±10.2 pts"
                     android:textColor="@color/widget_cyan"
-                    android:textSize="12sp"/>
+                    android:textSize="@dimen/widget_text_body"/>
             </LinearLayout>
 
             <LinearLayout
                 android:id="@+id/acc_miss2"
                 android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="3dp"
+                android:layout_height="0dp"
+                android:layout_weight="1"
+                android:gravity="center_vertical"
                 android:orientation="horizontal">
 
                 <TextView
@@ -142,7 +146,7 @@
                     android:maxLines="1"
                     android:text="Home Score"
                     android:textColor="@color/widget_ink"
-                    android:textSize="12sp"/>
+                    android:textSize="@dimen/widget_text_body"/>
 
                 <TextView
                     android:id="@+id/acc_miss2_value"
@@ -153,14 +157,15 @@
                     android:maxLines="1"
                     android:text="±7.4 pts"
                     android:textColor="@color/widget_cyan"
-                    android:textSize="12sp"/>
+                    android:textSize="@dimen/widget_text_body"/>
             </LinearLayout>
 
             <LinearLayout
                 android:id="@+id/acc_miss3"
                 android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="3dp"
+                android:layout_height="0dp"
+                android:layout_weight="1"
+                android:gravity="center_vertical"
                 android:orientation="horizontal">
 
                 <TextView
@@ -172,7 +177,7 @@
                     android:maxLines="1"
                     android:text="Away Score"
                     android:textColor="@color/widget_ink"
-                    android:textSize="12sp"/>
+                    android:textSize="@dimen/widget_text_body"/>
 
                 <TextView
                     android:id="@+id/acc_miss3_value"
@@ -183,7 +188,7 @@
                     android:maxLines="1"
                     android:text="±7.1 pts"
                     android:textColor="@color/widget_cyan"
-                    android:textSize="12sp"/>
+                    android:textSize="@dimen/widget_text_body"/>
             </LinearLayout>
         </LinearLayout>
 
@@ -197,11 +202,12 @@
         <LinearLayout
             android:id="@+id/acc_bands"
             android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_weight="4"
+            android:layout_height="match_parent"
+            android:layout_weight="2"
             android:orientation="vertical">
 
             <TextView
+                android:id="@+id/acc_bands_title"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="4dp"
@@ -210,26 +216,26 @@
                 android:text="@string/widget_by_confidence"
                 android:textAllCaps="true"
                 android:textColor="@color/widget_ink_sub"
-                android:textSize="9sp"
+                android:textSize="@dimen/widget_text_tag"
                 android:textStyle="bold"/>
 
             <LinearLayout
                 android:id="@+id/acc_band1"
                 android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="10dp"
+                android:layout_height="0dp"
+                android:layout_weight="1"
                 android:gravity="center_vertical"
                 android:orientation="horizontal">
 
                 <TextView
                     android:id="@+id/acc_band1_tag"
-                    android:layout_width="34dp"
+                    android:layout_width="44dp"
                     android:layout_height="wrap_content"
                     android:letterSpacing="0.08"
                     android:maxLines="1"
                     android:text="HIGH"
                     android:textColor="@color/widget_ink_sub"
-                    android:textSize="9sp"/>
+                    android:textSize="@dimen/widget_text_tag"/>
 
                 <ProgressBar
                     android:id="@+id/acc_band1_bar"
@@ -250,26 +256,26 @@
                     android:maxLines="1"
                     android:text="81%"
                     android:textColor="@color/widget_cyan"
-                    android:textSize="11sp"/>
+                    android:textSize="@dimen/widget_text_meta"/>
             </LinearLayout>
 
             <LinearLayout
                 android:id="@+id/acc_band2"
                 android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="10dp"
+                android:layout_height="0dp"
+                android:layout_weight="1"
                 android:gravity="center_vertical"
                 android:orientation="horizontal">
 
                 <TextView
                     android:id="@+id/acc_band2_tag"
-                    android:layout_width="34dp"
+                    android:layout_width="44dp"
                     android:layout_height="wrap_content"
                     android:letterSpacing="0.08"
                     android:maxLines="1"
                     android:text="MED"
                     android:textColor="@color/widget_ink_sub"
-                    android:textSize="9sp"/>
+                    android:textSize="@dimen/widget_text_tag"/>
 
                 <ProgressBar
                     android:id="@+id/acc_band2_bar"
@@ -290,26 +296,26 @@
                     android:maxLines="1"
                     android:text="66%"
                     android:textColor="@color/widget_cyan"
-                    android:textSize="11sp"/>
+                    android:textSize="@dimen/widget_text_meta"/>
             </LinearLayout>
 
             <LinearLayout
                 android:id="@+id/acc_band3"
                 android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="10dp"
+                android:layout_height="0dp"
+                android:layout_weight="1"
                 android:gravity="center_vertical"
                 android:orientation="horizontal">
 
                 <TextView
                     android:id="@+id/acc_band3_tag"
-                    android:layout_width="34dp"
+                    android:layout_width="44dp"
                     android:layout_height="wrap_content"
                     android:letterSpacing="0.08"
                     android:maxLines="1"
                     android:text="LOW"
                     android:textColor="@color/widget_ink_sub"
-                    android:textSize="9sp"/>
+                    android:textSize="@dimen/widget_text_tag"/>
 
                 <ProgressBar
                     android:id="@+id/acc_band3_bar"
@@ -330,7 +336,7 @@
                     android:maxLines="1"
                     android:text="54%"
                     android:textColor="@color/widget_cyan"
-                    android:textSize="11sp"/>
+                    android:textSize="@dimen/widget_text_meta"/>
             </LinearLayout>
         </LinearLayout>
     </LinearLayout>

@@ -49,10 +49,14 @@ BEST_MIN_SAMPLE = 3
 # published (see _entity_misses).
 ENTITY_MISS_MIN_SAMPLE = 3
 
-# (tag, minimum edge over a coin flip) -- the same tiers ConfidencePill in
-# the app's game cards uses (edge = |win probability - 0.5|), so the two
-# always agree on what HIGH/MED/LOW mean.
-WIN_PICK_TIERS = (("HIGH", 0.13), ("MED", 0.06), ("LOW", 0.0))
+# (tag, the favorite's lowest win probability in the tier), strongest first --
+# the only place the backend sets them. ConfidenceTier in the app
+# (front-end/lib/static/confidence_tiers.dart) holds the same figures for its
+# game cards, so the two agree on what HIGH/MED/LOW mean; test_scorecard.py
+# fails when they differ.
+WIN_PICK_FLOORS = (("HIGH", 5 / 6), ("MED", 2 / 3), ("LOW", 0.5))
+# (tag, minimum edge over a coin flip), edge = |win probability - 0.5|.
+WIN_PICK_TIERS = tuple((tag, floor - 0.5) for tag, floor in WIN_PICK_FLOORS)
 AMOUNT_TIERS = ("LOW", "MED", "HIGH")
 
 KIND_PICK = "pick"

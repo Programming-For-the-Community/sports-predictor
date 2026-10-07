@@ -1,3 +1,7 @@
+import re
+from fractions import Fraction
+from pathlib import Path
+
 import pytest
 
 from library.performance import scorecard
@@ -51,10 +55,11 @@ class TestPickRecord:
         assert record["vs_baseline_pct"] == pytest.approx((0.8 - 0.6) / 0.6 * 100)
 
     def test_bands_use_the_game_card_confidence_tiers(self):
+        high_edge, med_edge, low_edge = (edge for _, edge in scorecard.WIN_PICK_TIERS)
         samples = (
-            [_pick(WK1, True, edge=0.20)] * 5          # HIGH (>= 0.13)
-            + [_pick(WK1, True, edge=0.08)] * 3 + [_pick(WK1, False, edge=0.08)] * 2  # MED
-            + [_pick(WK1, False, edge=0.02)] * 5       # LOW
+            [_pick(WK1, True, edge=high_edge)] * 5
+            + [_pick(WK1, True, edge=med_edge)] * 3 + [_pick(WK1, False, edge=med_edge)] * 2
+            + [_pick(WK1, False, edge=low_edge)] * 5
         )
 
         record = scorecard.pick_record("win-probability", 9, samples, None)
@@ -64,8 +69,17 @@ class TestPickRecord:
         assert (med["tag"], med["n"], med["pct"]) == ("MED", 5, 0.6)
         assert (low["tag"], low["n"], low["pct"]) == ("LOW", 5, 0.0)
 
+    def test_tier_floors_match_the_apps_confidence_tiers(self):
+        dart = (Path(__file__).parents[3] / "front-end/lib/static/confidence_tiers.dart").read_text(encoding="utf-8")
+        app_floors = [
+            (tag, float(Fraction(value.replace(" ", ""))))
+            for tag, value in re.findall(r"^\s+\w+\('(\w+)', ([\d./ ]+), AppColors", dart, re.MULTILINE)
+        ]
+
+        assert app_floors == [(tag, pytest.approx(floor)) for tag, floor in scorecard.WIN_PICK_FLOORS]
+
     def test_a_band_under_the_minimum_sample_is_early_with_no_percentage(self):
-        record = scorecard.pick_record("win-probability", 9, [_pick(WK1, True, edge=0.2)] * 4, None)
+        record = scorecard.pick_record("win-probability", 9, [_pick(WK1, True, edge=0.5)] * 4, None)
 
         high = record["bands"][0]
         assert high["early"] is True

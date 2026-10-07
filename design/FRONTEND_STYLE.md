@@ -159,8 +159,9 @@ labels are UPPERCASE mono.
 - **Win-probability split bar**: favored segment = `cyan-fill`, underdog = translucent slate
   `#33405580`, track `#1a2233`, rounded ends. Widths are the live percentages — the only place
   a width should be a runtime value.
-- **Confidence tiers** from distance off 50/50: `edge ≥ 0.13 → HIGH` (cyan), `≥ 0.06 → MED`
-  (amber), else `LOW` (muted).
+- **Confidence tiers** by the favorite's win probability, each an equal third of the 50–100%
+  range: `≥ 5/6 → HIGH` (cyan), `≥ 2/3 → MED` (amber), else `LOW` (muted). Set in
+  `lib/static/confidence_tiers.dart` and `library/performance/scorecard.py`'s `WIN_PICK_FLOORS`.
 - **Probabilities** display as `NN%` by default; support an American-odds format
   (`p≥.5 → -round(100p/(1-p))`, else `+round(100(1-p)/p)`) as a user toggle.
 - **Head-to-head vs field event**: h2h shows win prob + margin; field events show a

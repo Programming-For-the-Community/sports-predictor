@@ -17,10 +17,11 @@
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:layout_weight="1"
+            android:ellipsize="end"
             android:maxLines="1"
             android:text="Top player props · NFL"
             android:textColor="@color/widget_ink"
-            android:textSize="12sp"
+            android:textSize="@dimen/widget_text_body"
             android:textStyle="bold"/>
 
         <TextView
@@ -33,14 +34,25 @@
             android:maxWidth="140dp"
             android:text="Today"
             android:textColor="@color/widget_ink_sub"
-            android:textSize="11sp"/>
+            android:textSize="@dimen/widget_text_meta"/>
     </LinearLayout>
+
+    <TextView
+        android:id="@+id/picks_message"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="10dp"
+        android:text="@string/widget_choose_sport"
+        android:textColor="@color/widget_ink_sub"
+        android:textSize="@dimen/widget_text_body"
+        android:visibility="gone"/>
 
     <LinearLayout
         android:id="@+id/prop1_row"
         android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="9dp"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:gravity="center_vertical"
         android:orientation="horizontal">
 
         <TextView
@@ -52,7 +64,7 @@
             android:maxLines="1"
             android:text="P. Mahomes · KC"
             android:textColor="@color/widget_ink"
-            android:textSize="13sp"/>
+            android:textSize="@dimen/widget_text_row"/>
 
         <TextView
             android:id="@+id/prop1_value"
@@ -63,14 +75,15 @@
             android:maxLines="1"
             android:text="284 pass yds ±38"
             android:textColor="@color/widget_cyan"
-            android:textSize="12sp"/>
+            android:textSize="@dimen/widget_text_body"/>
     </LinearLayout>
 
     <LinearLayout
         android:id="@+id/prop2_row"
         android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="6dp"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:gravity="center_vertical"
         android:orientation="horizontal">
 
         <TextView
@@ -82,7 +95,7 @@
             android:maxLines="1"
             android:text="J. Allen · BUF"
             android:textColor="@color/widget_ink"
-            android:textSize="13sp"/>
+            android:textSize="@dimen/widget_text_row"/>
 
         <TextView
             android:id="@+id/prop2_value"
@@ -93,14 +106,15 @@
             android:maxLines="1"
             android:text="262 pass yds ±41"
             android:textColor="@color/widget_cyan"
-            android:textSize="12sp"/>
+            android:textSize="@dimen/widget_text_body"/>
     </LinearLayout>
 
     <LinearLayout
         android:id="@+id/prop3_row"
         android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="6dp"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:gravity="center_vertical"
         android:orientation="horizontal">
 
         <TextView
@@ -112,7 +126,7 @@
             android:maxLines="1"
             android:text="S. Barkley · PHI"
             android:textColor="@color/widget_ink"
-            android:textSize="13sp"/>
+            android:textSize="@dimen/widget_text_row"/>
 
         <TextView
             android:id="@+id/prop3_value"
@@ -123,14 +137,15 @@
             android:maxLines="1"
             android:text="104 rush yds ±19"
             android:textColor="@color/widget_cyan"
-            android:textSize="12sp"/>
+            android:textSize="@dimen/widget_text_body"/>
     </LinearLayout>
 
     <LinearLayout
         android:id="@+id/prop4_row"
         android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="6dp"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:gravity="center_vertical"
         android:orientation="horizontal">
 
         <TextView
@@ -142,7 +157,7 @@
             android:maxLines="1"
             android:text="J. Gibbs · DET"
             android:textColor="@color/widget_ink"
-            android:textSize="13sp"/>
+            android:textSize="@dimen/widget_text_row"/>
 
         <TextView
             android:id="@+id/prop4_value"
@@ -153,14 +168,15 @@
             android:maxLines="1"
             android:text="91 rush yds ±18"
             android:textColor="@color/widget_cyan"
-            android:textSize="12sp"/>
+            android:textSize="@dimen/widget_text_body"/>
     </LinearLayout>
 
     <LinearLayout
         android:id="@+id/prop5_row"
         android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="6dp"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:gravity="center_vertical"
         android:orientation="horizontal">
 
         <TextView
@@ -172,7 +188,7 @@
             android:maxLines="1"
             android:text="J. Jefferson · MIN"
             android:textColor="@color/widget_ink"
-            android:textSize="13sp"/>
+            android:textSize="@dimen/widget_text_row"/>
 
         <TextView
             android:id="@+id/prop5_value"
@@ -183,16 +199,166 @@
             android:maxLines="1"
             android:text="98 rec yds ±22"
             android:textColor="@color/widget_cyan"
-            android:textSize="12sp"/>
+            android:textSize="@dimen/widget_text_body"/>
     </LinearLayout>
 
-    <TextView
-        android:id="@+id/picks_message"
+    <LinearLayout
+        android:id="@+id/prop6_row"
         android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="10dp"
-        android:text="@string/widget_choose_sport"
-        android:textColor="@color/widget_ink_sub"
-        android:textSize="12sp"
-        android:visibility="gone"/>
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        android:visibility="gone">
+
+        <TextView
+            android:id="@+id/prop6_label"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:ellipsize="end"
+            android:maxLines="1"
+            android:text="J. Jefferson · MIN"
+            android:textColor="@color/widget_ink"
+            android:textSize="@dimen/widget_text_row"/>
+
+        <TextView
+            android:id="@+id/prop6_value"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="8dp"
+            android:fontFamily="monospace"
+            android:maxLines="1"
+            android:text="98 rec yds ±22"
+            android:textColor="@color/widget_cyan"
+            android:textSize="@dimen/widget_text_body"/>
+    </LinearLayout>
+
+    <LinearLayout
+        android:id="@+id/prop7_row"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        android:visibility="gone">
+
+        <TextView
+            android:id="@+id/prop7_label"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:ellipsize="end"
+            android:maxLines="1"
+            android:text="J. Jefferson · MIN"
+            android:textColor="@color/widget_ink"
+            android:textSize="@dimen/widget_text_row"/>
+
+        <TextView
+            android:id="@+id/prop7_value"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="8dp"
+            android:fontFamily="monospace"
+            android:maxLines="1"
+            android:text="98 rec yds ±22"
+            android:textColor="@color/widget_cyan"
+            android:textSize="@dimen/widget_text_body"/>
+    </LinearLayout>
+
+    <LinearLayout
+        android:id="@+id/prop8_row"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        android:visibility="gone">
+
+        <TextView
+            android:id="@+id/prop8_label"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:ellipsize="end"
+            android:maxLines="1"
+            android:text="J. Jefferson · MIN"
+            android:textColor="@color/widget_ink"
+            android:textSize="@dimen/widget_text_row"/>
+
+        <TextView
+            android:id="@+id/prop8_value"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="8dp"
+            android:fontFamily="monospace"
+            android:maxLines="1"
+            android:text="98 rec yds ±22"
+            android:textColor="@color/widget_cyan"
+            android:textSize="@dimen/widget_text_body"/>
+    </LinearLayout>
+
+    <LinearLayout
+        android:id="@+id/prop9_row"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        android:visibility="gone">
+
+        <TextView
+            android:id="@+id/prop9_label"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:ellipsize="end"
+            android:maxLines="1"
+            android:text="J. Jefferson · MIN"
+            android:textColor="@color/widget_ink"
+            android:textSize="@dimen/widget_text_row"/>
+
+        <TextView
+            android:id="@+id/prop9_value"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="8dp"
+            android:fontFamily="monospace"
+            android:maxLines="1"
+            android:text="98 rec yds ±22"
+            android:textColor="@color/widget_cyan"
+            android:textSize="@dimen/widget_text_body"/>
+    </LinearLayout>
+
+    <LinearLayout
+        android:id="@+id/prop10_row"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        android:visibility="gone">
+
+        <TextView
+            android:id="@+id/prop10_label"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:ellipsize="end"
+            android:maxLines="1"
+            android:text="J. Jefferson · MIN"
+            android:textColor="@color/widget_ink"
+            android:textSize="@dimen/widget_text_row"/>
+
+        <TextView
+            android:id="@+id/prop10_value"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="8dp"
+            android:fontFamily="monospace"
+            android:maxLines="1"
+            android:text="98 rec yds ±22"
+            android:textColor="@color/widget_cyan"
+            android:textSize="@dimen/widget_text_body"/>
+    </LinearLayout>
 </LinearLayout>

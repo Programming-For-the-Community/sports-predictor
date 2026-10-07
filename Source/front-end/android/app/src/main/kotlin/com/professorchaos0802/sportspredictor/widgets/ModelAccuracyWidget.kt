@@ -6,11 +6,10 @@ import android.content.SharedPreferences
 import android.view.View
 import android.widget.RemoteViews
 import com.professorchaos0802.sportspredictor.R
-import es.antonborri.home_widget.HomeWidgetProvider
 import org.json.JSONObject
 
 /** One sport's win-probability accuracy: season figure, last period, and how each confidence level did. */
-class ModelAccuracyWidget : HomeWidgetProvider() {
+class ModelAccuracyWidget : ResizableWidgetProvider() {
     override fun onUpdate(
         context: Context,
         appWidgetManager: AppWidgetManager,
@@ -18,13 +17,35 @@ class ModelAccuracyWidget : HomeWidgetProvider() {
         widgetData: SharedPreferences,
     ) {
         for (widgetId in appWidgetIds) {
-            appWidgetManager.updateAppWidget(widgetId, renderAccuracy(context, widgetData, widgetId, wide = false))
+            val views = renderAccuracy(context, widgetData, widgetId, wide = false)
+            val size = appWidgetManager.sizeOf(context, widgetId)
+            views.scaleText(context, size.textScale(fit), textSizes)
+            views.scaleText(context, size.textScale(fullWidthFit), fullWidthTextSizes)
+            appWidgetManager.updateAppWidget(widgetId, views)
         }
+    }
+
+    private companion object {
+        val fit = WidgetSize(115f, 165f)
+        val textSizes = mapOf(
+            R.dimen.widget_text_figure to listOf(R.id.acc_big),
+            R.dimen.widget_text_row to bandViews.map { it.pct },
+            R.dimen.widget_text_body to listOf(R.id.acc_last),
+            R.dimen.widget_text_tag to bandViews.map { it.tag } + listOf(R.id.acc_bands_title),
+        )
+
+        /** The lines that run the widget's full width, so have less room to grow. */
+        val fullWidthFit = WidgetSize(150f, 165f)
+        val fullWidthTextSizes = mapOf(
+            R.dimen.widget_text_body to listOf(R.id.acc_message),
+            R.dimen.widget_text_meta to listOf(R.id.acc_season),
+            R.dimen.widget_text_caption to listOf(R.id.acc_header),
+        )
     }
 }
 
 /** The same figures with the score models' average misses alongside. */
-class ModelAccuracyWideWidget : HomeWidgetProvider() {
+class ModelAccuracyWideWidget : ResizableWidgetProvider() {
     override fun onUpdate(
         context: Context,
         appWidgetManager: AppWidgetManager,
@@ -34,8 +55,26 @@ class ModelAccuracyWideWidget : HomeWidgetProvider() {
         for (widgetId in appWidgetIds) {
             val views = renderAccuracy(context, widgetData, widgetId, wide = true)
             views.bindMisses(widgetData.sportFor(widgetId)?.let { widgetData.json("accuracy_$it") })
+            val size = appWidgetManager.sizeOf(context, widgetId)
+            views.scaleText(context, size.textScale(fit), textSizes)
+            views.scaleText(context, size.textScale(missFit), missTextSizes)
             appWidgetManager.updateAppWidget(widgetId, views)
         }
+    }
+
+    private companion object {
+        val fit = WidgetSize(265f, 150f)
+        val textSizes = mapOf(
+            R.dimen.widget_text_figure to listOf(R.id.acc_big),
+            R.dimen.widget_text_body to listOf(R.id.acc_message, R.id.acc_last),
+            R.dimen.widget_text_meta to bandViews.map { it.pct } + listOf(R.id.acc_season),
+            R.dimen.widget_text_caption to listOf(R.id.acc_header),
+            R.dimen.widget_text_tag to bandViews.map { it.tag } + listOf(R.id.acc_bands_title, R.id.acc_miss_title),
+        )
+
+        /** The average-miss rows fill their column's width, so have less room to grow. */
+        val missFit = WidgetSize(290f, 150f)
+        val missTextSizes = mapOf(R.dimen.widget_text_body to missViews.flatMap { listOf(it.label, it.value) })
     }
 }
 

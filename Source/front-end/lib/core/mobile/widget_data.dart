@@ -96,7 +96,9 @@ Map<String, Object?> _missRow(ModelPerformanceRecord model) {
   };
 }
 
-const maxPicks = 3;
+/// The most picks stored for a sport -- every pick row the picks widgets' layouts hold; a
+/// widget shows as many as its height has room for.
+const maxPicks = 10;
 
 /// The day the head-to-head picks cover: today when anything is scheduled
 /// today, otherwise the next day with games. Event dates are Eastern

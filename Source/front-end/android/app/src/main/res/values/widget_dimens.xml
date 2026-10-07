@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Widget text sizes at the smallest size each layout fits; the providers
+     scale them up with the placed widget (widgets/WidgetSupport.kt). -->
+<resources>
+    <dimen name="widget_text_figure">30sp</dimen>
+    <dimen name="widget_text_row">13sp</dimen>
+    <dimen name="widget_text_body">12sp</dimen>
+    <dimen name="widget_text_meta">11sp</dimen>
+    <dimen name="widget_text_caption">10sp</dimen>
+    <dimen name="widget_text_tag">9sp</dimen>
+</resources>

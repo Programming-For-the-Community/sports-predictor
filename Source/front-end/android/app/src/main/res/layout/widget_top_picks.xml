@@ -17,10 +17,11 @@
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:layout_weight="1"
+            android:ellipsize="end"
             android:maxLines="1"
             android:text="Today's top picks · NFL"
             android:textColor="@color/widget_ink"
-            android:textSize="12sp"
+            android:textSize="@dimen/widget_text_body"
             android:textStyle="bold"/>
 
         <TextView
@@ -33,14 +34,25 @@
             android:maxWidth="140dp"
             android:text="Today"
             android:textColor="@color/widget_ink_sub"
-            android:textSize="11sp"/>
+            android:textSize="@dimen/widget_text_meta"/>
     </LinearLayout>
+
+    <TextView
+        android:id="@+id/picks_message"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="10dp"
+        android:text="@string/widget_choose_sport"
+        android:textColor="@color/widget_ink_sub"
+        android:textSize="@dimen/widget_text_body"
+        android:visibility="gone"/>
 
     <LinearLayout
         android:id="@+id/pick1_row"
         android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="8dp"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:gravity="center_vertical"
         android:orientation="vertical">
 
         <LinearLayout
@@ -57,7 +69,7 @@
                 android:maxLines="1"
                 android:text="KC @ JAX"
                 android:textColor="@color/widget_ink"
-                android:textSize="13sp"/>
+                android:textSize="@dimen/widget_text_row"/>
 
             <TextView
                 android:id="@+id/pick1_value"
@@ -68,7 +80,7 @@
                 android:maxLines="1"
                 android:text="KC 68%"
                 android:textColor="@color/widget_cyan"
-                android:textSize="12sp"/>
+                android:textSize="@dimen/widget_text_body"/>
         </LinearLayout>
 
         <ProgressBar
@@ -85,8 +97,9 @@
     <LinearLayout
         android:id="@+id/pick2_row"
         android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="8dp"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:gravity="center_vertical"
         android:orientation="vertical">
 
         <LinearLayout
@@ -103,7 +116,7 @@
                 android:maxLines="1"
                 android:text="DET @ MIN"
                 android:textColor="@color/widget_ink"
-                android:textSize="13sp"/>
+                android:textSize="@dimen/widget_text_row"/>
 
             <TextView
                 android:id="@+id/pick2_value"
@@ -114,7 +127,7 @@
                 android:maxLines="1"
                 android:text="DET 61%"
                 android:textColor="@color/widget_cyan"
-                android:textSize="12sp"/>
+                android:textSize="@dimen/widget_text_body"/>
         </LinearLayout>
 
         <ProgressBar
@@ -131,8 +144,9 @@
     <LinearLayout
         android:id="@+id/pick3_row"
         android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="8dp"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:gravity="center_vertical"
         android:orientation="vertical">
 
         <LinearLayout
@@ -149,7 +163,7 @@
                 android:maxLines="1"
                 android:text="SF @ LAR"
                 android:textColor="@color/widget_ink"
-                android:textSize="13sp"/>
+                android:textSize="@dimen/widget_text_row"/>
 
             <TextView
                 android:id="@+id/pick3_value"
@@ -160,7 +174,7 @@
                 android:maxLines="1"
                 android:text="LAR 53%"
                 android:textColor="@color/widget_cyan"
-                android:textSize="12sp"/>
+                android:textSize="@dimen/widget_text_body"/>
         </LinearLayout>
 
         <ProgressBar
@@ -174,13 +188,339 @@
             android:progressDrawable="@drawable/widget_pick_bar"/>
     </LinearLayout>
 
-    <TextView
-        android:id="@+id/picks_message"
+    <LinearLayout
+        android:id="@+id/pick4_row"
         android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="10dp"
-        android:text="@string/widget_choose_sport"
-        android:textColor="@color/widget_ink_sub"
-        android:textSize="12sp"
-        android:visibility="gone"/>
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:gravity="center_vertical"
+        android:orientation="vertical"
+        android:visibility="gone">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal">
+
+            <TextView
+                android:id="@+id/pick4_label"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:ellipsize="end"
+                android:maxLines="1"
+                android:text="SF @ LAR"
+                android:textColor="@color/widget_ink"
+                android:textSize="@dimen/widget_text_row"/>
+
+            <TextView
+                android:id="@+id/pick4_value"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="8dp"
+                android:fontFamily="monospace"
+                android:maxLines="1"
+                android:text="LAR 53%"
+                android:textColor="@color/widget_cyan"
+                android:textSize="@dimen/widget_text_body"/>
+        </LinearLayout>
+
+        <ProgressBar
+            android:id="@+id/pick4_bar"
+            style="?android:attr/progressBarStyleHorizontal"
+            android:layout_width="match_parent"
+            android:layout_height="4dp"
+            android:layout_marginTop="3dp"
+            android:max="100"
+            android:progress="53"
+            android:progressDrawable="@drawable/widget_pick_bar"/>
+    </LinearLayout>
+
+    <LinearLayout
+        android:id="@+id/pick5_row"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:gravity="center_vertical"
+        android:orientation="vertical"
+        android:visibility="gone">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal">
+
+            <TextView
+                android:id="@+id/pick5_label"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:ellipsize="end"
+                android:maxLines="1"
+                android:text="SF @ LAR"
+                android:textColor="@color/widget_ink"
+                android:textSize="@dimen/widget_text_row"/>
+
+            <TextView
+                android:id="@+id/pick5_value"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="8dp"
+                android:fontFamily="monospace"
+                android:maxLines="1"
+                android:text="LAR 53%"
+                android:textColor="@color/widget_cyan"
+                android:textSize="@dimen/widget_text_body"/>
+        </LinearLayout>
+
+        <ProgressBar
+            android:id="@+id/pick5_bar"
+            style="?android:attr/progressBarStyleHorizontal"
+            android:layout_width="match_parent"
+            android:layout_height="4dp"
+            android:layout_marginTop="3dp"
+            android:max="100"
+            android:progress="53"
+            android:progressDrawable="@drawable/widget_pick_bar"/>
+    </LinearLayout>
+
+    <LinearLayout
+        android:id="@+id/pick6_row"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:gravity="center_vertical"
+        android:orientation="vertical"
+        android:visibility="gone">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal">
+
+            <TextView
+                android:id="@+id/pick6_label"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:ellipsize="end"
+                android:maxLines="1"
+                android:text="SF @ LAR"
+                android:textColor="@color/widget_ink"
+                android:textSize="@dimen/widget_text_row"/>
+
+            <TextView
+                android:id="@+id/pick6_value"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="8dp"
+                android:fontFamily="monospace"
+                android:maxLines="1"
+                android:text="LAR 53%"
+                android:textColor="@color/widget_cyan"
+                android:textSize="@dimen/widget_text_body"/>
+        </LinearLayout>
+
+        <ProgressBar
+            android:id="@+id/pick6_bar"
+            style="?android:attr/progressBarStyleHorizontal"
+            android:layout_width="match_parent"
+            android:layout_height="4dp"
+            android:layout_marginTop="3dp"
+            android:max="100"
+            android:progress="53"
+            android:progressDrawable="@drawable/widget_pick_bar"/>
+    </LinearLayout>
+
+    <LinearLayout
+        android:id="@+id/pick7_row"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:gravity="center_vertical"
+        android:orientation="vertical"
+        android:visibility="gone">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal">
+
+            <TextView
+                android:id="@+id/pick7_label"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:ellipsize="end"
+                android:maxLines="1"
+                android:text="SF @ LAR"
+                android:textColor="@color/widget_ink"
+                android:textSize="@dimen/widget_text_row"/>
+
+            <TextView
+                android:id="@+id/pick7_value"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="8dp"
+                android:fontFamily="monospace"
+                android:maxLines="1"
+                android:text="LAR 53%"
+                android:textColor="@color/widget_cyan"
+                android:textSize="@dimen/widget_text_body"/>
+        </LinearLayout>
+
+        <ProgressBar
+            android:id="@+id/pick7_bar"
+            style="?android:attr/progressBarStyleHorizontal"
+            android:layout_width="match_parent"
+            android:layout_height="4dp"
+            android:layout_marginTop="3dp"
+            android:max="100"
+            android:progress="53"
+            android:progressDrawable="@drawable/widget_pick_bar"/>
+    </LinearLayout>
+
+    <LinearLayout
+        android:id="@+id/pick8_row"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:gravity="center_vertical"
+        android:orientation="vertical"
+        android:visibility="gone">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal">
+
+            <TextView
+                android:id="@+id/pick8_label"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:ellipsize="end"
+                android:maxLines="1"
+                android:text="SF @ LAR"
+                android:textColor="@color/widget_ink"
+                android:textSize="@dimen/widget_text_row"/>
+
+            <TextView
+                android:id="@+id/pick8_value"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="8dp"
+                android:fontFamily="monospace"
+                android:maxLines="1"
+                android:text="LAR 53%"
+                android:textColor="@color/widget_cyan"
+                android:textSize="@dimen/widget_text_body"/>
+        </LinearLayout>
+
+        <ProgressBar
+            android:id="@+id/pick8_bar"
+            style="?android:attr/progressBarStyleHorizontal"
+            android:layout_width="match_parent"
+            android:layout_height="4dp"
+            android:layout_marginTop="3dp"
+            android:max="100"
+            android:progress="53"
+            android:progressDrawable="@drawable/widget_pick_bar"/>
+    </LinearLayout>
+
+    <LinearLayout
+        android:id="@+id/pick9_row"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:gravity="center_vertical"
+        android:orientation="vertical"
+        android:visibility="gone">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal">
+
+            <TextView
+                android:id="@+id/pick9_label"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:ellipsize="end"
+                android:maxLines="1"
+                android:text="SF @ LAR"
+                android:textColor="@color/widget_ink"
+                android:textSize="@dimen/widget_text_row"/>
+
+            <TextView
+                android:id="@+id/pick9_value"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="8dp"
+                android:fontFamily="monospace"
+                android:maxLines="1"
+                android:text="LAR 53%"
+                android:textColor="@color/widget_cyan"
+                android:textSize="@dimen/widget_text_body"/>
+        </LinearLayout>
+
+        <ProgressBar
+            android:id="@+id/pick9_bar"
+            style="?android:attr/progressBarStyleHorizontal"
+            android:layout_width="match_parent"
+            android:layout_height="4dp"
+            android:layout_marginTop="3dp"
+            android:max="100"
+            android:progress="53"
+            android:progressDrawable="@drawable/widget_pick_bar"/>
+    </LinearLayout>
+
+    <LinearLayout
+        android:id="@+id/pick10_row"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:gravity="center_vertical"
+        android:orientation="vertical"
+        android:visibility="gone">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal">
+
+            <TextView
+                android:id="@+id/pick10_label"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:ellipsize="end"
+                android:maxLines="1"
+                android:text="SF @ LAR"
+                android:textColor="@color/widget_ink"
+                android:textSize="@dimen/widget_text_row"/>
+
+            <TextView
+                android:id="@+id/pick10_value"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="8dp"
+                android:fontFamily="monospace"
+                android:maxLines="1"
+                android:text="LAR 53%"
+                android:textColor="@color/widget_cyan"
+                android:textSize="@dimen/widget_text_body"/>
+        </LinearLayout>
+
+        <ProgressBar
+            android:id="@+id/pick10_bar"
+            style="?android:attr/progressBarStyleHorizontal"
+            android:layout_width="match_parent"
+            android:layout_height="4dp"
+            android:layout_marginTop="3dp"
+            android:max="100"
+            android:progress="53"
+            android:progressDrawable="@drawable/widget_pick_bar"/>
+    </LinearLayout>
 </LinearLayout>

@@ -45,7 +45,7 @@ const propFloorShare = 0.6;
 const maxPropsPerStat = 2;
 
 /// Rows kept for the widgets; each shows as many as its size fits.
-const maxProps = 5;
+const maxProps = 10;
 
 /// "passing_yards" -> "player-prop-passing-yards", the model that projects it.
 String propModelName(String statKey) => 'player-prop-${statKey.replaceAll('_', '-')}';

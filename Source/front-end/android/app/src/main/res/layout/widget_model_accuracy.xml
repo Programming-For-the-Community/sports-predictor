@@ -16,7 +16,7 @@
         android:text="NFL · WIN PROBABILITY"
         android:textAllCaps="true"
         android:textColor="@color/widget_ink_sub"
-        android:textSize="10sp"
+        android:textSize="@dimen/widget_text_caption"
         android:letterSpacing="0.06"/>
 
     <TextView
@@ -26,50 +26,58 @@
         android:layout_marginTop="6dp"
         android:text="@string/widget_choose_sport"
         android:textColor="@color/widget_ink_sub"
-        android:textSize="12sp"
+        android:textSize="@dimen/widget_text_body"
         android:visibility="gone"/>
 
     <LinearLayout
         android:id="@+id/acc_body"
         android:layout_width="match_parent"
-        android:layout_height="wrap_content"
+        android:layout_height="0dp"
+        android:layout_weight="1"
         android:orientation="vertical">
 
-        <TextView
-            android:id="@+id/acc_big"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:maxLines="1"
-            android:text="68%"
-            android:textColor="@color/widget_ink"
-            android:textSize="30sp"
-            android:layout_marginTop="4dp"
-            android:textStyle="bold"/>
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_weight="1"
+            android:gravity="center_vertical"
+            android:orientation="vertical">
 
-        <TextView
-            android:id="@+id/acc_season"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:maxLines="1"
-            android:text="right this season · 77"
-            android:textColor="@color/widget_ink_sub"
-            android:textSize="11sp"/>
+            <TextView
+                android:id="@+id/acc_big"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:maxLines="1"
+                android:text="68%"
+                android:textColor="@color/widget_ink"
+                android:textSize="@dimen/widget_text_figure"
+                android:textStyle="bold"/>
 
-        <TextView
-            android:id="@+id/acc_last"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:maxLines="1"
-            android:text="Wk 5: 75%"
-            android:textColor="@color/widget_ink"
-            android:textSize="12sp"
-            android:layout_marginTop="4dp"/>
+            <TextView
+                android:id="@+id/acc_season"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:maxLines="1"
+                android:text="right this season · 77"
+                android:textColor="@color/widget_ink_sub"
+                android:textSize="@dimen/widget_text_meta"/>
+
+            <TextView
+                android:id="@+id/acc_last"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="4dp"
+                android:maxLines="1"
+                android:text="Wk 5: 75%"
+                android:textColor="@color/widget_ink"
+                android:textSize="@dimen/widget_text_body"/>
+        </LinearLayout>
 
         <LinearLayout
             android:id="@+id/acc_bands"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="8dp"
+            android:layout_marginTop="4dp"
             android:orientation="vertical">
 
             <FrameLayout
@@ -78,6 +86,7 @@
                 android:background="@color/widget_border"/>
 
             <TextView
+                android:id="@+id/acc_bands_title"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="6dp"
@@ -86,7 +95,7 @@
                 android:text="@string/widget_by_confidence"
                 android:textAllCaps="true"
                 android:textColor="@color/widget_ink_sub"
-                android:textSize="9sp"
+                android:textSize="@dimen/widget_text_tag"
                 android:textStyle="bold"/>
 
             <LinearLayout
@@ -111,7 +120,7 @@
                         android:maxLines="1"
                         android:text="HIGH"
                         android:textColor="@color/widget_ink_sub"
-                        android:textSize="9sp"/>
+                        android:textSize="@dimen/widget_text_tag"/>
 
                     <TextView
                         android:id="@+id/acc_band1_pct"
@@ -121,7 +130,7 @@
                         android:maxLines="1"
                         android:text="81%"
                         android:textColor="@color/widget_ink"
-                        android:textSize="13sp"/>
+                        android:textSize="@dimen/widget_text_row"/>
 
                     <ProgressBar
                         android:id="@+id/acc_band1_bar"
@@ -150,7 +159,7 @@
                         android:maxLines="1"
                         android:text="MED"
                         android:textColor="@color/widget_ink_sub"
-                        android:textSize="9sp"/>
+                        android:textSize="@dimen/widget_text_tag"/>
 
                     <TextView
                         android:id="@+id/acc_band2_pct"
@@ -160,7 +169,7 @@
                         android:maxLines="1"
                         android:text="66%"
                         android:textColor="@color/widget_ink"
-                        android:textSize="13sp"/>
+                        android:textSize="@dimen/widget_text_row"/>
 
                     <ProgressBar
                         android:id="@+id/acc_band2_bar"
@@ -189,7 +198,7 @@
                         android:maxLines="1"
                         android:text="LOW"
                         android:textColor="@color/widget_ink_sub"
-                        android:textSize="9sp"/>
+                        android:textSize="@dimen/widget_text_tag"/>
 
                     <TextView
                         android:id="@+id/acc_band3_pct"
@@ -199,7 +208,7 @@
                         android:maxLines="1"
                         android:text="54%"
                         android:textColor="@color/widget_ink"
-                        android:textSize="13sp"/>
+                        android:textSize="@dimen/widget_text_row"/>
 
                     <ProgressBar
                         android:id="@+id/acc_band3_bar"

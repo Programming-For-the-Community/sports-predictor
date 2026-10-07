@@ -11,6 +11,7 @@ import 'package:front_end/core/theme/app_colors.dart';
 import 'package:front_end/core/widgets/game_row.dart';
 import 'package:front_end/core/widgets/prediction_computing_retry.dart';
 import 'package:front_end/core/widgets/win_probability_bar.dart';
+import 'package:front_end/static/confidence_tiers.dart';
 
 // Locates a Text widget rendering exactly `text` in exactly `color` --
 // the actual/predicted score pair render as separate Text widgets
@@ -217,7 +218,8 @@ void main() {
       // KC is home and favored (0.68 >= 0.5).
       expect(find.textContaining('KC -6.5'), findsOneWidget);
       expect(find.text('68%'), findsOneWidget);
-      expect(find.text('HIGH'), findsOneWidget); // edge 0.18 -> HIGH tier
+      final tier = ConfidenceTier.forProbability(0.68).label;
+      expect(find.text(tier), findsOneWidget);
       // The pre-game win-probability bar is dropped once live -- the
       // LIVE pill already covers that state.
       expect(find.byType(WinProbabilityBar), findsNothing);
@@ -225,7 +227,7 @@ void main() {
       // LIVE pill/clock and ConfidencePill sit on the same row -- no
       // more staggering across two separate lines.
       final liveY = tester.getCenter(find.text('Q1 4:00')).dy;
-      final confidenceY = tester.getCenter(find.text('HIGH')).dy;
+      final confidenceY = tester.getCenter(find.text(tier)).dy;
       expect(liveY, equals(confidenceY));
 
       // A real gap (not just the small fixed spacer) separates the LIVE
@@ -298,10 +300,11 @@ void main() {
       ));
       await tester.pumpAndSettle();
 
-      // edge = 0.18 -> HIGH tier, collapsed to just its colored dot below
+      // The confidence tier is collapsed to just its colored dot below
       // the stack breakpoint -- the text label moves into a Tooltip.
-      expect(find.text('HIGH'), findsNothing);
-      expect(find.byTooltip('HIGH'), findsOneWidget);
+      final tier = ConfidenceTier.forProbability(0.68).label;
+      expect(find.text(tier), findsNothing);
+      expect(find.byTooltip(tier), findsOneWidget);
     });
 
     testWidgets('a narrow (mobile) live event collapses the LIVE pill to just its dot', (tester) async {
