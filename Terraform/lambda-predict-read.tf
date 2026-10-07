@@ -53,7 +53,7 @@ resource "aws_lambda_function" "predict_read" {
   handler       = "handler.lambda_handler"
   # API Gateway REST API's integration ceiling.
   timeout     = 29
-  memory_size = 512
+  memory_size = 1024
 
   filename         = data.archive_file.predict_read_placeholder.output_path
   source_code_hash = data.archive_file.predict_read_placeholder.output_base64sha256

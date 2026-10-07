@@ -187,6 +187,8 @@ resource "aws_cloudfront_distribution" "main" {
     cached_methods             = ["GET", "HEAD"]
     cache_policy_id            = aws_cloudfront_cache_policy.frontend_edge.id
     response_headers_policy_id = aws_cloudfront_response_headers_policy.security_headers.id
+    # The web build is uploaded uncompressed; CloudFront gzips/brotlis it.
+    compress = true
   }
 
   dynamic "ordered_cache_behavior" {

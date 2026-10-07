@@ -10,6 +10,7 @@ from boto3.dynamodb.conditions import Key
 from library.serving.live_window import POLL_SAFETY_CAP_AFTER_KICKOFF, parse_kickoff
 from library.serving.prediction_snapshots import event_prediction_rows
 from library.parsing import us_eastern_date
+from library.storage import event_list_snapshot, prediction_cache
 from library.storage.model_artifacts import current_version_key, model_artifact_key
 from library.storage.model_performance import model_performance_key
 from library.storage.season_projections import season_projection_key
@@ -36,6 +37,10 @@ _MODEL_KEY_VERSION_RE = re.compile(r"^MODEL#[a-z0-9-]+#v(\d+)(?:#|$)")
 # always included regardless of how long the gap to it is (e.g. the
 # off-season).
 RECENT_EVENTS_LIMIT = 400
+
+# UI hint on a stale embedded prediction -- how soon to ask the per-event
+# route, which starts the refresh.
+STALE_RETRY_AFTER_SECONDS = 5
 
 
 def enrich_participants(
@@ -87,6 +92,63 @@ def prefetch_entities(storage, sport: str, refs: list[tuple[str, str]]) -> dict[
     FeatureStorage's own method name, matching how enrich_participants
     already hides get_entity itself from callers."""
     return storage.get_entities(sport, refs)
+
+
+def prefetch_participant_teams(storage, sport: str, events: list[dict]) -> dict[tuple[str, str], dict]:
+    """entity_cache for enrich_participants covering every team across
+    `events` -- the same few teams repeat across a slate, so one batched
+    read replaces a GetItem per participant per event."""
+    refs = [(p["entity_id"], "team") for e in events for p in e.get("participants") or []]
+    return prefetch_entities(storage, sport, refs)
+
+
+def cached_prediction_reader(model_bucket, sport: str):
+    """event_key -> the body GET /{sport}/predictions/events/{event_id}
+    would serve from cache right now (`stale` set the same way), or None
+    on a miss or a negative entry. Lets a scheduled events list carry each
+    game's prediction instead of the client asking per game; a None or
+    stale one still sends the client to that route, which is what
+    triggers the compute."""
+    current_versions = prediction_cache.current_core_model_versions(
+        model_bucket, sport, prediction_cache.POINTER_MAX_AGE_SECONDS,
+    )
+
+    def _read(event_key: str) -> dict | None:
+        entry = prediction_cache.get_cached(
+            model_bucket, prediction_cache.event_prediction_cache_key(sport, event_key),
+        )
+        if entry is None or prediction_cache.is_error_entry(entry):
+            return None
+        if prediction_cache.is_fresh(entry, current_versions):
+            return {**entry["result"], "stale": False}
+        return {**entry["result"], "stale": True, "retry_after_seconds": STALE_RETRY_AFTER_SECONDS}
+
+    return _read
+
+
+def scheduled_prediction_reader(model_bucket, sport: str, status: str):
+    """cached_prediction_reader for a scheduled list that was given a
+    model_bucket, else None -- a completed event's card shows its
+    prediction_comparison instead."""
+    if model_bucket is None or status != "scheduled":
+        return None
+    return cached_prediction_reader(model_bucket, sport)
+
+
+def read_completed_snapshot(model_bucket, sport: str, status: str, events: list[dict]) -> tuple[str | None, list[dict] | None]:
+    """(fingerprint, entries) for a completed list given a model_bucket --
+    entries is the list built last time for exactly these events, None if
+    it has to be built. (None, None) for any other list: nothing is read,
+    and write_completed_snapshot then writes nothing."""
+    if model_bucket is None or status != "completed":
+        return None, None
+    events_fingerprint = event_list_snapshot.fingerprint(events)
+    return events_fingerprint, event_list_snapshot.read(model_bucket, sport, events_fingerprint)
+
+
+def write_completed_snapshot(model_bucket, sport: str, events_fingerprint: str | None, entries: list[dict]) -> None:
+    if events_fingerprint is not None:
+        event_list_snapshot.write(model_bucket, sport, events_fingerprint, entries)
 
 
 def most_recent_event(events: list[dict]) -> list[dict]:
@@ -537,13 +599,16 @@ def _sort_and_limit_leader_lists(home: dict, away: dict, limits: dict[str, int],
             bucket[category] = bucket[category][:limit]
 
 
-def list_events_grouped_by_day(storage, predictions_table, sport: str, status: str) -> dict:
+def list_events_grouped_by_day(storage, predictions_table, sport: str, status: str, model_bucket=None) -> dict:
     """GET /{sport}/events?status=scheduled|completed for a day-grouped
     basketball-shaped sport (nba/ncaambb) -- scoped to exactly one calendar
     date, not the whole matching history. Each participant also carries
     `name`/`abbreviation` off its own team entity -- see enrich_participants.
     Also carries `venue_name`/`venue_city`/`venue_state` straight off the
-    stored event, `null` on any of the three the venue lacked.
+    stored event, `null` on any of the three the venue lacked. With
+    model_bucket, a scheduled event also carries `prediction` -- see
+    cached_prediction_reader -- and a completed list is reused while its
+    events are unchanged -- see read_completed_snapshot.
 
     Bounded to RECENT_EVENTS_LIMIT rows on the query itself, most-recent-
     or soonest-first to match whichever bucket status narrows down to
@@ -560,6 +625,16 @@ def list_events_grouped_by_day(storage, predictions_table, sport: str, status: s
     else:
         events = storage.get_all_events(sport, status=status)
 
+    if not events:
+        return {"sport": sport, "events": []}
+
+    snapshot_fingerprint, entries = read_completed_snapshot(model_bucket, sport, status, events)
+    if entries is not None:
+        return {"sport": sport, "events": entries}
+
+    entity_cache = prefetch_participant_teams(storage, sport, events)
+    read_prediction = scheduled_prediction_reader(model_bucket, sport, status)
+
     def _entry(e: dict) -> dict:
         entry = {
             "event_id": e["event_id"],
@@ -567,11 +642,13 @@ def list_events_grouped_by_day(storage, predictions_table, sport: str, status: s
             "kickoff_time": e.get("kickoff_time"),
             "status": e.get("status"),
             "season": e.get("season"),
-            "participants": enrich_participants(storage, sport, e.get("participants")),
+            "participants": enrich_participants(storage, sport, e.get("participants"), entity_cache=entity_cache),
             "venue_name": e.get("venue_name"),
             "venue_city": e.get("venue_city"),
             "venue_state": e.get("venue_state"),
         }
+        if read_prediction is not None:
+            entry["prediction"] = read_prediction(e["event_key"])
         if status == "completed":
             # One query shared by _prediction_comparison and
             # _basketball_leaders_comparison rather than each querying
@@ -581,14 +658,12 @@ def list_events_grouped_by_day(storage, predictions_table, sport: str, status: s
             entry["leaders_comparison"] = _basketball_leaders_comparison(storage, rows, sport, e)
         return entry
 
-    if not events:
-        return {"sport": sport, "events": []}
-
     # Concurrent, not sequential -- each entry makes several DynamoDB round
     # trips, independent per event.
     with ThreadPoolExecutor(max_workers=min(len(events), 16)) as executor:
         entries = list(executor.map(_entry, events))
 
+    write_completed_snapshot(model_bucket, sport, snapshot_fingerprint, entries)
     return {"sport": sport, "events": entries}
 
 

@@ -43,13 +43,14 @@ def _predict_event(resource, path_params, query_params=None):
 
 def _s3_with_state(state: dict):
     """A MagicMock standing in for S3Manager, backed by a plain
-    {key: json_value} dict -- object_exists/get_json read from it,
+    {key: json_value} dict -- object_exists/get_json/get_json_or_none read from it,
     put_json/delete_object are left as ordinary (unasserted-by-default)
     mock calls, same shape claim_in_progress/put_cached/put_error_cached
     actually call against a real S3Manager."""
     s3 = MagicMock()
     s3.object_exists.side_effect = lambda key: key in state
     s3.get_json.side_effect = lambda key: state[key]
+    s3.get_json_or_none.side_effect = state.get
     return s3
 
 
@@ -123,16 +124,20 @@ class _TeamSportRoutingMixin:
     def test_events_route_calls_the_real_list_events(self):
         with patch.object(shared_predict_read, "_get_storage"), \
              patch.object(shared_predict_read, "_get_predictions_table"), \
+             patch.object(shared_predict_read, "_get_model_bucket") as mock_bucket, \
              patch.object(self._reads_module, "list_events", return_value={"sport": self.SPORT, "events": []}) as mock_list:
             response = shared_predict_read.lambda_handler(_api_event(f"/{self.SPORT}/events", {"status": "completed"}), None)
 
         assert response["statusCode"] == 200
         assert json.loads(response["body"]) == {"sport": self.SPORT, "events": []}
         assert mock_list.call_args.args[-1] == "completed"
+        # The bucket the list reads each scheduled game's cached prediction from.
+        assert mock_list.call_args.kwargs["model_bucket"] is mock_bucket.return_value
 
     def test_events_route_defaults_status_to_scheduled(self):
         with patch.object(shared_predict_read, "_get_storage"), \
              patch.object(shared_predict_read, "_get_predictions_table"), \
+             patch.object(shared_predict_read, "_get_model_bucket"), \
              patch.object(self._reads_module, "list_events", return_value={}) as mock_list:
             shared_predict_read.lambda_handler(_api_event(f"/{self.SPORT}/events"), None)
 

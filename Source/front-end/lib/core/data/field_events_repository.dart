@@ -6,6 +6,7 @@ import '../models/event_status.dart';
 import '../models/field_event.dart';
 import '../models/field_prediction.dart';
 import 'events_repository.dart' show PredictionComputingException;
+import 'last_known_cache.dart';
 
 export 'events_repository.dart' show PredictionComputingException;
 
@@ -18,11 +19,17 @@ class FieldEventsRepository {
 
   final ApiClient _api;
 
-  Future<List<FieldEvent>> listEvents(String sport, {String status = EventStatus.scheduled}) async {
-    final response = await _api.get(ApiRoutes.events(sport), queryParameters: {'status': status}) as Map<String, dynamic>;
-    final events = response['events'] as List<dynamic>? ?? [];
+  /// The raw GET /{sport}/events body -- see [parseEvents].
+  Future<Object?> fetchEvents(String sport, {String status = EventStatus.scheduled}) =>
+      _api.get(ApiRoutes.events(sport), queryParameters: {'status': status});
+
+  static List<FieldEvent> parseEvents(Object? json) {
+    final events = (json as Map<String, dynamic>)['events'] as List<dynamic>? ?? [];
     return events.map((e) => FieldEvent.fromJson(e as Map<String, dynamic>)).toList();
   }
+
+  Future<List<FieldEvent>> listEvents(String sport, {String status = EventStatus.scheduled}) async =>
+      parseEvents(await fetchEvents(sport, status: status));
 
   /// A Ryder Cup/Presidents Cup's own matches, in tee-off order.
   Future<List<FieldEvent>> listChildEvents(String sport, String parentEventId) async {
@@ -32,8 +39,11 @@ class FieldEventsRepository {
     return events.map((e) => FieldEvent.fromJson(e as Map<String, dynamic>)).toList();
   }
 
-  Future<PgaEventPrediction> getEventPrediction(String sport, String eventId) async {
-    final response = await _api.get(ApiRoutes.eventPrediction(sport, eventId)) as Map<String, dynamic>;
+  /// The raw GET /{sport}/predictions/events/{event_id} body -- see [parsePrediction].
+  Future<Object?> fetchEventPrediction(String sport, String eventId) => _api.get(ApiRoutes.eventPrediction(sport, eventId));
+
+  static PgaEventPrediction parsePrediction(Object? json) {
+    final response = json as Map<String, dynamic>;
     // Same "computing" cache-miss shape as every other sport's predict
     // route -- reuses EventsRepository's own exception type rather than
     // duplicating it, since callers already catch this type generically.
@@ -42,6 +52,9 @@ class FieldEventsRepository {
     }
     return parsePgaEventPrediction(response);
   }
+
+  Future<PgaEventPrediction> getEventPrediction(String sport, String eventId) async =>
+      parsePrediction(await fetchEventPrediction(sport, eventId));
 }
 
 final fieldEventsRepositoryProvider =
@@ -50,7 +63,13 @@ final fieldEventsRepositoryProvider =
 typedef _FieldEventsQuery = ({String sport, String status});
 
 final fieldEventsListProvider = FutureProvider.family<List<FieldEvent>, _FieldEventsQuery>((ref, query) {
-  return ref.watch(fieldEventsRepositoryProvider).listEvents(query.sport, status: query.status);
+  final repository = ref.watch(fieldEventsRepositoryProvider);
+  return lastKnownThenFresh(
+    ref,
+    key: 'events/${query.sport}/${query.status}',
+    fetch: () => repository.fetchEvents(query.sport, status: query.status),
+    parse: FieldEventsRepository.parseEvents,
+  );
 });
 
 typedef _FieldEventQuery = ({String sport, String eventId});
@@ -60,5 +79,11 @@ final fieldChildEventsProvider = FutureProvider.family<List<FieldEvent>, _FieldE
 });
 
 final fieldEventPredictionProvider = FutureProvider.family<PgaEventPrediction, _FieldEventQuery>((ref, query) {
-  return ref.watch(fieldEventsRepositoryProvider).getEventPrediction(query.sport, query.eventId);
+  final repository = ref.watch(fieldEventsRepositoryProvider);
+  return lastKnownThenFresh(
+    ref,
+    key: 'prediction/${query.sport}/${query.eventId}',
+    fetch: () => repository.fetchEventPrediction(query.sport, query.eventId),
+    parse: FieldEventsRepository.parsePrediction,
+  );
 });

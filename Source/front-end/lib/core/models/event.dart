@@ -1,5 +1,6 @@
 import 'event_leaders.dart';
 import 'event_status.dart';
+import 'prediction.dart';
 
 /// Mirrors GET /{sport}/events' response shape.
 class ParticipantResult {
@@ -103,6 +104,7 @@ class SportEvent {
     required this.participants,
     required this.predictionComparison,
     required this.leadersComparison,
+    this.prediction,
     this.venueName,
     this.venueCity,
     this.venueState,
@@ -130,6 +132,20 @@ class SportEvent {
   // predictionComparison (both are completed-event-only), same "null
   // means nobody recorded one before the game" condition as that field.
   final EventLeadersComparison? leadersComparison;
+  // A scheduled event's current prediction, when the list already had it
+  // cached -- null means ask the prediction route (see
+  // core/data/events_repository.dart's PredictionSeeds).
+  final EventPrediction? prediction;
+
+  static EventPrediction? _embeddedPrediction(Object? json) {
+    if (json is! Map<String, dynamic>) return null;
+    try {
+      return EventPrediction.fromJson(json);
+    } catch (_) {
+      // Not a shape this build understands -- the prediction route still is.
+      return null;
+    }
+  }
 
   factory SportEvent.fromJson(Map<String, dynamic> json) => SportEvent(
         eventId: json['event_id'] as String,
@@ -147,6 +163,7 @@ class SportEvent {
         leadersComparison: json['leaders_comparison'] != null
             ? EventLeadersComparison.fromJson(json['leaders_comparison'] as Map<String, dynamic>)
             : null,
+        prediction: _embeddedPrediction(json['prediction']),
         venueName: json['venue_name'] as String?,
         venueCity: json['venue_city'] as String?,
         venueState: json['venue_state'] as String?,

@@ -165,3 +165,25 @@ class TestDeleteObject:
             Key="training-runs/nfl/win-probability/run-1/progress.json",
             ExpectedBucketOwner=TEST_OWNER,
         )
+
+
+class TestGetJsonOrNone:
+    def test_returns_the_parsed_object(self):
+        manager, mock_client, _ = _make_manager()
+        mock_client.get_object.return_value = {"Body": MagicMock(read=MagicMock(return_value=b'{"version": 3}'))}
+
+        assert manager.get_json_or_none("nfl/win-probability/current.json") == {"version": 3}
+        mock_client.head_object.assert_not_called()
+
+    def test_none_for_a_missing_key(self):
+        manager, mock_client, _ = _make_manager()
+        mock_client.get_object.side_effect = _client_error("NoSuchKey")
+
+        assert manager.get_json_or_none("nfl/win-probability/current.json") is None
+
+    def test_other_errors_propagate(self):
+        manager, mock_client, _ = _make_manager()
+        mock_client.get_object.side_effect = _client_error("AccessDenied")
+
+        with pytest.raises(ClientError):
+            manager.get_json_or_none("nfl/win-probability/current.json")

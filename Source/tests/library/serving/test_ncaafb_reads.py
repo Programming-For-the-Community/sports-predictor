@@ -70,10 +70,10 @@ class TestListEvents:
         storage = MagicMock()
         predictions_table = MagicMock()
         storage.get_all_events.return_value = [_event("e1", _future(4), "333", "61", week=5)]
-        storage.get_entity.side_effect = lambda sport, entity_id, entity_type: {
-            "333": {"name": "Alabama", "metadata": {"abbreviation": "ALA", "conference": "SEC"}},
-            "61": {"name": "Georgia", "metadata": {"abbreviation": "UGA", "conference": "SEC"}},
-        }[entity_id]
+        storage.get_entities.return_value = {
+            ("333", "team"): {"name": "Alabama", "metadata": {"abbreviation": "ALA", "conference": "SEC"}},
+            ("61", "team"): {"name": "Georgia", "metadata": {"abbreviation": "UGA", "conference": "SEC"}},
+        }
 
         result = ncaafb_reads.list_events(storage, predictions_table, "ncaafb", "scheduled")
 
@@ -81,6 +81,7 @@ class TestListEvents:
         assert home["abbreviation"] == "ALA"
         assert away["abbreviation"] == "UGA"
         assert home["conference"] == "SEC"
+        storage.get_entity.assert_not_called()
 
     def test_a_stale_never_played_scheduled_event_does_not_mask_a_real_upcoming_week(self):
         storage = MagicMock()

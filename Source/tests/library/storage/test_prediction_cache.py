@@ -25,14 +25,13 @@ class TestCacheKeys:
 class TestGetCached:
     def test_returns_none_when_nothing_cached(self):
         s3 = MagicMock()
-        s3.object_exists.return_value = False
+        s3.get_json_or_none.return_value = None
 
         assert prediction_cache.get_cached(s3, "predictions-cache/nfl/events/E1.json") is None
 
     def test_returns_the_cached_envelope(self):
         s3 = MagicMock()
-        s3.object_exists.return_value = True
-        s3.get_json.return_value = {"model_versions": {"win_probability": 1}, "result": {"foo": "bar"}}
+        s3.get_json_or_none.return_value = {"model_versions": {"win_probability": 1}, "result": {"foo": "bar"}}
 
         entry = prediction_cache.get_cached(s3, "predictions-cache/nfl/events/E1.json")
 
@@ -121,8 +120,7 @@ class TestCurrentModelVersions:
 
     def test_reads_a_caller_supplied_model_map(self):
         s3 = MagicMock()
-        s3.object_exists.return_value = True
-        s3.get_json.return_value = {"version": 5}
+        s3.get_json_or_none.return_value = {"version": 5}
 
         versions = prediction_cache.current_model_versions(
             s3, "pga", {"top_10": "top-10-probability", "score": "projected-score-to-par"},
@@ -132,18 +130,72 @@ class TestCurrentModelVersions:
 
     def test_an_unpromoted_model_in_the_map_reads_as_none(self):
         s3 = MagicMock()
-        s3.object_exists.return_value = False
+        s3.get_json_or_none.return_value = None
 
         versions = prediction_cache.current_model_versions(s3, "pga", {"top_10": "top-10-probability"})
 
         assert versions == {"top_10": None}
 
 
+class TestPointerMemo:
+    """max_age_seconds lets a read path reuse a pointer it already read
+    in this container; the default always reads S3."""
+
+    def test_default_reads_s3_every_call(self):
+        s3 = MagicMock()
+        s3.get_json_or_none.return_value = {"version": 3}
+
+        prediction_cache.current_core_model_versions(s3, "nfl")
+        prediction_cache.current_core_model_versions(s3, "nfl")
+
+        assert s3.get_json_or_none.call_count == 8
+
+    def test_reuses_a_recent_read(self):
+        s3 = MagicMock()
+        s3.get_json_or_none.return_value = {"version": 3}
+
+        first = prediction_cache.current_core_model_versions(s3, "nfl", max_age_seconds=60)
+        s3.get_json_or_none.return_value = {"version": 4}
+        second = prediction_cache.current_core_model_versions(s3, "nfl", max_age_seconds=60)
+
+        assert first == second == {"win_probability": 3, "margin": 3, "home_score": 3, "away_score": 3}
+        assert s3.get_json_or_none.call_count == 4
+
+    def test_rereads_once_the_memo_has_aged_out(self, monkeypatch):
+        s3 = MagicMock()
+        s3.get_json_or_none.return_value = {"version": 3}
+        now = [1000.0]
+        monkeypatch.setattr(prediction_cache.time, "time", lambda: now[0])
+
+        prediction_cache.current_player_prop_model_version(s3, "nfl", "passing_yards", max_age_seconds=60)
+        now[0] += 61
+        s3.get_json_or_none.return_value = {"version": 4}
+
+        assert prediction_cache.current_player_prop_model_version(s3, "nfl", "passing_yards", max_age_seconds=60) == 4
+
+    def test_an_unpromoted_model_is_memoised_as_none(self):
+        s3 = MagicMock()
+        s3.get_json_or_none.return_value = None
+
+        prediction_cache.current_player_prop_model_version(s3, "nfl", "passing_yards", max_age_seconds=60)
+
+        assert prediction_cache.current_player_prop_model_version(s3, "nfl", "passing_yards", max_age_seconds=60) is None
+        assert s3.get_json_or_none.call_count == 1
+
+    def test_memo_is_per_s3_manager(self):
+        first, second = MagicMock(), MagicMock()
+        first.get_json_or_none.return_value = {"version": 1}
+        second.get_json_or_none.return_value = {"version": 2}
+
+        prediction_cache.current_player_prop_model_version(first, "nfl", "passing_yards", max_age_seconds=60)
+
+        assert prediction_cache.current_player_prop_model_version(second, "nfl", "passing_yards", max_age_seconds=60) == 2
+
+
 class TestCurrentCoreModelVersions:
     def test_reads_all_four_pointers(self):
         s3 = MagicMock()
-        s3.object_exists.return_value = True
-        s3.get_json.return_value = {"version": 3}
+        s3.get_json_or_none.return_value = {"version": 3}
 
         versions = prediction_cache.current_core_model_versions(s3, "nfl")
 
@@ -151,7 +203,7 @@ class TestCurrentCoreModelVersions:
 
     def test_a_never_promoted_model_reads_as_none(self):
         s3 = MagicMock()
-        s3.object_exists.return_value = False
+        s3.get_json_or_none.return_value = None
 
         versions = prediction_cache.current_core_model_versions(s3, "nfl")
 
@@ -161,14 +213,13 @@ class TestCurrentCoreModelVersions:
 class TestCurrentPlayerPropModelVersion:
     def test_returns_the_promoted_version(self):
         s3 = MagicMock()
-        s3.object_exists.return_value = True
-        s3.get_json.return_value = {"version": 5}
+        s3.get_json_or_none.return_value = {"version": 5}
 
         assert prediction_cache.current_player_prop_model_version(s3, "ncaafb", "passing_yards") == 5
 
     def test_none_when_never_promoted(self):
         s3 = MagicMock()
-        s3.object_exists.return_value = False
+        s3.get_json_or_none.return_value = None
 
         assert prediction_cache.current_player_prop_model_version(s3, "ncaafb", "passing_yards") is None
 
@@ -176,22 +227,20 @@ class TestCurrentPlayerPropModelVersion:
 class TestInProgressClaim:
     def test_claims_when_nothing_in_progress(self):
         s3 = MagicMock()
-        s3.object_exists.return_value = False
+        s3.get_json_or_none.return_value = None
 
         assert prediction_cache.claim_in_progress(s3, "predictions-cache/nfl/events/E1.json") is True
         s3.put_json.assert_called_once()
 
     def test_does_not_claim_when_a_recent_claim_already_exists(self):
         s3 = MagicMock()
-        s3.object_exists.return_value = True
-        s3.get_json.return_value = {"started_at_epoch": time.time()}
+        s3.get_json_or_none.return_value = {"started_at_epoch": time.time()}
 
         assert prediction_cache.claim_in_progress(s3, "predictions-cache/nfl/events/E1.json") is False
 
     def test_claims_again_once_the_previous_claim_has_expired(self):
         s3 = MagicMock()
-        s3.object_exists.return_value = True
-        s3.get_json.return_value = {"started_at_epoch": time.time() - (prediction_cache.IN_PROGRESS_TTL_SECONDS + 10)}
+        s3.get_json_or_none.return_value = {"started_at_epoch": time.time() - (prediction_cache.IN_PROGRESS_TTL_SECONDS + 10)}
 
         assert prediction_cache.claim_in_progress(s3, "predictions-cache/nfl/events/E1.json") is True
 

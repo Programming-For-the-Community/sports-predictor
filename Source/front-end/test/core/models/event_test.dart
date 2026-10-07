@@ -242,4 +242,41 @@ void main() {
 
     expect(event.leadersComparison, isNull);
   });
+
+  group('embedded prediction', () {
+    Map<String, dynamic> scheduled(Object? prediction) => {
+          'event_id': '401547417',
+          'event_date': '2025-09-28',
+          'status': 'scheduled',
+          'participants': [
+            {'entity_id': 'KC', 'role': 'home'},
+            {'entity_id': 'LAC', 'role': 'away'},
+          ],
+          'prediction': prediction,
+        };
+
+    test('is parsed when the list carries one', () {
+      final event = SportEvent.fromJson(scheduled({
+        'predictions': {
+          'win_probability': {'home_win_probability': 0.6, 'model_version': 3},
+          'margin': {'value': 4.5},
+          'home_score': {'value': 24.0},
+          'away_score': {'value': 19.5},
+        },
+        'stale': true,
+        'retry_after_seconds': 5,
+      }));
+
+      expect(event.prediction?.homeWinProbability, 0.6);
+      expect(event.prediction?.stale, isTrue);
+    });
+
+    test('is null when the list has none cached', () {
+      expect(SportEvent.fromJson(scheduled(null)).prediction, isNull);
+    });
+
+    test('is null, not a failed list, when its shape is not understood', () {
+      expect(SportEvent.fromJson(scheduled({'predictions': {}})).prediction, isNull);
+    });
+  });
 }

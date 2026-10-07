@@ -231,6 +231,7 @@ resource "aws_api_gateway_deployment" "main" {
 
   triggers = {
     redeployment = sha1(jsonencode([
+      aws_api_gateway_rest_api.main.minimum_compression_size,
       aws_api_gateway_resource.nfl.id,
       aws_api_gateway_resource.nfl_predictions.id,
       aws_api_gateway_resource.nfl_predictions_events.id,

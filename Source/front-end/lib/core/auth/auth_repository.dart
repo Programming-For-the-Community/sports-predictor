@@ -4,6 +4,7 @@ import 'dart:convert';
 import 'package:flutter_riverpod/legacy.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../data/last_known_cache.dart';
 import '../mobile/app_shell.dart';
 import 'cognito_auth_client.dart';
 import 'token_store.dart';
@@ -250,6 +251,7 @@ class AuthRepository extends StateNotifier<AuthState> {
     final prefs = await _prefsInstance;
     await prefs.remove(_lastActivityPrefsKey);
     await prefs.remove(_sessionRenewedAtPrefsKey);
+    await LastKnownStore.clearLastKnown(prefs);
   }
 
   Future<void> _touchActivity() async {

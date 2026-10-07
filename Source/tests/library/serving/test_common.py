@@ -9,12 +9,15 @@ docstring for why the pre-existing per-sport nba_reads.py/etc. copies
 weren't rewired to import from here). See their respective test files
 for the through-list_events/through-build_season_projection integration.
 """
-from datetime import datetime, timezone
+import time
+from datetime import datetime, timedelta, timezone
 from unittest.mock import MagicMock
 
 import pytest
 
+from library.parsing import us_eastern_date
 from library.serving import common
+from library.storage import event_list_snapshot
 from library.serving.common import (
     enrich_bracket_team_names, enrich_participants, enrich_team_standings, latest_matching_row, list_models,
     most_recent_event, prefetch_entities, row_model_version,
@@ -394,3 +397,196 @@ class TestMalformedEventsAndRows:
         result = common._predicted_stats_by_entity_category(rows, {"points": "scoring"})
 
         assert result == {("p1", "scoring"): {"points": 20.0}}
+
+
+def _prediction_bucket(objects: dict):
+    bucket = MagicMock()
+    bucket.get_json_or_none.side_effect = objects.get
+    return bucket
+
+
+def _core_pointers(sport: str, version: int) -> dict:
+    return {
+        f"{sport}/{model}/current.json": {"version": version}
+        for model in ("win-probability", "score-margin", "home-score", "away-score")
+    }
+
+
+_CORE_VERSIONS = {"win_probability": 2, "margin": 2, "home_score": 2, "away_score": 2}
+
+
+class TestCachedPredictionReader:
+    """What a scheduled events list embeds per game in place of the
+    client's own per-game prediction request."""
+
+    KEY = "SPORT#NBA#EVENT#e1"
+    CACHE_KEY = "predictions-cache/nba/events/SPORT#NBA#EVENT#e1.json"
+
+    def _entry(self, **overrides):
+        return {
+            "model_versions": _CORE_VERSIONS, "event_status": "scheduled",
+            "cached_at_epoch": time.time(), "result": {"predictions": {"margin": {"value": 3.5}}},
+            **overrides,
+        }
+
+    def test_fresh_entry_is_served_as_not_stale(self):
+        bucket = _prediction_bucket({**_core_pointers("nba", 2), self.CACHE_KEY: self._entry()})
+
+        prediction = common.cached_prediction_reader(bucket, "nba")(self.KEY)
+
+        assert prediction == {"predictions": {"margin": {"value": 3.5}}, "stale": False}
+
+    def test_entry_from_a_superseded_model_is_served_stale(self):
+        bucket = _prediction_bucket({**_core_pointers("nba", 3), self.CACHE_KEY: self._entry()})
+
+        prediction = common.cached_prediction_reader(bucket, "nba")(self.KEY)
+
+        assert prediction["stale"] is True
+        assert prediction["retry_after_seconds"] == common.STALE_RETRY_AFTER_SECONDS
+
+    def test_miss_is_none(self):
+        bucket = _prediction_bucket(_core_pointers("nba", 2))
+
+        assert common.cached_prediction_reader(bucket, "nba")(self.KEY) is None
+
+    def test_negative_entry_is_none(self):
+        error_entry = {"error_type": "EventNotFoundError", "error": "no such event", "cached_at_epoch": time.time()}
+        bucket = _prediction_bucket({**_core_pointers("nba", 2), self.CACHE_KEY: error_entry})
+
+        assert common.cached_prediction_reader(bucket, "nba")(self.KEY) is None
+
+    def test_never_writes_or_claims(self):
+        bucket = _prediction_bucket({**_core_pointers("nba", 3), self.CACHE_KEY: self._entry()})
+
+        common.cached_prediction_reader(bucket, "nba")(self.KEY)
+
+        bucket.put_json.assert_not_called()
+
+
+class TestScheduledPredictionReader:
+    def test_none_without_a_bucket(self):
+        assert common.scheduled_prediction_reader(None, "nba", "scheduled") is None
+
+    def test_none_for_a_completed_list(self):
+        assert common.scheduled_prediction_reader(MagicMock(), "nba", "completed") is None
+
+    def test_a_reader_for_a_scheduled_list_with_a_bucket(self):
+        bucket = _prediction_bucket(_core_pointers("nba", 2))
+
+        assert callable(common.scheduled_prediction_reader(bucket, "nba", "scheduled"))
+
+
+class TestListEventsEmbedsPredictions:
+    def _storage(self, event_date: str):
+        storage = MagicMock()
+        storage.get_all_events.return_value = [{
+            "event_id": "e1", "event_key": "SPORT#NBA#EVENT#e1", "event_date": event_date, "status": "scheduled",
+            "participants": [{"entity_id": "13", "role": "home"}, {"entity_id": "2", "role": "away"}],
+        }]
+        storage.get_entities.return_value = {}
+        storage.get_entity.return_value = None
+        return storage
+
+    def test_scheduled_event_carries_its_cached_prediction(self):
+        event_date = us_eastern_date(datetime.now(timezone.utc) + timedelta(days=2))
+        bucket = _prediction_bucket({
+            **_core_pointers("nba", 2),
+            "predictions-cache/nba/events/SPORT#NBA#EVENT#e1.json": {
+                "model_versions": _CORE_VERSIONS, "event_status": "scheduled",
+                "cached_at_epoch": time.time(), "result": {"predictions": {}},
+            },
+        })
+
+        result = common.list_events_grouped_by_day(self._storage(event_date), MagicMock(), "nba", "scheduled", model_bucket=bucket)
+
+        assert result["events"][0]["prediction"] == {"predictions": {}, "stale": False}
+
+    def test_uncached_event_carries_a_null_prediction(self):
+        event_date = us_eastern_date(datetime.now(timezone.utc) + timedelta(days=2))
+        bucket = _prediction_bucket(_core_pointers("nba", 2))
+
+        result = common.list_events_grouped_by_day(self._storage(event_date), MagicMock(), "nba", "scheduled", model_bucket=bucket)
+
+        assert result["events"][0]["prediction"] is None
+
+    def test_no_prediction_key_without_a_bucket(self):
+        event_date = us_eastern_date(datetime.now(timezone.utc) + timedelta(days=2))
+
+        result = common.list_events_grouped_by_day(self._storage(event_date), MagicMock(), "nba", "scheduled")
+
+        assert "prediction" not in result["events"][0]
+
+
+
+class TestCompletedListSnapshot:
+    """A completed list is rebuilt only when its events changed."""
+
+    def _storage(self):
+        storage = MagicMock()
+        storage.get_all_events.return_value = [{
+            "event_id": "e1", "event_key": "SPORT#NBA#EVENT#e1", "event_date": "2026-01-10", "status": "completed",
+            "participants": [
+                {"entity_id": "13", "role": "home", "result": {"score": 101}},
+                {"entity_id": "2", "role": "away", "result": {"score": 99}},
+            ],
+        }]
+        storage.get_entities.return_value = {}
+        storage.get_entity.return_value = None
+        storage.get_player_game_stats_for_event.return_value = []
+        return storage
+
+    def _predictions_table(self):
+        table = MagicMock()
+        table.query.return_value = []
+        return table
+
+    def test_a_matching_snapshot_is_served_without_rebuilding(self):
+        storage, table = self._storage(), self._predictions_table()
+        events_fingerprint = event_list_snapshot.fingerprint(storage.get_all_events.return_value)
+        bucket = _prediction_bucket({
+            "predictions-cache/lists/nba/completed.json": {
+                "fingerprint": events_fingerprint, "built_at_epoch": time.time(), "entries": [{"event_id": "from-snapshot"}],
+            },
+        })
+
+        result = common.list_events_grouped_by_day(storage, table, "nba", "completed", model_bucket=bucket)
+
+        assert result == {"sport": "nba", "events": [{"event_id": "from-snapshot"}]}
+        table.query.assert_not_called()
+        storage.get_entities.assert_not_called()
+        bucket.put_json.assert_not_called()
+
+    def test_a_miss_builds_the_list_and_saves_it(self):
+        storage, table = self._storage(), self._predictions_table()
+        bucket = _prediction_bucket({})
+
+        result = common.list_events_grouped_by_day(storage, table, "nba", "completed", model_bucket=bucket)
+
+        assert result["events"][0]["event_id"] == "e1"
+        key, payload = bucket.put_json.call_args.args
+        assert key == "predictions-cache/lists/nba/completed.json"
+        assert payload["entries"] == result["events"]
+        assert payload["fingerprint"] == event_list_snapshot.fingerprint(storage.get_all_events.return_value)
+
+    def test_a_snapshot_of_different_events_is_rebuilt(self):
+        storage, table = self._storage(), self._predictions_table()
+        bucket = _prediction_bucket({
+            "predictions-cache/lists/nba/completed.json": {
+                "fingerprint": "something-else", "built_at_epoch": time.time(), "entries": [{"event_id": "old"}],
+            },
+        })
+
+        result = common.list_events_grouped_by_day(storage, table, "nba", "completed", model_bucket=bucket)
+
+        assert result["events"][0]["event_id"] == "e1"
+
+    def test_a_scheduled_list_never_touches_the_snapshot(self):
+        assert common.read_completed_snapshot(MagicMock(), "nba", "scheduled", []) == (None, None)
+
+    def test_no_snapshot_without_a_bucket(self):
+        storage, table = self._storage(), self._predictions_table()
+
+        result = common.list_events_grouped_by_day(storage, table, "nba", "completed")
+
+        assert result["events"][0]["event_id"] == "e1"
+

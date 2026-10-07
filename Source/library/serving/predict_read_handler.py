@@ -137,7 +137,9 @@ def _handle_player_prop(namespace, sport: str, response_fn, event_id: str, entit
     event_key_value = build_event_key(sport, event_id)
     s3 = namespace["_get_model_bucket"]()
     cache_key = prediction_cache.player_prop_cache_key(sport, event_key_value, entity_id, target_stat)
-    current_version = prediction_cache.current_player_prop_model_version(s3, sport, target_stat)
+    current_version = prediction_cache.current_player_prop_model_version(
+        s3, sport, target_stat, prediction_cache.POINTER_MAX_AGE_SECONDS,
+    )
     return _serve_or_trigger(
         namespace, sport, response_fn, s3, cache_key, current_version, None,
         {

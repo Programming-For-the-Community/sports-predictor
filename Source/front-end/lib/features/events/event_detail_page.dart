@@ -119,22 +119,23 @@ class _EventDetailPageState extends ConsumerState<EventDetailPage>
     final scheduledAsync = ref.watch(eventsListProvider((sport: widget.sportId, status: EventStatus.scheduled)));
     final completedAsync = ref.watch(eventsListProvider((sport: widget.sportId, status: EventStatus.completed)));
 
-    if (scheduledAsync.isLoading || completedAsync.isLoading) {
-      return const Center(child: CircularProgressIndicator());
-    }
-    // Surface a real error instead of misreporting "Event not found".
-    if (scheduledAsync.hasError) {
-      return Text('Couldn\'t load events: ${scheduledAsync.error}', style: AppTextStyles.body(color: AppColors.neg));
-    }
-    if (completedAsync.hasError) {
-      return Text('Couldn\'t load events: ${completedAsync.error}', style: AppTextStyles.body(color: AppColors.neg));
-    }
-
+    // Renders as soon as either list has the event -- neither a list still
+    // loading (or refreshing) nor an error on the other one holds it back.
     final scheduled = scheduledAsync.value ?? const <SportEvent>[];
     final completed = completedAsync.value ?? const <SportEvent>[];
     final event = _findEvent(scheduled) ?? _findEvent(completed);
 
     if (event == null) {
+      if (scheduledAsync.isLoading || completedAsync.isLoading) {
+        return const Center(child: CircularProgressIndicator());
+      }
+      // Surface a real error instead of misreporting "Event not found".
+      if (scheduledAsync.hasError) {
+        return Text('Couldn\'t load events: ${scheduledAsync.error}', style: AppTextStyles.body(color: AppColors.neg));
+      }
+      if (completedAsync.hasError) {
+        return Text('Couldn\'t load events: ${completedAsync.error}', style: AppTextStyles.body(color: AppColors.neg));
+      }
       return Text('Event not found.', style: AppTextStyles.body(color: AppColors.neg));
     }
 

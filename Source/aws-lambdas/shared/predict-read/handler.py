@@ -82,7 +82,7 @@ def _team_sport_freshness_inputs(sport: str):
     # get_storage (the singleton getter) is deliberately never called --
     # this route never needed FeatureStorage for these 4 sports.
     def _freshness_inputs(s3, get_storage, event_id: str):
-        return prediction_cache.current_core_model_versions(s3, sport), None
+        return prediction_cache.current_core_model_versions(s3, sport, prediction_cache.POINTER_MAX_AGE_SECONDS), None
 
     return _freshness_inputs
 
@@ -105,7 +105,8 @@ def _pga_freshness_inputs_for_event(s3, storage, event_id: str) -> tuple[dict, i
         models = pga_reads.model_versions_for(event.get("event_type"))
     except KeyError:
         return {}, None
-    return prediction_cache.current_model_versions(s3, "pga", models), pga_reads.rounds_fingerprint(event)
+    versions = prediction_cache.current_model_versions(s3, "pga", models, prediction_cache.POINTER_MAX_AGE_SECONDS)
+    return versions, pga_reads.rounds_fingerprint(event)
 
 
 def _f1_freshness_inputs_for_event(s3, storage, event_id: str) -> tuple[dict, int | None]:
@@ -119,33 +120,42 @@ def _f1_freshness_inputs_for_event(s3, storage, event_id: str) -> tuple[dict, in
         models = f1_reads.model_versions_for(event.get("event_type"))
     except KeyError:
         return {}, None
-    return prediction_cache.current_model_versions(s3, "f1", models), f1_reads.result_fingerprint(event)
+    versions = prediction_cache.current_model_versions(s3, "f1", models, prediction_cache.POINTER_MAX_AGE_SECONDS)
+    return versions, f1_reads.result_fingerprint(event)
 
 
 SPORT_CONFIGS = {
     "nfl": {
-        "list_events_fn": lambda storage, status: nfl_reads.list_events(storage, _get_predictions_table(), "nfl", status),
+        "list_events_fn": lambda storage, status: nfl_reads.list_events(
+            storage, _get_predictions_table(), "nfl", status, model_bucket=_get_model_bucket(),
+        ),
         "get_season_projection_fn": lambda model_bucket: nfl_reads.get_season_projection(model_bucket, "nfl"),
         "list_models_fn": lambda model_bucket: list_models(model_bucket, "nfl"),
         "freshness_inputs_fn": _team_sport_freshness_inputs("nfl"),
         "has_player_prop_route": True,
     },
     "nba": {
-        "list_events_fn": lambda storage, status: nba_reads.list_events(storage, _get_predictions_table(), "nba", status),
+        "list_events_fn": lambda storage, status: nba_reads.list_events(
+            storage, _get_predictions_table(), "nba", status, model_bucket=_get_model_bucket(),
+        ),
         "get_season_projection_fn": lambda model_bucket: nba_reads.get_season_projection(model_bucket, "nba"),
         "list_models_fn": lambda model_bucket: list_models(model_bucket, "nba"),
         "freshness_inputs_fn": _team_sport_freshness_inputs("nba"),
         "has_player_prop_route": True,
     },
     "ncaafb": {
-        "list_events_fn": lambda storage, status: ncaafb_reads.list_events(storage, _get_predictions_table(), "ncaafb", status),
+        "list_events_fn": lambda storage, status: ncaafb_reads.list_events(
+            storage, _get_predictions_table(), "ncaafb", status, model_bucket=_get_model_bucket(),
+        ),
         "get_season_projection_fn": lambda model_bucket: ncaafb_reads.get_season_projection(model_bucket, "ncaafb"),
         "list_models_fn": lambda model_bucket: list_models(model_bucket, "ncaafb"),
         "freshness_inputs_fn": _team_sport_freshness_inputs("ncaafb"),
         "has_player_prop_route": True,
     },
     "ncaambb": {
-        "list_events_fn": lambda storage, status: ncaambb_reads.list_events(storage, _get_predictions_table(), "ncaambb", status),
+        "list_events_fn": lambda storage, status: ncaambb_reads.list_events(
+            storage, _get_predictions_table(), "ncaambb", status, model_bucket=_get_model_bucket(),
+        ),
         "get_season_projection_fn": lambda model_bucket: ncaambb_reads.get_season_projection(model_bucket, "ncaambb"),
         "list_models_fn": lambda model_bucket: list_models(model_bucket, "ncaambb"),
         "freshness_inputs_fn": _team_sport_freshness_inputs("ncaambb"),

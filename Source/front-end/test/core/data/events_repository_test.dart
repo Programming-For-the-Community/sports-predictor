@@ -102,4 +102,78 @@ void main() {
       );
     });
   });
+
+  group('predictions embedded in the events list', () {
+    test('a listed prediction is served without a prediction request', () async {
+      final paths = <String>[];
+      final container = buildTestContainer((request) async {
+        paths.add(request.url.path);
+        return http.Response(jsonEncode({'events': [{..._event(eventId: '7'), 'prediction': _predictionJson()}]}), 200);
+      });
+      addTearDown(container.dispose);
+
+      await container.read(eventsListProvider((sport: 'nfl', status: 'scheduled')).future);
+      final prediction = await container.read(eventPredictionProvider((sport: 'nfl', eventId: '7')).future);
+
+      expect(prediction.homeWinProbability, 0.6);
+      expect(paths, ['/nfl/events']);
+    });
+
+    test('refreshing that prediction afterwards asks the prediction route', () async {
+      final paths = <String>[];
+      final container = buildTestContainer((request) async {
+        paths.add(request.url.path);
+        if (request.url.path == '/nfl/events') {
+          return http.Response(jsonEncode({'events': [{..._event(eventId: '7'), 'prediction': _predictionJson()}]}), 200);
+        }
+        return http.Response(jsonEncode(_predictionJson()), 200);
+      });
+      addTearDown(container.dispose);
+      final predictionProvider = eventPredictionProvider((sport: 'nfl', eventId: '7'));
+
+      await container.read(eventsListProvider((sport: 'nfl', status: 'scheduled')).future);
+      await container.read(predictionProvider.future);
+      await container.refresh(predictionProvider.future);
+
+      expect(paths, ['/nfl/events', '/nfl/predictions/events/7']);
+    });
+
+    test('an event listed without a prediction still asks the prediction route', () async {
+      final paths = <String>[];
+      final container = buildTestContainer((request) async {
+        paths.add(request.url.path);
+        if (request.url.path == '/nfl/events') {
+          return http.Response(jsonEncode({'events': [{..._event(eventId: '7'), 'prediction': null}]}), 200);
+        }
+        return http.Response(jsonEncode(_predictionJson()), 200);
+      });
+      addTearDown(container.dispose);
+
+      await container.read(eventsListProvider((sport: 'nfl', status: 'scheduled')).future);
+      await container.read(eventPredictionProvider((sport: 'nfl', eventId: '7')).future);
+
+      expect(paths, ['/nfl/events', '/nfl/predictions/events/7']);
+    });
+
+    test('a refreshed list replaces a prediction already on screen', () async {
+      var homeWinProbability = 0.6;
+      final container = buildTestContainer((request) async {
+        final prediction = _predictionJson();
+        ((prediction['predictions'] as Map)['win_probability'] as Map)['home_win_probability'] = homeWinProbability;
+        return http.Response(jsonEncode({'events': [{..._event(eventId: '7'), 'prediction': prediction}]}), 200);
+      });
+      addTearDown(container.dispose);
+      final listProvider = eventsListProvider((sport: 'nfl', status: 'scheduled'));
+      final predictionProvider = eventPredictionProvider((sport: 'nfl', eventId: '7'));
+      container.listen(predictionProvider, (_, __) {});
+
+      await container.read(listProvider.future);
+      expect((await container.read(predictionProvider.future)).homeWinProbability, 0.6);
+
+      homeWinProbability = 0.7;
+      await container.refresh(listProvider.future);
+
+      expect((await container.read(predictionProvider.future)).homeWinProbability, 0.7);
+    });
+  });
 }

@@ -37,6 +37,10 @@ from library.serving.common import (
     enrich_participants,
     get_season_projection,
     list_models,
+    prefetch_participant_teams,
+    read_completed_snapshot,
+    scheduled_prediction_reader,
+    write_completed_snapshot,
 )
 
 _home_and_away = common._home_and_away
@@ -167,7 +171,7 @@ def _round_label(event: dict) -> str | None:
     return label
 
 
-def list_events(storage, predictions_table, sport: str, status: str) -> dict:
+def list_events(storage, predictions_table, sport: str, status: str, model_bucket=None) -> dict:
     """GET /ncaafb/events?status=scheduled|completed -- scoped to exactly
     one week, not the whole matching history. No exhibition-game filter --
     NCAAFB has no equivalent contamination to exclude. Each participant
@@ -175,6 +179,10 @@ def list_events(storage, predictions_table, sport: str, status: str) -> dict:
     enrich_participants. Also carries `venue_name`/`venue_city`/
     `venue_state` straight off the stored event, `null` on any of the
     three the venue lacked.
+
+    With model_bucket, a scheduled event also carries `prediction` -- see
+    common.cached_prediction_reader -- and a completed list is reused
+    while its events are unchanged -- see common.read_completed_snapshot.
 
     Bounded to RECENT_EVENTS_LIMIT rows on the query itself, most-recent-
     or soonest-first to match whichever bucket status narrows down to
@@ -191,6 +199,16 @@ def list_events(storage, predictions_table, sport: str, status: str) -> dict:
     else:
         events = storage.get_all_events(sport, status=status)
 
+    if not events:
+        return {"sport": sport, "events": []}
+
+    snapshot_fingerprint, entries = read_completed_snapshot(model_bucket, sport, status, events)
+    if entries is not None:
+        return {"sport": sport, "events": entries}
+
+    entity_cache = prefetch_participant_teams(storage, sport, events)
+    read_prediction = scheduled_prediction_reader(model_bucket, sport, status)
+
     def _entry(e: dict) -> dict:
         entry = {
             "event_id": e["event_id"],
@@ -201,11 +219,13 @@ def list_events(storage, predictions_table, sport: str, status: str) -> dict:
             "season_type": e.get("season_type"),
             "week": e.get("week"),
             "round": _round_label(e),
-            "participants": enrich_participants(storage, sport, e.get("participants")),
+            "participants": enrich_participants(storage, sport, e.get("participants"), entity_cache=entity_cache),
             "venue_name": e.get("venue_name"),
             "venue_city": e.get("venue_city"),
             "venue_state": e.get("venue_state"),
         }
+        if read_prediction is not None:
+            entry["prediction"] = read_prediction(e["event_key"])
         if status == "completed":
             # One query shared by _prediction_comparison and
             # _leaders_comparison rather than each querying independently.
@@ -214,13 +234,11 @@ def list_events(storage, predictions_table, sport: str, status: str) -> dict:
             entry["leaders_comparison"] = _leaders_comparison(storage, rows, sport, e)
         return entry
 
-    if not events:
-        return {"sport": sport, "events": []}
-
     # Concurrent, not sequential -- each entry makes several DynamoDB round
     # trips (the predictions query above plus a get_entity per matched
     # leader candidate), independent per event.
     with ThreadPoolExecutor(max_workers=min(len(events), 16)) as executor:
         entries = list(executor.map(_entry, events))
 
+    write_completed_snapshot(model_bucket, sport, snapshot_fingerprint, entries)
     return {"sport": sport, "events": entries}

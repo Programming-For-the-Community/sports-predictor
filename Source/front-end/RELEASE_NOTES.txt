@@ -3,4 +3,4 @@
 # Short, plain sentences about what's new or fixed -- no technical details;
 # keep it brief, it's read on a phone screen.
 # Lines starting with # are ignored; 200 characters max.
-Widgets show more picks and props the taller you make them, with a new player props widget. Confidence levels now split evenly: Low under 67%, Med to 83%, High above.
+Game lists and event pages open faster. The games you last viewed appear right away and update in the background.

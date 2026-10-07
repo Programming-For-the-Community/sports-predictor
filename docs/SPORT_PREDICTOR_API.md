@@ -87,6 +87,8 @@ Scoped to exactly **one week**, not the whole matching history: `status=schedule
 
 `round` is the playoff round name (`Wild Card`/`Divisional`/`Conference Championship`/`Super Bowl`) for a postseason game, `null` for regular season. `prediction_comparison`/`leaders_comparison` are only populated (not `null`) for a **completed** week -- predicted-vs-actual win/margin/score and predicted-vs-actual player-prop leaders, read from the predictions-table audit trail; `null` if no prediction was ever logged for that event before it was played. Every participant carries `name`/`abbreviation` off its own team entity. Excludes the Pro Bowl and any other exhibition game entirely.
 
+For the team sports (`nfl`/`ncaafb`/`nba`/`ncaambb`), each event in a **scheduled** list also carries `prediction`: the same body `GET /{sport}/predictions/events/{event_id}` would return from cache (including `stale`, plus `retry_after_seconds` when stale), or `null` when nothing is cached yet. A `null` or stale one is the client's cue to call that route, which starts the compute.
+
 ### `GET /nfl/models`
 
 Lists every currently-promoted model, with its latest model card summary.

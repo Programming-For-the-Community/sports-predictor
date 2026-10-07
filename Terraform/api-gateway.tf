@@ -9,6 +9,10 @@ resource "aws_api_gateway_rest_api" "main" {
   # reachable in parallel for no reason.
   disable_execute_api_endpoint = true
 
+  # Gzips any response of 1 KB or more for a client that sends
+  # Accept-Encoding, which CloudFront's origin request policy forwards.
+  minimum_compression_size = 1024
+
   endpoint_configuration {
     types = ["REGIONAL"]
   }

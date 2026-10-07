@@ -10,6 +10,7 @@ otherwise expires; a scheduled event's also expires after
 STALE_AFTER_SECONDS.
 """
 import time
+from weakref import WeakKeyDictionary
 
 from library.storage.model_artifacts import current_version_key
 
@@ -22,6 +23,14 @@ ERROR_STATUS_CODES = {
     "NoPromotedModelError": 503,
 }
 ERROR_TTL_SECONDS = 5 * 60
+
+# How long a read path may reuse a promoted-version pointer it already read
+# in this container. A newly promoted model is picked up within this window.
+POINTER_MAX_AGE_SECONDS = 60
+
+# {s3: {pointer_key: (version, read_at_epoch)}} -- per S3Manager, so the memo
+# lives and dies with the container's own singleton.
+_pointer_memo: WeakKeyDictionary = WeakKeyDictionary()
 
 CORE_EVENT_MODELS = {
     "win_probability": "win-probability",
@@ -47,7 +56,24 @@ def _in_progress_key(cache_key: str) -> str:
     return f"{cache_key}.in-progress"
 
 
-def current_model_versions(s3, sport: str, models: dict[str, str]) -> dict[str, int | None]:
+def _promoted_version(s3, pointer_key: str, max_age_seconds: float) -> int | None:
+    """The version a current.json pointer names, None if unpromoted.
+    max_age_seconds > 0 reuses a value read that recently."""
+    memo = _pointer_memo.setdefault(s3, {}) if max_age_seconds > 0 else None
+    if memo is not None:
+        cached = memo.get(pointer_key)
+        if cached is not None and time.time() - cached[1] < max_age_seconds:
+            return cached[0]
+    pointer = s3.get_json_or_none(pointer_key)
+    version = pointer["version"] if pointer is not None else None
+    if memo is not None:
+        memo[pointer_key] = (version, time.time())
+    return version
+
+
+def current_model_versions(
+    s3, sport: str, models: dict[str, str], max_age_seconds: float = 0,
+) -> dict[str, int | None]:
     """{key: version} for each `models` entry (key -> model_name), None if
     unpromoted. `models` lets a caller supply its own model-name map
     instead of this module hardcoding one shape -- CORE_EVENT_MODELS
@@ -56,28 +82,29 @@ def current_model_versions(s3, sport: str, models: dict[str, str]) -> dict[str, 
     (PGA) has a genuinely different model set (top10/top5/score/cutline/
     round, none of them win-probability/margin/home-score/away-score)
     and builds its own map at its own call site rather than this module
-    growing a second hardcoded constant per sport shape."""
-    versions: dict[str, int | None] = {}
-    for key, model_name in models.items():
-        pointer_key = current_version_key(sport, model_name)
-        versions[key] = s3.get_json(pointer_key)["version"] if s3.object_exists(pointer_key) else None
-    return versions
+    growing a second hardcoded constant per sport shape.
+
+    max_age_seconds defaults to 0 (always read S3) -- a compute path
+    stamping a fresh cache entry needs the pointer as it is now; only a
+    read path passes POINTER_MAX_AGE_SECONDS."""
+    return {
+        key: _promoted_version(s3, current_version_key(sport, model_name), max_age_seconds)
+        for key, model_name in models.items()
+    }
 
 
-def current_core_model_versions(s3, sport: str) -> dict[str, int | None]:
+def current_core_model_versions(s3, sport: str, max_age_seconds: float = 0) -> dict[str, int | None]:
     """{"win_probability": version, ...} for each CORE_EVENT_MODELS entry, None if unpromoted."""
-    return current_model_versions(s3, sport, CORE_EVENT_MODELS)
+    return current_model_versions(s3, sport, CORE_EVENT_MODELS, max_age_seconds)
 
 
-def current_player_prop_model_version(s3, sport: str, target_stat: str) -> int | None:
+def current_player_prop_model_version(s3, sport: str, target_stat: str, max_age_seconds: float = 0) -> int | None:
     pointer_key = current_version_key(sport, player_prop_model_name(target_stat))
-    return s3.get_json(pointer_key)["version"] if s3.object_exists(pointer_key) else None
+    return _promoted_version(s3, pointer_key, max_age_seconds)
 
 
 def get_cached(s3, cache_key: str) -> dict | None:
-    if not s3.object_exists(cache_key):
-        return None
-    return s3.get_json(cache_key)
+    return s3.get_json_or_none(cache_key)
 
 
 def is_fresh(entry: dict, current_model_versions, extra_fingerprint=None) -> bool:
@@ -126,10 +153,9 @@ def is_error_entry_fresh(entry: dict) -> bool:
 def claim_in_progress(s3, cache_key: str) -> bool:
     """True if the caller should trigger a compute; False if another claim is still active. Not atomic."""
     marker_key = _in_progress_key(cache_key)
-    if s3.object_exists(marker_key):
-        marker = s3.get_json(marker_key)
-        if time.time() - marker.get("started_at_epoch", 0) < IN_PROGRESS_TTL_SECONDS:
-            return False
+    marker = s3.get_json_or_none(marker_key)
+    if marker is not None and time.time() - marker.get("started_at_epoch", 0) < IN_PROGRESS_TTL_SECONDS:
+        return False
     s3.put_json(marker_key, {"started_at_epoch": time.time()})
     return True
 

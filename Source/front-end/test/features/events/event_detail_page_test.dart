@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -8,6 +10,7 @@ import 'package:front_end/core/models/event.dart';
 import 'package:front_end/core/models/event_leaders.dart';
 import 'package:front_end/core/models/live_score.dart';
 import 'package:front_end/core/models/prediction.dart';
+import 'package:front_end/core/widgets/matchup_hero.dart';
 import 'package:front_end/core/widgets/prediction_freshness_badge.dart';
 import 'package:front_end/features/events/event_detail_page.dart';
 
@@ -419,5 +422,74 @@ void main() {
     expect(find.byType(PredictionFreshnessBadge), findsOneWidget);
     await tester.pump(const Duration(minutes: 20));
     await tester.pumpWidget(const SizedBox());
+  });
+
+  testWidgets('shows a scheduled event while the completed list is still loading', (tester) async {
+    final completed = Completer<List<SportEvent>>();
+
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          eventsListProvider.overrideWith(
+            (ref, query) => query.status == 'scheduled' ? Future.value([_scheduledEvent('2026-09-14T17:00:00Z')]) : completed.future,
+          ),
+          eventPredictionProvider.overrideWith((ref, query) async => _prediction),
+          liveScoresProvider.overrideWith((ref, sport) async => const <String, LiveEventState>{}),
+        ],
+        child: const MaterialApp(home: Scaffold(body: EventDetailPage(sportId: 'nfl', eventId: '401547417'))),
+      ),
+    );
+    await tester.pump();
+    await tester.pump();
+
+    expect(find.byType(MatchupHero), findsOneWidget);
+    expect(find.byType(CircularProgressIndicator), findsNothing);
+
+    completed.complete(const []);
+    await tester.pump();
+  });
+
+  testWidgets('shows an event found in one list even when the other list failed', (tester) async {
+    await tester.pumpWidget(
+      ProviderScope(
+        retry: (_, __) => null,
+        overrides: [
+          eventsListProvider.overrideWith(
+            (ref, query) async => query.status == 'scheduled' ? [_scheduledEvent('2026-09-14T17:00:00Z')] : throw Exception('boom'),
+          ),
+          eventPredictionProvider.overrideWith((ref, query) async => _prediction),
+          liveScoresProvider.overrideWith((ref, sport) async => const <String, LiveEventState>{}),
+        ],
+        child: const MaterialApp(home: Scaffold(body: EventDetailPage(sportId: 'nfl', eventId: '401547417'))),
+      ),
+    );
+    await tester.pump();
+    await tester.pump();
+
+    expect(find.byType(MatchupHero), findsOneWidget);
+  });
+
+  testWidgets('still spins while the event has not turned up in either list yet', (tester) async {
+    final completed = Completer<List<SportEvent>>();
+
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          eventsListProvider.overrideWith((ref, query) => query.status == 'scheduled' ? Future.value(<SportEvent>[]) : completed.future),
+          eventPredictionProvider.overrideWith((ref, query) async => _prediction),
+          liveScoresProvider.overrideWith((ref, sport) async => const <String, LiveEventState>{}),
+        ],
+        child: const MaterialApp(home: Scaffold(body: EventDetailPage(sportId: 'nfl', eventId: '401547417'))),
+      ),
+    );
+    await tester.pump();
+
+    expect(find.byType(CircularProgressIndicator), findsOneWidget);
+
+    completed.complete(const []);
+    await tester.pump();
+    await tester.pump();
+
+    expect(find.text('Event not found.'), findsOneWidget);
   });
 }
