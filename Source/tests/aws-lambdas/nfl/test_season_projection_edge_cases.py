@@ -55,7 +55,7 @@ class TestFillRemainingFeatureRows:
         season_inputs = {"team_next_event": {"T1": "E-next"}, "current_ratings": {}, "team_last_completed_date": {}}
         player_team = {"ok": "T1", "missing-event": "T1", "boom": "T1", "no-team-game": "T2"}
 
-        def _build(storage, sport, event_key, entity_id, current_ratings, team_last_event_dates):
+        def _build(storage, sport, event_key, entity_id, current_ratings, team_last_event_dates, events):
             if entity_id == "missing-event":
                 raise live_features.EventNotFoundError("gone")
             if entity_id == "boom":
@@ -67,6 +67,26 @@ class TestFillRemainingFeatureRows:
             season_projection._fill_remaining_feature_rows(MagicMock(), season_inputs, player_team, cache, set(player_team))
 
         assert cache == {"ok": {"entity_id": "ok"}}
+
+    def test_reads_the_event_history_once_for_every_row(self):
+        # Regression: each row used to re-read the full history itself, which
+        # pushed the weekly run past Lambda's 10-minute limit.
+        season_inputs = {"team_next_event": {"T1": "E-next"}, "current_ratings": {}, "team_last_completed_date": {}}
+        player_team = {f"p{i}": "T1" for i in range(25)}
+        storage = MagicMock()
+        history = [{"event_key": "E-old"}]
+        storage.get_all_events.return_value = history
+        passed = []
+
+        def _build(storage, sport, event_key, entity_id, current_ratings, team_last_event_dates, events):
+            passed.append(events)
+            return {"entity_id": entity_id}
+
+        with patch.object(live_features, "build_live_player_features", side_effect=_build):
+            season_projection._fill_remaining_feature_rows(storage, season_inputs, player_team, {}, set(player_team))
+
+        storage.get_all_events.assert_called_once_with("nfl", status="completed")
+        assert len(passed) == 25 and all(events is history for events in passed)
 
 
 class TestProjectStatLeaderboard:

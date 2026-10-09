@@ -15,7 +15,7 @@ from weakref import WeakKeyDictionary
 from library.storage.model_artifacts import current_version_key
 
 STALE_AFTER_SECONDS = 12 * 60 * 60  # matches daily ingest cadence
-IN_PROGRESS_TTL_SECONDS = 330  # must exceed the predict Lambda's own timeout
+IN_PROGRESS_TTL_SECONDS = 630  # the predict Lambdas' 600s timeout (Terraform/lambda-*-predict.tf) plus 30s
 
 ERROR_STATUS_CODES = {
     "EventNotFoundError": 404,

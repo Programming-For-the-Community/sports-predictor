@@ -119,9 +119,13 @@ def _season_wide_candidate_rows(storage: FeatureStorage, season_inputs: dict) ->
     next_event_keys = {key for key in season_inputs["team_next_event"].values() if key}
     rows_by_category: dict[str, list[dict]] = {"passing": [], "receiving": [], "rushing": [], "sacks": []}
 
+    # The sport's full event history, read once and shared -- each call
+    # would otherwise re-read it.
+    events = storage.get_all_events(SPORT, status="completed") if next_event_keys else []
+
     def _candidates_for_event(event_key: str) -> dict | None:
         try:
-            return live_features.build_live_event_leader_candidates(storage, SPORT, event_key)
+            return live_features.build_live_event_leader_candidates(storage, SPORT, event_key, events=events)
         except Exception:
             logger.exception("Failed building season-wide candidates for %s", event_key)
             return None
@@ -163,10 +167,15 @@ def _fill_remaining_feature_rows(
 ) -> None:
     """Live feature rows for candidates the season-wide pass didn't cover
     -- mutates feature_row_cache in place."""
+    # Read once for every row -- each row would otherwise re-read the
+    # sport's full event history, which took the weekly run past Lambda's
+    # 10-minute limit once there were a few hundred candidates.
+    events = storage.get_all_events(SPORT, status="completed") if remaining else []
+
     def build_row(next_event_key: str, entity_id: str) -> dict:
         return live_features.build_live_player_features(
             storage, SPORT, next_event_key, entity_id, current_ratings=season_inputs["current_ratings"],
-            team_last_event_dates=season_inputs["team_last_completed_date"],
+            team_last_event_dates=season_inputs["team_last_completed_date"], events=events,
         )
 
     season_projection_common.fill_remaining_feature_rows(
