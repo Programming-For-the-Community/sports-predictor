@@ -300,6 +300,121 @@ void main() {
     });
   });
 
+  group('a pie beside a prediction leaves it level with the rest of its row', () {
+    double midY(WidgetTester tester, Finder finder) => tester.getCenter(finder).dy;
+
+    testWidgets('projected: the TD number sits level with the yards and the player name', (tester) async {
+      const leaders = EventLeaders(
+        home: TeamLeaders({
+          'passing': [PlayerStatLine(entityId: '1', name: 'Ty Simpson', stats: {'passing_yards': 241, 'passing_touchdowns': 1.72})],
+          'receiving': [], 'rushing': [], 'sacks': [],
+        }),
+        away: TeamLeaders({'passing': [], 'receiving': [], 'rushing': [], 'sacks': []}),
+      );
+      for (final width in [1000.0, 360.0]) {
+        await pumpAtWidth(tester, width, wrap(const TeamLeadersPanel(sport: 'ncaafb', homeAbbr: 'UGA', awayAbbr: 'BAMA', leaders: leaders)));
+        if (width < 560) {
+          await tester.tap(find.text('UGA'));
+          await tester.pump();
+        }
+
+        expect(midY(tester, find.text('2')), closeTo(midY(tester, find.text('241')), 0.5), reason: 'at width ' + width.toString());
+        expect(midY(tester, find.byType(TdDots)), closeTo(midY(tester, find.text('2')), 0.5));
+        expect(midY(tester, find.text('2')), closeTo(midY(tester, find.text('Ty Simpson')), 1.5));
+      }
+    });
+
+    testWidgets('props on a wide screen: actual and model touchdowns and yards share one line', (tester) async {
+      await pumpAtWidth(
+        tester, 1000,
+        wrap(const TeamLeadersComparisonPanel(sport: 'ncaafb', homeAbbr: 'UGA', awayAbbr: 'BAMA', comparison: footballComparison)),
+      );
+
+      final yards = midY(tester, find.text('268'));
+      expect(midY(tester, find.text('241')), closeTo(yards, 0.5));
+      // Passing: actual 2 TD, model 1.72 shown as 2 with its pies.
+      for (final element in find.text('2').evaluate()) {
+        expect(tester.getCenter(find.byWidget(element.widget)).dy, closeTo(yards, 0.5));
+      }
+      expect(midY(tester, find.byType(TdDots).first), closeTo(yards, 0.5));
+    });
+
+    testWidgets('props on a phone: the model touchdowns sit level with the model yards beneath the actual row', (tester) async {
+      await pumpAtWidth(
+        tester, 360,
+        wrap(const TeamLeadersComparisonPanel(sport: 'ncaafb', homeAbbr: 'UGA', awayAbbr: 'BAMA', comparison: footballComparison)),
+      );
+      await tester.tap(find.text('UGA'));
+      await tester.pump();
+
+      final modelYards = midY(tester, find.text('241'));
+      final actualYards = midY(tester, find.text('268'));
+      final twos = find.text('2').evaluate().map((e) => tester.getCenter(find.byWidget(e.widget)).dy).toList()..sort();
+      expect(twos.first, closeTo(actualYards, 0.5));
+      expect(twos.last, closeTo(modelYards, 0.5));
+      expect(midY(tester, find.byType(TdDots).first), closeTo(modelYards, 0.5));
+    });
+  });
+
+  group('every leader the backend sends is listed', () {
+    const cases = {
+      'nfl': {'passing': 'passing_yards', 'rushing': 'rushing_yards', 'receiving': 'receiving_yards', 'sacks': 'defensive_sacks'},
+      'ncaafb': {'passing': 'passing_yards', 'rushing': 'rushing_yards', 'receiving': 'receiving_yards', 'sacks': 'defensive_sacks'},
+      'nba': {'scoring': 'points', 'rebounding': 'rebounds', 'assists': 'assists'},
+      'ncaambb': {'scoring': 'points', 'rebounding': 'rebounds', 'assists': 'assists'},
+      'nhl': {'scoring': 'goals', 'shooting': 'shots_total', 'physical': 'hits', 'goaltending': 'saves'},
+    };
+    // A different count per category, so a cap on any one of them would show.
+    int count(int categoryIndex) => categoryIndex + 2;
+
+    for (final MapEntry(key: sport, value: categories) in cases.entries) {
+      testWidgets('$sport projected leaders and props, wide and on a phone', (tester) async {
+        final keys = categories.keys.toList();
+        final expected = [for (var c = 0; c < keys.length; c++) count(c)].fold(0, (a, b) => a + b);
+        final leaders = EventLeaders(
+          home: TeamLeaders({
+            for (var c = 0; c < keys.length; c++)
+              keys[c]: [
+                for (var i = 0; i < count(c); i++)
+                  PlayerStatLine(entityId: '$c-$i', name: 'Player $c-$i', stats: {categories[keys[c]]!: 10.0 + i}),
+              ],
+          }),
+          away: TeamLeaders({for (final key in keys) key: const []}),
+        );
+        final comparison = EventLeadersComparison(
+          home: TeamLeadersComparison({
+            for (var c = 0; c < keys.length; c++)
+              keys[c]: [
+                for (var i = 0; i < count(c); i++)
+                  PlayerStatLineComparison(
+                    entityId: '$c-$i', name: 'Player $c-$i',
+                    predicted: {categories[keys[c]]!: 10.0 + i}, actual: {categories[keys[c]]!: 12.0 + i},
+                  ),
+              ],
+          }),
+          away: TeamLeadersComparison({for (final key in keys) key: const []}),
+        );
+
+        for (final width in [1000.0, 360.0]) {
+          for (final panel in <Widget>[
+            TeamLeadersPanel(sport: sport, homeAbbr: 'HOM', awayAbbr: 'AWY', leaders: leaders),
+            TeamLeadersComparisonPanel(sport: sport, homeAbbr: 'HOM', awayAbbr: 'AWY', comparison: comparison),
+          ]) {
+            await pumpAtWidth(tester, width, wrap(panel));
+            if (width < 560) {
+              await tester.tap(find.text('HOM'));
+              await tester.pump();
+            }
+
+            expect(tester.takeException(), isNull);
+            expect(find.textContaining('Player '), findsNWidgets(expected), reason: '$sport at $width');
+            expect(find.byType(Table), findsNWidgets(keys.length));
+          }
+        }
+      });
+    }
+  });
+
   test('missText signs the gap and rounds like the stat itself', () {
     expect(missText('passing_yards', 268, 241), '+27');
     expect(missText('rushing_yards', 52, 64), '−12');
