@@ -451,4 +451,22 @@ def schedule_payload_to_scheduled_events(payload: dict, sport: str) -> list[dict
     checks the existing stored event's own status first, not this
     function's business)."""
     races = payload.get("MRData", {}).get("RaceTable", {}).get("Races", [])
-    return [_event_item_from_race(race, sport, results_key="Results", event_type="field") for race in races]
+    events = []
+    for race in races:
+        events.append(_event_item_from_race(race, sport, results_key="Results", event_type="field"))
+        sprint_stub = _scheduled_sprint_stub(race, sport)
+        if sprint_stub is not None:
+            events.append(sprint_stub)
+    return events
+
+
+def _scheduled_sprint_stub(race: dict, sport: str) -> dict | None:
+    """The Sprint race's own stub for a Sprint weekend (the calendar entry
+    carries a "Sprint" session), dated on the Sprint's own day -- None for
+    a normal weekend. Same event_id sprint_result_to_event_item produces."""
+    sprint_session = race.get("Sprint")
+    if not sprint_session:
+        return None
+    stub = _event_item_from_race(race, sport, results_key="SprintResults", event_type="sprint", event_id_suffix="-sprint")
+    stub["event_date"] = sprint_session.get("date") or stub["event_date"]
+    return stub

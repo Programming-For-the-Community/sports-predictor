@@ -29,7 +29,7 @@ def test_handler_runs_a_tick_and_returns_its_summary(monkeypatch):
     assert result == {"nfl": {"refreshes": 0, "snapshots": 1}}
     assert seen["project"] == "proj"
     assert seen["predictions_table"] == "predictions"
-    assert set(seen["sports"]) == {"nfl", "ncaafb", "nba", "ncaambb", "pga", "f1"}
+    assert set(seen["sports"]) == {"nfl", "ncaafb", "nba", "ncaambb", "pga", "f1", "nhl"}
     call = lambda_client.invoke.call_args.kwargs
     assert call["FunctionName"] == "proj-nfl-predict"
     assert call["InvocationType"] == "Event"

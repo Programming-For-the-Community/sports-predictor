@@ -53,6 +53,34 @@ def current_season_totals(
     return player_team, current_totals_by_stat
 
 
+def project_leaderboard(
+    current_totals: dict[str, float],
+    per_game_projections: dict[str, float],
+    games_remaining: dict[str, int],
+    top_n: int = 10,
+) -> list[dict]:
+    """Projects each candidate's season-end total as their current total
+    plus a flat per-remaining-game estimate (their own player-prop
+    model's prediction for their team's next game, applied across every
+    remaining game) -- not a per-opponent simulation. Returns the top_n ranked by CURRENT
+    season-to-date total, descending -- the leaderboard is who is leading
+    now; projected_total is shown alongside it, not what orders it.
+    Ties (notably every candidate at 0 before any stats exist) break on
+    projected_total, so preseason still reads as a pure projection.
+    """
+    projected = []
+    for entity_id, current_total in current_totals.items():
+        per_game = per_game_projections.get(entity_id, 0.0)
+        remaining = games_remaining.get(entity_id, 0)
+        projected.append({
+            "entity_id": entity_id,
+            "current_total": current_total,
+            "projected_total": current_total + per_game * remaining,
+        })
+    projected.sort(key=lambda row: (row["current_total"], row["projected_total"]), reverse=True)
+    return projected[:top_n]
+
+
 def project_stat_leaderboard(
     storage, sport: str, s3, model_cache: dict, season_inputs: dict, stat: str, candidates: set[str],
     current_totals_by_stat: dict[str, dict[str, float]], feature_row_cache: dict[str, dict],
@@ -64,7 +92,7 @@ def project_stat_leaderboard(
     game, or a candidate who hasn't recorded this stat yet), this reduces to
     a pure full-season projection. `event_prediction` is the sport's own
     module (model lookup and naming); `project_leaderboard` is its
-    season_simulation.project_leaderboard."""
+    season_simulation.project_leaderboard (project_leaderboard above)."""
     current_totals = {entity_id: current_totals_by_stat[stat].get(entity_id, 0.0) for entity_id in candidates}
     model_name = event_prediction.model_name_to_prop(stat)
     try:

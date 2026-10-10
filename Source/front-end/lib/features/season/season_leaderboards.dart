@@ -21,6 +21,10 @@ const _statLabels = {
   'steals': 'Steals',
   'blocks': 'Blocks',
   'three_pointers_made': '3-Pointers Made',
+  'goals': 'Goals',
+  'shots_total': 'Shots on Goal',
+  'hits': 'Hits',
+  'saves': 'Saves',
 };
 
 class SeasonLeaderboards extends StatelessWidget {

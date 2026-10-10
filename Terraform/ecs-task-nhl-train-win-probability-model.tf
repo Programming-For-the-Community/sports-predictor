@@ -1,0 +1,60 @@
+# 30-day retention so logs don't grow unbounded.
+resource "aws_cloudwatch_log_group" "nhl_train_win_probability_model" {
+  name              = "/ecs/${var.project}-nhl-train-win-probability-model"
+  retention_in_days = 30
+
+  tags = merge(local.common_tags, {
+    Sport     = "nhl"
+    Component = "training"
+  })
+}
+
+# EC2-backed task. Reads event_features.parquet, trains the NHL
+# win-probability model against the training harness's hyperparameter
+# search (including the LightGBM candidate family), and writes a
+# versioned artifact to the model artifacts bucket.
+#
+# Scheduled via the registry-driven training orchestrator
+# (sfn-training-orchestrator.tf, dynamodb-sport-registry.tf's nhl_registry
+# item) -- no per-sport scheduler file needed. cpu/memory come from
+# locals-training-compute.tf.
+resource "aws_ecs_task_definition" "nhl_train_win_probability_model" {
+  family                   = "${var.project}-nhl-train-win-probability-model"
+  requires_compatibilities = ["EC2"]
+  network_mode             = "awsvpc"
+  cpu                      = local.training_task_cpu
+  memory                   = local.training_task_memory
+  execution_role_arn       = aws_iam_role.ecs_pipeline.arn
+  task_role_arn            = aws_iam_role.ecs_pipeline.arn
+
+  container_definitions = jsonencode([
+    {
+      name      = "nhl-train-win-probability-model"
+      image     = "${var.ecr_repo_url}:nhl-train-win-probability-model-latest"
+      essential = true
+      environment = [
+        { name = "AWS_ACCOUNT_ID", value = var.account_id },
+        { name = "MODEL_ARTIFACTS_BUCKET_NAME", value = aws_s3_bucket.model_artifacts.bucket },
+        { name = "AWS_REGION", value = var.region },
+        # BLAS-oversubscription guard: caps thread pools so scikit-learn
+        # doesn't over-parallelize on a bounded-vCPU task.
+        { name = "OMP_NUM_THREADS", value = "1" },
+        { name = "OPENBLAS_NUM_THREADS", value = "1" },
+        { name = "MKL_NUM_THREADS", value = "1" },
+      ]
+      logConfiguration = {
+        logDriver = "awslogs"
+        options = {
+          "awslogs-group"         = aws_cloudwatch_log_group.nhl_train_win_probability_model.name
+          "awslogs-region"        = var.region
+          "awslogs-stream-prefix" = "train-win-probability-model"
+        }
+      }
+    }
+  ])
+
+  tags = merge(local.common_tags, {
+    Sport     = "nhl"
+    Component = "training"
+  })
+}

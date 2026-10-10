@@ -16,8 +16,8 @@ import 'package:front_end/static/confidence_tiers.dart';
 
 /// Kickoff given in the test machine's own local time, so slot labels don't
 /// depend on where the tests run.
-SportEvent _event(String id, {required int hour, int minute = 0}) {
-  final kickoff = DateTime(2026, 9, 27, hour, minute).toUtc().toIso8601String();
+SportEvent _event(String id, {required int hour, int minute = 0, int day = 27}) {
+  final kickoff = DateTime(2026, 9, day, hour, minute).toUtc().toIso8601String();
   return SportEvent(
     eventId: id,
     eventDate: kickoff.split('T').first,
@@ -88,7 +88,55 @@ void main() {
     });
   });
 
+  group('eventWeekdays', () {
+    test('one entry per local weekday, in first-seen order, folding a later week into the same day', () {
+      // Sep 24 2026 is a Thursday, 27 a Sunday, 28 a Monday.
+      final weekdays = eventWeekdays([
+        _event('thu', hour: 20, day: 24),
+        _event('sun', hour: 13),
+        _event('sun2', hour: 16),
+        _event('mon', hour: 20, day: 28),
+        _event('nextThu', hour: 20, day: 31), // rolls over to Oct 1
+      ]);
+
+      expect(weekdays, [DateTime.thursday, DateTime.sunday, DateTime.monday]);
+      expect(weekdays.map(weekdayLabel), ['THU', 'SUN', 'MON']);
+    });
+
+    test('falls back to the day-only event date when there is no kickoff time', () {
+      final noKickoff = SportEvent(
+        eventId: 'x', eventDate: '2026-09-27', kickoffTime: null, status: 'scheduled', week: 4, round: null,
+        participants: const [], predictionComparison: null, leadersComparison: null,
+      );
+
+      expect(eventWeekdays([noKickoff]), [DateTime.sunday]);
+    });
+  });
+
   group('EventListPage filters', () {
+    testWidgets('a day chip keeps only games on that weekday, and selecting it again clears it', (tester) async {
+      await _pumpPage(
+        tester,
+        [_event('thu', hour: 13, day: 24), _event('sun', hour: 13), _event('sun2', hour: 13)],
+        {'thu': 0.7, 'sun': 0.7, 'sun2': 0.7},
+      );
+
+      await tester.tap(find.text('SUN').first);
+      await tester.pump();
+      expect(_rowCount(tester), 2);
+
+      await tester.tap(find.text('SUN').first);
+      await tester.pump();
+      expect(_rowCount(tester), 3);
+    });
+
+    testWidgets('no day row when every game is on the same day', (tester) async {
+      await _pumpPage(tester, [_event('a', hour: 12), _event('b', hour: 19)], {'a': 0.7, 'b': 0.7});
+
+      expect(find.text('DAY'), findsNothing);
+    });
+
+
     testWidgets('a confidence chip keeps only games in that tier, and keeps games still loading with a note', (tester) async {
       await _pumpPage(
         tester,

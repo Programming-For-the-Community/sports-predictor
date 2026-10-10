@@ -13,7 +13,10 @@ String statValueText(String statKey, double value) {
 
 /// Touchdown stats, which show a whole number plus TdDots -- passing gets two
 /// dots, rushing and receiving one.
-const _touchdownDotSlots = {'passing_touchdowns': 2, 'rushing_touchdowns': 1, 'receiving_touchdowns': 1};
+const _touchdownDotSlots = {'passing_touchdowns': 2, 'rushing_touchdowns': 1, 'receiving_touchdowns': 1, 'goals': 1};
 
 /// How many dots a stat's prediction gets, or null for a stat without dots.
 int? tdDotSlots(String statKey) => _touchdownDotSlots[statKey];
+
+/// What a dotted stat counts, for TdDots' tooltip.
+String tdDotUnit(String statKey) => statKey == 'goals' ? 'G' : 'TD';

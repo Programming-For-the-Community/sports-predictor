@@ -458,6 +458,79 @@ jobs:
       requirements_files: 'Source/aws-lambdas/f1/normalize/requirements.txt'
   # No f1-schedule-sync test -- see f1_data_pipeline job's own comment below.
 
+  # ============================== NHL tests ==============================
+  test-nhl-library:
+    name: Run NHL library tests
+    uses: ./.github/workflows/run_python_tests.yml
+    with:
+      test_path: >-
+        Source/tests/library/normalize/test_nhl_normalize.py
+        Source/tests/library/features/test_nhl_teams.py
+      requirements_files: 'Source/data-backfills/nhl/requirements-dev.txt'
+
+  test-nhl-backfill:
+    name: Run NHL backfill tests
+    uses: ./.github/workflows/run_python_tests.yml
+    with:
+      test_path: 'Source/tests/data-backfills/nhl/'
+      requirements_files: 'Source/data-backfills/nhl/requirements-dev.txt'
+
+  test-nhl-feature-engineering:
+    name: Run NHL feature engineering tests
+    uses: ./.github/workflows/run_python_tests.yml
+    with:
+      test_path: >-
+        Source/tests/library/features/test_nhl.py
+        Source/tests/library/features/test_nhl_dataset.py
+        Source/tests/feature-engineering/nhl/
+      requirements_files: 'Source/feature-engineering/nhl/requirements.in'
+
+  test-nhl-train-model:
+    name: Run NHL training model tests
+    uses: ./.github/workflows/run_python_tests.yml
+    with:
+      test_path: 'Source/tests/library/ Source/tests/model-training/nhl/'
+      requirements_files: 'Source/model-training/nhl/requirements.in'
+
+  test-nhl-predict:
+    name: Run NHL predict tests
+    uses: ./.github/workflows/run_python_tests.yml
+    with:
+      test_path: >-
+        Source/tests/library/
+        Source/tests/aws-lambdas/nhl/test_predict.py
+        Source/tests/aws-lambdas/nhl/test_season_simulation.py
+        Source/tests/aws-lambdas/nhl/test_season_projection.py
+      requirements_files: 'Source/aws-lambdas/nhl/predict/requirements.in Source/aws-lambdas/nhl/predict/requirements-nodeps.in'
+
+  test-nhl-live-scores:
+    name: Run NHL live-scores tests
+    uses: ./.github/workflows/run_python_tests.yml
+    with:
+      test_path: 'Source/tests/aws-lambdas/nhl/test_live_scores.py Source/tests/aws-lambdas/nhl/test_live_scores_handler.py'
+      requirements_files: 'Source/aws-lambdas/nhl/live-scores/requirements.txt'
+
+  test-nhl-schedule-sync:
+    name: Run NHL schedule-sync tests
+    uses: ./.github/workflows/run_python_tests.yml
+    with:
+      test_path: 'Source/tests/aws-lambdas/nhl/test_schedule_sync.py'
+      requirements_files: 'Source/aws-lambdas/nhl/schedule-sync/requirements.txt'
+
+  test-nhl-ingest:
+    name: Run NHL ingest tests
+    uses: ./.github/workflows/run_python_tests.yml
+    with:
+      test_path: 'Source/tests/aws-lambdas/nhl/test_ingest.py'
+      requirements_files: 'Source/aws-lambdas/nhl/ingest/requirements.txt'
+
+  test-nhl-normalize:
+    name: Run NHL normalize tests
+    uses: ./.github/workflows/run_python_tests.yml
+    with:
+      test_path: 'Source/tests/aws-lambdas/nhl/test_normalize.py'
+      requirements_files: 'Source/aws-lambdas/nhl/normalize/requirements.txt'
+
   # ========================= shared lambdas tests =========================
   test-season-gate:
     name: Run season-gate tests
@@ -529,6 +602,8 @@ jobs:
       test-pga-live-scores, test-pga-ingest, test-pga-normalize, test-pga-schedule-sync,
       test-f1-backfill, test-f1-feature-engineering, test-f1-train-winprob-model, test-f1-predict,
       test-f1-live-scores, test-f1-ingest, test-f1-normalize,
+      test-nhl-library, test-nhl-backfill, test-nhl-feature-engineering, test-nhl-train-model,
+      test-nhl-predict, test-nhl-live-scores, test-nhl-schedule-sync, test-nhl-ingest, test-nhl-normalize,
       test-predict-read, test-season-gate, test-cloudwatch-geo-widget, test-ec2-training-reaper,
       test-frontend,
     ]
@@ -774,6 +849,43 @@ jobs:
       image_name: 'f1-backfill'
       image_version: '1.0.0'
 
+  nhl_backfill_build:
+    name: NHL backfill (build)
+    needs: scan
+    uses: ./.github/workflows/docker_image_deploy.yml
+    secrets: inherit
+    with:
+      sport: 'NHL'
+      dockerfile_path: 'Source/data-backfills/nhl/Dockerfile'
+      image_name: 'nhl-backfill'
+      image_version: '1.0.0'
+
+  nhl_ai_training_build:
+    name: NHL AI training (build)
+    needs: scan
+    uses: ./.github/workflows/ai_training.yml
+    secrets: inherit
+    with:
+      sport: 'NHL'
+      feature_engineering_dockerfile_path: 'Source/feature-engineering/nhl/Dockerfile'
+      feature_engineering_image_name: 'nhl-feature-engineering'
+      feature_engineering_image_version: '1.0.0'
+      train_model_dockerfile_path: 'Source/model-training/nhl/Dockerfile'
+      train_model_image_name: 'nhl-train-win-probability-model'
+      train_model_image_version: '1.0.0'
+
+  nhl_ai_hosting_build:
+    name: NHL AI hosting (build)
+    needs: scan
+    uses: ./.github/workflows/docker_image_deploy.yml
+    secrets: inherit
+    with:
+      sport: 'NHL'
+      dockerfile_path: 'Source/aws-lambdas/nhl/predict/Dockerfile'
+      image_name: 'nhl-predict'
+      image_version: '1.0.0'
+      platform: 'linux/arm64'
+
   f1_ai_training_build:
     name: F1 AI training (build)
     needs: scan
@@ -826,6 +938,7 @@ jobs:
       ncaambb_ai_hosting_build,
       pga_ai_hosting_build,
       f1_ai_hosting_build,
+      nhl_ai_hosting_build,
     ]
     uses: ./.github/workflows/tf_install.yml
     secrets: inherit
@@ -1034,6 +1147,41 @@ jobs:
       normalize_function_name: ${{ needs.infra.outputs.f1_normalize_function_name }}
       normalize_handler_dir: 'Source/aws-lambdas/f1/normalize'
       # No f1-schedule-sync -- see f1_deploy.yml's own comment.
+
+  nhl_predict_deploy:
+    name: NHL AI hosting (deploy)
+    needs: [infra, nhl_ai_hosting_build]
+    uses: ./.github/workflows/docker_lambda_deploy.yml
+    secrets: inherit
+    with:
+      function_name: ${{ needs.infra.outputs.nhl_predict_function_name }}
+      image_tag: ${{ needs.nhl_ai_hosting_build.outputs.image_tag }}
+      default_image_tag: 'nhl-predict-latest'
+
+  nhl_data_pipeline:
+    name: NHL data pipeline (deploy)
+    needs: [scan, infra]
+    uses: ./.github/workflows/data_pipeline.yml
+    secrets: inherit
+    with:
+      sport: 'NHL'
+      ingest_function_name: ${{ needs.infra.outputs.nhl_ingest_function_name }}
+      ingest_handler_dir: 'Source/aws-lambdas/nhl/ingest'
+      normalize_function_name: ${{ needs.infra.outputs.nhl_normalize_function_name }}
+      normalize_handler_dir: 'Source/aws-lambdas/nhl/normalize'
+      schedule_sync_function_name: ${{ needs.infra.outputs.nhl_schedule_sync_function_name }}
+      schedule_sync_handler_dir: 'Source/aws-lambdas/nhl/schedule-sync'
+
+  nhl_live_scores_deploy:
+    name: NHL live-scores (deploy)
+    needs: [scan, infra]
+    uses: ./.github/workflows/zip_lambda_deploy.yml
+    secrets: inherit
+    with:
+      sport: 'NHL'
+      function_name: ${{ needs.infra.outputs.nhl_live_scores_function_name }}
+      handler_dir: 'Source/aws-lambdas/nhl/live-scores'
+      extra_source_files: 'Source/aws-lambdas/nhl/live-scores/live_scores.py'
 
   f1_live_scores_deploy:
     name: F1 live-scores (deploy)

@@ -117,6 +117,41 @@ class TestSnapshotWindow:
         assert calls == []
 
 
+class TestAfterKickoffSnapshot:
+    """NHL: the starting goalies are only confirmed once the game starts."""
+
+    def _tick(self, minutes_to_kickoff, table=None):
+        sports = {"nhl": scheduler.SPORT_SCHEDULES["nhl"]}
+        return _run([_event("e1", minutes_to_kickoff)], table=table, sports=sports)
+
+    def test_nothing_fires_before_puck_drop(self):
+        for minutes in (45, 20, 5):
+            summary, calls, _ = self._tick(minutes)
+            assert calls == []
+            assert summary == {"nhl": {"refreshes": 0, "snapshots": 0}}
+
+    def test_refresh_fires_in_the_first_fifteen_minutes_of_the_game(self):
+        _, calls, _ = self._tick(-5)
+
+        assert calls == [("proj-nhl-ingest", {"date": "20260927", "force_refresh": True})]
+
+    def test_snapshot_fires_fifteen_to_thirty_minutes_after_puck_drop(self):
+        _, calls, _ = self._tick(-20)
+
+        assert calls == [("proj-nhl-predict", {"detail-type": "SnapshotPrediction", "event_id": "e1"})]
+
+    def test_nothing_fires_once_the_window_has_passed(self):
+        _, calls, _ = self._tick(-35)
+
+        assert calls == []
+
+    def test_other_sports_keep_their_pre_kickoff_windows(self):
+        assert scheduler.SPORT_SCHEDULES["nba"].snapshot_delay == timedelta(0)
+        _, calls, _ = _run([_event("e1", 10)])
+
+        assert calls == [("proj-nfl-predict", {"detail-type": "SnapshotPrediction", "event_id": "e1"})]
+
+
 def test_upcoming_events_queries_a_narrow_date_range_off_the_status_index():
     class Recorder:
         def query(self, condition, index_name=None, **kwargs):

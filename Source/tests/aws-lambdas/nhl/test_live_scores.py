@@ -1,0 +1,422 @@
+"""
+Unit tests for live-scores/live_scores.py -- candidate gating (which
+events are even worth an ESPN call this cycle), the ESPN response ->
+cached-state extraction, and the S3 cache's read/write/staleness behavior.
+All AWS calls are mocked; live_scores.py takes s3/bucket/storage/client as
+explicit arguments rather than holding its own.
+
+Matching a candidate to its ESPN scoreboard entry is a direct event_id
+lookup -- NHL's data source and live-scores source are both ESPN, so
+there's no separate matching logic here to test.
+
+live_scores is registered on sys.path by conftest.py.
+"""
+import json
+from datetime import datetime, timedelta, timezone
+from io import BytesIO
+from unittest.mock import MagicMock, patch
+
+from botocore.exceptions import ClientError
+
+import live_scores
+
+BUCKET = "test-bucket"
+SPORT = "nhl"
+
+
+def _make_s3():
+    mock_s3 = MagicMock()
+    store: dict[str, bytes] = {}
+
+    def _get(**kwargs):
+        key = kwargs.get("Key")
+        if key in store:
+            return {"Body": BytesIO(store[key])}
+        raise ClientError({"Error": {"Code": "404", "Message": "Not Found"}}, "GetObject")
+
+    def _put(**kwargs):
+        body = kwargs.get("Body")
+        store[kwargs.get("Key")] = body.encode("utf-8") if isinstance(body, str) else body
+
+    mock_s3.get_object.side_effect = _get
+    mock_s3.put_object.side_effect = _put
+    mock_s3._store = store
+    return mock_s3
+
+
+def _event(event_id: str, kickoff_time: str) -> dict:
+    return {"event_id": event_id, "kickoff_time": kickoff_time, "status": "scheduled"}
+
+
+def _espn_event(event_id: str, *, state: str, completed: bool, detail: str, home_score, away_score) -> dict:
+    return {
+        "id": event_id,
+        "competitions": [{
+            "status": {"type": {"state": state, "completed": completed, "shortDetail": detail}},
+            "competitors": [
+                {"homeAway": "home", "score": home_score},
+                {"homeAway": "away", "score": away_score},
+            ],
+        }],
+    }
+
+
+def _espn_summary(event_id: str) -> dict:
+    return {
+        "header": {"id": event_id, "competitions": [{"date": "2026-11-11T00:00Z"}]},
+        "boxscore": {
+            "players": [{
+                "team": {"id": "13"},
+                "statistics": [
+                    {
+                        "name": "forwards", "keys": ["goals", "assists", "shotsTotal", "hits", "timeOnIce"],
+                        "athletes": [{
+                            "athlete": {"id": "100", "displayName": "Skater One", "jersey": "9", "position": {"abbreviation": "C"}},
+                            "stats": ["1", "2", "4", "3", "12:30"],
+                        }],
+                    },
+                    {
+                        "name": "goalies", "keys": ["saves", "goalsAgainst"],
+                        "athletes": [{
+                            "athlete": {"id": "200", "displayName": "Goalie One", "jersey": "31", "position": {"abbreviation": "G"}},
+                            "stats": ["18", "2"],
+                        }],
+                    },
+                ],
+            }],
+        },
+    }
+
+
+class TestCandidateEvents:
+    def test_excludes_an_event_more_than_15_minutes_before_kickoff(self):
+        now = datetime(2026, 11, 11, 0, 0, tzinfo=timezone.utc)
+
+        candidates = live_scores._candidate_events([_event("1", "2026-11-11T00:16:00Z")], now, set())
+
+        assert candidates == []
+
+    def test_includes_an_event_within_15_minutes_of_kickoff(self):
+        now = datetime(2026, 11, 11, 0, 0, tzinfo=timezone.utc)
+
+        candidates = live_scores._candidate_events([_event("1", "2026-11-11T00:14:00Z")], now, set())
+
+        assert [e["event_id"] for e in candidates] == ["1"]
+
+    def test_excludes_an_event_past_the_safety_cap(self):
+        now = datetime(2026, 11, 11, 0, 0, tzinfo=timezone.utc)
+
+        candidates = live_scores._candidate_events([_event("1", "2026-11-10T16:00:00Z")], now, set())  # 8h before now
+
+        assert candidates == []
+
+    def test_excludes_an_event_already_confirmed_completed_by_a_prior_cycle(self):
+        now = datetime(2026, 11, 11, 3, 0, tzinfo=timezone.utc)
+
+        candidates = live_scores._candidate_events([_event("1", "2026-11-11T00:00:00Z")], now, already_completed={"1"})
+
+        assert candidates == []
+
+    def test_skips_an_event_with_no_kickoff_time(self):
+        now = datetime(2026, 11, 11, 0, 0, tzinfo=timezone.utc)
+
+        candidates = live_scores._candidate_events([{"event_id": "1"}], now, set())  # no kickoff_time key
+
+        assert candidates == []
+
+
+class TestExtractLiveState:
+    def test_parses_a_live_game(self):
+        espn_event = _espn_event("1", state="in", completed=False, detail="4:12 - 2nd", home_score="88", away_score="82")
+
+        state = live_scores._extract_live_state(espn_event)
+
+        assert state == {"live": True, "completed": False, "detail": "4:12 - 2nd", "home_score": 88, "away_score": 82}
+
+    def test_a_not_yet_started_game_is_not_live(self):
+        espn_event = _espn_event("1", state="pre", completed=False, detail="7:00 PM", home_score="0", away_score="0")
+
+        state = live_scores._extract_live_state(espn_event)
+
+        assert state["live"] is False
+
+    def test_a_final_game_is_completed_not_live(self):
+        espn_event = _espn_event("1", state="post", completed=True, detail="Final", home_score="112", away_score="104")
+
+        state = live_scores._extract_live_state(espn_event)
+
+        assert state["live"] is False
+        assert state["completed"] is True
+
+
+class TestRefresh:
+    def test_no_candidates_never_calls_espn(self):
+        storage = MagicMock()
+        storage.get_all_events.return_value = []
+        client = MagicMock()
+        s3 = _make_s3()
+
+        result = live_scores.refresh(storage, s3, BUCKET, client, SPORT)
+
+        assert result == {"polled": 0}
+        client.get_scoreboard_for_date.assert_not_called()
+        s3.put_object.assert_not_called()
+
+    def test_a_live_candidate_gets_fetched_and_cached(self):
+        storage = MagicMock()
+        storage.get_all_events.return_value = [_event("1", datetime.now(timezone.utc).isoformat())]
+        client = MagicMock()
+        client.get_scoreboard_for_date.return_value = {
+            "events": [_espn_event("1", state="in", completed=False, detail="Q3", home_score="60", away_score="55")],
+        }
+        s3 = _make_s3()
+
+        result = live_scores.refresh(storage, s3, BUCKET, client, SPORT)
+
+        assert result == {"polled": 1}
+        cached = json.loads(s3._store[live_scores.LIVE_SCORES_CACHE_KEY])
+        assert cached["events"]["1"]["live"] is True
+        assert cached["events"]["1"]["home_score"] == 60
+
+    def test_a_candidate_missing_from_todays_espn_scoreboard_is_skipped_not_errored(self):
+        storage = MagicMock()
+        storage.get_all_events.return_value = [_event("1", datetime.now(timezone.utc).isoformat())]
+        client = MagicMock()
+        client.get_scoreboard_for_date.return_value = {"events": []}
+        s3 = _make_s3()
+
+        result = live_scores.refresh(storage, s3, BUCKET, client, SPORT)
+
+        assert result == {"polled": 0}
+
+    def test_an_event_confirmed_completed_last_cycle_is_not_repolled(self):
+        # Not re-polled (no ESPN call) -- but see the carry-forward tests
+        # below: its cached state must still survive this tick, not get
+        # dropped just because it's no longer a "candidate".
+        storage = MagicMock()
+        storage.get_all_events.return_value = [_event("1", datetime.now(timezone.utc).isoformat())]
+        client = MagicMock()
+        s3 = _make_s3()
+        s3._store[live_scores.LIVE_SCORES_CACHE_KEY] = json.dumps({
+            "fetched_at": datetime.now(timezone.utc).isoformat(),
+            "events": {"1": {"live": False, "completed": True, "detail": "Final", "home_score": 110, "away_score": 101}},
+        }).encode("utf-8")
+
+        live_scores.refresh(storage, s3, BUCKET, client, SPORT)
+
+        client.get_scoreboard_for_date.assert_not_called()
+
+    def test_a_completed_events_final_state_is_carried_forward_not_dropped(self):
+        # Regression: previously, an event's cached state was rebuilt from
+        # this tick's candidates only, so a completed event (excluded from
+        # candidates on the very next tick) vanished from the cache ~60s
+        # after the game ended -- long before the next ingest could flip
+        # its real DynamoDB status to "completed". The frontend then had
+        # nowhere to get the final score/FINAL state from and rendered the
+        # game as if it hadn't been played yet.
+        storage = MagicMock()
+        storage.get_all_events.return_value = [_event("1", datetime.now(timezone.utc).isoformat())]
+        client = MagicMock()
+        s3 = _make_s3()
+        s3._store[live_scores.LIVE_SCORES_CACHE_KEY] = json.dumps({
+            "fetched_at": datetime.now(timezone.utc).isoformat(),
+            "events": {"1": {"live": False, "completed": True, "detail": "Final", "home_score": 110, "away_score": 101}},
+        }).encode("utf-8")
+
+        result = live_scores.refresh(storage, s3, BUCKET, client, SPORT)
+
+        assert result == {"polled": 1}
+        cached = json.loads(s3._store[live_scores.LIVE_SCORES_CACHE_KEY])
+        assert cached["events"]["1"] == {
+            "live": False, "completed": True, "detail": "Final", "home_score": 110, "away_score": 101,
+        }
+
+    def test_carrying_forward_a_completed_event_still_refreshes_fetched_at(self):
+        # Otherwise get_live_scores' own STALE_AFTER check would still
+        # expire the carried-forward event 5 minutes after the last real
+        # poll, even though refresh() keeps running every 60s.
+        storage = MagicMock()
+        storage.get_all_events.return_value = [_event("1", datetime.now(timezone.utc).isoformat())]
+        client = MagicMock()
+        s3 = _make_s3()
+        stale_fetch = datetime.now(timezone.utc) - live_scores.STALE_AFTER - timedelta(minutes=1)
+        s3._store[live_scores.LIVE_SCORES_CACHE_KEY] = json.dumps({
+            "fetched_at": stale_fetch.isoformat(),
+            "events": {"1": {"live": False, "completed": True, "detail": "Final", "home_score": 110, "away_score": 101}},
+        }).encode("utf-8")
+
+        live_scores.refresh(storage, s3, BUCKET, client, SPORT)
+
+        result = live_scores.get_live_scores(s3, BUCKET)
+        assert result["events"]["1"]["completed"] is True
+
+    def test_a_completed_event_no_longer_scheduled_stops_being_carried_forward(self):
+        # Once ingest catches up and flips this event's own DynamoDB
+        # status to "completed", get_all_events(status="scheduled") stops
+        # returning it -- the frontend now gets its final state from the
+        # event record itself (status/predictionComparison), so the
+        # live-scores cache no longer needs to keep carrying it forward.
+        storage = MagicMock()
+        storage.get_all_events.return_value = []  # ingest already flipped it to "completed"
+        client = MagicMock()
+        s3 = _make_s3()
+        s3._store[live_scores.LIVE_SCORES_CACHE_KEY] = json.dumps({
+            "fetched_at": datetime.now(timezone.utc).isoformat(),
+            "events": {"1": {"live": False, "completed": True, "detail": "Final", "home_score": 110, "away_score": 101}},
+        }).encode("utf-8")
+
+        result = live_scores.refresh(storage, s3, BUCKET, client, SPORT)
+
+        assert result == {"polled": 0}
+
+
+class TestLivePlayerStats:
+    def test_a_live_candidates_boxscore_is_fetched_and_cached(self):
+        storage = MagicMock()
+        storage.get_all_events.return_value = [_event("1", datetime.now(timezone.utc).isoformat())]
+        client = MagicMock()
+        client.get_scoreboard_for_date.return_value = {
+            "events": [_espn_event("1", state="in", completed=False, detail="Q3", home_score="60", away_score="55")],
+        }
+        client.get_summary.return_value = _espn_summary("1")
+        s3 = _make_s3()
+
+        live_scores.refresh(storage, s3, BUCKET, client, SPORT)
+
+        client.get_summary.assert_called_once_with("1")
+        cached = json.loads(s3._store[live_scores.LIVE_SCORES_CACHE_KEY])
+        player_stats = cached["events"]["1"]["player_stats"]
+        assert player_stats["100"] == {
+            "goals": 1, "assists": 2, "shots_total": 4, "hits": 3, "time_on_ice_seconds": 750, "points": 3,
+        }
+        assert player_stats["200"] == {"saves": 18, "goals_against": 2}
+
+    def test_a_not_yet_live_candidate_never_fetches_a_boxscore(self):
+        storage = MagicMock()
+        storage.get_all_events.return_value = [_event("1", datetime.now(timezone.utc).isoformat())]
+        client = MagicMock()
+        client.get_scoreboard_for_date.return_value = {
+            "events": [_espn_event("1", state="pre", completed=False, detail="7:00 PM", home_score="0", away_score="0")],
+        }
+        s3 = _make_s3()
+
+        live_scores.refresh(storage, s3, BUCKET, client, SPORT)
+
+        client.get_summary.assert_not_called()
+
+    def test_a_boxscore_fetch_failure_omits_player_stats_but_does_not_fail_the_whole_refresh(self):
+        storage = MagicMock()
+        storage.get_all_events.return_value = [_event("1", datetime.now(timezone.utc).isoformat())]
+        client = MagicMock()
+        client.get_scoreboard_for_date.return_value = {
+            "events": [_espn_event("1", state="in", completed=False, detail="Q3", home_score="60", away_score="55")],
+        }
+        client.get_summary.side_effect = RuntimeError("ESPN hiccup")
+        s3 = _make_s3()
+
+        result = live_scores.refresh(storage, s3, BUCKET, client, SPORT)
+
+        assert result == {"polled": 1}
+        cached = json.loads(s3._store[live_scores.LIVE_SCORES_CACHE_KEY])
+        assert cached["events"]["1"]["live"] is True
+        assert cached["events"]["1"]["player_stats"] == {}
+
+    def test_the_transition_tick_carries_forward_the_last_live_player_stats(self):
+        # Regression: the tick a game flips from live to completed, ESPN's
+        # own state is no longer "in" so this event isn't in
+        # live_event_ids and gets no fresh boxscore fetch -- the freshly
+        # extracted state has no player_stats key at all. Without
+        # carrying the previous tick's player_stats forward here, that
+        # gets baked into this tick's cache entry permanently (every
+        # later tick just carries THIS entry forward unchanged via
+        # already_completed), silently losing the final box score forever
+        # even though the event's own completed/live/score fields are
+        # carried forward correctly.
+        storage = MagicMock()
+        storage.get_all_events.return_value = [_event("1", datetime.now(timezone.utc).isoformat())]
+        client = MagicMock()
+        client.get_scoreboard_for_date.return_value = {
+            "events": [_espn_event("1", state="post", completed=True, detail="Final", home_score="112", away_score="104")],
+        }
+        s3 = _make_s3()
+        s3._store[live_scores.LIVE_SCORES_CACHE_KEY] = json.dumps({
+            "fetched_at": datetime.now(timezone.utc).isoformat(),
+            "events": {"1": {
+                "live": True, "completed": False, "detail": "Q4 00:12", "home_score": 108, "away_score": 104,
+                "player_stats": {"100": {"points": 27}},
+            }},
+        }).encode("utf-8")
+
+        live_scores.refresh(storage, s3, BUCKET, client, SPORT)
+
+        client.get_summary.assert_not_called()  # not live this tick -- no fresh fetch to expect
+        cached = json.loads(s3._store[live_scores.LIVE_SCORES_CACHE_KEY])
+        assert cached["events"]["1"]["completed"] is True
+        assert cached["events"]["1"]["player_stats"] == {"100": {"points": 27}}
+
+    def test_a_transition_tick_with_no_previous_player_stats_stays_empty(self):
+        # No prior live tick ever ran (e.g. the game was already over the
+        # first time it entered the poll window) -- nothing to carry
+        # forward, so this just stays absent/empty rather than erroring.
+        storage = MagicMock()
+        storage.get_all_events.return_value = [_event("1", datetime.now(timezone.utc).isoformat())]
+        client = MagicMock()
+        client.get_scoreboard_for_date.return_value = {
+            "events": [_espn_event("1", state="post", completed=True, detail="Final", home_score="112", away_score="104")],
+        }
+        s3 = _make_s3()
+
+        live_scores.refresh(storage, s3, BUCKET, client, SPORT)
+
+        cached = json.loads(s3._store[live_scores.LIVE_SCORES_CACHE_KEY])
+        assert cached["events"]["1"].get("player_stats", {}) == {}
+
+
+class TestGetLiveScores:
+    def test_returns_empty_when_nothing_cached_yet(self):
+        s3 = _make_s3()
+
+        assert live_scores.get_live_scores(s3, BUCKET) == {"events": {}}
+
+    def test_returns_cached_events_when_fresh(self):
+        s3 = _make_s3()
+        s3._store[live_scores.LIVE_SCORES_CACHE_KEY] = json.dumps({
+            "fetched_at": datetime.now(timezone.utc).isoformat(),
+            "events": {"1": {"live": True, "completed": False, "detail": "Q3", "home_score": 60, "away_score": 55}},
+        }).encode("utf-8")
+
+        result = live_scores.get_live_scores(s3, BUCKET)
+
+        assert result["events"]["1"]["live"] is True
+
+    def test_returns_empty_when_the_cache_is_stale(self):
+        s3 = _make_s3()
+        stale_fetch = datetime.now(timezone.utc) - live_scores.STALE_AFTER - timedelta(minutes=1)
+        s3._store[live_scores.LIVE_SCORES_CACHE_KEY] = json.dumps({
+            "fetched_at": stale_fetch.isoformat(),
+            "events": {"1": {"live": True, "completed": False, "detail": "Q3", "home_score": 60, "away_score": 55}},
+        }).encode("utf-8")
+
+        result = live_scores.get_live_scores(s3, BUCKET)
+
+        assert result == {"events": {}}
+
+
+class TestCommonDelegation:
+    def test_cache_reads_and_writes_use_this_sports_own_key(self):
+        s3 = MagicMock()
+        with patch.object(live_scores.common, "get_cache", return_value={"events": {}}) as get_cache,              patch.object(live_scores.common, "put_cache") as put_cache:
+            assert live_scores._get_cache(s3, "bucket") == {"events": {}}
+            live_scores._put_cache(s3, "bucket", {"events": {}})
+
+        get_cache.assert_called_once_with(s3, "bucket", live_scores.LIVE_SCORES_CACHE_KEY)
+        put_cache.assert_called_once_with(s3, "bucket", live_scores.LIVE_SCORES_CACHE_KEY, {"events": {}})
+
+    def test_live_player_stats_use_the_hockey_box_score_parser(self):
+        client = MagicMock()
+        with patch.object(live_scores.common, "live_player_stats", return_value={"p1": {}}) as live_player_stats:
+            assert live_scores._live_player_stats(client, "sport", "401") == {"p1": {}}
+
+        live_player_stats.assert_called_once_with(
+            client, "sport", "401", {}, parse_boxscore=live_scores.nhl.boxscore_to_player_game_stats,
+        )

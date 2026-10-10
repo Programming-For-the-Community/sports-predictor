@@ -19,6 +19,7 @@ locals {
     ncaambb = aws_lambda_function.ncaambb_predict.arn
     pga     = aws_lambda_function.pga_predict.arn
     f1      = aws_lambda_function.f1_predict.arn
+    nhl     = aws_lambda_function.nhl_predict.arn
   }
 }
 

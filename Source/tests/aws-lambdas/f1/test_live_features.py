@@ -248,6 +248,23 @@ class TestBuildLiveSprintFeatures:
         # The main race's own history never leaks into the Sprint's rolling stats.
         assert built["driver_rows"]["max_verstappen"]["starts"] == 0
 
+    def test_scheduled_stub_is_scored_against_the_current_roster(self):
+        last_race = _field_event(
+            "2024-4", "2024-04-07",
+            [_participant("max_verstappen", "red_bull"), _participant("lewis_hamilton", "mercedes")], status="completed",
+        )
+        stub = _sprint_event("2024-5-sprint", "2024-04-20", [])
+        storage = MagicMock()
+        storage.get_event.return_value = stub
+        storage.get_all_events.return_value = [last_race, stub]
+
+        built = live_features.build_live_sprint_features(storage, "f1", "2024-5-sprint")
+
+        assert set(built["driver_rows"]) == {"max_verstappen", "lewis_hamilton"}
+        assert built["driver_rows"]["lewis_hamilton"]["constructor_entity_id"] == "mercedes"
+        assert built["driver_rows"]["lewis_hamilton"]["field_size"] == 2
+        assert built["event"]["participants"] == []
+
 
 class TestBuildProjectedFieldFeatures:
     def test_builds_a_row_per_driver_id_regardless_of_stored_participants(self):

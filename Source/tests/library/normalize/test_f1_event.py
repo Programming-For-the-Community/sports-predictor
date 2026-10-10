@@ -412,3 +412,21 @@ class TestSchedulePayloadToScheduledEvents:
 
         assert stub["event_key"] == real["event_key"]
         assert stub["event_id"] == real["event_id"]
+
+    def test_sprint_weekend_adds_a_sprint_stub_dated_on_the_sprint_session(self):
+        race = {**_schedule_race(season="2026", round_="17", event_date="2026-10-11"), "Sprint": {"date": "2026-10-10", "time": "09:00:00Z"}}
+
+        field, sprint = schedule_payload_to_scheduled_events(_schedule_payload(race), "f1")
+
+        assert (field["event_id"], field["event_type"], field["event_date"]) == ("2026-17", "field", "2026-10-11")
+        assert (sprint["event_id"], sprint["event_type"], sprint["event_date"]) == ("2026-17-sprint", "sprint", "2026-10-10")
+        assert sprint["status"] == "scheduled"
+        assert sprint["participants"] == []
+
+    def test_sprint_stub_event_id_matches_what_sprint_result_to_event_item_will_later_produce(self):
+        race = {**_schedule_race(season="2024", round_="1"), "Sprint": {"date": "2024-03-01"}}
+
+        _, stub = schedule_payload_to_scheduled_events(_schedule_payload(race), "f1")
+        real = sprint_result_to_event_item(_sprint_payload(_WINNER, season="2024", round_="1"), "f1")
+
+        assert stub["event_key"] == real["event_key"]

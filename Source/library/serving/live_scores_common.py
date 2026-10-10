@@ -133,14 +133,21 @@ def _numeric_stats(stat_line: dict) -> dict:
     return {key: value for key, value in stat_line.items() if isinstance(value, (int, float)) and not isinstance(value, bool)}
 
 
-def live_player_stats(client, sport: str, event_id: str, compound_key_splits: dict[str, tuple[str, str]]) -> dict[str, dict]:
+def live_player_stats(
+    client, sport: str, event_id: str, compound_key_splits: dict[str, tuple[str, str]], parse_boxscore=None,
+) -> dict[str, dict]:
     """Best-effort entity_id -> stat_line for one currently-live event,
     from ESPN's own boxscore/summary endpoint. Empty on any fetch/parse
     failure rather than raising, so one bad event doesn't cost every
-    other live event its own score/stat refresh this tick."""
+    other live event its own score/stat refresh this tick.
+    `parse_boxscore(summary, sport)` replaces the shared ESPN box-score
+    parser for a sport with its own (NHL)."""
     try:
         summary = client.get_summary(event_id)
-        stats_items, _ = boxscore_to_player_game_stats(summary, sport, compound_key_splits)
+        if parse_boxscore is not None:
+            stats_items, _ = parse_boxscore(summary, sport)
+        else:
+            stats_items, _ = boxscore_to_player_game_stats(summary, sport, compound_key_splits)
         lines = {item["entity_id"]: _numeric_stats(item["stat_line"]) for item in stats_items}
         return {entity_id: line for entity_id, line in lines.items() if line}
     except Exception:
@@ -150,7 +157,7 @@ def live_player_stats(client, sport: str, event_id: str, compound_key_splits: di
 
 def refresh(
     storage, s3, bucket: str, client, sport: str, cache_key: str,
-    compound_key_splits: dict[str, tuple[str, str]], boxscore_max_workers: int = 10,
+    compound_key_splits: dict[str, tuple[str, str]], boxscore_max_workers: int = 10, parse_boxscore=None,
 ) -> dict:
     """Called on every LiveScoreRefresh tick. Reads already-ingested events
     from DynamoDB and only reaches out to ESPN once candidate_events finds
@@ -190,7 +197,9 @@ def refresh(
 
     events_out = dict(carried_over)
     live_event_ids = _apply_scoreboard_states(candidates, espn_events_by_id, previous_events, events_out)
-    _attach_live_player_stats(live_event_ids, client, sport, compound_key_splits, boxscore_max_workers, events_out)
+    _attach_live_player_stats(
+        live_event_ids, client, sport, compound_key_splits, boxscore_max_workers, events_out, parse_boxscore,
+    )
 
     put_cache(s3, bucket, cache_key, {"fetched_at": now.isoformat(), "events": events_out})
     logger.info("Refreshed live state for %d event(s)", len(events_out))
@@ -244,7 +253,7 @@ def _apply_scoreboard_states(
 
 def _attach_live_player_stats(
     live_event_ids: list[str], client, sport: str, compound_key_splits: dict[str, tuple[str, str]],
-    boxscore_max_workers: int, events_out: dict,
+    boxscore_max_workers: int, events_out: dict, parse_boxscore=None,
 ) -> None:
     """Fetches and attaches each live event's own boxscore player_stats
     into events_out in place -- one ESPN call per event, only for events
@@ -254,7 +263,10 @@ def _attach_live_player_stats(
     with ThreadPoolExecutor(max_workers=min(len(live_event_ids), boxscore_max_workers)) as executor:
         player_stats_by_event = dict(zip(
             live_event_ids,
-            executor.map(lambda event_id: live_player_stats(client, sport, event_id, compound_key_splits), live_event_ids),
+            executor.map(
+                lambda event_id: live_player_stats(client, sport, event_id, compound_key_splits, parse_boxscore),
+                live_event_ids,
+            ),
         ))
     for event_id, player_stats in player_stats_by_event.items():
         events_out[event_id]["player_stats"] = player_stats
@@ -282,10 +294,14 @@ class SportLiveScores:
     compound-stat-key splits, and live box-score fetch parallelism, bound
     to the functions above."""
 
-    def __init__(self, cache_key: str, compound_key_splits: dict[str, tuple[str, str]], boxscore_max_workers: int) -> None:
+    def __init__(
+        self, cache_key: str, compound_key_splits: dict[str, tuple[str, str]], boxscore_max_workers: int,
+        parse_boxscore=None,
+    ) -> None:
         self._cache_key = cache_key
         self._compound_key_splits = compound_key_splits
         self._boxscore_max_workers = boxscore_max_workers
+        self._parser = {} if parse_boxscore is None else {"parse_boxscore": parse_boxscore}
 
     def get_cache(self, s3, bucket: str) -> dict | None:
         return get_cache(s3, bucket, self._cache_key)
@@ -294,11 +310,12 @@ class SportLiveScores:
         put_cache(s3, bucket, self._cache_key, payload)
 
     def live_player_stats(self, client, sport: str, event_id: str) -> dict[str, dict]:
-        return live_player_stats(client, sport, event_id, self._compound_key_splits)
+        return live_player_stats(client, sport, event_id, self._compound_key_splits, **self._parser)
 
     def refresh(self, storage, s3, bucket: str, client, sport: str) -> dict:
         return refresh(
             storage, s3, bucket, client, sport, self._cache_key, self._compound_key_splits, self._boxscore_max_workers,
+            **self._parser,
         )
 
     def get_live_scores(self, s3, bucket: str) -> dict:

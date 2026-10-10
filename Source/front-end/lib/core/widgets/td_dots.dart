@@ -21,10 +21,11 @@ const _dotGap = 3.0;
 /// over an empty outline. `slots` is how many dots to draw at minimum (2 for
 /// passing, 1 otherwise).
 class TdDots extends StatelessWidget {
-  const TdDots({super.key, required this.value, this.slots = 1});
+  const TdDots({super.key, required this.value, this.slots = 1, this.unit = 'TD'});
 
   final double value;
   final int slots;
+  final String unit;
 
   int get _count => math.max(slots, value.ceil());
 
@@ -34,7 +35,7 @@ class TdDots extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Tooltip(
-      message: '${value.toStringAsFixed(2)} TD predicted',
+      message: '${value.toStringAsFixed(2)} $unit predicted',
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [

@@ -49,12 +49,14 @@ data "aws_iam_policy_document" "lambda_prediction_scheduler" {
       aws_lambda_function.nfl_ingest.arn,
       aws_lambda_function.nba_ingest.arn,
       aws_lambda_function.ncaambb_ingest.arn,
+      aws_lambda_function.nhl_ingest.arn,
       aws_lambda_function.nfl_predict.arn,
       aws_lambda_function.ncaafb_predict.arn,
       aws_lambda_function.nba_predict.arn,
       aws_lambda_function.ncaambb_predict.arn,
       aws_lambda_function.pga_predict.arn,
       aws_lambda_function.f1_predict.arn,
+      aws_lambda_function.nhl_predict.arn,
     ]
   }
 }

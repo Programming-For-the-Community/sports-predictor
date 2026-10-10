@@ -616,3 +616,84 @@ resource "aws_dynamodb_table_item" "f1_registry" {
     }
   })
 }
+
+# Same 3 score targets as the other head-to-head sports. No overtime
+# model: the season simulation uses the league-wide overtime rate. 6
+# skater props and 2 goalie props, all trained by the one player-prop task
+# (train_player_prop_model.py picks the dataset from the stat).
+locals {
+  nhl_score_targets = {
+    "margin"     = true
+    "home_score" = true
+    "away_score" = true
+  }
+  nhl_player_prop_stats = {
+    "shots_total"   = true
+    "points"        = true
+    "goals"         = true
+    "assists"       = true
+    "hits"          = true
+    "blocked_shots" = true
+    "saves"         = true
+    "goals_against" = true
+  }
+}
+
+# NHL's registry row -- drives the daily ingest and the monthly
+# feature-engineering and training run. season_start is the regular
+# season's early-October opener; season_end pads past the late-June Final.
+resource "aws_dynamodb_table_item" "nhl_registry" {
+  table_name = aws_dynamodb_table.sport_registry.name
+  hash_key   = aws_dynamodb_table.sport_registry.hash_key
+
+  item = jsonencode({
+    sport_key       = { S = "SPORT#NHL" }
+    sport           = { S = "nhl" }
+    event_type      = { S = "head_to_head" }
+    polling_cadence = { S = "daily" }
+    season_start    = { S = "10-01" }
+    season_end      = { S = "07-01" }
+
+    # 3-on-3 overtime began in 2015-16, so every season since shares the
+    # same overtime rules.
+    training_lookback_seasons = { N = "11" }
+
+    training_targets = {
+      L = concat(
+        [
+          {
+            M = {
+              model_name             = { S = "win-probability" }
+              task_definition_suffix = { S = "train-win-probability-model" }
+              container_name         = { S = "nhl-train-win-probability-model" }
+              env_name               = { S = "AWS_REGION" }
+              env_value              = { S = var.region }
+            }
+          },
+        ],
+        [
+          for target, _ in local.nhl_score_targets : {
+            M = {
+              model_name             = { S = "score-${replace(target, "_", "-")}" }
+              task_definition_suffix = { S = "train-score-model" }
+              container_name         = { S = "nhl-train-score-model" }
+              env_name               = { S = "SCORE_TARGET" }
+              env_value              = { S = target }
+            }
+          }
+        ],
+        [
+          for stat, _ in local.nhl_player_prop_stats : {
+            M = {
+              model_name             = { S = "player-prop-${replace(stat, "_", "-")}" }
+              task_definition_suffix = { S = "train-player-prop-model" }
+              container_name         = { S = "nhl-train-player-prop-model" }
+              env_name               = { S = "TARGET_STAT" }
+              env_value              = { S = stat }
+            }
+          }
+        ],
+      )
+    }
+  })
+}

@@ -24,6 +24,11 @@ predictions table so overlapping/repeat ticks don't fire it twice. A snapshot
 claim expires after RETRY_AFTER so a failed attempt is retried on a later
 tick, still before kickoff; a refresh is attempted once.
 
+A sport with `snapshot_delay` runs the same two steps that long after
+kickoff instead of before it. NHL uses it: the starting goalies are only
+confirmed once the game starts, so its refresh lands at T .. T+15min and
+its snapshot at T+15min .. T+30min.
+
 PGA and F1 have no kickoff to count down to, and are graded against ONE
 snapshot taken at the start of the event. A sport with
 `event_start_snapshot_utc_hour` gets a single SnapshotPrediction in a short
@@ -72,6 +77,8 @@ class SportSchedule:
     # and a retry), and only for these event types.
     days_before_start: int = 0
     event_types: frozenset[str] = frozenset()
+    # Shifts the refresh and snapshot windows this long past kickoff.
+    snapshot_delay: timedelta = timedelta(0)
 
 
 SPORT_SCHEDULES = {
@@ -81,6 +88,7 @@ SPORT_SCHEDULES = {
     "ncaambb": SportSchedule(_date_ingest_payload),
     "pga": SportSchedule(None, event_start_snapshot_utc_hour=11, days_before_start=1, event_types=frozenset({"field"})),
     "f1": SportSchedule(None, event_start_snapshot_utc_hour=11, event_types=frozenset({"field", "sprint"})),
+    "nhl": SportSchedule(_date_ingest_payload, snapshot_delay=REFRESH_LEAD),
 }
 
 
@@ -132,12 +140,13 @@ _REFRESH = "refresh"
 
 
 def _kickoff_action(event: dict, now: datetime, schedule: SportSchedule, predictions_table) -> str | None:
-    """Snapshot inside SNAPSHOT_LEAD of kickoff, refresh inside
-    REFRESH_LEAD, each only once its marker is claimed."""
+    """Snapshot inside SNAPSHOT_LEAD of kickoff (plus the sport's
+    snapshot_delay), refresh inside REFRESH_LEAD, each only once its
+    marker is claimed."""
     kickoff_raw = event.get("kickoff_time")
     if not kickoff_raw:
         return None
-    until = _parse_time(kickoff_raw) - now
+    until = _parse_time(kickoff_raw) + schedule.snapshot_delay - now
     if until <= timedelta(0):
         return None
     if until <= SNAPSHOT_LEAD:

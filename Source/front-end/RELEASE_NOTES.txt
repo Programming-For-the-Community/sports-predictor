@@ -3,4 +3,4 @@
 # Short, plain sentences about what's new or fixed -- no technical details;
 # keep it brief, it's read on a phone screen.
 # Lines starting with # are ignored; 200 characters max.
-Game lists and event pages open faster. The games you last viewed appear right away and update in the background.
+Game lists and event pages open faster. The games you last viewed appear right away and update in the background. You can now filter upcoming games by day of the week.

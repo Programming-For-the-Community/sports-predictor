@@ -108,12 +108,14 @@ String? nextGameDay(Iterable<String> eventDates, String todayEastern) {
   return upcoming.isEmpty ? null : upcoming.first;
 }
 
-/// Roughly how long after kickoff or tip-off each sport reaches halftime.
+/// Roughly how long after its start each sport reaches halftime (hockey: the
+/// middle of the second period).
 const halftimeAfterStart = <String, Duration>{
   SportIds.nfl: Duration(minutes: 90),
   SportIds.ncaafb: Duration(minutes: 100),
   SportIds.nba: Duration(minutes: 65),
   SportIds.ncaambb: Duration(minutes: 50),
+  SportIds.nhl: Duration(minutes: 75),
 };
 
 /// The [limit] games a day's picks are drawn from: those not yet at halftime

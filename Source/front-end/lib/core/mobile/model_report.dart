@@ -6,7 +6,8 @@ import '../widgets/model_performance_format.dart';
 /// Each sport's weekly model report goes out at 10 AM Eastern on its
 /// schedule-sync day (Terraform/scheduler-*-schedule-sync.tf runs at 6 AM
 /// Eastern that same day). PGA's sync is daily, so its report follows the
-/// Sunday finish; F1 has no sync and reports on Tuesday.
+/// Sunday finish; F1 has no sync and reports on Tuesday; NHL's sync is daily
+/// too and reports on Sunday.
 const reportWeekday = {
   SportIds.nfl: DateTime.wednesday,
   SportIds.ncaafb: DateTime.thursday,
@@ -14,6 +15,7 @@ const reportWeekday = {
   SportIds.ncaambb: DateTime.saturday,
   SportIds.pga: DateTime.monday,
   SportIds.f1: DateTime.tuesday,
+  SportIds.nhl: DateTime.sunday,
 };
 
 const reportHourEastern = 10;

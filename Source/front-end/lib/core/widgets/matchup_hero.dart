@@ -135,10 +135,69 @@ class MatchupHero extends StatelessWidget {
                   Flexible(child: _StatTrio(label: 'HOME MARGIN', value: prediction.margin.toStringAsFixed(1))),
                 ],
               ),
+              _StartingGoalies(
+                goalies: prediction.goalies.isNotEmpty ? prediction.goalies : event.goalies,
+                homeAbbr: home.abbreviation, awayAbbr: away.abbreviation,
+              ),
             ],
           );
         },
       ),
+    );
+  }
+}
+
+/// Each side's starting goalie and how sure the listing is, away then
+/// home. Renders nothing for a sport or event with no goalies.
+class _StartingGoalies extends StatelessWidget {
+  const _StartingGoalies({required this.goalies, required this.homeAbbr, required this.awayAbbr});
+
+  final Map<String, EventGoalie> goalies;
+  final String homeAbbr;
+  final String awayAbbr;
+
+  Widget _side(String abbr, EventGoalie? goalie) {
+    if (goalie == null) return const SizedBox.shrink();
+    final tag = goalie.tag;
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Text('$abbr GOALIE', style: AppTextStyles.microLabel(), textAlign: TextAlign.center),
+        const SizedBox(height: 4),
+        Text(goalie.displayName, style: AppTextStyles.body(), textAlign: TextAlign.center),
+        if (tag != null) ...[
+          const SizedBox(height: 4),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(999),
+              border: Border.all(color: AppColors.borderRaised),
+            ),
+            child: Text(tag.toUpperCase(), style: AppTextStyles.microLabel(color: AppColors.inkSub)),
+          ),
+        ],
+      ],
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (goalies.isEmpty) return const SizedBox.shrink();
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        const SizedBox(height: 20),
+        const Divider(height: 1, thickness: 1, color: AppColors.border),
+        const SizedBox(height: 16),
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Expanded(child: _side(awayAbbr, goalies['away'])),
+            const SizedBox(width: 12),
+            Expanded(child: _side(homeAbbr, goalies['home'])),
+          ],
+        ),
+      ],
     );
   }
 }
@@ -362,7 +421,7 @@ class MatchupResultHero extends StatelessWidget {
                 child: Column(
                   children: [
                     Text('@', style: AppTextStyles.sectionTitle(color: AppColors.inkMute)),
-                    Text('FINAL', style: AppTextStyles.microLabel(color: AppColors.inkMute)),
+                    Text(event.finalLabel, style: AppTextStyles.microLabel(color: AppColors.inkMute)),
                   ],
                 ),
               ),

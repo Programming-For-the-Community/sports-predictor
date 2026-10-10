@@ -1,5 +1,5 @@
 # GET /{sport}/model-performance -> predict_read (shared), for every sport.
-# One for_each block rather than six copies: the route is identical for all
+# One for_each block rather than a copy per sport: the route is identical for all
 # sports (it reads that sport's scorecard file from S3, see
 # library.serving.common.get_model_performance). CloudFront already routes
 # /{sport}/* to the API (cloudfront.tf's dynamic ordered_cache_behavior), so
@@ -15,6 +15,7 @@ locals {
     ncaambb = aws_api_gateway_resource.ncaambb.id
     pga     = aws_api_gateway_resource.pga.id
     f1      = aws_api_gateway_resource.f1.id
+    nhl     = aws_api_gateway_resource.nhl.id
   }
 }
 

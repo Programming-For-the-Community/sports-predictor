@@ -30,12 +30,19 @@ const _basketballPropStats = <String, PropStat>{
   'assists': PropStat(bigGame: 10, unit: 'ast', decimals: 1),
 };
 
+const _hockeyPropStats = <String, PropStat>{
+  'goals': PropStat(bigGame: 1, unit: 'goals', decimals: 1),
+  'shots_total': PropStat(bigGame: 5, unit: 'SOG', decimals: 1),
+  'saves': PropStat(bigGame: 45, unit: 'saves', decimals: 0),
+};
+
 /// The sports with player-props widgets, each with the stats it lists.
 const propStatsBySport = <String, Map<String, PropStat>>{
   SportIds.nfl: _footballPropStats,
   SportIds.ncaafb: _footballPropStats,
   SportIds.nba: _basketballPropStats,
   SportIds.ncaambb: _basketballPropStats,
+  SportIds.nhl: _hockeyPropStats,
 };
 
 /// A projection is listed only once it reaches this share of its stat's big game.

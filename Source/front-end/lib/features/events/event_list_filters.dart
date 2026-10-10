@@ -44,27 +44,45 @@ List<KickoffSlot> kickoffSlots(List<SportEvent> events) {
   ];
 }
 
-/// Confidence-tier and start-time chips for the Upcoming/Current list.
-/// An empty selection in a row means that row doesn't filter.
+const _weekdayLabels = ['MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT', 'SUN'];
+
+/// "MON".."SUN" for a DateTime.weekday value (1-7).
+String weekdayLabel(int weekday) => _weekdayLabels[weekday - 1];
+
+/// The local day of the week (DateTime.monday..sunday) this event falls on,
+/// from the same kickoff-else-date key the list's own day headings use.
+int? eventWeekday(SportEvent event) => DateTime.tryParse(event.kickoffTime ?? event.eventDate)?.toLocal().weekday;
+
+/// The distinct weekdays in `events`, in the order they first appear.
+List<int> eventWeekdays(List<SportEvent> events) => events.map(eventWeekday).whereType<int>().toSet().toList();
+
+/// Confidence-tier, day-of-week and start-time chips for the Upcoming/Current
+/// list. An empty selection in a row means that row doesn't filter.
 class EventListFilters extends StatelessWidget {
   const EventListFilters({
     super.key,
     required this.slots,
+    required this.weekdays,
     required this.selectedTiers,
+    required this.selectedWeekdays,
     required this.selectedHours,
     required this.onToggleTier,
+    required this.onToggleWeekday,
     required this.onToggleHour,
   });
 
   final List<KickoffSlot> slots;
+  final List<int> weekdays;
   final Set<ConfidenceTier> selectedTiers;
+  final Set<int> selectedWeekdays;
   final Set<int> selectedHours;
   final ValueChanged<ConfidenceTier> onToggleTier;
+  final ValueChanged<int> onToggleWeekday;
   final ValueChanged<int> onToggleHour;
 
   @override
   Widget build(BuildContext context) {
-    // Both groups share one row, each label inline before its chips; a
+    // The groups share one row, each label inline before its chips; a
     // group only moves to its own line when the screen is too narrow.
     return Wrap(
       spacing: 24,
@@ -82,6 +100,20 @@ class EventListFilters extends StatelessWidget {
               ),
           ],
         ),
+        // A single day has nothing to choose between.
+        if (weekdays.length > 1)
+          _FilterGroup(
+            label: 'DAY',
+            chips: [
+              for (final weekday in weekdays)
+                StatusToggle(
+                  label: weekdayLabel(weekday),
+                  selected: selectedWeekdays.contains(weekday),
+                  onTap: () => onToggleWeekday(weekday),
+                  accentColor: AppColors.cyan,
+                ),
+            ],
+          ),
         // A single slot has nothing to choose between.
         if (slots.length > 1)
           _FilterGroup(

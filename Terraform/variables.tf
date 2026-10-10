@@ -262,6 +262,7 @@ variable "feature_engineering_task_cpu" {
     ncaambb = 8192
     pga     = 1024
     f1      = 1024
+    nhl     = 8192
   }
   nullable = false
 
@@ -281,6 +282,7 @@ variable "feature_engineering_task_memory_per_vcpu_mib" {
     ncaambb = 7680
     pga     = 4096
     f1      = 4096
+    nhl     = 4096
   }
   nullable = false
 }

@@ -70,6 +70,7 @@ data "aws_iam_policy_document" "stepfunctions_orchestrator_permissions" {
       aws_iam_role.ncaambb_backfill.arn,
       aws_iam_role.pga_backfill.arn,
       aws_iam_role.f1_backfill.arn,
+      aws_iam_role.nhl_backfill.arn,
     ]
   }
 

@@ -76,6 +76,36 @@ locals {
       description = "Cache-only current score/clock live snapshot for NCAA FB games near or at kickoff, matched to ESPN's own event_id. Never triggers a DynamoDB write."
     }
 
+    nhl_events = {
+      path        = "/nhl/events", method = "GET"
+      summary     = "List NHL events"
+      description = "Returns NHL events grouped by day, each with predicted winner/margin/score, each side's probable starting goalie, overtime/shootout flags and period scores, and for completed events the predicted-vs-actual leaders for goals, assists, shots on goal, hits and saves. Pass status=completed for finished events."
+    }
+    nhl_models = {
+      path        = "/nhl/models", method = "GET"
+      summary     = "List NHL model cards"
+      description = "Currently-promoted model card for every NHL prediction target: win-probability, the three score models, and each trained skater and goalie player-prop stat."
+    }
+    nhl_season = {
+      path        = "/nhl/season", method = "GET"
+      summary     = "NHL season projection"
+      description = "Cached NHL season-long projection. Returns 404 until the weekly projection has been computed."
+    }
+    nhl_predict_event = {
+      path        = "/nhl/predictions/events/{event_id}", method = "GET"
+      summary     = "Predict one NHL event"
+      description = "Win probability, predicted score, the starting goalie each side was computed for (confirmed, probable or predicted), and predicted leader stat lines for one NHL event. The graded prediction is taken shortly after puck drop, once the starting goalies are confirmed."
+    }
+    nhl_predict_player = {
+      path        = "/nhl/predictions/events/{event_id}/players/{entity_id}", method = "GET"
+      summary     = "Predict one NHL player prop"
+      description = "Predicted value for one player/stat combination in one NHL event: shots_total, points, goals, assists, hits or blocked_shots for a skater; saves or goals_against for a goalie."
+    }
+    nhl_live_scores = {
+      path        = "/nhl/live-scores", method = "GET"
+      summary     = "Live in-progress scores"
+      description = "Cache-only current score/clock/leader live-stat snapshot for NHL games near or at puck drop. Never triggers a DynamoDB write."
+    }
     nba_events = {
       path        = "/nba/events", method = "GET"
       summary     = "List NBA events"
@@ -143,18 +173,18 @@ locals {
   # every sport's shape is identical here, so this loops sport x param
   # rather than repeating 4 near-identical blocks by hand.
   api_documentation_predict_event_params = {
-    for sport in ["nfl", "ncaafb", "nba", "ncaambb"] : "${sport}_event_id" => {
+    for sport in ["nfl", "ncaafb", "nba", "ncaambb", "nhl"] : "${sport}_event_id" => {
       path = "/${sport}/predictions/events/{event_id}"
       name = "event_id"
     }
   }
 
   api_documentation_predict_player_params = merge(
-    { for sport in ["nfl", "ncaafb", "nba", "ncaambb"] : "${sport}_player_event_id" => {
+    { for sport in ["nfl", "ncaafb", "nba", "ncaambb", "nhl"] : "${sport}_player_event_id" => {
       path = "/${sport}/predictions/events/{event_id}/players/{entity_id}"
       name = "event_id"
     } },
-    { for sport in ["nfl", "ncaafb", "nba", "ncaambb"] : "${sport}_player_entity_id" => {
+    { for sport in ["nfl", "ncaafb", "nba", "ncaambb", "nhl"] : "${sport}_player_entity_id" => {
       path = "/${sport}/predictions/events/{event_id}/players/{entity_id}"
       name = "entity_id"
     } },
@@ -212,7 +242,7 @@ resource "aws_api_gateway_documentation_part" "predict_player_path_params" {
 # stat is optional on the player-prop endpoint (omit it to get every
 # trained stat for this player/event; pass it to narrow to one).
 resource "aws_api_gateway_documentation_part" "predict_player_stat_query_param" {
-  for_each    = toset(["nfl", "ncaafb", "nba", "ncaambb"])
+  for_each    = toset(["nfl", "ncaafb", "nba", "ncaambb", "nhl"])
   rest_api_id = aws_api_gateway_rest_api.main.id
 
   location {

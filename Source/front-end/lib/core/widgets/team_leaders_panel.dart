@@ -62,6 +62,10 @@ const _statShortLabels = {
   'points': 'PTS',
   'rebounds': 'REB',
   'assists': 'AST',
+  'goals': 'G',
+  'shots_total': 'SOG',
+  'hits': 'HIT',
+  'saves': 'SV',
 };
 
 class _CategoryConfig {
@@ -87,7 +91,7 @@ const _basketballCategories = [
   _CategoryConfig('assists', 'Assists', ['assists']),
 ];
 
-bool _isFootball(String sport) => sport != SportIds.nba && sport != SportIds.ncaambb;
+bool _isFootball(String sport) => sport == SportIds.nfl || sport == SportIds.ncaafb;
 
 /// A predicted stat's spans: its value (whole-number TD plus TdDots for a
 /// touchdown stat) in cyan, optionally followed by its short label.
@@ -99,12 +103,21 @@ List<InlineSpan> _predictedSpans(String key, double value, {String? label}) {
   }
   return [
     TextSpan(text: label == null ? '${value.round()} ' : '${value.round()} $label ', style: style),
-    WidgetSpan(alignment: PlaceholderAlignment.middle, child: TdDots(value: value, slots: slots)),
+    WidgetSpan(alignment: PlaceholderAlignment.middle, child: TdDots(value: value, slots: slots, unit: tdDotUnit(key))),
   ];
 }
 
-List<_CategoryConfig> _categoriesFor(String sport) =>
-    sport == SportIds.nba || sport == SportIds.ncaambb ? _basketballCategories : _footballCategories;
+const _hockeyCategories = [
+  _CategoryConfig('scoring', 'Scoring', ['goals', 'assists']),
+  _CategoryConfig('shooting', 'Shooting', ['shots_total']),
+  _CategoryConfig('physical', 'Physical', ['hits']),
+  _CategoryConfig('goaltending', 'Goaltending', ['saves']),
+];
+
+List<_CategoryConfig> _categoriesFor(String sport) {
+  if (sport == SportIds.nhl) return _hockeyCategories;
+  return _isFootball(sport) ? _footballCategories : _basketballCategories;
+}
 
 /// Renders the `leaders` block from GET /{sport}/predictions/events/{id}.
 /// Category set is sport-specific (see _categoriesFor above); each

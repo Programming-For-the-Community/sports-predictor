@@ -18,9 +18,9 @@
 # which is why Lambda Throttles, Predict+predict-read Duration p99, and
 # DynamoDB throttles each split into several narrower alarms below.
 locals {
-  alarm_all_sports = ["nfl", "ncaafb", "nba", "ncaambb", "pga", "f1"]
+  alarm_all_sports = ["nfl", "ncaafb", "nba", "ncaambb", "pga", "f1", "nhl"]
   # f1 has no schedule-sync Lambda (see lambda-f1-*.tf's own set) -- every
-  # other stage covers all 6 sports.
+  # other stage covers every sport.
   alarm_schedule_sync_sports = [for sport in local.alarm_all_sports : sport if sport != "f1"]
 
   alarm_dynamodb_tables = [
@@ -84,7 +84,7 @@ resource "aws_cloudwatch_metric_alarm" "predict_read_errors" {
   # Logs Insights, filtering on the "sport" field log_viewer_analytics
   # writes into every log line (cloudwatch-dashboard-application.tf).
   alarm_name          = "${var.project}-predict-read-lambda-errors"
-  alarm_description   = "The shared predict-read Lambda (all 6 sports) errored in the last 5 minutes -- the user-facing cache-read path the frontend calls directly."
+  alarm_description   = "The shared predict-read Lambda (every sport) errored in the last 5 minutes -- the user-facing cache-read path the frontend calls directly."
   comparison_operator = "GreaterThanThreshold"
   evaluation_periods  = 1
   threshold           = 0
@@ -417,7 +417,7 @@ resource "aws_cloudwatch_metric_alarm" "predict_read_throttles" {
   # Plain single-metric alarm -- see predict_read_errors' own comment above
   # for why (one shared Lambda now, not 6).
   alarm_name          = "${var.project}-predict-read-lambda-throttles"
-  alarm_description   = "The shared predict-read Lambda (all 6 sports) got throttled in the last 5 minutes."
+  alarm_description   = "The shared predict-read Lambda (every sport) got throttled in the last 5 minutes."
   comparison_operator = "GreaterThanThreshold"
   evaluation_periods  = 1
   threshold           = 0
@@ -537,7 +537,7 @@ resource "aws_cloudwatch_metric_alarm" "predict_read_duration_p99" {
   # boundary directly now, not the 0/1 boolean-expression shape the old
   # multi-sport OR-across-metrics version needed.
   alarm_name          = "${var.project}-predict-read-duration-p99"
-  alarm_description   = "p99 duration on the shared predict-read Lambda (all 6 sports) exceeded 80% of its configured timeout (24000ms) in the last 5 minutes."
+  alarm_description   = "p99 duration on the shared predict-read Lambda (every sport) exceeded 80% of its configured timeout (24000ms) in the last 5 minutes."
   comparison_operator = "GreaterThanThreshold"
   evaluation_periods  = 2
   threshold           = 24000

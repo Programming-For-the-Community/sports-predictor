@@ -17,6 +17,7 @@ abstract final class SportIds {
   static const ncaafb = 'ncaafb';
   static const nba = 'nba';
   static const ncaambb = 'ncaambb';
+  static const nhl = 'nhl';
   static const pga = 'pga';
   static const f1 = 'f1';
 }
@@ -98,6 +99,14 @@ const kSports = [
     eventShape: EventShape.headToHead,
     accentColor: AppColors.cyan,
     active: true,
+    hasPerformanceTab: true,
+  ),
+  SportConfig(
+    id: SportIds.nhl,
+    displayName: 'NHL',
+    eventShape: EventShape.headToHead,
+    accentColor: AppColors.cyan,
+    active: false,
     hasPerformanceTab: true,
   ),
   SportConfig(

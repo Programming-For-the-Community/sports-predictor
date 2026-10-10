@@ -1,0 +1,256 @@
+# Top-level NHL deploy pipeline. Runs on every push to an nhl* branch, but
+# pauses for manual approval (via the environment's required reviewers --
+# configure this in Settings > Environments, it can't be set from this
+# file) before doing anything.
+#
+# Covers the data layer, feature engineering, training and serving:
+# backfill, feature-engineering, training and predict images, and the
+# ingest, normalize, schedule-sync and live-scores Lambdas.
+#
+# Exactly one SonarQube Cloud scan for this whole pipeline: every
+# component's own test job runs directly against run_python_tests.yml
+# (not nested inside a category workflow, since a scan job can't depend on
+# jobs nested inside a called reusable workflow -- only a sibling job in
+# the SAME file), `scan` needs all of them, and every build/deploy job
+# needs `scan`.
+
+name: NHL Deploy
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - 'nhl*'
+  workflow_call:
+
+# Shared group across every workflow that can reach tf_install.yml's
+# terraform apply, since Terraform/main.tf's S3 backend has no state
+# locking configured.
+concurrency:
+  group: terraform-deploy-pipeline
+  cancel-in-progress: false
+
+permissions:
+  id-token: write
+  contents: read
+  actions: read
+
+jobs:
+  approval:
+    name: Await deployment approval
+    if: github.event_name != 'workflow_call'
+    runs-on: ubuntu-latest
+    environment: development
+    steps:
+      - name: Approved
+        run: echo "Deployment approved -- proceeding."
+
+  # Each test job below repeats the same tolerant check against `approval`
+  # directly -- approval is intentionally skipped (not failed) when called
+  # via workflow_call, and without this tolerant check a skipped `needs`
+  # job would cause everything downstream to be skipped too.
+  test-library:
+    name: Run NHL library tests
+    needs: approval
+    if: |
+      always() &&
+      (needs.approval.result == 'success' || needs.approval.result == 'skipped')
+    uses: ./.github/workflows/run_python_tests.yml
+    with:
+      test_path: >-
+        Source/tests/library/normalize/test_nhl_normalize.py
+        Source/tests/library/normalize/test_espn_roster.py
+        Source/tests/library/features/test_nhl_teams.py
+        Source/tests/library/http/test_espn_sport_clients.py
+      requirements_files: 'Source/data-backfills/nhl/requirements-dev.txt'
+
+  test-backfill:
+    name: Run NHL backfill tests
+    needs: approval
+    if: |
+      always() &&
+      (needs.approval.result == 'success' || needs.approval.result == 'skipped')
+    uses: ./.github/workflows/run_python_tests.yml
+    with:
+      test_path: 'Source/tests/data-backfills/nhl/'
+      requirements_files: 'Source/data-backfills/nhl/requirements-dev.txt'
+
+  test-feature-engineering:
+    name: Run NHL feature engineering tests
+    needs: approval
+    if: |
+      always() &&
+      (needs.approval.result == 'success' || needs.approval.result == 'skipped')
+    uses: ./.github/workflows/run_python_tests.yml
+    with:
+      test_path: >-
+        Source/tests/library/features/test_nhl.py
+        Source/tests/library/features/test_nhl_dataset.py
+        Source/tests/feature-engineering/nhl/
+      requirements_files: 'Source/feature-engineering/nhl/requirements.in'
+
+  test-train-model:
+    name: Run NHL training model tests
+    needs: approval
+    if: |
+      always() &&
+      (needs.approval.result == 'success' || needs.approval.result == 'skipped')
+    uses: ./.github/workflows/run_python_tests.yml
+    with:
+      test_path: 'Source/tests/library/ Source/tests/model-training/nhl/'
+      requirements_files: 'Source/model-training/nhl/requirements.in'
+
+  test-predict:
+    name: Run NHL predict tests
+    needs: approval
+    if: |
+      always() &&
+      (needs.approval.result == 'success' || needs.approval.result == 'skipped')
+    uses: ./.github/workflows/run_python_tests.yml
+    with:
+      test_path: >-
+        Source/tests/library/
+        Source/tests/aws-lambdas/nhl/test_predict.py
+        Source/tests/aws-lambdas/nhl/test_season_simulation.py
+        Source/tests/aws-lambdas/nhl/test_season_projection.py
+      requirements_files: 'Source/aws-lambdas/nhl/predict/requirements.in Source/aws-lambdas/nhl/predict/requirements-nodeps.in'
+
+  test-live-scores:
+    name: Run NHL live-scores tests
+    needs: approval
+    if: |
+      always() &&
+      (needs.approval.result == 'success' || needs.approval.result == 'skipped')
+    uses: ./.github/workflows/run_python_tests.yml
+    with:
+      test_path: 'Source/tests/aws-lambdas/nhl/test_live_scores.py Source/tests/aws-lambdas/nhl/test_live_scores_handler.py'
+      requirements_files: 'Source/aws-lambdas/nhl/live-scores/requirements.txt'
+
+  test-schedule-sync:
+    name: Run NHL schedule-sync tests
+    needs: approval
+    if: |
+      always() &&
+      (needs.approval.result == 'success' || needs.approval.result == 'skipped')
+    uses: ./.github/workflows/run_python_tests.yml
+    with:
+      test_path: 'Source/tests/aws-lambdas/nhl/test_schedule_sync.py'
+      requirements_files: 'Source/aws-lambdas/nhl/schedule-sync/requirements.txt'
+
+  test-ingest:
+    name: Run NHL ingest tests
+    needs: approval
+    if: |
+      always() &&
+      (needs.approval.result == 'success' || needs.approval.result == 'skipped')
+    uses: ./.github/workflows/run_python_tests.yml
+    with:
+      test_path: 'Source/tests/aws-lambdas/nhl/test_ingest.py'
+      requirements_files: 'Source/aws-lambdas/nhl/ingest/requirements.txt'
+
+  test-normalize:
+    name: Run NHL normalize tests
+    needs: approval
+    if: |
+      always() &&
+      (needs.approval.result == 'success' || needs.approval.result == 'skipped')
+    uses: ./.github/workflows/run_python_tests.yml
+    with:
+      test_path: 'Source/tests/aws-lambdas/nhl/test_normalize.py'
+      requirements_files: 'Source/aws-lambdas/nhl/normalize/requirements.txt'
+
+  scan:
+    name: SonarQube Cloud scan
+    needs: [
+      test-library, test-backfill, test-feature-engineering, test-train-model,
+      test-predict, test-live-scores, test-schedule-sync, test-ingest, test-normalize,
+    ]
+    # always() -- see app_deploy.yml's own copy of this comment.
+    if: always()
+    uses: ./.github/workflows/sonar_scan.yml
+    secrets: inherit
+    with:
+      environment: ${{ github.event.inputs.environment || 'development' }}
+      parent_workflow: ${{ github.workflow }}
+
+  backfill:
+    name: Historical backfill (build)
+    needs: scan
+    uses: ./.github/workflows/docker_image_deploy.yml
+    secrets: inherit
+    with:
+      sport: 'NHL'
+      dockerfile_path: 'Source/data-backfills/nhl/Dockerfile'
+      image_name: 'nhl-backfill'
+      image_version: '1.0.0'
+
+  ai_training:
+    name: AI training (build)
+    needs: scan
+    uses: ./.github/workflows/ai_training.yml
+    secrets: inherit
+    with:
+      sport: 'NHL'
+      feature_engineering_dockerfile_path: 'Source/feature-engineering/nhl/Dockerfile'
+      feature_engineering_image_name: 'nhl-feature-engineering'
+      feature_engineering_image_version: '1.0.0'
+      train_model_dockerfile_path: 'Source/model-training/nhl/Dockerfile'
+      train_model_image_name: 'nhl-train-win-probability-model'
+      train_model_image_version: '1.0.0'
+
+  # Pushes nhl-predict-latest. infra never runs without it already in ECR:
+  # aws_lambda_function.nhl_predict is a container-image Lambda, and
+  # CreateFunction validates its image tag exists before Terraform can
+  # create it.
+  ai_hosting:
+    name: AI hosting (build)
+    needs: scan
+    uses: ./.github/workflows/docker_image_deploy.yml
+    secrets: inherit
+    with:
+      sport: 'NHL'
+      dockerfile_path: 'Source/aws-lambdas/nhl/predict/Dockerfile'
+      image_name: 'nhl-predict'
+      image_version: '1.0.0'
+      platform: 'linux/arm64'
+
+  infra:
+    name: Apply shared infrastructure
+    needs: [ai_hosting]
+    uses: ./.github/workflows/tf_install.yml
+    secrets: inherit
+
+  deploy_predict_lambda:
+    name: AI hosting (deploy)
+    needs: [infra, ai_hosting]
+    uses: ./.github/workflows/docker_lambda_deploy.yml
+    secrets: inherit
+    with:
+      function_name: ${{ needs.infra.outputs.nhl_predict_function_name }}
+      image_tag: ${{ needs.ai_hosting.outputs.image_tag }}
+      default_image_tag: 'nhl-predict-latest'
+
+  live_scores_deploy:
+    name: NHL live-scores (deploy)
+    needs: [scan, infra]
+    uses: ./.github/workflows/zip_lambda_deploy.yml
+    secrets: inherit
+    with:
+      sport: 'NHL'
+      function_name: ${{ needs.infra.outputs.nhl_live_scores_function_name }}
+      handler_dir: 'Source/aws-lambdas/nhl/live-scores'
+      extra_source_files: 'Source/aws-lambdas/nhl/live-scores/live_scores.py'
+
+  data_pipeline:
+    name: Data pipeline
+    needs: [scan, infra]
+    uses: ./.github/workflows/data_pipeline.yml
+    secrets: inherit
+    with:
+      sport: 'NHL'
+      ingest_function_name: ${{ needs.infra.outputs.nhl_ingest_function_name }}
+      ingest_handler_dir: 'Source/aws-lambdas/nhl/ingest'
+      normalize_function_name: ${{ needs.infra.outputs.nhl_normalize_function_name }}
+      normalize_handler_dir: 'Source/aws-lambdas/nhl/normalize'
+      schedule_sync_function_name: ${{ needs.infra.outputs.nhl_schedule_sync_function_name }}
+      schedule_sync_handler_dir: 'Source/aws-lambdas/nhl/schedule-sync'

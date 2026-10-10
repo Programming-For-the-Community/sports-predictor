@@ -141,6 +141,23 @@ class TestCollectSamples:
         assert [s.version for s in samples["player-prop-passing-yards"]] == [4]
         assert [s.version for s in samples["player-prop-passing-touchdowns"]] == [3]
 
+    def test_hockey_grades_skaters_and_only_the_goalie_who_played(self):
+        events = [_event("1", 4, 3, week=None, event_date="2026-10-10")]
+        rows = _rows(margin=0.5, home=3.0, away=3.0) + [
+            _row("MODEL#player-prop-shots-total#v2#PLAYER#s1", {"value": 3.4}),
+            _row("MODEL#player-prop-saves#v2#PLAYER#g1", {"value": 27.0}),
+            _row("MODEL#player-prop-saves#v2#PLAYER#g2", {"value": 25.0}),  # predicted starter who sat
+        ]
+        stats = {events[0]["event_key"]: {"s1": {"shots_total": 5, "goals": 1}, "g1": {"saves": 31}}}
+
+        samples = head_to_head.collect_samples("nhl", events, {events[0]["event_key"]: rows}, stats)
+
+        assert [(s.predicted, s.actual) for s in samples["player-prop-shots-total"]] == [(3.4, 5)]
+        assert [(s.predicted, s.actual) for s in samples["player-prop-saves"]] == [(27.0, 31)]
+        assert samples["score-margin"][0].actual == 1
+        # Graded by calendar week, like basketball.
+        assert samples["win-probability"][0].period.label == "Oct 5"
+
 
 class TestBuildRecords:
     def _cards(self):

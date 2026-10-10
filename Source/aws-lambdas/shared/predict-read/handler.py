@@ -1,5 +1,5 @@
 """
-Shared read-only serving Lambda for all 6 sports. Triggered by API Gateway
+Shared read-only serving Lambda for every sport. Triggered by API Gateway
 behind the Cognito authorizer -- every sport's own `/{sport}/events`,
 `/{sport}/models`, `/{sport}/season`, `/{sport}/predictions/events/
 {event_id}` (and, for team sports, `.../players/{entity_id}`) resource
@@ -34,7 +34,7 @@ from library.aws.lambda_invoker import LambdaInvoker
 from library.aws.s3_manager import S3Manager
 from library.aws.serving_resources import ServingResources
 from library.schema.keys import event_key as build_event_key
-from library.serving import f1_reads, nba_reads, ncaafb_reads, ncaambb_reads, nfl_reads, pga_reads
+from library.serving import f1_reads, nba_reads, ncaafb_reads, ncaambb_reads, nfl_reads, nhl_reads, pga_reads
 from library.serving.api_response import json_response
 from library.serving.common import list_models
 from library.serving.predict_read_handler import make_multi_sport_lambda_handler
@@ -59,6 +59,7 @@ _PREDICT_FUNCTION_NAME_ENV_VARS = {
     "ncaambb": "NCAAMBB_PREDICT_FUNCTION_NAME",
     "pga": "PGA_PREDICT_FUNCTION_NAME",
     "f1": "F1_PREDICT_FUNCTION_NAME",
+    "nhl": "NHL_PREDICT_FUNCTION_NAME",
 }
 
 
@@ -159,6 +160,15 @@ SPORT_CONFIGS = {
         "get_season_projection_fn": lambda model_bucket: ncaambb_reads.get_season_projection(model_bucket, "ncaambb"),
         "list_models_fn": lambda model_bucket: list_models(model_bucket, "ncaambb"),
         "freshness_inputs_fn": _team_sport_freshness_inputs("ncaambb"),
+        "has_player_prop_route": True,
+    },
+    "nhl": {
+        "list_events_fn": lambda storage, status: nhl_reads.list_events(
+            storage, _get_predictions_table(), "nhl", status, model_bucket=_get_model_bucket(),
+        ),
+        "get_season_projection_fn": lambda model_bucket: nhl_reads.get_season_projection(model_bucket, "nhl"),
+        "list_models_fn": lambda model_bucket: list_models(model_bucket, "nhl"),
+        "freshness_inputs_fn": _team_sport_freshness_inputs("nhl"),
         "has_player_prop_route": True,
     },
     "pga": {

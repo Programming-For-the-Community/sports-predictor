@@ -80,6 +80,7 @@ resource "aws_lambda_function" "predict_read" {
       NCAAMBB_PREDICT_FUNCTION_NAME = aws_lambda_function.ncaambb_predict.function_name
       PGA_PREDICT_FUNCTION_NAME     = aws_lambda_function.pga_predict.function_name
       F1_PREDICT_FUNCTION_NAME      = aws_lambda_function.f1_predict.function_name
+      NHL_PREDICT_FUNCTION_NAME     = aws_lambda_function.nhl_predict.function_name
     }
   }
 

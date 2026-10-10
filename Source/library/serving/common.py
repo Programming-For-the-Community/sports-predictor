@@ -488,12 +488,26 @@ def _basketball_leaders_comparison(storage, rows: list[dict], sport: str, event:
     now gets its own entry, correctly scoped to just that category's own
     stats, and can appear in more than one category's own list, same as
     the predicted-only leaders panel already allows."""
+    return list_leaders_comparison(
+        storage, rows, sport, event, _BASKETBALL_STAT_CATEGORY, _BASKETBALL_LEADER_CATEGORY_LIMITS,
+        _BASKETBALL_CATEGORY_PRIMARY_STAT,
+    )
+
+
+def list_leaders_comparison(
+    storage, rows: list[dict], sport: str, event: dict, stat_category: dict[str, str],
+    limits: dict[str, int], primary_stat: dict[str, str],
+) -> dict | None:
+    """Player-prop predicted-vs-actual for a completed event whose leader
+    categories are all lists: {"home": {category: [entry, ...]}, "away":
+    {...}}, each list sorted by its category's primary stat and cut to its
+    limit. `stat_category` maps each prop stat to its category."""
     home_away = _home_and_away(event)
     if home_away is None:
         return None
     home_id, away_id = home_away
 
-    predicted_by_entity_category = _predicted_stats_by_entity_category(rows, _BASKETBALL_STAT_CATEGORY)
+    predicted_by_entity_category = _predicted_stats_by_entity_category(rows, stat_category)
     if not predicted_by_entity_category:
         return None
 
@@ -502,12 +516,12 @@ def _basketball_leaders_comparison(storage, rows: list[dict], sport: str, event:
         for row in storage.get_player_game_stats_for_event(event["event_key"])
     }
 
-    home: dict[str, list[dict]] = {"scoring": [], "rebounding": [], "assists": []}
-    away: dict[str, list[dict]] = {"scoring": [], "rebounding": [], "assists": []}
+    home: dict[str, list[dict]] = {category: [] for category in limits}
+    away: dict[str, list[dict]] = {category: [] for category in limits}
     _bucket_leader_entries(
         storage, sport, predicted_by_entity_category, home_id, away_id, actual_by_entity, home, away, set(),
     )
-    _sort_and_limit_leader_lists(home, away, _BASKETBALL_LEADER_CATEGORY_LIMITS, _BASKETBALL_CATEGORY_PRIMARY_STAT)
+    _sort_and_limit_leader_lists(home, away, limits, primary_stat)
 
     return {"home": home, "away": away}
 
@@ -599,10 +613,16 @@ def _sort_and_limit_leader_lists(home: dict, away: dict, limits: dict[str, int],
             bucket[category] = bucket[category][:limit]
 
 
-def list_events_grouped_by_day(storage, predictions_table, sport: str, status: str, model_bucket=None) -> dict:
+def list_events_grouped_by_day(
+    storage, predictions_table, sport: str, status: str, model_bucket=None, *,
+    leaders_comparison_fn=_basketball_leaders_comparison, extra_entry_fn=None,
+) -> dict:
     """GET /{sport}/events?status=scheduled|completed for a day-grouped
-    basketball-shaped sport (nba/ncaambb) -- scoped to exactly one calendar
-    date, not the whole matching history. Each participant also carries
+    sport (nba/ncaambb/nhl) -- scoped to exactly one calendar
+    date, not the whole matching history. leaders_comparison_fn(storage,
+    rows, sport, event) builds a completed event's leaders_comparison;
+    extra_entry_fn(event), when given, adds the sport's own fields to
+    every entry. Each participant also carries
     `name`/`abbreviation` off its own team entity -- see enrich_participants.
     Also carries `venue_name`/`venue_city`/`venue_state` straight off the
     stored event, `null` on any of the three the venue lacked. With
@@ -655,7 +675,9 @@ def list_events_grouped_by_day(storage, predictions_table, sport: str, status: s
             # independently.
             rows = event_prediction_rows(predictions_table, e["event_key"])
             entry["prediction_comparison"] = _prediction_comparison(rows, e)
-            entry["leaders_comparison"] = _basketball_leaders_comparison(storage, rows, sport, e)
+            entry["leaders_comparison"] = leaders_comparison_fn(storage, rows, sport, e)
+        if extra_entry_fn is not None:
+            entry.update(extra_entry_fn(e))
         return entry
 
     # Concurrent, not sequential -- each entry makes several DynamoDB round

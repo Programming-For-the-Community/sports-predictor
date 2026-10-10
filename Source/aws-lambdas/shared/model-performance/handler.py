@@ -25,7 +25,7 @@ from library.storage.feature_storage import FeatureStorage
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s", force=True)  # AWS Lambda pre-attaches a root handler, so basicConfig() is otherwise a silent no-op
 logger = logging.getLogger("model-performance")
 
-SPORTS = ("nfl", "ncaafb", "nba", "ncaambb", "pga", "f1")
+SPORTS = ("nfl", "ncaafb", "nba", "ncaambb", "pga", "f1", "nhl")
 
 _storage: FeatureStorage | None = None
 _model_bucket: S3Manager | None = None

@@ -15,6 +15,8 @@ FOOTBALL_PROP_STATS = (
 )
 BASKETBALL_PROP_STATS = ("points", "rebounds", "assists", "steals", "blocks", "three_pointers_made")
 BASKETBALL_USAGE_STATS = ("field_goal_attempts", "minutes")
+HOCKEY_PROP_STATS = ("shots_total", "points", "goals", "assists", "hits", "blocked_shots")
+HOCKEY_USAGE_STATS = ("time_on_ice_seconds", "power_play_time_on_ice_seconds", "shots_total")
 
 # sport -> (prop stats, usage volume stats)
 MATCHUP_STATS = {
@@ -22,6 +24,7 @@ MATCHUP_STATS = {
     "ncaafb": (FOOTBALL_PROP_STATS, ("passing_attempts", "rushing_attempts", "receiving_receptions")),
     "nba": (BASKETBALL_PROP_STATS, BASKETBALL_USAGE_STATS),
     "ncaambb": (BASKETBALL_PROP_STATS, BASKETBALL_USAGE_STATS),
+    "nhl": (HOCKEY_PROP_STATS, HOCKEY_USAGE_STATS),
 }
 
 _EVENT_ROWS_TTL_SECONDS = 300

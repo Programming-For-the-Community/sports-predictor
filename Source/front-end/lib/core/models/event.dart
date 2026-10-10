@@ -93,6 +93,37 @@ class PredictionComparison {
       );
 }
 
+/// A side's starting goalie (NHL). `tag` is how sure the listing is:
+/// ESPN's "Confirmed"/"Expected" on an event, or the prediction's own
+/// "Confirmed"/"Probable"/"Predicted".
+class EventGoalie {
+  const EventGoalie({required this.entityId, required this.name, required this.tag});
+
+  final String entityId;
+  final String? name;
+  final String? tag;
+
+  String get displayName => name ?? entityId;
+
+  /// {"home": {...}, "away": {...}} keyed by role; `tagKey` names the field
+  /// carrying the tag ("status" on an event, "source" on a prediction).
+  static Map<String, EventGoalie> mapFromJson(Object? json, String tagKey) {
+    if (json is! Map<String, dynamic>) return const {};
+    final goalies = <String, EventGoalie>{};
+    for (final entry in json.entries) {
+      final value = entry.value;
+      if (value is! Map<String, dynamic> || value['entity_id'] is! String) continue;
+      final tag = value[tagKey] as String?;
+      goalies[entry.key] = EventGoalie(
+        entityId: value['entity_id'] as String,
+        name: value['name'] as String?,
+        tag: tag == null || tag.isEmpty ? null : '${tag[0].toUpperCase()}${tag.substring(1)}',
+      );
+    }
+    return goalies;
+  }
+}
+
 class SportEvent {
   const SportEvent({
     required this.eventId,
@@ -108,6 +139,9 @@ class SportEvent {
     this.venueName,
     this.venueCity,
     this.venueState,
+    this.wentToOvertime,
+    this.decidedByShootout,
+    this.goalies = const {},
   });
 
   final String eventId;
@@ -136,6 +170,17 @@ class SportEvent {
   // cached -- null means ask the prediction route (see
   // core/data/events_repository.dart's PredictionSeeds).
   final EventPrediction? prediction;
+  // NHL only: how a finished game ended, and each side's probable starting
+  // goalie by role. Null/empty for every other sport.
+  final bool? wentToOvertime;
+  final bool? decidedByShootout;
+  final Map<String, EventGoalie> goalies;
+
+  /// "FINAL", or "FINAL/OT" / "FINAL/SO" for a game that went past regulation.
+  String get finalLabel {
+    if (decidedByShootout == true) return 'FINAL/SO';
+    return wentToOvertime == true ? 'FINAL/OT' : 'FINAL';
+  }
 
   static EventPrediction? _embeddedPrediction(Object? json) {
     if (json is! Map<String, dynamic>) return null;
@@ -167,6 +212,9 @@ class SportEvent {
         venueName: json['venue_name'] as String?,
         venueCity: json['venue_city'] as String?,
         venueState: json['venue_state'] as String?,
+        wentToOvertime: json['went_to_overtime'] as bool?,
+        decidedByShootout: json['decided_by_shootout'] as bool?,
+        goalies: EventGoalie.mapFromJson(json['goalies'], 'status'),
       );
 
   Participant get home => participants.firstWhere((p) => p.role == 'home');

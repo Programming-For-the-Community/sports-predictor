@@ -294,6 +294,15 @@ def build_live_sprint_features(storage, sport: str, event_id: str, window: int =
     all_events = storage.get_all_events(sport)
     sprint_events_before = _events_before(all_events, "sprint", before_date)
 
+    # A "scheduled" stub has no participants -- score the current roster.
+    if not participants:
+        driver_ids, driver_to_constructor = current_roster(storage, sport, all_events=[e for e in all_events if e.get("status") == "completed"])
+        participants = [
+            {"entity_id": entity_id, "constructor_entity_id": driver_to_constructor.get(entity_id), "result": {}}
+            for entity_id in driver_ids
+        ]
+    featured_event = {**event, "participants": participants}
+
     driver_rows = {}
     for participant in participants:
         entity_id = participant["entity_id"]
@@ -302,7 +311,7 @@ def build_live_sprint_features(storage, sport: str, event_id: str, window: int =
         constructor_results = (
             _constructor_pooled_results(sprint_events_before, constructor_id, window) if constructor_id is not None else None
         )
-        driver_rows[entity_id] = build_sprint_event_features(event, participant, prior_results, window, constructor_results, window)
+        driver_rows[entity_id] = build_sprint_event_features(featured_event, participant, prior_results, window, constructor_results, window)
 
     return {"event": event, "driver_rows": driver_rows}
 

@@ -38,6 +38,12 @@ const _propUnits = <String, (String, int, int)>{
   'steals': ('stl', 1, 1),
   'blocks': ('blk', 1, 1),
   'three-pointers-made': ('3PM', 1, 1),
+  'goals-against': ('GA', 1, 1),
+  'goals': ('goals', 2, 1),
+  'shots-total': ('SOG', 1, 1),
+  'blocked-shots': ('blk', 1, 1),
+  'hits': ('hits', 1, 1),
+  'saves': ('saves', 1, 0),
 };
 
 // PGA / F1 amount models. A golfer's projected score and each round are in

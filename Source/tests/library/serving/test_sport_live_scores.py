@@ -29,3 +29,18 @@ def test_each_method_passes_the_sports_own_settings():
     player_stats.assert_called_once_with("client", "nba", "e1", _SPLITS)
     refresh.assert_called_once_with("storage", "s3", "raw", "client", "nba", "nba/cache/live.json", _SPLITS, 7)
     get_live.assert_called_once_with("s3", "raw", "nba/cache/live.json")
+
+
+def test_a_sports_own_box_score_parser_is_passed_through():
+    def parse(summary, sport):
+        return [{"entity_id": "g1", "stat_line": {"saves": 30, "save_pct": "--"}}], []
+
+    live = common.SportLiveScores("nhl/cache/live.json", {}, 7, parse)
+    client = type("Client", (), {"get_summary": staticmethod(lambda event_id: {"id": event_id})})()
+
+    assert live.live_player_stats(client, "nhl", "e1") == {"g1": {"saves": 30}}
+
+    with patch.object(common, "refresh", return_value={"polled": 0}) as refresh:
+        live.refresh("storage", "s3", "raw", "client", "nhl")
+
+    refresh.assert_called_once_with("storage", "s3", "raw", "client", "nhl", "nhl/cache/live.json", {}, 7, parse_boxscore=parse)

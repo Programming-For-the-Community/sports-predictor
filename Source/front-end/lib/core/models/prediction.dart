@@ -1,3 +1,4 @@
+import 'event.dart' show EventGoalie;
 import 'event_leaders.dart';
 
 /// Mirrors GET /{sport}/predictions/events/{event_id}'s response shape
@@ -13,6 +14,7 @@ class EventPrediction {
     required this.leaders,
     this.stale = false,
     this.staleRetryAfterSeconds,
+    this.goalies = const {},
   });
 
   final double homeWinProbability;
@@ -29,6 +31,8 @@ class EventPrediction {
   // Only meaningful when stale -- the server's own cadence hint (same
   // field/purpose as PredictionComputingException.retryAfterSeconds).
   final int? staleRetryAfterSeconds;
+  // NHL only: the starting goalie each side's numbers were computed for, by role.
+  final Map<String, EventGoalie> goalies;
 
   factory EventPrediction.fromJson(Map<String, dynamic> json) {
     final predictions = json['predictions'] as Map<String, dynamic>;
@@ -42,6 +46,7 @@ class EventPrediction {
       leaders: json['leaders'] != null ? EventLeaders.fromJson(json['leaders'] as Map<String, dynamic>) : null,
       stale: json['stale'] as bool? ?? false,
       staleRetryAfterSeconds: json['retry_after_seconds'] as int?,
+      goalies: EventGoalie.mapFromJson(json['goalies'], 'source'),
     );
   }
 }

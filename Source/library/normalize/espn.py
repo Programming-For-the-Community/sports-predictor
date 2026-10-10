@@ -251,12 +251,14 @@ def attach_injuries(events: list[dict], injuries_by_team: dict[str, list[dict]])
             evt[f"{role}_injuries"] = injuries_by_team[team_id]
 
 
-def roster_to_team_injuries(roster: dict) -> list[dict]:
+def roster_to_team_injuries(roster: dict, current_statuses: frozenset[str] | set[str] = _CURRENT_INJURY_STATUSES) -> list[dict]:
     """Extracts each currently-injured athlete's status from a roster
     response. Some sports' site-API rosters embed `injuries` directly on
     each athlete, so no extra fetch is needed here. Returns
     [{"entity_id", "status"}, ...] with the raw ESPN status string
     unmapped (severity thresholding is a feature-layer concern).
+
+    current_statuses is the sport's own status vocabulary to keep.
 
     Assumes a top-level "status" string per injury entry, with a fallback
     to a nested type.description shape.
@@ -268,7 +270,7 @@ def roster_to_team_injuries(roster: dict) -> list[dict]:
             continue
         for injury in athlete.get("injuries") or []:
             status = injury.get("status") or (injury.get("type") or {}).get("description")
-            if status not in _CURRENT_INJURY_STATUSES:
+            if status not in current_statuses:
                 continue
             result.append({"entity_id": athlete_id, "status": status})
     return result

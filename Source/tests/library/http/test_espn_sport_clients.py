@@ -6,6 +6,7 @@ from unittest.mock import patch
 
 from library.http.f1_espn import F1EspnClient
 from library.http.nba import NBAClient
+from library.http.nhl import NHLClient
 
 
 class TestNBAClient:
@@ -22,6 +23,22 @@ class TestNBAClient:
         ]
         assert [c.kwargs["params"] for c in get.call_args_list] == [{}, {"dates": "20260101"}, {"event": "401"}, {}]
         assert "basketball/nba" in client.base_url
+
+
+class TestNHLClient:
+    def test_endpoints(self):
+        client = NHLClient(min_interval_seconds=0)
+        with patch.object(client, "_get", return_value={"ok": 1}) as get:
+            assert client.get_teams() == {"ok": 1}
+            client.get_scoreboard_for_date("20261009")
+            client.get_summary("401803584")
+            client.get_roster("13")
+
+        assert [c.args for c in get.call_args_list] == [
+            ("teams",), ("scoreboard",), ("summary",), ("teams/13/roster",),
+        ]
+        assert [c.kwargs["params"] for c in get.call_args_list] == [{}, {"dates": "20261009"}, {"event": "401803584"}, {}]
+        assert "hockey/nhl" in client.base_url
 
 
 class TestF1EspnClient:

@@ -100,6 +100,7 @@ class _EventListPageState extends ConsumerState<EventListPage> with WidgetsBindi
   String _conferenceFilter = '';
   // Upcoming/Current only; empty means "don't filter on this".
   final Set<ConfidenceTier> _confidenceTiers = {};
+  final Set<int> _weekdays = {};
   final Set<int> _kickoffHours = {};
   Timer? _liveScoresTimer;
 
@@ -208,6 +209,7 @@ class _EventListPageState extends ConsumerState<EventListPage> with WidgetsBindi
     var pending = 0;
     final kept = <SportEvent>[];
     for (final event in events) {
+      if (_weekdays.isNotEmpty && !_weekdays.contains(eventWeekday(event))) continue;
       if (_kickoffHours.isNotEmpty && !_kickoffHours.contains(kickoffHour(event))) continue;
       if (_confidenceTiers.isNotEmpty) {
         final prediction = ref.watch(eventPredictionProvider((sport: widget.sportId, eventId: event.eventId))).value;
@@ -245,9 +247,12 @@ class _EventListPageState extends ConsumerState<EventListPage> with WidgetsBindi
         if (isUpcoming) ...[
           EventListFilters(
             slots: kickoffSlots(sorted),
+            weekdays: eventWeekdays(sorted),
             selectedTiers: _confidenceTiers,
+            selectedWeekdays: _weekdays,
             selectedHours: _kickoffHours,
             onToggleTier: (tier) => _toggle(_confidenceTiers, tier),
+            onToggleWeekday: (weekday) => _toggle(_weekdays, weekday),
             onToggleHour: (hour) => _toggle(_kickoffHours, hour),
           ),
           const SizedBox(height: 16),

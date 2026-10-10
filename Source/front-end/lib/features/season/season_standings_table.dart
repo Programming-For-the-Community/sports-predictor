@@ -36,6 +36,7 @@ abstract final class _StandingsLabels {
   static const champNbaNcaambb = 'CHAMP%'; // NBA/NCAA MBB
   static const nc = 'NC%'; // NCAAFB
   static const sb = 'SB%'; // NFL
+  static const cup = 'CUP%'; // NHL
 }
 
 String _playoffLabel(bool isNba, bool isNcaafb, bool isNcaambb) {
@@ -132,7 +133,7 @@ List<_StandingsColumn> _standingsColumns(String sport) {
       2, (context, sport, team) => _PercentText(team.playoffProbability),
     ),
     _StandingsColumn(
-      _championshipLabel(isNba, isNcaafb, isNcaambb),
+      sport == SportIds.nhl ? _StandingsLabels.cup : _championshipLabel(isNba, isNcaafb, isNcaambb),
       2, (context, sport, team) => _PercentText(team.championshipProbability),
     ),
   ];

@@ -1,0 +1,62 @@
+# NHL inference Lambda. Reads feature context from DynamoDB and the current
+# promoted model from the model artifacts bucket.
+#
+# Container image (xgboost/lightgbm dependency footprint). Built/pushed by
+# nhl_deploy.yml / app_deploy.yml. VPC-attached.
+resource "aws_cloudwatch_log_group" "nhl_predict" {
+  name              = "/aws/lambda/${var.project}-nhl-predict"
+  retention_in_days = 30
+
+  tags = merge(local.common_tags, {
+    Sport     = "nhl"
+    Component = "serving"
+  })
+}
+
+resource "aws_lambda_function" "nhl_predict" {
+  function_name = "${var.project}-nhl-predict"
+  description   = "Computes NHL event-outcome and player-prop predictions in the background. Never called by API Gateway -- invoked asynchronously by the shared predict-read Lambda on a cache miss, by the prediction scheduler for the post-puck-drop snapshot, and by EventBridge Scheduler weekly for the season projection. See predict/handler.py."
+  role          = aws_iam_role.lambda_inference.arn
+  package_type  = "Image"
+  image_uri     = "${var.ecr_repo_url}:nhl-predict-latest"
+  architectures = ["arm64"]
+  # Not on the API Gateway request path (fired async).
+  timeout = 600
+
+  memory_size = 3008
+
+  environment {
+    variables = {
+      # Known at deploy time (secrets.AWS_ACCOUNT_ID -> TF_VAR_account_id) --
+      # avoids get_account_id() (library/aws/account.py) needing to call
+      # STS at runtime, which this VPC-attached Lambda has no route to
+      # without the STS Interface Endpoint (see vpc-endpoints.tf).
+      AWS_ACCOUNT_ID               = var.account_id
+      MODEL_ARTIFACTS_BUCKET_NAME  = aws_s3_bucket.model_artifacts.bucket
+      PREDICTIONS_TABLE_NAME       = aws_dynamodb_table.predictions.name
+      ENTITIES_TABLE_NAME          = aws_dynamodb_table.entities.name
+      EVENTS_TABLE_NAME            = aws_dynamodb_table.events.name
+      PLAYER_GAME_STATS_TABLE_NAME = aws_dynamodb_table.player_game_stats.name
+      TEAM_GAME_STATS_TABLE_NAME   = aws_dynamodb_table.team_game_stats.name
+    }
+  }
+
+  vpc_config {
+    subnet_ids         = [aws_subnet.private_a.id, aws_subnet.private_b.id, aws_subnet.private_c.id]
+    security_group_ids = [aws_security_group.lambda_inference.id]
+  }
+
+  logging_config {
+    log_format = "Text"
+    log_group  = aws_cloudwatch_log_group.nhl_predict.name
+  }
+
+  lifecycle {
+    ignore_changes = [image_uri]
+  }
+
+  tags = merge(local.common_tags, {
+    Sport     = "nhl"
+    Component = "serving"
+  })
+}

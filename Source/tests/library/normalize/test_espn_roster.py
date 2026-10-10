@@ -148,3 +148,13 @@ class TestRosterToTeamInjuries:
         }
 
         assert roster_to_team_injuries(roster) == [{"entity_id": "1", "status": "Questionable"}]
+
+    def test_a_sports_own_status_vocabulary_replaces_the_default(self):
+        roster = {"athletes": [{"position": "Centers", "items": [
+            {"id": "1", "injuries": [{"status": "Injured Reserve", "date": "2026-10-07T18:11Z"}]},
+            {"id": "2", "injuries": [{"status": "Questionable"}]},
+        ]}]}
+
+        assert roster_to_team_injuries(roster, {"Injured Reserve", "Day-To-Day"}) == [
+            {"entity_id": "1", "status": "Injured Reserve"},
+        ]

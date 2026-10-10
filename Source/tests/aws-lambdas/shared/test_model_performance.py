@@ -28,7 +28,7 @@ def test_runs_every_sport_by_default():
     with patches, run_patch:
         summary = shared_model_performance.lambda_handler({}, None)
 
-    assert ran == ["nfl", "ncaafb", "nba", "ncaambb", "pga", "f1"]
+    assert ran == ["nfl", "ncaafb", "nba", "ncaambb", "pga", "f1", "nhl"]
     assert summary["nfl"] == {"status": "ok", "models": 2, "completed_events": 5, "with_prediction": 4, "unpredicted": 1}
 
 
