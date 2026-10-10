@@ -174,6 +174,10 @@ resource "aws_ecs_capacity_provider" "ec2_training_spot" {
 resource "aws_ecs_capacity_provider" "ec2_training_ondemand" {
   name = "${var.project}-ec2-training-ondemand"
 
+  # The cluster takes one capacity provider update at a time; a second
+  # one sent alongside fails.
+  depends_on = [aws_ecs_capacity_provider.ec2_training_spot]
+
   auto_scaling_group_provider {
     auto_scaling_group_arn         = aws_autoscaling_group.ec2_training_ondemand.arn
     managed_termination_protection = "ENABLED"
