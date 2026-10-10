@@ -15,7 +15,7 @@ resource "aws_cloudwatch_log_group" "nhl_predict" {
 
 resource "aws_lambda_function" "nhl_predict" {
   function_name = "${var.project}-nhl-predict"
-  description   = "Computes NHL event-outcome and player-prop predictions in the background. Never called by API Gateway -- invoked asynchronously by the shared predict-read Lambda on a cache miss, by the prediction scheduler for the post-puck-drop snapshot, and by EventBridge Scheduler weekly for the season projection. See predict/handler.py."
+  description   = "Computes NHL event and player-prop predictions in the background: invoked by predict-read on a cache miss, the prediction scheduler after puck drop, and EventBridge Scheduler weekly for the season projection. See predict/handler.py."
   role          = aws_iam_role.lambda_inference.arn
   package_type  = "Image"
   image_uri     = "${var.ecr_repo_url}:nhl-predict-latest"
