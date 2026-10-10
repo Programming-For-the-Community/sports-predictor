@@ -41,6 +41,15 @@ resource "aws_autoscaling_group" "ec2_training_spot" {
     }
   }
 
+  # ECS's service role may only act on a group carrying this tag. ECS adds
+  # it when the capacity provider is created; declared here so an apply
+  # doesn't strip it, which leaves ECS unable to change the scaling policy,
+  # lift scale-in protection or finish a draining instance's termination.
+  tag {
+    key                 = "AmazonECSManaged"
+    value               = "true"
+    propagate_at_launch = true
+  }
   tag {
     key                 = "Component"
     value               = "training"
@@ -97,6 +106,15 @@ resource "aws_autoscaling_group" "ec2_training_ondemand" {
     }
   }
 
+  # ECS's service role may only act on a group carrying this tag. ECS adds
+  # it when the capacity provider is created; declared here so an apply
+  # doesn't strip it, which leaves ECS unable to change the scaling policy,
+  # lift scale-in protection or finish a draining instance's termination.
+  tag {
+    key                 = "AmazonECSManaged"
+    value               = "true"
+    propagate_at_launch = true
+  }
   tag {
     key                 = "Component"
     value               = "training"

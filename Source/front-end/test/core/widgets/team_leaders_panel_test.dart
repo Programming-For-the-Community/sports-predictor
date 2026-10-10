@@ -318,7 +318,7 @@ void main() {
           await tester.pump();
         }
 
-        expect(midY(tester, find.text('2')), closeTo(midY(tester, find.text('241')), 0.5), reason: 'at width ' + width.toString());
+        expect(midY(tester, find.text('2')), closeTo(midY(tester, find.text('241')), 0.5), reason: 'at width $width');
         expect(midY(tester, find.byType(TdDots)), closeTo(midY(tester, find.text('2')), 0.5));
         expect(midY(tester, find.text('2')), closeTo(midY(tester, find.text('Ty Simpson')), 1.5));
       }
