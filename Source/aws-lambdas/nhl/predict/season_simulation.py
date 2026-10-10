@@ -220,7 +220,7 @@ def simulate_season(
     for _ in range(simulations):
         record = _play_out_schedule(current, remaining_games, probabilities, rng)
         points = {team: 2 * record["wins"].get(team, 0) + record["overtime_losses"].get(team, 0) for team in teams}
-        coin = {team: rng.random() for team in teams}
+        coin = {team: rng.random() for team in teams}  # NOSONAR -- a simulation tiebreak draw, nothing secret
         fields = conference_fields(points, record["regulation_wins"], record["wins"], coin.get)
         rank = {team: (*_standings_key(team, points, record["regulation_wins"], record["wins"]), coin[team]) for team in teams}
         champion = _simulate_playoffs(fields, rank, ratings, home_advantage, rng)

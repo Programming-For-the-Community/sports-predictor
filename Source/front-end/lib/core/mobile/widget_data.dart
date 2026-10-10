@@ -127,7 +127,11 @@ List<SportEvent> gamesToPredict(SportConfig sport, Iterable<SportEvent> dayEvent
   final ordered = [
     for (final event in dayEvents) (event: event, kickoff: DateTime.tryParse(event.kickoffTime ?? '')),
   ];
-  int group(DateTime? kickoff) => kickoff == null ? 2 : (kickoff.add(untilHalftime).isAfter(now) ? 0 : 1);
+  int group(DateTime? kickoff) {
+    if (kickoff == null) return 2;
+    return kickoff.add(untilHalftime).isAfter(now) ? 0 : 1;
+  }
+
   ordered.sort((a, b) {
     final byGroup = group(a.kickoff).compareTo(group(b.kickoff));
     if (byGroup != 0) return byGroup;
@@ -183,24 +187,14 @@ List<Map<String, Object?>> buildTopProps(
   if (stats == null) return const [];
   final missesByModel = {for (final model in performance.models) model.modelName: model.entityMisses};
 
-  final candidates = <({String entityId, String statKey, double share, Map<String, Object?> row})>[];
+  final candidates = <_PropCandidate>[];
   for (final event in events) {
     final leaders = predictions[event.eventId]?.leaders;
     if (leaders == null) continue;
     for (final (role, team) in [('away', leaders.away), ('home', leaders.home)]) {
       final abbreviation = event.participants.where((p) => p.role == role).firstOrNull?.abbreviation;
       for (final player in team.categories.values.expand((players) => players)) {
-        for (final MapEntry(key: statKey, value: stat) in stats.entries) {
-          final projection = player.stats[statKey];
-          final miss = missesByModel[propModelName(statKey)]?[player.entityId]?.value;
-          if (projection == null || miss == null || projection < stat.bigGame * propFloorShare) continue;
-          candidates.add((
-            entityId: player.entityId,
-            statKey: statKey,
-            share: miss / projection,
-            row: _propRow(sport, event, player, abbreviation, stat, projection, miss),
-          ));
-        }
+        candidates.addAll(_playerCandidates(sport, event, player, abbreviation, stats, missesByModel));
       }
     }
   }
@@ -217,6 +211,33 @@ List<Map<String, Object?>> buildTopProps(
     rows.add(candidate.row);
   }
   return rows;
+}
+
+typedef _PropCandidate = ({String entityId, String statKey, double share, Map<String, Object?> row});
+
+/// One candidate per listed stat the player has both a big enough projection
+/// and a graded history for.
+List<_PropCandidate> _playerCandidates(
+  SportConfig sport,
+  SportEvent event,
+  PlayerStatLine player,
+  String? abbreviation,
+  Map<String, PropStat> stats,
+  Map<String, Map<String, PerformanceWindow>> missesByModel,
+) {
+  final candidates = <_PropCandidate>[];
+  for (final MapEntry(key: statKey, value: stat) in stats.entries) {
+    final projection = player.stats[statKey];
+    final miss = missesByModel[propModelName(statKey)]?[player.entityId]?.value;
+    if (projection == null || miss == null || projection < stat.bigGame * propFloorShare) continue;
+    candidates.add((
+      entityId: player.entityId,
+      statKey: statKey,
+      share: miss / projection,
+      row: _propRow(sport, event, player, abbreviation, stat, projection, miss),
+    ));
+  }
+  return candidates;
 }
 
 Map<String, Object?> _propRow(

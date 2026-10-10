@@ -144,8 +144,10 @@ class TestScore:
         assert self._run("home_score", rows=50).kwargs["options"].target_baseline is None
 
     def test_unknown_target_is_rejected(self):
+        storage, df = MagicMock(), _make_df()
+
         with pytest.raises(ValueError, match="Unknown SCORE_TARGET"):
-            train_score_model.train(MagicMock(), _make_df(), "total")
+            train_score_model.train(storage, df, "total")
 
     def test_main_reads_the_target_from_the_environment(self, monkeypatch):
         monkeypatch.setenv("MODEL_ARTIFACTS_BUCKET_NAME", "test-bucket")

@@ -208,8 +208,10 @@ class TestTrainServeParity:
         assert mismatched == {}
 
     def test_unknown_player_raises_not_found(self):
+        storage = _storage(HISTORY, self._upcoming())
+
         with pytest.raises(EventNotFoundError):
-            hockey_live.build_live_player_features(_storage(HISTORY, self._upcoming()), "nhl", "SPORT#NHL#EVENT#9", "nobody")
+            hockey_live.build_live_player_features(storage, "nhl", "SPORT#NHL#EVENT#9", "nobody")
 
 
 class TestLeaderCandidates:

@@ -141,6 +141,15 @@ def _athlete_stat_line(keys: list[str], stats: list) -> dict:
     return line
 
 
+def _team_categories(summary: dict) -> list[tuple[str, dict]]:
+    """(team id, box-score stat category) for both teams, in ESPN order."""
+    return [
+        (str(team_block["team"]["id"]), category)
+        for team_block in summary.get("boxscore", {}).get("players", [])
+        for category in team_block.get("statistics", [])
+    ]
+
+
 def _athletes_who_played(category: dict) -> list[tuple[dict, list]]:
     """(athlete, stats) for a box-score category's entries, in ESPN's
     order, without scratches and DNP stubs."""
@@ -172,22 +181,20 @@ def boxscore_to_player_game_stats(summary: dict, sport: str) -> tuple[list[dict]
     position_groups: dict[str, str] = {}
     started: dict[str, bool] = {}
 
-    for team_block in summary.get("boxscore", {}).get("players", []):
-        team_id = str(team_block["team"]["id"])
-        for category in team_block.get("statistics", []):
-            is_goalie_category = category.get("name") == _GOALIE_CATEGORY
-            keys = category.get("keys", [])
-            for index, (athlete, stats) in enumerate(_athletes_who_played(category)):
-                athlete_id = athlete["id"]
-                stat_lines[athlete_id] = _athlete_stat_line(keys, stats)
-                athlete_team[athlete_id] = team_id
-                athlete_meta[athlete_id] = (
-                    athlete.get("displayName", ""), athlete.get("jersey"),
-                    (athlete.get("position") or {}).get("abbreviation"),
-                )
-                position_groups[athlete_id] = POSITION_GROUP_GOALIE if is_goalie_category else POSITION_GROUP_SKATER
-                if is_goalie_category:
-                    started[athlete_id] = index == 0
+    for team_id, category in _team_categories(summary):
+        is_goalie_category = category.get("name") == _GOALIE_CATEGORY
+        keys = category.get("keys", [])
+        for index, (athlete, stats) in enumerate(_athletes_who_played(category)):
+            athlete_id = athlete["id"]
+            stat_lines[athlete_id] = _athlete_stat_line(keys, stats)
+            athlete_team[athlete_id] = team_id
+            athlete_meta[athlete_id] = (
+                athlete.get("displayName", ""), athlete.get("jersey"),
+                (athlete.get("position") or {}).get("abbreviation"),
+            )
+            position_groups[athlete_id] = POSITION_GROUP_GOALIE if is_goalie_category else POSITION_GROUP_SKATER
+            if is_goalie_category:
+                started[athlete_id] = index == 0
 
     stats_items, player_entities = espn._build_player_items(
         sport, event_id, event_date, stat_lines, athlete_meta, athlete_team,

@@ -86,7 +86,8 @@ class TestFillRemainingFeatureRows:
             season_projection._fill_remaining_feature_rows(storage, season_inputs, player_team, {}, set(player_team))
 
         storage.get_all_events.assert_called_once_with("nfl", status="completed")
-        assert len(passed) == 25 and all(events is history for events in passed)
+        assert len(passed) == 25
+        assert all(events is history for events in passed)
 
 
 class TestProjectStatLeaderboard:
