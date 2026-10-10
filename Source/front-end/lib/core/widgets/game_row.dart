@@ -303,8 +303,50 @@ String _modelText(double? model, {required bool hasScore}) {
   return hasScore ? '--' : '';
 }
 
-/// A margin signed for MarginTrack: positive when the home side won.
+/// A margin signed so that home winning is positive.
 double _homePositive(double margin, {required bool homeWon}) => margin.abs() * (homeWon ? 1 : -1);
+
+/// How far the model's margin landed from the final one, counting a pick on
+/// the wrong side as the two margins added together. Null without a
+/// predicted margin.
+double? _marginMiss(PredictionComparison c) {
+  final predicted = c.predictedMargin;
+  if (predicted == null) return null;
+  return (_homePositive(c.actualMargin, homeWon: c.actualHomeWon) - _homePositive(predicted, homeWon: c.predictedHomeWon)).abs();
+}
+
+/// A finished game's margins: the model's line, an arrow, the final line,
+/// and how far apart they were.
+class _FinalMargins extends StatelessWidget {
+  const _FinalMargins({required this.view, required this.comparison});
+
+  final _RowView view;
+  final PredictionComparison comparison;
+
+  static String missLabel(double miss) => 'OFF BY ${miss.toStringAsFixed(1)}';
+
+  @override
+  Widget build(BuildContext context) {
+    final (model, actual) = _finalLines(view, comparison);
+    final miss = _marginMiss(comparison);
+    return Wrap(
+      spacing: 10,
+      runSpacing: 6,
+      crossAxisAlignment: WrapCrossAlignment.center,
+      children: [
+        Text(model, style: AppTextStyles.metricValue(color: AppColors.cyan)),
+        const Icon(Icons.arrow_forward, size: 14, color: AppColors.inkMute),
+        Text(actual, style: AppTextStyles.metricValue(color: AppColors.ink)),
+        if (miss != null)
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+            decoration: BoxDecoration(color: AppColors.inkSub.withValues(alpha: 0.14), borderRadius: BorderRadius.circular(999)),
+            child: Text(missLabel(miss), style: AppTextStyles.microLabel(color: AppColors.inkSub)),
+          ),
+      ],
+    );
+  }
+}
 
 /// Away over home: colour, name, the real score in white and the model's in
 /// cyan, each number in its own aligned slot.
@@ -395,7 +437,7 @@ Widget _predictionError(_RowView view, Object error) => error is PredictionCompu
 Widget _noPrediction() => Text('No prediction recorded', style: AppTextStyles.body(color: AppColors.inkMute));
 
 /// The wide row's centre: each side's win chance over the bar before and
-/// during a game, the model's line against the final one after it.
+/// during a game, the model's line and the final one after it.
 class _Middle extends StatelessWidget {
   const _Middle({required this.view});
   final _RowView view;
@@ -431,28 +473,11 @@ class _Middle extends StatelessWidget {
     );
   }
 
-  Widget _margins(PredictionComparison c) {
-    final (model, actual) = _finalLines(view, c);
-    final predictedMargin = c.predictedMargin;
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        _ends(model, AppColors.cyan, actual, AppColors.ink),
-        const SizedBox(height: 4),
-        MarginTrack(
-          predicted: predictedMargin == null ? null : _homePositive(predictedMargin, homeWon: c.predictedHomeWon),
-          actual: _homePositive(c.actualMargin, homeWon: c.actualHomeWon),
-        ),
-      ],
-    );
-  }
-
   @override
   Widget build(BuildContext context) {
     if (view.isCompleted) {
       final comparison = view.comparison;
-      return comparison == null ? _noPrediction() : _margins(comparison);
+      return comparison == null ? _noPrediction() : _FinalMargins(view: view, comparison: comparison);
     }
     return view.prediction!.when(
       data: (p) => _winChance(p.homeWinProbability),
@@ -504,7 +529,7 @@ class _Pick extends StatelessWidget {
 }
 
 /// A phone card's last lines: the bar and the line before a game, the down
-/// and the line during one, both lines after it.
+/// and the line during one, the model's line and the final one after it.
 class _StackedFooter extends StatelessWidget {
   const _StackedFooter({required this.view});
   final _RowView view;
@@ -544,47 +569,12 @@ class _StackedFooter extends StatelessWidget {
   Widget build(BuildContext context) {
     if (view.isCompleted) {
       final comparison = view.comparison;
-      if (comparison == null) return _noPrediction();
-      final (model, actual) = _finalLines(view, comparison);
-      return Wrap(spacing: 10, runSpacing: 2, children: [_line(actual, AppColors.ink), _line(model, AppColors.cyan)]);
+      return comparison == null ? _noPrediction() : _FinalMargins(view: view, comparison: comparison);
     }
     return view.prediction!.when(
       data: _upcoming,
       loading: () => const WinProbabilityBar(homeWinProbability: 0.5, height: 5),
       error: (error, _) => _predictionError(view, error),
-    );
-  }
-}
-
-/// One axis, away to the left of centre and home to the right: the model's
-/// margin as a cyan tick and the final one as a white tick.
-class MarginTrack extends StatelessWidget {
-  const MarginTrack({super.key, required this.predicted, required this.actual});
-
-  /// Home-positive margins. [predicted] is null when none was logged.
-  final double? predicted;
-  final double actual;
-
-  Widget _tick(double margin, double scale, Color color) => Align(
-        alignment: Alignment((margin / scale).clamp(-1.0, 1.0), 0),
-        child: Container(width: 4, height: 12, decoration: BoxDecoration(color: color, borderRadius: BorderRadius.circular(2))),
-      );
-
-  @override
-  Widget build(BuildContext context) {
-    final largest = [actual.abs(), predicted?.abs() ?? 0, 1.0].reduce((a, b) => a > b ? a : b);
-    final scale = largest * 1.25;
-    return SizedBox(
-      height: 16,
-      child: Stack(
-        alignment: Alignment.center,
-        children: [
-          Container(height: 2, color: AppColors.track),
-          Container(width: 1, height: 14, color: AppColors.inkMute),
-          if (predicted != null) _tick(predicted!, scale, AppColors.cyan),
-          _tick(actual, scale, AppColors.ink),
-        ],
-      ),
     );
   }
 }

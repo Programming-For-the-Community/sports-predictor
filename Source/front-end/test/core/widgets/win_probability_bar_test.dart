@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+import 'package:front_end/core/theme/app_colors.dart';
 import 'package:front_end/core/widgets/win_probability_bar.dart';
 
 List<Expanded> _segments(WidgetTester tester) => tester.widgetList<Expanded>(find.byType(Expanded)).toList();
@@ -39,6 +40,19 @@ void main() {
       final segments = _segments(tester);
       expect(segments[1].flex, lessThanOrEqualTo(999));
       expect(segments[0].flex, greaterThanOrEqualTo(1));
+    });
+
+    testWidgets('both segments are drawn at the full bar height, the favourite in cyan', (tester) async {
+      await tester.pumpWidget(const MaterialApp(
+        home: Scaffold(body: Center(child: SizedBox(width: 300, child: WinProbabilityBar(homeWinProbability: 0.7, height: 8)))),
+      ));
+
+      final fills = find.descendant(of: find.byType(Expanded), matching: find.byType(DecoratedBox));
+      expect(fills, findsNWidgets(2));
+      final sizes = [for (final element in fills.evaluate()) tester.getSize(find.byWidget(element.widget))];
+      expect(sizes, [const Size(90, 8), const Size(210, 8)]);
+      final home = tester.widget<DecoratedBox>(fills.last).decoration as BoxDecoration;
+      expect(home.gradient, AppColors.cyanFill);
     });
 
     testWidgets('renders at the requested height', (tester) async {

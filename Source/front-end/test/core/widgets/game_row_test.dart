@@ -175,7 +175,8 @@ void main() {
       expect(_textStyled('17', AppColors.cyan), findsOneWidget);
       expect(_textStyled('KC -10.0', AppColors.cyan), findsOneWidget);
       expect(_textStyled('KC -14', AppColors.ink), findsOneWidget);
-      expect(find.byType(MarginTrack), findsOneWidget);
+      // The model had KC by 10; it won by 14.
+      expect(find.text('OFF BY 4.0'), findsOneWidget);
       expect(find.text(VerdictPill.hitLabel), findsOneWidget);
       expect(find.text('KC 67%'), findsOneWidget);
       expect(find.byType(WinProbabilityBar), findsNothing);
@@ -191,6 +192,8 @@ void main() {
       expect(find.text(VerdictPill.missLabel), findsOneWidget);
       expect(find.text('LV 60%'), findsOneWidget);
       expect(_textStyled('LV -3.0', AppColors.cyan), findsOneWidget);
+      // A pick on the wrong side misses by both margins: 3 one way, 14 the other.
+      expect(find.text('OFF BY 17.0'), findsOneWidget);
     });
 
     testWidgets('a completed game with no predicted score or margin keeps its slots', (tester) async {
@@ -201,8 +204,9 @@ void main() {
       )));
 
       expect(_textStyled('--', AppColors.cyan), findsNWidgets(2));
-      // The pick alone, with no margin to print.
+      // The pick alone, with no margin to print or to measure a miss from.
       expect(_textStyled('KC', AppColors.cyan), findsOneWidget);
+      expect(find.textContaining('OFF BY'), findsNothing);
     });
 
     testWidgets('a completed game with no recorded prediction says so', (tester) async {
@@ -247,6 +251,11 @@ void main() {
         expect(find.text(VerdictPill.hitLabel), findsOneWidget);
         expect(_textStyled('KC -14', AppColors.ink), findsOneWidget);
         expect(_textStyled('KC -10.0', AppColors.cyan), findsOneWidget);
+        expect(find.text('OFF BY 4.0'), findsOneWidget);
+        // The model's line reads first, then the result, even when they wrap.
+        final model = tester.getTopLeft(find.text('KC -10.0'));
+        final result = tester.getTopLeft(find.text('KC -14'));
+        expect(model.dy < result.dy || (model.dy == result.dy && model.dx < result.dx), isTrue);
         // The chance shows on the picked side only.
         expect(find.text('67%'), findsOneWidget);
         expect(find.text('33%'), findsNothing);

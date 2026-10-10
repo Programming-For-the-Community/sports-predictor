@@ -3,7 +3,6 @@ import 'package:flutter_test/flutter_test.dart';
 
 import 'package:front_end/core/theme/app_colors.dart';
 import 'package:front_end/core/theme/app_text_styles.dart';
-import 'package:front_end/core/widgets/game_row.dart';
 import 'package:front_end/core/widgets/pick_labels.dart';
 import 'package:front_end/features/season/season_bracket_round_labels.dart';
 
@@ -46,29 +45,5 @@ void main() {
 
     expect(tester.takeException(), isNull);
     expect(tester.getSize(find.byType(SlotNumber)).width, 30);
-  });
-
-  group('MarginTrack', () {
-    double tickX(WidgetTester tester, Color color) => tester.getCenter(find.byWidgetPredicate(
-          (w) => w is Container && w.decoration is BoxDecoration && (w.decoration as BoxDecoration).color == color,
-        )).dx;
-
-    testWidgets('puts a home margin right of centre and an away margin left of it', (tester) async {
-      await tester.pumpWidget(_wrap(const SizedBox(width: 400, child: MarginTrack(predicted: -3, actual: 14))));
-
-      final centre = tester.getCenter(find.byType(MarginTrack)).dx;
-      expect(tickX(tester, AppColors.ink), greaterThan(centre));
-      expect(tickX(tester, AppColors.cyan), lessThan(centre));
-    });
-
-    testWidgets('draws only the final margin when none was predicted', (tester) async {
-      await tester.pumpWidget(_wrap(const SizedBox(width: 400, child: MarginTrack(predicted: null, actual: 0))));
-
-      expect(tickX(tester, AppColors.ink), closeTo(tester.getCenter(find.byType(MarginTrack)).dx, 0.5));
-      expect(
-        find.byWidgetPredicate((w) => w is Container && (w.decoration as BoxDecoration?)?.color == AppColors.cyan),
-        findsNothing,
-      );
-    });
   });
 }

@@ -23,6 +23,8 @@ class WinProbabilityBar extends StatelessWidget {
         child: DecoratedBox(
           decoration: const BoxDecoration(color: AppColors.track),
           child: Row(
+            // Stretched: a segment has no child to give it a height of its own.
+            crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               Expanded(flex: 1000 - homeFlex, child: _Segment(favored: !homeFavored)),
               Expanded(flex: homeFlex, child: _Segment(favored: homeFavored)),

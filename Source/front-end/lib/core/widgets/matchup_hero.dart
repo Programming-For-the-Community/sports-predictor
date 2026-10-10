@@ -45,11 +45,19 @@ Widget _sides(Widget away, Widget home) => Row(
       ],
     );
 
-BoxDecoration _heroDecoration() => BoxDecoration(
-      borderRadius: BorderRadius.circular(20),
-      gradient: const LinearGradient(begin: Alignment.topLeft, end: Alignment.bottomRight, colors: AppColors.surfaceGrad),
-      border: Border.all(color: AppColors.borderRaised),
-    );
+/// The hero's card, or -- unframed, beside the taller player panel -- just
+/// its contents, so the two don't read as mismatched boxes.
+Widget _heroFrame({required bool framed, required Widget child}) => framed
+    ? Container(
+        padding: const EdgeInsets.all(22),
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(20),
+          gradient: const LinearGradient(begin: Alignment.topLeft, end: Alignment.bottomRight, colors: AppColors.surfaceGrad),
+          border: Border.all(color: AppColors.borderRaised),
+        ),
+        child: child,
+      )
+    : Padding(padding: const EdgeInsets.symmetric(vertical: 20), child: child);
 
 /// design/FRONTEND_STYLE.md's "Matchup hero (detail)" component for a game
 /// not yet stored as completed. Before kickoff each side's win chance is the
@@ -58,12 +66,16 @@ BoxDecoration _heroDecoration() => BoxDecoration(
 /// chance sit under it in cyan. The bar, the line, the total and confidence
 /// describe the pre-game pick and stay put throughout.
 class MatchupHero extends StatelessWidget {
-  const MatchupHero({super.key, required this.sport, required this.event, required this.prediction, this.liveState});
+  const MatchupHero({
+    super.key, required this.sport, required this.event, required this.prediction, this.liveState, this.framed = true,
+  });
 
   final String sport;
   final SportEvent event;
   final EventPrediction prediction;
   final LiveEventState? liveState;
+  // False draws the contents with no card behind them.
+  final bool framed;
 
   @override
   Widget build(BuildContext context) {
@@ -93,9 +105,8 @@ class MatchupHero extends StatelessWidget {
       );
     }
 
-    return Container(
-      padding: const EdgeInsets.all(22),
-      decoration: _heroDecoration(),
+    return _heroFrame(
+      framed: framed,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
@@ -314,11 +325,12 @@ class _StartingGoalies extends StatelessWidget {
 /// and total over the model's. [comparison] is null when no prediction was
 /// ever logged, not a loading state.
 class MatchupResultHero extends StatelessWidget {
-  const MatchupResultHero({super.key, required this.sport, required this.event, required this.comparison});
+  const MatchupResultHero({super.key, required this.sport, required this.event, required this.comparison, this.framed = true});
 
   final String sport;
   final SportEvent event;
   final PredictionComparison? comparison;
+  final bool framed;
 
   static const noPredictionLabel = 'No prediction was recorded for this game.';
 
@@ -343,9 +355,8 @@ class MatchupResultHero extends StatelessWidget {
       );
     }
 
-    return Container(
-      padding: const EdgeInsets.all(22),
-      decoration: _heroDecoration(),
+    return _heroFrame(
+      framed: framed,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [

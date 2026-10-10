@@ -105,6 +105,11 @@ void main() {
       final props = tester.getRect(find.byType(TeamLeadersComparisonPanel));
       expect(props.left, greaterThan(hero.right));
       expect(props.top, closeTo(hero.top, 1));
+      // No card behind the matchup here: only the player panel is boxed.
+      expect(tester.widget<MatchupResultHero>(find.byType(MatchupResultHero)).framed, isFalse);
+      expect(find.descendant(of: find.byType(MatchupResultHero), matching: find.byType(Container)).evaluate().where(
+        (e) => ((e.widget as Container).decoration as BoxDecoration?)?.gradient != null,
+      ), isEmpty);
     });
 
     for (final width in mobileViewportWidths) {
@@ -113,6 +118,7 @@ void main() {
         await tester.pumpAndSettle();
 
         expect(tester.takeException(), isNull);
+        expect(tester.widget<MatchupResultHero>(find.byType(MatchupResultHero)).framed, isTrue);
         final hero = tester.getRect(find.byType(MatchupResultHero));
         final props = tester.getRect(find.byType(TeamLeadersComparisonPanel));
         expect(props.top, greaterThan(hero.bottom));

@@ -147,20 +147,22 @@ class _EventDetailPageState extends ConsumerState<EventDetailPage>
   }
 
   /// The matchup beside the players on a wide screen, above them otherwise.
-  Widget _layout(Widget matchup, Widget? players) {
-    if (players == null) return matchup;
+  /// Beside them it is drawn unframed: its card would stop short of the
+  /// taller player panel's.
+  Widget _layout(Widget Function(bool framed) matchup, Widget? players) {
+    if (players == null) return matchup(true);
     return LayoutBuilder(
       builder: (context, constraints) {
         if (constraints.maxWidth < _sideBySideBreakpoint) {
           return Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [matchup, const SizedBox(height: 20), players],
+            children: [matchup(true), const SizedBox(height: 20), players],
           );
         }
         return Row(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            SizedBox(width: _matchupWidth, child: matchup),
+            SizedBox(width: _matchupWidth, child: matchup(false)),
             const SizedBox(width: 24),
             Expanded(child: players),
           ],
@@ -174,7 +176,9 @@ class _EventDetailPageState extends ConsumerState<EventDetailPage>
     return SingleChildScrollView(
       padding: const EdgeInsets.all(24),
       child: _layout(
-        MatchupResultHero(sport: widget.sportId, event: event, comparison: event.predictionComparison),
+        (framed) => MatchupResultHero(
+          sport: widget.sportId, event: event, comparison: event.predictionComparison, framed: framed,
+        ),
         leadersComparison != null
             ? TeamLeadersComparisonPanel(
                 sport: widget.sportId,
@@ -235,10 +239,10 @@ class _EventDetailPageState extends ConsumerState<EventDetailPage>
       players = null;
     }
     return _layout(
-      Column(
+      (framed) => Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          MatchupHero(sport: widget.sportId, event: event, prediction: prediction, liveState: liveState),
+          MatchupHero(sport: widget.sportId, event: event, prediction: prediction, liveState: liveState, framed: framed),
           if (prediction.stale) ...[
             const SizedBox(height: 12),
             Center(
