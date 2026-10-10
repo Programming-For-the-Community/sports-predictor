@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 
 import '../../core/models/season_projection.dart';
-import '../../core/models/sport_config.dart';
 import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_text_styles.dart';
 import 'season_bracket_layout.dart';
@@ -56,7 +55,7 @@ class BracketSection extends StatelessWidget {
       for (var r = 0; r < roundCount; r++)
         BracketRound(round: roundsA[r].round, matchups: [...roundsA[r].matchups, ...roundsB[r].matchups]),
       BracketRound(
-        round: sport == SportIds.nfl ? BracketRoundLabels.superBowl : BracketRoundLabels.championship,
+        round: BracketRoundLabels.finalFor(sport),
         matchups: [finalMatchup],
       ),
     ];

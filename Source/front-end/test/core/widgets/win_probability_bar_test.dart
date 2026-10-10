@@ -7,12 +7,12 @@ List<Expanded> _segments(WidgetTester tester) => tester.widgetList<Expanded>(fin
 
 void main() {
   group('WinProbabilityBar', () {
-    testWidgets('splits the bar proportionally to the probability', (tester) async {
+    testWidgets('splits the bar proportionally, away on the left and home on the right', (tester) async {
       await tester.pumpWidget(const MaterialApp(home: Scaffold(body: WinProbabilityBar(homeWinProbability: 0.7))));
 
       final segments = _segments(tester);
-      expect(segments[0].flex, 700);
-      expect(segments[1].flex, 300);
+      expect(segments[0].flex, 300);
+      expect(segments[1].flex, 700);
     });
 
     testWidgets('an exact 50/50 split treats home as favored', (tester) async {
@@ -29,16 +29,16 @@ void main() {
       final segments = _segments(tester);
       // flex must stay >= 1 -- a 0 flex would make the segment invisible
       // instead of a thin sliver.
-      expect(segments[0].flex, greaterThanOrEqualTo(1));
-      expect(segments[1].flex, lessThanOrEqualTo(999));
+      expect(segments[1].flex, greaterThanOrEqualTo(1));
+      expect(segments[0].flex, lessThanOrEqualTo(999));
     });
 
     testWidgets('clamps the flex away from 1000 for a near-certain home win', (tester) async {
       await tester.pumpWidget(const MaterialApp(home: Scaffold(body: WinProbabilityBar(homeWinProbability: 0.999))));
 
       final segments = _segments(tester);
-      expect(segments[0].flex, lessThanOrEqualTo(999));
-      expect(segments[1].flex, greaterThanOrEqualTo(1));
+      expect(segments[1].flex, lessThanOrEqualTo(999));
+      expect(segments[0].flex, greaterThanOrEqualTo(1));
     });
 
     testWidgets('renders at the requested height', (tester) async {

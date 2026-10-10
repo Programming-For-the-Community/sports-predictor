@@ -115,14 +115,12 @@ void main() {
       'away': EventGoalie(entityId: 'g2', name: 'J. Korpisalo', tag: 'Predicted'),
     };
 
-    testWidgets('keeps the existing hero and adds the starting goalies underneath', (tester) async {
+    testWidgets('shows whole-number scores, the line and total, and the starting goalies underneath', (tester) async {
       await _pump(tester, MatchupHero(sport: 'nhl', event: _event(), prediction: _prediction(goalies: goalies)));
 
-      // The existing hero, unchanged: whole-number scores labelled PTS, PICK, the duo.
-      expect(find.text('3 PTS'), findsNWidgets(2));
-      expect(find.text('PICK'), findsOneWidget);
-      expect(find.text('PRED TOTAL'), findsOneWidget);
-      expect(find.text('HOME MARGIN'), findsOneWidget);
+      expect(find.text('3'), findsNWidgets(2));
+      expect(find.text('LINE'), findsOneWidget);
+      expect(find.text('TOTAL'), findsOneWidget);
       expect(find.text('NYR GOALIE'), findsOneWidget);
       expect(find.text('BOS GOALIE'), findsOneWidget);
       expect(find.text('I. Shesterkin'), findsOneWidget);
@@ -151,20 +149,21 @@ void main() {
       expect(find.text('NYR GOALIE'), findsOneWidget);
     });
 
-    testWidgets('a shootout result reads FINAL/SO on the existing result hero', (tester) async {
+    testWidgets('a shootout result reads FINAL/SO on the result hero', (tester) async {
       await _pump(
         tester,
         MatchupResultHero(sport: 'nhl', event: _event(status: 'completed', overtime: true, shootout: true), comparison: null),
       );
 
-      expect(find.text('FINAL/SO'), findsOneWidget);
+      expect(find.textContaining('FINAL/SO'), findsOneWidget);
       expect(find.text('4'), findsOneWidget);
     });
 
     testWidgets('a regulation result still reads FINAL', (tester) async {
       await _pump(tester, MatchupResultHero(sport: 'nba', event: _event(status: 'completed'), comparison: null));
 
-      expect(find.text('FINAL'), findsOneWidget);
+      expect(find.textContaining('FINAL'), findsOneWidget);
+      expect(find.textContaining('FINAL/'), findsNothing);
     });
   });
 
@@ -186,11 +185,12 @@ void main() {
       for (final title in ['SCORING', 'SHOOTING', 'PHYSICAL', 'GOALTENDING']) {
         expect(find.text(title), findsOneWidget);
       }
-      expect(find.textContaining('0 G', findRichText: true), findsOneWidget);
-      expect(find.textContaining('1 AST', findRichText: true), findsOneWidget);
-      expect(find.textContaining('4 SOG', findRichText: true), findsOneWidget);
-      expect(find.textContaining('3 HIT', findRichText: true), findsOneWidget);
-      expect(find.textContaining('27 SV', findRichText: true), findsOneWidget);
+      for (final label in ['G', 'AST', 'SOG', 'HIT', 'SV']) {
+        expect(find.text(label), findsOneWidget);
+      }
+      for (final value in ['0', '1', '4', '3', '27']) {
+        expect(find.text(value), findsOneWidget);
+      }
       final dots = tester.widget<TdDots>(find.byType(TdDots));
       expect(dots.value, 0.4);
       expect(dots.unit, 'G');
@@ -213,9 +213,11 @@ void main() {
 
       await _pump(tester, TeamLeadersComparisonPanel(sport: 'nhl', homeAbbr: 'NYR', awayAbbr: 'BOS', comparison: comparison));
 
-      expect(find.text('PLAYER PROPS -- PREDICTED VS ACTUAL'), findsOneWidget);
-      expect(find.textContaining('1 G', findRichText: true), findsOneWidget);
-      expect(find.textContaining('31 SV', findRichText: true), findsOneWidget);
+      expect(find.text('PLAYER PROPS'), findsOneWidget);
+      expect(find.text('31'), findsOneWidget);
+      expect(find.text('27'), findsOneWidget);
+      // Saves missed by four; the gap shows on each category's first stat.
+      expect(find.text('+4'), findsOneWidget);
       expect(find.byType(TdDots), findsOneWidget);
     });
   });

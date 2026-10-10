@@ -10,8 +10,8 @@ import '../../core/models/event_status.dart';
 import '../../core/models/live_score.dart';
 import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_text_styles.dart';
-import '../../core/widgets/conference_filter_field.dart';
 import '../../core/widgets/game_row.dart';
+import '../../core/widgets/pick_labels.dart';
 import '../../core/widgets/status_toggle.dart';
 import '../../static/conference_order.dart';
 import '../../static/confidence_tiers.dart';
@@ -55,32 +55,31 @@ List<(String, List<SportEvent>)> _groupByDate(List<SportEvent> events) {
   return groups;
 }
 
-// Home's conference stands in for the whole matchup -- the away side can
-// differ (a non-conference game), but grouping needs exactly one key per
-// event. Null for NFL (no conference field on its team entities) and for
-// any NCAAFB game whose home participant hasn't been enriched.
+// Home's conference stands in for the whole matchup, since grouping needs
+// one key per event. Null for a sport whose teams carry no conference.
 String? _primaryConference(SportEvent event) => event.home.conference ?? event.away.conference;
 
+const _otherConference = 'Other';
+
+String _conferenceKey(SportEvent event) => _primaryConference(event) ?? _otherConference;
+
 /// Buckets an already-date-sorted event list into (conference, dateGroups)
-/// sections, Power 5 first then Group of 5 (see static/conference_order.
-/// dart) with anything unclassified ("Other") last. Skips the outer
-/// grouping entirely (one null-keyed section) when nothing in the list has
-/// a conference at all. `filter`, when non-empty, keeps only conferences
-/// whose own name contains it (case-insensitive).
-List<(String?, List<(String, List<SportEvent>)>)> _groupByConferenceThenDate(List<SportEvent> events, String filter) {
+/// sections, Power 5 first then Group of 5 (see static/conference_order.dart)
+/// with anything unclassified last. One null-keyed section when nothing in
+/// the list has a conference.
+List<(String?, List<(String, List<SportEvent>)>)> _groupByConferenceThenDate(List<SportEvent> events) {
   if (!events.any((e) => _primaryConference(e) != null)) {
     return [(null, _groupByDate(events))];
   }
 
   final byConference = <String, List<SportEvent>>{};
   for (final event in events) {
-    byConference.putIfAbsent(_primaryConference(event) ?? 'Other', () => []).add(event);
+    byConference.putIfAbsent(_conferenceKey(event), () => []).add(event);
   }
-  final needle = filter.trim().toLowerCase();
-  final conferences = byConference.keys.where((c) => needle.isEmpty || c.toLowerCase().contains(needle)).toList()
+  final conferences = byConference.keys.toList()
     ..sort((a, b) {
-      if (a == 'Other') return b == 'Other' ? 0 : 1;
-      if (b == 'Other') return -1;
+      if (a == _otherConference) return b == _otherConference ? 0 : 1;
+      if (b == _otherConference) return -1;
       return compareConferenceOrder(a, b);
     });
   return [for (final conference in conferences) (conference, _groupByDate(byConference[conference]!))];
@@ -97,8 +96,9 @@ class EventListPage extends ConsumerStatefulWidget {
 
 class _EventListPageState extends ConsumerState<EventListPage> with WidgetsBindingObserver {
   String _status = EventStatus.scheduled;
-  String _conferenceFilter = '';
-  // Upcoming/Current only; empty means "don't filter on this".
+  // An empty set filters nothing. Conference applies to both tabs, the
+  // rest to Upcoming/Current only.
+  final Set<String> _conferences = {};
   final Set<ConfidenceTier> _confidenceTiers = {};
   final Set<int> _weekdays = {};
   final Set<int> _kickoffHours = {};
@@ -166,10 +166,22 @@ class _EventListPageState extends ConsumerState<EventListPage> with WidgetsBindi
     _scheduleLiveScoresPoll();
   }
 
-  // One entry per (conference, dateGroups) bucket -- 3 levels of nested
-  // loops (conference -> dateGroups -> dayEvents), pulled out of build/
-  // _dataView so their own nesting doesn't count toward either's
-  // cognitive complexity.
+  /// The day, with the model's record on it once any of its games is graded.
+  Widget _dayHeading(String heading, List<SportEvent> dayEvents) {
+    final graded = [for (final event in dayEvents) if (event.predictionComparison != null) event.predictionComparison!.correct];
+    final hits = graded.where((correct) => correct).length;
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Row(
+        children: [
+          Expanded(child: Text(heading.toUpperCase(), style: AppTextStyles.microLabel(color: AppColors.inkSub))),
+          if (graded.isNotEmpty)
+            Text('MODEL $hits–${graded.length - hits}', style: AppTextStyles.microLabel(color: AppColors.inkSub)),
+        ],
+      ),
+    );
+  }
+
   List<Widget> _groupedSections(
     List<(String?, List<(String, List<SportEvent>)>)> grouped,
     Map<String, LiveEventState> liveScores,
@@ -182,10 +194,7 @@ class _EventListPageState extends ConsumerState<EventListPage> with WidgetsBindi
             child: Text(conference.toUpperCase(), style: AppTextStyles.sectionTitle(color: AppColors.cyan)),
           ),
         for (final (heading, dayEvents) in dateGroups) ...[
-          Padding(
-            padding: const EdgeInsets.only(bottom: 8),
-            child: Text(heading.toUpperCase(), style: AppTextStyles.microLabel(color: AppColors.inkSub)),
-          ),
+          _dayHeading(heading, dayEvents),
           for (final event in dayEvents) ...[
             GameRow(sport: widget.sportId, event: event, liveState: liveScores[event.eventId]),
             const SizedBox(height: 12),
@@ -201,27 +210,74 @@ class _EventListPageState extends ConsumerState<EventListPage> with WidgetsBindi
     setState(() => selection.contains(value) ? selection.remove(value) : selection.add(value));
   }
 
-  /// The events passing the Upcoming/Current filters, plus how many were
-  /// kept only because their prediction hasn't loaded yet (no tier to test).
-  /// Watches the same per-event prediction providers GameRow already does,
-  /// so a confidence filter costs no extra requests.
-  (List<SportEvent>, int) _applyFilters(List<SportEvent> events) {
+  void _clearFilters() => setState(() {
+        _conferences.clear();
+        _confidenceTiers.clear();
+        _weekdays.clear();
+        _kickoffHours.clear();
+      });
+
+  /// The events passing the filters, plus how many were kept only because
+  /// their prediction hasn't loaded yet (no tier to test). Watches the same
+  /// per-event prediction providers GameRow does, so a confidence filter
+  /// costs no extra requests.
+  (List<SportEvent>, int) _applyFilters(List<SportEvent> events, bool isUpcoming) {
     var pending = 0;
     final kept = <SportEvent>[];
     for (final event in events) {
-      if (_weekdays.isNotEmpty && !_weekdays.contains(eventWeekday(event))) continue;
-      if (_kickoffHours.isNotEmpty && !_kickoffHours.contains(kickoffHour(event))) continue;
-      if (_confidenceTiers.isNotEmpty) {
-        final prediction = ref.watch(eventPredictionProvider((sport: widget.sportId, eventId: event.eventId))).value;
-        if (prediction == null) {
-          pending++;
-        } else if (!_confidenceTiers.contains(ConfidenceTier.forProbability(prediction.homeWinProbability))) {
-          continue;
+      if (_conferences.isNotEmpty && !_conferences.contains(_conferenceKey(event))) continue;
+      if (isUpcoming) {
+        if (_weekdays.isNotEmpty && !_weekdays.contains(eventWeekday(event))) continue;
+        if (_kickoffHours.isNotEmpty && !_kickoffHours.contains(kickoffHour(event))) continue;
+        if (_confidenceTiers.isNotEmpty) {
+          final prediction = ref.watch(eventPredictionProvider((sport: widget.sportId, eventId: event.eventId))).value;
+          if (prediction == null) {
+            pending++;
+          } else if (!_confidenceTiers.contains(ConfidenceTier.forProbability(prediction.homeWinProbability))) {
+            continue;
+          }
         }
       }
       kept.add(event);
     }
     return (kept, pending);
+  }
+
+  FilterGroup _group<T>(String label, Set<T> selection, List<(T, String, int?)> options) => FilterGroup(
+        label: label,
+        choices: [
+          for (final (value, text, count) in options)
+            FilterChoice(
+              label: text, count: count,
+              isSelected: () => selection.contains(value), onToggle: () => _toggle(selection, value),
+            ),
+        ],
+      );
+
+  /// A group with a single value has nothing to choose between and is left out.
+  List<FilterGroup> _filterGroups(List<SportEvent> events, bool isUpcoming) {
+    final conferences = events.map(_primaryConference).any((c) => c != null)
+        ? [for (final (conference, _) in _groupByConferenceThenDate(events)) conference!]
+        : const <String>[];
+    final weekdays = eventWeekdays(events);
+    final slots = kickoffSlots(events);
+    int count(bool Function(SportEvent) test) => events.where(test).length;
+    return [
+      if (isUpcoming)
+        _group('CONFIDENCE', _confidenceTiers, [for (final tier in ConfidenceTier.values) (tier, tier.label, null)]),
+      if (isUpcoming && weekdays.length > 1)
+        _group('DAY', _weekdays, [
+          for (final day in weekdays) (day, weekdayLabel(day), count((e) => eventWeekday(e) == day)),
+        ]),
+      if (isUpcoming && slots.length > 1)
+        _group('START', _kickoffHours, [
+          for (final slot in slots) (slot.hour, slot.label, count((e) => kickoffHour(e) == slot.hour)),
+        ]),
+      if (conferences.length > 1)
+        _group('CONFERENCE', _conferences, [
+          for (final conference in conferences) (conference, conference, count((e) => _conferenceKey(e) == conference)),
+        ]),
+    ];
   }
 
   Widget _dataView(List<SportEvent> list, Map<String, LiveEventState> liveScores) {
@@ -233,28 +289,17 @@ class _EventListPageState extends ConsumerState<EventListPage> with WidgetsBindi
     }
     // Soonest-first for Upcoming, most-recent-first for Completed -- both
     // read top-to-bottom as "closest to now at the top".
-    final sorted = [...list]..sort(
-        (a, b) => _status == EventStatus.scheduled
-            ? _sortKey(a).compareTo(_sortKey(b))
-            : _sortKey(b).compareTo(_sortKey(a)),
-      );
     final isUpcoming = _status == EventStatus.scheduled;
-    final (filtered, pending) = isUpcoming ? _applyFilters(sorted) : (sorted, 0);
-    final grouped = _groupByConferenceThenDate(filtered, _conferenceFilter);
+    final sorted = [...list]..sort(
+        (a, b) => isUpcoming ? _sortKey(a).compareTo(_sortKey(b)) : _sortKey(b).compareTo(_sortKey(a)),
+      );
+    final (filtered, pending) = _applyFilters(sorted, isUpcoming);
+    final groups = _filterGroups(sorted, isUpcoming);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        if (isUpcoming) ...[
-          EventListFilters(
-            slots: kickoffSlots(sorted),
-            weekdays: eventWeekdays(sorted),
-            selectedTiers: _confidenceTiers,
-            selectedWeekdays: _weekdays,
-            selectedHours: _kickoffHours,
-            onToggleTier: (tier) => _toggle(_confidenceTiers, tier),
-            onToggleWeekday: (weekday) => _toggle(_weekdays, weekday),
-            onToggleHour: (hour) => _toggle(_kickoffHours, hour),
-          ),
+        if (groups.isNotEmpty) ...[
+          EventListFilters(groups: groups, shown: filtered.length, total: sorted.length, onClear: _clearFilters),
           const SizedBox(height: 16),
         ],
         if (pending > 0) ...[
@@ -264,19 +309,8 @@ class _EventListPageState extends ConsumerState<EventListPage> with WidgetsBindi
           ),
           const SizedBox(height: 12),
         ],
-        // Only shown when there's more than one conference to filter.
-        if (_groupByConferenceThenDate(sorted, '').length > 1) ...[
-          ConferenceFilterField(
-            value: _conferenceFilter,
-            onChanged: (value) => setState(() => _conferenceFilter = value),
-          ),
-          const SizedBox(height: 16),
-        ],
-        if (filtered.isEmpty)
-          Text('No games match these filters.', style: AppTextStyles.body(color: AppColors.inkSub))
-        else if (grouped.isEmpty)
-          Text('No conferences match "$_conferenceFilter".', style: AppTextStyles.body(color: AppColors.inkSub)),
-        ..._groupedSections(grouped, liveScores),
+        if (filtered.isEmpty) Text('No games match these filters.', style: AppTextStyles.body(color: AppColors.inkSub)),
+        ..._groupedSections(_groupByConferenceThenDate(filtered), liveScores),
       ],
     );
   }
@@ -319,9 +353,15 @@ class _EventListPageState extends ConsumerState<EventListPage> with WidgetsBindi
             ],
           ),
           const SizedBox(height: 8),
-          // Stated once for the whole list rather than repeated on every
-          // GameRow.
-          Text('Times shown in your local time (${localTimezoneLabel()})', style: AppTextStyles.microLabel()),
+          Wrap(
+            spacing: 16,
+            runSpacing: 6,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            children: [
+              Text('Times shown in your local time (${localTimezoneLabel()})', style: AppTextStyles.microLabel()),
+              const ActualModelKey(),
+            ],
+          ),
           const SizedBox(height: 12),
           events.when(
             data: (list) => _dataView(list, liveScores),

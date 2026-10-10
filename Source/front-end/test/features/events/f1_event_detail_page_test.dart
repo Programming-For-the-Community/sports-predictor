@@ -31,7 +31,7 @@ void main() {
 
     expect(find.text('Drivers'), findsNothing);
     expect(find.text('Constructors'), findsNothing);
-    expect(find.text('Max Verstappen'), findsOneWidget);
+    expect(find.text('Max Verstappen'), findsNWidgets(2)); // the top-three strip and the table
   });
 
   testWidgets('defaults to the Drivers tab, Constructors table not built until tapped', (tester) async {
@@ -39,7 +39,7 @@ void main() {
     await tester.pumpWidget(_wrap(prediction));
     await tester.pumpAndSettle();
 
-    expect(find.text('Max Verstappen'), findsOneWidget);
+    expect(find.text('Max Verstappen'), findsNWidgets(2)); // the top-three strip and the table
     expect(find.text('Red Bull'), findsNothing);
   });
 

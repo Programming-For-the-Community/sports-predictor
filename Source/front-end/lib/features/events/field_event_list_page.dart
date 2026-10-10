@@ -12,10 +12,9 @@ import '../../core/widgets/status_toggle.dart';
 /// (RefreshIndicator + Upcoming/Completed toggle) but flat, not grouped:
 /// no conference grouping (golfers have no team/conference concept) and
 /// no per-day grouping either (tournaments are weekly, not daily, so a
-/// day-heading bucket would almost always hold exactly one row). Also,
-/// unlike GameRow, no per-row prediction fetch -- a field prediction
-/// response (~150 golfers) is materially heavier than a head-to-head
-/// one, and a season list can hold ~45 tournament rows.
+/// day-heading bucket would almost always hold exactly one row). Only the
+/// next tournament fetches its prediction -- a field response (~150
+/// golfers) is too heavy to fetch for each of a season's ~45 rows.
 class FieldEventListPage extends ConsumerStatefulWidget {
   const FieldEventListPage({super.key, required this.sportId});
 
@@ -76,11 +75,16 @@ class _FieldEventListPageState extends ConsumerState<FieldEventListPage> {
                         ? a.eventDate.compareTo(b.eventDate)
                         : b.eventDate.compareTo(a.eventDate),
                   );
+                // The next tournament leads the Upcoming list with the model's picks.
+                final isUpcoming = _status == EventStatus.scheduled;
                 return Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    for (final event in sorted) ...[
-                      FieldEventRow(sport: widget.sportId, event: event),
+                    for (final (index, event) in sorted.indexed) ...[
+                      if (isUpcoming && index == 0)
+                        FeaturedFieldEvent(sport: widget.sportId, event: event)
+                      else
+                        FieldEventRow(sport: widget.sportId, event: event),
                       const SizedBox(height: 12),
                     ],
                   ],

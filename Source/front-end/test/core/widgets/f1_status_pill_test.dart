@@ -3,8 +3,7 @@ import 'package:flutter_test/flutter_test.dart';
 
 import 'package:front_end/core/widgets/f1_status_pill.dart';
 
-Widget _wrap(String? status, {bool dotOnly = false}) =>
-    MaterialApp(home: Scaffold(body: F1StatusPill(status: status, dotOnly: dotOnly)));
+Widget _wrap(String? status) => MaterialApp(home: Scaffold(body: F1StatusPill(status: status)));
 
 void main() {
   group('F1StatusPill', () {
@@ -34,19 +33,6 @@ void main() {
       await tester.pumpWidget(_wrap('retired'));
 
       expect(find.text('RETIRED'), findsOneWidget);
-    });
-
-    testWidgets('dotOnly renders no text label at all', (tester) async {
-      await tester.pumpWidget(_wrap('dnf', dotOnly: true));
-
-      expect(find.text('DNF'), findsNothing);
-      expect(find.byType(Text), findsNothing);
-    });
-
-    testWidgets('dotOnly still surfaces the full label via a tooltip', (tester) async {
-      await tester.pumpWidget(_wrap('classified', dotOnly: true));
-
-      expect(find.byTooltip('Classified'), findsOneWidget);
     });
   });
 }

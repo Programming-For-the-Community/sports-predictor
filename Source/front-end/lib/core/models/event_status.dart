@@ -2,7 +2,7 @@
 /// identically by every sport (head-to-head and field alike): the backend
 /// only ever writes 'scheduled' or 'completed' here (see DATA_SCHEMA.md's
 /// event.status), distinct from any sport's own per-participant status
-/// vocabulary (field_status_pill.dart's PgaParticipantStatus,
+/// vocabulary (pga_participant_status.dart's PgaParticipantStatus,
 /// f1_status_pill.dart's F1DriverStatus) or from BracketMatchupStatus
 /// (season_projection.dart), both of which vary by sport/shape. No
 /// canonical definition existed for this one before -- every file that

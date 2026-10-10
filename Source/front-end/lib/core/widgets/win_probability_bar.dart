@@ -3,7 +3,8 @@ import 'package:flutter/material.dart';
 import '../theme/app_colors.dart';
 
 /// design/FRONTEND_STYLE.md: "favored segment = cyan-fill, underdog =
-/// translucent slate #33405580, track #1a2233, rounded ends."
+/// translucent slate #33405580, track #1a2233, rounded ends." Away is the
+/// left segment and home the right, the order every matchup is listed in.
 class WinProbabilityBar extends StatelessWidget {
   const WinProbabilityBar({super.key, required this.homeWinProbability, this.height = 10});
 
@@ -20,11 +21,11 @@ class WinProbabilityBar extends StatelessWidget {
       child: SizedBox(
         height: height,
         child: DecoratedBox(
-          decoration: const BoxDecoration(color: Color(0xFF1a2233)),
+          decoration: const BoxDecoration(color: AppColors.track),
           child: Row(
             children: [
-              Expanded(flex: homeFlex, child: _Segment(favored: homeFavored)),
               Expanded(flex: 1000 - homeFlex, child: _Segment(favored: !homeFavored)),
+              Expanded(flex: homeFlex, child: _Segment(favored: homeFavored)),
             ],
           ),
         ),

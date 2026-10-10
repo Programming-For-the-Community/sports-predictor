@@ -545,6 +545,105 @@ class TestRandomForestAdapters:
         assert [name for name, _ in pipeline.steps] == ["impute", "model"]
 
 
+class TestRandomForestSearchPlan:
+    def _tune(self, n_rows, cpus=16, target=None):
+        adapter = model_types.RandomForestRegressorAdapter()
+        mock_search = MagicMock()
+        mock_search.best_params_ = {"model__n_estimators": 200}
+        mock_search.best_score_ = -1.5
+        mock_search.cv_results_ = {"mean_test_score": [-1.5], "params": [{"model__n_estimators": 200}]}
+        pipeline = MagicMock()
+        pipeline.set_params.return_value = pipeline
+        y = pd.Series(np.arange(n_rows, dtype=float)) if target is None else target
+        with patch.object(model_types, "RandomizedSearchCV", return_value=mock_search) as search_cls, \
+             patch.object(model_types, "_available_cpus", return_value=cpus), \
+             patch.object(adapter, "_build_pipeline", return_value=pipeline) as build:
+            adapter.tune_and_fit(_df(n_rows), y)
+        return search_cls.call_args, build, pipeline
+
+    @pytest.mark.parametrize("n_rows, folds, depths, leaves", [
+        (2_764, 8, [4, 6, 8, 10, 15, 20, 30], [1, 2, 4, 8]),
+        (24_999, 8, [4, 6, 8, 10, 15, 20, 30], [1, 2, 4, 8]),
+        (25_000, 6, [6, 8, 10, 15, 20], [4, 8, 16, 32]),
+        (99_999, 6, [6, 8, 10, 15, 20], [4, 8, 16, 32]),
+        (100_000, 4, [8, 10, 15, 20], [8, 16, 32, 64]),
+        (355_282, 4, [8, 10, 15, 20], [8, 16, 32, 64]),
+    ])
+    def test_folds_depth_and_leaf_size_follow_the_training_set_size(self, n_rows, folds, depths, leaves):
+        plan = model_types.random_forest_search_plan(n_rows)
+
+        assert plan.cv_splits == folds
+        assert list(plan.max_depths) == depths
+        assert list(plan.min_samples_leaves) == leaves
+
+    def test_more_data_never_means_more_folds_or_smaller_leaves(self):
+        plans = [model_types.random_forest_search_plan(rows) for rows in (1_000, 50_000, 500_000)]
+
+        assert [p.cv_splits for p in plans] == sorted((p.cv_splits for p in plans), reverse=True)
+        assert [p.min_samples_leaves[0] for p in plans] == sorted(p.min_samples_leaves[0] for p in plans)
+        assert [p.max_depths[0] for p in plans] == sorted(p.max_depths[0] for p in plans)
+
+    def test_a_large_training_set_searches_four_folds_with_the_narrowed_space(self):
+        call, build, _ = self._tune(100_000)
+
+        assert call.kwargs["cv"].n_splits == 4
+        assert call.kwargs["n_jobs"] == 4
+        space = call.kwargs["param_distributions"]
+        assert space["model__max_depth"] == [8, 10, 15, 20]
+        assert space["model__min_samples_leaf"] == [8, 16, 32, 64]
+        assert space["model__n_estimators"] == [100, 200, 300, 400, 500, 600]
+        # Four workers on sixteen vCPUs leave four threads for each forest.
+        assert build.call_args_list[0].kwargs == {"n_jobs": 4}
+
+    def test_a_small_training_set_keeps_eight_folds_and_the_full_space(self):
+        call, build, _ = self._tune(40)
+
+        assert call.kwargs["cv"].n_splits == 8
+        assert call.kwargs["n_jobs"] == 8
+        assert call.kwargs["param_distributions"]["model__min_samples_leaf"] == [1, 2, 4, 8]
+        assert build.call_args_list[0].kwargs == {"n_jobs": 2}
+
+    def test_threads_never_drop_below_one_on_a_small_machine(self):
+        _, build, _ = self._tune(40, cpus=2)
+
+        assert build.call_args_list[0].kwargs == {"n_jobs": 1}
+
+    def test_the_final_fit_uses_every_cpu_and_the_saved_model_goes_back_to_one_thread(self):
+        _, build, pipeline = self._tune(40)
+
+        assert build.call_args_list[-1].kwargs == {"n_jobs": 16}
+        assert pipeline.set_params.call_args_list[-1].kwargs == {"model__n_jobs": 1}
+
+    def test_fit_passes_sample_weight_to_the_model_step(self):
+        adapter = model_types.RandomForestRegressorAdapter()
+        pipeline = MagicMock()
+        pipeline.set_params.return_value = pipeline
+        weights = np.array([1.0, 2.0])
+        with patch.object(adapter, "_build_pipeline", return_value=pipeline):
+            adapter.fit(_df(2), pd.Series([1.0, 2.0]), {"max_depth": 8}, weights)
+
+        assert pipeline.set_params.call_args_list[0].kwargs == {"model__max_depth": 8}
+        assert pipeline.fit.call_args.kwargs["model__sample_weight"] is weights
+
+    def test_built_pipeline_carries_the_thread_count(self):
+        pipeline = model_types.RandomForestClassifierAdapter()._build_pipeline(n_jobs=4)
+
+        assert pipeline.named_steps["model"].n_jobs == 4
+        assert model_types.RandomForestClassifierAdapter()._build_pipeline().named_steps["model"].n_jobs == 1
+
+    def test_available_cpus_prefers_the_process_affinity(self):
+        with patch.object(model_types.os, "sched_getaffinity", return_value={0, 1, 2}, create=True):
+            assert model_types._available_cpus() == 3
+
+    def test_available_cpus_falls_back_to_the_cpu_count(self):
+        with patch.object(model_types, "os") as fake_os:
+            del fake_os.sched_getaffinity
+            fake_os.cpu_count.return_value = None
+            assert model_types._available_cpus() == 1
+            fake_os.cpu_count.return_value = 12
+            assert model_types._available_cpus() == 12
+
+
 class TestMLPAdapters:
     def _mock_pipeline(self):
         mock_pipeline = MagicMock()

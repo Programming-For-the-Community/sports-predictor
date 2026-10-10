@@ -7,7 +7,6 @@ import 'package:front_end/core/models/event.dart';
 import 'package:front_end/core/models/event_leaders.dart';
 import 'package:front_end/core/models/live_score.dart';
 import 'package:front_end/core/models/prediction.dart';
-import 'package:front_end/core/theme/app_colors.dart';
 import 'package:front_end/core/widgets/game_row.dart';
 import 'package:front_end/core/widgets/matchup_hero.dart';
 import 'package:front_end/core/widgets/possession_ball.dart';
@@ -141,15 +140,14 @@ void main() {
   });
 
   group('event detail header', () {
-    testWidgets('the football sits only by the team name, and the down line has none', (tester) async {
+    testWidgets('the football sits right after the team name, and the down line has none', (tester) async {
       await _pumpHero(tester, const LiveEventState(live: true, detail: 'Q3 8:42', homeScore: 24, awayScore: 17, situation: _homeRedZone));
 
       expect(find.byType(PossessionBall), findsOneWidget);
       final ball = _ballCenter(tester);
-      // The team name, not the PICK below it, which also reads KC.
-      final kc = tester.getCenter(find.text('KC').first);
+      final kc = tester.getCenter(find.text('KC'));
       expect((ball.dy - kc.dy).abs(), lessThan(4));
-      expect(ball.dx, lessThan(kc.dx));
+      expect(ball.dx, greaterThan(kc.dx));
       expect(find.textContaining('1st & Goal at LV 6'), findsOneWidget);
       expect(find.textContaining('Red zone'), findsOneWidget);
     });
@@ -161,12 +159,12 @@ void main() {
       expect(find.text('Final'), findsNothing);
     });
 
-    testWidgets('the line under the venue is a plain divider, not the colored bar', (tester) async {
+    testWidgets('the win bar sits under the teams, before and during the game', (tester) async {
       await _pumpHero(tester, const LiveEventState(live: false, detail: null, homeScore: null, awayScore: null));
+      expect(find.byType(WinProbabilityBar), findsOneWidget);
 
-      expect(find.byType(WinProbabilityBar), findsNothing);
-      final divider = tester.widget<Divider>(find.byType(Divider));
-      expect(divider.color, AppColors.border);
+      await _pumpHero(tester, const LiveEventState(live: true, detail: 'Q1 3:56', homeScore: 10, awayScore: 7, situation: _awayBall));
+      expect(find.byType(WinProbabilityBar), findsOneWidget);
     });
   });
 
@@ -193,6 +191,9 @@ void main() {
         body: SingleChildScrollView(child: TeamLeadersComparisonPanel(sport: 'nfl', homeAbbr: 'KC', awayAbbr: 'LV', comparison: comparison)),
       ),
     ));
+    // A phone shows one team at a time, away first.
+    await tester.tap(find.text('KC'));
+    await tester.pump();
 
     final dividedRows = tester
         .widgetList<Table>(find.byType(Table))

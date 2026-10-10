@@ -6,7 +6,7 @@ import 'fit_text.dart';
 
 /// map_status vocabulary (library/normalize/f1.py) -- F1StatusPill's own
 /// switch references these instead of retyping the raw string. A
-/// separate class from field_status_pill.dart's PgaParticipantStatus --
+/// separate class from pga_participant_status.dart's PgaParticipantStatus --
 /// PGA's own status vocabulary is a genuinely different set of strings,
 /// reusing it here would mis-color a real "classified" or "dnf" result as
 /// if the driver were still racing, since neither string is in PGA's own
@@ -31,12 +31,9 @@ abstract final class F1DriverStatus {
 /// One driver's own race/qualifying status, as a small colored pill --
 /// F1DriverStatus above.
 class F1StatusPill extends StatelessWidget {
-  const F1StatusPill({super.key, required this.status, this.dotOnly = false});
+  const F1StatusPill({super.key, required this.status});
 
   final String? status;
-  // True on a narrow (compact) viewport -- collapses to just the colored
-  // dot, keeping the color-coded signal without text.
-  final bool dotOnly;
 
   @override
   Widget build(BuildContext context) {
@@ -59,13 +56,6 @@ class F1StatusPill extends StatelessWidget {
       // guessing at a negative outcome.
       _ => (status!.toUpperCase(), AppColors.live),
     };
-
-    if (dotOnly) {
-      return Tooltip(
-        message: label,
-        child: Container(width: 8, height: 8, decoration: BoxDecoration(color: color, shape: BoxShape.circle)),
-      );
-    }
 
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),

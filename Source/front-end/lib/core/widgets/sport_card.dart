@@ -10,7 +10,7 @@ import '../models/sport_config.dart';
 import '../routing/app_routes.dart';
 import '../theme/app_colors.dart';
 import '../theme/app_text_styles.dart';
-import 'field_status_pill.dart' show PgaParticipantStatus;
+import 'pga_participant_status.dart';
 import 'live_status_pill.dart';
 
 // A PGA field-shape participant/match counts as "actually happening right

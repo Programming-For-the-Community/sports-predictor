@@ -114,30 +114,67 @@ void main() {
   });
 
   group('EventListPage filters', () {
-    testWidgets('a day chip keeps only games on that weekday, and selecting it again clears it', (tester) async {
+    /// Opens `group`'s menu, toggles `choice` in it, and closes the menu.
+    Future<void> pick(WidgetTester tester, String group, String choice) async {
+      await tester.tap(find.textContaining(group).first);
+      await tester.pumpAndSettle();
+      await tester.tap(find.widgetWithText(CheckboxMenuButton, choice));
+      await tester.pumpAndSettle();
+      await tester.tap(find.textContaining(group).first);
+      await tester.pumpAndSettle();
+    }
+
+    testWidgets('a day choice keeps only games on that weekday, and Clear brings the rest back', (tester) async {
       await _pumpPage(
         tester,
         [_event('thu', hour: 13, day: 24), _event('sun', hour: 13), _event('sun2', hour: 13)],
         {'thu': 0.7, 'sun': 0.7, 'sun2': 0.7},
       );
 
-      await tester.tap(find.text('SUN').first);
-      await tester.pump();
-      expect(_rowCount(tester), 2);
+      await pick(tester, 'DAY', 'SUN');
 
-      await tester.tap(find.text('SUN').first);
+      expect(_rowCount(tester), 2);
+      // The button names the one active choice, and the count says what's left.
+      expect(find.text('DAY · SUN'), findsOneWidget);
+      expect(find.text('2 OF 3 GAMES'), findsOneWidget);
+
+      await tester.tap(find.text(EventListFilters.clearLabel));
       await tester.pump();
+
       expect(_rowCount(tester), 3);
+      expect(find.text('DAY'), findsOneWidget);
     });
 
-    testWidgets('no day row when every game is on the same day', (tester) async {
+    testWidgets('a menu lists each choice with its game count and stays open across toggles', (tester) async {
+      await _pumpPage(
+        tester,
+        [_event('thu', hour: 13, day: 24), _event('sun', hour: 13), _event('sun2', hour: 13)],
+        {'thu': 0.7, 'sun': 0.7, 'sun2': 0.7},
+      );
+
+      await tester.tap(find.text('DAY'));
+      await tester.pumpAndSettle();
+      final sunday = find.widgetWithText(CheckboxMenuButton, 'SUN');
+      expect(find.descendant(of: sunday, matching: find.text('2')), findsOneWidget);
+      expect(find.descendant(of: find.widgetWithText(CheckboxMenuButton, 'THU'), matching: find.text('1')), findsOneWidget);
+
+      await tester.tap(sunday);
+      await tester.pumpAndSettle();
+      await tester.tap(find.widgetWithText(CheckboxMenuButton, 'THU'));
+      await tester.pumpAndSettle();
+
+      expect(_rowCount(tester), 3);
+      expect(find.text('DAY · 2'), findsOneWidget);
+    });
+
+    testWidgets('no day menu when every game is on the same day', (tester) async {
       await _pumpPage(tester, [_event('a', hour: 12), _event('b', hour: 19)], {'a': 0.7, 'b': 0.7});
 
       expect(find.text('DAY'), findsNothing);
+      expect(find.text('START'), findsOneWidget);
     });
 
-
-    testWidgets('a confidence chip keeps only games in that tier, and keeps games still loading with a note', (tester) async {
+    testWidgets('a confidence choice keeps only games in that tier, and keeps games still loading with a note', (tester) async {
       await _pumpPage(
         tester,
         [_event('high', hour: 13), _event('med', hour: 13), _event('low', hour: 13), _event('loading', hour: 13)],
@@ -145,70 +182,99 @@ void main() {
       );
       expect(_rowCount(tester), 4);
 
-      await tester.tap(find.text('HIGH').first);
-      await tester.pump();
+      await pick(tester, 'CONFIDENCE', 'HIGH');
 
       expect(_rowCount(tester), 2);
       expect(find.textContaining('1 game still loading a prediction'), findsOneWidget);
 
-      await tester.tap(find.text('MED').first);
-      await tester.pump();
+      await pick(tester, 'CONFIDENCE', 'MED');
 
       expect(_rowCount(tester), 3);
     });
 
-    testWidgets('a start-time chip keeps only games in that slot, and selecting it again clears it', (tester) async {
+    testWidgets('a start-time choice keeps only games in that slot', (tester) async {
       await _pumpPage(
         tester,
         [_event('early', hour: 12), _event('late', hour: 19, minute: 30), _event('late2', hour: 19, minute: 30)],
         {'early': 0.7, 'late': 0.7, 'late2': 0.7},
       );
 
-      await tester.tap(find.text('7:30 PM').first);
-      await tester.pump();
+      await pick(tester, 'START', '7:30 PM');
       expect(_rowCount(tester), 2);
 
-      await tester.tap(find.text('7:30 PM').first);
-      await tester.pump();
+      await pick(tester, 'START', '7:30 PM');
       expect(_rowCount(tester), 3);
     });
 
-    testWidgets('no start-time row when every game starts in the same hour', (tester) async {
+    testWidgets('no start menu when every game starts in the same hour', (tester) async {
       await _pumpPage(tester, [_event('a', hour: 13), _event('b', hour: 13)], {'a': 0.7, 'b': 0.7});
 
-      expect(find.text('START TIME'), findsNothing);
-      expect(find.text('WINNER CONFIDENCE'), findsOneWidget);
+      expect(find.text('START'), findsNothing);
+      expect(find.text('CONFIDENCE'), findsOneWidget);
     });
 
-    testWidgets('both filter groups sit on one row on a wide screen', (tester) async {
+    testWidgets('the menus sit on one row on a wide screen', (tester) async {
       tester.view.physicalSize = const Size(1200, 900);
       tester.view.devicePixelRatio = 1.0;
       addTearDown(tester.view.reset);
       await _pumpPage(tester, [_event('a', hour: 12), _event('b', hour: 19)], {'a': 0.7, 'b': 0.7});
 
-      final confidence = tester.getRect(find.text('WINNER CONFIDENCE'));
-      final startTime = tester.getRect(find.text('START TIME'));
-      expect(startTime.center.dy, closeTo(confidence.center.dy, 2));
-      expect(startTime.left, greaterThan(confidence.right));
+      final confidence = tester.getRect(find.text('CONFIDENCE'));
+      final start = tester.getRect(find.text('START'));
+      expect(start.center.dy, closeTo(confidence.center.dy, 2));
+      expect(start.left, greaterThan(confidence.right));
     });
 
     testWidgets('says so when the filters leave nothing', (tester) async {
       await _pumpPage(tester, [_event('a', hour: 13)], {'a': 0.5});
 
-      await tester.tap(find.text('HIGH').first);
-      await tester.pump();
+      await pick(tester, 'CONFIDENCE', 'HIGH');
 
       expect(_rowCount(tester), 0);
       expect(find.text('No games match these filters.'), findsOneWidget);
     });
 
-    testWidgets('the Completed tab has no filters', (tester) async {
+    testWidgets('the Completed tab has no game filters', (tester) async {
       await _pumpPage(tester, [_event('a', hour: 13)], {'a': 0.7});
 
       await tester.tap(find.text('Completed'));
       await tester.pumpAndSettle();
 
-      expect(find.text('WINNER CONFIDENCE'), findsNothing);
+      expect(find.text('CONFIDENCE'), findsNothing);
+    });
+
+    testWidgets('on a phone one Filters button opens a sheet, and active choices stay as removable chips', (tester) async {
+      tester.view.physicalSize = const Size(360, 900);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.reset);
+      await _pumpPage(
+        tester,
+        [_event('thu', hour: 13, day: 24), _event('sun', hour: 13), _event('sun2', hour: 19)],
+        {'thu': 0.7, 'sun': 0.7, 'sun2': 0.7},
+      );
+      expect(tester.takeException(), isNull);
+      expect(find.text('DAY'), findsNothing);
+
+      await tester.tap(find.text(EventListFilters.filtersLabel));
+      await tester.pumpAndSettle();
+      // Every group is in the sheet.
+      expect(find.text('CONFIDENCE'), findsOneWidget);
+      expect(find.text('DAY'), findsOneWidget);
+      expect(find.text('START'), findsOneWidget);
+
+      await tester.tap(find.text('SUN'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text(EventListFilters.doneLabel));
+      await tester.pumpAndSettle();
+
+      expect(tester.takeException(), isNull);
+      expect(_rowCount(tester), 2);
+      expect(find.text('${EventListFilters.filtersLabel} · 1'), findsOneWidget);
+
+      // The chip removes its own choice.
+      await tester.tap(find.text('SUN'));
+      await tester.pump();
+      expect(_rowCount(tester), 3);
     });
   });
 }

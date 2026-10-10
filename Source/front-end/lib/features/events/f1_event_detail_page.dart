@@ -3,13 +3,18 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/data/f1_events_repository.dart';
 import '../../core/data/live_scores_repository.dart';
+import '../../core/models/event_status.dart';
+import '../../core/models/f1_event.dart';
 import '../../core/mixins/polling_state_mixin.dart';
 import '../../core/models/f1_live_score.dart';
 import '../../core/models/f1_prediction.dart';
 import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_text_styles.dart';
+import '../../core/widgets/event_card.dart';
+import '../../core/widgets/f1_event_row.dart';
 import '../../core/widgets/final_status_pill.dart';
 import '../../core/widgets/live_status_pill.dart';
+import '../../core/widgets/pick_labels.dart';
 import '../../core/widgets/prediction_computing_retry.dart';
 import '../../core/widgets/prediction_freshness_badge.dart';
 import '../../core/widgets/sprint_badge.dart';
@@ -58,10 +63,19 @@ class _F1EventDetailPageState extends ConsumerState<F1EventDetailPage>
   Widget build(BuildContext context) {
     final liveScores = ref.watch(f1LiveScoresProvider(widget.sportId)).value ?? const <String, F1LiveEventState>{};
     final liveState = liveScores[widget.eventId];
+    // Both lists, since a weekend's sprint can already be completed while
+    // its Grand Prix is still upcoming.
+    final events = [
+      for (final status in [EventStatus.scheduled, EventStatus.completed])
+        ...ref.watch(f1EventsListProvider((sport: widget.sportId, status: status))).value ?? const <F1Event>[],
+    ];
     return SingleChildScrollView(
       padding: const EdgeInsets.all(24),
       child: ref.watch(f1EventPredictionProvider((sport: widget.sportId, eventId: widget.eventId))).when(
-            data: (prediction) => _PredictionView(sport: widget.sportId, eventId: widget.eventId, prediction: prediction, liveState: liveState),
+            data: (prediction) => _PredictionView(
+              sport: widget.sportId, eventId: widget.eventId, prediction: prediction, liveState: liveState,
+              sessions: _weekendSessions(events, prediction),
+            ),
             loading: () => const Center(child: CircularProgressIndicator()),
             error: (error, _) => error is PredictionComputingException
                 ? PredictionComputingRetry(
@@ -73,6 +87,16 @@ class _F1EventDetailPageState extends ConsumerState<F1EventDetailPage>
           ),
     );
   }
+}
+
+/// This weekend's sessions as chips, when it has both a sprint and a Grand
+/// Prix; empty for an ordinary weekend.
+List<EventSession> _weekendSessions(List<F1Event> events, F1EventPrediction prediction) {
+  final season = prediction.season;
+  final round = prediction.week;
+  if (season == null || round == null) return const [];
+  final weekend = groupF1Weekends([for (final event in events) if (event.season == season && event.week == round) event]);
+  return weekend.isEmpty ? const [] : weekend.single.chips;
 }
 
 enum _DetailTab { drivers, constructors }
@@ -87,7 +111,9 @@ abstract final class _DetailTabLabels {
 }
 
 class _PredictionView extends StatefulWidget {
-  const _PredictionView({required this.sport, required this.eventId, required this.prediction, this.liveState});
+  const _PredictionView({
+    required this.sport, required this.eventId, required this.prediction, this.liveState, this.sessions = const [],
+  });
 
   final String sport;
   final String eventId;
@@ -95,6 +121,8 @@ class _PredictionView extends StatefulWidget {
   // From f1LiveScoresProvider -- null when there's no live/recently-live
   // ESPN session for this event at all (the ordinary case).
   final F1LiveEventState? liveState;
+  // Both of a sprint weekend's sessions, this one included; else empty.
+  final List<EventSession> sessions;
 
   @override
   State<_PredictionView> createState() => _PredictionViewState();
@@ -133,12 +161,17 @@ class _PredictionViewState extends State<_PredictionView> {
             // leaderboard itself still only showing pre-race
             // projections.
             if (widget.liveState?.isFinished ?? false) const FinalStatusPill(),
-            if (prediction.isSprint) ...[
+            // A sprint weekend names both sessions in the switch below.
+            if (prediction.isSprint && widget.sessions.isEmpty) ...[
               const SizedBox(width: 8),
               const SprintBadge(),
             ],
           ],
         ),
+        if (widget.sessions.isNotEmpty) ...[
+          const SizedBox(height: 12),
+          EventSessionChips(sport: widget.sport, sessions: widget.sessions, selectedEventId: widget.eventId),
+        ],
         if (prediction.stale) ...[
           const SizedBox(height: 12),
           PredictionFreshnessBadge(
@@ -168,11 +201,17 @@ class _PredictionViewState extends State<_PredictionView> {
           ),
         ],
         const SizedBox(height: 16),
-        if (tab == _DetailTab.drivers)
+        if (tab == _DetailTab.drivers) ...[
+          F1PodiumStrip(field: prediction.field, isSprint: prediction.isSprint),
+          const SizedBox(height: 16),
+          if (prediction.field.any((driver) => driver.actual != null)) ...[
+            const ActualModelKey(),
+            const SizedBox(height: 10),
+          ],
           F1LeaderboardTable(
             field: prediction.field, isSprint: prediction.isSprint, liveResults: widget.liveState?.participants ?? const {},
-          )
-        else
+          ),
+        ] else
           _ConstructorsTable(constructors: prediction.constructors),
       ],
     );

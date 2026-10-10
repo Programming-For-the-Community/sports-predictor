@@ -9,6 +9,7 @@ import 'package:front_end/core/models/live_score.dart';
 import 'package:front_end/core/models/prediction.dart';
 import 'package:front_end/core/theme/app_colors.dart';
 import 'package:front_end/core/widgets/game_row.dart';
+import 'package:front_end/core/widgets/pick_labels.dart';
 import 'package:front_end/core/widgets/prediction_computing_retry.dart';
 import 'package:front_end/core/widgets/win_probability_bar.dart';
 import 'package:front_end/static/confidence_tiers.dart';
@@ -67,386 +68,190 @@ SportEvent _completedEvent() => SportEvent(
       leadersComparison: null,
     );
 
+const _prediction = EventPrediction(
+  homeWinProbability: 0.68,
+  homeWinProbabilityModelVersion: 3,
+  margin: 6.5,
+  homeScore: 27.4,
+  awayScore: 20.9,
+  leaders: null,
+);
+
+/// One row at `width`, with the standard prediction unless the event is completed.
+Future<void> _pumpRow(
+  WidgetTester tester,
+  SportEvent event, {
+  LiveEventState? liveState,
+  double width = 800,
+  double textScale = 1,
+  String sport = 'nfl',
+}) async {
+  await tester.pumpWidget(ProviderScope(
+    overrides: [eventPredictionProvider.overrideWith((ref, query) async => _prediction)],
+    child: MaterialApp(
+      home: MediaQuery(
+        data: MediaQueryData(textScaler: TextScaler.linear(textScale)),
+        child: Scaffold(
+          body: SingleChildScrollView(
+            child: SizedBox(width: width, child: GameRow(sport: sport, event: event, liveState: liveState)),
+          ),
+        ),
+      ),
+    ),
+  ));
+  await tester.pumpAndSettle();
+}
+
+SportEvent _completedWith(PredictionComparison? comparison) {
+  final event = _completedEvent();
+  return SportEvent(
+    eventId: event.eventId,
+    eventDate: event.eventDate,
+    kickoffTime: event.kickoffTime,
+    status: event.status,
+    week: event.week,
+    round: null,
+    participants: event.participants,
+    predictionComparison: comparison,
+    leadersComparison: null,
+  );
+}
+
 void main() {
-  group('GameRow', () {
-    testWidgets('scheduled row has no @ sign and shows the predicted score next to the actual one', (tester) async {
-      await tester.pumpWidget(ProviderScope(
-        overrides: [
-          eventPredictionProvider.overrideWith(
-            (ref, query) async => const EventPrediction(
-              homeWinProbability: 0.68,
-              homeWinProbabilityModelVersion: 3,
-              margin: 6.5,
-              homeScore: 27.4,
-              awayScore: 20.9,
-              leaders: null,
-            ),
-          ),
-        ],
-        child: MaterialApp(home: Scaffold(body: GameRow(sport: 'nfl', event: _scheduledEvent()))),
-      ));
-      await tester.pumpAndSettle();
+  group('GameRow on a wide screen', () {
+    testWidgets('an upcoming game shows the model scores, each side\'s win chance over the bar, and the line', (tester) async {
+      await _pumpRow(tester, _scheduledEvent(venueName: 'Arrowhead Stadium', venueCity: 'Kansas City', venueState: 'MO'));
 
       expect(find.text('@'), findsNothing);
-      // Predicted scores render in cyan next to each team's own line, no
-      // actual score yet (pre-kickoff) so no ink-colored number to
-      // collide with.
       expect(_textStyled('27', AppColors.cyan), findsOneWidget);
       expect(_textStyled('21', AppColors.cyan), findsOneWidget);
-      // Percentage lives only on the right (_LivePredictionSummary).
-      expect(find.textContaining('68%'), findsOneWidget);
-    });
-
-    testWidgets('a live event still shows the pre-game predicted score next to the live one', (tester) async {
-      await tester.pumpWidget(ProviderScope(
-        overrides: [
-          eventPredictionProvider.overrideWith(
-            (ref, query) async => const EventPrediction(
-              homeWinProbability: 0.68,
-              homeWinProbabilityModelVersion: 3,
-              margin: 6.5,
-              homeScore: 27.4,
-              awayScore: 20.9,
-              leaders: null,
-            ),
-          ),
-        ],
-        child: MaterialApp(
-          home: Scaffold(
-            body: GameRow(
-              sport: 'ncaafb',
-              event: _scheduledEvent(),
-              liveState: const LiveEventState(live: true, detail: 'Q1 4:00', homeScore: 10, awayScore: 3),
-            ),
-          ),
-        ),
-      ));
-      await tester.pumpAndSettle();
-
-      // The live score (ink) and the still-fetched pre-game predicted
-      // score (cyan) both render -- previously the predicted-score
-      // fetch was skipped entirely once an event went live, leaving a
-      // permanent '--' next to the live score.
-      expect(_textStyled('10', AppColors.ink), findsOneWidget);
-      expect(_textStyled('3', AppColors.ink), findsOneWidget);
-      expect(_textStyled('27', AppColors.cyan), findsOneWidget);
-      expect(_textStyled('21', AppColors.cyan), findsOneWidget);
-      expect(find.text('Q1 4:00'), findsOneWidget);
-    });
-
-    testWidgets(
-        'a finished-but-not-yet-completed event shows the FINAL pill and the final score, not the '
-        'pre-live view', (tester) async {
-      // event.status is still "scheduled" -- the once-daily batch ingest
-      // hasn't flipped it to "completed" yet -- but liveState.completed
-      // (ESPN's own signal) says the game is over.
-      await tester.pumpWidget(ProviderScope(
-        overrides: [
-          eventPredictionProvider.overrideWith(
-            (ref, query) async => const EventPrediction(
-              homeWinProbability: 0.68,
-              homeWinProbabilityModelVersion: 3,
-              margin: 6.5,
-              homeScore: 27.4,
-              awayScore: 20.9,
-              leaders: null,
-            ),
-          ),
-        ],
-        child: MaterialApp(
-          home: Scaffold(
-            body: GameRow(
-              sport: 'nfl',
-              event: _scheduledEvent(),
-              liveState: const LiveEventState(live: false, completed: true, detail: 'Final', homeScore: 31, awayScore: 17),
-            ),
-          ),
-        ),
-      ));
-      await tester.pumpAndSettle();
-
-      // Regression: previously `isLive` alone (now false, since ESPN
-      // itself reports the game over) gated everything here -- the row
-      // reverted to looking pre-game: the final score vanished
-      // (event.home.result is still null, since this event's own status
-      // hasn't caught up) and no FINAL pill ever appeared (that only
-      // ever checked event.status == "completed").
-      expect(find.text('FINAL'), findsOneWidget);
-      expect(_textStyled('31', AppColors.ink), findsOneWidget);
-      expect(_textStyled('17', AppColors.ink), findsOneWidget);
-      expect(find.byType(WinProbabilityBar), findsNothing);
-    });
-
-    testWidgets(
-        'a live event keeps the pick/margin/confidence summary, with the LIVE pill/clock taking the pre-game '
-        'win-probability bar\'s own slot on the same row rather than staggering onto a separate line', (tester) async {
-      // A wide desktop viewport -- SizedBox(width: ...) alone gets
-      // clamped to the default 800x600 test surface, silently making
-      // every width variant identical, so the surface itself has to be
-      // resized to actually exercise the extra room a real wide window
-      // gives the predictionArea column.
-      await tester.binding.setSurfaceSize(const Size(1800, 800));
-      tester.view.physicalSize = const Size(1800, 800);
-      tester.view.devicePixelRatio = 1.0;
-      addTearDown(tester.view.reset);
-
-      await tester.pumpWidget(ProviderScope(
-        overrides: [
-          eventPredictionProvider.overrideWith(
-            (ref, query) async => const EventPrediction(
-              homeWinProbability: 0.68,
-              homeWinProbabilityModelVersion: 3,
-              margin: 6.5,
-              homeScore: 27.4,
-              awayScore: 20.9,
-              leaders: null,
-            ),
-          ),
-        ],
-        child: MaterialApp(
-          home: Scaffold(
-            body: GameRow(
-              sport: 'nfl',
-              event: _scheduledEvent(),
-              liveState: const LiveEventState(live: true, detail: 'Q1 4:00', homeScore: 10, awayScore: 3),
-            ),
-          ),
-        ),
-      ));
-      await tester.pumpAndSettle();
-
-      // KC is home and favored (0.68 >= 0.5).
-      expect(find.textContaining('KC -6.5'), findsOneWidget);
-      expect(find.text('68%'), findsOneWidget);
-      final tier = ConfidenceTier.forProbability(0.68).label;
-      expect(find.text(tier), findsOneWidget);
-      // The pre-game win-probability bar is dropped once live -- the
-      // LIVE pill already covers that state.
-      expect(find.byType(WinProbabilityBar), findsNothing);
-
-      // LIVE pill/clock and ConfidencePill sit on the same row -- no
-      // more staggering across two separate lines.
-      final liveY = tester.getCenter(find.text('Q1 4:00')).dy;
-      final confidenceY = tester.getCenter(find.text(tier)).dy;
-      expect(liveY, equals(confidenceY));
-
-      // A real gap (not just the small fixed spacer) separates the LIVE
-      // pill/clock from the pick/margin/confidence group -- the leftover
-      // space lands between them (spaceBetween) instead of the two
-      // blocks bunching up flush against each other on the right edge.
-      final liveRightEdge = tester.getTopRight(find.text('Q1 4:00')).dx;
-      final pickLeftEdge = tester.getTopLeft(find.text('68%')).dx;
-      expect(pickLeftEdge - liveRightEdge, greaterThan(100));
-    });
-
-    testWidgets('a scheduled (not yet live) event still shows the win-probability bar', (tester) async {
-      await tester.pumpWidget(ProviderScope(
-        overrides: [
-          eventPredictionProvider.overrideWith(
-            (ref, query) async => const EventPrediction(
-              homeWinProbability: 0.68,
-              homeWinProbabilityModelVersion: 3,
-              margin: 6.5,
-              homeScore: 27.4,
-              awayScore: 20.9,
-              leaders: null,
-            ),
-          ),
-        ],
-        child: MaterialApp(home: Scaffold(body: GameRow(sport: 'nfl', event: _scheduledEvent()))),
-      ));
-      await tester.pumpAndSettle();
-
+      // KC is home and favoured, so its end of the bar is the cyan one.
+      expect(_textStyled('LV 32%', AppColors.inkSub), findsOneWidget);
+      expect(_textStyled('KC 68%', AppColors.cyan), findsOneWidget);
       expect(find.byType(WinProbabilityBar), findsOneWidget);
+      expect(_textStyled('KC -6.5', AppColors.cyan), findsOneWidget);
+      expect(find.text(ConfidenceTier.forProbability(0.68).label), findsOneWidget);
+      // The venue is on the game page only.
+      expect(find.textContaining('Arrowhead'), findsNothing);
     });
 
-    testWidgets('a completed event shows a FINAL status pill', (tester) async {
-      await tester.pumpWidget(ProviderScope(
-        child: MaterialApp(home: Scaffold(body: GameRow(sport: 'nfl', event: _completedEvent()))),
-      ));
-      await tester.pumpAndSettle();
-
-      expect(find.text('FINAL'), findsOneWidget);
-      expect(find.byType(WinProbabilityBar), findsNothing);
-    });
-
-    testWidgets('a narrow (mobile) completed event collapses the FINAL pill to just its dot', (tester) async {
-      await tester.pumpWidget(ProviderScope(
-        child: MaterialApp(home: Scaffold(body: SizedBox(width: 360, child: GameRow(sport: 'nfl', event: _completedEvent())))),
-      ));
-      await tester.pumpAndSettle();
-
-      expect(find.text('FINAL'), findsNothing);
-      expect(find.byTooltip('FINAL'), findsOneWidget);
-    });
-
-    testWidgets('a narrow (mobile) width collapses the confidence pill to just its dot', (tester) async {
-      await tester.pumpWidget(ProviderScope(
-        overrides: [
-          eventPredictionProvider.overrideWith(
-            (ref, query) async => const EventPrediction(
-              homeWinProbability: 0.68,
-              homeWinProbabilityModelVersion: 3,
-              margin: 6.5,
-              homeScore: 27.4,
-              awayScore: 20.9,
-              leaders: null,
-            ),
-          ),
-        ],
-        child: MaterialApp(
-          home: Scaffold(body: SizedBox(width: 360, child: GameRow(sport: 'nfl', event: _scheduledEvent()))),
-        ),
-      ));
-      await tester.pumpAndSettle();
-
-      // The confidence tier is collapsed to just its colored dot below
-      // the stack breakpoint -- the text label moves into a Tooltip.
-      final tier = ConfidenceTier.forProbability(0.68).label;
-      expect(find.text(tier), findsNothing);
-      expect(find.byTooltip(tier), findsOneWidget);
-    });
-
-    testWidgets('a narrow (mobile) live event collapses the LIVE pill to just its dot', (tester) async {
-      await tester.pumpWidget(ProviderScope(
-        overrides: [
-          eventPredictionProvider.overrideWith(
-            (ref, query) async => const EventPrediction(
-              homeWinProbability: 0.68,
-              homeWinProbabilityModelVersion: 3,
-              margin: 6.5,
-              homeScore: 27.4,
-              awayScore: 20.9,
-              leaders: null,
-            ),
-          ),
-        ],
-        child: MaterialApp(
-          home: Scaffold(
-            body: SizedBox(
-              width: 360,
-              child: GameRow(
-                sport: 'ncaafb',
-                event: _scheduledEvent(),
-                liveState: const LiveEventState(live: true, detail: 'Q1 4:00', homeScore: 10, awayScore: 3),
-              ),
-            ),
-          ),
-        ),
-      ));
-      await tester.pumpAndSettle();
-
-      expect(find.text('LIVE'), findsNothing);
-      expect(find.byTooltip('LIVE'), findsOneWidget);
-    });
-
-    testWidgets('venue label renders name and city/state between the matchup and the pick', (tester) async {
-      await tester.pumpWidget(ProviderScope(
-        overrides: [
-          eventPredictionProvider.overrideWith(
-            (ref, query) async => const EventPrediction(
-              homeWinProbability: 0.5,
-              homeWinProbabilityModelVersion: 3,
-              margin: 0,
-              homeScore: 21,
-              awayScore: 21,
-              leaders: null,
-            ),
-          ),
-        ],
-        child: MaterialApp(
-          home: Scaffold(
-            body: GameRow(
-              sport: 'nfl',
-              event: _scheduledEvent(venueName: 'Arrowhead Stadium', venueCity: 'Kansas City', venueState: 'MO'),
-            ),
-          ),
-        ),
-      ));
-      await tester.pumpAndSettle();
-
-      expect(find.textContaining('Arrowhead Stadium'), findsOneWidget);
-      expect(find.byIcon(Icons.location_on_outlined), findsOneWidget);
-      // No mention of the venue being indoor/outdoor -- location/name only.
-      expect(find.textContaining('Indoor'), findsNothing);
-      expect(find.textContaining('Outdoor'), findsNothing);
-    });
-
-    testWidgets('venue line renders nothing when the event has no venue data', (tester) async {
-      await tester.pumpWidget(ProviderScope(
-        overrides: [
-          eventPredictionProvider.overrideWith(
-            (ref, query) async => const EventPrediction(
-              homeWinProbability: 0.5,
-              homeWinProbabilityModelVersion: 3,
-              margin: 0,
-              homeScore: 21,
-              awayScore: 21,
-              leaders: null,
-            ),
-          ),
-        ],
-        child: MaterialApp(home: Scaffold(body: GameRow(sport: 'nfl', event: _scheduledEvent()))),
-      ));
-      await tester.pumpAndSettle();
-
-      expect(find.byIcon(Icons.location_on_outlined), findsNothing);
-    });
-
-    testWidgets('completed row has no @ sign and does not repeat the score on the right', (tester) async {
-      await tester.pumpWidget(ProviderScope(
-        child: MaterialApp(home: Scaffold(body: GameRow(sport: 'nfl', event: _completedEvent()))),
-      ));
-      await tester.pumpAndSettle();
-
-      expect(find.text('@'), findsNothing);
-      // Predicted score shows next to each team's own actual score, so
-      // the right-hand recap states the pick/margin/probability only,
-      // not the same score pair a second time. Away's predicted (17,
-      // cyan) and actual (17, ink) happen to coincide numerically --
-      // color, not a parenthetical, is what tells them apart.
-      expect(_textStyled('27', AppColors.cyan), findsOneWidget);
-      expect(_textStyled('17', AppColors.cyan), findsOneWidget);
-      expect(_textStyled('31', AppColors.ink), findsOneWidget);
-      expect(_textStyled('17', AppColors.ink), findsOneWidget);
-      expect(find.textContaining('Predicted KC (67%) by 10.0'), findsOneWidget);
-      expect(find.textContaining('31-17'), findsNothing);
-    });
-
-    testWidgets('a completed event with no predicted score shows -- instead of hiding the slot', (tester) async {
-      final event = SportEvent(
-        eventId: '401547419',
-        eventDate: '2026-09-14',
-        kickoffTime: '2026-09-14T17:00:00Z',
-        status: 'completed',
-        week: 2,
-        round: null,
-        participants: const [
-          Participant(entityId: '12', role: 'home', result: ParticipantResult(score: 31, won: true)),
-          Participant(entityId: '13', role: 'away', result: ParticipantResult(score: 17, won: false)),
-        ],
-        predictionComparison: const PredictionComparison(
-          predictedHomeWinProbability: 0.67,
-          predictedHomeWon: true,
-          actualHomeWon: true,
-          correct: true,
-          predictedMargin: null,
-          actualMargin: 14,
-          predictedHomeScore: null,
-          predictedAwayScore: null,
-          actualHomeScore: 31,
-          actualAwayScore: 17,
-        ),
-        leadersComparison: null,
+    testWidgets('a live game keeps the bar and the line, and puts the clock under the LIVE pill', (tester) async {
+      await _pumpRow(
+        tester, _scheduledEvent(), sport: 'ncaafb',
+        liveState: const LiveEventState(live: true, detail: 'Q1 4:00', homeScore: 10, awayScore: 3),
       );
 
-      await tester.pumpWidget(ProviderScope(
-        child: MaterialApp(home: Scaffold(body: GameRow(sport: 'nfl', event: event))),
-      ));
-      await tester.pumpAndSettle();
+      // The leader's score is white, the trailing side's dimmed; the model
+      // stays beside both in cyan.
+      expect(_textStyled('10', AppColors.ink), findsOneWidget);
+      expect(_textStyled('3', AppColors.inkSub), findsOneWidget);
+      expect(_textStyled('27', AppColors.cyan), findsOneWidget);
+      expect(_textStyled('21', AppColors.cyan), findsOneWidget);
+      expect(find.text('LIVE'), findsOneWidget);
+      expect(tester.getTopLeft(find.text('Q1 4:00')).dy, greaterThan(tester.getCenter(find.text('LIVE')).dy));
+      expect(find.byType(WinProbabilityBar), findsOneWidget);
+      expect(find.textContaining('-6.5'), findsOneWidget);
+    });
+
+    testWidgets('a game ESPN reports over reads FINAL with its final score before storage catches up', (tester) async {
+      await _pumpRow(
+        tester, _scheduledEvent(),
+        liveState: const LiveEventState(live: false, completed: true, detail: 'Final', homeScore: 31, awayScore: 17),
+      );
+
+      expect(find.text('FINAL'), findsOneWidget);
+      expect(find.text('Final'), findsNothing);
+      expect(_textStyled('31', AppColors.ink), findsOneWidget);
+      expect(_textStyled('17', AppColors.inkSub), findsOneWidget);
+    });
+
+    testWidgets('a completed game shows the verdict, the pick, and the model line against the final one', (tester) async {
+      await _pumpRow(tester, _completedEvent());
+
+      expect(find.text('FINAL'), findsOneWidget);
+      expect(_textStyled('31', AppColors.ink), findsOneWidget);
+      expect(_textStyled('17', AppColors.inkSub), findsOneWidget);
+      expect(_textStyled('27', AppColors.cyan), findsOneWidget);
+      expect(_textStyled('17', AppColors.cyan), findsOneWidget);
+      expect(_textStyled('KC -10.0', AppColors.cyan), findsOneWidget);
+      expect(_textStyled('KC -14', AppColors.ink), findsOneWidget);
+      expect(find.byType(MarginTrack), findsOneWidget);
+      expect(find.text(VerdictPill.hitLabel), findsOneWidget);
+      expect(find.text('KC 67%'), findsOneWidget);
+      expect(find.byType(WinProbabilityBar), findsNothing);
+    });
+
+    testWidgets('a wrong pick reads MISS and names the side that was picked', (tester) async {
+      await _pumpRow(tester, _completedWith(const PredictionComparison(
+        predictedHomeWinProbability: 0.4, predictedHomeWon: false, actualHomeWon: true, correct: false,
+        predictedMargin: -3.0, actualMargin: 14, predictedHomeScore: 20, predictedAwayScore: 23,
+        actualHomeScore: 31, actualAwayScore: 17,
+      )));
+
+      expect(find.text(VerdictPill.missLabel), findsOneWidget);
+      expect(find.text('LV 60%'), findsOneWidget);
+      expect(_textStyled('LV -3.0', AppColors.cyan), findsOneWidget);
+    });
+
+    testWidgets('a completed game with no predicted score or margin keeps its slots', (tester) async {
+      await _pumpRow(tester, _completedWith(const PredictionComparison(
+        predictedHomeWinProbability: 0.67, predictedHomeWon: true, actualHomeWon: true, correct: true,
+        predictedMargin: null, actualMargin: 14, predictedHomeScore: null, predictedAwayScore: null,
+        actualHomeScore: 31, actualAwayScore: 17,
+      )));
 
       expect(_textStyled('--', AppColors.cyan), findsNWidgets(2));
+      // The pick alone, with no margin to print.
+      expect(_textStyled('KC', AppColors.cyan), findsOneWidget);
     });
+
+    testWidgets('a completed game with no recorded prediction says so', (tester) async {
+      await _pumpRow(tester, _completedWith(null));
+
+      expect(find.text('No prediction recorded'), findsOneWidget);
+      expect(find.byType(VerdictPill), findsNothing);
+    });
+  });
+
+  group('GameRow on a phone', () {
+    for (final (width, textScale) in [(360.0, 1.0), (320.0, 1.3)]) {
+      testWidgets('an upcoming card spells out confidence and fits at $width px, text x$textScale', (tester) async {
+        await _pumpRow(tester, _scheduledEvent(), width: width, textScale: textScale);
+
+        expect(tester.takeException(), isNull);
+        // The tier is written out, never a bare dot with a tooltip.
+        expect(find.text(ConfidenceTier.forProbability(0.68).label), findsOneWidget);
+        expect(find.text('68%'), findsOneWidget);
+        expect(find.text('32%'), findsOneWidget);
+        expect(_textStyled('KC -6.5', AppColors.cyan), findsOneWidget);
+        expect(find.byType(WinProbabilityBar), findsOneWidget);
+      });
+
+      testWidgets('a live card shows LIVE, the clock and the line at $width px, text x$textScale', (tester) async {
+        await _pumpRow(
+          tester, _scheduledEvent(), width: width, textScale: textScale,
+          liveState: const LiveEventState(live: true, detail: 'End of 2nd Quarter', homeScore: 110, awayScore: 103),
+        );
+
+        expect(tester.takeException(), isNull);
+        expect(find.text('LIVE'), findsOneWidget);
+        expect(find.text('End of 2nd Quarter'), findsOneWidget);
+        expect(_textStyled('KC -6.5', AppColors.cyan), findsOneWidget);
+        expect(find.byType(WinProbabilityBar), findsNothing);
+      });
+
+      testWidgets('a completed card shows the verdict and both lines at $width px, text x$textScale', (tester) async {
+        await _pumpRow(tester, _completedEvent(), width: width, textScale: textScale);
+
+        expect(tester.takeException(), isNull);
+        expect(find.text(VerdictPill.hitLabel), findsOneWidget);
+        expect(_textStyled('KC -14', AppColors.ink), findsOneWidget);
+        expect(_textStyled('KC -10.0', AppColors.cyan), findsOneWidget);
+        // The chance shows on the picked side only.
+        expect(find.text('67%'), findsOneWidget);
+        expect(find.text('33%'), findsNothing);
+      });
+    }
   });
 
   group('GameRow states', () {
@@ -513,19 +318,6 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.text('No prediction recorded'), findsOneWidget);
-    });
-
-    testWidgets('a narrow row still shows the venue line', (tester) async {
-      await tester.pumpWidget(row(
-        _scheduledEvent(venueName: 'Arrowhead Stadium', venueCity: 'Kansas City', venueState: 'MO'),
-        prediction: () async => const EventPrediction(
-          homeWinProbability: 0.5, homeWinProbabilityModelVersion: 3, margin: 0, homeScore: 21, awayScore: 21, leaders: null,
-        ),
-        width: 360,
-      ));
-      await tester.pumpAndSettle();
-
-      expect(find.textContaining('Arrowhead Stadium'), findsOneWidget);
     });
 
     testWidgets('tapping the row navigates to the event detail route', (tester) async {

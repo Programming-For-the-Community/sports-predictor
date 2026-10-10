@@ -15,9 +15,9 @@ import '../../core/widgets/status_toggle.dart';
 /// F1's own list page -- mirrors field_event_list_page.dart's shell
 /// (RefreshIndicator + Upcoming/Completed toggle, flat not grouped: races
 /// are weekly, not daily, so a per-day heading bucket would almost always
-/// hold exactly one row). Also, unlike GameRow, no per-row prediction
-/// fetch -- a field response (~20 drivers + ~10 constructors) is heavier
-/// than a head-to-head one, and a season list can hold ~24 race rows.
+/// hold exactly one row). Only the next weekend fetches its prediction --
+/// a field response (~20 drivers + ~10 constructors) is heavier than a
+/// head-to-head one, and a season list can hold ~24 race rows.
 class F1EventListPage extends ConsumerStatefulWidget {
   const F1EventListPage({super.key, required this.sportId});
 
@@ -124,11 +124,17 @@ class _F1EventListPageState extends ConsumerState<F1EventListPage> with WidgetsB
                         ? a.eventDate.compareTo(b.eventDate)
                         : b.eventDate.compareTo(a.eventDate),
                   );
+                // One card per race weekend; the next one leads the
+                // Upcoming list with the model's picks.
+                final isUpcoming = _status == EventStatus.scheduled;
                 return Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    for (final event in sorted) ...[
-                      F1EventRow(sport: widget.sportId, event: event, liveState: liveScores[event.eventId]),
+                    for (final (index, weekend) in groupF1Weekends(sorted).indexed) ...[
+                      if (isUpcoming && index == 0)
+                        FeaturedF1Weekend(sport: widget.sportId, weekend: weekend, liveScores: liveScores)
+                      else
+                        F1EventRow(sport: widget.sportId, weekend: weekend, liveScores: liveScores),
                       const SizedBox(height: 12),
                     ],
                   ],

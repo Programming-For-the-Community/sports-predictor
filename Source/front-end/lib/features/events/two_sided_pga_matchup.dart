@@ -67,8 +67,8 @@ class TwoSidedPgaMatchup extends StatelessWidget {
             WinProbabilityBar(homeWinProbability: winProbability),
             const SizedBox(height: 8),
             Text(
-              '${home?.name ?? 'Home'} ${(winProbability * 100).round()}% -- '
-              '${away?.name ?? 'Away'} ${((1 - winProbability) * 100).round()}%',
+              '${away?.name ?? 'Away'} ${((1 - winProbability) * 100).round()}% -- '
+              '${home?.name ?? 'Home'} ${(winProbability * 100).round()}%',
               style: AppTextStyles.microLabel(color: AppColors.inkMute),
             ),
           ] else

@@ -4,8 +4,9 @@ import '../../core/models/field_live_score.dart';
 import '../../core/models/field_prediction.dart';
 import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_text_styles.dart';
-import '../../core/widgets/field_status_pill.dart';
+import '../../core/widgets/pga_participant_status.dart';
 import '../../core/widgets/fit_text.dart';
+import '../../core/widgets/name_with_tag.dart';
 import 'leaderboard_sort.dart';
 
 /// PGA's own leaderboard table -- column-spec pattern, same shape as
@@ -23,8 +24,8 @@ import 'leaderboard_sort.dart';
 abstract final class _FieldColumnLabels {
   static const position = '#';
   static const player = 'PLAYER';
-  static const status = 'STATUS';
   static const total = 'TOTAL';
+  static const projected = 'PROJ';
   static const thisRound = 'THIS RD';
   static const top10 = 'TOP 10%';
   static const top5 = 'TOP 5%';
@@ -64,10 +65,8 @@ int? _currentRoundNumber(FieldParticipantPrediction entry) {
   return null;
 }
 
-// Below this width, a ~150-golfer field with real names/pills/stroke
-// counts doesn't fit across 7 columns. Same breakpoint as game_row.dart's
-// _stackBreakpoint. THIS RD/TOP 10%/TOP 5% move into the expanded
-// per-row detail below this width -- see _ExpandedProbabilities.
+// Below this width the table keeps five columns; THIS RD and TOP 5% move
+// into each row's expanded detail.
 const _compactBreakpoint = 600.0;
 
 /// Falls back to the row's own displayed position rather than '--' --
@@ -82,75 +81,77 @@ Widget _positionColumnCell(BuildContext context, FieldParticipantPrediction entr
   );
 }
 
+/// A golfer's round status in a few letters: "THRU 12", "F", "CUT", "MDF",
+/// "WD". Null before they tee off. live.status first (freshest), else the
+/// stored one.
+(String, Color)? _statusWords(FieldParticipantPrediction entry, FieldParticipantLiveResult? live) {
+  final thru = _currentThru(entry, live);
+  return switch (live?.status ?? entry.actualStatus) {
+    PgaParticipantStatus.inProgress => (thru == null ? 'IN PROGRESS' : 'THRU $thru', AppColors.live),
+    PgaParticipantStatus.finished => ('F', AppColors.inkSub),
+    PgaParticipantStatus.cut => ('CUT', AppColors.neg),
+    PgaParticipantStatus.madeCutDidNotFinish => ('MDF', AppColors.warn),
+    PgaParticipantStatus.withdrawn => ('WD', AppColors.neg),
+    _ => null,
+  };
+}
+
+/// The golfer's name over their country and round status.
 Widget _playerColumnCell(BuildContext context, FieldParticipantPrediction entry, FieldParticipantLiveResult? live, int rowNumber) {
-  final name = entry.name ?? entry.entityId;
-  return Column(
-    crossAxisAlignment: CrossAxisAlignment.start,
-    mainAxisSize: MainAxisSize.min,
-    children: [
-      Text(name, style: AppTextStyles.body(color: AppColors.ink)),
-      if (entry.country != null)
-        Text(entry.country!, style: AppTextStyles.microLabel(color: AppColors.inkSub)),
-    ],
+  final status = _statusWords(entry, live);
+  return NameWithTag(
+    name: entry.name ?? entry.entityId, detail: entry.country, tag: status?.$1, tagColor: status?.$2 ?? AppColors.inkSub,
   );
 }
 
-/// Round status (scheduled/finished/cut/MDF/withdrawn/still playing).
-/// live.status first (freshest, live-poll window only), else this
-/// golfer's own real stored status -- not inferred from
-/// actualFinishPosition's presence.
-Widget _statusColumnCell(BuildContext context, FieldParticipantPrediction entry, FieldParticipantLiveResult? live, int rowNumber, bool compact) {
-  final status = live?.status ?? entry.actualStatus;
-  return Center(child: FieldStatusPill(status: status, dotOnly: compact));
-}
-
-/// Actual (live-first, else the real cumulative standing) next to the
-/// model's own projected FINAL tournament score-to-par. Labeled TOTAL,
-/// not TO PAR -- same term ESPN/PGA Tour's own real leaderboards use,
-/// and distinguishes it from THIS RD's own to-par-for-the-round-alone
-/// value.
+/// The real cumulative standing, live-first. TOTAL, not TO PAR -- the term
+/// real leaderboards use, and distinct from THIS RD's to-par for the round.
 Widget _totalColumnCell(BuildContext context, FieldParticipantPrediction entry, FieldParticipantLiveResult? live, int rowNumber) {
   final scoreToPar = live?.scoreToPar ?? entry.actualScoreToPar;
-  final projected = entry.projectedScoreToPar?.value;
-  return Center(child: _StandingCell(actual: scoreToPar, projected: projected));
+  return FitText(
+    _formatToPar(scoreToPar), style: AppTextStyles.metricValue(color: scoreToPar != null ? AppColors.ink : AppColors.inkMute),
+    textAlign: TextAlign.center
+  );
 }
 
-/// The current round's own proj/actual, visible without expanding the
-/// row -- the full 1-4 breakdown is still only in the expanded panel
-/// below (_RoundBreakdownStrip).
+/// The model's projected final score-to-par, in cyan.
+Widget _projectedColumnCell(BuildContext context, FieldParticipantPrediction entry, FieldParticipantLiveResult? live, int rowNumber) {
+  return FitText(
+    _formatToPar(entry.projectedScoreToPar?.value), style: AppTextStyles.metricValue(color: AppColors.cyan),
+    textAlign: TextAlign.center
+  );
+}
+
+/// The current round's proj/actual; the full 1-4 breakdown is in the
+/// expanded panel (_RoundBreakdownStrip).
 Widget _thisRoundColumnCell(BuildContext context, FieldParticipantPrediction entry, FieldParticipantLiveResult? live, int rowNumber, int? par) {
   final round = _currentRoundNumber(entry);
   if (round == null) {
     return Text('--', style: AppTextStyles.metricValue(color: AppColors.inkMute), textAlign: TextAlign.center);
   }
   return Center(
-    child: _RoundCell(
-      round: round, projected: entry.rounds[round]?.value, actual: _actualForRound(round, entry, live), par: par,
-      thru: _currentThru(entry, live),
-    ),
+    child: _RoundCell(round: round, projected: entry.rounds[round]?.value, actual: _actualForRound(round, entry, live), par: par),
   );
 }
 
 List<_LeaderboardColumn> _leaderboardColumns(int? par, {required bool compact}) {
-  final core = [
-    const _LeaderboardColumn(_FieldColumnLabels.position, 1, _positionColumnCell),
-    const _LeaderboardColumn(_FieldColumnLabels.player, 4, _playerColumnCell),
-    _LeaderboardColumn(
-      _FieldColumnLabels.status, compact ? 1 : 3,
-      (context, entry, live, rowNumber) => _statusColumnCell(context, entry, live, rowNumber, compact),
-    ),
-    const _LeaderboardColumn(_FieldColumnLabels.total, 3, _totalColumnCell),
+  final top10 = _LeaderboardColumn(
+    _FieldColumnLabels.top10, 2, (context, entry, live, rowNumber) => _PercentText(entry.top10Probability?.value),
+  );
+  const core = [
+    _LeaderboardColumn(_FieldColumnLabels.position, 1, _positionColumnCell),
+    _LeaderboardColumn(_FieldColumnLabels.player, 4, _playerColumnCell),
+    _LeaderboardColumn(_FieldColumnLabels.total, 2, _totalColumnCell),
+    _LeaderboardColumn(_FieldColumnLabels.projected, 2, _projectedColumnCell),
   ];
-  if (compact) return core;
-  // THIS RD/TOP 10%/TOP 5% move into the expanded per-row detail below
-  // _compactBreakpoint -- see _ExpandedProbabilities.
+  if (compact) return [...core, top10];
   return [
     ...core,
     _LeaderboardColumn(
-      _FieldColumnLabels.thisRound, 2,
+      _FieldColumnLabels.thisRound, 3,
       (context, entry, live, rowNumber) => _thisRoundColumnCell(context, entry, live, rowNumber, par),
     ),
-    _LeaderboardColumn(_FieldColumnLabels.top10, 2, (context, entry, live, rowNumber) => _PercentText(entry.top10Probability?.value)),
+    top10,
     _LeaderboardColumn(_FieldColumnLabels.top5, 2, (context, entry, live, rowNumber) => _PercentText(entry.top5Probability?.value)),
   ];
 }
@@ -190,49 +191,127 @@ double? _standingScoreToPar(FieldParticipantPrediction entry, FieldParticipantLi
 List<FieldParticipantPrediction> _sortedByStanding(List<FieldParticipantPrediction> field, Map<String, FieldParticipantLiveResult> liveResults) =>
     sortedByNullableKey(field, (e) => _standingScoreToPar(e, liveResults[e.entityId]));
 
-class FieldLeaderboardTable extends StatelessWidget {
-  const FieldLeaderboardTable({super.key, required this.field, this.liveResults = const {}, this.par});
+/// Where the projected cut falls in `sorted`: the index of the first golfer
+/// whose real standing is over it. Null without a projection, once the real
+/// cut has been made, or when nobody is on one side of it yet.
+int? _projectedCutIndex(
+  List<FieldParticipantPrediction> sorted, Map<String, FieldParticipantLiveResult> liveResults, double? projectedCut,
+) {
+  if (projectedCut == null) return null;
+  const cutStatuses = {PgaParticipantStatus.cut, PgaParticipantStatus.madeCutDidNotFinish};
+  if (sorted.any((e) => cutStatuses.contains(liveResults[e.entityId]?.status ?? e.actualStatus))) return null;
+  final index = sorted.indexWhere((e) {
+    final score = _standingScoreToPar(e, liveResults[e.entityId]);
+    return score != null && score > projectedCut;
+  });
+  return index <= 0 ? null : index;
+}
+
+class FieldLeaderboardTable extends StatefulWidget {
+  const FieldLeaderboardTable({super.key, required this.field, this.liveResults = const {}, this.par, this.projectedCut});
+
+  static const searchHint = 'Find a golfer';
 
   final List<FieldParticipantPrediction> field;
-  // Optional overlay from fieldLiveScoresProvider -- the table itself
-  // doesn't own polling, the detail page feeds fresher data in as it
-  // arrives (same split GameRow uses for its own isLive/liveState params).
+  // From fieldLiveScoresProvider; the detail page owns the polling.
   final Map<String, FieldParticipantLiveResult> liveResults;
-  // This tournament's own course par (FieldEventPrediction.par) -- lets
-  // every actual/projected cell show "N strokes (to par)" instead of the
-  // bare to-par number. Null for an older cached response predating this
-  // field.
+  // This course's par (FieldEventPrediction.par), so a round shows "N
+  // strokes (to par)". Null for an older cached response.
   final int? par;
+  // The model's projected cut score-to-par, drawn as a line in the table
+  // until the real cut is made.
+  final double? projectedCut;
+
+  @override
+  State<FieldLeaderboardTable> createState() => _FieldLeaderboardTableState();
+}
+
+class _FieldLeaderboardTableState extends State<FieldLeaderboardTable> {
+  String _query = '';
+
+  Widget _search() => TextField(
+        onChanged: (value) => setState(() => _query = value.trim().toLowerCase()),
+        style: AppTextStyles.body(color: AppColors.ink),
+        decoration: InputDecoration(
+          hintText: FieldLeaderboardTable.searchHint,
+          hintStyle: AppTextStyles.body(color: AppColors.inkMute),
+          prefixIcon: const Icon(Icons.search, size: 18, color: AppColors.inkMute),
+          isDense: true,
+          contentPadding: const EdgeInsets.symmetric(vertical: 10),
+          enabledBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(999), borderSide: const BorderSide(color: AppColors.border),
+          ),
+          focusedBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(999), borderSide: const BorderSide(color: AppColors.violet),
+          ),
+        ),
+      );
+
+  Widget _cutLine(double cut) => Padding(
+        padding: const EdgeInsets.symmetric(vertical: 6),
+        child: Row(
+          children: [
+            Text('PROJ CUT ${_formatToPar(cut)}', style: AppTextStyles.microLabel(color: AppColors.warn)),
+            const SizedBox(width: 10),
+            const Expanded(child: Divider(height: 1, color: AppColors.warn)),
+          ],
+        ),
+      );
 
   @override
   Widget build(BuildContext context) {
+    final field = widget.field;
+    final liveResults = widget.liveResults;
     if (field.isEmpty) {
       return Text('No field available yet.', style: AppTextStyles.body(color: AppColors.inkSub));
     }
     final sorted = _sortedByStanding(field, liveResults);
+    // A search keeps each golfer's place in the full field and hides the cut line.
+    final cutIndex = _query.isEmpty ? _projectedCutIndex(sorted, liveResults, widget.projectedCut) : null;
+    final shown = [
+      for (var i = 0; i < sorted.length; i++)
+        if (_query.isEmpty || (sorted[i].name ?? sorted[i].entityId).toLowerCase().contains(_query)) i,
+    ];
     return LayoutBuilder(
       builder: (context, constraints) {
         final compact = constraints.maxWidth < _compactBreakpoint;
-        final columns = _leaderboardColumns(par, compact: compact);
-        return Container(
-          padding: const EdgeInsets.symmetric(horizontal: 20),
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(16),
-            gradient: const LinearGradient(begin: Alignment.topLeft, end: Alignment.bottomRight, colors: AppColors.surfaceGrad),
-            border: Border.all(color: AppColors.borderRaised),
-          ),
-          child: Column(
-            children: [
-              Padding(padding: const EdgeInsets.symmetric(vertical: 10), child: _LeaderboardHeaderRow(columns: columns)),
-              for (var i = 0; i < sorted.length; i++) ...[
-                const Divider(height: 1, color: AppColors.border),
-                _LeaderboardRow(
-                  entry: sorted[i], live: liveResults[sorted[i].entityId], columns: columns, rowNumber: i + 1,
-                  par: par, compact: compact,
-                ),
-              ],
-            ],
-          ),
+        final columns = _leaderboardColumns(widget.par, compact: compact);
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Align(
+              alignment: Alignment.centerLeft,
+              child: ConstrainedBox(constraints: const BoxConstraints(maxWidth: 320), child: _search()),
+            ),
+            const SizedBox(height: 12),
+            Container(
+              padding: EdgeInsets.symmetric(horizontal: compact ? 12 : 20),
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(16),
+                gradient: const LinearGradient(begin: Alignment.topLeft, end: Alignment.bottomRight, colors: AppColors.surfaceGrad),
+                border: Border.all(color: AppColors.borderRaised),
+              ),
+              child: Column(
+                children: [
+                  Padding(padding: const EdgeInsets.symmetric(vertical: 10), child: _LeaderboardHeaderRow(columns: columns)),
+                  if (shown.isEmpty)
+                    Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 16),
+                      child: Text('No golfer matches.', style: AppTextStyles.body(color: AppColors.inkSub)),
+                    ),
+                  for (final i in shown) ...[
+                    if (i == cutIndex) _cutLine(widget.projectedCut!) else const Divider(height: 1, color: AppColors.border),
+                    _LeaderboardRow(
+                      // Keyed so an expanded row stays with its golfer as a search narrows the list.
+                      key: ValueKey(sorted[i].entityId),
+                      entry: sorted[i], live: liveResults[sorted[i].entityId], columns: columns, rowNumber: i + 1,
+                      par: widget.par, compact: compact,
+                    ),
+                  ],
+                ],
+              ),
+            ),
+          ],
         );
       },
     );
@@ -258,7 +337,7 @@ class _LeaderboardHeaderRow extends StatelessWidget {
             child: FitText(
               columns[i].label,
               style: AppTextStyles.microLabel(),
-              textAlign: i == 0 ? TextAlign.start : TextAlign.center
+              textAlign: columns[i].label == _FieldColumnLabels.player ? TextAlign.start : TextAlign.center
             ),
           ),
         ],
@@ -274,7 +353,7 @@ class _LeaderboardHeaderRow extends StatelessWidget {
 /// way to see them -- see _ExpandedProbabilities, shown only when compact.
 class _LeaderboardRow extends StatefulWidget {
   const _LeaderboardRow({
-    required this.entry, required this.live, required this.columns, required this.rowNumber,
+    super.key, required this.entry, required this.live, required this.columns, required this.rowNumber,
     required this.par, required this.compact,
   });
 
@@ -336,8 +415,8 @@ class _LeaderboardRowState extends State<_LeaderboardRow> {
   }
 }
 
-/// TOP 10%/TOP 5% dropped from the compact (mobile) top-level columns --
-/// shown above the ROUND 1-4 breakdown once a row is expanded instead.
+/// TOP 5% isn't in the compact columns; it leads a phone row's expanded
+/// detail, above the round breakdown.
 class _ExpandedProbabilities extends StatelessWidget {
   const _ExpandedProbabilities({required this.entry});
 
@@ -345,23 +424,12 @@ class _ExpandedProbabilities extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Wrap(
-      spacing: 20,
-      runSpacing: 4,
-      children: [
-        _labeledPercent(_FieldColumnLabels.top10, entry.top10Probability?.value),
-        _labeledPercent(_FieldColumnLabels.top5, entry.top5Probability?.value),
-      ],
-    );
-  }
-
-  Widget _labeledPercent(String label, double? value) {
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
-        Text(label, style: AppTextStyles.microLabel(color: AppColors.inkMute)),
+        Text(_FieldColumnLabels.top5, style: AppTextStyles.microLabel(color: AppColors.inkMute)),
         const SizedBox(width: 6),
-        _PercentText(value),
+        _PercentText(entry.top5Probability?.value),
       ],
     );
   }
@@ -469,36 +537,6 @@ class _RoundCell extends StatelessWidget {
       children: [
         Text('ROUND $round', style: AppTextStyles.microLabel(color: AppColors.inkMute)),
         value,
-      ],
-    );
-  }
-}
-
-/// TOTAL column's cell -- same compact actual-over-projected stack
-/// _RoundCell uses for THIS RD (showLabel: false), just tournament-level
-/// (cumulative standing vs. projected FINAL score-to-par). Deliberately
-/// stays bare to-par (no "N strokes" prefix) -- unlike a single round, a
-/// tournament total has no unambiguous par baseline to convert against
-/// (2-round missed-cut vs. 4-round made-cut).
-class _StandingCell extends StatelessWidget {
-  const _StandingCell({required this.actual, required this.projected});
-
-  final num? actual;
-  final double? projected;
-
-  @override
-  Widget build(BuildContext context) {
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      crossAxisAlignment: CrossAxisAlignment.center,
-      children: [
-        FitText(
-          _formatToPar(actual), style: AppTextStyles.metricValue(color: actual != null ? AppColors.ink : AppColors.inkMute)
-        ),
-        FitText(
-          _formatToPar(projected),
-          style: AppTextStyles.microLabel(color: AppColors.cyan)
-        ),
       ],
     );
   }

@@ -24,8 +24,9 @@ registry for both classifier and regressor model cards.
 """
 import io
 import logging
+import os
 import types
-from typing import Any, Optional, Protocol
+from typing import Any, NamedTuple, Optional, Protocol
 
 import joblib
 import numpy as np
@@ -463,59 +464,107 @@ class ElasticNetAdapter(_PipelineAdapter):
 # bootstrap draw sees, bounding per-tree fit cost. max_features has no
 # None option: an uncapped draw (every split considering every feature)
 # is pure cost with no variance-reduction benefit.
-_RF_PARAM_DISTRIBUTIONS = {
-    "model__n_estimators": [100, 200, 300, 400, 500, 600],
-    # No None option -- same reasoning as max_features below: an uncapped
-    # draw is pure cost with no variance-reduction benefit. An uncapped
-    # max_depth combined with a high n_estimators can OOM-kill the
-    # training task on its largest TimeSeriesSplit fold.
-    "model__max_depth": [4, 6, 8, 10, 15, 20, 30],
-    "model__min_samples_leaf": [1, 2, 4, 8],
-    "model__max_features": ["sqrt", "log2"],
-    "model__max_samples": [0.4, 0.5, 0.6, 0.7, 0.85],
-}
+_RF_N_ESTIMATORS = (100, 200, 300, 400, 500, 600)
+_RF_MAX_FEATURES = ("sqrt", "log2")
+_RF_MAX_SAMPLES = (0.4, 0.5, 0.6, 0.7, 0.85)
+
+
+class _RandomForestSearchPlan(NamedTuple):
+    """How the search runs for a training set of at least `min_rows` rows.
+    There is no unlimited depth: with a high n_estimators it can OOM-kill
+    the task on its largest fold."""
+    min_rows: int
+    cv_splits: int
+    max_depths: tuple[int, ...]
+    min_samples_leaves: tuple[int, ...]
+
+
+# Largest first. A forest's cost grows with its rows, and so does how
+# little a single fold or a single leaf's worth of rows tells it: a big
+# training set gets fewer folds (each is still large enough to rank
+# candidates), no shallow trees (they underfit it) and no tiny leaves or
+# 30-deep trees (the slowest forests there are, and the least likely to
+# generalize). A small one keeps the widest search; it is cheap at any
+# setting.
+_RF_SEARCH_PLANS = (
+    _RandomForestSearchPlan(min_rows=100_000, cv_splits=4, max_depths=(8, 10, 15, 20), min_samples_leaves=(8, 16, 32, 64)),
+    _RandomForestSearchPlan(min_rows=25_000, cv_splits=6, max_depths=(6, 8, 10, 15, 20), min_samples_leaves=(4, 8, 16, 32)),
+    _RandomForestSearchPlan(min_rows=0, cv_splits=8, max_depths=(4, 6, 8, 10, 15, 20, 30), min_samples_leaves=(1, 2, 4, 8)),
+)
+
+
+def random_forest_search_plan(n_rows: int) -> _RandomForestSearchPlan:
+    """The plan for a training set of `n_rows` rows."""
+    return next(plan for plan in _RF_SEARCH_PLANS if n_rows >= plan.min_rows)
+
+
+def _rf_param_distributions(plan: _RandomForestSearchPlan) -> dict:
+    return {
+        "model__n_estimators": list(_RF_N_ESTIMATORS),
+        "model__max_depth": list(plan.max_depths),
+        "model__min_samples_leaf": list(plan.min_samples_leaves),
+        "model__max_features": list(_RF_MAX_FEATURES),
+        "model__max_samples": list(_RF_MAX_SAMPLES),
+    }
+
+
+def _available_cpus() -> int:
+    """The vCPUs this process may run on (the training task's own, not the host's)."""
+    affinity = getattr(os, "sched_getaffinity", None)
+    return len(affinity(0)) if affinity else (os.cpu_count() or 1)
+
+
 # _run_randomized_search_with_early_stopping's batch size scales with
 # this ceiling (max_iter * _EARLY_STOP_BATCH_FRACTION) -- raising it also
 # raises RF's early-stop patience window in absolute iterations, not just
 # the ceiling itself.
 _RF_SEARCH_ITERATIONS = 70
-_RF_CV_SPLITS = 8
 _RF_RANDOM_STATE = 42
-# One worker per CV fold, not n_jobs=-1 (every vCPU on the task, 16 by
-# default -- variables.tf's training_task_vcpu). This is still the most
-# memory-hungry candidate in the tournament even with max_depth's None
-# option gone above, so it alone gets a narrower cap than the other
-# adapters' own n_jobs=-1 (their per-fit cost doesn't carry the same risk)
-# -- bounds how many full-depth-tree fits can peak in memory at once
-# without limiting useful parallelism (a search can't usefully exceed one
-# concurrent fit per fold regardless of vCPU headroom).
-_RF_SEARCH_N_JOBS = _RF_CV_SPLITS
 
 
 class _RandomForestAdapterBase(_PipelineAdapter):
     _estimator_cls: Optional[type] = None
     _scoring = None
 
-    def _build_pipeline(self) -> Pipeline:
+    def _build_pipeline(self, n_jobs: int = 1) -> Pipeline:
         # No StandardScaler -- trees split on raw thresholds. SimpleImputer
         # is still needed since scikit-learn's tree ensembles don't handle
         # NaN natively.
         return Pipeline([
             ("impute", SimpleImputer(strategy="median")),
-            ("model", self._estimator_cls(random_state=_RF_RANDOM_STATE, n_jobs=1)),
+            ("model", self._estimator_cls(random_state=_RF_RANDOM_STATE, n_jobs=n_jobs)),
         ], memory=None)
 
+    def fit(self, X_train: pd.DataFrame, y_train: pd.Series, params: dict, sample_weight=None) -> Pipeline:
+        """A fit outside the search has the task to itself, so it grows its
+        trees on every vCPU. The saved model goes back to one thread, which
+        is all a serving Lambda should use."""
+        model = self._build_pipeline(n_jobs=_available_cpus()).set_params(**{f"model__{k}": v for k, v in params.items()})
+        model.fit(X_train, y_train, **({} if sample_weight is None else {"model__sample_weight": sample_weight}))
+        return model.set_params(model__n_jobs=1)
+
     def tune_and_fit(self, X_train: pd.DataFrame, y_train: pd.Series) -> tuple[Pipeline, dict]:
+        plan = random_forest_search_plan(len(X_train))
+        folds = _time_series_splits(plan.cv_splits, len(X_train))
+        # One worker per CV fold bounds how many forests peak in memory at
+        # once (this is the most memory-hungry candidate); each forest then
+        # grows its trees on the vCPUs the workers leave free.
+        threads_per_fit = max(1, _available_cpus() // folds)
+        logger.info(
+            "%s search on %d rows: %d folds, %d threads per fit, max_depth %d-%d, min_samples_leaf %d-%d",
+            self.algorithm, len(X_train), folds, threads_per_fit,
+            plan.max_depths[0], plan.max_depths[-1], plan.min_samples_leaves[0], plan.min_samples_leaves[-1],
+        )
         search = _run_randomized_search_with_early_stopping(
-            self._build_pipeline(),
-            param_distributions=_RF_PARAM_DISTRIBUTIONS,
+            self._build_pipeline(n_jobs=threads_per_fit),
+            param_distributions=_rf_param_distributions(plan),
             X=X_train, y=y_train,
             scoring=self._scoring,
-            cv=TimeSeriesSplit(n_splits=_time_series_splits(_RF_CV_SPLITS, len(X_train))),
+            cv=TimeSeriesSplit(n_splits=folds),
             max_iter=_RF_SEARCH_ITERATIONS,
             random_state=_RF_RANDOM_STATE,
             verbose=10,
-            n_jobs=_RF_SEARCH_N_JOBS,
+            n_jobs=folds,
             label=self.algorithm,
         )
         _log_search_convergence(self.algorithm, search)

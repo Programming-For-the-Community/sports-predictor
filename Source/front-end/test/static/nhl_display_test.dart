@@ -30,11 +30,11 @@ void main() {
   });
 
   group('NHL in the per-sport maps', () {
-    test('has a Performance tab and stays hidden until activated', () {
+    test('is active with a Performance tab and a Season tab', () {
       final nhl = sportById(SportIds.nhl);
       expect(nhl.hasPerformanceTab, isTrue);
       expect(nhl.hasSeasonProjection, isTrue);
-      expect(nhl.active, isFalse);
+      expect(nhl.active, isTrue);
     });
 
     test('player-props widgets list goals, shots on goal and saves', () {

@@ -106,7 +106,7 @@ const kSports = [
     displayName: 'NHL',
     eventShape: EventShape.headToHead,
     accentColor: AppColors.cyan,
-    active: false,
+    active: true,
     hasPerformanceTab: true,
   ),
   SportConfig(

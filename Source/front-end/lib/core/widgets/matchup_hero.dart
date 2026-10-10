@@ -8,68 +8,55 @@ import '../theme/app_text_styles.dart';
 import '../../static/nfl_team_colors.dart';
 import 'confidence_pill.dart';
 import 'final_status_pill.dart';
+import 'game_row.dart' show clockLabel, localTimezoneLabel;
 import 'live_status_pill.dart';
+import 'pick_labels.dart';
 import 'possession_ball.dart';
 import 'team_color_dot.dart';
+import 'win_probability_bar.dart';
 
-/// design/FRONTEND_STYLE.md's "Matchup hero (detail)" component: two
-/// columns of team + score (win probability % small underneath), a split
-/// bar, then the big PICK (with its own confidence pill right under it),
-/// then a Pred total / home margin duo. liveState (from
-/// liveScoresProvider) adds its own LIVE/FINAL status/game-clock line
-/// between the win-probability bar and PICK once set and live or
-/// finished (LiveEventState.completed) -- confidence and the spread
-/// (PRED TOTAL/HOME MARGIN below) stay visible either way, live or not,
-/// since both describe the pre-game pick, not the live game state.
-/// `completed` (ESPN's own signal, via the live-scores cache) is checked
-/// independently of this event's own SportEvent.status/`live` here --
-/// `live` flips back to false the moment the game ends, and
-/// SportEvent.status can lag the real result by up to 24h (the
-/// once-daily batch ingest) -- see LiveEventState.completed's own doc
-/// comment.
-///
-/// Pre-game, each column's only number is the model's own predicted
-/// score, gradient-clipped cyan for the favored side. Once live or
-/// finished, each column shows its real (in-progress, or final) score
-/// (gradient-clipped violet for whichever side is currently ahead/won)
-/// with the same pre-game predicted score still visible right below it
-/// in cyan -- live/actual and predicted stay two distinctly colored
-/// numbers rather than one swapping value, same convention game_row.dart's
-/// list rows use (ink/cyan there; violet here since this big numeral
-/// doubles as the "who's currently winning" signal, distinct from the
-/// pre-game favorite).
-// Same breakpoint as game_row.dart's own _stackBreakpoint/
-// field_leaderboard_table.dart's own _compactBreakpoint -- collapses the
-// LIVE/confidence pills to just their colored dots on a phone-width card.
-const _compactBreakpoint = 600.0;
+const _weekdays = ['MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT', 'SUN'];
+const _months = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'];
 
-/// isFinished is true once ESPN itself reports the game over, even
-/// though this event's own SportEvent.status can still say "scheduled"
-/// for up to 24h (the once-daily batch ingest hasn't caught up yet --
-/// see LiveEventState.completed's own doc comment). Kept distinct from
-/// isLive: a finished game shows the FINAL pill instead of LIVE, but
-/// still needs the real (now final, not still-updating) score.
-///
-/// homeLeading is who's ahead right now -- null pre-game (no live score
-/// yet) or on a live tie, when neither side is "winning". Distinct from
-/// MatchupHero.build's own homeFavored, which is the pre-game
-/// win-probability pick and stays fixed for the whole game.
-({bool isLive, bool isFinished, double? homeLiveScore, double? awayLiveScore, bool? homeLeading}) _liveMatchupState(
-  LiveEventState? liveState,
-) {
-  final isLive = liveState?.live ?? false;
-  final isFinished = liveState?.completed ?? false;
-  final homeLiveScore = (isLive || isFinished) ? liveState!.homeScore : null;
-  final awayLiveScore = (isLive || isFinished) ? liveState!.awayScore : null;
-  final homeLeading = (homeLiveScore != null && awayLiveScore != null && homeLiveScore != awayLiveScore)
-      ? homeLiveScore > awayLiveScore
-      : null;
-  return (
-    isLive: isLive, isFinished: isFinished, homeLiveScore: homeLiveScore, awayLiveScore: awayLiveScore,
-    homeLeading: homeLeading,
-  );
+/// "SAT, OCT 10" in the viewer's local time, plus " · 7:00 PM EDT" when
+/// [withTime] and the event has a kickoff time.
+String _dateLine(SportEvent event, {required bool withTime}) {
+  final local = DateTime.tryParse(event.kickoffTime ?? event.eventDate)?.toLocal();
+  if (local == null) return '';
+  final day = '${_weekdays[local.weekday - 1]}, ${_months[local.month - 1]} ${local.day}';
+  if (!withTime || event.kickoffTime == null) return day;
+  return '$day · ${clockLabel(local)} ${localTimezoneLabel()}';
 }
 
+/// White for the side ahead (or level), dimmed for the one behind.
+Color _scoreColor(double score, double? other) => other != null && score < other ? AppColors.inkSub : AppColors.ink;
+
+Color _chanceColor(double chance) => chance >= 0.5 ? AppColors.cyan : AppColors.inkSub;
+
+/// Away on the left of "@", home on the right.
+Widget _sides(Widget away, Widget home) => Row(
+      children: [
+        Expanded(child: away),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 12),
+          child: Text('@', style: AppTextStyles.sectionTitle(color: AppColors.inkMute)),
+        ),
+        Expanded(child: home),
+      ],
+    );
+
+BoxDecoration _heroDecoration() => BoxDecoration(
+      borderRadius: BorderRadius.circular(20),
+      gradient: const LinearGradient(begin: Alignment.topLeft, end: Alignment.bottomRight, colors: AppColors.surfaceGrad),
+      border: Border.all(color: AppColors.borderRaised),
+    );
+
+/// design/FRONTEND_STYLE.md's "Matchup hero (detail)" component for a game
+/// not yet stored as completed. Before kickoff each side's win chance is the
+/// big number with the model's score under it; once [liveState] is live or
+/// finished the real score takes the big slot and the model's score and win
+/// chance sit under it in cyan. The bar, the line, the total and confidence
+/// describe the pre-game pick and stay put throughout.
 class MatchupHero extends StatelessWidget {
   const MatchupHero({super.key, required this.sport, required this.event, required this.prediction, this.liveState});
 
@@ -82,67 +69,187 @@ class MatchupHero extends StatelessWidget {
   Widget build(BuildContext context) {
     final home = teamDisplay(sport, event.home);
     final away = teamDisplay(sport, event.away);
-    final homeFavored = prediction.homeWinProbability >= 0.5;
+    final homeChance = prediction.homeWinProbability;
+    final homeFavored = homeChance >= 0.5;
+    final state = liveState;
+    final onScoreboard = state != null && (state.live || state.completed);
+    final situation = state != null && state.live ? state.situation : null;
+    final homeScore = onScoreboard ? state.homeScore : null;
+    final awayScore = onScoreboard ? state.awayScore : null;
+
+    Widget side({required bool isHome}) {
+      final team = isHome ? home : away;
+      final chance = isHome ? homeChance : 1 - homeChance;
+      final model = (isHome ? prediction.homeScore : prediction.awayScore).round();
+      final score = isHome ? homeScore : awayScore;
+      final other = isHome ? awayScore : homeScore;
+      final percent = '${(chance * 100).round()}%';
+      return _Side(
+        team: team,
+        hasBall: (isHome ? situation?.homeHasBall : situation?.awayHasBall) ?? false,
+        big: score != null ? score.toStringAsFixed(0) : percent,
+        bigColor: score != null ? _scoreColor(score, other) : _chanceColor(chance),
+        model: score != null ? '$model · $percent' : '$model',
+      );
+    }
 
     return Container(
-      padding: const EdgeInsets.all(28),
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(20),
-        gradient: const LinearGradient(begin: Alignment.topLeft, end: Alignment.bottomRight, colors: AppColors.surfaceGrad),
-        border: Border.all(color: AppColors.borderRaised),
-      ),
-      child: LayoutBuilder(
-        builder: (context, constraints) {
-          final compact = constraints.maxWidth < _compactBreakpoint;
-          return Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
+      padding: const EdgeInsets.all(22),
+      decoration: _heroDecoration(),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          _Status(event: event, liveState: state),
+          const SizedBox(height: 14),
+          _sides(side(isHome: false), side(isHome: true)),
+          const SizedBox(height: 16),
+          WinProbabilityBar(homeWinProbability: homeChance, height: 8),
+          const SizedBox(height: 16),
+          const Divider(height: 1, thickness: 1, color: AppColors.border),
+          const SizedBox(height: 14),
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              _TeamColumns(home: home, away: away, prediction: prediction, liveState: liveState),
-              if (event.venueLabel != null) ...[
-                const SizedBox(height: 12),
-                Center(child: _VenueLabel(label: event.venueLabel!)),
-              ],
-              const SizedBox(height: 20),
-              // A plain divider -- each side's win probability is already
-              // printed under its team.
-              const Divider(height: 1, thickness: 1, color: AppColors.border),
-              _LiveStatus(liveState: liveState, compact: compact),
-              const SizedBox(height: 24),
-              Center(
+              Expanded(
+                child: _Figure(
+                  label: 'LINE',
+                  lines: [(lineLabel(homeFavored ? home.abbreviation : away.abbreviation, prediction.margin), AppColors.cyan)],
+                ),
+              ),
+              Expanded(
+                child: _Figure(
+                  label: 'TOTAL',
+                  lines: [((prediction.homeScore + prediction.awayScore).toStringAsFixed(1), AppColors.cyan)],
+                ),
+              ),
+              Expanded(
                 child: Column(
+                  mainAxisSize: MainAxisSize.min,
                   children: [
-                    Text('PICK', style: AppTextStyles.microLabel()),
-                    const SizedBox(height: 4),
-                    Text(homeFavored ? home.abbreviation : away.abbreviation, style: AppTextStyles.bigStatNumeral()),
-                    const SizedBox(height: 8),
-                    // Confidence stays visible live or not -- it's a
-                    // property of the pre-game pick above it, not
-                    // something the live game state changes.
-                    ConfidencePill(homeWinProbability: prediction.homeWinProbability, dotOnly: compact),
+                    Text('CONFIDENCE', style: AppTextStyles.microLabel(), textAlign: TextAlign.center),
+                    const SizedBox(height: 6),
+                    ConfidencePill(homeWinProbability: homeChance),
                   ],
                 ),
               ),
-              const SizedBox(height: 24),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceAround,
-                children: [
-                  Flexible(
-                    child: _StatTrio(
-                      label: 'PRED TOTAL',
-                      value: (prediction.homeScore + prediction.awayScore).toStringAsFixed(1),
-                    ),
-                  ),
-                  Flexible(child: _StatTrio(label: 'HOME MARGIN', value: prediction.margin.toStringAsFixed(1))),
-                ],
-              ),
-              _StartingGoalies(
-                goalies: prediction.goalies.isNotEmpty ? prediction.goalies : event.goalies,
-                homeAbbr: home.abbreviation, awayAbbr: away.abbreviation,
-              ),
             ],
-          );
-        },
+          ),
+          _StartingGoalies(
+            goalies: prediction.goalies.isNotEmpty ? prediction.goalies : event.goalies,
+            homeAbbr: home.abbreviation, awayAbbr: away.abbreviation,
+          ),
+        ],
       ),
+    );
+  }
+}
+
+/// The date, time and venue before a game; the LIVE pill, clock and down
+/// during one; FINAL once ESPN reports it over.
+class _Status extends StatelessWidget {
+  const _Status({required this.event, required this.liveState});
+
+  final SportEvent event;
+  final LiveEventState? liveState;
+
+  @override
+  Widget build(BuildContext context) {
+    final state = liveState;
+    final venue = event.venueLabel;
+    final venueLine = venue == null ? null : _VenueLabel(label: venue);
+    if (state == null || !(state.live || state.completed)) {
+      return Column(
+        children: [
+          Text(_dateLine(event, withTime: true), style: AppTextStyles.microLabel(color: AppColors.inkSub), textAlign: TextAlign.center),
+          if (venueLine != null) ...[const SizedBox(height: 6), venueLine],
+        ],
+      );
+    }
+    final clock = state.live ? state.detail : null;
+    final situation = state.live ? state.situation : null;
+    return Column(
+      children: [
+        Wrap(
+          alignment: WrapAlignment.center,
+          crossAxisAlignment: WrapCrossAlignment.center,
+          spacing: 8,
+          runSpacing: 4,
+          children: [
+            state.live ? const LiveStatusPill() : const FinalStatusPill(),
+            if (clock != null && clock.isNotEmpty) Text(clock, style: AppTextStyles.body(color: AppColors.inkSub)),
+          ],
+        ),
+        if (situation != null && situation.hasDown) ...[
+          const SizedBox(height: 6),
+          FootballSituationText(situation: situation, separator: ' at ', textAlign: TextAlign.center),
+        ],
+        if (venueLine != null) ...[const SizedBox(height: 6), venueLine],
+      ],
+    );
+  }
+}
+
+/// One team: colour and name, a big number, and the model's figures in cyan.
+class _Side extends StatelessWidget {
+  const _Side({
+    required this.team, required this.big, required this.bigColor, required this.model, this.hasBall = false,
+    this.dimmed = false,
+  });
+
+  final NflTeam team;
+  final String big;
+  final Color bigColor;
+  // Null when no prediction was logged.
+  final String? model;
+  final bool hasBall;
+  final bool dimmed;
+
+  @override
+  Widget build(BuildContext context) {
+    final model = this.model;
+    return Column(
+      children: [
+        FittedBox(
+          fit: BoxFit.scaleDown,
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TeamColorDot(color: team.primary, size: 10),
+              const SizedBox(width: 8),
+              Text(team.abbreviation, style: AppTextStyles.cardTitle(color: dimmed ? AppColors.inkSub : AppColors.ink)),
+              if (hasBall) ...[const SizedBox(width: 8), const PossessionBall()],
+            ],
+          ),
+        ),
+        const SizedBox(height: 4),
+        FittedBox(fit: BoxFit.scaleDown, child: Text(big, style: AppTextStyles.bigStatNumeral(color: bigColor))),
+        if (model != null) ...[
+          const SizedBox(height: 2),
+          FittedBox(fit: BoxFit.scaleDown, child: Text(model, style: AppTextStyles.metricValue(color: AppColors.cyan))),
+        ],
+      ],
+    );
+  }
+}
+
+/// A labelled figure of one or two coloured lines (the actual in white over
+/// the model in cyan, or the model alone).
+class _Figure extends StatelessWidget {
+  const _Figure({required this.label, required this.lines});
+
+  final String label;
+  final List<(String, Color)> lines;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Text(label, style: AppTextStyles.microLabel(), textAlign: TextAlign.center),
+        const SizedBox(height: 4),
+        for (final (text, color) in lines)
+          FittedBox(fit: BoxFit.scaleDown, child: Text(text, style: AppTextStyles.metricValueLarge(color: color))),
+      ],
     );
   }
 }
@@ -186,9 +293,9 @@ class _StartingGoalies extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        const SizedBox(height: 20),
-        const Divider(height: 1, thickness: 1, color: AppColors.border),
         const SizedBox(height: 16),
+        const Divider(height: 1, thickness: 1, color: AppColors.border),
+        const SizedBox(height: 14),
         Row(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -202,187 +309,10 @@ class _StartingGoalies extends StatelessWidget {
   }
 }
 
-/// Away column, "@", home column -- each team's color, name, score(s) and
-/// win probability, with the football by whichever side has the ball.
-class _TeamColumns extends StatelessWidget {
-  const _TeamColumns({required this.home, required this.away, required this.prediction, required this.liveState});
-
-  final NflTeam home;
-  final NflTeam away;
-  final EventPrediction prediction;
-  final LiveEventState? liveState;
-
-  @override
-  Widget build(BuildContext context) {
-    final homeFavored = prediction.homeWinProbability >= 0.5;
-    final (:isLive, isFinished: _, :homeLiveScore, :awayLiveScore, :homeLeading) = _liveMatchupState(liveState);
-    final situation = isLive ? liveState?.situation : null;
-    return Row(
-      children: [
-        Expanded(
-          child: _TeamColumn(
-            color: away.primary,
-            abbr: away.abbreviation,
-            probability: 1 - prediction.homeWinProbability,
-            favored: !homeFavored,
-            predictedScore: prediction.awayScore,
-            liveScore: awayLiveScore,
-            leading: homeLeading == null ? null : !homeLeading,
-            hasBall: situation?.awayHasBall ?? false,
-          ),
-        ),
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16),
-          // "@" reads as "away @ home"; away is the left column above so
-          // this ordering matches that. This is the only marker of which
-          // side is home/away.
-          child: Text('@', style: AppTextStyles.sectionTitle(color: AppColors.inkMute)),
-        ),
-        Expanded(
-          child: _TeamColumn(
-            color: home.primary,
-            abbr: home.abbreviation,
-            probability: prediction.homeWinProbability,
-            favored: homeFavored,
-            predictedScore: prediction.homeScore,
-            liveScore: homeLiveScore,
-            leading: homeLeading,
-            hasBall: situation?.homeHasBall ?? false,
-          ),
-        ),
-      ],
-    );
-  }
-}
-
-/// The LIVE pill + game clock (or just FINAL once the game's over), and for
-/// live football the down line under it. Renders nothing before kickoff.
-/// Kept apart from confidence, which belongs to the pre-game PICK below.
-class _LiveStatus extends StatelessWidget {
-  const _LiveStatus({required this.liveState, required this.compact});
-
-  final LiveEventState? liveState;
-  final bool compact;
-
-  @override
-  Widget build(BuildContext context) {
-    final state = liveState;
-    if (state == null || !(state.live || state.completed)) return const SizedBox.shrink();
-    final clock = state.live ? state.detail : null;
-    final situation = state.live ? state.situation : null;
-    return Column(
-      children: [
-        const SizedBox(height: 12),
-        Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            state.live ? LiveStatusPill(dotOnly: compact) : FinalStatusPill(dotOnly: compact),
-            if (clock != null) ...[
-              const SizedBox(width: 8),
-              // Flexible + wrapping -- ESPN's detail isn't always a short
-              // clock ("Q3 08:14"); "End of 2nd Quarter" or "Delayed:
-              // Weather" can overflow a phone-width card otherwise.
-              Flexible(child: Text(clock, style: AppTextStyles.body(color: AppColors.inkSub))),
-            ],
-          ],
-        ),
-        if (situation != null && situation.hasDown) ...[
-          const SizedBox(height: 6),
-          FootballSituationText(situation: situation, separator: ' at ', textAlign: TextAlign.center),
-        ],
-      ],
-    );
-  }
-}
-
-class _TeamColumn extends StatelessWidget {
-  const _TeamColumn({
-    required this.color, required this.abbr, required this.probability, required this.favored,
-    required this.predictedScore, this.liveScore, this.leading, this.hasBall = false,
-  });
-  final Color? color;
-  final String abbr;
-  final double probability;
-  // The pre-game win-probability pick -- fixed for the whole game, only
-  // used to accent the predicted score before there's a live one.
-  final bool favored;
-  final double predictedScore;
-  // Non-null only once the event is actually live -- this team's own
-  // real, in-progress score.
-  final double? liveScore;
-  // Whether this team is currently ahead on the live scoreboard -- null
-  // pre-game or on a live tie, when neither side is "winning" yet.
-  final bool? leading;
-  // Live football: this team has the ball.
-  final bool hasBall;
-
-  @override
-  Widget build(BuildContext context) {
-    // Predicted score always renders in cyan -- the sole number pre-game
-    // (gradient-clipped when favored), or the smaller companion value
-    // once a live score takes over the big numeral below.
-    final predictedText = liveScore != null
-        ? Text('${predictedScore.round()}', style: AppTextStyles.metricValue(color: AppColors.cyan))
-        : Text('${predictedScore.round()} PTS', style: AppTextStyles.metricValueLarge(color: AppColors.cyan));
-    final predictedNumeral = favored
-        ? ShaderMask(
-            shaderCallback: (bounds) => AppColors.cyanFill.createShader(bounds),
-            blendMode: BlendMode.srcIn,
-            child: predictedText,
-          )
-        : Opacity(opacity: 0.6, child: predictedText);
-
-    Widget scoreDisplay;
-    final live = liveScore;
-    if (live != null) {
-      // Live: this team's real, in-progress score is the big numeral,
-      // gradient-clipped violet when currently ahead (dimmed otherwise)
-      // -- distinct from the cyan predicted score, kept visible right
-      // below it rather than swapped out.
-      final liveNumeral = Text('${live.round()} PTS', style: AppTextStyles.metricValueLarge());
-      scoreDisplay = Column(
-        children: [
-          leading == true
-              ? ShaderMask(
-                  shaderCallback: (bounds) => AppColors.violetFill.createShader(bounds),
-                  blendMode: BlendMode.srcIn,
-                  child: liveNumeral,
-                )
-              : Opacity(opacity: 0.6, child: liveNumeral),
-          const SizedBox(height: 2),
-          predictedNumeral,
-        ],
-      );
-    } else {
-      scoreDisplay = predictedNumeral;
-    }
-
-    return Column(
-      children: [
-        TeamColorDot(color: color, size: 10),
-        const SizedBox(height: 8),
-        Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            if (hasBall) ...[const PossessionBall(), const SizedBox(width: 6)],
-            // Flexible so a long name still shrinks within a narrow column.
-            Flexible(child: Text(abbr, style: AppTextStyles.cardTitle(), textAlign: TextAlign.center)),
-          ],
-        ),
-        const SizedBox(height: 8),
-        scoreDisplay,
-        const SizedBox(height: 4),
-        Text('${(probability * 100).round()}%', style: AppTextStyles.microLabel(color: AppColors.inkMute)),
-      ],
-    );
-  }
-}
-
-/// Completed-game counterpart to MatchupHero -- same card shape/team-color
-/// language, but shows the final score plus the prediction actually
-/// logged before the game was played, via `comparison` (already fetched
-/// by the events list). `comparison` is null when no prediction was ever
-/// logged for this event, not a loading state.
+/// MatchupHero for a completed game: the final score with the model's under
+/// it, the verdict on the pick logged before the game, then the final line
+/// and total over the model's. [comparison] is null when no prediction was
+/// ever logged, not a loading state.
 class MatchupResultHero extends StatelessWidget {
   const MatchupResultHero({super.key, required this.sport, required this.event, required this.comparison});
 
@@ -390,165 +320,116 @@ class MatchupResultHero extends StatelessWidget {
   final SportEvent event;
   final PredictionComparison? comparison;
 
+  static const noPredictionLabel = 'No prediction was recorded for this game.';
+
   @override
   Widget build(BuildContext context) {
     final home = teamDisplay(sport, event.home);
     final away = teamDisplay(sport, event.away);
     final homeWon = event.home.result?.won ?? false;
+    final c = comparison;
+    final venue = event.venueLabel;
+
+    Widget side({required bool isHome}) {
+      final score = (isHome ? event.home : event.away).result?.score;
+      final model = isHome ? c?.predictedHomeScore : c?.predictedAwayScore;
+      final won = isHome ? homeWon : !homeWon;
+      return _Side(
+        team: isHome ? home : away,
+        big: score?.toStringAsFixed(0) ?? '--',
+        bigColor: won ? AppColors.ink : AppColors.inkSub,
+        model: model?.round().toString(),
+        dimmed: !won,
+      );
+    }
 
     return Container(
-      padding: const EdgeInsets.all(28),
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(20),
-        gradient: const LinearGradient(begin: Alignment.topLeft, end: Alignment.bottomRight, colors: AppColors.surfaceGrad),
-        border: Border.all(color: AppColors.borderRaised),
-      ),
+      padding: const EdgeInsets.all(22),
+      decoration: _heroDecoration(),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Row(
-            children: [
-              Expanded(
-                child: _ResultTeamColumn(
-                  color: away.primary, abbr: away.abbreviation,
-                  score: event.away.result?.score, predictedScore: comparison?.predictedAwayScore, won: !homeWon,
-                ),
-              ),
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 16),
-                // Away-left/home-right + "@", "FINAL" underneath adds the
-                // completed-game status on top.
-                child: Column(
-                  children: [
-                    Text('@', style: AppTextStyles.sectionTitle(color: AppColors.inkMute)),
-                    Text(event.finalLabel, style: AppTextStyles.microLabel(color: AppColors.inkMute)),
-                  ],
-                ),
-              ),
-              Expanded(
-                child: _ResultTeamColumn(
-                  color: home.primary, abbr: home.abbreviation,
-                  score: event.home.result?.score, predictedScore: comparison?.predictedHomeScore, won: homeWon,
-                ),
-              ),
-            ],
+          Text(
+            [event.finalLabel, _dateLine(event, withTime: false)].where((part) => part.isNotEmpty).join(' · '),
+            style: AppTextStyles.microLabel(color: AppColors.inkSub), textAlign: TextAlign.center,
           ),
-          if (event.venueLabel != null) ...[
-            const SizedBox(height: 12),
-            Center(child: _VenueLabel(label: event.venueLabel!)),
-          ],
-          const SizedBox(height: 24),
-          _PredictionRecap(comparison: comparison),
+          if (venue != null) ...[const SizedBox(height: 6), _VenueLabel(label: venue)],
+          const SizedBox(height: 14),
+          _sides(side(isHome: false), side(isHome: true)),
+          const SizedBox(height: 16),
+          if (c == null)
+            Center(child: Text(noPredictionLabel, style: AppTextStyles.body(color: AppColors.inkMute), textAlign: TextAlign.center))
+          else
+            _Recap(comparison: c, homeAbbr: home.abbreviation, awayAbbr: away.abbreviation),
         ],
       ),
     );
   }
 }
 
-class _ResultTeamColumn extends StatelessWidget {
-  const _ResultTeamColumn({
-    required this.color, required this.abbr, required this.score, required this.predictedScore, required this.won,
-  });
-  final Color? color;
-  final String abbr;
-  final double? score;
-  // The pre-game predicted score, shown alongside the actual final score
-  // (same cyan-actual/predicted convention _TeamColumn uses live) -- null
-  // when no prediction was ever logged for this event.
-  final double? predictedScore;
-  final bool won;
+/// HIT or MISS beside the pick and its win chance, then the final line and
+/// total in white over the model's in cyan.
+class _Recap extends StatelessWidget {
+  const _Recap({required this.comparison, required this.homeAbbr, required this.awayAbbr});
 
-  @override
-  Widget build(BuildContext context) {
-    final numeral = Text(score?.toStringAsFixed(0) ?? '--', style: AppTextStyles.bigStatNumeral());
-
-    return Column(
-      children: [
-        TeamColorDot(color: color, size: 10),
-        const SizedBox(height: 8),
-        Text(abbr, style: AppTextStyles.cardTitle()),
-        const SizedBox(height: 8),
-        won
-            ? ShaderMask(
-                shaderCallback: (bounds) => AppColors.cyanFill.createShader(bounds),
-                blendMode: BlendMode.srcIn,
-                child: numeral,
-              )
-            : Opacity(opacity: 0.6, child: numeral),
-        if (predictedScore != null) ...[
-          const SizedBox(height: 4),
-          Text('${predictedScore!.round()} PTS PRED', style: AppTextStyles.metricValue(color: AppColors.cyan)),
-        ],
-      ],
-    );
-  }
-}
-
-class _PredictionRecap extends StatelessWidget {
-  const _PredictionRecap({required this.comparison});
-  final PredictionComparison? comparison;
+  final PredictionComparison comparison;
+  final String homeAbbr;
+  final String awayAbbr;
 
   @override
   Widget build(BuildContext context) {
     final c = comparison;
-    if (c == null) {
-      return Center(
-        child: Text('No prediction was recorded for this game.', style: AppTextStyles.body(color: AppColors.inkMute)),
-      );
-    }
+    final pick = c.predictedHomeWon ? homeAbbr : awayAbbr;
+    final winner = c.actualHomeWon ? homeAbbr : awayAbbr;
+    final chance = c.predictedHomeWon ? c.predictedHomeWinProbability : 1 - c.predictedHomeWinProbability;
+    final margin = c.predictedMargin;
+    final modelHome = c.predictedHomeScore;
+    final modelAway = c.predictedAwayScore;
     return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Row(
-          mainAxisAlignment: MainAxisAlignment.center,
+        Wrap(
+          alignment: WrapAlignment.center,
+          crossAxisAlignment: WrapCrossAlignment.center,
+          spacing: 10,
+          runSpacing: 6,
           children: [
-            Icon(c.correct ? Icons.check_circle : Icons.cancel, color: c.correct ? AppColors.live : AppColors.neg, size: 18),
-            const SizedBox(width: 8),
-            Flexible(
-              child: Text(
-                c.correct ? 'Model picked the winner' : 'Model missed the winner',
-                style: AppTextStyles.body(color: AppColors.inkSub),
+            VerdictPill(correct: c.correct),
+            Text('$pick ${(chance * 100).round()}%', style: AppTextStyles.metricValue(color: AppColors.cyan)),
+          ],
+        ),
+        const SizedBox(height: 16),
+        const Divider(height: 1, thickness: 1, color: AppColors.border),
+        const SizedBox(height: 14),
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Expanded(
+              child: _Figure(
+                label: 'LINE',
+                lines: [
+                  (c.actualMargin == 0 ? 'TIE' : lineLabel(winner, c.actualMargin, trim: true), AppColors.ink),
+                  if (margin != null) (lineLabel(pick, margin), AppColors.cyan),
+                ],
+              ),
+            ),
+            Expanded(
+              child: _Figure(
+                label: 'TOTAL',
+                lines: [
+                  ((c.actualHomeScore + c.actualAwayScore).toStringAsFixed(0), AppColors.ink),
+                  if (modelHome != null && modelAway != null) ((modelHome + modelAway).toStringAsFixed(1), AppColors.cyan),
+                ],
               ),
             ),
           ],
         ),
-        const SizedBox(height: 16),
-        Row(
-          mainAxisAlignment: MainAxisAlignment.spaceAround,
-          children: [
-            Flexible(child: _StatTrio(label: 'PREDICTED', value: '${(c.predictedHomeWinProbability * 100).round()}% HOME')),
-            // '--' rather than omitting the trio when unavailable -- keeps
-            // the 3-slot spaceAround layout stable instead of reflowing.
-            Flexible(child: _StatTrio(label: 'PRED MARGIN', value: c.predictedMargin?.toStringAsFixed(1) ?? '--')),
-            Flexible(child: _StatTrio(label: 'ACTUAL MARGIN', value: c.actualMargin.toStringAsFixed(1))),
-          ],
-        ),
       ],
     );
   }
 }
 
-class _StatTrio extends StatelessWidget {
-  const _StatTrio({required this.label, required this.value});
-  final String label;
-  final String value;
-
-  @override
-  Widget build(BuildContext context) {
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Text(label, style: AppTextStyles.microLabel(), textAlign: TextAlign.center),
-        const SizedBox(height: 4),
-        Text(value, style: AppTextStyles.metricValueLarge()),
-      ],
-    );
-  }
-}
-
-/// Stadium name + city/state, between the score/probability row above and
-/// the PICK/margin section below -- see SportEvent.venueLabel. Caller
-/// skips rendering entirely when it's null; deliberately excludes
-/// venue_indoor -- location/name only.
+/// Stadium name and city/state, centred. Location only, never venue_indoor.
 class _VenueLabel extends StatelessWidget {
   const _VenueLabel({required this.label});
   final String label;
@@ -556,16 +437,11 @@ class _VenueLabel extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Row(
-      mainAxisSize: MainAxisSize.min,
+      mainAxisAlignment: MainAxisAlignment.center,
       children: [
         const Icon(Icons.location_on_outlined, size: 13, color: AppColors.inkMute),
         const SizedBox(width: 4),
-        Flexible(
-          child: Text(
-            label,
-            style: AppTextStyles.microLabel(color: AppColors.inkMute),
-          ),
-        ),
+        Flexible(child: Text(label, style: AppTextStyles.microLabel(color: AppColors.inkMute), textAlign: TextAlign.center)),
       ],
     );
   }

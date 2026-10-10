@@ -58,7 +58,7 @@ void main() {
       _conferenceEvent('4', '2026-09-15T18:00:00Z', null),
     ];
 
-    testWidgets('groups by conference with Other last, and filters by conference name', (tester) async {
+    testWidgets('groups by conference with Other last, and the Conference menu narrows to the chosen ones', (tester) async {
       await tester.pumpWidget(_page((status) async => events));
       await tester.pumpAndSettle();
 
@@ -68,14 +68,32 @@ void main() {
       expect(other, greaterThan(sec));
       expect(other, greaterThan(bigTen));
 
-      await tester.enterText(find.byType(TextField), 'sec');
+      await tester.tap(find.text('CONFERENCE'));
       await tester.pumpAndSettle();
+      await tester.tap(find.widgetWithText(CheckboxMenuButton, 'SEC'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('CONFERENCE · SEC'));
+      await tester.pumpAndSettle();
+
       expect(find.text('SEC'), findsOneWidget);
       expect(find.text('BIG TEN'), findsNothing);
+      expect(find.text('OTHER'), findsNothing);
+      expect(find.text('1 OF 4 GAMES'), findsOneWidget);
+    });
 
-      await tester.enterText(find.byType(TextField), 'zzz');
+    testWidgets('the Completed tab keeps the Conference menu and drops the game filters', (tester) async {
+      final completed = [
+        _conferenceEvent('5', '2026-09-01T17:00:00Z', 'SEC', status: 'completed'),
+        _conferenceEvent('6', '2026-09-08T17:00:00Z', 'Big Ten', status: 'completed'),
+      ];
+      await tester.pumpWidget(_page((status) async => status == 'completed' ? completed : events));
       await tester.pumpAndSettle();
-      expect(find.text('No conferences match "zzz".'), findsOneWidget);
+
+      await tester.tap(find.text('Completed'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('CONFERENCE'), findsOneWidget);
+      expect(find.text('CONFIDENCE'), findsNothing);
     });
 
     testWidgets('Completed lists most-recent first, and switching back to Upcoming works', (tester) async {

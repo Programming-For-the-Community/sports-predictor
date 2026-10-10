@@ -11,6 +11,8 @@ abstract final class AppColors {
   static const inset = Color(0x08FFFFFF);
   static const border = Color(0x12FFFFFF);
   static const borderRaised = Color(0x14FFFFFF);
+  static const track = Color(0xFF1a2233);
+  static const menu = Color(0xFF121826);
 
   // Text
   static const ink = Color(0xFFEAF0F7);

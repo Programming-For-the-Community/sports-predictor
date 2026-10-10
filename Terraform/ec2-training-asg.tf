@@ -140,6 +140,10 @@ resource "aws_ecs_capacity_provider" "ec2_training_spot" {
       target_capacity           = 100
       minimum_scaling_step_size = 1
       maximum_scaling_step_size = 1
+      # Time for a launched instance to boot and join the cluster before
+      # the scaling policy acts again. At 0 it re-fires every minute on
+      # the still-pending tasks and launches three times what they need.
+      instance_warmup_period = 300
     }
   }
 
@@ -161,6 +165,10 @@ resource "aws_ecs_capacity_provider" "ec2_training_ondemand" {
       target_capacity           = 100
       minimum_scaling_step_size = 1
       maximum_scaling_step_size = 1
+      # Time for a launched instance to boot and join the cluster before
+      # the scaling policy acts again. At 0 it re-fires every minute on
+      # the still-pending tasks and launches three times what they need.
+      instance_warmup_period = 300
     }
   }
 

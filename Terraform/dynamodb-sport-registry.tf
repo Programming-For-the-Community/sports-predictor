@@ -618,9 +618,11 @@ resource "aws_dynamodb_table_item" "f1_registry" {
 }
 
 # Same 3 score targets as the other head-to-head sports. No overtime
-# model: the season simulation uses the league-wide overtime rate. 6
-# skater props and 2 goalie props, all trained by the one player-prop task
-# (train_player_prop_model.py picks the dataset from the stat).
+# model: the season simulation uses the league-wide overtime rate. The 4
+# skater props and 1 goalie prop the app shows, all trained by the one
+# player-prop task (train_player_prop_model.py picks the dataset from the
+# stat). It can also train points, blocked_shots and goals_against, which
+# nothing displays.
 locals {
   nhl_score_targets = {
     "margin"     = true
@@ -628,14 +630,11 @@ locals {
     "away_score" = true
   }
   nhl_player_prop_stats = {
-    "shots_total"   = true
-    "points"        = true
-    "goals"         = true
-    "assists"       = true
-    "hits"          = true
-    "blocked_shots" = true
-    "saves"         = true
-    "goals_against" = true
+    "shots_total" = true
+    "goals"       = true
+    "assists"     = true
+    "hits"        = true
+    "saves"       = true
   }
 }
 

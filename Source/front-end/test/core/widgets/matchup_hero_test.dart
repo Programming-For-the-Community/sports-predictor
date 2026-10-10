@@ -6,6 +6,8 @@ import 'package:front_end/core/models/live_score.dart';
 import 'package:front_end/core/models/prediction.dart';
 import 'package:front_end/core/theme/app_colors.dart';
 import 'package:front_end/core/widgets/matchup_hero.dart';
+import 'package:front_end/core/widgets/pick_labels.dart';
+import 'package:front_end/core/widgets/win_probability_bar.dart';
 import 'package:front_end/static/confidence_tiers.dart';
 
 final _tier = ConfidenceTier.forProbability(0.62).label;
@@ -40,154 +42,146 @@ SportEvent _scheduledEvent() => SportEvent(
       leadersComparison: null,
     );
 
-// Locates a Text widget rendering exactly `text` -- used below for the
-// smaller companion predicted-score numeral, which (unlike the big live
-// numeral) isn't wrapped in a ShaderMask so its own style is checkable
-// directly.
 Finder _textStyled(String text, Color color) => find.byWidgetPredicate(
       (widget) => widget is Text && widget.data == text && widget.style?.color == color,
     );
 
+const _prediction = EventPrediction(
+  homeWinProbability: 0.62,
+  homeWinProbabilityModelVersion: 9,
+  margin: 4.5,
+  homeScore: 27.3,
+  awayScore: 22.8,
+  leaders: null,
+);
+
+Future<void> _pump(WidgetTester tester, Widget hero, {double width = 700, double textScale = 1}) => tester.pumpWidget(MaterialApp(
+      home: MediaQuery(
+        data: MediaQueryData(textScaler: TextScaler.linear(textScale)),
+        child: Scaffold(body: SingleChildScrollView(child: SizedBox(width: width, child: hero))),
+      ),
+    ));
+
 void main() {
-  group('MatchupHero live scoring', () {
-    const prediction = EventPrediction(
-      homeWinProbability: 0.62,
-      homeWinProbabilityModelVersion: 9,
-      margin: 4.5,
-      homeScore: 27.3,
-      awayScore: 22.8,
-      leaders: null,
-    );
+  group('MatchupHero', () {
+    testWidgets('before a game each side\'s win chance is the big number, with the model score under it', (tester) async {
+      await _pump(tester, MatchupHero(sport: 'nfl', event: _scheduledEvent(), prediction: _prediction));
 
-    testWidgets('a live event shows the real score alongside the still-visible predicted one, in cyan', (tester) async {
-      const liveState = LiveEventState(live: true, detail: 'Q2 04:12', homeScore: 14, awayScore: 7);
-
-      await tester.pumpWidget(MaterialApp(
-        home: Scaffold(body: MatchupHero(sport: 'nfl', event: _scheduledEvent(), prediction: prediction, liveState: liveState)),
-      ));
-
-      // Live scores render as the big numeral.
-      expect(find.textContaining('14 PTS'), findsOneWidget);
-      expect(find.textContaining('7 PTS'), findsOneWidget);
-      // The pre-game predicted scores stay visible too, smaller and
-      // cyan, not swapped out by the live ones.
+      // KC is home and favoured.
+      expect(_textStyled('62%', AppColors.cyan), findsOneWidget);
+      expect(_textStyled('38%', AppColors.inkSub), findsOneWidget);
       expect(_textStyled('27', AppColors.cyan), findsOneWidget);
       expect(_textStyled('23', AppColors.cyan), findsOneWidget);
-      // Confidence and the spread stay visible alongside the LIVE
-      // banner/clock, not replaced by it.
-      expect(find.text('Q2 04:12'), findsOneWidget);
+      expect(find.byType(WinProbabilityBar), findsOneWidget);
+      expect(_textStyled('KC -4.5', AppColors.cyan), findsOneWidget);
+      expect(_textStyled('50.1', AppColors.cyan), findsOneWidget);
       expect(find.text(_tier), findsOneWidget);
-      expect(find.text('HOME MARGIN'), findsOneWidget);
-    });
-
-    testWidgets('the confidence pill sits with PICK, below the LIVE banner/clock -- not next to it', (tester) async {
-      const liveState = LiveEventState(live: true, detail: 'Q2 04:12', homeScore: 14, awayScore: 7);
-
-      await tester.pumpWidget(MaterialApp(
-        home: Scaffold(body: MatchupHero(sport: 'nfl', event: _scheduledEvent(), prediction: prediction, liveState: liveState)),
-      ));
-
-      final liveY = tester.getCenter(find.text('Q2 04:12')).dy;
-      final pickLabelY = tester.getCenter(find.text('PICK')).dy;
-      final confidenceY = tester.getCenter(find.text(_tier)).dy;
-
-      expect(liveY, lessThan(pickLabelY));
-      expect(confidenceY, greaterThan(pickLabelY));
-    });
-
-    testWidgets('a live event on a narrow (mobile) width collapses the LIVE/confidence pills to just their dots',
-        (tester) async {
-      const liveState = LiveEventState(live: true, detail: 'Q2 04:12', homeScore: 14, awayScore: 7);
-
-      await tester.pumpWidget(MaterialApp(
-        home: Scaffold(
-          body: SizedBox(
-            width: 560,
-            child: MatchupHero(sport: 'nfl', event: _scheduledEvent(), prediction: prediction, liveState: liveState),
-          ),
-        ),
-      ));
-
+      expect(find.textContaining('SEP 14'), findsOneWidget);
       expect(find.text('LIVE'), findsNothing);
-      expect(find.text(_tier), findsNothing);
-      expect(find.byTooltip('LIVE'), findsOneWidget);
-      expect(find.byTooltip(_tier), findsOneWidget);
-      // The rest of the card (game clock, spread) is unaffected.
+    });
+
+    testWidgets('a live game puts the real score in the big slot and keeps the model and win chance under it', (tester) async {
+      const liveState = LiveEventState(live: true, detail: 'Q2 04:12', homeScore: 14, awayScore: 7);
+      await _pump(tester, MatchupHero(sport: 'nfl', event: _scheduledEvent(), prediction: _prediction, liveState: liveState));
+
+      expect(_textStyled('14', AppColors.ink), findsOneWidget);
+      expect(_textStyled('7', AppColors.inkSub), findsOneWidget);
+      expect(_textStyled('27 · 62%', AppColors.cyan), findsOneWidget);
+      expect(_textStyled('23 · 38%', AppColors.cyan), findsOneWidget);
+      expect(find.text('LIVE'), findsOneWidget);
       expect(find.text('Q2 04:12'), findsOneWidget);
-      expect(find.text('HOME MARGIN'), findsOneWidget);
+      // The pre-game pick stays put.
+      expect(find.text('KC -4.5'), findsOneWidget);
+      expect(find.text(_tier), findsOneWidget);
     });
 
-    testWidgets('a long live-detail string does not overflow a phone-width card', (tester) async {
-      // ESPN's own detail text isn't always a short clock -- situational
-      // strings ("End of 2nd Quarter", a weather delay message) run long
-      // enough to overflow the LIVE row if it isn't allowed to shrink.
-      const liveState = LiveEventState(live: true, detail: '2nd & Goal at NCAAFB 4 -- Timeout', homeScore: 14, awayScore: 7);
-
-      await tester.pumpWidget(MaterialApp(
-        home: Scaffold(
-          body: SizedBox(
-            width: 360,
-            child: MatchupHero(sport: 'ncaafb', event: _scheduledEvent(), prediction: prediction, liveState: liveState),
-          ),
-        ),
-      ));
-
-      expect(tester.takeException(), isNull);
-    });
-
-    testWidgets('a pre-game (not yet live) event shows only the predicted score, in cyan', (tester) async {
-      await tester.pumpWidget(MaterialApp(
-        home: Scaffold(body: MatchupHero(sport: 'nfl', event: _scheduledEvent(), prediction: prediction)),
-      ));
-
-      expect(find.textContaining('27 PTS'), findsOneWidget);
-      expect(find.textContaining('23 PTS'), findsOneWidget);
-      // No live numeral, no smaller companion value either.
-      expect(_textStyled('27', AppColors.cyan), findsNothing);
-    });
-
-    testWidgets(
-        'a finished-but-not-yet-completed event shows the final score and a FINAL pill, not the '
-        'pre-live view', (tester) async {
-      // event.status is still "scheduled" (_scheduledEvent) -- the
-      // once-daily batch ingest hasn't flipped it to "completed" yet --
-      // but liveState.completed (ESPN's own signal) says the game is
-      // over. Regression: previously `live` alone (now false) gated the
-      // real score entirely, reverting this card to looking pre-game the
-      // instant the game ended.
+    testWidgets('a game ESPN reports over shows the final score and FINAL before storage catches up', (tester) async {
       const liveState = LiveEventState(live: false, completed: true, detail: 'Final', homeScore: 31, awayScore: 17);
+      await _pump(tester, MatchupHero(sport: 'nfl', event: _scheduledEvent(), prediction: _prediction, liveState: liveState));
 
-      await tester.pumpWidget(MaterialApp(
-        home: Scaffold(body: MatchupHero(sport: 'nfl', event: _scheduledEvent(), prediction: prediction, liveState: liveState)),
-      ));
-
-      expect(find.textContaining('31 PTS'), findsOneWidget);
-      expect(find.textContaining('17 PTS'), findsOneWidget);
-      expect(_textStyled('27', AppColors.cyan), findsOneWidget);
-      expect(_textStyled('23', AppColors.cyan), findsOneWidget);
+      expect(_textStyled('31', AppColors.ink), findsOneWidget);
+      expect(_textStyled('17', AppColors.inkSub), findsOneWidget);
       expect(find.text('FINAL'), findsOneWidget);
       expect(find.text('LIVE'), findsNothing);
     });
+
+    for (final (width, textScale) in [(360.0, 1.0), (320.0, 1.3)]) {
+      testWidgets('a live card with a long status fits at $width px, text x$textScale', (tester) async {
+        // ESPN's detail isn't always a short clock.
+        const liveState = LiveEventState(live: true, detail: '2nd & Goal at NCAAFB 4 -- Timeout', homeScore: 114, awayScore: 107);
+        await _pump(
+          tester, MatchupHero(sport: 'ncaafb', event: _scheduledEvent(), prediction: _prediction, liveState: liveState),
+          width: width, textScale: textScale,
+        );
+
+        expect(tester.takeException(), isNull);
+        // Pills keep their words on a phone.
+        expect(find.text('LIVE'), findsOneWidget);
+        expect(find.text(_tier), findsOneWidget);
+      });
+    }
   });
-  testWidgets('MatchupResultHero shows -- for a missing predicted margin instead of dropping the trio', (tester) async {
+
+  group('MatchupResultHero', () {
     const comparison = PredictionComparison(
       predictedHomeWinProbability: 0.67,
       predictedHomeWon: true,
       actualHomeWon: true,
       correct: true,
-      predictedMargin: null,
+      predictedMargin: 10,
       actualMargin: 14,
-      predictedHomeScore: null,
-      predictedAwayScore: null,
+      predictedHomeScore: 27.4,
+      predictedAwayScore: 17.1,
       actualHomeScore: 31,
       actualAwayScore: 17,
     );
 
-    await tester.pumpWidget(MaterialApp(
-      home: Scaffold(body: MatchupResultHero(sport: 'nfl', event: _completedEvent(), comparison: comparison)),
-    ));
+    testWidgets('shows the verdict in the pick\'s own terms, then the final line and total over the model\'s', (tester) async {
+      await _pump(tester, MatchupResultHero(sport: 'nfl', event: _completedEvent(), comparison: comparison));
 
-    expect(find.text('PRED MARGIN'), findsOneWidget);
-    expect(find.text('--'), findsOneWidget);
+      expect(_textStyled('31', AppColors.ink), findsOneWidget);
+      expect(_textStyled('17', AppColors.inkSub), findsOneWidget);
+      expect(_textStyled('27', AppColors.cyan), findsOneWidget);
+      expect(find.text(VerdictPill.hitLabel), findsOneWidget);
+      expect(_textStyled('KC 67%', AppColors.cyan), findsOneWidget);
+      expect(_textStyled('KC -14', AppColors.ink), findsOneWidget);
+      expect(_textStyled('KC -10.0', AppColors.cyan), findsOneWidget);
+      expect(_textStyled('48', AppColors.ink), findsOneWidget);
+      expect(_textStyled('44.5', AppColors.cyan), findsOneWidget);
+      expect(find.textContaining('HOME'), findsNothing);
+    });
+
+    testWidgets('a wrong away pick reads MISS with the away side\'s chance', (tester) async {
+      const missed = PredictionComparison(
+        predictedHomeWinProbability: 0.36, predictedHomeWon: false, actualHomeWon: true, correct: false,
+        predictedMargin: -3.5, actualMargin: 14, predictedHomeScore: 20, predictedAwayScore: 23.5,
+        actualHomeScore: 31, actualAwayScore: 17,
+      );
+      await _pump(tester, MatchupResultHero(sport: 'nfl', event: _completedEvent(), comparison: missed));
+
+      expect(find.text(VerdictPill.missLabel), findsOneWidget);
+      expect(find.text('LV 64%'), findsOneWidget);
+      expect(_textStyled('LV -3.5', AppColors.cyan), findsOneWidget);
+    });
+
+    testWidgets('a pick logged without a margin or scores shows only the final figures', (tester) async {
+      const bare = PredictionComparison(
+        predictedHomeWinProbability: 0.67, predictedHomeWon: true, actualHomeWon: true, correct: true,
+        predictedMargin: null, actualMargin: 14, predictedHomeScore: null, predictedAwayScore: null,
+        actualHomeScore: 31, actualAwayScore: 17,
+      );
+      await _pump(tester, MatchupResultHero(sport: 'nfl', event: _completedEvent(), comparison: bare), width: 320, textScale: 1.3);
+
+      expect(tester.takeException(), isNull);
+      expect(_textStyled('KC -14', AppColors.ink), findsOneWidget);
+      expect(find.textContaining('-10'), findsNothing);
+    });
+
+    testWidgets('says so when no prediction was recorded', (tester) async {
+      await _pump(tester, MatchupResultHero(sport: 'nfl', event: _completedEvent(), comparison: null));
+
+      expect(find.text(MatchupResultHero.noPredictionLabel), findsOneWidget);
+      expect(find.byType(VerdictPill), findsNothing);
+    });
   });
 }

@@ -3,6 +3,7 @@ import 'package:flutter_test/flutter_test.dart';
 
 import 'package:front_end/core/models/field_live_score.dart';
 import 'package:front_end/core/models/field_prediction.dart';
+import 'package:front_end/core/theme/app_colors.dart';
 import 'package:front_end/features/events/field_leaderboard_table.dart';
 
 import '../../support/mobile_viewport.dart';
@@ -134,15 +135,96 @@ void main() {
     expect(find.text('--'), findsWidgets);
   });
 
-  testWidgets('TOTAL combines the real standing and the projected final score into one column, no separate PROJ column', (tester) async {
+  testWidgets('the real standing and the projected final score sit side by side, white under TOTAL and cyan under PROJ', (tester) async {
     final field = [_golfer('1', 'Xander Schauffele', projectedScoreToPar: -8, actualScoreToPar: -5)];
 
     await tester.pumpWidget(_wrap(FieldLeaderboardTable(field: field)));
 
-    expect(find.text('PROJ'), findsNothing); // folded into TOTAL, not its own column anymore
-    expect(find.text('TOTAL'), findsOneWidget);
-    expect(find.text('-5'), findsOneWidget); // actual standing
-    expect(find.text('-8'), findsOneWidget); // projected final score-to-par, right underneath
+    final actual = tester.widget<Text>(find.text('-5'));
+    final projected = tester.widget<Text>(find.text('-8'));
+    expect(actual.style?.color, AppColors.ink);
+    expect(projected.style?.color, AppColors.cyan);
+    expect(tester.getCenter(find.text('-8')).dy, closeTo(tester.getCenter(find.text('-5')).dy, 1));
+    expect(tester.getCenter(find.text('-8')).dx, closeTo(tester.getCenter(find.text('PROJ')).dx, 2));
+    expect(tester.getCenter(find.text('-5')).dx, closeTo(tester.getCenter(find.text('TOTAL')).dx, 2));
+  });
+
+  testWidgets('a golfer\'s round status reads in words under the name, beside the country', (tester) async {
+    final field = [
+      FieldParticipantPrediction(entityId: '1', name: 'Xander Schauffele', country: 'USA', actualStatus: 'in_progress', actualThru: 12),
+      _golfer('2', 'Collin Morikawa', actualStatus: 'finished'),
+      _golfer('3', 'Billy Horschel', actualStatus: 'cut'),
+      _golfer('4', 'Matt Kuchar', actualStatus: 'made_cut_did_not_finish'),
+      _golfer('5', 'Tony Finau', actualStatus: 'withdrawn'),
+      _golfer('6', 'Not Started', actualStatus: 'scheduled'),
+    ];
+
+    await tester.pumpWidget(_wrap(FieldLeaderboardTable(field: field)));
+
+    expect(find.textContaining('USA · THRU 12', findRichText: true), findsOneWidget);
+    for (final words in ['F', 'CUT', 'MDF', 'WD']) {
+      expect(find.text(words, findRichText: true), findsOneWidget);
+    }
+    expect(find.text('STATUS'), findsNothing);
+  });
+
+  group('projected cut line', () {
+    final field = [
+      _golfer('1', 'Leader', actualScoreToPar: -6),
+      _golfer('2', 'On The Number', actualScoreToPar: 1),
+      _golfer('3', 'Outside', actualScoreToPar: 3),
+      _golfer('4', 'Not Started'),
+    ];
+
+    testWidgets('is drawn above the first golfer over the projected cut', (tester) async {
+      await tester.pumpWidget(_wrap(FieldLeaderboardTable(field: field, projectedCut: 1)));
+
+      final line = tester.getCenter(find.text('PROJ CUT +1')).dy;
+      expect(line, greaterThan(tester.getCenter(find.text('On The Number')).dy));
+      expect(line, lessThan(tester.getCenter(find.text('Outside')).dy));
+    });
+
+    testWidgets('is left out without a projection, when nobody is over it, and once the real cut is made', (tester) async {
+      await tester.pumpWidget(_wrap(FieldLeaderboardTable(field: field)));
+      expect(find.textContaining('PROJ CUT'), findsNothing);
+
+      await tester.pumpWidget(_wrap(FieldLeaderboardTable(field: field, projectedCut: 5)));
+      expect(find.textContaining('PROJ CUT'), findsNothing);
+
+      final afterCut = [...field, _golfer('5', 'Missed', actualScoreToPar: 6, actualStatus: 'cut')];
+      await tester.pumpWidget(_wrap(FieldLeaderboardTable(field: afterCut, projectedCut: 1)));
+      expect(find.textContaining('PROJ CUT'), findsNothing);
+    });
+  });
+
+  group('search', () {
+    final field = [
+      _golfer('1', 'Xander Schauffele', actualScoreToPar: -6),
+      _golfer('2', 'Collin Morikawa', actualScoreToPar: -4),
+      _golfer('3', 'Hideki Matsuyama', actualScoreToPar: 2),
+    ];
+
+    testWidgets('narrows the table to matching names, keeping each golfer\'s place in the field', (tester) async {
+      await tester.pumpWidget(_wrap(FieldLeaderboardTable(field: field, projectedCut: 1)));
+
+      await tester.enterText(find.byType(TextField), 'mats');
+      await tester.pump();
+
+      expect(find.text('Hideki Matsuyama'), findsOneWidget);
+      expect(find.text('Xander Schauffele'), findsNothing);
+      expect(find.text('3'), findsOneWidget);
+      // The cut line only makes sense against the whole field.
+      expect(find.textContaining('PROJ CUT'), findsNothing);
+    });
+
+    testWidgets('says so when no golfer matches', (tester) async {
+      await tester.pumpWidget(_wrap(FieldLeaderboardTable(field: field)));
+
+      await tester.enterText(find.byType(TextField), 'zzz');
+      await tester.pump();
+
+      expect(find.text('No golfer matches.'), findsOneWidget);
+    });
   });
 
   testWidgets('TOTAL stays bare to-par even when a real stroke count and par are both available', (tester) async {
@@ -226,7 +308,7 @@ void main() {
     expect(find.text('67 (-3)'), findsNothing);
   });
 
-  testWidgets('THIS RD shows how many holes are played so far when the golfer is in progress', (tester) async {
+  testWidgets('holes played so far show under the name while the golfer is in progress', (tester) async {
     final field = [
       _golfer(
         '1', 'Xander Schauffele',
@@ -237,7 +319,7 @@ void main() {
 
     await tester.pumpWidget(_wrap(FieldLeaderboardTable(field: field)));
 
-    expect(find.text('Thru 14'), findsOneWidget);
+    expect(find.text('THRU 14', findRichText: true), findsOneWidget);
   });
 
   testWidgets('THIS RD does not show a Thru count for a golfer who has finished their round', (tester) async {
@@ -251,40 +333,30 @@ void main() {
 
     await tester.pumpWidget(_wrap(FieldLeaderboardTable(field: field)));
 
-    expect(find.textContaining('Thru'), findsNothing);
+    expect(find.textContaining('THRU', findRichText: true), findsNothing);
   });
 
   group('narrow (mobile) viewport', () {
-    testWidgets('THIS RD/TOP 10%/TOP 5% are dropped from the collapsed columns below the compact breakpoint', (tester) async {
+    testWidgets('a phone row is position, player, total, projection and top-10 chance', (tester) async {
       final field = [
         _golfer('1', 'Xander Schauffele', rounds: {2: const ModelValue(value: -3.0, modelVersion: 1)}),
       ];
 
       await pumpAtWidth(tester, 360, _wrap(FieldLeaderboardTable(field: field)));
 
-      expect(find.text('#'), findsOneWidget);
-      expect(find.text('PLAYER'), findsOneWidget);
-      expect(find.text('STATUS'), findsOneWidget);
-      expect(find.text('TOTAL'), findsOneWidget);
+      for (final label in ['#', 'PLAYER', 'TOTAL', 'PROJ', 'TOP 10%']) {
+        expect(find.text(label), findsOneWidget);
+      }
       expect(find.text('THIS RD'), findsNothing);
-      expect(find.text('TOP 10%'), findsNothing);
       expect(find.text('TOP 5%'), findsNothing);
     });
 
-    testWidgets('STATUS collapses to a colored dot (no text label) below the compact breakpoint', (tester) async {
+    testWidgets('status stays in words on a phone, never a bare dot', (tester) async {
       final field = [_golfer('1', 'Xander Schauffele', actualStatus: 'made_cut_did_not_finish')];
 
       await pumpAtWidth(tester, 360, _wrap(FieldLeaderboardTable(field: field)));
 
-      expect(find.text('Made Cut, DNF'), findsNothing);
-    });
-
-    testWidgets('STATUS still shows the full text label at a wide (non-compact) width', (tester) async {
-      final field = [_golfer('1', 'Xander Schauffele', actualStatus: 'made_cut_did_not_finish')];
-
-      await pumpAtWidth(tester, 800, _wrap(FieldLeaderboardTable(field: field)));
-
-      expect(find.text('Made Cut, DNF'), findsOneWidget);
+      expect(find.text('MDF', findRichText: true), findsOneWidget);
     });
 
     testWidgets('every column is still present at a wide (non-compact) width', (tester) async {
@@ -297,17 +369,19 @@ void main() {
       expect(find.text('TOP 5%'), findsOneWidget);
     });
 
-    testWidgets('TOP 10%/TOP 5% reappear in the expanded detail when compact', (tester) async {
+    testWidgets('TOP 5% and the round breakdown appear in a phone row\'s expanded detail', (tester) async {
       final field = [_golfer('1', 'Xander Schauffele')];
 
       await pumpAtWidth(tester, 360, _wrap(FieldLeaderboardTable(field: field)));
-      expect(find.text('TOP 10%'), findsNothing);
+      expect(find.text('TOP 5%'), findsNothing);
 
       await tester.tap(find.text('Xander Schauffele'));
       await tester.pumpAndSettle();
 
-      expect(find.text('TOP 10%'), findsOneWidget);
       expect(find.text('TOP 5%'), findsOneWidget);
+      expect(find.text('TOP 10%'), findsOneWidget);
+      expect(find.text('ROUND 1'), findsOneWidget);
+      expect(find.text('ROUND 4'), findsOneWidget);
     });
 
     testWidgets('the expanded probabilities row is absent at a wide width (already visible at the top level)', (tester) async {

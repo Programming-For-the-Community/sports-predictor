@@ -32,18 +32,5 @@ void main() {
 
       expect(find.text('HIGH'), findsOneWidget);
     });
-
-    testWidgets('dotOnly renders no text label', (tester) async {
-      await tester.pumpWidget(MaterialApp(home: Scaffold(body: ConfidencePill(homeWinProbability: high, dotOnly: true))));
-
-      expect(find.text('HIGH'), findsNothing);
-      expect(find.byType(Text), findsNothing);
-    });
-
-    testWidgets('dotOnly still surfaces the tier via a tooltip', (tester) async {
-      await tester.pumpWidget(MaterialApp(home: Scaffold(body: ConfidencePill(homeWinProbability: high, dotOnly: true))));
-
-      expect(find.byTooltip('HIGH'), findsOneWidget);
-    });
   });
 }

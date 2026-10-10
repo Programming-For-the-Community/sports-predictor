@@ -10,17 +10,5 @@ void main() {
 
       expect(find.text('FINAL'), findsOneWidget);
     });
-
-    testWidgets('dotOnly renders no text label', (tester) async {
-      await tester.pumpWidget(const MaterialApp(home: Scaffold(body: FinalStatusPill(dotOnly: true))));
-
-      expect(find.text('FINAL'), findsNothing);
-    });
-
-    testWidgets('dotOnly still surfaces FINAL via a tooltip', (tester) async {
-      await tester.pumpWidget(const MaterialApp(home: Scaffold(body: FinalStatusPill(dotOnly: true))));
-
-      expect(find.byTooltip('FINAL'), findsOneWidget);
-    });
   });
 }

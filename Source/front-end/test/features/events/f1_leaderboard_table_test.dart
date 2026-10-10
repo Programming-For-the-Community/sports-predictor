@@ -91,62 +91,70 @@ void main() {
     expect(find.text('P3'), findsNothing);
   });
 
-  testWidgets('a real result keeps its pre-race projection visible beneath it, from the server order, not the re-sorted row', (tester) async {
-    // Server order (pre-race prediction): a=P1, b=P2. Real result flips
-    // them, so the table re-sorts b first -- b's projection must still
-    // read "Pred P2", not "Pred P1" from its new row position.
+  testWidgets('a real result keeps the model\'s prediction beside it, from the server order, with places gained or lost', (tester) async {
+    // Server order (pre-race prediction): a=P1, b=P2. The real result flips
+    // them, so b's row comes first -- its prediction must still read P2.
     final field = [
-      _driver('a', name: 'A', projectedFinishPosition: 1.0, actual: const F1ActualResult(finishPosition: 2, status: 'Finished')),
-      _driver('b', name: 'B', projectedFinishPosition: 2.0, actual: const F1ActualResult(finishPosition: 1, status: 'Finished')),
+      _driver('a', name: 'A', projectedFinishPosition: 1.0, actual: const F1ActualResult(finishPosition: 2, status: 'finished')),
+      _driver('b', name: 'B', projectedFinishPosition: 2.0, actual: const F1ActualResult(finishPosition: 1, status: 'finished')),
     ];
 
     await tester.pumpWidget(_wrap(F1LeaderboardTable(field: field, isSprint: false)));
 
-    expect(find.text('Pred P1'), findsOneWidget);
-    expect(find.text('Pred P2'), findsOneWidget);
-    // Actual values render as bare numbers, distinct from "P"-prefixed projections.
-    expect(find.text('1'), findsWidgets);
+    expect(tester.getTopLeft(find.text('B')).dy, lessThan(tester.getTopLeft(find.text('A')).dy));
+    expect(tester.getCenter(find.text('P2')).dy, closeTo(tester.getCenter(find.text('B')).dy, 12));
+    expect(find.text('▲ 1'), findsOneWidget);
+    expect(find.text('▼ 1'), findsOneWidget);
+    expect(find.text('#'), findsOneWidget);
+    expect(find.text('±'), findsOneWidget);
+  });
+
+  testWidgets('a driver who finished where the model had them shows =', (tester) async {
+    final field = [_driver('a', name: 'A', projectedFinishPosition: 1.0, actual: const F1ActualResult(finishPosition: 1))];
+
+    await tester.pumpWidget(_wrap(F1LeaderboardTable(field: field, isSprint: false)));
+
+    expect(find.text('='), findsOneWidget);
   });
 
   testWidgets('actual and projected qualifying are both shown once qualifying has a real result', (tester) async {
     final field = [
       _driver(
         'a', name: 'A', projectedQualifyingPosition: 4.2, projectedQualifyingRank: 4,
-        actual: const F1ActualResult(qualifyingPosition: 2, finishPosition: 1, status: 'Finished'),
+        actual: const F1ActualResult(qualifyingPosition: 2, finishPosition: 1, status: 'finished'),
       ),
     ];
 
     await tester.pumpWidget(_wrap(F1LeaderboardTable(field: field, isSprint: false)));
 
-    expect(find.text('Pred P4'), findsOneWidget);
-    expect(find.text('2'), findsWidgets);
+    expect(find.text('P4'), findsOneWidget);
+    expect(find.text('2'), findsOneWidget);
+    expect(find.textContaining('Pred'), findsNothing);
   });
 
-  testWidgets('a projection alone is a bare "P" value with no "Pred" line', (tester) async {
+  testWidgets('before the race the table leads with the predicted order and has no result columns', (tester) async {
     final field = [_driver('a', name: 'A', projectedFinishPosition: 3.0)];
 
     await tester.pumpWidget(_wrap(F1LeaderboardTable(field: field, isSprint: false)));
 
+    expect(find.text('PRED'), findsOneWidget);
     expect(find.text('P1'), findsOneWidget);
-    expect(find.textContaining('Pred'), findsNothing);
+    expect(find.text('#'), findsNothing);
+    expect(find.text('±'), findsNothing);
+    expect(find.text('STATUS'), findsNothing);
   });
 
-  testWidgets('a field event shows a QUALIFYING column, a sprint event does not', (tester) async {
-    final field = [_driver('a', name: 'A', projectedQualifyingPosition: 2.0)];
+  testWidgets('a field event shows qualifying and DNF columns, a sprint shows GRID and neither', (tester) async {
+    final field = [_driver('a', name: 'A', projectedQualifyingPosition: 2.0, projectedGridPosition: 1.0)];
 
     await tester.pumpWidget(_wrap(F1LeaderboardTable(field: field, isSprint: false)));
-    expect(find.text('QUALIFYING'), findsOneWidget);
+    expect(find.text('QUALI'), findsOneWidget);
+    expect(find.text('DNF%'), findsOneWidget);
 
     await tester.pumpWidget(_wrap(F1LeaderboardTable(field: field, isSprint: true)));
-    expect(find.text('QUALIFYING'), findsNothing);
-  });
-
-  testWidgets('a driver with no real result yet shows a real status word, not blank', (tester) async {
-    final field = [_driver('a', name: 'A', projectedFinishPosition: 1.0)];
-
-    await tester.pumpWidget(_wrap(F1LeaderboardTable(field: field, isSprint: false)));
-
-    expect(find.text('Scheduled'), findsOneWidget);
+    expect(find.text('QUALI'), findsNothing);
+    expect(find.text('DNF%'), findsNothing);
+    expect(find.text('GRID'), findsOneWidget);
   });
 
   testWidgets('an empty field shows a plain message instead of an empty table', (tester) async {
@@ -155,8 +163,6 @@ void main() {
   });
 
   testWidgets('re-sorts by live running order when a live overlay is present', (tester) async {
-    // Server-projected order is a, b -- the live overlay says b is
-    // actually running ahead (order 1) with a behind (order 2).
     final field = [
       _driver('a', name: 'Driver A', projectedFinishPosition: 1.0),
       _driver('b', name: 'Driver B', projectedFinishPosition: 2.0),
@@ -170,16 +176,18 @@ void main() {
     expect(bPos.dy, lessThan(aPos.dy));
   });
 
-  testWidgets('shows the live running order in the FINISH column ahead of a stale projection', (tester) async {
-    final field = [_driver('a', name: 'Driver A', projectedFinishPosition: 5.0)];
+  testWidgets('a live running position shows in # with the prediction and the gap beside it', (tester) async {
+    final field = [
+      _driver('a', name: 'Driver A', projectedFinishPosition: 1.0),
+      _driver('b', name: 'Driver B', projectedFinishPosition: 2.0),
+    ];
     final live = {'a': const F1DriverLiveResult(order: 3)};
 
     await tester.pumpWidget(_wrap(F1LeaderboardTable(field: field, isSprint: false, liveResults: live)));
 
-    // Both the '#' column and the FINISH column resolve to the same live
-    // order once neither has a real "actual" finish yet.
-    expect(find.text('3'), findsNWidgets(2));
-    expect(find.text('P5'), findsNothing);
+    expect(find.text('3'), findsOneWidget);
+    expect(find.text('P1'), findsOneWidget);
+    expect(find.text('▼ 2'), findsOneWidget);
   });
 
   testWidgets('a driver with a real actual finish still wins over a live overlay', (tester) async {
@@ -188,15 +196,11 @@ void main() {
 
     await tester.pumpWidget(_wrap(F1LeaderboardTable(field: field, isSprint: false, liveResults: live)));
 
-    expect(find.text('1'), findsNWidgets(2));
+    expect(find.text('1'), findsOneWidget);
     expect(find.text('7'), findsNothing);
   });
 
   testWidgets('a completed race re-sorts rows by actual finish position, not stale pre-race order', (tester) async {
-    // Server/prediction order was b, a -- the real result has a finishing
-    // ahead of b. Real complaint 2026-09-02: a completed Grand Prix's own
-    // row order still matched the pre-race projected order, not the
-    // actual result.
     final field = [
       _driver('b', name: 'Driver B', actual: const F1ActualResult(finishPosition: 2)),
       _driver('a', name: 'Driver A', actual: const F1ActualResult(finishPosition: 1)),
@@ -209,13 +213,10 @@ void main() {
     expect(aPos.dy, lessThan(bPos.dy));
   });
 
-  testWidgets('a DNF driver in a completed race sorts last and shows no stale projected position', (tester) async {
-    // Real complaint 2026-09-02: a DNF'd driver (finishPosition null,
-    // status "dnf") displayed "P6" in the FINISH column -- a stale
-    // pre-race projection, misleading once the race is already over.
+  testWidgets('a DNF driver sorts last with a dash for a position, DNF by the team, and no gap', (tester) async {
     final field = [
-      _driver('dnf', name: 'DNF Driver', projectedFinishPosition: 3.0, actual: const F1ActualResult(status: 'dnf')),
-      _driver('a', name: 'Driver A', actual: const F1ActualResult(finishPosition: 1)),
+      _driver('dnf', name: 'DNF Driver', constructorName: 'Alpine', projectedFinishPosition: 3.0, actual: const F1ActualResult(status: 'dnf')),
+      _driver('a', name: 'Driver A', projectedFinishPosition: 1.0, actual: const F1ActualResult(finishPosition: 1)),
     ];
 
     await tester.pumpWidget(_wrap(F1LeaderboardTable(field: field, isSprint: false)));
@@ -223,46 +224,100 @@ void main() {
     final aPos = tester.getTopLeft(find.text('Driver A'));
     final dnfPos = tester.getTopLeft(find.text('DNF Driver'));
     expect(aPos.dy, lessThan(dnfPos.dy));
-    expect(find.text('P3'), findsNothing);
+    expect(find.text('–'), findsOneWidget);
+    expect(find.textContaining('Alpine · DNF', findRichText: true), findsOneWidget);
+    // One gap, for the classified driver only: the model had A second.
+    expect(find.text('▲ 1'), findsOneWidget);
+    expect(find.textContaining('▼'), findsNothing);
+  });
+
+  group('F1PodiumStrip', () {
+    final field = [
+      _driver('a', name: 'Lando Norris', projectedFinishPosition: 1.0),
+      _driver('b', name: 'Max Verstappen', projectedFinishPosition: 2.0),
+      _driver('c', name: 'Oscar Piastri', projectedFinishPosition: 3.0),
+      _driver('d', name: 'George Russell', projectedFinishPosition: 4.0),
+    ];
+
+    testWidgets('before the session it lists the model\'s first three', (tester) async {
+      await tester.pumpWidget(_wrap(F1PodiumStrip(field: field, isSprint: false)));
+
+      expect(find.text(F1PodiumStrip.modelLabel), findsOneWidget);
+      expect(find.text('Lando Norris'), findsOneWidget);
+      expect(find.text('George Russell'), findsNothing);
+      expect(find.text('P3'), findsOneWidget);
+    });
+
+    testWidgets('after it, the real first three with where the model had each', (tester) async {
+      final decided = [
+        _driver('a', name: 'Lando Norris', projectedFinishPosition: 1.0, actual: const F1ActualResult(finishPosition: 3)),
+        _driver('b', name: 'Max Verstappen', projectedFinishPosition: 2.0, actual: const F1ActualResult(finishPosition: 2)),
+        _driver('c', name: 'Oscar Piastri', projectedFinishPosition: 3.0, actual: const F1ActualResult(status: 'dnf')),
+        _driver('d', name: 'George Russell', projectedFinishPosition: 4.0, actual: const F1ActualResult(finishPosition: 1)),
+      ];
+      await tester.pumpWidget(_wrap(F1PodiumStrip(field: decided, isSprint: false)));
+
+      expect(find.text(F1PodiumStrip.resultLabel), findsOneWidget);
+      expect(find.text('Oscar Piastri'), findsNothing);
+      // Russell won; the model had him fourth.
+      expect(tester.getTopLeft(find.text('George Russell')).dx, lessThan(tester.getTopLeft(find.text('Lando Norris')).dx));
+      expect(find.text('P4 · --'), findsOneWidget);
+    });
+
+    testWidgets('renders nothing for an empty field, and stacks on a phone without overflow', (tester) async {
+      await tester.pumpWidget(_wrap(const F1PodiumStrip(field: [], isSprint: false)));
+      expect(find.text(F1PodiumStrip.modelLabel), findsNothing);
+
+      for (final width in mobileViewportWidths) {
+        await pumpAtWidth(tester, width, _wrap(SingleChildScrollView(child: F1PodiumStrip(field: field, isSprint: true)), width: width));
+        expect(tester.takeException(), isNull);
+        expect(
+          tester.getTopLeft(find.text('Max Verstappen')).dy,
+          greaterThan(tester.getTopLeft(find.text('Lando Norris')).dy),
+        );
+      }
+    });
   });
 
   group('narrow (mobile) viewport', () {
-    testWidgets('STATUS/FINISH/QUALIFYING/DNF% are dropped from the collapsed columns below the compact breakpoint', (tester) async {
+    testWidgets('before the race a phone row is the prediction, the driver, win and podium', (tester) async {
       final field = [_driver('a', name: 'Driver A', projectedFinishPosition: 1.0, projectedQualifyingPosition: 1.0)];
+
+      await tester.pumpWidget(_wrap(F1LeaderboardTable(field: field, isSprint: false), width: 360));
+
+      expect(find.text('PRED'), findsOneWidget);
+      expect(find.text('DRIVER'), findsOneWidget);
+      expect(find.text('WIN%'), findsOneWidget);
+      expect(find.text('PODIUM%'), findsOneWidget);
+      expect(find.text('QUALI'), findsNothing);
+      expect(find.text('DNF%'), findsNothing);
+    });
+
+    testWidgets('after the race a phone row leads with the real position and keeps the prediction and gap', (tester) async {
+      final field = [
+        _driver('a', name: 'Driver A', projectedFinishPosition: 1.0, actual: const F1ActualResult(finishPosition: 1, status: 'finished')),
+      ];
 
       await tester.pumpWidget(_wrap(F1LeaderboardTable(field: field, isSprint: false), width: 360));
 
       expect(find.text('#'), findsOneWidget);
-      expect(find.text('DRIVER'), findsOneWidget);
-      expect(find.text('WIN%'), findsOneWidget);
-      expect(find.text('STATUS'), findsNothing);
-      expect(find.text('FINISH'), findsNothing);
-      expect(find.text('QUALIFYING'), findsNothing);
-      expect(find.text('DNF%'), findsNothing);
+      expect(find.text('PRED'), findsOneWidget);
+      expect(find.text('±'), findsOneWidget);
+      expect(find.text('PODIUM%'), findsNothing);
     });
 
-    testWidgets('every column is still present at a wide (non-compact) width', (tester) async {
-      final field = [_driver('a', name: 'Driver A', projectedFinishPosition: 1.0, projectedQualifyingPosition: 1.0)];
-
-      await tester.pumpWidget(_wrap(F1LeaderboardTable(field: field, isSprint: false), width: 900));
-
-      expect(find.text('STATUS'), findsOneWidget);
-      expect(find.text('FINISH'), findsOneWidget);
-      expect(find.text('QUALIFYING'), findsOneWidget);
-      expect(find.text('DNF%'), findsOneWidget);
-    });
-
-    testWidgets('tapping a compact row reveals STATUS/FINISH/QUALIFYING/DNF% in an expanded detail', (tester) async {
+    testWidgets('tapping a phone row reveals status, qualifying and DNF chance', (tester) async {
       final field = [_driver('a', name: 'Driver A', projectedFinishPosition: 1.0, projectedQualifyingPosition: 1.0)];
 
       await tester.pumpWidget(_wrap(F1LeaderboardTable(field: field, isSprint: false), width: 360));
-      expect(find.text('QUALIFYING'), findsNothing);
+      expect(find.text('QUALI'), findsNothing);
 
       await tester.tap(find.text('Driver A'));
       await tester.pumpAndSettle();
 
       expect(find.text('STATUS'), findsOneWidget);
-      expect(find.text('QUALIFYING'), findsOneWidget);
+      expect(find.text('Scheduled'), findsOneWidget);
+      expect(find.text('QUALI'), findsOneWidget);
       expect(find.text('DNF%'), findsOneWidget);
     });
 
@@ -276,15 +331,21 @@ void main() {
           _driver(
             'lando_norris', name: 'Lando Norris', constructorEntityId: 'mclaren', constructorName: 'McLaren Formula 1 Team',
             projectedFinishPosition: 2.0, projectedGridPosition: 2.0, projectedQualifyingPosition: 2.0, projectedQualifyingRank: 2,
-            actual: const F1ActualResult(finishPosition: 2, gridPosition: 2, status: 'finished', points: 18, qualifyingPosition: 2),
+            actual: const F1ActualResult(finishPosition: 2, gridPosition: 2, status: 'dnf', points: 18, qualifyingPosition: 2),
           ),
         ];
         final live = {'max_verstappen': const F1DriverLiveResult(order: 1, winner: true)};
 
         await pumpAtWidth(tester, width, _wrap(F1LeaderboardTable(field: field, isSprint: false, liveResults: live), width: width));
         expect(tester.takeException(), isNull);
+        await tester.tap(find.text('Lando Norris'));
+        await tester.pumpAndSettle();
+        expect(tester.takeException(), isNull);
 
         await pumpAtWidth(tester, width, _wrap(F1LeaderboardTable(field: field, isSprint: true), width: width));
+        expect(tester.takeException(), isNull);
+
+        await pumpAtWidth(tester, width, _wrap(F1LeaderboardTable(field: [field.first], isSprint: false), width: width));
         expect(tester.takeException(), isNull);
       }
     });

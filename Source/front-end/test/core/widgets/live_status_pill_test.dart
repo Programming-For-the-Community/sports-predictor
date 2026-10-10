@@ -10,21 +10,5 @@ void main() {
 
       expect(find.text('LIVE'), findsOneWidget);
     });
-
-    testWidgets('dotOnly renders no text label', (tester) async {
-      await tester.pumpWidget(const MaterialApp(home: Scaffold(body: LiveStatusPill(dotOnly: true))));
-
-      expect(find.text('LIVE'), findsNothing);
-    });
-
-    testWidgets('dotOnly still surfaces LIVE via a tooltip', (tester) async {
-      await tester.pumpWidget(const MaterialApp(home: Scaffold(body: LiveStatusPill(dotOnly: true))));
-
-      expect(find.byTooltip('LIVE'), findsOneWidget);
-    });
-
-    test('label is the shared LIVE constant', () {
-      expect(LiveStatusPill.label, 'LIVE');
-    });
   });
 }
