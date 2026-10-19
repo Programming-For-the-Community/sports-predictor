@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/auth/auth_repository.dart';
@@ -38,6 +39,11 @@ class _LoginPageState extends ConsumerState<LoginPage> {
     });
     try {
       await action();
+      // Tells the browser / OS password manager the credentials were
+      // accepted, which is what prompts it to offer saving them.
+      if (ref.read(authRepositoryProvider) is AuthAuthenticated) {
+        TextInput.finishAutofillContext();
+      }
     } catch (e) {
       if (mounted) setState(() => _errorMessage = _messageFor(e));
     } finally {
@@ -86,7 +92,13 @@ class _LoginPageState extends ConsumerState<LoginPage> {
                       Text(_errorMessage!, style: const TextStyle(color: AppColors.neg)),
                       const SizedBox(height: 16),
                     ],
-                    if (needsNewPassword) ..._newPasswordFields() else ..._loginFields(),
+                    AutofillGroup(
+                      onDisposeAction: AutofillContextAction.cancel,
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: needsNewPassword ? _newPasswordFields() : _loginFields(),
+                      ),
+                    ),
                   ],
                 ),
               ),
@@ -102,12 +114,14 @@ class _LoginPageState extends ConsumerState<LoginPage> {
       TextField(
         controller: _usernameController,
         decoration: const InputDecoration(labelText: 'Username'),
+        autofillHints: const [AutofillHints.username],
         textInputAction: TextInputAction.next,
       ),
       const SizedBox(height: 16),
       TextField(
         controller: _passwordController,
         decoration: const InputDecoration(labelText: 'Password'),
+        autofillHints: const [AutofillHints.password],
         obscureText: true,
         onSubmitted: (_) => _submitLogin(),
       ),
@@ -124,6 +138,7 @@ class _LoginPageState extends ConsumerState<LoginPage> {
       TextField(
         controller: _newPasswordController,
         decoration: const InputDecoration(labelText: 'New password'),
+        autofillHints: const [AutofillHints.newPassword],
         obscureText: true,
         onSubmitted: (_) => _submitNewPassword(),
       ),

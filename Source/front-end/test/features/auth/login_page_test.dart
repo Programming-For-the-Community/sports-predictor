@@ -29,6 +29,18 @@ Future<void> _pumpLoginPage(WidgetTester tester, {required http.Client httpClien
 }
 
 void main() {
+  testWidgets('login fields sit in one autofill group so password managers can save them', (tester) async {
+    await _pumpLoginPage(tester, httpClient: srpAwareMockClient((request) async => http.Response('{}', 200)));
+
+    TextField field(String label) => tester.widget<TextField>(find.widgetWithText(TextField, label));
+    expect(field('Username').autofillHints, [AutofillHints.username]);
+    expect(field('Password').autofillHints, [AutofillHints.password]);
+    expect(
+      find.ancestor(of: find.widgetWithText(TextField, 'Password'), matching: find.byType(AutofillGroup)),
+      findsOneWidget,
+    );
+  });
+
   testWidgets('shows an error message on incorrect credentials', (tester) async {
     await _pumpLoginPage(
       tester,

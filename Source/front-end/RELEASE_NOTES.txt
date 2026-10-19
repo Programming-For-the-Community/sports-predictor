@@ -4,3 +4,4 @@
 # keep it brief, it's read on a phone screen.
 # Lines starting with # are ignored; 200 characters max.
 NHL is here: game picks, player projections, standings and the playoff bracket. New-look game, golf and race screens show each pick as a betting line and how it turned out, with simpler filters.
+Your browser and phone can now save and fill in your sign-in details.
