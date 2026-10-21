@@ -86,6 +86,10 @@ List<(String?, List<(String, List<SportEvent>)>)> _groupByConferenceThenDate(Lis
   return [for (final conference in conferences) (conference, _groupByDate(byConference[conference]!))];
 }
 
+/// How one event fares against the filters; [pending] is kept until its
+/// prediction loads.
+enum _Verdict { keep, drop, pending }
+
 class EventListPage extends ConsumerStatefulWidget {
   const EventListPage({super.key, required this.sportId});
 
@@ -249,29 +253,37 @@ class _EventListPageState extends ConsumerState<EventListPage> with WidgetsBindi
     var pending = 0;
     final kept = <SportEvent>[];
     for (final event in events) {
-      if (_conferences.isNotEmpty && !_conferences.contains(_conferenceKey(event))) continue;
-      if (!isUpcoming && _upsets.contains(UpsetFlag.upset) && _completedUpset(event) != UpsetFlag.upset) continue;
-      if (isUpcoming) {
-        if (_weekdays.isNotEmpty && !_weekdays.contains(eventWeekday(event))) continue;
-        if (_kickoffHours.isNotEmpty && !_kickoffHours.contains(kickoffHour(event))) continue;
-        final watchOnly = _upsets.contains(UpsetFlag.watch);
-        if (_confidenceTiers.isNotEmpty || watchOnly) {
-          final prediction = ref.watch(eventPredictionProvider((sport: widget.sportId, eventId: event.eventId))).value;
-          if (prediction == null) {
-            pending++;
-          } else if (_confidenceTiers.isNotEmpty &&
-              !_confidenceTiers.contains(ConfidenceTier.forProbability(prediction.homeWinProbability))) {
-            continue;
-          } else if (watchOnly &&
-              upsetFlag(favorite: event.bettingFavorite, isFinal: false, homeWinProbability: prediction.homeWinProbability) !=
-                  UpsetFlag.watch) {
-            continue;
-          }
-        }
-      }
+      final verdict = _filterVerdict(event, isUpcoming);
+      if (verdict == _Verdict.drop) continue;
+      if (verdict == _Verdict.pending) pending++;
       kept.add(event);
     }
     return (kept, pending);
+  }
+
+  _Verdict _filterVerdict(SportEvent event, bool isUpcoming) {
+    if (_conferences.isNotEmpty && !_conferences.contains(_conferenceKey(event))) return _Verdict.drop;
+    if (!isUpcoming) {
+      final upsetOnly = _upsets.contains(UpsetFlag.upset);
+      return upsetOnly && _completedUpset(event) != UpsetFlag.upset ? _Verdict.drop : _Verdict.keep;
+    }
+    if (_weekdays.isNotEmpty && !_weekdays.contains(eventWeekday(event))) return _Verdict.drop;
+    if (_kickoffHours.isNotEmpty && !_kickoffHours.contains(kickoffHour(event))) return _Verdict.drop;
+    return _predictionVerdict(event);
+  }
+
+  /// The confidence and upset-watch filters, which need the event's prediction.
+  _Verdict _predictionVerdict(SportEvent event) {
+    final watchOnly = _upsets.contains(UpsetFlag.watch);
+    if (_confidenceTiers.isEmpty && !watchOnly) return _Verdict.keep;
+    final prediction = ref.watch(eventPredictionProvider((sport: widget.sportId, eventId: event.eventId))).value;
+    if (prediction == null) return _Verdict.pending;
+    final probability = prediction.homeWinProbability;
+    if (_confidenceTiers.isNotEmpty && !_confidenceTiers.contains(ConfidenceTier.forProbability(probability))) {
+      return _Verdict.drop;
+    }
+    final flag = upsetFlag(favorite: event.bettingFavorite, isFinal: false, homeWinProbability: probability);
+    return watchOnly && flag != UpsetFlag.watch ? _Verdict.drop : _Verdict.keep;
   }
 
   UpsetFlag? _completedUpset(SportEvent event) {
@@ -300,33 +312,43 @@ class _EventListPageState extends ConsumerState<EventListPage> with WidgetsBindi
     final conferences = events.map(_primaryConference).any((c) => c != null)
         ? [for (final (conference, _) in _groupByConferenceThenDate(events)) conference!]
         : const <String>[];
-    final weekdays = eventWeekdays(events);
-    final slots = kickoffSlots(events);
-    int count(bool Function(SportEvent) test) => events.where(test).length;
     return [
       if (isUpcoming)
         _group('CONFIDENCE', _confidenceTiers, [for (final tier in ConfidenceTier.values) (tier, tier.label, null)]),
-      // Each tab offers only the flag its rows can show.
-      _group('UPSETS', _upsets, [
-        if (isUpcoming)
-          (UpsetFlag.watch, UpsetFlag.watch.label, null)
-        else
-          (UpsetFlag.upset, UpsetFlag.upset.label, count((e) => _completedUpset(e) == UpsetFlag.upset)),
-      ]),
-      if (isUpcoming && weekdays.length > 1)
-        _group('DAY', _weekdays, [
-          for (final day in weekdays) (day, weekdayLabel(day), count((e) => eventWeekday(e) == day)),
-        ]),
-      if (isUpcoming && slots.length > 1)
-        _group('START', _kickoffHours, [
-          for (final slot in slots) (slot.hour, slot.label, count((e) => kickoffHour(e) == slot.hour)),
-        ]),
+      _upsetGroup(events, isUpcoming),
+      if (isUpcoming) ..._scheduleGroups(events),
       if (conferences.length > 1)
         _group('CONFERENCE', _conferences, [
-          for (final conference in conferences) (conference, conference, count((e) => _conferenceKey(e) == conference)),
+          for (final conference in conferences)
+            (conference, conference, _count(events, (e) => _conferenceKey(e) == conference)),
         ]),
     ];
   }
+
+  /// Each tab offers only the flag its rows can show.
+  FilterGroup _upsetGroup(List<SportEvent> events, bool isUpcoming) => _group('UPSETS', _upsets, [
+        if (isUpcoming)
+          (UpsetFlag.watch, UpsetFlag.watch.label, null)
+        else
+          (UpsetFlag.upset, UpsetFlag.upset.label, _count(events, (e) => _completedUpset(e) == UpsetFlag.upset)),
+      ]);
+
+  List<FilterGroup> _scheduleGroups(List<SportEvent> events) {
+    final weekdays = eventWeekdays(events);
+    final slots = kickoffSlots(events);
+    return [
+      if (weekdays.length > 1)
+        _group('DAY', _weekdays, [
+          for (final day in weekdays) (day, weekdayLabel(day), _count(events, (e) => eventWeekday(e) == day)),
+        ]),
+      if (slots.length > 1)
+        _group('START', _kickoffHours, [
+          for (final slot in slots) (slot.hour, slot.label, _count(events, (e) => kickoffHour(e) == slot.hour)),
+        ]),
+    ];
+  }
+
+  static int _count(List<SportEvent> events, bool Function(SportEvent) test) => events.where(test).length;
 
   Widget _dataView(List<SportEvent> list, Map<String, LiveEventState> liveScores) {
     if (list.isEmpty) {

@@ -432,27 +432,29 @@ class _ComparisonSection extends StatelessWidget {
           _titleCell(title),
           for (final key in columns.keys) ...[columns.label(key), if (_hasMiss(columns, key)) _missHeader()],
         ]),
-        for (final (index, player) in players.indexed) ...[
-          // A hairline above every player after the first, so each white row
-          // and the cyan row under it read as one player.
-          TableRow(decoration: index > 0 ? _rowDivider : null, children: [
-            Padding(padding: const EdgeInsets.only(top: 6), child: Text(player.displayName, style: AppTextStyles.body())),
-            for (final key in columns.keys) ...[
-              Padding(padding: const EdgeInsets.only(top: 6), child: columns.actual(key, player.actual[key])),
-              if (_hasMiss(columns, key))
-                Padding(
-                  padding: const EdgeInsets.only(top: 6),
-                  child: columns.miss(key, player.actual[key], player.predicted[key]),
-                ),
-            ],
-          ]),
-          TableRow(children: [
-            const SizedBox.shrink(),
-            for (final key in columns.keys) ...[
-              Padding(padding: const EdgeInsets.only(bottom: 6), child: columns.model(key, player.predicted[key])),
-              if (_hasMiss(columns, key)) const SizedBox.shrink(),
-            ],
-          ]),
-        ],
+        for (final (index, player) in players.indexed) ..._stackedPlayerRows(columns, player, divided: index > 0),
+      ];
+
+  /// The player's actual row in white, then the model's row in cyan under it.
+  /// [divided] draws a hairline above the pair so the two read as one player.
+  List<TableRow> _stackedPlayerRows(_StatColumns columns, PlayerStatLineComparison player, {required bool divided}) => [
+        TableRow(decoration: divided ? _rowDivider : null, children: [
+          Padding(padding: const EdgeInsets.only(top: 6), child: Text(player.displayName, style: AppTextStyles.body())),
+          for (final key in columns.keys) ...[
+            Padding(padding: const EdgeInsets.only(top: 6), child: columns.actual(key, player.actual[key])),
+            if (_hasMiss(columns, key))
+              Padding(
+                padding: const EdgeInsets.only(top: 6),
+                child: columns.miss(key, player.actual[key], player.predicted[key]),
+              ),
+          ],
+        ]),
+        TableRow(children: [
+          const SizedBox.shrink(),
+          for (final key in columns.keys) ...[
+            Padding(padding: const EdgeInsets.only(bottom: 6), child: columns.model(key, player.predicted[key])),
+            if (_hasMiss(columns, key)) const SizedBox.shrink(),
+          ],
+        ]),
       ];
 }

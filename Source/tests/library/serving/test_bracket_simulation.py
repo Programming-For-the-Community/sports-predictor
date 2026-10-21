@@ -63,7 +63,9 @@ class TestSeriesProbability:
 
 class TestDisplayedBracket:
     def test_the_same_real_results_give_the_same_bracket(self):
-        assert _simulate() == _simulate()
+        first = _simulate()
+        second = _simulate()
+        assert first == second
 
     def test_every_slot_names_a_winner_from_the_chosen_run(self):
         bracket = _simulate()

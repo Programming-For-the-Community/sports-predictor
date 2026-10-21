@@ -294,20 +294,7 @@ class _FieldLeaderboardTableState extends State<FieldLeaderboardTable> {
               child: Column(
                 children: [
                   Padding(padding: const EdgeInsets.symmetric(vertical: 10), child: _LeaderboardHeaderRow(columns: columns)),
-                  if (shown.isEmpty)
-                    Padding(
-                      padding: const EdgeInsets.symmetric(vertical: 16),
-                      child: Text('No golfer matches.', style: AppTextStyles.body(color: AppColors.inkSub)),
-                    ),
-                  for (final i in shown) ...[
-                    if (i == cutIndex) _cutLine(widget.projectedCut!) else const Divider(height: 1, color: AppColors.border),
-                    _LeaderboardRow(
-                      // Keyed so an expanded row stays with its golfer as a search narrows the list.
-                      key: ValueKey(sorted[i].entityId),
-                      entry: sorted[i], live: liveResults[sorted[i].entityId], columns: columns, rowNumber: i + 1,
-                      par: widget.par, compact: compact,
-                    ),
-                  ],
+                  ..._rows(sorted, shown, cutIndex, columns, compact: compact),
                 ],
               ),
             ),
@@ -315,6 +302,36 @@ class _FieldLeaderboardTableState extends State<FieldLeaderboardTable> {
         );
       },
     );
+  }
+
+  /// The [shown] golfers by their index in [sorted], with the cut line above
+  /// the first golfer projected to miss it.
+  List<Widget> _rows(
+    List<FieldParticipantPrediction> sorted,
+    List<int> shown,
+    int? cutIndex,
+    List<_LeaderboardColumn> columns, {
+    required bool compact,
+  }) {
+    if (shown.isEmpty) {
+      return [
+        Padding(
+          padding: const EdgeInsets.symmetric(vertical: 16),
+          child: Text('No golfer matches.', style: AppTextStyles.body(color: AppColors.inkSub)),
+        ),
+      ];
+    }
+    return [
+      for (final i in shown) ...[
+        if (i == cutIndex) _cutLine(widget.projectedCut!) else const Divider(height: 1, color: AppColors.border),
+        _LeaderboardRow(
+          // Keyed so an expanded row stays with its golfer as a search narrows the list.
+          key: ValueKey(sorted[i].entityId),
+          entry: sorted[i], live: widget.liveResults[sorted[i].entityId], columns: columns, rowNumber: i + 1,
+          par: widget.par, compact: compact,
+        ),
+      ],
+    ];
   }
 }
 

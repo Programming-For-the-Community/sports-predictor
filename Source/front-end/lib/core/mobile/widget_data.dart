@@ -187,19 +187,16 @@ List<Map<String, Object?>> buildTopProps(
   if (stats == null) return const [];
   final missesByModel = {for (final model in performance.models) model.modelName: model.entityMisses};
 
-  final candidates = <_PropCandidate>[];
-  for (final event in events) {
-    final leaders = predictions[event.eventId]?.leaders;
-    if (leaders == null) continue;
-    for (final (role, team) in [('away', leaders.away), ('home', leaders.home)]) {
-      final abbreviation = event.participants.where((p) => p.role == role).firstOrNull?.abbreviation;
-      for (final player in team.categories.values.expand((players) => players)) {
-        candidates.addAll(_playerCandidates(sport, event, player, abbreviation, stats, missesByModel));
-      }
-    }
-  }
-  candidates.sort((a, b) => a.share.compareTo(b.share));
+  final candidates = [
+    for (final event in events)
+      ..._eventCandidates(sport, event, predictions[event.eventId], stats, missesByModel),
+  ]..sort((a, b) => a.share.compareTo(b.share));
+  return _pickProps(candidates);
+}
 
+/// Up to maxProps rows from [candidates] in order, one per player and at
+/// most maxPropsPerStat per stat.
+List<Map<String, Object?>> _pickProps(List<_PropCandidate> candidates) {
   final rows = <Map<String, Object?>>[];
   final players = <String>{};
   final perStat = <String, int>{};
@@ -214,6 +211,25 @@ List<Map<String, Object?>> buildTopProps(
 }
 
 typedef _PropCandidate = ({String entityId, String statKey, double share, Map<String, Object?> row});
+
+List<_PropCandidate> _eventCandidates(
+  SportConfig sport,
+  SportEvent event,
+  EventPrediction? prediction,
+  Map<String, PropStat> stats,
+  Map<String, Map<String, PerformanceWindow>> missesByModel,
+) {
+  final leaders = prediction?.leaders;
+  if (leaders == null) return const [];
+  return [
+    for (final (role, team) in [('away', leaders.away), ('home', leaders.home)])
+      for (final player in team.categories.values.expand((players) => players))
+        ..._playerCandidates(
+          sport, event, player, event.participants.where((p) => p.role == role).firstOrNull?.abbreviation, stats,
+          missesByModel,
+        ),
+  ];
+}
 
 /// One candidate per listed stat the player has both a big enough projection
 /// and a graded history for.

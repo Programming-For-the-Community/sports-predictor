@@ -426,40 +426,48 @@ class F1PodiumStrip extends StatelessWidget {
     final top = (decided ? classified : field).take(3).toList();
     if (top.isEmpty) return const SizedBox.shrink();
 
-    Widget place(int index) {
-      final entry = top[index];
-      final win = _formatPercent(entry.winProbability?.value);
-      final position = decided ? _resultPosition(entry, isSprint)! : index + 1;
-      return _PodiumPlace(
-        position: 'P$position',
-        name: entry.name ?? entry.entityId,
-        // After the session: where the model had this driver, and their
-        // chance of winning it.
-        model: decided ? 'P${projectedRanks[entry.entityId]} · $win' : win,
-        modelColor: decided ? AppColors.cyan : AppColors.violet,
-      );
-    }
-
+    final places = [
+      for (final (index, entry) in top.indexed)
+        decided ? _resultPlace(entry, projectedRanks[entry.entityId]) : _modelPlace(entry, index + 1),
+    ];
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         Text(decided ? resultLabel : modelLabel, style: AppTextStyles.microLabel()),
         const SizedBox(height: 8),
-        LayoutBuilder(
-          builder: (context, constraints) {
-            if (constraints.maxWidth < _compactBreakpoint) {
-              return Column(
-                children: [for (var i = 0; i < top.length; i++) Padding(padding: EdgeInsets.only(top: i == 0 ? 0 : 8), child: place(i))],
-              );
-            }
-            return Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                for (var i = 0; i < top.length; i++) ...[if (i > 0) const SizedBox(width: 10), Expanded(child: place(i))],
-              ],
-            );
-          },
-        ),
+        LayoutBuilder(builder: (context, constraints) => _arrange(places, compact: constraints.maxWidth < _compactBreakpoint)),
+      ],
+    );
+  }
+
+  Widget _modelPlace(F1DriverPrediction entry, int position) => _PodiumPlace(
+        position: 'P$position',
+        name: entry.name ?? entry.entityId,
+        model: _formatPercent(entry.winProbability?.value),
+        modelColor: AppColors.violet,
+      );
+
+  /// After the session: where the model had this driver, and their chance
+  /// of winning it.
+  Widget _resultPlace(F1DriverPrediction entry, int? projectedRank) => _PodiumPlace(
+        position: 'P${_resultPosition(entry, isSprint)}',
+        name: entry.name ?? entry.entityId,
+        model: 'P$projectedRank · ${_formatPercent(entry.winProbability?.value)}',
+        modelColor: AppColors.cyan,
+      );
+
+  static Widget _arrange(List<Widget> places, {required bool compact}) {
+    if (compact) {
+      return Column(
+        children: [
+          for (final (i, place) in places.indexed) Padding(padding: EdgeInsets.only(top: i == 0 ? 0 : 8), child: place),
+        ],
+      );
+    }
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        for (final (i, place) in places.indexed) ...[if (i > 0) const SizedBox(width: 10), Expanded(child: place)],
       ],
     );
   }

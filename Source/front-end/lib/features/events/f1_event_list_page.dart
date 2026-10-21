@@ -6,6 +6,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/data/f1_events_repository.dart';
 import '../../core/data/live_scores_repository.dart';
 import '../../core/models/event_status.dart';
+import '../../core/models/f1_event.dart';
 import '../../core/models/f1_live_score.dart';
 import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_text_styles.dart';
@@ -71,6 +72,33 @@ class _F1EventListPageState extends ConsumerState<F1EventListPage> with WidgetsB
     _scheduleLiveScoresPoll();
   }
 
+  Widget _dataView(List<F1Event> list, Map<String, F1LiveEventState> liveScores) {
+    final isUpcoming = _status == EventStatus.scheduled;
+    if (list.isEmpty) {
+      return Text(isUpcoming ? 'Coming Soon' : 'No races found.', style: AppTextStyles.body(color: AppColors.inkSub));
+    }
+    // Soonest-first for Upcoming, most-recent-first for Completed -- both
+    // read top-to-bottom as "closest to now at the top" (same convention
+    // field_event_list_page.dart uses).
+    final sorted = [...list]..sort(
+        (a, b) => isUpcoming ? a.eventDate.compareTo(b.eventDate) : b.eventDate.compareTo(a.eventDate),
+      );
+    // One card per race weekend; the next one leads the Upcoming list with
+    // the model's picks.
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        for (final (index, weekend) in groupF1Weekends(sorted).indexed) ...[
+          if (isUpcoming && index == 0)
+            FeaturedF1Weekend(sport: widget.sportId, weekend: weekend, liveScores: liveScores)
+          else
+            F1EventRow(sport: widget.sportId, weekend: weekend, liveScores: liveScores),
+          const SizedBox(height: 12),
+        ],
+      ],
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final events = ref.watch(f1EventsListProvider((sport: widget.sportId, status: _status)));
@@ -111,35 +139,7 @@ class _F1EventListPageState extends ConsumerState<F1EventListPage> with WidgetsB
             ),
             const SizedBox(height: 16),
             events.when(
-              data: (list) {
-                if (list.isEmpty) {
-                  final message = _status == EventStatus.scheduled ? 'Coming Soon' : 'No races found.';
-                  return Text(message, style: AppTextStyles.body(color: AppColors.inkSub));
-                }
-                // Soonest-first for Upcoming, most-recent-first for
-                // Completed -- both read top-to-bottom as "closest to now
-                // at the top" (same convention field_event_list_page.dart uses).
-                final sorted = [...list]..sort(
-                    (a, b) => _status == EventStatus.scheduled
-                        ? a.eventDate.compareTo(b.eventDate)
-                        : b.eventDate.compareTo(a.eventDate),
-                  );
-                // One card per race weekend; the next one leads the
-                // Upcoming list with the model's picks.
-                final isUpcoming = _status == EventStatus.scheduled;
-                return Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    for (final (index, weekend) in groupF1Weekends(sorted).indexed) ...[
-                      if (isUpcoming && index == 0)
-                        FeaturedF1Weekend(sport: widget.sportId, weekend: weekend, liveScores: liveScores)
-                      else
-                        F1EventRow(sport: widget.sportId, weekend: weekend, liveScores: liveScores),
-                      const SizedBox(height: 12),
-                    ],
-                  ],
-                );
-              },
+              data: (list) => _dataView(list, liveScores),
               loading: () => const Center(child: Padding(padding: EdgeInsets.all(40), child: CircularProgressIndicator())),
               error: (error, _) => Text('Couldn\'t load races: $error', style: AppTextStyles.body(color: AppColors.neg)),
             ),

@@ -394,7 +394,7 @@ def _round_odds(runs: list[_Run], chosen: _Run, columns: list[tuple[str, str | N
     total = len(runs)
 
     groups: dict[str, list[dict]] = {}
-    for team in sorted({team for team, _ in reach}):
+    for team in sorted({key[0] for key in reach}):
         values = [(titles[team] if round_name is None else reach[(team, round_name)]) / total for _, round_name in columns]
         groups.setdefault(group_of(team) or "", []).append({"team_id": team, "seed": seeds.get(team), "values": values})
     for rows in groups.values():

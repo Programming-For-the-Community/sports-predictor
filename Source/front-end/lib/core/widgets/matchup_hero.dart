@@ -77,6 +77,31 @@ class MatchupHero extends StatelessWidget {
   // False draws the contents with no card behind them.
   final bool framed;
 
+  /// One side: the real score once the game is on the scoreboard, else the
+  /// model's win chance.
+  Widget _side(NflTeam team, {required bool isHome}) {
+    final state = liveState;
+    final onScoreboard = state != null && (state.live || state.completed);
+    final situation = onScoreboard && state.live ? state.situation : null;
+    final homeScore = onScoreboard ? state.homeScore : null;
+    final awayScore = onScoreboard ? state.awayScore : null;
+    final homeChance = prediction.homeWinProbability;
+    final chance = isHome ? homeChance : 1 - homeChance;
+    final model = (isHome ? prediction.homeScore : prediction.awayScore).round();
+    final score = isHome ? homeScore : awayScore;
+    final percent = '${(chance * 100).round()}%';
+    if (score == null) {
+      return _Side(team: team, big: percent, bigColor: _chanceColor(chance), model: '$model');
+    }
+    return _Side(
+      team: team,
+      hasBall: (isHome ? situation?.homeHasBall : situation?.awayHasBall) ?? false,
+      big: score.toStringAsFixed(0),
+      bigColor: _scoreColor(score, isHome ? awayScore : homeScore),
+      model: '$model · $percent',
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final home = teamDisplay(sport, event.home);
@@ -84,26 +109,6 @@ class MatchupHero extends StatelessWidget {
     final homeChance = prediction.homeWinProbability;
     final homeFavored = homeChance >= 0.5;
     final state = liveState;
-    final onScoreboard = state != null && (state.live || state.completed);
-    final situation = state != null && state.live ? state.situation : null;
-    final homeScore = onScoreboard ? state.homeScore : null;
-    final awayScore = onScoreboard ? state.awayScore : null;
-
-    Widget side({required bool isHome}) {
-      final team = isHome ? home : away;
-      final chance = isHome ? homeChance : 1 - homeChance;
-      final model = (isHome ? prediction.homeScore : prediction.awayScore).round();
-      final score = isHome ? homeScore : awayScore;
-      final other = isHome ? awayScore : homeScore;
-      final percent = '${(chance * 100).round()}%';
-      return _Side(
-        team: team,
-        hasBall: (isHome ? situation?.homeHasBall : situation?.awayHasBall) ?? false,
-        big: score != null ? score.toStringAsFixed(0) : percent,
-        bigColor: score != null ? _scoreColor(score, other) : _chanceColor(chance),
-        model: score != null ? '$model · $percent' : '$model',
-      );
-    }
 
     return _heroFrame(
       framed: framed,
@@ -112,7 +117,7 @@ class MatchupHero extends StatelessWidget {
         children: [
           _Status(event: event, liveState: state),
           const SizedBox(height: 14),
-          _sides(side(isHome: false), side(isHome: true)),
+          _sides(_side(away, isHome: false), _side(home, isHome: true)),
           const SizedBox(height: 16),
           WinProbabilityBar(homeWinProbability: homeChance, height: 8),
           const SizedBox(height: 16),

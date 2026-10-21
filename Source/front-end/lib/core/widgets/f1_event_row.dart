@@ -70,24 +70,23 @@ List<F1Weekend> groupF1Weekends(List<F1Event> events) {
       weekends.add(F1Weekend([event]));
       continue;
     }
-    final sessions = byRound[(season, round)];
-    if (sessions != null) {
-      sessions.add(event);
-      continue;
-    }
-    final created = [event];
-    byRound[(season, round)] = created;
-    weekends.add(F1Weekend(created));
+    byRound.putIfAbsent((season, round), () {
+      final created = <F1Event>[];
+      weekends.add(F1Weekend(created));
+      return created;
+    }).add(event);
   }
   for (final sessions in byRound.values) {
-    // Sprint before the Grand Prix when both carry the same date.
-    sessions.sort((a, b) {
-      final byDate = a.eventDate.compareTo(b.eventDate);
-      if (byDate != 0) return byDate;
-      return (a.isSprint ? 0 : 1).compareTo(b.isSprint ? 0 : 1);
-    });
+    sessions.sort(_sessionOrder);
   }
   return weekends;
+}
+
+/// By date, with the sprint before the Grand Prix when both carry the same date.
+int _sessionOrder(F1Event a, F1Event b) {
+  final byDate = a.eventDate.compareTo(b.eventDate);
+  if (byDate != 0) return byDate;
+  return (a.isSprint ? 0 : 1).compareTo(b.isSprint ? 0 : 1);
 }
 
 /// One race weekend in GET /f1/events' list. A sprint weekend is one card
