@@ -247,6 +247,18 @@ void main() {
       expect(requests.where((r) => r.method == 'GET').map((r) => r.headers['Authorization']).toSet(), {'id-2'});
     });
 
+    test('a token with time left is used as-is, with no Cognito call across hourly runs', () async {
+      final tokens = _MemoryTokenStore(_tokens());
+      final host = _FakeWidgetHost([(id: 7, kind: HomeWidgetKind.accuracy)])..sports[7] = SportIds.nba;
+      final httpClient = client(publishedVersionCode: 41, scorecards: {SportIds.nfl: _scorecard(SportIds.nfl)});
+
+      for (var hour = 0; hour < 3; hour++) {
+        await run(httpClient, tokens: tokens, widgets: host, now: _wednesdayMorning.add(Duration(hours: hour)));
+      }
+
+      expect(requests.where((r) => r.url.host.startsWith('cognito-idp')), isEmpty);
+    });
+
     test('uses the token the app rotated in while its own refresh was rejected as reuse', () async {
       final tokens = _MemoryTokenStore(_tokens(expiresIn: Duration.zero));
       final httpClient = MockClient((request) async {

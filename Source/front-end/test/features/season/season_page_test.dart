@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/rendering.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -652,7 +651,7 @@ void main() {
     expect(scrollbar.thumbVisibility, isTrue);
   });
 
-  testWidgets('a completed bracket matchup shows the real score, not a probability', (tester) async {
+  testWidgets("a completed bracket matchup shows the real score and each side's pre-game chance", (tester) async {
     final projection = SeasonProjection(
       sport: 'nfl',
       season: 2026,
@@ -679,9 +678,10 @@ void main() {
     await tester.tap(find.text('Playoff Bracket'));
     await tester.pumpAndSettle();
 
-    expect(find.text('FINAL'), findsOneWidget);
     expect(find.text('27'), findsOneWidget);
     expect(find.text('13'), findsOneWidget);
+    expect(find.text('62%'), findsOneWidget);
+    expect(find.text('38%'), findsOneWidget);
   });
 
   testWidgets('an NBA series matchup shows the live win-loss record, not a single score', (tester) async {
@@ -720,7 +720,7 @@ void main() {
     expect(find.text('DET'), findsOneWidget);
   });
 
-  testWidgets('a decided NBA series (4 wins) shows as final with the series record', (tester) async {
+  testWidgets('a decided NBA series (4 wins) shows its real series record', (tester) async {
     final projection = SeasonProjection(
       sport: 'nba',
       season: 2026,
@@ -749,14 +749,14 @@ void main() {
     await tester.tap(find.text('Playoff Bracket'));
     await tester.pumpAndSettle();
 
-    // The record (4-2) isn't repeated on the status line -- it's already
-    // the big score digits in the team rows above.
-    expect(find.textContaining('BOS WINS SERIES'), findsOneWidget);
+    expect(find.text('4'), findsOneWidget);
+    expect(find.text('2'), findsOneWidget);
+    expect(find.textContaining('WINS SERIES'), findsNothing);
   });
 
   testWidgets(
-      "a not-yet-real NBA series matchup's status line shows PROJECTED + the predicted final record, "
-      'without repeating the live 0-0 record the team rows already show', (tester) async {
+      "a not-yet-real NBA series shows each side's chance and the shown run's series wins, "
+      'with no status line', (tester) async {
     final projection = SeasonProjection(
       sport: 'nba',
       season: 2026,
@@ -770,6 +770,7 @@ void main() {
                 teamA: '2', teamB: '8', seedA: 1, seedB: 8, status: 'projected',
                 predictedWinner: '2', winProbability: 0.7, winsA: 0, winsB: 0,
                 predictedWinsA: 4, predictedWinsB: 2,
+                chanceA: 0.7, chanceB: 0.3, seriesWinsA: 4, seriesWinsB: 2,
               ),
             ]),
           ],
@@ -786,25 +787,15 @@ void main() {
     await tester.tap(find.text('Playoff Bracket'));
     await tester.pumpAndSettle();
 
-    // The live 0-0 record is not repeated on the status line -- it's
-    // already the big "0"/"0" score digits in the team rows.
-    expect(find.text('0'), findsNWidgets(2));
-    expect(find.textContaining('PROJECTED'), findsOneWidget);
-    // The predicted final record (4-2, BOS the predicted winner) is the
-    // one record that belongs on the status line, formatted as
-    // "PROJECTED — TEAM RECORD PERCENT".
-    expect(find.text('PROJECTED — BOS 4-2 70%'), findsOneWidget);
-
-    // find.textContaining only checks the Text widget's own `data` string,
-    // unaffected by paint-time ellipsis clipping -- checking the real
-    // RenderParagraph is the only way to catch text actually being cut.
-    final paragraph = tester.renderObject<RenderParagraph>(find.textContaining('PROJECTED'));
-    expect(paragraph.didExceedMaxLines, isFalse, reason: 'status line text is being clipped, not just wrapped');
+    expect(find.text('70%'), findsOneWidget);
+    expect(find.text('30%'), findsOneWidget);
+    expect(find.text('4'), findsOneWidget);
+    expect(find.text('2'), findsOneWidget);
+    expect(find.textContaining('PROJECTED'), findsNothing);
   });
 
   testWidgets(
-      "a scheduled (real, in-progress) NBA series shows its predicted final record alongside the "
-      'live one', (tester) async {
+      "a scheduled (real, in-progress) NBA series shows the shown run's final record, not the live one", (tester) async {
     final projection = SeasonProjection(
       sport: 'nba',
       season: 2026,
@@ -818,6 +809,7 @@ void main() {
                 teamA: '2', teamB: '8', seedA: 3, seedB: 6, status: 'scheduled',
                 predictedWinner: '2', winProbability: 0.81, winsA: 2, winsB: 1,
                 predictedWinsA: 4, predictedWinsB: 1,
+                chanceA: 0.81, chanceB: 0.19, seriesWinsA: 4, seriesWinsB: 1,
               ),
             ]),
           ],
@@ -834,11 +826,11 @@ void main() {
     await tester.tap(find.text('Playoff Bracket'));
     await tester.pumpAndSettle();
 
-    // The live 2-1 record is the big per-team score digits (not repeated
-    // on the status line); the predicted 4-1 final only appears there.
-    expect(find.text('2'), findsOneWidget);
+    expect(find.text('4'), findsOneWidget);
     expect(find.text('1'), findsOneWidget);
-    expect(find.text('BOS 4-1 81%'), findsOneWidget);
+    expect(find.text('2'), findsNothing);
+    expect(find.text('81%'), findsOneWidget);
+    expect(find.text('19%'), findsOneWidget);
   });
 
   testWidgets(

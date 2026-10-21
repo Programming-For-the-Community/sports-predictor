@@ -259,7 +259,7 @@ class MarchMadnessGrid extends StatelessWidget {
         top: grid.y(slot),
         width: BracketDimensions.cardWidth,
         height: BracketDimensions.cardHeight,
-        child: BracketMatchupCard(sport: sport, matchup: matchup, teamNames: bracket.teamNames, cardWidth: BracketDimensions.cardWidth),
+        child: BracketMatchupCard(sport: sport, matchup: matchup, teamNames: bracket.teamNames),
       );
 }
 

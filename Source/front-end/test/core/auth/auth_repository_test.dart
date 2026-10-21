@@ -129,6 +129,31 @@ void main() {
     expect(refreshCalls, 1);
   });
 
+  test('a run of 401s right after a refresh forces only one refresh', () async {
+    var refreshCalls = 0;
+    final repo = AuthRepository(
+      authClient: CognitoAuthClient(
+        srpFactory: FakeCognitoSrp.new,
+        httpClient: srpAwareMockClient((request) async {
+          final body = jsonDecode(request.body) as Map<String, dynamic>;
+          if (body['AuthFlow'] == 'REFRESH_TOKEN_AUTH') {
+            refreshCalls++;
+            return _tokenResponse(id: 'refreshed-$refreshCalls', refresh: null);
+          }
+          return _tokenResponse(id: 'initial');
+        }),
+      ),
+    );
+    await _firstRealState(repo);
+    await repo.login(username: 'chamar', password: 'hunter2');
+
+    final concurrent = await Future.wait([for (var i = 0; i < 5; i++) repo.getValidIdToken(forceRefresh: true)]);
+    final later = [for (var i = 0; i < 5; i++) await repo.getValidIdToken(forceRefresh: true)];
+
+    expect(refreshCalls, 1);
+    expect({...concurrent, ...later}, {'refreshed-1'});
+  });
+
   test('getValidIdToken transitions to AuthUnauthenticated when the refresh token itself is rejected', () async {
     final repo = AuthRepository(
       authClient: CognitoAuthClient(
@@ -346,11 +371,69 @@ void main() {
       await _firstRealState(repo);
       final prefs = await SharedPreferences.getInstance();
       await prefs.setString('cognito_tokens', persisted(refresh: 'from-background'));
+      await prefs.setString('session_renewed_at', DateTime.now().subtract(renewalInterval).toIso8601String());
 
       await repo.renewSession();
 
       expect(sent, ['r1', 'from-background']);
       expect((repo.state as AuthAuthenticated).tokens.idToken, 'id-2');
+    });
+
+    test('restore within renewalInterval of the last renewal keeps a fresh token without calling Cognito', () async {
+      SharedPreferences.setMockInitialValues({
+        'cognito_tokens': persisted(id: 'kept-id'),
+        'session_renewed_at': DateTime.now().subtract(const Duration(hours: 2)).toIso8601String(),
+      });
+      var calls = 0;
+      final repo = rolling((r) async {
+        calls++;
+        return _tokenResponse();
+      });
+
+      final state = await _firstRealState(repo);
+
+      expect((state as AuthAuthenticated).tokens.idToken, 'kept-id');
+      expect(calls, 0);
+    });
+
+    test('repeated resumes rotate once per renewalInterval, not once per resume', () async {
+      SharedPreferences.setMockInitialValues({'cognito_tokens': persisted()});
+      var calls = 0;
+      final repo = rolling((r) async {
+        calls++;
+        return _tokenResponse(id: 'id-$calls', refresh: 'r${calls + 1}');
+      });
+      await _firstRealState(repo);
+
+      for (var i = 0; i < 10; i++) {
+        await repo.renewSession();
+      }
+      expect(calls, 1);
+
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString('session_renewed_at', DateTime.now().subtract(renewalInterval).toIso8601String());
+      await repo.renewSession();
+      await repo.renewSession();
+      expect(calls, 2);
+    });
+
+    test('a resume with the ID token near expiry still refreshes inside renewalInterval', () async {
+      SharedPreferences.setMockInitialValues({
+        'cognito_tokens': persisted(expiresIn: const Duration(seconds: 30)),
+        'session_renewed_at': DateTime.now().toIso8601String(),
+      });
+      var calls = 0;
+      final repo = rolling((r) async {
+        calls++;
+        return _tokenResponse(id: 'id-$calls', refresh: 'r${calls + 1}');
+      });
+      await _firstRealState(repo);
+      expect(calls, 1);
+
+      await repo.renewSession();
+
+      expect(calls, 1);
+      expect((repo.state as AuthAuthenticated).tokens.idToken, 'id-1');
     });
 
     test('concurrent token requests near expiry share one rotation', () async {

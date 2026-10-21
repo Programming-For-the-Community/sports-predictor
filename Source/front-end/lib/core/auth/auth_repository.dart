@@ -22,6 +22,15 @@ const sessionLifetime = Duration(days: 30);
 Future<void> markSessionRenewed(SharedPreferences prefs) =>
     prefs.setString(_sessionRenewedAtPrefsKey, DateTime.now().toIso8601String());
 
+/// How often the Android app rotates its refresh token to keep
+/// sessionLifetime rolling. A launch or resume sooner than this keeps the
+/// current tokens unless the ID token is near expiry.
+const renewalInterval = Duration(hours: 24);
+
+/// A forced refresh this soon after the last one would get the same tokens
+/// back, so the current ones are returned instead.
+const _forcedRefreshCooldown = Duration(seconds: 30);
+
 /// How long the website tolerates zero authenticated activity before
 /// forcing a fresh login, independent of whether the refresh token itself
 /// is still valid. Not enforced in the Android app (rollingSession).
@@ -65,8 +74,8 @@ class AuthRepository extends StateNotifier<AuthState> {
   TokenStore? _tokenStore;
 
   /// The Android app's session: no inactivityTtl, the refresh token is
-  /// rotated on every launch and resume (renewSession) so sessionLifetime
-  /// rolls, and only Cognito rejecting the refresh token signs the user
+  /// rotated on a launch or resume once per renewalInterval (renewSession)
+  /// so sessionLifetime rolls, and only Cognito rejecting the refresh token signs the user
   /// out -- a failed network call keeps the session.
   final bool rollingSession;
 
@@ -101,7 +110,7 @@ class AuthRepository extends StateNotifier<AuthState> {
     }
 
     var tokens = CognitoTokens.fromJson(jsonDecode(raw) as Map<String, dynamic>);
-    if (rollingSession || tokens.isNearExpiry) {
+    if (tokens.isNearExpiry || await _renewalDue()) {
       try {
         tokens = await _refresh(tokens);
       } catch (error) {
@@ -165,7 +174,8 @@ class AuthRepository extends StateNotifier<AuthState> {
   ///
   /// forceRefresh skips the isNearExpiry check -- ApiClient's 401-retry
   /// path needs this: a token can be rejected server-side while still
-  /// looking fresh by its own local expiresAt.
+  /// looking fresh by its own local expiresAt. Within _forcedRefreshCooldown
+  /// of the last refresh the current token is returned instead.
   Future<String> getValidIdToken({bool forceRefresh = false}) async {
     await _restored.future;
     final current = state;
@@ -181,7 +191,7 @@ class AuthRepository extends StateNotifier<AuthState> {
       throw StateError('Session expired after $inactivityTtl of inactivity');
     }
     await _touchActivity();
-    if (!forceRefresh && !current.tokens.isNearExpiry) {
+    if (forceRefresh ? _refreshedRecently : !current.tokens.isNearExpiry) {
       return current.tokens.idToken;
     }
     try {
@@ -198,12 +208,14 @@ class AuthRepository extends StateNotifier<AuthState> {
   }
 
   /// Android app: called on every return to the foreground (app.dart).
-  /// Rotating the refresh token restarts sessionLifetime.
+  /// Rotates the refresh token, restarting sessionLifetime, at most once per
+  /// renewalInterval or when the ID token is near expiry.
   Future<void> renewSession() async {
     if (!rollingSession) return;
     await _restored.future;
     final current = state;
     if (current is! AuthAuthenticated) return;
+    if (!current.tokens.isNearExpiry && !await _renewalDue()) return;
     try {
       state = AuthAuthenticated(await _refresh(current.tokens));
     } catch (error) {
@@ -218,6 +230,23 @@ class AuthRepository extends StateNotifier<AuthState> {
       _refreshing ??= _rotate(current).whenComplete(() => _refreshing = null);
 
   Future<CognitoTokens>? _refreshing;
+  DateTime? _refreshedAt;
+
+  bool get _refreshedRecently {
+    final at = _refreshedAt;
+    return at != null && DateTime.now().difference(at) < _forcedRefreshCooldown;
+  }
+
+  /// True when the rolling session was last renewed renewalInterval ago or
+  /// more, or never recorded. Reloaded first: background_checks.dart renews
+  /// from its own isolate.
+  Future<bool> _renewalDue() async {
+    if (!rollingSession) return false;
+    final prefs = await _prefsInstance;
+    await prefs.reload();
+    final renewedAt = DateTime.tryParse(prefs.getString(_sessionRenewedAtPrefsKey) ?? '');
+    return renewedAt == null || DateTime.now().difference(renewedAt) >= renewalInterval;
+  }
 
   Future<CognitoTokens> _rotate(CognitoTokens current) async {
     var refreshToken = current.refreshToken;
@@ -236,6 +265,7 @@ class AuthRepository extends StateNotifier<AuthState> {
       refreshToken = stored;
       refreshed = await _authClient.refresh(refreshToken);
     }
+    _refreshedAt = DateTime.now();
     await _persist(refreshed);
     if (refreshed.refreshToken != refreshToken) await markSessionRenewed(await _prefsInstance);
     return refreshed;

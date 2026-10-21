@@ -1,3 +1,5 @@
+import 'upset.dart';
+
 /// Mirrors GET /{sport}/season's response shape.
 class TeamStanding {
   const TeamStanding({
@@ -224,6 +226,11 @@ class BracketMatchup {
     this.winsB,
     this.predictedWinsA,
     this.predictedWinsB,
+    this.chanceA,
+    this.chanceB,
+    this.seriesWinsA,
+    this.seriesWinsB,
+    this.flag,
   });
 
   // Null on the side that got a bye into this round -- see
@@ -259,6 +266,19 @@ class BracketMatchup {
   final int? predictedWinsA;
   final int? predictedWinsB;
 
+  /// Each side's chance to win this game or series from where it stands
+  /// now. Null in payloads from before the simulated bracket.
+  final double? chanceA;
+  final double? chanceB;
+
+  /// The series record as the shown simulated run ends it (the real record
+  /// once final).
+  final int? seriesWinsA;
+  final int? seriesWinsB;
+
+  /// UPSET or UPSET WATCH, judged against the betting (else seed) favourite.
+  final UpsetFlag? flag;
+
   bool get isFinal => status == BracketMatchupStatus.finalStatus;
 
   /// True for a real best-of-7 series slot -- lets the UI show a running
@@ -280,6 +300,15 @@ class BracketMatchup {
         winsB: json['wins_b'] as int?,
         predictedWinsA: json['predicted_wins_a'] as int?,
         predictedWinsB: json['predicted_wins_b'] as int?,
+        chanceA: (json['chance_a'] as num?)?.toDouble(),
+        chanceB: (json['chance_b'] as num?)?.toDouble(),
+        seriesWinsA: json['series_wins_a'] as int?,
+        seriesWinsB: json['series_wins_b'] as int?,
+        flag: switch (json['flag']) {
+          'upset' => UpsetFlag.upset,
+          'watch' => UpsetFlag.watch,
+          _ => null,
+        },
       );
 }
 
@@ -314,6 +343,45 @@ class BracketTeamName {
       );
 }
 
+/// One team's row in [RoundOdds]: its chance of reaching each column's
+/// round, the last column being the title.
+class RoundOddsRow {
+  const RoundOddsRow({required this.teamId, required this.values, this.seed});
+
+  final String teamId;
+  final int? seed;
+  final List<double> values;
+
+  factory RoundOddsRow.fromJson(Map<String, dynamic> json) => RoundOddsRow(
+        teamId: json['team_id'] as String,
+        seed: json['seed'] as int?,
+        values: [for (final value in json['values'] as List<dynamic>) (value as num).toDouble()],
+      );
+}
+
+/// How often each team reached each round across every simulated run,
+/// grouped by conference or region (already in seed order).
+class RoundOdds {
+  const RoundOdds({required this.columns, required this.groups, this.simulations});
+
+  final List<String> columns;
+  final Map<String, List<RoundOddsRow>> groups;
+  final int? simulations;
+
+  /// Null for a payload from before the simulated bracket.
+  static RoundOdds? fromBracketJson(Map<String, dynamic> json) {
+    final odds = json['round_odds'] as Map<String, dynamic>?;
+    if (odds == null) return null;
+    return RoundOdds(
+      columns: [for (final column in odds['columns'] as List<dynamic>) column as String],
+      groups: (odds['groups'] as Map<String, dynamic>).map(
+        (group, rows) => MapEntry(group, [for (final row in rows as List<dynamic>) RoundOddsRow.fromJson(row as Map<String, dynamic>)]),
+      ),
+      simulations: json['simulations'] as int?,
+    );
+  }
+}
+
 /// A full bracket -- either conference-split (NFL/NBA: two conferences'
 /// own round lists plus one cross-conference final matchup) or flat
 /// (NCAAFB: one unified bracket, its championship already the last round
@@ -326,6 +394,7 @@ class BracketProjection {
     required this.teamNames,
     this.finalMatchup,
     this.champion,
+    this.roundOdds,
   });
 
   /// Conference name -> that conference's own round list. Empty for a
@@ -345,6 +414,8 @@ class BracketProjection {
   /// team_id -> display name/abbreviation. A team id missing here falls
   /// back to the raw id, same as teamDisplayFor's own convention.
   final Map<String, BracketTeamName> teamNames;
+
+  final RoundOdds? roundOdds;
 
   factory BracketProjection.fromJson(Map<String, dynamic> json) {
     final conferencesJson = json['conferences'] as Map<String, dynamic>?;
@@ -366,6 +437,7 @@ class BracketProjection {
       teamNames: (teamNamesJson ?? {}).map(
         (teamId, info) => MapEntry(teamId, BracketTeamName.fromJson(info as Map<String, dynamic>)),
       ),
+      roundOdds: RoundOdds.fromBracketJson(json),
     );
   }
 }
@@ -398,6 +470,7 @@ class MarchMadnessBracket {
     required this.teamNames,
     this.championship,
     this.champion,
+    this.roundOdds,
   });
 
   final List<BracketMatchup> firstFour;
@@ -415,6 +488,7 @@ class MarchMadnessBracket {
   final BracketMatchup? championship;
   final String? champion;
   final Map<String, BracketTeamName> teamNames;
+  final RoundOdds? roundOdds;
 
   factory MarchMadnessBracket.fromJson(Map<String, dynamic> json) => MarchMadnessBracket(
         firstFour: (json['first_four'] as List<dynamic>? ?? [])
@@ -430,6 +504,7 @@ class MarchMadnessBracket {
         champion: json['champion'] as String?,
         teamNames: (json['team_names'] as Map<String, dynamic>? ?? {})
             .map((teamId, info) => MapEntry(teamId, BracketTeamName.fromJson(info as Map<String, dynamic>))),
+        roundOdds: RoundOdds.fromBracketJson(json),
       );
 }
 

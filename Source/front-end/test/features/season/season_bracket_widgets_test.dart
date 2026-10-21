@@ -3,13 +3,17 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:front_end/core/models/season_projection.dart';
+import 'package:front_end/core/models/upset.dart';
+import 'package:front_end/core/theme/app_colors.dart';
 import 'package:front_end/features/season/season_bracket_dimensions.dart';
+import 'package:front_end/features/season/season_bracket_legend.dart';
 import 'package:front_end/features/season/season_bracket_matchup_card.dart';
 import 'package:front_end/features/season/season_bracket_tree.dart';
 import 'package:front_end/features/season/season_leaderboards.dart';
 import 'package:front_end/features/season/season_march_madness_section.dart';
 import 'package:front_end/features/season/season_standings_table.dart';
 import 'package:front_end/features/season/season_march_madness_grid.dart';
+import 'package:front_end/features/season/season_round_odds_table.dart';
 
 BracketMatchup _m(String? a, String? b, {String? winner, int? seedA, int? seedB, int? predA, int? predB}) => BracketMatchup(
       teamA: a,
@@ -108,17 +112,57 @@ void main() {
     Widget card(BracketMatchup matchup) => _app(SizedBox(
           width: BracketDimensions.cardWidth,
           height: BracketDimensions.cardHeight,
-          child: BracketMatchupCard(sport: 'nba', matchup: matchup, teamNames: const {}, cardWidth: BracketDimensions.cardWidth),
+          child: BracketMatchupCard(sport: 'nba', matchup: matchup, teamNames: const {}),
         ));
 
-    testWidgets('a series predicted for team B shows B-first predicted record', (tester) async {
-      final matchup = BracketMatchup(
+    testWidgets("a series shows each side's chance and wins as the shown run ends it, and no status line", (tester) async {
+      const matchup = BracketMatchup(
         teamA: '1', teamB: '2', status: 'scheduled', predictedWinner: '2', winProbability: 0.6,
-        winsA: 0, winsB: 0, predictedWinsA: 2, predictedWinsB: 4,
+        winsA: 1, winsB: 1, predictedWinsA: 3, predictedWinsB: 4,
+        chanceA: 0.4, chanceB: 0.6, seriesWinsA: 3, seriesWinsB: 4,
       );
       await tester.pumpWidget(card(matchup));
 
-      expect(find.textContaining('4-2'), findsOneWidget);
+      expect(find.text('40%'), findsOneWidget);
+      expect(find.text('60%'), findsOneWidget);
+      expect(find.text('3'), findsOneWidget);
+      expect(find.text('4'), findsOneWidget);
+      expect(find.textContaining('PROJECTED'), findsNothing);
+      expect(find.textContaining('4-3'), findsNothing);
+    });
+
+    testWidgets('an older payload without chances falls back to the pick and its probability', (tester) async {
+      await tester.pumpWidget(card(_m('1', '2', winner: '2')));
+
+      expect(find.text('40%'), findsOneWidget);
+      expect(find.text('60%'), findsOneWidget);
+    });
+
+    testWidgets('a finished game shows the chance each side had beforehand, and its score', (tester) async {
+      const matchup = BracketMatchup(
+        teamA: '1', teamB: '2', status: 'final', predictedWinner: '1', winProbability: 0.7,
+        actualWinner: '2', actualHomeScore: 20, actualAwayScore: 24, chanceA: 0, chanceB: 1, flag: UpsetFlag.upset,
+      );
+      await tester.pumpWidget(card(matchup));
+
+      expect(find.text('70%'), findsOneWidget);
+      expect(find.text('30%'), findsOneWidget);
+      expect(find.text('24'), findsOneWidget);
+      expect(find.text('UPSET'), findsOneWidget);
+      final border = (tester.widget<Container>(find.byType(Container).first).decoration! as BoxDecoration).border! as Border;
+      expect(border.top.color, AppColors.warn.withValues(alpha: 0.4));
+    });
+
+    testWidgets('an upset watch shows its chip and a plain border', (tester) async {
+      const matchup = BracketMatchup(
+        teamA: '1', teamB: '2', status: 'projected', predictedWinner: '1', winProbability: 0.58,
+        chanceA: 0.58, chanceB: 0.42, flag: UpsetFlag.watch,
+      );
+      await tester.pumpWidget(card(matchup));
+
+      expect(find.text('UPSET WATCH'), findsOneWidget);
+      expect(find.text('UPSET'), findsNothing);
+      expect(tester.takeException(), isNull);
     });
 
     testWidgets('a bye side shows BYE with its seed', (tester) async {
@@ -159,6 +203,65 @@ void main() {
     testWidgets('no standings', (tester) async {
       await tester.pumpWidget(_app(const StandingsTable(sport: 'nfl', standings: [])));
       expect(find.text('No standings available yet.'), findsOneWidget);
+    });
+  });
+
+  group('BracketLegend', () {
+    testWidgets('a series bracket explains chips, chance and series wins with the run count', (tester) async {
+      await tester.pumpWidget(_app(const BracketLegend(showSkip: true, simulation: (series: true, simulations: 2000))));
+
+      expect(find.text(BracketLegend.skipText), findsOneWidget);
+      expect(find.text('UPSET'), findsOneWidget);
+      expect(find.text('UPSET WATCH'), findsOneWidget);
+      expect(find.text(BracketLegend.upsetText(series: true)), findsOneWidget);
+      expect(find.text('Series wins in ${BracketLegend.runText(2000)}'), findsOneWidget);
+      expect(find.textContaining('2,000'), findsOneWidget);
+    });
+
+    testWidgets('a single-game bracket folds the run into the chance entry', (tester) async {
+      await tester.pumpWidget(_app(const BracketLegend(simulation: (series: false, simulations: 2000))));
+
+      expect(find.text(BracketLegend.skipText), findsNothing);
+      expect(find.text(BracketLegend.upsetText(series: false)), findsOneWidget);
+      expect(find.textContaining('Series wins'), findsNothing);
+      expect(find.text('Chance to win that game · picks come from ${BracketLegend.runText(2000)}'), findsOneWidget);
+    });
+  });
+
+  group('RoundOddsTables', () {
+    const odds = RoundOdds(
+      columns: ['Finals', 'Title'],
+      groups: {
+        'West': [RoundOddsRow(teamId: 'w1', seed: 1, values: [0.6, 0.35])],
+        'East': [
+          RoundOddsRow(teamId: 'e1', seed: 1, values: [0.55, 0.3]),
+          RoundOddsRow(teamId: 'e8', seed: 8, values: [0, 0]),
+          RoundOddsRow(teamId: 'e5', seed: 5, values: [0.001, 0.0004]),
+        ],
+      },
+      simulations: 2000,
+    );
+    const names = {'e1': BracketTeamName(abbreviation: 'CLE'), 'e8': BracketTeamName(abbreviation: 'MIA'), 'w1': BracketTeamName(abbreviation: 'OKC')};
+
+    testWidgets('one card per group in the given order, with dashes and slivers', (tester) async {
+      await tester.pumpWidget(_app(const RoundOddsTables(sport: 'nba', odds: odds, teamNames: names, groupOrder: ['East', 'West'])));
+
+      final east = tester.getTopLeft(find.text('Round odds · East'));
+      final west = tester.getTopLeft(find.text('Round odds · West'));
+      expect(east.dy < west.dy || east.dx < west.dx, isTrue);
+      expect(find.text('ACROSS ALL 2,000 SIMULATIONS'), findsNWidgets(2));
+      expect(find.text('55%'), findsOneWidget);
+      expect(find.text('—'), findsNWidgets(2));
+      expect(find.text('<1%'), findsNWidgets(2));
+      expect(find.text('TITLE'), findsNWidgets(2));
+    });
+
+    test('formatRoundOdds', () {
+      expect(formatRoundOdds(0), '—');
+      expect(formatRoundOdds(0.004), '<1%');
+      expect(formatRoundOdds(0.996), '>99%');
+      expect(formatRoundOdds(1), '100%');
+      expect(formatRoundOdds(0.375), '38%');
     });
   });
 }

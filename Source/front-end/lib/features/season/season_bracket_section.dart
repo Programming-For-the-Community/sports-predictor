@@ -4,8 +4,10 @@ import '../../core/models/season_projection.dart';
 import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_text_styles.dart';
 import 'season_bracket_layout.dart';
+import 'season_bracket_legend.dart';
 import 'season_bracket_round_labels.dart';
 import 'season_bracket_tree.dart';
+import 'season_round_odds_table.dart';
 
 /// Playoff/Cup-knockout bracket, rendered as a single converging tree
 /// (BracketTree). A flat-bracket sport (NCAAFB -- bracket.rounds
@@ -22,12 +24,37 @@ class BracketSection extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final odds = bracket.roundOdds;
+    final conferenceNames = bracket.conferences.keys.toList()..sort();
+    final tree = _tree(conferenceNames, _simulationLegend(odds));
+    if (odds == null) return tree;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        tree,
+        const SizedBox(height: 24),
+        RoundOddsTables(sport: sport, odds: odds, teamNames: bracket.teamNames, groupOrder: conferenceNames),
+      ],
+    );
+  }
+
+  BracketSimulationLegend? _simulationLegend(RoundOdds? odds) {
+    if (odds == null) return null;
+    final matchups = [
+      ...?bracket.rounds?.expand((round) => round.matchups),
+      for (final rounds in bracket.conferences.values) ...rounds.expand((round) => round.matchups),
+    ];
+    return (series: matchups.any((m) => m.isSeries), simulations: odds.simulations ?? 0);
+  }
+
+  Widget _tree(List<String> conferenceNames, BracketSimulationLegend? legend) {
     final flatRounds = bracket.rounds;
     if (flatRounds != null) {
-      return BracketTree(sport: sport, rounds: flatRounds, teamNames: bracket.teamNames, highlightFinalMatchup: true);
+      return BracketTree(
+        sport: sport, rounds: flatRounds, teamNames: bracket.teamNames, highlightFinalMatchup: true, simulationLegend: legend,
+      );
     }
 
-    final conferenceNames = bracket.conferences.keys.toList()..sort();
     final finalMatchup = bracket.finalMatchup;
     if (conferenceNames.length != 2 || finalMatchup == null) {
       // Not the shape this combined layout assumes -- fall back to
@@ -35,12 +62,17 @@ class BracketSection extends StatelessWidget {
       return Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          for (final conference in conferenceNames) ...[
+          for (final (i, conference) in conferenceNames.indexed) ...[
             Padding(
               padding: const EdgeInsets.only(bottom: 8),
               child: Text(conference.toUpperCase(), style: AppTextStyles.microLabel(color: AppColors.cyan)),
             ),
-            BracketTree(sport: sport, rounds: bracket.conferences[conference]!, teamNames: bracket.teamNames),
+            BracketTree(
+              sport: sport,
+              rounds: bracket.conferences[conference]!,
+              teamNames: bracket.teamNames,
+              simulationLegend: i == 0 ? legend : null,
+            ),
             const SizedBox(height: 20),
           ],
         ],
@@ -74,6 +106,7 @@ class BracketSection extends StatelessWidget {
       conferenceLabels: conferenceLabels,
       precomputedLayout: combined.layout,
       highlightFinalMatchup: true,
+      simulationLegend: legend,
     );
   }
 }

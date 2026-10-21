@@ -43,16 +43,19 @@ class ActualModelKey extends StatelessWidget {
 /// UPSET (amber) or UPSET WATCH, outlined so it never reads as a filled
 /// confidence or verdict pill.
 class UpsetChip extends StatelessWidget {
-  const UpsetChip({super.key, required this.flag});
+  const UpsetChip({super.key, required this.flag, this.dense = false});
 
   final UpsetFlag flag;
+
+  /// Tighter padding, for the fixed-height bracket card and its legend.
+  final bool dense;
 
   @override
   Widget build(BuildContext context) {
     final color = flag == UpsetFlag.upset ? AppColors.warn : AppColors.inkMid;
     final border = flag == UpsetFlag.upset ? AppColors.warn : AppColors.inkSub.withValues(alpha: 0.5);
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 3),
+      padding: dense ? const EdgeInsets.symmetric(horizontal: 6, vertical: 1) : const EdgeInsets.symmetric(horizontal: 9, vertical: 3),
       decoration: BoxDecoration(border: Border.all(color: border), borderRadius: BorderRadius.circular(999)),
       child: Text(flag.label, style: AppTextStyles.microLabel(color: color)),
     );

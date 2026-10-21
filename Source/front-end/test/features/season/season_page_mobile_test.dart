@@ -4,6 +4,7 @@ import 'package:flutter_test/flutter_test.dart';
 
 import 'package:front_end/core/data/season_repository.dart';
 import 'package:front_end/core/models/season_projection.dart';
+import 'package:front_end/core/models/upset.dart';
 import 'package:front_end/features/season/season_page.dart';
 
 import '../../support/mobile_viewport.dart';
@@ -117,10 +118,14 @@ final _bracketSeason = SeasonProjection(
       'AFC': [
         BracketRound(round: 'Wild Card', matchups: [
           BracketMatchup(teamA: '12', teamB: '13', seedA: 2, seedB: 7, status: 'projected', predictedWinner: '12', winProbability: 0.62),
-          BracketMatchup(teamA: '2', teamB: '17', seedA: 3, seedB: 6, status: 'scheduled', predictedWinner: '2', winProbability: 0.58),
+          BracketMatchup(
+            teamA: '2', teamB: '17', seedA: 3, seedB: 6, status: 'scheduled', predictedWinner: '2', winProbability: 0.58,
+            chanceA: 0.58, chanceB: 0.42, flag: UpsetFlag.watch,
+          ),
           BracketMatchup(
             teamA: '4', teamB: '5', seedA: 4, seedB: 5, status: 'final',
             predictedWinner: '4', winProbability: 0.51, actualWinner: '5', actualHomeScore: 20, actualAwayScore: 24,
+            chanceA: 0, chanceB: 1, flag: UpsetFlag.upset,
           ),
         ]),
         BracketRound(round: 'Divisional', matchups: [
@@ -153,6 +158,20 @@ final _bracketSeason = SeasonProjection(
     },
     finalMatchup: BracketMatchup(teamA: '1', teamB: '22', status: 'projected', predictedWinner: '1', winProbability: 0.51),
     champion: '1',
+    roundOdds: RoundOdds(
+      columns: ['Divisional', 'Conf champ', 'Super Bowl', 'Title'],
+      groups: {
+        'AFC': [
+          RoundOddsRow(teamId: '1', seed: 1, values: [1, 0.612, 0.384, 0.215]),
+          RoundOddsRow(teamId: '12', seed: 2, values: [0.62, 0.301, 0.152, 0.071]),
+          RoundOddsRow(teamId: '13', seed: 7, values: [0.38, 0.0995, 0.004, 0]),
+        ],
+        'NFC': [
+          RoundOddsRow(teamId: '22', seed: 1, values: [1, 0.55, 0.31, 0.148]),
+        ],
+      },
+      simulations: 2000,
+    ),
   ),
 );
 
@@ -170,7 +189,10 @@ final _nbaSeriesBracketSeason = SeasonProjection(
     conferences: {
       'Eastern': [
         BracketRound(round: 'Play-In', matchups: [
-          BracketMatchup(teamA: '1', teamB: '14', seedA: 7, seedB: 8, status: 'projected', predictedWinner: '1', winProbability: 0.59),
+          BracketMatchup(
+            teamA: '1', teamB: '14', seedA: 7, seedB: 8, status: 'final', predictedWinner: '1', winProbability: 0.59,
+            actualWinner: '14', actualHomeScore: 108, actualAwayScore: 112, chanceA: 0, chanceB: 1, flag: UpsetFlag.upset,
+          ),
         ]),
         BracketRound(round: 'Conference Quarterfinals', matchups: [
           BracketMatchup(
@@ -180,14 +202,16 @@ final _nbaSeriesBracketSeason = SeasonProjection(
           ),
           BracketMatchup(
             teamA: '2', teamB: '5', seedA: 4, seedB: 5, status: 'scheduled',
-            predictedWinner: '2', winProbability: 0.813, winsA: 3, winsB: 3,
+            predictedWinner: '2', winProbability: 0.513, winsA: 3, winsB: 3,
             predictedWinsA: 4, predictedWinsB: 3,
+            chanceA: 0.513, chanceB: 0.487, seriesWinsA: 4, seriesWinsB: 3, flag: UpsetFlag.watch,
           ),
         ]),
         BracketRound(round: 'Conference Semifinals', matchups: [
           BracketMatchup(
             teamA: '18', teamB: '2', seedA: 1, seedB: 4, status: 'final',
-            winsA: 4, winsB: 3, actualWinner: '18',
+            winsA: 3, winsB: 4, actualWinner: '2', predictedWinner: '18', winProbability: 0.64,
+            seriesWinsA: 3, seriesWinsB: 4, chanceA: 0, chanceB: 1, flag: UpsetFlag.upset,
           ),
         ]),
       ],
@@ -211,6 +235,20 @@ final _nbaSeriesBracketSeason = SeasonProjection(
     },
     finalMatchup: BracketMatchup(teamA: '18', teamB: '24', status: 'projected', predictedWinner: '18', winProbability: 0.5),
     champion: '18',
+    roundOdds: RoundOdds(
+      columns: ['Playoffs', '2nd round', 'Conf finals', 'Finals', 'Title'],
+      groups: {
+        'Eastern': [
+          RoundOddsRow(teamId: '18', seed: 1, values: [1, 0.995, 0.612, 0.384, 0.215]),
+          RoundOddsRow(teamId: '28', seed: 8, values: [1, 0.005, 0.001, 0, 0]),
+          RoundOddsRow(teamId: '14', seed: 10, values: [0.412, 0.003, 0, 0, 0]),
+        ],
+        'Western': [
+          RoundOddsRow(teamId: '24', seed: 1, values: [1, 0.812, 0.55, 0.31, 0.148]),
+        ],
+      },
+      simulations: 2000,
+    ),
   ),
 );
 
@@ -258,8 +296,33 @@ final _marchMadnessSeason = SeasonProjection(
       '1': BracketTeamName(name: 'Duke Blue Devils', abbreviation: 'DUKE'),
       '3': BracketTeamName(name: 'Gonzaga Bulldogs', abbreviation: 'GONZ'),
     },
+    roundOdds: const RoundOdds(
+      columns: ['Sweet 16', 'Elite Eight', 'Final Four', 'Final', 'Title'],
+      groups: {
+        'Region A': [
+          RoundOddsRow(teamId: '1', seed: 1, values: [0.902, 0.715, 0.48, 0.31, 0.188]),
+          RoundOddsRow(teamId: '9', seed: 8, values: [0.31, 0.11, 0.004, 0.001, 0]),
+        ],
+        'Region B': [RoundOddsRow(teamId: '2', seed: 1, values: [0.88, 0.6, 0.41, 0.2, 0.1])],
+        'Region C': [RoundOddsRow(teamId: '3', seed: 1, values: [0.85, 0.64, 0.44, 0.28, 0.16])],
+        'Region D': [RoundOddsRow(teamId: '4', seed: 1, values: [1, 1, 0.995, 0.5, 0.25])],
+      },
+      simulations: 2000,
+    ),
   ),
 );
+
+/// Round headers and First Four captions that ellipsize at 1.5x text.
+const _bracketCaptions = {
+  'CONFERENCE CHAMPIONSHIP',
+  'CONFERENCE QUARTERFINALS',
+  'CONFERENCE SEMIFINALS',
+  'Winner advances to Round of 64',
+};
+
+/// Clipped text other than [_bracketCaptions].
+List<String> _clippedSimulationText(WidgetTester tester) =>
+    [for (final text in truncatedText(tester)) if (!_bracketCaptions.contains(text)) text];
 
 void main() {
   for (final width in mobileViewportWidths) {
@@ -340,9 +403,13 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(tester.takeException(), isNull);
+      expect(_clippedSimulationText(tester), isEmpty);
+      expect(find.text('Round odds · AFC'), findsOneWidget);
+      expect(find.text('UPSET'), findsWidgets);
+      expect(find.text('UPSET WATCH'), findsWidgets);
     });
 
-    testWidgets('Playoff Bracket tab renders NBA series matchups (long status lines) with no overflow at ${width}px wide',
+    testWidgets('Playoff Bracket tab renders NBA series matchups with no overflow at ${width}px wide',
         (tester) async {
       await pumpAtWidth(
         tester,
@@ -358,6 +425,10 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(tester.takeException(), isNull);
+      expect(_clippedSimulationText(tester), isEmpty);
+      expect(find.text('Round odds · Eastern'), findsOneWidget);
+      expect(find.text('UPSET'), findsWidgets);
+      expect(find.text('UPSET WATCH'), findsWidgets);
     });
 
     testWidgets('March Madness tab renders a full 4-region bracket (First Four through Championship) with no overflow at ${width}px wide',
@@ -376,6 +447,10 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(tester.takeException(), isNull);
+      expect(_clippedSimulationText(tester), isEmpty);
+      expect(find.text('Round odds · Region A'), findsOneWidget);
+      expect(find.text('UPSET'), findsWidgets);
+      expect(find.text('UPSET WATCH'), findsWidgets);
     });
   }
 }

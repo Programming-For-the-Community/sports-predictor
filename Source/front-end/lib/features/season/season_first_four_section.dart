@@ -55,7 +55,7 @@ class FirstFourSection extends StatelessWidget {
                   children: [
                     SizedBox(
                       height: BracketDimensions.cardHeight,
-                      child: BracketMatchupCard(sport: sport, matchup: matchup, teamNames: bracket.teamNames, cardWidth: BracketDimensions.cardWidth),
+                      child: BracketMatchupCard(sport: sport, matchup: matchup, teamNames: bracket.teamNames),
                     ),
                     const SizedBox(height: 4),
                     Builder(builder: (context) {

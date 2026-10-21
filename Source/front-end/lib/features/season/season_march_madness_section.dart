@@ -3,9 +3,11 @@ import 'package:flutter/material.dart';
 import '../../core/models/season_projection.dart';
 import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_text_styles.dart';
+import 'season_bracket_legend.dart';
 import 'season_bracket_tree.dart';
 import 'season_first_four_section.dart';
 import 'season_march_madness_grid.dart';
+import 'season_round_odds_table.dart';
 
 /// March Madness's own region-shaped layout -- 4 regions (not 2
 /// conferences) each played down to a champion, those 4 champions meeting
@@ -22,6 +24,7 @@ class MarchMadnessSection extends StatelessWidget {
   Widget build(BuildContext context) {
     final regionOrder = bracket.regions.keys.toList()..sort();
     final canGrid = regionOrder.length == 4 && bracket.finalFour.length == 2 && bracket.championship != null;
+    final odds = bracket.roundOdds;
 
     // The grid path below places First Four cards itself, right next to
     // the Round of 64 slot each one feeds -- only the independent-tree
@@ -30,6 +33,10 @@ class MarchMadnessSection extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
+        if (odds != null) ...[
+          BracketLegend(simulation: (series: false, simulations: odds.simulations ?? 0)),
+          const SizedBox(height: 4),
+        ],
         if (!canGrid) ...[
           if (bracket.firstFour.isNotEmpty) ...[
             FirstFourSection(sport: sport, matchups: bracket.firstFour, bracket: bracket),
@@ -47,6 +54,10 @@ class MarchMadnessSection extends StatelessWidget {
           ],
         ] else
           MarchMadnessGrid(sport: sport, bracket: bracket, regionOrder: regionOrder),
+        if (odds != null) ...[
+          const SizedBox(height: 24),
+          RoundOddsTables(sport: sport, odds: odds, teamNames: bracket.teamNames, groupOrder: regionOrder),
+        ],
       ],
     );
   }

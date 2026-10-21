@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 
 import '../../core/models/season_projection.dart';
 import '../../core/theme/app_colors.dart';
-import 'season_bracket_dimensions.dart';
 import 'season_bracket_matchup_card.dart';
 
 /// The Championship card's own gradient border + glow -- see
@@ -14,15 +13,6 @@ class ChampionshipCard extends StatelessWidget {
   final String sport;
   final BracketMatchup matchup;
   final Map<String, BracketTeamName> teamNames;
-
-  // Combined outer + inner Padding below, each side -- the actual width
-  // BracketMatchupCard renders at is BracketDimensions.championshipCardWidth
-  // minus twice this, not the full championshipCardWidth. Passing the
-  // outer width as its own cardWidth would understate how much space its
-  // FittedBox status line actually has, overflowing it -- only visible in
-  // debug mode (the overflow's hazard-stripe rendering and console
-  // warning are both debug-only).
-  static const double _borderInset = 2 + 1.5;
 
   @override
   Widget build(BuildContext context) {
@@ -52,12 +42,7 @@ class ChampionshipCard extends StatelessWidget {
               decoration: BoxDecoration(borderRadius: BorderRadius.circular(13), color: AppColors.bg),
               child: ClipRRect(
                 borderRadius: BorderRadius.circular(13),
-                child: BracketMatchupCard(
-                  sport: sport,
-                  matchup: matchup,
-                  teamNames: teamNames,
-                  cardWidth: BracketDimensions.championshipCardWidth - 2 * _borderInset,
-                ),
+                child: BracketMatchupCard(sport: sport, matchup: matchup, teamNames: teamNames),
               ),
             ),
           ),

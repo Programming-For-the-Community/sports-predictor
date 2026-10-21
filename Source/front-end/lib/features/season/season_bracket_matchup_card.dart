@@ -1,170 +1,93 @@
 import 'package:flutter/material.dart';
 
 import '../../core/models/season_projection.dart';
+import '../../core/models/upset.dart';
 import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_text_styles.dart';
+import '../../core/widgets/pick_labels.dart';
 import '../../core/widgets/team_color_dot.dart';
 import '../../static/nfl_team_colors.dart';
 
-/// Winner-first predicted series record (e.g. "4-2"), or null if either
-/// side's predicted win count is missing.
-String? _seriesPredictedRecord(BracketMatchup matchup) {
-  if (matchup.predictedWinsA == null || matchup.predictedWinsB == null) return null;
-  if (matchup.predictedWinner == matchup.teamA) return '${matchup.predictedWinsA}-${matchup.predictedWinsB}';
-  return '${matchup.predictedWinsB}-${matchup.predictedWinsA}';
-}
-
 const _maxTextScale = 1.1;
 
+/// One bracket slot: each team's chance to win it, a series' wins (or a
+/// finished game's score), and the UPSET / UPSET WATCH chip. Before the
+/// result is in, the winner is the one in the shown simulated run.
 class BracketMatchupCard extends StatelessWidget {
-  const BracketMatchupCard({super.key, required this.sport, required this.matchup, required this.teamNames, required this.cardWidth});
+  const BracketMatchupCard({super.key, required this.sport, required this.matchup, required this.teamNames});
 
   final String sport;
   final BracketMatchup matchup;
   final Map<String, BracketTeamName> teamNames;
 
-  /// Threaded from _BracketTree's own card width -- gives the status line a
-  /// real width to wrap against inside the FittedBox below.
-  final double cardWidth;
-
   @override
   Widget build(BuildContext context) {
     final winner = matchup.isFinal ? matchup.actualWinner : matchup.predictedWinner;
+    final flag = matchup.flag;
     // The bracket lays cards out at a fixed cardHeight (BracketDimensions),
-    // so unbounded system text scaling would push the two team rows past it.
+    // so unbounded system text scaling would push the rows past it.
     return MediaQuery.withClampedTextScaling(
       maxScaleFactor: _maxTextScale,
-      child: _card(winner),
-    );
-  }
-
-  Widget _card(String? winner) {
-    return Container(
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(12),
-        gradient: const LinearGradient(begin: Alignment.topLeft, end: Alignment.bottomRight, colors: AppColors.surfaceGrad),
-        border: Border.all(color: AppColors.borderRaised),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          _BracketTeamRow(
-            sport: sport,
-            teamId: matchup.teamA,
-            seed: matchup.seedA,
-            teamNames: teamNames,
-            isWinner: winner == matchup.teamA,
-            score: _rowScore(matchup.winsA, matchup.actualHomeScore),
-          ),
-          const SizedBox(height: 4),
-          _BracketTeamRow(
-            sport: sport,
-            teamId: matchup.teamB,
-            seed: matchup.seedB,
-            teamNames: teamNames,
-            isWinner: winner == matchup.teamB,
-            score: _rowScore(matchup.winsB, matchup.actualAwayScore),
-          ),
-          const SizedBox(height: 6),
-          // Shrinks the wrapped status text to fit whatever vertical space
-          // remains, so it can't overflow the fixed-height card.
-          Expanded(
-            child: FittedBox(
-              fit: BoxFit.scaleDown,
-              alignment: Alignment.topLeft,
-              child: SizedBox(
-                width: cardWidth - 24, // Container's own 12px padding each side
-                child: Text(
-                  _statusLabel(),
-                  style: AppTextStyles.microLabel(color: _statusColor()),
-                  maxLines: 3,
-                  softWrap: true,
-                ),
-              ),
+      child: Container(
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(12),
+          gradient: const LinearGradient(begin: Alignment.topLeft, end: Alignment.bottomRight, colors: AppColors.surfaceGrad),
+          border: Border.all(color: flag == UpsetFlag.upset ? AppColors.warn.withValues(alpha: 0.4) : AppColors.borderRaised),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            _BracketTeamRow(
+              sport: sport,
+              teamId: matchup.teamA,
+              seed: matchup.seedA,
+              teamNames: teamNames,
+              isWinner: winner == matchup.teamA,
+              chance: _chance(isA: true),
+              score: _rowScore(isA: true),
             ),
-          ),
-        ],
+            const SizedBox(height: 4),
+            _BracketTeamRow(
+              sport: sport,
+              teamId: matchup.teamB,
+              seed: matchup.seedB,
+              teamNames: teamNames,
+              isWinner: winner == matchup.teamB,
+              chance: _chance(isA: false),
+              score: _rowScore(isA: false),
+            ),
+            if (flag != null) ...[
+              const SizedBox(height: 6),
+              UpsetChip(flag: flag, dense: true),
+            ],
+          ],
+        ),
       ),
     );
   }
 
-  /// A series' running win count takes priority over a single game's score,
-  /// shown throughout (including 0-0); a single game shows its score once final.
-  int? _rowScore(int? seriesWins, int? finalScore) {
-    if (matchup.isSeries) return seriesWins;
-    return matchup.isFinal ? finalScore : null;
+  /// A finished slot shows the chance its pick had beforehand; any other
+  /// shows the chance from where it stands now.
+  double? _chance({required bool isA}) {
+    if (matchup.teamA == null || matchup.teamB == null) return null;
+    final now = isA ? matchup.chanceA : matchup.chanceB;
+    if (!matchup.isFinal && now != null) return now;
+    final probability = matchup.winProbability;
+    final pick = matchup.predictedWinner;
+    if (probability == null || pick == null) return null;
+    final pickIsA = pick == matchup.teamA;
+    return isA == pickIsA ? probability : 1 - probability;
   }
 
-  String _teamLabel(String teamId) {
-    final info = teamNames[teamId];
-    return teamDisplayFor(sport, teamId, info?.abbreviation).abbreviation;
-  }
-
-  // "Projected"/"Scheduled"/"Final". A series matchup (isSeries) folds in
-  // its running win-loss record.
-  String _statusLabel() => matchup.isSeries ? _seriesStatusLabel() : _singleGameStatusLabel();
-
-  // The live win-loss record (winsA/winsB) is shown per-team by this
-  // card's own team rows, so it isn't repeated here. Only the predicted
-  // final record (winner-first, e.g. "4-2") appears on the status line.
-  String _seriesStatusLabel() {
-    final winnerLabel = matchup.predictedWinner != null ? _teamLabel(matchup.predictedWinner!) : null;
-    final predictedRecord = _seriesPredictedRecord(matchup);
-    switch (matchup.status) {
-      case BracketMatchupStatus.finalStatus:
-        return _seriesFinalLabel();
-      case BracketMatchupStatus.scheduled:
-        return _seriesScheduledLabel(winnerLabel, predictedRecord);
-      default:
-        return _seriesProjectedLabel(winnerLabel, predictedRecord);
+  /// A series' wins as the shown run ends it (the real record once final);
+  /// a single game's score once final.
+  int? _rowScore({required bool isA}) {
+    if (matchup.isSeries) {
+      return isA ? (matchup.seriesWinsA ?? matchup.winsA) : (matchup.seriesWinsB ?? matchup.winsB);
     }
-  }
-
-  String _seriesFinalLabel() {
-    final winnerName = matchup.actualWinner != null ? _teamLabel(matchup.actualWinner!) : null;
-    return winnerName != null ? '$winnerName WINS SERIES' : 'SERIES FINAL';
-  }
-
-  String _seriesScheduledLabel(String? winnerLabel, String? predictedRecord) {
-    if (matchup.winProbability == null || winnerLabel == null) return 'PREDICTION PENDING';
-    final probability = '${(matchup.winProbability! * 100).round()}%';
-    return predictedRecord != null ? '$winnerLabel $predictedRecord $probability' : '$probability $winnerLabel';
-  }
-
-  String _seriesProjectedLabel(String? winnerLabel, String? predictedRecord) {
-    if (matchup.winProbability == null || winnerLabel == null) return 'PROJECTED';
-    final probability = '${(matchup.winProbability! * 100).round()}%';
-    return predictedRecord != null
-        ? 'PROJECTED — $winnerLabel $predictedRecord $probability'
-        : 'PROJECTED — $probability $winnerLabel';
-  }
-
-  String _singleGameStatusLabel() {
-    final winnerLabel = matchup.predictedWinner != null ? _teamLabel(matchup.predictedWinner!) : null;
-    switch (matchup.status) {
-      case BracketMatchupStatus.finalStatus:
-        return 'FINAL';
-      case BracketMatchupStatus.scheduled:
-        return matchup.winProbability != null && winnerLabel != null
-            ? '${(matchup.winProbability! * 100).round()}% $winnerLabel'
-            : 'PREDICTION PENDING';
-      default:
-        return matchup.winProbability != null && winnerLabel != null
-            ? 'PROJECTED — ${(matchup.winProbability! * 100).round()}% $winnerLabel'
-            : 'PROJECTED';
-    }
-  }
-
-  Color _statusColor() {
-    switch (matchup.status) {
-      case BracketMatchupStatus.finalStatus:
-        return AppColors.cyan;
-      case BracketMatchupStatus.scheduled:
-        return AppColors.ink;
-      default:
-        return AppColors.inkMute;
-    }
+    if (!matchup.isFinal) return null;
+    return isA ? matchup.actualHomeScore : matchup.actualAwayScore;
   }
 }
 
@@ -175,6 +98,7 @@ class _BracketTeamRow extends StatelessWidget {
     required this.seed,
     required this.teamNames,
     required this.isWinner,
+    this.chance,
     this.score,
   });
 
@@ -185,16 +109,19 @@ class _BracketTeamRow extends StatelessWidget {
   final int? seed;
   final Map<String, BracketTeamName> teamNames;
   final bool isWinner;
+  final double? chance;
   final int? score;
 
   @override
   Widget build(BuildContext context) {
     final id = teamId;
+    final seedCell = seed == null
+        ? null
+        : SizedBox(width: 20, child: Text('$seed', style: AppTextStyles.microLabel(color: AppColors.inkMute)));
     if (id == null) {
       return Row(
         children: [
-          if (seed != null)
-            SizedBox(width: 20, child: Text('$seed', style: AppTextStyles.microLabel(color: AppColors.inkMute))),
+          if (seedCell != null) seedCell,
           Expanded(
             child: Text('BYE', style: AppTextStyles.body(color: AppColors.inkMute), overflow: TextOverflow.ellipsis),
           ),
@@ -202,10 +129,10 @@ class _BracketTeamRow extends StatelessWidget {
       );
     }
     final info = teamDisplayFor(sport, id, teamNames[id]?.abbreviation, apiColor: teamNames[id]?.color);
+    final chance = this.chance;
     return Row(
       children: [
-        if (seed != null)
-          SizedBox(width: 20, child: Text('$seed', style: AppTextStyles.microLabel(color: AppColors.inkMute))),
+        if (seedCell != null) seedCell,
         TeamColorDot(color: info.primary),
         if (info.primary != null) const SizedBox(width: 8),
         Expanded(
@@ -215,9 +142,26 @@ class _BracketTeamRow extends StatelessWidget {
             overflow: TextOverflow.ellipsis,
           ),
         ),
+        if (chance != null)
+          Text(formatBracketChance(chance), style: AppTextStyles.microLabel(color: isWinner ? AppColors.cyan : AppColors.inkSub)),
         if (score != null)
-          Text('$score', style: AppTextStyles.metricValue(color: isWinner ? AppColors.cyan : AppColors.inkMute)),
+          Container(
+            constraints: const BoxConstraints(minWidth: 28),
+            alignment: Alignment.centerRight,
+            child: Text(
+              '$score',
+              textAlign: TextAlign.right,
+              style: AppTextStyles.metricValue(color: isWinner ? AppColors.ink : AppColors.inkSub),
+            ),
+          ),
       ],
     );
   }
+}
+
+/// A whole percent, "<1%" for a sliver, ">99%" for all but certain.
+String formatBracketChance(double chance) {
+  if (chance > 0 && chance < 0.005) return '<1%';
+  if (chance < 1 && chance > 0.995) return '>99%';
+  return '${(chance * 100).round()}%';
 }

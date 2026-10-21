@@ -6,6 +6,7 @@ import '../../core/theme/app_text_styles.dart';
 import 'season_bracket_dimensions.dart';
 import 'season_bracket_geometry.dart';
 import 'season_bracket_layout.dart';
+import 'season_bracket_legend.dart';
 import 'season_bracket_matchup_card.dart';
 import 'season_championship_card.dart';
 import 'season_horizontal_scrollable_bracket.dart';
@@ -114,33 +115,6 @@ class _BracketConnectorPainter extends CustomPainter {
   bool shouldRepaint(covariant _BracketConnectorPainter oldDelegate) => oldDelegate.connections != connections;
 }
 
-/// Small dashed-line swatch for the skip-connection legend, reusing the
-/// connector painter's dash geometry so the sample matches the real lines.
-class _DashedLegendSwatchPainter extends CustomPainter {
-  const _DashedLegendSwatchPainter({required this.color});
-  final Color color;
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final paint = Paint()
-      ..color = color
-      ..strokeWidth = 1.5
-      ..style = PaintingStyle.stroke;
-    const dashLength = 5.0;
-    const gapLength = 4.0;
-    final y = size.height / 2;
-    var x = 0.0;
-    while (x < size.width) {
-      final segmentEnd = (x + dashLength).clamp(0.0, size.width);
-      canvas.drawLine(Offset(x, y), Offset(segmentEnd, y), paint);
-      x += dashLength + gapLength;
-    }
-  }
-
-  @override
-  bool shouldRepaint(covariant _DashedLegendSwatchPainter oldDelegate) => oldDelegate.color != color;
-}
-
 /// Converging bracket tree -- rounds placed left to right, each matchup
 /// card positioned by its computed slot, connector lines drawn underneath.
 /// Horizontally scrollable; the outer page already scrolls vertically, so a
@@ -155,6 +129,7 @@ class BracketTree extends StatelessWidget {
     this.conferenceLabels = const [],
     this.precomputedLayout,
     this.highlightFinalMatchup = false,
+    this.simulationLegend,
   });
 
   final String sport;
@@ -181,6 +156,11 @@ class BracketTree extends StatelessWidget {
   /// independent-tree fallback cases, which compute their own from
   /// `rounds` below.
   final BracketSlotLayout? precomputedLayout;
+
+  /// The simulated-bracket entries of the legend above the tree; null for a
+  /// tree that isn't the first of its bracket, or a payload from before the
+  /// simulation.
+  final BracketSimulationLegend? simulationLegend;
 
   // A bye matchup (either side null -- see BracketMatchup's own doc
   // comment) gets no card at all: the team it awarded simply appears
@@ -211,12 +191,7 @@ class BracketTree extends StatelessWidget {
                 top: layout.slots[r][i] * BracketDimensions.verticalUnit,
                 width: BracketDimensions.cardWidth,
                 height: BracketDimensions.cardHeight,
-                child: BracketMatchupCard(
-                  sport: sport,
-                  matchup: rounds[r].matchups[i],
-                  teamNames: teamNames,
-                  cardWidth: BracketDimensions.cardWidth,
-                ),
+                child: BracketMatchupCard(sport: sport, matchup: rounds[r].matchups[i], teamNames: teamNames),
               ),
     ];
   }
@@ -252,27 +227,12 @@ class BracketTree extends StatelessWidget {
         championshipExtraWidth +
         championshipEntryGap;
     final totalHeight = maxSlot * BracketDimensions.verticalUnit + BracketDimensions.cardHeight + championshipExtraHeight;
-    final hasSkipConnection = layout.connections.any((c) => c.isSkip);
+    final legend = BracketLegend(showSkip: layout.connections.any((c) => c.isSkip), simulation: simulationLegend);
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        if (hasSkipConnection) ...[
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.center,
-            children: [
-              const CustomPaint(size: Size(28, 12), painter: _DashedLegendSwatchPainter(color: AppColors.violet)),
-              const SizedBox(width: 8),
-              Flexible(
-                child: Text(
-                  'Winner advances directly to a later round, skipping the Elimination Game',
-                  style: AppTextStyles.microLabel(color: AppColors.inkSub),
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 12),
-        ],
+        if (!legend.isEmpty) ...[legend, const SizedBox(height: 4)],
         HorizontalScrollableBracket(
           width: totalWidth,
           height: totalHeight + BracketDimensions.headerHeight + (conferenceLabels.isEmpty ? 10 : 10 + BracketDimensions.headerHeight),

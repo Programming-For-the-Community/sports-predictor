@@ -88,6 +88,14 @@ String timezoneLabelFor(Duration offset, Duration janOffset, Duration julOffset)
   return 'UTC$sign${offset.abs().inHours}';
 }
 
+/// The live score while ESPN has the game on its scoreboard, else the stored
+/// one once the game is completed. ESPN reports 0 before kickoff, so a
+/// stored score on an unplayed game is never shown.
+double? _score(bool onScoreboard, bool isCompleted, double? live, double? stored) {
+  if (onScoreboard) return live;
+  return isCompleted ? stored : null;
+}
+
 T? _dataOrNull<T>(AsyncValue<T>? value) => value?.when(data: (v) => v, loading: () => null, error: (_, __) => null);
 
 /// Everything one row shows, resolved once so the wide and stacked layouts
@@ -187,8 +195,8 @@ class GameRow extends ConsumerWidget {
       liveFinished: liveFinished,
       liveDetail: liveState?.detail,
       situation: isLive ? liveState?.situation : null,
-      homeScore: onScoreboard ? liveState?.homeScore : event.home.result?.score,
-      awayScore: onScoreboard ? liveState?.awayScore : event.away.result?.score,
+      homeScore: _score(onScoreboard, isCompleted, liveState?.homeScore, event.home.result?.score),
+      awayScore: _score(onScoreboard, isCompleted, liveState?.awayScore, event.away.result?.score),
       prediction: isCompleted ? null : ref.watch(eventPredictionProvider((sport: sport, eventId: event.eventId))),
     );
 

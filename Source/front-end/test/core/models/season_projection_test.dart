@@ -1,6 +1,7 @@
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:front_end/core/models/season_projection.dart';
+import 'package:front_end/core/models/upset.dart';
 
 void main() {
   test('parses standings and leaderboards from a full response', () {
@@ -129,6 +130,42 @@ void main() {
     expect(matchup.isSeries, isFalse);
     expect(matchup.winsA, isNull);
     expect(matchup.winsB, isNull);
+  });
+
+  test("a simulated bracket matchup parses chances, the shown run's series wins and its flag", () {
+    final matchup = BracketMatchup.fromJson({
+      'team_a': '2', 'team_b': '8', 'status': 'scheduled', 'wins_a': 1, 'wins_b': 2,
+      'chance_a': 0.45, 'chance_b': 0.55, 'series_wins_a': 3, 'series_wins_b': 4, 'flag': 'upset',
+    });
+
+    expect((matchup.chanceA, matchup.chanceB), (0.45, 0.55));
+    expect((matchup.seriesWinsA, matchup.seriesWinsB), (3, 4));
+    expect(matchup.flag, UpsetFlag.upset);
+    expect(BracketMatchup.fromJson({'team_a': '2', 'team_b': '8', 'flag': 'watch'}).flag, UpsetFlag.watch);
+    expect(BracketMatchup.fromJson({'team_a': '2', 'team_b': '8', 'flag': null}).flag, isNull);
+  });
+
+  test('round odds parse from both bracket shapes, and are null on an older payload', () {
+    final odds = {
+      'columns': ['Finals', 'Title'],
+      'groups': {
+        'East': [
+          {'team_id': '2', 'seed': 1, 'values': [0.5, 0.25]},
+          {'team_id': '9', 'seed': null, 'values': [0, 0]},
+        ],
+      },
+    };
+    final bracket = BracketProjection.fromJson({'conferences': <String, dynamic>{}, 'round_odds': odds, 'simulations': 2000});
+    final marchMadness = MarchMadnessBracket.fromJson({'round_odds': odds, 'simulations': 2000});
+
+    for (final parsed in [bracket.roundOdds!, marchMadness.roundOdds!]) {
+      expect(parsed.columns, ['Finals', 'Title']);
+      expect(parsed.simulations, 2000);
+      final rows = parsed.groups['East']!;
+      expect(rows.map((r) => (r.teamId, r.seed)), [('2', 1), ('9', null)]);
+      expect(rows.map((r) => r.values), [[0.5, 0.25], [0.0, 0.0]]);
+    }
+    expect(BracketProjection.fromJson({'conferences': <String, dynamic>{}}).roundOdds, isNull);
   });
 
   test('a bracket matchup with no status field defaults to projected instead of crashing', () {

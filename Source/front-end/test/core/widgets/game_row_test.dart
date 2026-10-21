@@ -336,6 +336,44 @@ void main() {
     }
   });
 
+  group('GameRow before kickoff', () {
+    // ESPN reports "0" for both sides of an unplayed game, and it is stored that way.
+    final scheduledZeroZero = SportEvent(
+      eventId: '401547420',
+      eventDate: '2026-09-14',
+      kickoffTime: '2026-09-14T17:00:00Z',
+      status: 'scheduled',
+      week: 2,
+      round: null,
+      participants: const [
+        Participant(entityId: '12', role: 'home', result: ParticipantResult(score: 0, won: false)),
+        Participant(entityId: '13', role: 'away', result: ParticipantResult(score: 0, won: false)),
+      ],
+      predictionComparison: null,
+      leadersComparison: null,
+    );
+
+    for (final sport in ['nfl', 'ncaafb', 'nba', 'ncaambb', 'nhl']) {
+      testWidgets('$sport: a stored 0-0 on an unplayed game shows only the model scores', (tester) async {
+        await _pumpRow(tester, scheduledZeroZero, sport: sport);
+
+        expect(find.text('0'), findsNothing);
+        expect(_textStyled('27', AppColors.cyan), findsOneWidget);
+        expect(_textStyled('21', AppColors.cyan), findsOneWidget);
+      });
+    }
+
+    testWidgets('a game on the live scoreboard still shows its live 0-0', (tester) async {
+      await _pumpRow(
+        tester,
+        scheduledZeroZero,
+        liveState: const LiveEventState(live: true, detail: 'Q1 15:00', homeScore: 0, awayScore: 0),
+      );
+
+      expect(find.text('0'), findsNWidgets(2));
+    });
+  });
+
   group('GameRow states', () {
     Widget row(SportEvent event, {Future<EventPrediction> Function()? prediction, double? width}) => ProviderScope(
           retry: (retryCount, error) => null,
