@@ -168,9 +168,10 @@ class _BackgroundApi {
   final CognitoAuthClient _authClient;
   final http.Client _httpClient;
 
-  String? _idToken;
+  // The future itself, so concurrent callers share one refresh.
+  Future<String?>? _idToken;
 
-  Future<String?> idToken() async => _idToken ??= await _resolveIdToken();
+  Future<String?> idToken() => _idToken ??= _resolveIdToken();
 
   Future<String?> _resolveIdToken() async {
     final raw = await _tokenStore.read();
@@ -179,6 +180,14 @@ class _BackgroundApi {
     if (!tokens.isNearExpiry) return tokens.idToken;
     try {
       tokens = await _authClient.refresh(tokens.refreshToken);
+    } on CognitoException catch (error) {
+      // The app may have rotated the stored token mid-request.
+      final latest = error.type == refreshTokenReuseError ? await _tokenStore.read() : null;
+      if (latest == null || latest == raw) {
+        debugPrint('[BackgroundChecks] token refresh failed: $error');
+        return null;
+      }
+      return CognitoTokens.fromJson(jsonDecode(latest) as Map<String, dynamic>).idToken;
     } catch (error) {
       debugPrint('[BackgroundChecks] token refresh failed: $error');
       return null;

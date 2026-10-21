@@ -38,159 +38,17 @@ def _postseason_event(event_key, season, home_id, away_id, *, status="scheduled"
     }
 
 
-class TestResolveMatchup:
-    def test_no_real_game_falls_back_to_the_deterministic_projection(self):
-        result = season_projection._resolve_matchup(
-            "a", "b", 1, 2, {}, MagicMock(), MagicMock(), MagicMock(), {"a": 1900, "b": 1400},
-            season_simulation.DEFAULT_HOME_ADVANTAGE,
-        )
+class TestMatchupRules:
+    def test_play_in_games_are_single_games_and_later_rounds_best_of_seven(self):
+        rules = season_projection._matchup_rules({})
+        assert rules("Play-In", SEED_7, SEED_8, 0.0).wins_needed == 1
+        assert rules("Play-In Elimination", SEED_8, SEED_9, 0.0).wins_needed == 1
+        for round_name in ("Conference Quarterfinals", "Conference Semifinals", "Conference Finals", "NBA Finals"):
+            assert rules(round_name, SEED_1, SEED_8, 0.0).wins_needed == 4
 
-        assert result["status"] == "projected"
-        assert result["predicted_winner"] == "a"
-
-    def test_real_completed_game_reports_the_actual_winner_and_score(self):
-        event = _postseason_event("E1", 2026, SEED_1, SEED_8, status="completed", home_score=112, away_score=98)
-        predictions_table = MagicMock()
-        predictions_table.query.return_value = []
-
-        result = season_projection._resolve_matchup(
-            SEED_1, SEED_8, 1, 8, {frozenset((SEED_1, SEED_8)): event}, MagicMock(), MagicMock(), predictions_table, {},
-            season_simulation.DEFAULT_HOME_ADVANTAGE,
-        )
-
-        assert result["status"] == "final"
-        assert result["actual_winner"] == SEED_1
-        assert result["actual_home_score"] == 112
-
-    def test_real_scheduled_game_with_no_logged_prediction_computes_one_in_process(self):
-        event = _postseason_event("E1", 2026, SEED_1, SEED_8, status="scheduled")
-        predictions_table = MagicMock()
-        predictions_table.query.side_effect = [
-            [],
-            [{"model_key": "MODEL#win-probability#v1", "predicted_value": {"home_win_probability": 0.62}}],
-        ]
-
-        with patch.object(event_prediction, "compute_and_cache_event") as compute:
-            result = season_projection._resolve_matchup(
-                SEED_1, SEED_8, 1, 8, {frozenset((SEED_1, SEED_8)): event}, MagicMock(), MagicMock(), predictions_table, {},
-                season_simulation.DEFAULT_HOME_ADVANTAGE,
-            )
-
-        compute.assert_called_once()
-        assert result["status"] == "scheduled"
-        assert result["predicted_winner"] == SEED_1
-        assert result["win_probability"] == 0.62
-
-
-class TestSeriesRecord:
-    def test_counts_wins_by_team_id_not_home_away_role(self):
-        # A real series' host alternates by game (2-2-1-1-1) -- team_a
-        # wins game 1 at home, then wins game 3 on the road.
-        game1 = _postseason_event("E1", 2026, SEED_1, SEED_8, status="completed", home_score=110, away_score=100)
-        game2 = _postseason_event("E2", 2026, SEED_1, SEED_8, status="completed", home_score=90, away_score=100)
-        game3 = _postseason_event("E3", 2026, SEED_8, SEED_1, status="completed", home_score=95, away_score=105)
-
-        wins_a, wins_b = season_projection._series_record(SEED_1, SEED_8, [game1, game2, game3])
-
-        assert wins_a == 2  # game1 (home) + game3 (road)
-        assert wins_b == 1  # game2
-
-    def test_a_scheduled_unplayed_game_contributes_nothing(self):
-        game1 = _postseason_event("E1", 2026, SEED_1, SEED_8, status="completed", home_score=110, away_score=100)
-        game2 = _postseason_event("E2", 2026, SEED_1, SEED_8, status="scheduled")
-
-        wins_a, wins_b = season_projection._series_record(SEED_1, SEED_8, [game1, game2])
-
-        assert (wins_a, wins_b) == (1, 0)
-
-
-class TestResolveSeriesMatchup:
-    def test_no_real_games_falls_back_to_a_fresh_series_projection(self):
-        result = season_projection._resolve_series_matchup(
-            "a", "b", 1, 8, {}, MagicMock(), MagicMock(), MagicMock(), {"a": 1900, "b": 1400},
-            season_simulation.DEFAULT_HOME_ADVANTAGE,
-        )
-
-        assert result["status"] == "projected"
-        assert result["predicted_winner"] == "a"
-        assert (result["wins_a"], result["wins_b"]) == (0, 0)
-        # A predicted FINAL score, distinct from wins_a/wins_b's own
-        # current (always 0-0 pre-series) record -- "a" (the favorite,
-        # 1900 vs 1400 Elo) should be predicted to win the series outright.
-        assert result["predicted_wins_a"] == 4
-        assert result["predicted_wins_b"] < 4
-
-    def test_a_series_decided_four_to_two_is_final_with_the_real_record(self):
-        games = [
-            _postseason_event(f"E{i}", 2026, SEED_1, SEED_8, status="completed", home_score=110, away_score=100)
-            for i in range(4)
-        ] + [
-            _postseason_event(f"E{i}", 2026, SEED_8, SEED_1, status="completed", home_score=110, away_score=100)
-            for i in range(4, 6)
-        ]
-        real_series = {frozenset((SEED_1, SEED_8)): games}
-
-        result = season_projection._resolve_series_matchup(
-            SEED_1, SEED_8, 1, 8, real_series, MagicMock(), MagicMock(), MagicMock(), {},
-            season_simulation.DEFAULT_HOME_ADVANTAGE,
-        )
-
-        assert result["status"] == "final"
-        assert result["actual_winner"] == SEED_1
-        assert (result["wins_a"], result["wins_b"]) == (4, 2)
-        assert result["predicted_winner"] is None  # decided -- nothing left to predict
-        # A final series has nothing left to predict -- the real record
-        # already answers the "how did it end" question.
-        assert "predicted_wins_a" not in result
-        assert "predicted_wins_b" not in result
-
-    def test_an_in_progress_series_reports_the_live_record_and_a_series_probability(self):
-        # 2-1 SEED_1, game 4 scheduled next.
-        completed = [
-            _postseason_event("E1", 2026, SEED_1, SEED_8, status="completed", home_score=110, away_score=100),
-            _postseason_event("E2", 2026, SEED_1, SEED_8, status="completed", home_score=90, away_score=100),
-            _postseason_event("E3", 2026, SEED_8, SEED_1, status="completed", home_score=95, away_score=105),
-        ]
-        next_game = _postseason_event("E4", 2026, SEED_8, SEED_1, status="scheduled")
-        real_series = {frozenset((SEED_1, SEED_8)): completed + [next_game]}
-        predictions_table = MagicMock()
-        predictions_table.query.side_effect = [
-            [],
-            [{"model_key": "MODEL#win-probability#v1", "predicted_value": {"home_win_probability": 0.4}}],
-        ]
-
-        with patch.object(event_prediction, "compute_and_cache_event"):
-            result = season_projection._resolve_series_matchup(
-                SEED_1, SEED_8, 1, 8, real_series, MagicMock(), MagicMock(), predictions_table, {},
-                season_simulation.DEFAULT_HOME_ADVANTAGE,
-            )
-
-        assert result["status"] == "scheduled"
-        assert (result["wins_a"], result["wins_b"]) == (2, 1)
-        # SEED_8 (home for game 4) at 40% -> SEED_1 (away) at 60% for that
-        # game -- combined with its 2-1 series lead, SEED_1 should be a
-        # strong series favorite, stronger than a bare 60%.
-        assert result["predicted_winner"] == SEED_1
-        assert result["win_probability"] > 0.6
-
-    def test_a_series_with_completed_games_but_no_next_game_logged_falls_back_to_elo(self):
-        # 2-2, next game not yet ingested/scheduled in our data.
-        games = [
-            _postseason_event("E1", 2026, SEED_1, SEED_8, status="completed", home_score=110, away_score=100),
-            _postseason_event("E2", 2026, SEED_1, SEED_8, status="completed", home_score=90, away_score=100),
-            _postseason_event("E3", 2026, SEED_8, SEED_1, status="completed", home_score=95, away_score=105),
-            _postseason_event("E4", 2026, SEED_8, SEED_1, status="completed", home_score=105, away_score=95),
-        ]
-        real_series = {frozenset((SEED_1, SEED_8)): games}
-
-        result = season_projection._resolve_series_matchup(
-            SEED_1, SEED_8, 1, 8, real_series, MagicMock(), MagicMock(), MagicMock(), {SEED_1: 1900, SEED_8: 1400},
-            season_simulation.DEFAULT_HOME_ADVANTAGE,
-        )
-
-        assert result["status"] == "scheduled"
-        assert (result["wins_a"], result["wins_b"]) == (2, 2)
-        assert result["predicted_winner"] == SEED_1  # the stronger Elo team
+    def test_the_better_seed_listed_first_hosts(self):
+        rules = season_projection._matchup_rules({})
+        assert rules("Conference Quarterfinals", SEED_1, SEED_8, season_simulation.DEFAULT_HOME_ADVANTAGE).game_probability(0) > 0.5
 
 
 class TestBracketPayload:
@@ -286,24 +144,46 @@ class TestBracketPayload:
         play_in_teams = {t for m in result["conferences"]["Eastern"][0]["matchups"] for t in (m["team_a"], m["team_b"])}
         assert SEED_10 not in play_in_teams
 
-    def test_a_real_first_round_series_in_progress_shows_the_live_record_not_one_game(self):
-        # SEED_1 (2) vs SEED_8 (8) is Conference Quarterfinals' own (2, 8) pair --
-        # season_type=3 (real playoff, not play-in's 5).
+    def test_a_real_first_round_series_in_progress_shows_the_live_record(self):
+        # The real play-in put SEED_8 in the 8 slot; SEED_1 leads the real
+        # quarterfinal 2-0 with game 3 to come.
         real_games = [
+            _postseason_event("P1", 2026, SEED_7, SEED_8, status="completed", home_score=110, away_score=100, season_type=5),
+            _postseason_event("P2", 2026, SEED_9, SEED_10, status="completed", home_score=110, away_score=100, season_type=5),
+            _postseason_event("P3", 2026, SEED_8, SEED_9, status="completed", home_score=110, away_score=100, season_type=5),
+        ] + [
             _postseason_event(f"F{i}", 2026, SEED_1, SEED_8, status="completed", home_score=110, away_score=100, season_type=3)
             for i in range(2)
         ] + [_postseason_event("F3", 2026, SEED_8, SEED_1, status="scheduled", season_type=3)]
         storage = MagicMock()
-        storage.get_all_events.side_effect = lambda sport, status: (
-            [g for g in real_games if g["status"] == status]
-        )
+        storage.get_all_events.side_effect = lambda sport, status: [g for g in real_games if g["status"] == status]
+        predictions_table = MagicMock()
+        predictions_table.query.return_value = []
+
+        with patch.object(event_prediction, "compute_and_cache_event"):
+            result = season_projection._bracket_payload(storage, MagicMock(), predictions_table, self._season_inputs(), {})
+
+        first_round = result["conferences"]["Eastern"][2]["matchups"]
+        series = next(m for m in first_round if {m["team_a"], m["team_b"]} == {SEED_1, SEED_8})
+        assert series["status"] == "scheduled"
+        assert (series["wins_a"], series["wins_b"]) == (2, 0)
+        assert series["series_wins_a"] >= 2
+        assert max(series["series_wins_a"], series["series_wins_b"]) == 4
+
+    def test_every_card_carries_both_chances_and_round_odds_cover_both_conferences(self):
+        storage = MagicMock()
+        storage.get_all_events.return_value = []
         predictions_table = MagicMock()
         predictions_table.query.return_value = []
 
         result = season_projection._bracket_payload(storage, MagicMock(), predictions_table, self._season_inputs(), {})
 
-        first_round = result["conferences"]["Eastern"][2]["matchups"]  # index 2 -- Play-In/Play-In Elimination come first
-        series = next(m for m in first_round if {m["team_a"], m["team_b"]} == {SEED_1, SEED_8})
-        assert series["status"] == "scheduled"
-        assert (series["wins_a"], series["wins_b"]) == (2, 0)
-        assert series["predicted_winner"] == SEED_1
+        for rounds in result["conferences"].values():
+            for round_payload in rounds:
+                for matchup in round_payload["matchups"]:
+                    assert matchup["chance_a"] + matchup["chance_b"] == 1
+                    assert matchup["flag"] in (None, "upset", "watch")
+        assert result["round_odds"]["columns"] == ["Playoffs", "2nd round", "Conf finals", "Finals", "Title"]
+        assert set(result["round_odds"]["groups"]) == {"Eastern", "Western"}
+        titles = [row["values"][-1] for rows in result["round_odds"]["groups"].values() for row in rows]
+        assert abs(sum(titles) - 1) < 1e-9

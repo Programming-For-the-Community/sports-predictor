@@ -74,32 +74,6 @@ def series_win_probability(home_probability: float, away_probability: float, win
     )
 
 
-def predicted_series_score(home_probability: float, away_probability: float) -> tuple[int, int]:
-    """The likeliest final series score, (higher seed wins, lower seed
-    wins), given who is favoured to take it."""
-    favoured = series_win_probability(home_probability, away_probability) >= 0.5
-    best_score, best_probability = (SERIES_WINS, 0), -1.0
-    for loser_wins in range(SERIES_WINS):
-        probability = _exact_score_probability(home_probability, away_probability, favoured, loser_wins)
-        if probability > best_probability:
-            best_score = (SERIES_WINS, loser_wins) if favoured else (loser_wins, SERIES_WINS)
-            best_probability = probability
-    return best_score
-
-
-def _exact_score_probability(home_probability: float, away_probability: float, a_wins_series: bool, loser_wins: int) -> float:
-    """Chance the series ends 4-loser_wins for A (or for B)."""
-    def walk(wins_a: int, wins_b: int) -> float:
-        target = (SERIES_WINS, loser_wins) if a_wins_series else (loser_wins, SERIES_WINS)
-        if (wins_a, wins_b) == target:
-            return 1.0
-        if wins_a >= SERIES_WINS or wins_b >= SERIES_WINS:
-            return 0.0
-        p = home_probability if HIGHER_SEED_HOME[wins_a + wins_b] else away_probability
-        return p * walk(wins_a + 1, wins_b) + (1 - p) * walk(wins_a, wins_b + 1)
-    return walk(0, 0)
-
-
 def _standings_key(team_id: str, points: dict, regulation_wins: dict, wins: dict):
     return (points.get(team_id, 0), regulation_wins.get(team_id, 0), wins.get(team_id, 0))
 
@@ -238,65 +212,6 @@ def simulate_season(
         }
         for team, total in totals.items()
     }
-
-
-def project_matchup(team_a: str | None, team_b: str | None, seeds: dict[str, int], ratings: dict, home_advantage: float) -> dict:
-    """One projected series row; team_a is the higher seed. A side still
-    undetermined (no wildcard yet) advances the other."""
-    if team_a is None or team_b is None:
-        known = team_a or team_b
-        return {
-            "team_a": team_a, "team_b": team_b, "seed_a": seeds.get(team_a), "seed_b": seeds.get(team_b),
-            "status": "projected", "predicted_winner": known, "win_probability": 1.0 if known else None,
-        }
-    home = game_probability(team_a, team_b, ratings, home_advantage)
-    away = 1 - game_probability(team_b, team_a, ratings, home_advantage)
-    probability_a = series_win_probability(home, away)
-    predicted_a, predicted_b = predicted_series_score(home, away)
-    a_wins = probability_a >= 0.5
-    return {
-        "team_a": team_a, "team_b": team_b, "seed_a": seeds.get(team_a), "seed_b": seeds.get(team_b),
-        "status": "projected",
-        "predicted_winner": team_a if a_wins else team_b,
-        "win_probability": probability_a if a_wins else 1 - probability_a,
-        "predicted_wins_a": predicted_a, "predicted_wins_b": predicted_b,
-    }
-
-
-def project_bracket(
-    points: dict[str, float], regulation_wins: dict[str, float], wins: dict[str, float], ratings: dict[str, float],
-    home_advantage: float = ELO_HOME_ADVANTAGE,
-) -> dict:
-    """The single most likely bracket if the season ended on these
-    standings: {"conferences": {name: [round, round, round]}, "finals":
-    matchup, "champion": team}. Each round is {"round", "matchups"}."""
-    fields = conference_fields(points, regulation_wins, wins)
-    rank = {team: _standings_key(team, points, regulation_wins, wins) for field in fields.values() for team in field["teams"]}
-
-    def play(team_a: str | None, team_b: str | None, seeds: dict[str, int]) -> dict:
-        if team_a is not None and team_b is not None:
-            team_a, team_b = _higher_seed_first(team_a, team_b, rank)
-        return project_matchup(team_a, team_b, seeds, ratings, home_advantage)
-
-    conferences, finalists, all_seeds = {}, [], {}
-    for conference, field in sorted(fields.items()):
-        seeds = field["seeds"]
-        all_seeds.update(seeds)
-        first_round, second_round = [], []
-        for d1, wildcard, d2, d3 in field["brackets"]:
-            top, bottom = play(d1, wildcard, seeds), play(d2, d3, seeds)
-            first_round += [top, bottom]
-            second_round.append(play(top["predicted_winner"], bottom["predicted_winner"], seeds))
-        final = play(second_round[0]["predicted_winner"], second_round[1]["predicted_winner"], seeds)
-        conferences[conference] = [
-            {"round": ROUND_NAMES[0], "matchups": first_round},
-            {"round": ROUND_NAMES[1], "matchups": second_round},
-            {"round": ROUND_NAMES[2], "matchups": [final]},
-        ]
-        finalists.append(final["predicted_winner"])
-
-    finals = play(finalists[0], finalists[1], all_seeds)
-    return {"conferences": conferences, "finals": {**finals, "round": FINAL_ROUND}, "champion": finals["predicted_winner"]}
 
 
 project_leaderboard = season_projection_common.project_leaderboard

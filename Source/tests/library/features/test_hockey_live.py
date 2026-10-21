@@ -42,7 +42,7 @@ class FakeStorage:
         ]
         return rows[:limit] if limit is not None else rows
 
-    def get_player_game_stats(self, entity_id, before_date=None, limit=None):
+    def get_player_game_stats(self, entity_id, before_date=None, limit=None, *, sport):
         rows = sorted(
             (r for r in self.players if r["entity_id"] == entity_id and (before_date is None or r["event_date"] < before_date)),
             key=lambda r: r["event_date"], reverse=True,

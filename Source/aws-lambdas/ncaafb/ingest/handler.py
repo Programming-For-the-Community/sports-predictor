@@ -44,6 +44,8 @@ import enrichment
 from library.aws.account import get_account_id
 from library.aws.boto_config import DEFAULT_CONFIG
 from library.http.cfbd import CFBDClient
+from library.http.ncaafb_espn import NcaafbEspnClient
+from library.normalize.odds import fetch_event_odds
 from library.parsing import us_eastern_date_from_iso
 from library.storage.ncaafb_team_cache import get_cached_teams, teams_by_school
 
@@ -113,6 +115,31 @@ def _put_json(key: str, payload) -> None:
         Bucket=RAW_BUCKET, Key=key, Body=json.dumps(payload).encode("utf-8"), ContentType="application/json",
         ExpectedBucketOwner=get_account_id(),
     )
+
+
+def _object_exists(key: str) -> bool:
+    try:
+        _s3.head_object(Bucket=RAW_BUCKET, Key=key, ExpectedBucketOwner=get_account_id())
+        return True
+    except ClientError:
+        return False
+
+
+def _fetch_odds(games: list[dict], now: datetime | None = None) -> tuple[int, int]:
+    """Betting lines from ESPN, whose game ids are CFBD's: a finished game's
+    closing line once, and a not-yet-started game's current line every run
+    while it still moves. (saved, failed)."""
+    now = now or datetime.now(timezone.utc)
+    client = NcaafbEspnClient()
+    finished = [str(g["id"]) for g in games if g.get("completed")]
+    upcoming = [
+        str(g["id"]) for g in games
+        if not g.get("completed") and g.get("startDate") and _parse_iso(g["startDate"]) > now
+    ]
+    shared = {"object_exists": _object_exists, "put_json": _put_json, "logger": logger}
+    saved, failed = fetch_event_odds(client, "ncaafb", finished, **shared)
+    upcoming_saved, upcoming_failed = fetch_event_odds(client, "ncaafb", upcoming, refresh=True, **shared)
+    return saved + upcoming_saved, failed + upcoming_failed
 
 
 def _annotate_roster(roster: list[dict], teams: list[dict]) -> None:
@@ -272,6 +299,12 @@ def lambda_handler(event: dict, context) -> dict:
         except Exception:
             logger.exception("Failed fetching team box scores for season %s type %s week %s", season, season_type, week)
             failed += 1
+
+    try:
+        odds_saved, odds_failed = _fetch_odds(games)
+        logger.info("Lines: %d saved, %d failed", odds_saved, odds_failed)
+    except Exception:
+        logger.exception("Failed fetching lines for season %s type %s week %s", season, season_type, week)
 
     logger.info("Done: %d processed, %d failed", processed, failed)
     return {

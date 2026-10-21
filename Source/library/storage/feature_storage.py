@@ -4,7 +4,7 @@ PipelineStorage (pipeline_storage.py), which is write-only.
 """
 import os
 
-from boto3.dynamodb.conditions import Key
+from boto3.dynamodb.conditions import Attr, Key
 
 from library.aws.dynamodb_table import DynamoDBTable
 from library.schema.keys import entity_key, entity_team_key
@@ -29,15 +29,18 @@ class FeatureStorage:
         self._team_game_stats_table = DynamoDBTable(_require_env("TEAM_GAME_STATS_TABLE_NAME"), region=region)
 
     def get_player_game_stats(
-        self, entity_id: str, before_date: str | None = None, limit: int | None = None
+        self, entity_id: str, before_date: str | None = None, limit: int | None = None, *, sport: str,
     ) -> list[dict]:
-        """A player's completed-game log, most recent first, via the
-        entity-history GSI. before_date is exclusive, ISO 8601."""
+        """A player's completed-game log in one sport, most recent first, via
+        the entity-history GSI. before_date is exclusive, ISO 8601. ESPN keeps
+        one athlete id from college to the pros, so the GSI alone also
+        returns a drafted player's college games."""
         condition = Key("entity_id").eq(entity_id)
         if before_date is not None:
             condition = condition & Key("event_date").lt(before_date)
         return self._player_game_stats_table.query(
             condition, index_name="entity-history", scan_index_forward=False, limit=limit,
+            filter_expression=Attr("sport").eq(sport),
         )
 
     def get_team_events(

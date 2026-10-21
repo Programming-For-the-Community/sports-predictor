@@ -16,6 +16,7 @@ from datetime import datetime, timedelta, timezone
 from io import BytesIO
 from unittest.mock import MagicMock, patch
 
+import pytest
 from botocore.exceptions import ClientError
 
 import ncaafb_ingest
@@ -30,6 +31,13 @@ def _game(game_id="1", home_id="2", away_id="52", completed=False, start_date="2
 
 def _calendar_week(season_type="regular", week=4, first_game_start="2025-09-25T00:00:00.000Z"):
     return {"seasonType": season_type, "week": week, "firstGameStart": first_game_start}
+
+
+@pytest.fixture(autouse=True)
+def _espn_odds_client():
+    with patch.object(ncaafb_ingest, "NcaafbEspnClient") as client_cls:
+        client_cls.return_value.get_event_odds.return_value = {"items": []}
+        yield client_cls.return_value
 
 
 class TestLambdaHandlerWeekResolution:
@@ -493,3 +501,34 @@ class TestCurrentNcaafbSeason:
         # UPCOMING season.
         from datetime import date
         assert ncaafb_ingest._current_ncaafb_season(date(2026, 2, 1)) == 2026
+
+
+class TestFetchOdds:
+    NOW = datetime(2026, 10, 21, 12, tzinfo=timezone.utc)
+
+    def test_finished_games_once_and_upcoming_games_every_run(self, _espn_odds_client):
+        _espn_odds_client.get_event_odds.return_value = {"items": [{"details": "MIA -19.5"}]}
+        games = [
+            _game("1", completed=True, start_date="2026-10-17T19:00:00.000Z"),
+            _game("2", start_date="2026-10-24T19:00:00.000Z"),
+            _game("3", start_date="2026-10-21T11:00:00.000Z"),
+        ]
+        mock_s3 = MagicMock()
+
+        with patch.object(ncaafb_ingest, "_s3", mock_s3):
+            saved, failed = ncaafb_ingest._fetch_odds(games, now=self.NOW)
+
+        # Game 1's line was already saved; game 3 has kicked off and isn't finished.
+        assert (saved, failed) == (1, 0)
+        assert [c.args[0] for c in _espn_odds_client.get_event_odds.call_args_list] == ["2"]
+        assert [c.kwargs["Key"] for c in mock_s3.put_object.call_args_list] == ["ncaafb/odds/2.json"]
+
+    def test_a_finished_game_without_a_saved_line_is_fetched(self, _espn_odds_client):
+        _espn_odds_client.get_event_odds.return_value = {"items": [{"details": "MIA -19.5"}]}
+        mock_s3 = MagicMock()
+        mock_s3.head_object.side_effect = ClientError({"Error": {"Code": "404"}}, "HeadObject")
+
+        with patch.object(ncaafb_ingest, "_s3", mock_s3):
+            saved, _ = ncaafb_ingest._fetch_odds([_game("1", completed=True)], now=self.NOW)
+
+        assert saved == 1

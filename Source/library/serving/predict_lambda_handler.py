@@ -49,9 +49,18 @@ from library.aws import lambda_singletons
 from library.logging_safety import safe_log_value
 
 
+def _scheduled_projection(event: dict, run_scheduled_fn, postseason_active_fn, logger):
+    """The daily schedule only rebuilds while the playoffs are on; the
+    weekly one always does."""
+    if event.get("postseason_only") and postseason_active_fn is not None and not postseason_active_fn():
+        logger.info("Not in the postseason -- skipping the daily season projection")
+        return {"status": "skipped"}
+    return run_scheduled_fn()
+
+
 def make_lambda_handler(
     *, warmup_fn, run_scheduled_fn, compute_and_cache_event_fn, logger,
-    compute_and_cache_player_prop_fn=None, snapshot_event_fn=None,
+    compute_and_cache_player_prop_fn=None, snapshot_event_fn=None, postseason_active_fn=None,
 ):
     def lambda_handler(event, context):
         # EventBridge Scheduler warmup ping -- keeps a container past its
@@ -60,7 +69,7 @@ def make_lambda_handler(
             return warmup_fn()
 
         if event.get("detail-type") == "ScheduledSeasonProjection":
-            return run_scheduled_fn()
+            return _scheduled_projection(event, run_scheduled_fn, postseason_active_fn, logger)
         # From the prediction-scheduler shortly before kickoff -- only the
         # sports that pass snapshot_event_fn take part.
         if event.get("detail-type") == "SnapshotPrediction" and snapshot_event_fn is not None:
@@ -86,6 +95,7 @@ def make_lambda_handler(
 
 def make_event_prediction_lambda_handler(
     *, resources, event_prediction, run_scheduled_fn, logger, player_props: bool, extra_warmups=(),
+    postseason_active_fn=None,
 ):
     """make_lambda_handler wired to a sport's own event_prediction module,
     each entry point called with `resources.all()` (storage, model bucket,
@@ -105,5 +115,6 @@ def make_event_prediction_lambda_handler(
         compute_and_cache_event_fn=lambda event_id: event_prediction.compute_and_cache_event(*resources.all(), event_id),
         compute_and_cache_player_prop_fn=compute_and_cache_player_prop if player_props else None,
         snapshot_event_fn=lambda event_id: event_prediction.snapshot_event(*resources.all(), event_id),
+        postseason_active_fn=postseason_active_fn,
         logger=logger,
     )

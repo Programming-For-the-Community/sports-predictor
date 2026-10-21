@@ -18,6 +18,7 @@ import event_prediction
 import season_simulation
 from library.features.common import compute_elo_ratings
 from library.serving import bracket_projection
+from library.serving.bracket_simulation import BracketSimulation, RealPostseason, elo_rules
 from library.serving import model_loader, season_projection_common
 from library.serving.common import enrich_bracket_team_names, enrich_team_standings
 from library.serving.ncaafb_reads import _home_and_away
@@ -208,28 +209,18 @@ def _real_current_ranks(events: list[dict]) -> dict[str, int]:
     return {team_id: rank for team_id, (_, rank) in latest.items()}
 
 
-_BRACKET = bracket_projection.BracketResolver(
-    event_prediction=event_prediction, season_simulation=season_simulation, logger=logger,
-)
-_logged_win_probability = bracket_projection.logged_win_probability
-_predicted_winner_and_probability = bracket_projection.predicted_winner_and_probability
-_completed_matchup_row = bracket_projection.completed_matchup_row
-_scheduled_matchup_row = _BRACKET.scheduled_matchup_row
-_resolve_matchup = _BRACKET.resolve_matchup
-_project_bracket_round = _BRACKET.project_bracket_round
-
-
-def _real_postseason_matchups(storage: FeatureStorage, current_season: int | None) -> dict[frozenset, dict]:
-    return bracket_projection.real_postseason_matchups(storage, SPORT, current_season, lambda event: bool(event.get("is_playoff_game")))
+CFP_GROUP = "College Football Playoff"
+ROUND_ODDS_COLUMNS = [
+    ("Quarterfinals", "Quarterfinals"), ("Semifinals", "Semifinals"), ("Final", "National Championship"), ("Title", None),
+]
 
 
 def _bracket_payload(
     storage: FeatureStorage, s3, predictions_table, season_inputs: dict,
     estimator, model_card: dict, teams: list[str], simulation: dict[str, dict],
 ) -> dict | None:
-    """Builds the 12-team CFP bracket, reconciled against real results as
-    they exist right now -- see _resolve_matchup's own docstring for the
-    3-state design. Seeds from the season simulation's own projected
+    """The 12-team CFP bracket as one simulated run -- see library.serving.
+    bracket_simulation. Seeds from the season simulation's own projected
     end-of-year wins once the regular season still has games left, else
     real wins. point_differential/ratings stay at today's real value
     either way -- simulate_season doesn't project either forward. None
@@ -254,52 +245,44 @@ def _bracket_payload(
     seed_number = {team_id: rank + 1 for rank, team_id in enumerate(seeds)}
     one, two, three, four, five, six, seven, eight, nine, ten, eleven, twelve = seeds
 
-    current_season = season_inputs["current_season"]
-    real_matchups = _real_postseason_matchups(storage, current_season)
-    ratings = season_inputs["current_ratings"]
     home_advantage = season_simulation.DEFAULT_HOME_ADVANTAGE
 
-    round_of_12, round_of_12_advancing = _project_bracket_round(
-        "Round of 12",
-        [
-            (five, twelve, seed_number[five], seed_number[twelve]),
-            (six, eleven, seed_number[six], seed_number[eleven]),
-            (seven, ten, seed_number[seven], seed_number[ten]),
-            (eight, nine, seed_number[eight], seed_number[nine]),
-        ],
-        real_matchups, storage, s3, predictions_table, ratings, home_advantage,
-    )
-    r1_5v12, r1_6v11, r1_7v10, r1_8v9 = round_of_12_advancing
+    def topology(play_round) -> dict:
+        def pair(a: str, b: str):
+            return (a, b, seed_number[a], seed_number[b])
 
-    quarterfinals, quarterfinal_advancing = _project_bracket_round(
-        "Quarterfinals",
-        [
-            (one, r1_8v9[0], seed_number[one], r1_8v9[1]),
-            (two, r1_5v12[0], seed_number[two], r1_5v12[1]),
-            (three, r1_6v11[0], seed_number[three], r1_6v11[1]),
-            (four, r1_7v10[0], seed_number[four], r1_7v10[1]),
-        ],
-        real_matchups, storage, s3, predictions_table, ratings, 0.0,
-    )
-    qf1, qf2, qf3, qf4 = quarterfinal_advancing
+        # Campus sites in the first round; neutral bowls after it.
+        round_of_12, (r1_5v12, r1_6v11, r1_7v10, r1_8v9) = play_round(
+            "Round of 12", [pair(five, twelve), pair(six, eleven), pair(seven, ten), pair(eight, nine)], home_advantage,
+        )
+        quarterfinals, (qf1, qf2, qf3, qf4) = play_round(
+            "Quarterfinals",
+            [
+                (one, r1_8v9[0], seed_number[one], r1_8v9[1]),
+                (two, r1_5v12[0], seed_number[two], r1_5v12[1]),
+                (three, r1_6v11[0], seed_number[three], r1_6v11[1]),
+                (four, r1_7v10[0], seed_number[four], r1_7v10[1]),
+            ],
+            0.0,
+        )
+        semifinals, (sf1, sf2) = play_round(
+            "Semifinals", [(qf1[0], qf4[0], qf1[1], qf4[1]), (qf2[0], qf3[0], qf2[1], qf3[1])], 0.0,
+        )
+        championship, (champion,) = play_round("National Championship", [(sf1[0], sf2[0], sf1[1], sf2[1])], 0.0)
+        return {"rounds": [round_of_12, quarterfinals, semifinals, championship], "champion": champion[0]}
 
-    semifinals, semifinal_advancing = _project_bracket_round(
-        "Semifinals",
-        [(qf1[0], qf4[0], qf1[1], qf4[1]), (qf2[0], qf3[0], qf2[1], qf3[1])],
-        real_matchups, storage, s3, predictions_table, ratings, 0.0,
+    events = bracket_projection.real_postseason_events(
+        storage, SPORT, season_inputs["current_season"], lambda event: bool(event.get("is_playoff_game")),
     )
-    sf1, sf2 = semifinal_advancing
-
-    championship, championship_advancing = _project_bracket_round(
-        "National Championship", [(sf1[0], sf2[0], sf1[1], sf2[1])],
-        real_matchups, storage, s3, predictions_table, ratings, 0.0,
-    )
-
-    bracket = {
-        "rounds": [round_of_12, quarterfinals, semifinals, championship],
-        "champion": championship_advancing[0][0],
-    }
+    real = RealPostseason(events, bracket_projection.logged_home_probability(event_prediction, storage, s3, predictions_table, logger))
+    engine = BracketSimulation(real, elo_rules(season_inputs["current_ratings"]))
+    bracket = engine.run(topology, ROUND_ODDS_COLUMNS, group_of=lambda team: CFP_GROUP)
     return enrich_bracket_team_names(storage, SPORT, bracket)
+
+
+def postseason_active(storage: FeatureStorage) -> bool:
+    """Whether the daily schedule should rebuild the projection today."""
+    return bracket_projection.postseason_active(storage, SPORT, lambda event: bool(event.get("is_playoff_game")))
 
 
 def build_season_projection(storage: FeatureStorage, s3, predictions_table) -> dict:

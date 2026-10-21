@@ -76,6 +76,7 @@ from library.aws.account import get_account_id
 from library.aws.boto_config import DEFAULT_CONFIG
 from library.http.espn_core import EspnCoreApiClient
 from library.http.nfl import NFLClient
+from library.normalize.odds import fetch_event_odds
 from library.storage.depth_chart_cache import DEPTH_CHART_CACHE_TTL_DAYS, get_cached_depth_chart
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s", force=True)  # AWS Lambda pre-attaches a root handler, so basicConfig() is otherwise a silent no-op
@@ -235,6 +236,11 @@ def _ingest_week(
         except Exception:
             logger.exception("Failed fetching summary for event %s", event_id)
             failed += 1
+    completed_ids = [evt["id"] for evt in events if evt.get("status", {}).get("type", {}).get("completed", False)]
+    odds_saved, odds_failed = fetch_event_odds(
+        client, "nfl", completed_ids, object_exists=_object_exists, put_json=_put_json, logger=logger,
+    )
+    logger.info("Closing lines: %d saved, %d failed", odds_saved, odds_failed)
     return processed, skipped, failed
 
 

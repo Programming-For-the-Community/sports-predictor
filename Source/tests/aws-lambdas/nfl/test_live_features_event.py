@@ -187,7 +187,7 @@ class TestBuildLiveEventFeatures:
             [_roster_entry("veteran-qb", "QB"), _roster_entry("hot-backup", "QB")] if team_id == "KC" else []
         )
 
-        def player_history(entity_id, before_date=None, limit=None):
+        def player_history(entity_id, before_date=None, limit=None, *, sport):
             histories = {
                 "veteran-qb": [{"stat_line": {"passing_attempts": 30}}] * 3,  # total 90
                 "hot-backup": [{"stat_line": {"passing_attempts": 35}}],  # total 35
@@ -286,7 +286,7 @@ class TestBuildLiveEventFeatures:
             [_roster_entry("mahomes-patrick", "QB"), _roster_entry("backup-qb", "QB")] if team_id == "KC" else []
         )
 
-        def player_history(entity_id, before_date=None, limit=None):
+        def player_history(entity_id, before_date=None, limit=None, *, sport):
             histories = {
                 "mahomes-patrick": [{"stat_line": {"passing_attempts": 30, "passing_yards": 300}}],
                 "backup-qb": [{"stat_line": {"passing_attempts": 5, "passing_yards": 40}}],

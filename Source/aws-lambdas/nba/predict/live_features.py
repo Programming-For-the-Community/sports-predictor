@@ -13,9 +13,12 @@ Leaders panel (build_live_event_leader_candidates) needs its own
 per-category candidate search: no roster/depth-chart position data to
 pick a starter from, so candidates are every still-rostered player
 credited with the category's volume stat anywhere in the team's recent
-box scores, ranked by recent volume. Basketball's own category set is
-scoring/rebounding/assists (see library.serving.nba_reads' own
-_STAT_CATEGORY).
+box scores, plus anyone rostered there since, ranked by recent volume.
+Basketball's own category set is scoring/rebounding/assists (see
+library.serving.nba_reads' own _STAT_CATEGORY). "Still-rostered"
+(_still_on_team) means both matches team_id AND was recently reconfirmed
+there (_is_roster_entry_fresh) -- nothing ever un-sets a waived player's
+last-known team_id.
 
 `events` (an already-fetched get_all_events(sport) result) is an optional
 pass-through accepted by every public function here and threaded into
@@ -23,12 +26,19 @@ get_team_events/_live_elo_ratings calls, so one event-prediction request
 can share a single fetch instead of each function re-querying.
 """
 
+from datetime import date
+
 from library.features import basketball_live
 from library.features.live_orchestration import EventNotFoundError, MalformedEventError, box_score_candidate_ids
+from library.features.live_orchestration import is_roster_entry_fresh
 from library.features.nba import build_event_features, build_player_features
 
 DEFAULT_ROLLING_WINDOW = 5
 SEASON_LOOKBACK = 1
+
+# Ingest re-fetches all 30 rosters on every daily run, so this only needs
+# to absorb a handful of missed runs.
+_ROSTER_STALENESS_DAYS = 14
 
 # Leaders-panel candidate generation -- box-score volume stat per category.
 # Matches library.serving.nba_reads' own _CATEGORY_PRIMARY_STAT.
@@ -36,9 +46,11 @@ LEADER_VOLUME_STATS = basketball_live.LEADER_VOLUME_STATS
 LEADER_CANDIDATE_LIMITS = basketball_live.LEADER_CANDIDATE_LIMITS
 
 
-def _still_on_team(storage, sport: str, entity_id: str, team_id: str) -> bool:
+def _still_on_team(storage, sport: str, entity_id: str, team_id: str, reference_date: str | None = None) -> bool:
     entity = storage.get_entity(sport, entity_id, "player")
-    return bool(entity) and (entity.get("metadata") or {}).get("team_id") == team_id
+    if not entity or (entity.get("metadata") or {}).get("team_id") != team_id:
+        return False
+    return is_roster_entry_fresh(entity, reference_date or date.today().isoformat(), _ROSTER_STALENESS_DAYS)
 
 
 def _box_score_candidate_ids(

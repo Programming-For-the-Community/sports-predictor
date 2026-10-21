@@ -7,6 +7,7 @@ import 'package:front_end/core/data/events_repository.dart';
 import 'package:front_end/core/models/event.dart';
 import 'package:front_end/core/models/live_score.dart';
 import 'package:front_end/core/models/prediction.dart';
+import 'package:front_end/core/models/upset.dart';
 import 'package:front_end/core/theme/app_colors.dart';
 import 'package:front_end/core/widgets/game_row.dart';
 import 'package:front_end/core/widgets/pick_labels.dart';
@@ -85,9 +86,10 @@ Future<void> _pumpRow(
   double width = 800,
   double textScale = 1,
   String sport = 'nfl',
+  EventPrediction prediction = _prediction,
 }) async {
   await tester.pumpWidget(ProviderScope(
-    overrides: [eventPredictionProvider.overrideWith((ref, query) async => _prediction)],
+    overrides: [eventPredictionProvider.overrideWith((ref, query) async => prediction)],
     child: MaterialApp(
       home: MediaQuery(
         data: MediaQueryData(textScaler: TextScaler.linear(textScale)),
@@ -117,7 +119,78 @@ SportEvent _completedWith(PredictionComparison? comparison) {
   );
 }
 
+/// [event] with a sportsbook favourite of 'home' (KC) or 'away' (LV).
+SportEvent _favoring(SportEvent event, String? favorite) => SportEvent(
+      eventId: event.eventId,
+      eventDate: event.eventDate,
+      kickoffTime: event.kickoffTime,
+      status: event.status,
+      week: event.week,
+      round: event.round,
+      participants: event.participants,
+      predictionComparison: event.predictionComparison,
+      leadersComparison: event.leadersComparison,
+      bettingFavorite: favorite,
+    );
+
 void main() {
+  group('GameRow upset chips', () {
+    // The model has KC (home) at 68% throughout.
+    testWidgets('an upcoming game whose betting favourite the model gives 60% or less is an upset watch', (tester) async {
+      await _pumpRow(tester, _favoring(_scheduledEvent(), 'away'));
+
+      expect(find.text(UpsetFlag.watch.label), findsOneWidget);
+      expect(find.text(UpsetFlag.upset.label), findsNothing);
+    });
+
+    testWidgets('no chip when the model backs the betting favourite', (tester) async {
+      await _pumpRow(tester, _favoring(_scheduledEvent(), 'home'));
+
+      expect(find.byType(UpsetChip), findsNothing);
+    });
+
+    testWidgets('no chip without a line', (tester) async {
+      await _pumpRow(tester, _favoring(_scheduledEvent(), null));
+
+      expect(find.byType(UpsetChip), findsNothing);
+    });
+
+    testWidgets('a finished game the betting favourite lost is an upset, and never an upset watch', (tester) async {
+      await _pumpRow(tester, _favoring(_completedEvent(), 'away'));
+
+      expect(find.text(UpsetFlag.upset.label), findsOneWidget);
+      expect(find.text(UpsetFlag.watch.label), findsNothing);
+      expect(find.text(VerdictPill.hitLabel), findsOneWidget);
+    });
+
+    testWidgets('a finished game the betting favourite won has no chip, however close', (tester) async {
+      await _pumpRow(tester, _favoring(_completedEvent(), 'home'));
+
+      expect(find.byType(UpsetChip), findsNothing);
+    });
+
+    testWidgets('a game ESPN reports over is judged on its live final score', (tester) async {
+      await _pumpRow(
+        tester, _favoring(_scheduledEvent(), 'away'),
+        liveState: const LiveEventState(live: false, completed: true, detail: 'Final', homeScore: 31, awayScore: 17),
+      );
+
+      expect(find.text(UpsetFlag.upset.label), findsOneWidget);
+    });
+
+    for (final (width, textScale) in [(800.0, 1.3), (360.0, 1.0), (320.0, 1.3)]) {
+      testWidgets('both chips fit beside their pill at $width px, text x$textScale', (tester) async {
+        await _pumpRow(tester, _favoring(_scheduledEvent(), 'away'), width: width, textScale: textScale);
+        expect(tester.takeException(), isNull);
+        expect(find.text(UpsetFlag.watch.label), findsOneWidget);
+
+        await _pumpRow(tester, _favoring(_completedEvent(), 'away'), width: width, textScale: textScale);
+        expect(tester.takeException(), isNull);
+        expect(find.text(UpsetFlag.upset.label), findsOneWidget);
+      });
+    }
+  });
+
   group('GameRow on a wide screen', () {
     testWidgets('an upcoming game shows the model scores, each side\'s win chance over the bar, and the line', (tester) async {
       await _pumpRow(tester, _scheduledEvent(venueName: 'Arrowhead Stadium', venueCity: 'Kansas City', venueState: 'MO'));

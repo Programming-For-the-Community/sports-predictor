@@ -21,9 +21,10 @@ import season_simulation
 from library.features.common import compute_elo_ratings
 from library.features.nba_teams import TEAM_DIVISIONS, is_real_franchise_matchup
 from library.serving import bracket_projection
+from library.serving.bracket_simulation import BracketSimulation, RealPostseason, elo_rules
 from library.serving import season_projection_common
 from library.serving.common import enrich_bracket_team_names, enrich_team_standings
-from library.serving.nba_reads import _actual_result, _home_and_away
+from library.serving.nba_reads import _home_and_away
 from library.storage.feature_storage import FeatureStorage
 from library.storage.season_projections import season_projection_key
 
@@ -31,7 +32,7 @@ logger = logging.getLogger("nba-predict")
 
 # ESPN's season.type convention: 3 is postseason, 5 is the play-in
 # tournament, its own distinct type, not folded into postseason. Both
-# count as "real playoff bracket" games for _real_postseason_matchups
+# count as "real playoff bracket" games for the bracket simulation
 # below; a coincidental regular-season rematch between the same two teams
 # never collides since neither type is 2 (regular season).
 POSTSEASON_TYPES = {3, 5}
@@ -295,309 +296,101 @@ def _cup_bracket_payload(storage: FeatureStorage, season_inputs: dict) -> dict |
     return enrich_bracket_team_names(storage, SPORT, bracket)
 
 
-_BRACKET = bracket_projection.BracketResolver(
-    event_prediction=event_prediction, season_simulation=season_simulation, logger=logger,
-)
-_logged_win_probability = bracket_projection.logged_win_probability
-_predicted_winner_and_probability = bracket_projection.predicted_winner_and_probability
-_completed_matchup_row = bracket_projection.completed_matchup_row
-_scheduled_matchup_row = _BRACKET.scheduled_matchup_row
-_resolve_matchup = _BRACKET.resolve_matchup
+# Single games; every other round is best-of-7.
+SINGLE_GAME_ROUNDS = {"Play-In", "Play-In Elimination"}
+FINALS_ROUND = "NBA Finals"
+ROUND_ODDS_COLUMNS = [
+    ("Playoffs", "Conference Quarterfinals"), ("2nd round", "Conference Semifinals"),
+    ("Conf finals", "Conference Finals"), ("Finals", FINALS_ROUND), ("Title", None),
+]
 
 
-def _real_postseason_matchups(storage: FeatureStorage, current_season: int | None) -> dict[frozenset, dict]:
-    return bracket_projection.real_postseason_matchups(storage, SPORT, current_season, lambda event: event.get("season_type") in POSTSEASON_TYPES)
+def _matchup_rules(ratings: dict[str, float]):
+    return elo_rules(ratings, lambda round_name: 1 if round_name in SINGLE_GAME_ROUNDS else 4)
 
 
-def _real_postseason_series(storage: FeatureStorage, current_season: int | None) -> dict[frozenset, list[dict]]:
-    """{frozenset({team_a, team_b}): [games chronological]} for every real
-    playoff/play-in game (season_type in POSTSEASON_TYPES) this season --
-    every real game between a pair, not just one, since a real playoff
-    series (Conference Quarterfinals onward) is best-of-7 -- _resolve_series_matchup
-    reads a pair's whole game list to know the series' running record and
-    which game (if any) is next. Sorted by event_date so "the next
-    unplayed game" is well-defined."""
-    by_pair: dict[frozenset, list[dict]] = {}
-    for status in ("scheduled", "completed"):
-        for event in storage.get_all_events(SPORT, status=status):
-            if event.get("season") != current_season or event.get("season_type") not in POSTSEASON_TYPES:
-                continue
-            home_away = _home_and_away(event)
-            if home_away is None:
-                continue
-            by_pair.setdefault(frozenset(home_away), []).append(event)
-    for games in by_pair.values():
-        games.sort(key=lambda e: e.get("event_date") or "")
-    return by_pair
-
-
-def _series_record(team_a: str, team_b: str, games: list[dict]) -> tuple[int, int]:
-    """(wins_a, wins_b) across a chronological list of real games between
-    team_a/team_b -- keyed by team_id, not each game's own home/away role,
-    since a series' host alternates by game (the real 2-2-1-1-1 format)
-    while team_a/team_b stay fixed to the bracket slot's own seeded
-    identities. Only completed games count; a scheduled-but-unplayed game
-    contributes nothing yet."""
-    wins_a = wins_b = 0
-    for game in games:
-        if game.get("status") != "completed":
-            continue
-        actual = _actual_result(game)
-        home_id, away_id = _home_and_away(game)
-        winner_id = home_id if actual["home_won"] else away_id
-        if winner_id == team_a:
-            wins_a += 1
-        elif winner_id == team_b:
-            wins_b += 1
-    return wins_a, wins_b
-
-
-def _next_series_game_probability(
-    games: list[dict], team_a: str, storage: FeatureStorage, s3, predictions_table,
-) -> float | None:
-    """team_a's own win probability for the next unplayed real game in
-    this series, from its logged/live prediction (computing it on the
-    spot on a cache miss, same as _resolve_matchup) -- None if no real
-    next game exists yet."""
-    next_game = next((g for g in games if g.get("status") != "completed"), None)
-    if next_game is None:
-        return None
-    event_key_value = next_game["event_key"]
-    home_id, _ = _home_and_away(next_game)
-    logged = _logged_win_probability(predictions_table, event_key_value)
-    if logged is None:
-        try:
-            event_prediction.compute_and_cache_event(storage, s3, predictions_table, next_game["event_id"])
-            logged = _logged_win_probability(predictions_table, event_key_value)
-        except Exception:
-            logger.exception("Failed computing a live prediction for series game %s", event_key_value)
-    if logged is None:
-        return None
-    home_probability = logged["home_win_probability"]
-    return home_probability if home_id == team_a else 1 - home_probability
-
-
-def _resolve_series_matchup(
-    team_a: str, team_b: str, seed_a: int | None, seed_b: int | None,
-    real_series: dict[frozenset, list[dict]], storage: FeatureStorage, s3, predictions_table,
-    current_ratings: dict[str, float], home_advantage: float,
-) -> dict:
-    """Best-of-7 sibling of _resolve_matchup -- every real NBA playoff
-    round except Play-In (Conference Quarterfinals, Conference Semifinals,
-    Conference Finals, NBA Finals) is a series, not a single game, so this tracks a
-    running win count per side across every real game found for the pair
-    instead of resolving just one (see _series_record). "final" means the
-    SERIES is decided (someone reached 4 wins), not that one game
-    finished; "wins_a"/"wins_b" are always present (0/0 for a series that
-    hasn't started yet) so the frontend can show a running record like
-    "DEN leads 3-1" the same way for a projected, in-progress, or decided
-    series.
-
-    win_probability is always the SERIES winner's own probability (via
-    season_simulation.series_win_probability), computed from a single
-    game's Elo probability plus the real record so far -- not one game's
-    raw probability. The single game's own probability comes from the
-    next unplayed real game's own logged/live prediction when one exists
-    (computing it on the spot on a cache miss, same as _resolve_matchup),
-    falling back to a fresh Elo estimate when no real game is logged yet
-    (series hasn't started, or ingest hasn't caught up to the next game)
-    -- both cases go through the exact same formula, just with wins_a/
-    wins_b at 0/0 or the real partial record respectively.
-
-    Not-yet-final slots also carry predicted_wins_a/predicted_wins_b (via
-    season_simulation.predicted_series_score) -- the single most likely
-    FINAL record the series ends at, distinct from wins_a/wins_b's own
-    current/live record (always 0-0 before the series starts). Omitted
-    once "final", since the real record already answers the same
-    question with no need for a prediction."""
-    games = real_series.get(frozenset((team_a, team_b)), [])
-    wins_a, wins_b = _series_record(team_a, team_b, games)
-
-    if wins_a >= 4 or wins_b >= 4:
-        return {
-            "status": "final",
-            "team_a": team_a, "team_b": team_b, "seed_a": seed_a, "seed_b": seed_b,
-            "predicted_winner": None, "win_probability": None,
-            "actual_winner": team_a if wins_a >= 4 else team_b,
-            "wins_a": wins_a, "wins_b": wins_b,
-        }
-
-    game_probability_a = _next_series_game_probability(games, team_a, storage, s3, predictions_table)
-    if game_probability_a is None:
-        # No real next game logged yet (series hasn't started, or ingest
-        # hasn't caught up) -- fall back to the model's own Elo estimate,
-        # same input project_matchup itself would use.
-        rating_a = current_ratings.get(team_a, season_simulation.DEFAULT_STARTING_RATING)
-        rating_b = current_ratings.get(team_b, season_simulation.DEFAULT_STARTING_RATING)
-        game_probability_a = season_simulation.expected_score(rating_a, rating_b, home_advantage)
-
-    series_probability_a = season_simulation.series_win_probability(game_probability_a, wins_a, wins_b)
-    predicted_winner = team_a if series_probability_a >= 0.5 else team_b
-    win_probability = series_probability_a if predicted_winner == team_a else 1 - series_probability_a
-    predicted_wins_a, predicted_wins_b = season_simulation.predicted_series_score(game_probability_a, wins_a, wins_b)
-
-    return {
-        "status": "scheduled" if games else "projected",
-        "team_a": team_a, "team_b": team_b, "seed_a": seed_a, "seed_b": seed_b,
-        "predicted_winner": predicted_winner, "win_probability": win_probability,
-        "wins_a": wins_a, "wins_b": wins_b,
-        "predicted_wins_a": predicted_wins_a, "predicted_wins_b": predicted_wins_b,
-    }
-
-
-def _project_series_round(
-    round_name: str, pairs: list[tuple[str, str, int | None, int | None]],
-    real_series: dict[frozenset, list[dict]], storage: FeatureStorage, s3, predictions_table,
-    current_ratings: dict[str, float], home_advantage: float,
-) -> tuple[dict, list[tuple[str, int | None]]]:
-    """Resolves one round's worth of best-of-7 series slots via
-    _resolve_series_matchup, returning that round's display dict alongside
-    [(advancing_team, its_own_seed), ...] for the next round to consume."""
-    matchups = []
-    advancing = []
-    for team_a, team_b, seed_a, seed_b in pairs:
-        matchup = _resolve_series_matchup(
-            team_a, team_b, seed_a, seed_b, real_series, storage, s3, predictions_table,
-            current_ratings, home_advantage,
-        )
-        matchups.append(matchup)
-        winner = matchup["predicted_winner"] if matchup["status"] != "final" else matchup["actual_winner"]
-        winner_seed = seed_a if winner == team_a else seed_b
-        advancing.append((winner, winner_seed))
-    return {"round": round_name, "matchups": matchups}, advancing
-
-
-def _project_conference_bracket_reconciled(
-    direct_seeds: list[str], seed_7: str, seed_8: str, seed_9: str, seed_10: str,
-    real_matchups: dict[frozenset, dict], real_series: dict[frozenset, list[dict]],
-    storage: FeatureStorage, s3, predictions_table,
-    current_ratings: dict[str, float], home_advantage: float,
-) -> tuple[list[dict], str]:
-    """Same two-stage shape as season_simulation.project_conference_bracket
-    (Play-In then the fixed no-reseed 8-team bracket), but reconciled
-    against real results: Play-In goes through _resolve_matchup's
-    real-vs-projected reconciliation (both play-in games are single
-    elimination, not a series); every round after it goes through
-    _resolve_series_matchup instead (Conference Quarterfinals onward is
-    best-of-7). Returns (rounds, champion)."""
-    # Play-In is built game-by-game (unlike the other rounds), since
-    # game 3's own participants depend on games 1/2's own results --
-    # _project_series_round's own "resolve a static list of pairs" shape
-    # doesn't fit a round with an internal dependency like that.
-    game1 = _resolve_matchup(
-        seed_7, seed_8, 7, 8, real_matchups, storage, s3, predictions_table, current_ratings, home_advantage,
+def _conference_rounds(play_round, direct_seeds: list[str], play_in_seeds: list[str], home_advantage: float):
+    """One conference: the Play-In (7v8 and 9v10, then 7v8's loser against
+    9v10's winner), then the fixed, no-reseed 8-team bracket. Returns
+    (rounds, champion)."""
+    seed_7, seed_8, seed_9, seed_10 = play_in_seeds
+    game1, (game1_advancing,) = play_round("Play-In", [(seed_7, seed_8, 7, 8)], home_advantage)
+    game2, (game2_advancing,) = play_round("Play-In", [(seed_9, seed_10, 9, 10)], home_advantage)
+    seven = game1_advancing[0]
+    game1_loser, game1_loser_seed = (seed_8, 8) if seven == seed_7 else (seed_7, 7)
+    game3, (game3_advancing,) = play_round(
+        "Play-In Elimination", [(game1_loser, game2_advancing[0], game1_loser_seed, game2_advancing[1])], home_advantage,
     )
-    game1_winner = game1["predicted_winner"] if game1["status"] != "final" else game1["actual_winner"]
-    game1_loser = seed_8 if game1_winner == seed_7 else seed_7
-    game1_loser_seed = 8 if game1_winner == seed_7 else 7
+    field = direct_seeds + [seven, game3_advancing[0]]
+    number = {team: rank + 1 for rank, team in enumerate(field)}
+    one, two, three, four, five, six, seven, eight = field
 
-    game2 = _resolve_matchup(
-        seed_9, seed_10, 9, 10, real_matchups, storage, s3, predictions_table, current_ratings, home_advantage,
+    def pair(a: str, b: str):
+        return (a, b, number[a], number[b])
+
+    quarterfinals, qf = play_round(
+        "Conference Quarterfinals", [pair(one, eight), pair(four, five), pair(three, six), pair(two, seven)], home_advantage,
     )
-    game2_winner = game2["predicted_winner"] if game2["status"] != "final" else game2["actual_winner"]
-    game2_winner_seed = 9 if game2_winner == seed_9 else 10
-
-    game3 = _resolve_matchup(
-        game1_loser, game2_winner, game1_loser_seed, game2_winner_seed, real_matchups, storage, s3,
-        predictions_table, current_ratings, home_advantage,
+    semifinals, sf = play_round(
+        "Conference Semifinals", [(qf[0][0], qf[1][0], qf[0][1], qf[1][1]), (qf[2][0], qf[3][0], qf[2][1], qf[3][1])], home_advantage,
     )
-    final_8_seed = game3["predicted_winner"] if game3["status"] != "final" else game3["actual_winner"]
-
-    # Two rounds, not one -- game3 isn't played in parallel with games
-    # 1/2, it's built FROM their results (matches
-    # season_simulation.project_conference_bracket's own shape).
-    play_in_round1 = {"round": "Play-In", "matchups": [game2, game1]}
-    play_in_round2 = {"round": "Play-In Elimination", "matchups": [game3]}
-    full_seeds = direct_seeds + [game1_winner, final_8_seed]
-
-    seed_number = {team_id: rank + 1 for rank, team_id in enumerate(full_seeds)}
-    one, two, three, four, five, six, seven, eight = full_seeds
-
-    first_round, first_round_advancing = _project_series_round(
-        "Conference Quarterfinals",
-        [
-            (one, eight, seed_number[one], seed_number[eight]),
-            (four, five, seed_number[four], seed_number[five]),
-            (three, six, seed_number[three], seed_number[six]),
-            (two, seven, seed_number[two], seed_number[seven]),
-        ],
-        real_series, storage, s3, predictions_table, current_ratings, home_advantage,
-    )
-
-    semifinals, semifinal_advancing = _project_series_round(
-        "Conference Semifinals",
-        [
-            (first_round_advancing[0][0], first_round_advancing[1][0], first_round_advancing[0][1], first_round_advancing[1][1]),
-            (first_round_advancing[2][0], first_round_advancing[3][0], first_round_advancing[2][1], first_round_advancing[3][1]),
-        ],
-        real_series, storage, s3, predictions_table, current_ratings, home_advantage,
-    )
-
-    championship, championship_advancing = _project_series_round(
-        "Conference Finals",
-        [(semifinal_advancing[0][0], semifinal_advancing[1][0], semifinal_advancing[0][1], semifinal_advancing[1][1])],
-        real_series, storage, s3, predictions_table, current_ratings, home_advantage,
-    )
-
-    return [play_in_round1, play_in_round2, first_round, semifinals, championship], championship_advancing[0][0]
+    final, (champion,) = play_round("Conference Finals", [(sf[0][0], sf[1][0], sf[0][1], sf[1][1])], home_advantage)
+    # Play-In's game 2 sits above game 1: game 1's winner skips to the 2v7
+    # quarterfinal at the bottom, while game 2 feeds the elimination game.
+    play_in = {"round": "Play-In", "matchups": [game2["matchups"][0], game1["matchups"][0]]}
+    return [play_in, game3, quarterfinals, semifinals, final], champion[0]
 
 
 def _bracket_payload(
     storage: FeatureStorage, s3, predictions_table, season_inputs: dict, simulation: dict[str, dict],
 ) -> dict:
-    """Builds the full NBA playoff bracket (both conferences, play-in
-    included, plus the Finals), reconciled against real results as they
-    exist right now (see _resolve_matchup for the 3-state design). Seeds
-    from real wins/point-differential once the regular season is actually
-    over (season_inputs["remaining_games"] empty), else from
-    simulate_season's own projected_wins."""
-    regular_season_over = not season_inputs["remaining_games"]
-    if regular_season_over:
-        wins, point_differential = season_inputs["wins"], season_inputs["point_differential"]
+    """The full NBA playoff bracket (both conferences, play-in included,
+    plus the Finals) as one simulated run -- see library.serving.
+    bracket_simulation. Seeds from real wins/point differential once the
+    regular season is over, else from simulate_season's projected_wins."""
+    if not season_inputs["remaining_games"]:
+        wins = season_inputs["wins"]
     else:
         wins = {team_id: projection["projected_wins"] for team_id, projection in simulation.items()}
-        point_differential = season_inputs["point_differential"]
-
+    point_differential = season_inputs["point_differential"]
     conferences = season_simulation._teams_by_conference()
-    current_season = season_inputs["current_season"]
-    real_matchups = _real_postseason_matchups(storage, current_season)
-    real_series = _real_postseason_series(storage, current_season)
-    ratings = season_inputs["current_ratings"]
+    conference_of = {team: conference for conference, teams in conferences.items() for team in teams}
     home_advantage = season_simulation.DEFAULT_HOME_ADVANTAGE
+    seeded = {}
+    for conference, teams in conferences.items():
+        seeds = season_simulation._seed_conference(teams, wins, point_differential)
+        seeded[conference] = (seeds[:season_simulation.DIRECT_PLAYOFF_SEEDS], seeds[season_simulation.DIRECT_PLAYOFF_SEEDS:season_simulation.PLAY_IN_FIELD_SIZE])
 
-    conference_results: dict[str, list[dict]] = {}
-    champions: dict[str, str] = {}
-    for conference, conference_teams in conferences.items():
-        seeds = season_simulation._seed_conference(conference_teams, wins, point_differential)
-        direct_seeds = seeds[:season_simulation.DIRECT_PLAYOFF_SEEDS]
-        seed_7, seed_8, seed_9, seed_10 = seeds[6:season_simulation.PLAY_IN_FIELD_SIZE]
-        rounds, champion = _project_conference_bracket_reconciled(
-            direct_seeds, seed_7, seed_8, seed_9, seed_10, real_matchups, real_series, storage, s3,
-            predictions_table, ratings, home_advantage,
-        )
-        conference_results[conference] = rounds
-        champions[conference] = champion
+    def record(team: str) -> tuple:
+        return (wins.get(team, 0), point_differential.get(team, 0))
 
-    # NBA Finals is also best-of-7 (_resolve_series_matchup, not
-    # _resolve_matchup) -- home-court goes to the better regular-season
-    # record, point differential as tiebreak. Decided once here since a
-    # series' host team stays fixed across all 7 possible games even
-    # though which games it physically hosts alternates (2-2-1-1-1).
-    (_, champion_a), (_, champion_b) = champions.items()
-    record_a = (wins.get(champion_a, 0), point_differential.get(champion_a, 0))
-    record_b = (wins.get(champion_b, 0), point_differential.get(champion_b, 0))
-    finals_home, finals_away = (champion_a, champion_b) if record_a >= record_b else (champion_b, champion_a)
-    finals_matchup = _resolve_series_matchup(
-        finals_home, finals_away, None, None, real_series, storage, s3, predictions_table, ratings, home_advantage,
+    def topology(play_round) -> dict:
+        rounds_by_conference, champions = {}, []
+        for conference, (direct_seeds, play_in_seeds) in seeded.items():
+            rounds_by_conference[conference], champion = _conference_rounds(play_round, direct_seeds, play_in_seeds, home_advantage)
+            champions.append(champion)
+        # Home court in the Finals goes to the better regular-season record.
+        home, away = sorted(champions, key=record, reverse=True)
+        finals, (winner,) = play_round(FINALS_ROUND, [(home, away, None, None)], home_advantage)
+        return {"conferences": rounds_by_conference, "finals": finals["matchups"][0], "champion": winner[0]}
+
+    def tiebreak(team_a: str, team_b: str) -> str | None:
+        if record(team_a) == record(team_b):
+            return None
+        return team_a if record(team_a) > record(team_b) else team_b
+
+    events = bracket_projection.real_postseason_events(
+        storage, SPORT, season_inputs["current_season"], lambda event: event.get("season_type") in POSTSEASON_TYPES,
     )
-    finals_winner = finals_matchup["predicted_winner"] if finals_matchup["status"] != "final" else finals_matchup["actual_winner"]
-
-    bracket = {
-        "conferences": conference_results,
-        "finals": finals_matchup,
-        "champion": finals_winner,
-    }
+    real = RealPostseason(events, bracket_projection.logged_home_probability(event_prediction, storage, s3, predictions_table, logger))
+    engine = BracketSimulation(real, _matchup_rules(season_inputs["current_ratings"]), tiebreak=tiebreak)
+    bracket = engine.run(topology, ROUND_ODDS_COLUMNS, group_of=conference_of.get)
     return enrich_bracket_team_names(storage, SPORT, bracket)
+
+
+def postseason_active(storage: FeatureStorage) -> bool:
+    """Whether the daily schedule should rebuild the projection today."""
+    return bracket_projection.postseason_active(storage, SPORT, lambda event: event.get("season_type") in POSTSEASON_TYPES)
 
 
 def build_season_projection(storage: FeatureStorage, s3, predictions_table) -> dict:

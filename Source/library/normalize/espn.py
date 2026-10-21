@@ -7,6 +7,7 @@ Sport-specific behaviour -- such as which stat keys pack two numbers into
 one string -- is passed in by the caller via compound_key_splits rather
 than hardcoded here.
 """
+from library.normalize.odds import PREGAME_ODDS, scoreboard_odds
 from library.parsing import parse_clock_to_seconds, parse_number, snake_case, us_eastern_date_from_iso
 from library.schema.keys import entity_key, entity_team_key, event_key, player_key, team_key
 
@@ -73,6 +74,14 @@ def _event_status(status: dict) -> str:
     return "scheduled"
 
 
+def _pregame_odds(event: dict, competition: dict) -> dict | None:
+    """Only a game that hasn't started: an in-progress one can carry live
+    odds, and PipelineStorage.upsert_event keeps the line already on file."""
+    if (event.get("status") or {}).get("type", {}).get("state") != "pre":
+        return None
+    return scoreboard_odds(competition)
+
+
 def scoreboard_event_to_event_item(event: dict, sport: str) -> dict:
     competition = event["competitions"][0]
     participants = []
@@ -125,6 +134,9 @@ def scoreboard_event_to_event_item(event: dict, sport: str) -> dict:
         # non-conference or NCAA-tournament game.
         "conference_competition": competition.get("conferenceCompetition"),
     }
+
+    if (odds := _pregame_odds(event, competition)) is not None:
+        item[PREGAME_ODDS] = odds
 
     # Sport-agnostic passthrough of ESPN's event-level "notes" (a sibling
     # of "competitions", not nested inside it). Stored as the raw headline

@@ -236,6 +236,36 @@ void main() {
       expect(jsonDecode(tokens.value!)['idToken'], 'id-2');
       expect(jsonDecode(tokens.value!)['refreshToken'], 'refresh');
     });
+
+    test('refreshes once per run however many requests need the token', () async {
+      final tokens = _MemoryTokenStore(_tokens(expiresIn: Duration.zero));
+      final host = _FakeWidgetHost([(id: 7, kind: HomeWidgetKind.accuracy)])..sports[7] = SportIds.nba;
+
+      await run(client(publishedVersionCode: 41, scorecards: {SportIds.nfl: _scorecard(SportIds.nfl)}), tokens: tokens, widgets: host);
+
+      expect(requests.where((r) => r.url.host.startsWith('cognito-idp')), hasLength(1));
+      expect(requests.where((r) => r.method == 'GET').map((r) => r.headers['Authorization']).toSet(), {'id-2'});
+    });
+
+    test('uses the token the app rotated in while its own refresh was rejected as reuse', () async {
+      final tokens = _MemoryTokenStore(_tokens(expiresIn: Duration.zero));
+      final httpClient = MockClient((request) async {
+        requests.add(request);
+        if (request.method == 'HEAD') return http.Response('', 404);
+        if (request.url.host.startsWith('cognito-idp')) {
+          tokens.value = jsonEncode(
+            CognitoTokens(accessToken: 'a', idToken: 'app-rotated', refreshToken: 'r9', expiresAt: DateTime.now().add(const Duration(hours: 1))).toJson(),
+          );
+          return http.Response(jsonEncode({'__type': 'RefreshTokenReuseException', 'message': 'Refresh token reuse detected'}), 400);
+        }
+        return http.Response(_scorecard(request.url.pathSegments.first), 200);
+      });
+
+      await run(httpClient, tokens: tokens);
+
+      expect(requests.firstWhere((r) => r.url.path == '/nfl/model-performance').headers['Authorization'], 'app-rotated');
+      expect(jsonDecode(tokens.value!)['refreshToken'], 'r9');
+    });
   });
 
   group('home-screen widgets', () {

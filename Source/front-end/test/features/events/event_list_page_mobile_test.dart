@@ -7,6 +7,7 @@ import 'package:front_end/core/data/live_scores_repository.dart';
 import 'package:front_end/core/models/event.dart';
 import 'package:front_end/core/models/live_score.dart';
 import 'package:front_end/core/models/prediction.dart';
+import 'package:front_end/core/models/upset.dart';
 import 'package:front_end/features/events/event_list_page.dart';
 
 import '../../support/mobile_viewport.dart';
@@ -24,6 +25,9 @@ SportEvent _scheduledEvent(String id, String kickoff, {String? round, int? week}
       ],
       predictionComparison: null,
       leadersComparison: null,
+      // LV favoured by the books against a model that likes KC: every
+      // upcoming card carries UPSET WATCH, the widest pill row a card gets.
+      bettingFavorite: 'away',
     );
 
 SportEvent _completedEvent(String id, String kickoff) => SportEvent(
@@ -53,6 +57,8 @@ SportEvent _completedEvent(String id, String kickoff) => SportEvent(
         actualAwayScore: 17,
       ),
       leadersComparison: null,
+      // KC won as the betting underdog: MISS and UPSET side by side.
+      bettingFavorite: 'away',
     );
 
 void main() {
@@ -97,11 +103,13 @@ void main() {
         ),
       );
       expect(tester.takeException(), isNull);
+      expect(find.text(UpsetFlag.watch.label), findsNWidgets(2));
 
       // _ComparisonSummary (game_row.dart) is only reached on this tab.
       await tester.tap(find.text('Completed'));
       await tester.pumpAndSettle();
       expect(tester.takeException(), isNull);
+      expect(find.text(UpsetFlag.upset.label), findsOneWidget);
     });
   }
 
@@ -132,3 +140,4 @@ void main() {
     expect(tester.getSize(find.text('LV')).width, greaterThan(minLegibleWidth));
   });
 }
+

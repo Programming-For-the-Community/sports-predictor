@@ -353,6 +353,60 @@ void main() {
       expect((repo.state as AuthAuthenticated).tokens.idToken, 'id-2');
     });
 
+    test('concurrent token requests near expiry share one rotation', () async {
+      SharedPreferences.setMockInitialValues({'cognito_tokens': persisted()});
+      final sent = <String>[];
+      final repo = rolling((request) async {
+        final body = jsonDecode(request.body) as Map<String, dynamic>;
+        sent.add(body['RefreshToken'] as String);
+        return _tokenResponse(id: 'id-${sent.length}', refresh: 'r${sent.length + 1}', expiresIn: 30);
+      });
+      await _firstRealState(repo);
+
+      final tokens = await Future.wait([repo.getValidIdToken(), repo.getValidIdToken(), repo.renewSession().then((_) => '')]);
+
+      expect(sent, ['r1', 'r2']);
+      expect(tokens.take(2), ['id-2', 'id-2']);
+    });
+
+    test('signs out when Cognito reports the refresh token was already rotated away', () async {
+      SharedPreferences.setMockInitialValues({'cognito_tokens': persisted()});
+      var calls = 0;
+      final repo = rolling((r) async {
+        calls++;
+        if (calls == 1) return _tokenResponse(id: 'restored', refresh: 'r2', expiresIn: 30);
+        return http.Response(jsonEncode({'__type': 'RefreshTokenReuseException', 'message': 'Refresh token reuse detected'}), 400);
+      });
+      await _firstRealState(repo);
+
+      await expectLater(repo.getValidIdToken(), throwsA(isA<CognitoException>()));
+
+      expect(repo.state, isA<AuthUnauthenticated>());
+      final prefs = await SharedPreferences.getInstance();
+      expect(prefs.getString('cognito_tokens'), isNull);
+    });
+
+    test('retries with the stored refresh token when the background job rotated it mid-request', () async {
+      final store = _MemoryTokenStore(persisted());
+      final sent = <String>[];
+      late AuthRepository repo;
+      repo = rolling((request) async {
+        final token = (jsonDecode(request.body) as Map<String, dynamic>)['RefreshToken'] as String;
+        sent.add(token);
+        if (token == 'r1' && sent.length == 1) return _tokenResponse(id: 'restored', refresh: 'r2', expiresIn: 30);
+        if (token == 'r2') {
+          store.value = persisted(refresh: 'from-background');
+          return http.Response(jsonEncode({'__type': 'RefreshTokenReuseException', 'message': 'Refresh token reuse detected'}), 400);
+        }
+        return _tokenResponse(id: 'after-retry', refresh: 'r4');
+      }, store: store);
+      await _firstRealState(repo);
+
+      expect(await repo.getValidIdToken(), 'after-retry');
+      expect(sent, ['r1', 'r2', 'from-background']);
+      expect(jsonDecode(store.value!)['refreshToken'], 'r4');
+    });
+
     test('a network failure in getValidIdToken surfaces the error but keeps the session', () async {
       SharedPreferences.setMockInitialValues({'cognito_tokens': persisted()});
       var calls = 0;

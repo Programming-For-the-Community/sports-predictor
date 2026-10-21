@@ -220,6 +220,8 @@ def _bracket_team_ids(bracket: dict) -> set[str]:
     for key in ("super_bowl", "finals", "championship"):
         if bracket.get(key):
             _add_matchup_team_ids(bracket[key], team_ids)
+    for rows in (bracket.get("round_odds") or {}).get("groups", {}).values():
+        team_ids.update(row["team_id"] for row in rows)
     return team_ids
 
 
@@ -613,6 +615,12 @@ def _sort_and_limit_leader_lists(home: dict, away: dict, limits: dict[str, int],
             bucket[category] = bucket[category][:limit]
 
 
+def betting_favorite(event: dict) -> str | None:
+    """"home"/"away": the sportsbook favourite on the event's saved pre-game
+    line, None without one or for a pick'em."""
+    return (event.get("pregame_odds") or {}).get("favorite")
+
+
 def list_events_grouped_by_day(
     storage, predictions_table, sport: str, status: str, model_bucket=None, *,
     leaders_comparison_fn=_basketball_leaders_comparison, extra_entry_fn=None,
@@ -666,6 +674,7 @@ def list_events_grouped_by_day(
             "venue_name": e.get("venue_name"),
             "venue_city": e.get("venue_city"),
             "venue_state": e.get("venue_state"),
+            "betting_favorite": betting_favorite(e),
         }
         if read_prediction is not None:
             entry["prediction"] = read_prediction(e["event_key"])

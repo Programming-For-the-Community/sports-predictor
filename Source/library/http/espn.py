@@ -15,6 +15,7 @@ from library.parsing import US_EASTERN_TZ
 
 DEFAULT_ESPN_API_ROOT_URL = "https://site.web.api.espn.com/apis/site/v2/sports"
 DEFAULT_ESPN_USER_AGENT = "python-requests/2.31.0"
+DEFAULT_ESPN_CORE_SPORTS_ROOT_URL = "https://sports.core.api.espn.com/v2/sports"
 
 
 def espn_scoreboard_date(moment: datetime) -> str:
@@ -36,7 +37,21 @@ def _espn_user_agent() -> str:
     return os.environ.get("ESPN_USER_AGENT", DEFAULT_ESPN_USER_AGENT)
 
 
+def _espn_core_sports_url() -> str:
+    return os.environ.get("ESPN_CORE_SPORTS_ROOT_URL", DEFAULT_ESPN_CORE_SPORTS_ROOT_URL).rstrip("/")
+
+
 class EspnBaseClient(HttpClient):
     def __init__(self, sport_path: str, min_interval_seconds: float = 0.3):
-        base_url = f"{_espn_root_url()}/{sport_path.strip('/')}"
+        self._sport_path = sport_path.strip("/")
+        base_url = f"{_espn_root_url()}/{self._sport_path}"
         super().__init__(base_url=base_url, min_interval_seconds=min_interval_seconds, user_agent=_espn_user_agent())
+
+    def get_event_odds(self, event_id: str) -> dict:
+        """The core API's betting lines for one event ({"items": [...]}, one
+        per sportsbook). Unlike the scoreboard's own `odds`, these stay
+        available once the game is final."""
+        sport, league = self._sport_path.split("/", 1)
+        return self.get_absolute(
+            f"{_espn_core_sports_url()}/{sport}/leagues/{league}/events/{event_id}/competitions/{event_id}/odds",
+        )

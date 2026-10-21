@@ -38,6 +38,7 @@ from library.normalize.ncaafb import (
     game_to_event_item,
     roster_to_player_entities,
 )
+from library.normalize.odds import apply_core_odds
 from library.storage.pipeline_storage import PipelineStorage
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s", force=True)  # AWS Lambda pre-attaches a root handler, so basicConfig() is otherwise a silent no-op
@@ -236,6 +237,8 @@ def _dispatch(bucket: str, key: str) -> None:
         _process_teamstats(payload, key)
     elif "/roster/" in key:
         _process_roster(payload, key)
+    elif "/odds/" in key:
+        apply_core_odds(_get_storage(), SPORT, key, payload, logger)
     else:
         logger.warning("Unrecognized S3 key pattern, skipping: %s", key)
 

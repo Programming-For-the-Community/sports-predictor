@@ -12,6 +12,7 @@ live DynamoDB read.
 from decimal import Decimal
 from unittest.mock import MagicMock, patch
 
+from boto3.dynamodb.conditions import Attr
 from botocore.exceptions import ClientError
 
 from library.aws.dynamodb_table import DynamoDBTable, _from_dynamodb_safe
@@ -155,6 +156,47 @@ class TestQuery:
 
         assert result == [{"id": "1"}, {"id": "2"}]
         assert mock_boto_table.query.call_count == 1
+
+    def test_keeps_paging_past_filtered_out_pages_until_limit_reached(self):
+        # DynamoDB applies FilterExpression after each page's own Limit, so a
+        # page can come back short or empty while more matches remain.
+        table, mock_boto_table = _make_table(query_pages=[
+            {"Items": [], "LastEvaluatedKey": {"id": "2"}},
+            {"Items": [{"id": "3"}], "LastEvaluatedKey": {"id": "4"}},
+            {"Items": [{"id": "5"}, {"id": "6"}]},
+        ])
+        condition, filter_expression = object(), object()
+
+        result = table.query(condition, limit=2, filter_expression=filter_expression)
+
+        assert result == [{"id": "3"}, {"id": "5"}]
+        assert mock_boto_table.query.call_count == 3
+        assert mock_boto_table.query.call_args_list[0].kwargs == {
+            "KeyConditionExpression": condition, "ScanIndexForward": True, "Limit": 2,
+            "FilterExpression": filter_expression,
+        }
+
+
+class TestSetAttributeIfExists:
+    def test_sets_one_attribute_only_when_the_item_exists(self):
+        table, mock_boto_table = _make_table(query_pages=[])
+
+        assert table.set_attribute_if_exists({"event_key": "E1"}, "pregame_odds", {"favorite": "home"}) is True
+
+        kwargs = mock_boto_table.update_item.call_args.kwargs
+        assert kwargs["Key"] == {"event_key": "E1"}
+        assert kwargs["UpdateExpression"] == "SET #name = :value"
+        assert kwargs["ExpressionAttributeNames"] == {"#name": "pregame_odds"}
+        assert kwargs["ExpressionAttributeValues"] == {":value": {"favorite": "home"}}
+        assert kwargs["ConditionExpression"] == Attr("event_key").exists()
+
+    def test_false_when_no_item_has_the_key(self):
+        table, mock_boto_table = _make_table(query_pages=[])
+        mock_boto_table.update_item.side_effect = ClientError(
+            {"Error": {"Code": "ConditionalCheckFailedException", "Message": "no"}}, "UpdateItem",
+        )
+
+        assert table.set_attribute_if_exists({"event_key": "E1"}, "pregame_odds", {}) is False
 
 
 class TestBatchGetItems:

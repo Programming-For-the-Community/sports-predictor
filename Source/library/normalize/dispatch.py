@@ -26,7 +26,10 @@ import urllib.parse
 from library.aws.account import get_account_id
 
 
-def dispatch(s3, bucket: str, key: str, logger: logging.Logger, *, process_teams, process_scoreboard, process_boxscore, process_roster) -> None:
+def dispatch(
+    s3, bucket: str, key: str, logger: logging.Logger, *,
+    process_teams, process_scoreboard, process_boxscore, process_roster, process_odds,
+) -> None:
     response = s3.get_object(Bucket=bucket, Key=key, ExpectedBucketOwner=get_account_id())
     payload = json.loads(response["Body"].read())
 
@@ -38,6 +41,8 @@ def dispatch(s3, bucket: str, key: str, logger: logging.Logger, *, process_teams
         process_boxscore(payload, key)
     elif "/roster/" in key:
         process_roster(payload, key)
+    elif "/odds/" in key:
+        process_odds(payload, key)
     else:
         logger.warning("Unrecognized S3 key pattern, skipping: %s", key)
 

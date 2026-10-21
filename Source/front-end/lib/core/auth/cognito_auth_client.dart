@@ -10,6 +10,10 @@ import 'cognito_srp.dart';
 /// The app client allows only ALLOW_USER_SRP_AUTH and refresh, with no
 /// client secret (see Terraform/cognito-app-client.tf): sign-in is an SRP
 /// exchange (cognito_srp.dart), so the password itself is never sent.
+/// GetTokensFromRefreshToken's error for a refresh token rotation has
+/// already replaced.
+const refreshTokenReuseError = 'RefreshTokenReuseException';
+
 class CognitoException implements Exception {
   CognitoException(this.type, this.message);
 

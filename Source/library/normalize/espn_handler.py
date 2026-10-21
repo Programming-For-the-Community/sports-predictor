@@ -9,6 +9,7 @@ import logging
 from collections.abc import Callable
 
 from library.normalize import dispatch as dispatch_common
+from library.normalize.odds import apply_core_odds
 from library.normalize.espn import (
     boxscore_to_player_game_stats,
     boxscore_to_team_game_stats,
@@ -38,6 +39,9 @@ class EspnNormalizer:
         for team_entry in league["teams"]:
             storage.upsert_entity(team_to_entity(team_entry["team"], self._sport))
         self._logger.info("Upserted %d team entities from %s", len(league["teams"]), key)
+
+    def process_odds(self, payload: dict, key: str) -> None:
+        apply_core_odds(self._get_storage(), self._sport, key, payload, self._logger)
 
     def process_scoreboard(self, payload: dict, key: str) -> None:
         storage = self._get_storage()
@@ -107,4 +111,5 @@ class EspnNormalizer:
             s3, bucket, key, self._logger,
             process_teams=self.process_teams, process_scoreboard=self.process_scoreboard,
             process_boxscore=self.process_boxscore, process_roster=self.process_roster,
+            process_odds=self.process_odds,
         )

@@ -1,6 +1,6 @@
 """
 Unit tests for the season tab's CFP-bracket reconciliation
-(season_projection._resolve_matchup/_bracket_payload) -- a 3-state
+(season_projection._bracket_payload) -- a 3-state
 design (projected/scheduled/final), adapted for NCAAFB's 12-team
 topology and ranking-model-driven seeding. _bracket_payload's own
 signature takes an estimator/model_card/teams.
@@ -34,50 +34,6 @@ def _postseason_event(event_key, season, home_id, away_id, *, status="scheduled"
         "season": season, "is_playoff_game": True, "week": 16,
         "status": status, "participants": participants,
     }
-
-
-class TestResolveMatchup:
-    def test_no_real_game_falls_back_to_the_deterministic_projection(self):
-        result = season_projection._resolve_matchup(
-            "a", "b", 1, 2, {}, MagicMock(), MagicMock(), MagicMock(), {"a": 1900, "b": 1400},
-            season_simulation.DEFAULT_HOME_ADVANTAGE,
-        )
-
-        assert result["status"] == "projected"
-        assert result["predicted_winner"] == "a"
-
-    def test_real_completed_game_reports_the_actual_winner_and_score(self):
-        event = _postseason_event("E1", 2025, "t0", "t1", status="completed", home_score=31, away_score=17)
-        predictions_table = MagicMock()
-        predictions_table.query.return_value = []
-
-        result = season_projection._resolve_matchup(
-            "t0", "t1", 1, 8, {frozenset(("t0", "t1")): event}, MagicMock(), MagicMock(), predictions_table, {},
-            season_simulation.DEFAULT_HOME_ADVANTAGE,
-        )
-
-        assert result["status"] == "final"
-        assert result["actual_winner"] == "t0"
-        assert result["actual_home_score"] == 31
-
-    def test_real_scheduled_game_with_no_logged_prediction_computes_one_in_process(self):
-        event = _postseason_event("E1", 2025, "t0", "t1", status="scheduled")
-        predictions_table = MagicMock()
-        predictions_table.query.side_effect = [
-            [],
-            [{"model_key": "MODEL#win-probability#v1", "predicted_value": {"home_win_probability": 0.55}}],
-        ]
-
-        with patch.object(event_prediction, "compute_and_cache_event") as compute:
-            result = season_projection._resolve_matchup(
-                "t0", "t1", 1, 8, {frozenset(("t0", "t1")): event}, MagicMock(), MagicMock(), predictions_table, {},
-                season_simulation.DEFAULT_HOME_ADVANTAGE,
-            )
-
-        compute.assert_called_once()
-        assert result["status"] == "scheduled"
-        assert result["predicted_winner"] == "t0"
-        assert result["win_probability"] == 0.55
 
 
 class TestBracketPayload:

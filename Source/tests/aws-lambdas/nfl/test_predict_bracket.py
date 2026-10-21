@@ -31,106 +31,84 @@ def _postseason_event(event_key, season, home_id, away_id, *, status="scheduled"
     }
 
 
-class TestResolveMatchup:
-    def test_no_real_game_falls_back_to_the_deterministic_projection(self):
-        real_matchups = {}
-        ratings = {"a": 1900, "b": 1400}
+# Distinct AFC win totals make seeding deterministic: 1=2, 2=33, 3=34,
+# 4=7, 5=15, 6=17, 7=20, so the Wild Card's 2v7 game is "33" v "20".
+AFC_WINS = {
+    "2": 16, "33": 15, "34": 14, "7": 13, "15": 12, "17": 11, "20": 10,
+    "12": 9, "13": 8, "24": 7, "4": 6, "5": 5, "23": 4, "11": 3, "30": 2, "10": 1,
+}
 
-        result = season_projection._resolve_matchup(
-            "a", "b", 1, 2, real_matchups, MagicMock(), MagicMock(), MagicMock(), ratings,
-            season_simulation.DEFAULT_HOME_ADVANTAGE,
-        )
 
-        assert result["status"] == "projected"
-        assert result["predicted_winner"] == "a"
+def _wild_card_2v7(real_games, predictions_table):
+    storage = MagicMock()
+    storage.get_all_events.side_effect = lambda sport, status: [g for g in real_games if g["status"] == status]
+    season_inputs = {"current_season": 2025, "remaining_games": [], "wins": AFC_WINS, "point_differential": {}, "current_ratings": {}}
+    result = season_projection._bracket_payload(storage, MagicMock(), predictions_table, season_inputs, {})
+    return next(m for m in result["conferences"]["AFC"][0]["matchups"] if {m["team_a"], m["team_b"]} == {"33", "20"})
 
-    def test_real_completed_game_reports_the_actual_winner_and_score(self):
-        event = _postseason_event("E1", 2025, KC, LV, status="completed", home_score=27, away_score=13)
-        real_matchups = {frozenset((KC, LV)): event}
+
+def _logged(probability):
+    return [{"model_key": "MODEL#win-probability#v1", "predicted_value": {"home_win_probability": probability}}]
+
+
+class TestRealGames:
+    def test_a_completed_game_reports_the_actual_winner_score_and_original_prediction(self):
         predictions_table = MagicMock()
-        predictions_table.query.return_value = []
+        predictions_table.query.return_value = _logged(0.7)
+        game = _postseason_event("E1", 2025, "33", "20", status="completed", home_score=27, away_score=13)
 
-        result = season_projection._resolve_matchup(
-            KC, LV, 1, 2, real_matchups, MagicMock(), MagicMock(), predictions_table, {},
-            season_simulation.DEFAULT_HOME_ADVANTAGE,
-        )
+        matchup = _wild_card_2v7([game], predictions_table)
 
-        assert result["status"] == "final"
-        assert result["actual_winner"] == KC
-        assert result["actual_home_score"] == 27
-        assert result["actual_away_score"] == 13
+        assert matchup["status"] == "final"
+        assert matchup["actual_winner"] == "33"
+        assert (matchup["actual_home_score"], matchup["actual_away_score"]) == (27, 13)
+        assert matchup["predicted_winner"] == "33"
+        assert matchup["win_probability"] == 0.7
 
-    def test_real_completed_game_includes_what_was_originally_predicted(self):
-        event = _postseason_event("E1", 2025, KC, LV, status="completed", home_score=27, away_score=13)
-        real_matchups = {frozenset((KC, LV)): event}
+    def test_a_scheduled_game_with_a_logged_prediction_uses_it(self):
         predictions_table = MagicMock()
-        predictions_table.query.return_value = [
-            {"model_key": "MODEL#win-probability#v1", "predicted_value": {"home_win_probability": 0.7}},
-        ]
-
-        result = season_projection._resolve_matchup(
-            KC, LV, 1, 2, real_matchups, MagicMock(), MagicMock(), predictions_table, {},
-            season_simulation.DEFAULT_HOME_ADVANTAGE,
-        )
-
-        assert result["predicted_winner"] == KC
-        assert result["win_probability"] == 0.7
-
-    def test_real_scheduled_game_with_an_already_logged_prediction_uses_it(self):
-        event = _postseason_event("E1", 2025, KC, LV, status="scheduled")
-        real_matchups = {frozenset((KC, LV)): event}
-        predictions_table = MagicMock()
-        predictions_table.query.return_value = [
-            {"model_key": "MODEL#win-probability#v1", "predicted_value": {"home_win_probability": 0.35}},
-        ]
+        predictions_table.query.return_value = _logged(0.35)
+        game = _postseason_event("E1", 2025, "33", "20")
 
         with patch.object(event_prediction, "compute_and_cache_event") as compute:
-            result = season_projection._resolve_matchup(
-                KC, LV, 1, 2, real_matchups, MagicMock(), MagicMock(), predictions_table, {},
-                season_simulation.DEFAULT_HOME_ADVANTAGE,
-            )
+            matchup = _wild_card_2v7([game], predictions_table)
 
-        compute.assert_not_called()  # already logged -- no need to compute one
-        assert result["status"] == "scheduled"
-        assert result["predicted_winner"] == LV
-        assert result["win_probability"] == 0.65
+        compute.assert_not_called()
+        assert matchup["status"] == "scheduled"
+        assert matchup["chance_a"] == 0.35
 
-    def test_real_scheduled_game_with_no_logged_prediction_computes_one_in_process(self):
-        event = _postseason_event("E1", 2025, KC, LV, status="scheduled")
-        real_matchups = {frozenset((KC, LV)): event}
+    def test_a_scheduled_game_nobody_viewed_gets_a_prediction_computed_once(self):
         predictions_table = MagicMock()
-        # First query (before computing): nothing logged yet. Second query
-        # (after compute_and_cache_event "writes" it): the fresh row.
-        predictions_table.query.side_effect = [
-            [],
-            [{"model_key": "MODEL#win-probability#v1", "predicted_value": {"home_win_probability": 0.6}}],
-        ]
+        predictions_table.query.side_effect = [[], _logged(0.6)] + [_logged(0.6)] * 10
+        game = _postseason_event("E1", 2025, "33", "20")
 
         with patch.object(event_prediction, "compute_and_cache_event") as compute:
-            result = season_projection._resolve_matchup(
-                KC, LV, 1, 2, real_matchups, MagicMock(), MagicMock(), predictions_table, {},
-                season_simulation.DEFAULT_HOME_ADVANTAGE,
-            )
+            matchup = _wild_card_2v7([game], predictions_table)
 
         compute.assert_called_once()
-        assert result["predicted_winner"] == KC
-        assert result["win_probability"] == 0.6
+        assert matchup["chance_a"] == 0.6
 
-    def test_a_failed_on_the_spot_compute_degrades_to_no_prediction_rather_than_raising(self):
-        event = _postseason_event("E1", 2025, KC, LV, status="scheduled")
-        real_matchups = {frozenset((KC, LV)): event}
+    def test_a_failed_compute_falls_back_to_the_models_own_odds(self):
         predictions_table = MagicMock()
         predictions_table.query.return_value = []
+        game = _postseason_event("E1", 2025, "33", "20")
 
         with patch.object(event_prediction, "compute_and_cache_event", side_effect=RuntimeError("boom")):
-            result = season_projection._resolve_matchup(
-                KC, LV, 1, 2, real_matchups, MagicMock(), MagicMock(), predictions_table, {},
-                season_simulation.DEFAULT_HOME_ADVANTAGE,
-            )
+            matchup = _wild_card_2v7([game], predictions_table)
 
-        assert result["status"] == "scheduled"
-        assert result["predicted_winner"] is None
-        assert result["win_probability"] is None
+        assert matchup["status"] == "scheduled"
+        assert 0 < matchup["chance_a"] < 1
+
+    def test_the_line_names_the_favourite_and_an_underdog_win_is_an_upset(self):
+        predictions_table = MagicMock()
+        predictions_table.query.return_value = _logged(0.7)
+        game = _postseason_event("E1", 2025, "33", "20", status="completed", home_score=10, away_score=13)
+        game["pregame_odds"] = {"favorite": "home"}
+
+        matchup = _wild_card_2v7([game], predictions_table)
+
+        assert matchup["favorite"] == "33"
+        assert matchup["flag"] == "upset"
 
 
 class TestBracketPayload:

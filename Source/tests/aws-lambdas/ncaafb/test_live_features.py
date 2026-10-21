@@ -411,7 +411,7 @@ class TestBuildLiveEventLeaderCandidates:
         ]
         storage.get_entity.return_value = _entity("61")
 
-        def _player_history(entity_id, before_date=None, limit=None):
+        def _player_history(entity_id, before_date=None, limit=None, *, sport):
             volumes = {"101": 5, "102": 20, "103": 12}
             return [{"entity_id": entity_id, "stat_line": {"rushing_attempts": volumes[entity_id]}}]
 

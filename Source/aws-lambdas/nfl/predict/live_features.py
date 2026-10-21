@@ -135,13 +135,13 @@ def _eligible_entity_ids(roster: list[dict], positions: set[str]) -> list[str]:
     return [entity["entity_id"] for entity in roster if entity.get("metadata", {}).get("position") in positions]
 
 
-def _leader_history(storage, entity_ids: list[str], stat: str, before_date: str, window: int) -> list[dict]:
+def _leader_history(storage, sport: str, entity_ids: list[str], stat: str, before_date: str, window: int) -> list[dict]:
     """The single top candidate among entity_ids by recent (last `window`
     games) volume of stat, returning that same game list -- [] if
     entity_ids is empty. Ties fall back to roster order."""
     if not entity_ids:
         return []
-    volumes = {entity_id: _recent_volume(storage, entity_id, stat, before_date, window) for entity_id in entity_ids}
+    volumes = {entity_id: _recent_volume(storage, sport, entity_id, stat, before_date, window) for entity_id in entity_ids}
     winner = max(volumes, key=lambda entity_id: volumes[entity_id][0])
     return volumes[winner][1]
 
@@ -176,14 +176,14 @@ def _presumptive_leader_and_history(
             healthy_ids = _healthy_athlete_ids(entry, injuries)
             if not healthy_ids:
                 return []
-            return storage.get_player_game_stats(healthy_ids[0], before_date=before_date, limit=window)
+            return storage.get_player_game_stats(healthy_ids[0], before_date=before_date, limit=window, sport=sport)
 
     positions = _LEADER_POSITIONS.get(position_abbreviation)
     if positions is None:
         return []
     roster = team_roster if team_roster is not None else _fresh_roster(storage, sport, team_id)
     eligible_ids = _eligible_entity_ids(roster, positions)
-    return _leader_history(storage, eligible_ids, _LEADER_VOLUME_STAT[position_abbreviation], before_date, window)
+    return _leader_history(storage, sport, eligible_ids, _LEADER_VOLUME_STAT[position_abbreviation], before_date, window)
 
 
 def build_live_event_features(
@@ -317,7 +317,7 @@ def build_live_player_features(
         raise EventNotFoundError(f"No entity found for {entity_id}")
     team_id = entity.get("metadata", {}).get("team_id")
 
-    prior_games = storage.get_player_game_stats(entity_id, before_date=event["event_date"], limit=window)
+    prior_games = storage.get_player_game_stats(entity_id, before_date=event["event_date"], limit=window, sport=sport)
     return _build_player_feature_row(
         storage, sport, event, home_id, away_id, entity_id, team_id, prior_games, window,
         current_ratings, team_last_event_dates, events,
@@ -390,16 +390,18 @@ def _team_leader_candidates(
             # model predictions do that ranking downstream.
             cap = None if position_abbreviation == "WR" else n
             ids = _healthy_athletes_across_slots(entries, injuries, cap)
-            return {eid: storage.get_player_game_stats(eid, before_date=before_date, limit=window) for eid in ids}
+            return {
+                eid: storage.get_player_game_stats(eid, before_date=before_date, limit=window, sport=sport) for eid in ids
+            }
         eligible_ids = _eligible_entity_ids(roster, _LEADER_POSITIONS[position_abbreviation])
         return _top_n_by_recent_volume(
-            storage, eligible_ids, _LEADER_VOLUME_STAT[position_abbreviation], before_date, window, n,
+            storage, sport, eligible_ids, _LEADER_VOLUME_STAT[position_abbreviation], before_date, window, n,
         )
 
     passing_rows = rows_for(candidates_for("QB", 1))
     receiving_rows = rows_for(candidates_for("WR", 3))
     rushing_rows = rows_for(candidates_for("RB", 2))
     sacks_ids = _eligible_entity_ids(roster, _DEFENSIVE_POSITIONS)
-    sacks_rows = rows_for(_top_n_by_recent_volume(storage, sacks_ids, "defensive_sacks", before_date, window, 3))
+    sacks_rows = rows_for(_top_n_by_recent_volume(storage, sport, sacks_ids, "defensive_sacks", before_date, window, 3))
 
     return {"passing": passing_rows, "receiving": receiving_rows, "rushing": rushing_rows, "sacks": sacks_rows}

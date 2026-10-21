@@ -46,28 +46,28 @@ class TestMalformedEventsAreSkipped:
 
         assert ranks == {"a": 4}
 
-    def test_real_postseason_matchups_skip_missing_sides(self):
+    def test_real_postseason_games_skip_missing_sides(self):
         storage = MagicMock()
         storage.get_all_events.side_effect = lambda sport, status: (
             [_NO_SIDES, _game("P1", "a", "b", 30, 20, is_playoff_game=True)] if status == "completed" else []
         )
+        events = season_projection.bracket_projection.real_postseason_events(
+            storage, "ncaafb", 2025, lambda e: bool(e.get("is_playoff_game")),
+        )
 
-        assert list(season_projection._real_postseason_matchups(storage, 2025)) == [frozenset(("a", "b"))]
+        assert season_projection.RealPostseason(events, lambda event: None).record("a", "b") == (1, 0)
 
 
-class TestScheduledMatchupComputeFailure:
-    def test_a_failed_live_prediction_leaves_the_slot_unpredicted_instead_of_raising(self):
+class TestLoggedProbabilityComputeFailure:
+    def test_a_failed_live_prediction_falls_back_to_none_instead_of_raising(self):
         predictions_table = MagicMock()
         predictions_table.query.return_value = []
+        lookup = season_projection.bracket_projection.logged_home_probability(
+            season_projection.event_prediction, MagicMock(), MagicMock(), predictions_table, season_projection.logger,
+        )
 
         with patch.object(season_projection.event_prediction, "compute_and_cache_event", side_effect=RuntimeError("boom")):
-            row = season_projection._scheduled_matchup_row(
-                {"event_id": "E1"}, "EVENT#E1", "a", "b", 1, 8, MagicMock(), MagicMock(), predictions_table,
-            )
-
-        assert row["status"] == "scheduled"
-        assert row["predicted_winner"] is None
-        assert row["win_probability"] is None
+            assert lookup({"event_id": "E1", "event_key": "EVENT#E1", "status": "scheduled"}) is None
 
 
 class TestBatchScoreTeams:

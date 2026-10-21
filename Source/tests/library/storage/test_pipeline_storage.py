@@ -148,6 +148,54 @@ class TestUpsertEvent:
         assert "sport_status" not in written
 
 
+class TestUpsertEventKeepsTheSavedLine:
+    LINE = {"provider": "DraftKings", "details": "ORL -2.5", "favorite": "home", "home_moneyline": -130, "away_moneyline": 110}
+
+    def test_a_rewrite_without_odds_keeps_the_line_on_file(self, storage_env):
+        # ESPN drops odds once a game starts, so the final-score write has none.
+        storage, mock_events = _make_storage_with_events(storage_env)
+        mock_events.get_item.return_value = {"event_key": "SPORT#NBA#EVENT#1", "pregame_odds": self.LINE}
+
+        storage.upsert_event({"event_key": "SPORT#NBA#EVENT#1", "event_type": "head_to_head", "status": "completed"})
+
+        assert mock_events.put_item.call_args.args[0]["pregame_odds"] == self.LINE
+
+    def test_a_newer_line_replaces_the_saved_one(self, storage_env):
+        storage, mock_events = _make_storage_with_events(storage_env)
+        newer = {**self.LINE, "details": "ORL -3.5"}
+
+        storage.upsert_event({"event_key": "SPORT#NBA#EVENT#1", "event_type": "head_to_head", "pregame_odds": newer})
+
+        mock_events.get_item.assert_not_called()
+        assert mock_events.put_item.call_args.args[0]["pregame_odds"] == newer
+
+    def test_a_new_event_without_odds_is_written_as_is(self, storage_env):
+        storage, mock_events = _make_storage_with_events(storage_env)
+        mock_events.get_item.return_value = None
+
+        storage.upsert_event({"event_key": "SPORT#NBA#EVENT#1", "event_type": "head_to_head"})
+
+        assert "pregame_odds" not in mock_events.put_item.call_args.args[0]
+
+    def test_field_events_skip_the_lookup(self, storage_env):
+        storage, mock_events = _make_storage_with_events(storage_env)
+
+        storage.upsert_event({"event_key": "SPORT#PGA#EVENT#1", "event_type": "field"})
+
+        mock_events.get_item.assert_not_called()
+
+
+class TestSetEventOdds:
+    def test_sets_only_the_odds_attribute_on_an_existing_event(self, storage_env):
+        storage, mock_events = _make_storage_with_events(storage_env)
+        mock_events.set_attribute_if_exists.return_value = True
+
+        assert storage.set_event_odds("SPORT#NBA#EVENT#1", {"favorite": "away"}) is True
+        mock_events.set_attribute_if_exists.assert_called_once_with(
+            {"event_key": "SPORT#NBA#EVENT#1"}, "pregame_odds", {"favorite": "away"},
+        )
+
+
 class TestGetTeamEntities:
     def test_queries_the_team_index(self, storage_env):
         storage, mock_entities = _make_storage(storage_env)

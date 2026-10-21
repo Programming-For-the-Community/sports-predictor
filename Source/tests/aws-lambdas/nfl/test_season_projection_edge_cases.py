@@ -41,13 +41,16 @@ class TestMalformedEventsAreSkipped:
         assert remaining == [("a", "b")]
         assert next_event == {"a": "S1", "b": "S1"}
 
-    def test_real_postseason_matchups_skip_missing_sides(self):
+    def test_real_postseason_games_skip_missing_sides(self):
         storage = MagicMock()
         storage.get_all_events.side_effect = lambda sport, status: (
             [_NO_SIDES, _game("P1", "a", "b", 30, 20, season_type=3)] if status == "completed" else []
         )
+        events = season_projection.bracket_projection.real_postseason_events(
+            storage, "nfl", 2025, lambda e: e.get("season_type") == season_projection.POSTSEASON_TYPE,
+        )
 
-        assert list(season_projection._real_postseason_matchups(storage, 2025)) == [frozenset(("a", "b"))]
+        assert season_projection.RealPostseason(events, lambda event: None).record("a", "b") == (1, 0)
 
 
 class TestFillRemainingFeatureRows:

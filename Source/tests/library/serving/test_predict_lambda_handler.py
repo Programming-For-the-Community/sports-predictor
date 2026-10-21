@@ -67,3 +67,26 @@ def test_without_player_props_that_route_is_unrecognized():
 
     assert response["status"] == "error"
     event_prediction.compute_and_cache_player_prop.assert_not_called()
+
+
+def test_the_daily_postseason_run_skips_outside_the_postseason():
+    run = MagicMock(return_value={"ok": 1})
+    handler = make_event_prediction_lambda_handler(
+        resources=_resources(), event_prediction=_event_prediction(), run_scheduled_fn=run,
+        logger=logging.getLogger("test-predict"), player_props=True, postseason_active_fn=lambda: False,
+    )
+
+    assert handler({"detail-type": "ScheduledSeasonProjection", "postseason_only": True}, None) == {"status": "skipped"}
+    run.assert_not_called()
+    # The weekly run always rebuilds.
+    assert handler({"detail-type": "ScheduledSeasonProjection"}, None) == {"ok": 1}
+
+
+def test_the_daily_postseason_run_rebuilds_during_the_postseason():
+    run = MagicMock(return_value={"ok": 1})
+    handler = make_event_prediction_lambda_handler(
+        resources=_resources(), event_prediction=_event_prediction(), run_scheduled_fn=run,
+        logger=logging.getLogger("test-predict"), player_props=True, postseason_active_fn=lambda: True,
+    )
+
+    assert handler({"detail-type": "ScheduledSeasonProjection", "postseason_only": True}, None) == {"ok": 1}

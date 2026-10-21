@@ -7,6 +7,7 @@ import '../models/event.dart';
 import '../models/event_status.dart';
 import '../models/live_score.dart';
 import '../models/prediction.dart';
+import '../models/upset.dart';
 import '../routing/app_routes.dart';
 import '../theme/app_colors.dart';
 import '../theme/app_text_styles.dart';
@@ -142,6 +143,18 @@ class _RowView {
 
   String get finalLabel => isCompleted ? event.finalLabel : 'FINAL';
 
+  /// UPSET once final, UPSET WATCH before then -- see upsetFlag.
+  UpsetFlag? get upset {
+    final home = homeScore;
+    final away = awayScore;
+    return upsetFlag(
+      favorite: event.bettingFavorite,
+      isFinal: isFinal,
+      homeWon: home == null || away == null || home == away ? null : home > away,
+      homeWinProbability: predicted?.homeWinProbability,
+    );
+  }
+
   void invalidate(WidgetRef ref, String sport, String eventId) =>
       ref.invalidate(eventPredictionProvider((sport: sport, eventId: eventId)));
 }
@@ -224,6 +237,8 @@ class _StackedRow extends StatelessWidget {
   const _StackedRow({required this.view});
   final _RowView view;
 
+  static const _pillShare = 0.6;
+
   Widget? _badge() {
     final comparison = view.comparison;
     if (view.isCompleted) return comparison == null ? null : VerdictPill(correct: comparison.correct);
@@ -234,14 +249,26 @@ class _StackedRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final badge = _badge();
+    final upset = view.upset;
+    final pills = [if (upset != null) UpsetChip(flag: upset), if (badge != null) badge];
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Row(
-          children: [
-            Expanded(child: _When(view: view, stacked: true)),
-            if (badge != null) ...[const SizedBox(width: 8), badge],
-          ],
+        // The pills wrap under each other rather than squeeze the LIVE pill
+        // and clock off a narrow card.
+        LayoutBuilder(
+          builder: (context, constraints) => Row(
+            children: [
+              Expanded(child: _When(view: view, stacked: true)),
+              if (pills.isNotEmpty) ...[
+                const SizedBox(width: 8),
+                ConstrainedBox(
+                  constraints: BoxConstraints(maxWidth: constraints.maxWidth * _pillShare),
+                  child: Wrap(alignment: WrapAlignment.end, spacing: 8, runSpacing: 6, children: pills),
+                ),
+              ],
+            ],
+          ),
         ),
         const SizedBox(height: 10),
         _Teams(view: view, showWinChance: true),
@@ -492,6 +519,17 @@ class _Pick extends StatelessWidget {
   const _Pick({required this.view});
   final _RowView view;
 
+  Widget _withUpset(Widget pill) {
+    final upset = view.upset;
+    if (upset == null) return pill;
+    return Wrap(
+      alignment: WrapAlignment.end,
+      spacing: 6,
+      runSpacing: 6,
+      children: [pill, UpsetChip(flag: upset)],
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final comparison = view.comparison;
@@ -503,7 +541,7 @@ class _Pick extends StatelessWidget {
           ? comparison.predictedHomeWinProbability
           : 1 - comparison.predictedHomeWinProbability;
       children = [
-        VerdictPill(correct: comparison.correct),
+        _withUpset(VerdictPill(correct: comparison.correct)),
         const SizedBox(height: 6),
         Text('$pick ${(chance * 100).round()}%', style: AppTextStyles.microLabel(color: AppColors.cyan)),
       ];
@@ -516,7 +554,7 @@ class _Pick extends StatelessWidget {
           child: Text(_pickLine(view, p), style: AppTextStyles.metricValue(color: AppColors.cyan), maxLines: 1),
         ),
         const SizedBox(height: 6),
-        ConfidencePill(homeWinProbability: p.homeWinProbability),
+        _withUpset(ConfidencePill(homeWinProbability: p.homeWinProbability)),
         PredictionFreshnessBadge(
           sport: view.sport, eventId: view.event.eventId,
           stale: p.stale, retryAfterSeconds: p.staleRetryAfterSeconds, compact: true,

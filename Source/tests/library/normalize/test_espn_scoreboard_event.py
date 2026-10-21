@@ -208,3 +208,34 @@ class TestScoreboardEventToEventItemCoachInjuryDepthChart:
         item = scoreboard_event_to_event_item(_scoreboard_event(notes=[]), "nba")
 
         assert "tournament_note" not in item
+
+
+ODDS = [{
+    "provider": {"name": "Draft Kings"}, "details": "KC -3.5",
+    "homeTeamOdds": {"favorite": True}, "awayTeamOdds": {"favorite": False},
+    "moneyline": {"home": {"close": {"odds": "-180"}}, "away": {"close": {"odds": "+150"}}},
+}]
+
+
+def _with_odds(state, completed=False):
+    raw = _scoreboard_event(status={"type": {"completed": completed, "state": state}})
+    raw["competitions"][0]["odds"] = ODDS
+    return raw
+
+
+class TestPregameOdds:
+    def test_a_game_not_yet_started_saves_its_line(self):
+        item = scoreboard_event_to_event_item(_with_odds("pre"), "nfl")
+        assert item["pregame_odds"] == {
+            "provider": "Draft Kings", "details": "KC -3.5", "favorite": "home", "home_moneyline": -180, "away_moneyline": 150,
+        }
+
+    def test_an_in_progress_games_live_odds_are_not_saved(self):
+        assert "pregame_odds" not in scoreboard_event_to_event_item(_with_odds("in"), "nfl")
+
+    def test_a_final_game_saves_nothing(self):
+        assert "pregame_odds" not in scoreboard_event_to_event_item(_with_odds("post", completed=True), "nfl")
+
+    def test_no_odds_posted_yet(self):
+        raw = _scoreboard_event(status={"type": {"completed": False, "state": "pre"}})
+        assert "pregame_odds" not in scoreboard_event_to_event_item(raw, "nfl")

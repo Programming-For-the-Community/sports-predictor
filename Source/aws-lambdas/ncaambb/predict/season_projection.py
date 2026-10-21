@@ -26,12 +26,9 @@ Unlike every other sport's single postseason bracket, NCAA MBB has TWO:
 one bracket per conference tournament, each resolved independently, plus
 the March Madness bracket that consumes each conference bracket's own
 champion (real once known, projected until then) as that conference's
-automatic bid -- see season_simulation.py's own module docstring. Both
-get the same full real-vs-projected reconciliation NFL/NCAAFB/NBA's own
-brackets already have (_resolve_matchup's 3-state design, copied in shape
-from NCAAFB's own season_projection.py, unchanged -- it already operates
-one round/one pair at a time and doesn't care how many rounds total there
-are, or how many separate brackets call it).
+automatic bid -- see season_simulation.py's own module docstring. Each is
+shown as one simulated run from the real games so far, like every other
+sport's bracket (library.serving.bracket_simulation).
 """
 import logging
 import re
@@ -42,6 +39,7 @@ import season_simulation
 from library.features.common import DEFAULT_HOME_ADVANTAGE, compute_elo_ratings
 from library.http.ncaambb_core import ap_poll_to_rank_by_team
 from library.serving import bracket_projection
+from library.serving.bracket_simulation import BracketSimulation, RealPostseason, elo_rules
 from library.serving import model_loader, season_projection_common
 from library.serving.common import enrich_bracket_team_names, enrich_team_standings
 from library.serving.ncaambb_reads import _home_and_away
@@ -351,68 +349,55 @@ def _latest_ap_poll_ranks(raw_bucket, season: int | None) -> dict[str, int]:
     return ap_poll_to_rank_by_team(raw_bucket.get_json(latest_key))
 
 
-_BRACKET = bracket_projection.BracketResolver(
-    event_prediction=event_prediction, season_simulation=season_simulation, logger=logger,
-)
-_logged_win_probability = bracket_projection.logged_win_probability
-_predicted_winner_and_probability = bracket_projection.predicted_winner_and_probability
-_completed_matchup_row = bracket_projection.completed_matchup_row
-_scheduled_matchup_row = _BRACKET.scheduled_matchup_row
-_resolve_matchup = _BRACKET.resolve_matchup
-_project_bracket_round = _BRACKET.project_bracket_round
+FINAL_FOUR = "Final Four"
+CHAMPIONSHIP = "Championship"
+MARCH_MADNESS_COLUMNS = [
+    ("Sweet 16", "Sweet 16"), ("Elite Eight", "Elite Eight"), (FINAL_FOUR, FINAL_FOUR),
+    ("Final", CHAMPIONSHIP), ("Title", None),
+]
 
 
-def _real_postseason_matchups(storage: FeatureStorage, current_season: int | None, predicate) -> dict[frozenset, dict]:
-    return bracket_projection.real_postseason_matchups(storage, SPORT, current_season, predicate)
+def _real_postseason(storage: FeatureStorage, s3, predictions_table, current_season: int | None, is_game) -> RealPostseason:
+    events = bracket_projection.real_postseason_events(storage, SPORT, current_season, is_game)
+    return RealPostseason(events, bracket_projection.logged_home_probability(event_prediction, storage, s3, predictions_table, logger))
 
 
-def _reconcile_single_elim_bracket(
-    seeded_teams: list[str], round_names: list[str], real_matchups: dict[frozenset, dict],
-    storage: FeatureStorage, s3, predictions_table, current_ratings: dict[str, float], home_advantage: float,
-) -> dict:
-    """Walks the SAME seed-line/bye topology project_single_elim_bracket
-    resolves deterministically, but through _resolve_matchup/
-    _project_bracket_round's real-vs-projected reconciliation each round,
-    instead of always picking the model's own deterministic winner. Used
-    for both a conference bracket and (per region, then glued together by
-    the caller) March Madness."""
+def _single_elim_rounds(play_round, seeded_teams: list[str], round_names: list[str], home_advantage: float):
+    """The standard seed-line bracket for `seeded_teams` (byes where the
+    field is short of a power of two), home advantage in the first round
+    only. Returns (rounds, champion)."""
     bracket_size = season_simulation._next_power_of_two(len(seeded_teams))
     seed_line = season_simulation._standard_seed_line(bracket_size)
     slot_team: dict[int, str | None] = {
         seed: (seeded_teams[seed - 1] if seed <= len(seeded_teams) else None) for seed in seed_line
     }
-
-    rounds = []
-    current_seeds = seed_line
-    advantage = home_advantage
+    rounds, current_seeds, advantage, advancing = [], seed_line, home_advantage, []
     for round_name in round_names:
         pairs = [
             (slot_team[current_seeds[i]], slot_team[current_seeds[i + 1]], current_seeds[i], current_seeds[i + 1])
             for i in range(0, len(current_seeds), 2)
         ]
-        round_payload, advancing = _project_bracket_round(
-            round_name, pairs, real_matchups, storage, s3, predictions_table, current_ratings, advantage,
-        )
+        round_payload, advancing = play_round(round_name, pairs, advantage)
         rounds.append(round_payload)
         for winner, winner_seed in advancing:
             slot_team[winner_seed] = winner
         current_seeds = [seed for _, seed in advancing]
         advantage = 0.0
-
-    return {"rounds": rounds, "champion": rounds[-1]["matchups"][0]["predicted_winner"] if rounds[-1]["matchups"][0]["status"] != "final" else rounds[-1]["matchups"][0]["actual_winner"]}
+    return rounds, advancing[0][0]
 
 
 def _conference_bracket_payloads(
     storage: FeatureStorage, s3, predictions_table, season_inputs: dict, current_season: int | None,
 ) -> list[dict]:
-    """One reconciled bracket per conference with at least 2 tracked
+    """One simulated bracket per conference with at least 2 tracked
     members -- {"conference": name, "bracket": {"rounds": [...],
-    "champion": team_id}}. Seeding is conference-only record (wins then
-    point differential, see season_simulation._conference_seed_order's
-    own docstring for the simplification this accepts)."""
+    "champion": team_id, "round_odds": ...}}. Seeding is conference-only
+    record (wins then point differential, see season_simulation.
+    _conference_seed_order's own docstring for the simplification this
+    accepts)."""
     conferences = season_simulation._group_by_conference(season_inputs["team_conference"])
-    real_matchups = _real_postseason_matchups(storage, current_season, _is_conference_tournament_game)
-    ratings = season_inputs["current_ratings"]
+    real = _real_postseason(storage, s3, predictions_table, current_season, _is_conference_tournament_game)
+    rules = elo_rules(season_inputs["current_ratings"])
 
     payloads = []
     for conference, members in sorted(conferences.items()):
@@ -422,10 +407,14 @@ def _conference_bracket_payloads(
             members, season_inputs["conference_wins"], season_inputs["point_differential"],
         )
         round_names = season_simulation._round_names(season_simulation._next_power_of_two(len(seed_order)))
+
+        def topology(play_round, seed_order=seed_order, round_names=round_names) -> dict:
+            rounds, champion = _single_elim_rounds(play_round, seed_order, round_names, DEFAULT_HOME_ADVANTAGE)
+            return {"rounds": rounds, "champion": champion}
+
+        columns = [(name, name) for name in round_names[1:]] + [("Title", None)]
         try:
-            bracket = _reconcile_single_elim_bracket(
-                seed_order, round_names, real_matchups, storage, s3, predictions_table, ratings, DEFAULT_HOME_ADVANTAGE,
-            )
+            bracket = BracketSimulation(real, rules).run(topology, columns, group_of=lambda team, conference=conference: conference)
         except Exception:
             logger.exception("Failed building conference bracket for %s -- skipping this run", conference)
             continue
@@ -437,63 +426,56 @@ def _march_madness_bracket_payload(
     storage: FeatureStorage, s3, predictions_table, season_inputs: dict, current_season: int | None,
     estimator, model_card: dict, teams: list[str], conference_champions: dict[str, str],
 ) -> dict | None:
-    """Reconciled March Madness bracket -- First Four seeded/resolved
-    deterministically (no real First-Four results feed back in yet; a
-    future improvement, not core to this build), then each of the 4
-    regions walked through the same real-vs-projected reconciliation as
-    a conference bracket. Unlike season_simulation.project_march_madness_
-    bracket's own deterministic version (used only inside the Monte Carlo
-    loop, never rendered), each region's own round list is kept separate
-    here -- {"first_four", "regions": {name: {"rounds", "champion"}},
-    "final_four", "championship", "champion"} -- so the frontend can draw
-    the traditional 4-region tournament layout instead of one flat list.
-    None if fewer than 2 conferences produced a champion (nothing to seed
-    a field from)."""
+    """The March Madness bracket as one simulated run -- First Four seeded
+    and resolved deterministically (no real First-Four results feed back in
+    yet), then the 4 regions, the Final Four and the Championship. Each
+    region's own round list is kept separate -- {"first_four", "regions":
+    {name: {"rounds", "champion"}}, "final_four", "championship",
+    "champion", "round_odds"} -- so the frontend can draw the traditional
+    4-region layout. None if fewer than 2 conferences produced a champion
+    (nothing to seed a field from)."""
     if len(conference_champions) < 2:
         return None
 
     model_scores = _current_model_scores(estimator, model_card, teams, season_inputs)
     auto_bids, at_large = season_simulation.select_march_madness_field(model_scores, conference_champions)
-    ratings = season_inputs["current_ratings"]
-
-    first_four = season_simulation.project_first_four(auto_bids, at_large, ratings, model_scores)
+    first_four = season_simulation.project_first_four(auto_bids, at_large, season_inputs["current_ratings"], model_scores)
     regions = season_simulation._assign_regions(first_four["field"])
-    real_matchups = _real_postseason_matchups(storage, current_season, _is_march_madness_game)
+    region_of = {team: region for region, region_teams in regions.items() for team in region_teams}
 
-    region_brackets = {}
-    for region_name, region_teams in regions.items():
-        round_names = season_simulation.MARCH_MADNESS_REGION_ROUND_NAMES[: season_simulation._next_power_of_two(len(region_teams)).bit_length() - 1]
-        try:
-            region_brackets[region_name] = _reconcile_single_elim_bracket(
-                region_teams, round_names, real_matchups, storage, s3, predictions_table, ratings, 0.0,
-            )
-        except Exception:
-            logger.exception("Failed building March Madness region bracket for %s -- skipping this run", region_name)
+    def topology(play_round) -> dict:
+        region_brackets = {}
+        for region_name in season_simulation.REGION_NAMES:
+            region_teams = regions[region_name]
+            size = season_simulation._next_power_of_two(len(region_teams))
+            round_names = season_simulation.MARCH_MADNESS_REGION_ROUND_NAMES[: size.bit_length() - 1]
+            rounds, champion = _single_elim_rounds(play_round, region_teams, round_names, 0.0)
+            region_brackets[region_name] = {"rounds": rounds, "champion": champion}
+        c = [region_brackets[name]["champion"] for name in season_simulation.REGION_NAMES]
+        final_four, (f1, f2) = play_round(FINAL_FOUR, [(c[0], c[1], None, None), (c[2], c[3], None, None)], 0.0)
+        championship, (champion,) = play_round(CHAMPIONSHIP, [(f1[0], f2[0], None, None)], 0.0)
+        return {
+            "first_four": first_four["matchups"],
+            "regions": region_brackets,
+            "final_four": final_four["matchups"],
+            "championship": championship["matchups"][0],
+            "champion": champion[0],
+        }
+
+    def tiebreak(team_a: str, team_b: str) -> str | None:
+        score_a, score_b = model_scores.get(team_a), model_scores.get(team_b)
+        if score_a is None or score_b is None or score_a == score_b:
             return None
+        return team_a if score_a > score_b else team_b
 
-    region_champions = [region_brackets[name]["champion"] for name in season_simulation.REGION_NAMES]
-    final_four_round, final_four_advancing = _project_bracket_round(
-        "Final Four",
-        [(region_champions[0], region_champions[1], None, None), (region_champions[2], region_champions[3], None, None)],
-        real_matchups, storage, s3, predictions_table, ratings, 0.0,
-    )
-
-    championship_round, championship_advancing = _project_bracket_round(
-        "Championship",
-        [(final_four_advancing[0][0], final_four_advancing[1][0], None, None)],
-        real_matchups, storage, s3, predictions_table, ratings, 0.0,
-    )
-
-    bracket = {
-        "first_four": first_four["matchups"],
-        "regions": {
-            region_name: {"rounds": region_brackets[region_name]["rounds"], "champion": region_brackets[region_name]["champion"]}
-            for region_name in season_simulation.REGION_NAMES
-        },
-        "final_four": final_four_round["matchups"],
-        "championship": championship_round["matchups"][0],
-        "champion": championship_advancing[0][0],
-    }
+    real = _real_postseason(storage, s3, predictions_table, current_season, _is_march_madness_game)
+    engine = BracketSimulation(real, elo_rules(season_inputs["current_ratings"]), tiebreak=tiebreak)
+    try:
+        bracket = engine.run(topology, MARCH_MADNESS_COLUMNS, group_of=region_of.get)
+    except Exception:
+        # Exactly 4 regions by construction: without all of them there's no bracket to show.
+        logger.exception("Failed building the March Madness bracket -- skipping this run")
+        return None
     return enrich_bracket_team_names(storage, SPORT, bracket)
 
 

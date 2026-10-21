@@ -74,12 +74,6 @@ class TestSeries:
 
         assert sim.series_win_probability(p, p) == pytest.approx(closed_form)
 
-    def test_predicted_score_names_four_wins_for_the_favourite(self):
-        assert sim.predicted_series_score(0.9, 0.9) == (4, 0)
-        wins_a, wins_b = sim.predicted_series_score(0.3, 0.3)
-        assert wins_b == 4
-        assert wins_a < 4
-
     def test_game_probability_rates_a_relocated_team_by_its_franchise(self):
         ratings = {nhl_teams.UTAH_TEAM_ID: 1600.0, "1": 1500.0}
 
@@ -130,36 +124,6 @@ class TestSimulateSeason:
         assert result["1"]["playoff_probability"] == 1.0
 
 
-class TestProjectBracket:
-    def test_three_rounds_per_conference_then_the_final(self):
-        points = _all_points(**_points_by_order(ATLANTIC), **_points_by_order(METROPOLITAN, start=110))
-
-        bracket = sim.project_bracket(points, {}, {}, {"1": 1700.0})
-
-        east = bracket["conferences"]["Eastern"]
-        assert [(r["round"], len(r["matchups"])) for r in east] == [
-            ("First Round", 4), ("Second Round", 2), ("Conference Final", 1),
-        ]
-        first = east[0]["matchups"][0]
-        assert (first["team_a"], first["team_b"], first["seed_a"], first["status"]) == ("1", "10", 1, "projected")
-        assert first["predicted_winner"] == "1"
-        assert (first["predicted_wins_a"], first["win_probability"] > 0.5) == (4, True)
-        assert east[2]["matchups"][0]["predicted_winner"] == "1"
-        assert bracket["finals"]["round"] == "Stanley Cup Final"
-        assert bracket["champion"] == "1"
-        assert set(bracket["conferences"]) == {"Eastern", "Western"}
-
-    def test_the_higher_seed_is_always_team_a(self):
-        points = _all_points(**_points_by_order(ATLANTIC), **_points_by_order(METROPOLITAN, start=110))
-
-        bracket = sim.project_bracket(points, {}, {}, {"10": 1900.0})
-
-        # The wildcard upsets the division winner, then meets the 2-3 winner as the lower seed.
-        second = bracket["conferences"]["Eastern"][1]["matchups"][0]
-        assert (second["team_a"], second["team_b"], second["predicted_winner"]) == ("2", "10", "10")
-        assert second["win_probability"] > 0.5
-
-
 class TestProjectLeaderboard:
     def test_ranks_by_current_total_and_adds_the_per_game_estimate(self):
         board = sim.project_leaderboard({"a": 10, "b": 12, "c": 1}, {"a": 0.5, "b": 0.25}, {"a": 40, "b": 40}, top_n=2)
@@ -168,15 +132,3 @@ class TestProjectLeaderboard:
             {"entity_id": "b", "current_total": 12, "projected_total": 22.0},
             {"entity_id": "a", "current_total": 10, "projected_total": 30.0},
         ]
-
-
-class TestProjectMatchup:
-    def test_a_side_with_no_opponent_yet_advances(self):
-        matchup = sim.project_matchup("1", None, {"1": 1}, {}, 25.0)
-
-        assert (matchup["predicted_winner"], matchup["win_probability"], matchup["seed_b"]) == ("1", 1.0, None)
-
-    def test_nothing_is_predicted_with_neither_side_known(self):
-        matchup = sim.project_matchup(None, None, {}, {}, 25.0)
-
-        assert (matchup["predicted_winner"], matchup["win_probability"]) == (None, None)

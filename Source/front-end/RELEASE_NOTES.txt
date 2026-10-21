@@ -5,3 +5,8 @@
 # Lines starting with # are ignored; 200 characters max.
 NHL is here: game picks, player projections, standings and the playoff bracket. New-look game, golf and race screens show each pick as a betting line and how it turned out, with simpler filters.
 Your browser and phone can now save and fill in your sign-in details.
+Games now flag upsets: UPSET WATCH when our model thinks the betting favorite could lose, UPSET when they did, plus a new Upsets filter.
+Playoff brackets now show a realistic run, upsets included, and update every day during the playoffs.
+Player predictions now include stars who changed teams, and rookies are no longer judged on their college stats.
+Fixed a sign-in problem that could leave the app showing errors after a while away. Finished games now show their final score without a refresh.
+The Raiders' team color is now silver.

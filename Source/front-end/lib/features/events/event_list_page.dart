@@ -8,6 +8,7 @@ import '../../core/data/live_scores_repository.dart';
 import '../../core/models/event.dart';
 import '../../core/models/event_status.dart';
 import '../../core/models/live_score.dart';
+import '../../core/models/upset.dart';
 import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_text_styles.dart';
 import '../../core/widgets/game_row.dart';
@@ -102,20 +103,42 @@ class _EventListPageState extends ConsumerState<EventListPage> with WidgetsBindi
   final Set<ConfidenceTier> _confidenceTiers = {};
   final Set<int> _weekdays = {};
   final Set<int> _kickoffHours = {};
+  final Set<UpsetFlag> _upsets = {};
   Timer? _liveScoresTimer;
+  ProviderSubscription<AsyncValue<Map<String, LiveEventState>>>? _liveScoresSubscription;
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     _scheduleLiveScoresPoll();
+    _liveScoresSubscription = ref.listenManual(liveScoresProvider(widget.sportId), _onLiveScores);
   }
 
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _liveScoresTimer?.cancel();
+    _liveScoresSubscription?.close();
     super.dispose();
+  }
+
+  // The live-scores cache lets go of a game once our own storage marks it
+  // completed, so a game that drops out of it after showing live or final
+  // has a stored result the Upcoming list was fetched too early to carry.
+  // A page left open in the foreground never resumes, so this is what
+  // re-fetches the list.
+  void _onLiveScores(
+    AsyncValue<Map<String, LiveEventState>>? previous,
+    AsyncValue<Map<String, LiveEventState>> next,
+  ) {
+    final before = previous?.value;
+    final after = next.value;
+    if (before == null || after == null || _status != EventStatus.scheduled) return;
+    final released = before.entries.any((entry) => (entry.value.live || entry.value.completed) && !after.containsKey(entry.key));
+    if (released) {
+      ref.invalidate(eventsListProvider((sport: widget.sportId, status: EventStatus.scheduled)));
+    }
   }
 
   // Browsers (and mobile OSes) throttle -- or outright pause -- a
@@ -215,6 +238,7 @@ class _EventListPageState extends ConsumerState<EventListPage> with WidgetsBindi
         _confidenceTiers.clear();
         _weekdays.clear();
         _kickoffHours.clear();
+        _upsets.clear();
       });
 
   /// The events passing the filters, plus how many were kept only because
@@ -226,14 +250,21 @@ class _EventListPageState extends ConsumerState<EventListPage> with WidgetsBindi
     final kept = <SportEvent>[];
     for (final event in events) {
       if (_conferences.isNotEmpty && !_conferences.contains(_conferenceKey(event))) continue;
+      if (!isUpcoming && _upsets.contains(UpsetFlag.upset) && _completedUpset(event) != UpsetFlag.upset) continue;
       if (isUpcoming) {
         if (_weekdays.isNotEmpty && !_weekdays.contains(eventWeekday(event))) continue;
         if (_kickoffHours.isNotEmpty && !_kickoffHours.contains(kickoffHour(event))) continue;
-        if (_confidenceTiers.isNotEmpty) {
+        final watchOnly = _upsets.contains(UpsetFlag.watch);
+        if (_confidenceTiers.isNotEmpty || watchOnly) {
           final prediction = ref.watch(eventPredictionProvider((sport: widget.sportId, eventId: event.eventId))).value;
           if (prediction == null) {
             pending++;
-          } else if (!_confidenceTiers.contains(ConfidenceTier.forProbability(prediction.homeWinProbability))) {
+          } else if (_confidenceTiers.isNotEmpty &&
+              !_confidenceTiers.contains(ConfidenceTier.forProbability(prediction.homeWinProbability))) {
+            continue;
+          } else if (watchOnly &&
+              upsetFlag(favorite: event.bettingFavorite, isFinal: false, homeWinProbability: prediction.homeWinProbability) !=
+                  UpsetFlag.watch) {
             continue;
           }
         }
@@ -241,6 +272,16 @@ class _EventListPageState extends ConsumerState<EventListPage> with WidgetsBindi
       kept.add(event);
     }
     return (kept, pending);
+  }
+
+  UpsetFlag? _completedUpset(SportEvent event) {
+    final home = event.home.result?.score;
+    final away = event.away.result?.score;
+    return upsetFlag(
+      favorite: event.bettingFavorite,
+      isFinal: true,
+      homeWon: home == null || away == null || home == away ? null : home > away,
+    );
   }
 
   FilterGroup _group<T>(String label, Set<T> selection, List<(T, String, int?)> options) => FilterGroup(
@@ -265,6 +306,13 @@ class _EventListPageState extends ConsumerState<EventListPage> with WidgetsBindi
     return [
       if (isUpcoming)
         _group('CONFIDENCE', _confidenceTiers, [for (final tier in ConfidenceTier.values) (tier, tier.label, null)]),
+      // Each tab offers only the flag its rows can show.
+      _group('UPSETS', _upsets, [
+        if (isUpcoming)
+          (UpsetFlag.watch, UpsetFlag.watch.label, null)
+        else
+          (UpsetFlag.upset, UpsetFlag.upset.label, count((e) => _completedUpset(e) == UpsetFlag.upset)),
+      ]),
       if (isUpcoming && weekdays.length > 1)
         _group('DAY', _weekdays, [
           for (final day in weekdays) (day, weekdayLabel(day), count((e) => eventWeekday(e) == day)),

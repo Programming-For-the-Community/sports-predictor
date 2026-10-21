@@ -262,6 +262,40 @@ class TestLambdaHandlerBoxScores:
         assert result["failed"] == 1
 
 
+class TestLambdaHandlerClosingLines:
+    def test_saves_the_closing_line_of_each_finished_game_only(self):
+        mock_client = MagicMock()
+        mock_client.get_teams.return_value = _teams_response(team_ids=())
+        mock_client.get_scoreboard_for_date.return_value = _scoreboard(
+            [_event(event_id="1", completed=True), _event(event_id="2", completed=False)],
+        )
+        mock_client.get_summary.return_value = {"header": {"id": "1"}}
+        mock_client.get_event_odds.return_value = {"items": [{"details": "OKC -1.5"}]}
+        mock_s3 = MagicMock()
+        mock_s3.head_object.side_effect = ClientError({"Error": {"Code": "404"}}, "HeadObject")
+
+        with patch.object(nba_ingest, "NBAClient", return_value=mock_client),              patch.object(nba_ingest, "_s3", mock_s3):
+            nba_ingest.lambda_handler({"date": "20260114"}, None)
+
+        mock_client.get_event_odds.assert_called_once_with("1")
+        written_keys = [c.kwargs["Key"] for c in mock_s3.put_object.call_args_list]
+        assert "nba/odds/1.json" in written_keys
+
+    def test_an_odds_failure_does_not_fail_the_run(self):
+        mock_client = MagicMock()
+        mock_client.get_teams.return_value = _teams_response(team_ids=())
+        mock_client.get_scoreboard_for_date.return_value = _scoreboard([_event(event_id="1", completed=True)])
+        mock_client.get_summary.return_value = {"header": {"id": "1"}}
+        mock_client.get_event_odds.side_effect = RuntimeError("ESPN down")
+        mock_s3 = MagicMock()
+        mock_s3.head_object.side_effect = ClientError({"Error": {"Code": "404"}}, "HeadObject")
+
+        with patch.object(nba_ingest, "NBAClient", return_value=mock_client),              patch.object(nba_ingest, "_s3", mock_s3):
+            result = nba_ingest.lambda_handler({"date": "20260114"}, None)
+
+        assert result["processed"] == 1
+
+
 class TestYesterday:
     def test_returns_the_day_before_today(self):
         assert nba_ingest._yesterday(date(2026, 1, 15)) == "20260114"

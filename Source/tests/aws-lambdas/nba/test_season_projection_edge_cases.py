@@ -54,11 +54,12 @@ class TestRealPostseasonLookups:
         )
         return storage
 
-    def test_matchups_skip_events_missing_a_side(self):
-        assert list(season_projection._real_postseason_matchups(self._storage(), 2026)) == [frozenset(("a", "b"))]
-
-    def test_series_skip_events_missing_a_side(self):
-        assert list(season_projection._real_postseason_series(self._storage(), 2026)) == [frozenset(("a", "b"))]
+    def test_postseason_games_missing_a_side_are_left_out(self):
+        events = season_projection.bracket_projection.real_postseason_events(
+            self._storage(), "nba", 2026, lambda e: e.get("season_type") in season_projection.POSTSEASON_TYPES,
+        )
+        real = season_projection.RealPostseason(events, lambda event: None)
+        assert real.record("a", "b") == (1, 0)
 
 
 class TestFillRemainingFeatureRows:
@@ -100,21 +101,17 @@ class TestProjectStatLeaderboard:
         assert top[0]["name"] == "Player One"
 
 
-class TestResolveMatchupComputeFailure:
-    def test_a_failed_live_prediction_leaves_the_slot_unpredicted_instead_of_raising(self):
+class TestLoggedProbabilityComputeFailure:
+    def test_a_failed_live_prediction_falls_back_to_none_instead_of_raising(self):
         event = _game("E1", "a", "b", None, None, status="scheduled", season_type=3)
         predictions_table = MagicMock()
         predictions_table.query.return_value = []
+        lookup = season_projection.bracket_projection.logged_home_probability(
+            season_projection.event_prediction, MagicMock(), MagicMock(), predictions_table, season_projection.logger,
+        )
 
         with patch.object(season_projection.event_prediction, "compute_and_cache_event", side_effect=RuntimeError("boom")):
-            result = season_projection._resolve_matchup(
-                "a", "b", 7, 8, {frozenset(("a", "b")): event}, MagicMock(), MagicMock(), predictions_table, {},
-                season_simulation.DEFAULT_HOME_ADVANTAGE,
-            )
-
-        assert result["status"] == "scheduled"
-        assert result["predicted_winner"] is None
-        assert result["win_probability"] is None
+            assert lookup(event) is None
 
 
 class TestBuildSeasonProjectionSectionFailures:

@@ -9,11 +9,16 @@ from unittest.mock import MagicMock
 from library.features.live_orchestration import box_score_candidate_ids
 
 
-def _storage(events: list[dict], rows_by_event: dict[str, list[dict]]):
+def _storage(events: list[dict], rows_by_event: dict[str, list[dict]], roster: list[dict] | None = None):
     storage = MagicMock()
     storage.get_team_events.return_value = events
     storage.get_player_game_stats_for_event.side_effect = lambda event_key: rows_by_event.get(event_key, [])
+    storage.get_team_entities.return_value = roster or []
     return storage
+
+
+def _player(entity_id):
+    return {"entity_id": entity_id, "entity_type": "player"}
 
 
 def _row(entity_id, team_id="13", **stats):
@@ -56,3 +61,30 @@ def test_no_candidates_skips_the_roster_check():
         _storage([], {}), "nba", "13", "2026-01-10", None, "points", season_lookback=1, still_on_team=still_on_team,
     ) == []
     still_on_team.assert_not_called()
+
+
+def test_rostered_players_without_a_box_score_for_the_team_follow_its_own_history():
+    # A player who joined since the team's last game has no box score with it yet.
+    storage = _storage(
+        [{"event_key": "E1", "season": 2027}],
+        {"E1": [_row("b", points=10)]},
+        roster=[_player("b"), _player("new"), _player("waived"), {"entity_id": "13", "entity_type": "team"}],
+    )
+
+    ids = box_score_candidate_ids(
+        storage, "nba", "13", "2026-10-21", 2027, "points",
+        season_lookback=1, still_on_team=lambda entity_id: entity_id != "waived",
+    )
+
+    assert ids == ["b", "new"]
+    storage.get_team_entities.assert_called_once_with("nba", "13")
+
+
+def test_a_roster_with_no_team_history_still_yields_candidates():
+    storage = _storage([], {}, roster=[_player("new")])
+
+    ids = box_score_candidate_ids(
+        storage, "nba", "13", "2026-10-21", 2027, "points", season_lookback=1, still_on_team=lambda _: True,
+    )
+
+    assert ids == ["new"]

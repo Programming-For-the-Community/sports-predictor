@@ -101,7 +101,7 @@ class TestBuildLiveEventLeaderCandidates:
             ] if team_id == "KC" else []
         )
 
-        def player_history(entity_id, before_date=None, limit=None):
+        def player_history(entity_id, before_date=None, limit=None, *, sport):
             histories = {
                 "qb1": [{"stat_line": {"passing_attempts": 30}}],
                 "wr1": [{"stat_line": {"receiving_targets": 10}}],
@@ -144,7 +144,7 @@ class TestBuildLiveEventLeaderCandidates:
             [_roster_entry("rb1", "RB"), _roster_entry("te1", "TE")] if team_id == "KC" else []
         )
 
-        def player_history(entity_id, before_date=None, limit=None):
+        def player_history(entity_id, before_date=None, limit=None, *, sport):
             histories = {
                 "rb1": [{"stat_line": {"rushing_attempts": 18, "receiving_targets": 4}}],
                 "te1": [{"stat_line": {"receiving_targets": 7}}],
@@ -199,7 +199,7 @@ class TestBuildLiveEventLeaderCandidates:
             ] if team_id == "KC" else []
         )
 
-        def player_history(entity_id, before_date=None, limit=None):
+        def player_history(entity_id, before_date=None, limit=None, *, sport):
             histories = {
                 "qb1": [{"stat_line": {"passing_attempts": 30}}],
                 "wr1": [{"stat_line": {"receiving_targets": 10}}],
@@ -224,7 +224,7 @@ class TestBuildLiveEventLeaderCandidates:
             [_roster_entry("dl1", "DE"), _roster_entry("dl2", "LB"), _roster_entry("qb1", "QB")] if team_id == "KC" else []
         )
 
-        def player_history(entity_id, before_date=None, limit=None):
+        def player_history(entity_id, before_date=None, limit=None, *, sport):
             histories = {
                 "dl1": [{"stat_line": {"defensive_sacks": 3.0}}, {"stat_line": {"defensive_sacks": 2.0}}],  # total 5
                 "dl2": [{"stat_line": {"defensive_sacks": 1.0}}, {"stat_line": {"defensive_sacks": 1.0}}],  # total 2
@@ -272,7 +272,7 @@ class TestBuildLiveEventLeaderCandidates:
             [_roster_entry("wr1", "WR"), _roster_entry("wr2", "WR"), _roster_entry("wr3", "WR")] if team_id == "KC" else []
         )
 
-        def player_history(entity_id, before_date=None, limit=None):
+        def player_history(entity_id, before_date=None, limit=None, *, sport):
             histories = {
                 "wr1": [{"stat_line": {"receiving_targets": 10}}],
                 "wr2": [{"stat_line": {"receiving_targets": 8}}],

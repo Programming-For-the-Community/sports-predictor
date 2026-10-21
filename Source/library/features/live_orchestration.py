@@ -11,9 +11,8 @@ build_live_event_leader_candidates plus presumptive-leader selection --
 those differ genuinely per sport: NFL's depth-chart/injury-based selection
 has no equivalent elsewhere, NCAAFB has a geo travel-distance feature the
 others don't, and each sport's own roster-staleness day threshold and
-`_still_on_team` check (NBA checks team_id only; NCAAFB/NCAAMBB
-additionally require a freshness recheck) are kept separate rather than
-merged -- see `is_roster_entry_fresh` below, which takes that threshold as
+`_still_on_team` check (team_id plus a freshness recheck everywhere) are
+kept separate rather than merged -- see `is_roster_entry_fresh` below, which takes that threshold as
 an argument rather than assuming a shared constant.
 
 PGA and F1 are explicitly out of scope -- their live_features.py is a
@@ -71,23 +70,23 @@ def live_elo_ratings(
     }
 
 
-def recent_volume(storage, entity_id: str, stat: str, before_date: str, window: int) -> tuple[float, list[dict]]:
+def recent_volume(storage, sport: str, entity_id: str, stat: str, before_date: str, window: int) -> tuple[float, list[dict]]:
     """(sum of stat over a candidate's most recent `window` games, that
     same game list) for one candidate. A candidate with no games at all
     sums to 0 rather than being excluded, so it still competes on equal
     footing but never wins over a candidate with real volume."""
-    games = storage.get_player_game_stats(entity_id, before_date=before_date, limit=window)
+    games = storage.get_player_game_stats(entity_id, before_date=before_date, limit=window, sport=sport)
     total = sum(game.get("stat_line", {}).get(stat, 0) for game in games)
     return total, games
 
 
 def top_n_by_recent_volume(
-    storage, entity_ids: list[str], stat: str, before_date: str, window: int, n: int,
+    storage, sport: str, entity_ids: list[str], stat: str, before_date: str, window: int, n: int,
 ) -> dict[str, list[dict]]:
     """entity_id -> recent game history, for the top n of entity_ids by recent volume of stat."""
     if not entity_ids:
         return {}
-    volumes = {entity_id: recent_volume(storage, entity_id, stat, before_date, window) for entity_id in entity_ids}
+    volumes = {entity_id: recent_volume(storage, sport, entity_id, stat, before_date, window) for entity_id in entity_ids}
     ranked = sorted(volumes, key=lambda entity_id: volumes[entity_id][0], reverse=True)[:n]
     return {entity_id: volumes[entity_id][1] for entity_id in ranked}
 
@@ -108,12 +107,13 @@ def box_score_candidate_ids(
     season_lookback: int, still_on_team: Callable[[str], bool], events: list[dict] | None = None,
 ) -> list[str]:
     """Every entity_id credited with stat_key at least once in team_id's
-    box-score history that `still_on_team(entity_id)` confirms, most-recent
-    first, bounded to the current season plus season_lookback prior. The
-    distinct ids are collected first (no I/O beyond the already-fetched
-    rows), then roster membership is checked concurrently -- sequential
-    checks are a real latency source once a team's history holds dozens of
-    candidates for one category."""
+    box-score history, most-recent first, bounded to the current season plus
+    season_lookback prior, followed by the team's other rostered players --
+    someone who joined since the team's last game has no box score with it
+    yet. Only ids `still_on_team(entity_id)` confirms are kept. The distinct
+    ids are collected first, then roster membership is checked concurrently
+    -- sequential checks are a real latency source once a team's history
+    holds dozens of candidates for one category."""
     team_events = storage.get_team_events(sport, team_id, before_date=before_date, events=events)
     seen: set[str] = set()
     ordered_ids: list[str] = []
@@ -125,6 +125,11 @@ def box_score_candidate_ids(
             entity_id = row.get("entity_id")
             if entity_id is None or entity_id in seen or stat_key not in row.get("stat_line", {}):
                 continue
+            seen.add(entity_id)
+            ordered_ids.append(entity_id)
+    for entity in storage.get_team_entities(sport, team_id):
+        entity_id = entity.get("entity_id")
+        if entity.get("entity_type") == "player" and entity_id and entity_id not in seen:
             seen.add(entity_id)
             ordered_ids.append(entity_id)
 

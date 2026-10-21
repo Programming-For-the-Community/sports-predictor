@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../models/upset.dart';
 import '../theme/app_colors.dart';
 import '../theme/app_text_styles.dart';
 
@@ -35,6 +36,25 @@ class ActualModelKey extends StatelessWidget {
       spacing: 14,
       runSpacing: 4,
       children: [_entry(actualLabel, AppColors.ink), _entry(modelLabel, AppColors.cyan)],
+    );
+  }
+}
+
+/// UPSET (amber) or UPSET WATCH, outlined so it never reads as a filled
+/// confidence or verdict pill.
+class UpsetChip extends StatelessWidget {
+  const UpsetChip({super.key, required this.flag});
+
+  final UpsetFlag flag;
+
+  @override
+  Widget build(BuildContext context) {
+    final color = flag == UpsetFlag.upset ? AppColors.warn : AppColors.inkMid;
+    final border = flag == UpsetFlag.upset ? AppColors.warn : AppColors.inkSub.withValues(alpha: 0.5);
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 3),
+      decoration: BoxDecoration(border: Border.all(color: border), borderRadius: BorderRadius.circular(999)),
+      child: Text(flag.label, style: AppTextStyles.microLabel(color: color)),
     );
   }
 }

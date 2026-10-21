@@ -10,6 +10,7 @@ import time
 from decimal import Decimal
 
 import boto3
+from boto3.dynamodb.conditions import Attr
 from botocore.config import Config
 from botocore.exceptions import ClientError
 
@@ -78,6 +79,23 @@ class DynamoDBTable:
                 return False
             raise
 
+    def set_attribute_if_exists(self, key: dict, name: str, value) -> bool:
+        """Sets one attribute on an existing item, leaving the rest alone.
+        False (nothing written) when no item has this key."""
+        try:
+            self._table.update_item(
+                Key=key,
+                UpdateExpression="SET #name = :value",
+                ConditionExpression=Attr(next(iter(key))).exists(),
+                ExpressionAttributeNames={"#name": name},
+                ExpressionAttributeValues={":value": _to_dynamodb_safe(value)},
+            )
+            return True
+        except ClientError as exc:
+            if exc.response["Error"]["Code"] == "ConditionalCheckFailedException":
+                return False
+            raise
+
     def get_item(self, key: dict) -> dict | None:
         response = self._table.get_item(Key=key)
         item = response.get("Item")
@@ -137,10 +155,12 @@ class DynamoDBTable:
         index_name: str | None = None,
         scan_index_forward: bool = True,
         limit: int | None = None,
+        filter_expression=None,
     ) -> list[dict]:
-        """key_condition is a boto3.dynamodb.conditions expression built by
-        the caller. Paginates until every matching item is collected or
-        `limit` is reached. `limit` is also passed to DynamoDB as its own
+        """key_condition (and filter_expression, when given) are
+        boto3.dynamodb.conditions expressions built by the caller. Paginates
+        until every matching item is collected or `limit` is reached --
+        counted after filter_expression, which DynamoDB applies per page. `limit` is also passed to DynamoDB as its own
         per-page Limit, so a bounded call reads less data server-side too,
         not just fewer round trips -- without it, a single page can still
         read up to DynamoDB's own ~1MB page cap regardless of how small a
@@ -150,6 +170,8 @@ class DynamoDBTable:
             kwargs["IndexName"] = index_name
         if limit is not None:
             kwargs["Limit"] = limit
+        if filter_expression is not None:
+            kwargs["FilterExpression"] = filter_expression
 
         items: list[dict] = []
         response = self._table.query(**kwargs)

@@ -20,7 +20,8 @@ import event_prediction
 import live_features
 import season_simulation
 from library.features import nhl_dataset, nhl_teams
-from library.serving import season_projection_common
+from library.serving import bracket_projection, season_projection_common
+from library.serving.bracket_simulation import BracketSimulation, MatchupRules, RealPostseason
 from library.serving.common import enrich_bracket_team_names, enrich_team_standings
 from library.serving.nhl_reads import LEADER_CATEGORY_STATS, _home_and_away
 from library.storage.feature_storage import FeatureStorage
@@ -30,6 +31,7 @@ logger = logging.getLogger("nhl-predict")
 
 SPORT = "nhl"
 REGULAR_SEASON_TYPE = 2
+POSTSEASON_TYPE = 3
 
 PLAYER_PROP_STATS = [stat for stats in LEADER_CATEGORY_STATS.values() for stat in stats]
 GOALIE_CATEGORY = "goaltending"
@@ -105,17 +107,91 @@ def _standings(storage: FeatureStorage, season_inputs: dict, simulation: dict[st
     return enrich_team_standings(storage, SPORT, rows)
 
 
-def _bracket(storage: FeatureStorage, season_inputs: dict, simulation: dict[str, dict]) -> dict:
-    """The bracket implied by projected final standings. Regulation wins
-    are projected at each team's current share of its wins."""
-    points = {team: row["projected_points"] for team, row in simulation.items()}
-    wins = {team: row["projected_wins"] for team, row in simulation.items()}
-    regulation_wins = {}
-    for team, projected in wins.items():
+ROUND_ODDS_COLUMNS = [
+    ("2nd round", season_simulation.ROUND_NAMES[1]), ("Conf final", season_simulation.ROUND_NAMES[2]),
+    ("Cup final", season_simulation.FINAL_ROUND), ("Title", None),
+]
+
+
+def _matchup_rules(ratings: dict[str, float]):
+    """Best-of-seven, the higher seed (team_a) at home in games 1, 2, 5 and 7."""
+    def rules(round_name: str, team_a: str, team_b: str, home_advantage: float) -> MatchupRules:
+        home = season_simulation.game_probability(team_a, team_b, ratings, home_advantage)
+        away = 1 - season_simulation.game_probability(team_b, team_a, ratings, home_advantage)
+        return MatchupRules(
+            wins_needed=season_simulation.SERIES_WINS,
+            game_probability=lambda i: home if season_simulation.HIGHER_SEED_HOME[i] else away,
+        )
+    return rules
+
+
+def _seeded_pair(team_a: str | None, team_b: str | None, seeds: dict[str, int]):
+    """A conference slot, the better seed (tiebreak included) first, hosting."""
+    if team_a is not None and team_b is not None:
+        team_a, team_b = sorted((team_a, team_b), key=seeds.get)
+    return (team_a, team_b, seeds.get(team_a), seeds.get(team_b))
+
+
+def _conference_rounds(play_round, field: dict, home_advantage: float):
+    """One conference: two division brackets of two series each, then the
+    conference final. Returns (rounds, champion)."""
+    seeds = field["seeds"]
+    first_pairs = [
+        pair for d1, wildcard, d2, d3 in field["brackets"]
+        for pair in (_seeded_pair(d1, wildcard, seeds), _seeded_pair(d2, d3, seeds))
+    ]
+    first_round, first = play_round(season_simulation.ROUND_NAMES[0], first_pairs, home_advantage)
+    second_pairs = [_seeded_pair(first[i][0], first[i + 1][0], seeds) for i in range(0, len(first), 2)]
+    second_round, second = play_round(season_simulation.ROUND_NAMES[1], second_pairs, home_advantage)
+    final, (winner,) = play_round(season_simulation.ROUND_NAMES[2], [_seeded_pair(second[0][0], second[1][0], seeds)], home_advantage)
+    return [first_round, second_round, final], winner[0]
+
+
+def _projected_regulation_wins(season_inputs: dict, wins: dict[str, float]) -> dict[str, float]:
+    """Projected wins at each team's current share of regulation wins."""
+    projected = {}
+    for team, team_wins in wins.items():
         current = season_inputs["wins"].get(team, 0)
         share = season_inputs["regulation_wins"].get(team, 0) / current if current else 1 - season_simulation.OVERTIME_RATE
-        regulation_wins[team] = projected * share
-    bracket = season_simulation.project_bracket(points, regulation_wins, wins, season_inputs["current_ratings"])
+        projected[team] = team_wins * share
+    return projected
+
+
+def _bracket(storage: FeatureStorage, s3, predictions_table, season_inputs: dict, simulation: dict[str, dict]) -> dict:
+    """The bracket implied by projected final standings, as one simulated
+    run from the real playoffs so far -- see library.serving.
+    bracket_simulation."""
+    points = {team: row["projected_points"] for team, row in simulation.items()}
+    wins = {team: row["projected_wins"] for team, row in simulation.items()}
+    regulation_wins = _projected_regulation_wins(season_inputs, wins)
+    fields = season_simulation.conference_fields(points, regulation_wins, wins)
+    rank = {team: season_simulation._standings_key(team, points, regulation_wins, wins) for field in fields.values() for team in field["teams"]}
+    conference_of = {team: conference for conference, field in fields.items() for team in field["teams"]}
+    seeds = {team: seed for field in fields.values() for team, seed in field["seeds"].items()}
+    home_advantage = season_simulation.ELO_HOME_ADVANTAGE
+
+    def topology(play_round) -> dict:
+        conferences, finalists = {}, []
+        for conference, field in sorted(fields.items()):
+            conferences[conference], finalist = _conference_rounds(play_round, field, home_advantage)
+            finalists.append(finalist)
+        # Conference seeds aren't on one scale, so the standings pick the host.
+        home, away = season_simulation._higher_seed_first(finalists[0], finalists[1], rank)
+        finals, (champion,) = play_round(season_simulation.FINAL_ROUND, [(home, away, seeds.get(home), seeds.get(away))], home_advantage)
+        row = finals["matchups"][0]
+        return {"conferences": conferences, "finals": row and {**row, "round": season_simulation.FINAL_ROUND}, "champion": champion[0]}
+
+    def tiebreak(team_a: str, team_b: str) -> str | None:
+        if rank.get(team_a) == rank.get(team_b):
+            return None
+        return team_a if rank.get(team_a, ()) > rank.get(team_b, ()) else team_b
+
+    events = bracket_projection.real_postseason_events(
+        storage, SPORT, season_inputs["current_season"], lambda event: event.get("season_type") == POSTSEASON_TYPE,
+    )
+    real = RealPostseason(events, bracket_projection.logged_home_probability(event_prediction, storage, s3, predictions_table, logger))
+    engine = BracketSimulation(real, _matchup_rules(season_inputs["current_ratings"]), tiebreak=tiebreak)
+    bracket = engine.run(topology, ROUND_ODDS_COLUMNS, group_of=conference_of.get)
     return enrich_bracket_team_names(storage, SPORT, bracket)
 
 
@@ -189,7 +265,12 @@ def _leaderboards(storage: FeatureStorage, s3, season_inputs: dict) -> dict:
     }
 
 
-def build_season_projection(storage: FeatureStorage, s3) -> dict:
+def postseason_active(storage: FeatureStorage) -> bool:
+    """Whether the daily schedule should rebuild the projection today."""
+    return bracket_projection.postseason_active(storage, SPORT, lambda event: event.get("season_type") == POSTSEASON_TYPE)
+
+
+def build_season_projection(storage: FeatureStorage, s3, predictions_table) -> dict:
     season_inputs = _season_inputs(storage)
     simulation = season_simulation.simulate_season(
         season_inputs["wins"], season_inputs["losses"], season_inputs["overtime_losses"],
@@ -203,7 +284,7 @@ def build_season_projection(storage: FeatureStorage, s3) -> dict:
         leaderboards = None
 
     try:
-        bracket = _bracket(storage, season_inputs, simulation)
+        bracket = _bracket(storage, s3, predictions_table, season_inputs, simulation)
     except Exception:
         logger.exception("Failed to build season bracket")
         bracket = None
@@ -218,12 +299,12 @@ def build_season_projection(storage: FeatureStorage, s3) -> dict:
     }
 
 
-def run_scheduled(storage: FeatureStorage, model_bucket) -> dict:
+def run_scheduled(storage: FeatureStorage, model_bucket, predictions_table) -> dict:
     """Entry point for the weekly EventBridge Scheduler invoke
     (Terraform/scheduler-nhl-season-projection.tf): computes the
     projection and writes it to S3. A failure propagates so it shows up
     as a Lambda error."""
-    result = build_season_projection(storage, model_bucket)
+    result = build_season_projection(storage, model_bucket, predictions_table)
     model_bucket.put_json(season_projection_key(SPORT), result)
     logger.info("Wrote season projection for %s to S3", SPORT)
     return {"status": "ok"}

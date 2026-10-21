@@ -8,6 +8,7 @@ build_live_event_features itself. FeatureStorage is mocked throughout.
 The nba_predict module (and this directory's own sys.path entry for
 predict/) is registered by conftest.py.
 """
+from datetime import date
 from unittest.mock import MagicMock
 
 import pytest
@@ -36,8 +37,8 @@ def _player_game(entity_id, team_id, event_key, event_date, stat_line):
     }
 
 
-def _entity(team_id):
-    return {"metadata": {"team_id": team_id}}
+def _entity(team_id, team_id_as_of=None):
+    return {"metadata": {"team_id": team_id, "team_id_as_of": team_id_as_of or date.today().isoformat()}}
 
 
 class TestStillOnTeam:
@@ -45,6 +46,23 @@ class TestStillOnTeam:
         storage = MagicMock()
         storage.get_entity.return_value = _entity("13")
         assert live_features._still_on_team(storage, "nba", "101", "13") is True
+
+    def test_false_when_team_id_as_of_is_stale(self):
+        # A waived player keeps their last team_id -- only the daily roster
+        # re-fetch stops reconfirming it.
+        storage = MagicMock()
+        storage.get_entity.return_value = _entity("13", team_id_as_of="2026-10-06")
+        assert live_features._still_on_team(storage, "nba", "101", "13", "2026-10-21") is False
+
+    def test_true_at_the_staleness_boundary(self):
+        storage = MagicMock()
+        storage.get_entity.return_value = _entity("13", team_id_as_of="2026-10-07")  # exactly 14 days before
+        assert live_features._still_on_team(storage, "nba", "101", "13", "2026-10-21") is True
+
+    def test_false_when_team_id_as_of_is_missing(self):
+        storage = MagicMock()
+        storage.get_entity.return_value = {"metadata": {"team_id": "13"}}
+        assert live_features._still_on_team(storage, "nba", "101", "13") is False
 
     def test_false_when_entity_team_differs(self):
         storage = MagicMock()
@@ -233,7 +251,7 @@ class TestBuildLiveEventLeaderCandidates:
         ]
         storage.get_entity.return_value = _entity("13")
 
-        def _player_history(entity_id, before_date=None, limit=None):
+        def _player_history(entity_id, before_date=None, limit=None, *, sport):
             volumes = {"101": 8, "102": 30, "103": 18, "104": 22, "105": 15, "106": 4}
             return [{"entity_id": entity_id, "stat_line": {"points": volumes[entity_id]}}]
 
@@ -244,3 +262,24 @@ class TestBuildLiveEventLeaderCandidates:
         # LEADER_CANDIDATE_LIMITS caps scoring at 5 -- the top 5 by volume, not 106 (lowest).
         assert [row["entity_id"] for row in result["home"]["scoring"]] == ["102", "104", "103", "105", "101"]
         assert result["away"]["scoring"] == []
+
+    def test_a_player_new_to_the_team_competes_on_their_own_history(self):
+        # Traded over the offseason: every one of their games is for their
+        # old team, but the roster now lists them here.
+        storage = MagicMock()
+        event = _event("SPORT#NBA#EVENT#1", "2026-10-21", "20", "2", season=2027)
+        storage.get_event.return_value = event
+        storage.get_all_events.return_value = []
+        storage.get_team_events.return_value = []
+        storage.get_team_entities.side_effect = lambda sport, team_id: (
+            [{"entity_id": "3917376", "entity_type": "player"}] if team_id == "20" else []
+        )
+        storage.get_entity.return_value = _entity("20")
+        storage.get_player_game_stats.side_effect = lambda entity_id, before_date=None, limit=None, *, sport: [
+            {"entity_id": entity_id, "team_id": "2", "stat_line": {"points": 29, "rebounds": 6, "assists": 4}},
+        ]
+
+        result = live_features.build_live_event_leader_candidates(storage, "nba", event["event_key"])
+
+        assert [row["entity_id"] for row in result["home"]["scoring"]] == ["3917376"]
+        assert result["home"]["scoring"][0]["team_id"] == "20"

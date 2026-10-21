@@ -36,6 +36,12 @@ def _storage(completed, scheduled, player_stats=()):
     return storage
 
 
+def _predictions_table():
+    table = MagicMock()
+    table.query.return_value = []
+    return table
+
+
 COMPLETED = [
     _event(1, "1", "2", 4, 2, date="2026-10-08"),
     _event(2, "2", "1", 3, 2, date="2026-10-09", overtime=True),
@@ -89,7 +95,7 @@ class TestBuildSeasonProjection:
                  season_simulation, "simulate_season",
                  side_effect=lambda *args, **kwargs: real_simulate(*args, **kwargs, simulations=20, seed=3),
              ):
-            return season_projection.build_season_projection(storage, MagicMock())
+            return season_projection.build_season_projection(storage, MagicMock(), _predictions_table())
 
     def test_payload_has_the_shared_season_shape(self):
         result = self._build()
@@ -164,10 +170,10 @@ class TestRunScheduled:
     def test_writes_the_projection_to_the_season_cache_key(self):
         bucket = MagicMock()
         with patch.object(season_projection, "build_season_projection", return_value={"sport": "nhl"}) as build:
-            result = season_projection.run_scheduled("storage", bucket)
+            result = season_projection.run_scheduled("storage", bucket, "predictions")
 
         assert result == {"status": "ok"}
-        build.assert_called_once_with("storage", bucket)
+        build.assert_called_once_with("storage", bucket, "predictions")
         bucket.put_json.assert_called_once_with("season-projections/nhl/latest.json", {"sport": "nhl"})
 
 
@@ -207,7 +213,53 @@ class TestBracketFailure:
     def test_a_bracket_failure_still_returns_standings(self):
         with patch.object(season_projection, "_leaderboards", return_value={}), \
              patch.object(season_projection, "_bracket", side_effect=RuntimeError("boom")):
-            result =season_projection.build_season_projection(_storage(COMPLETED, SCHEDULED), MagicMock())
+            result = season_projection.build_season_projection(_storage(COMPLETED, SCHEDULED), MagicMock(), _predictions_table())
 
         assert result["bracket"] is None
         assert len(result["standings"]) == 32
+
+
+ATLANTIC = ["1", "2", "5", "26", "10", "14", "20", "21"]
+METROPOLITAN = ["7", "29", "11", "12", "13", "15", "16", "23"]
+
+
+class TestBracket:
+    def _bracket(self, ratings):
+        points = {team: 60 for team in season_simulation.nhl_teams.TEAM_DIVISIONS}
+        points.update({team: 120 - 2 * i for i, team in enumerate(ATLANTIC)})
+        points.update({team: 110 - 2 * i for i, team in enumerate(METROPOLITAN)})
+        simulation = {team: {"projected_points": p, "projected_wins": p / 2} for team, p in points.items()}
+        inputs = {"wins": {}, "regulation_wins": {}, "current_ratings": ratings, "current_season": SEASON}
+        storage = MagicMock()
+        storage.get_all_events.return_value = []
+        storage.get_entity.return_value = None
+        return season_projection._bracket(storage, MagicMock(), _predictions_table(), inputs, simulation)
+
+    def test_three_series_rounds_per_conference_then_the_cup_final(self):
+        bracket = self._bracket({"1": 1700.0})
+
+        east = bracket["conferences"]["Eastern"]
+        assert [(r["round"], len(r["matchups"])) for r in east] == [
+            ("First Round", 4), ("Second Round", 2), ("Conference Final", 1),
+        ]
+        first = east[0]["matchups"][0]
+        assert (first["team_a"], first["team_b"], first["seed_a"]) == ("1", "10", 1)
+        assert max(first["series_wins_a"], first["series_wins_b"]) == 4
+        assert bracket["finals"]["round"] == "Stanley Cup Final"
+        assert set(bracket["conferences"]) == {"Eastern", "Western"}
+        assert bracket["round_odds"]["columns"] == ["2nd round", "Conf final", "Cup final", "Title"]
+
+    def test_the_higher_seed_is_always_team_a(self):
+        bracket = self._bracket({"10": 1900.0})
+
+        for rounds in bracket["conferences"].values():
+            for round_payload in rounds:
+                for matchup in round_payload["matchups"]:
+                    if matchup["seed_a"] is not None and matchup["seed_b"] is not None:
+                        assert matchup["seed_a"] < matchup["seed_b"]
+
+    def test_home_ice_follows_the_higher_seed_through_the_series(self):
+        rules = season_projection._matchup_rules({"1": 1600.0, "10": 1500.0})("First Round", "1", "10", 25.0)
+        assert rules.wins_needed == 4
+        # Games 1-2 at the higher seed's rink, 3-4 away.
+        assert rules.game_probability(0) == rules.game_probability(1) > rules.game_probability(2) == rules.game_probability(3)

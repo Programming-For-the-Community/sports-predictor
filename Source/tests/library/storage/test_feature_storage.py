@@ -7,7 +7,7 @@ tests/library/aws/test_dynamodb_table.py for that).
 from unittest.mock import MagicMock, patch
 
 import pytest
-from boto3.dynamodb.conditions import Key
+from boto3.dynamodb.conditions import Attr, Key
 
 from library.storage.feature_storage import FeatureStorage
 
@@ -46,7 +46,7 @@ class TestGetPlayerGameStats:
         storage, _, _, mock_stats, _ = _make_storage(storage_env)
         mock_stats.query.return_value = [{"event_date": "2025-09-28"}]
 
-        result = storage.get_player_game_stats("mahomes-patrick")
+        result = storage.get_player_game_stats("mahomes-patrick", sport="nfl")
 
         assert result == [{"event_date": "2025-09-28"}]
         call_kwargs = mock_stats.query.call_args.kwargs
@@ -54,11 +54,20 @@ class TestGetPlayerGameStats:
         assert call_kwargs["scan_index_forward"] is False
         assert call_kwargs["limit"] is None
 
+    def test_filters_to_the_requested_sport(self, storage_env):
+        # One ESPN athlete id spans a drafted player's college and pro games.
+        storage, _, _, mock_stats, _ = _make_storage(storage_env)
+        mock_stats.query.return_value = []
+
+        storage.get_player_game_stats("5142718", sport="nba")
+
+        assert mock_stats.query.call_args.kwargs["filter_expression"] == Attr("sport").eq("nba")
+
     def test_passes_limit_through(self, storage_env):
         storage, _, _, mock_stats, _ = _make_storage(storage_env)
         mock_stats.query.return_value = []
 
-        storage.get_player_game_stats("mahomes-patrick", limit=5)
+        storage.get_player_game_stats("mahomes-patrick", limit=5, sport="nfl")
 
         assert mock_stats.query.call_args.kwargs["limit"] == 5
 
@@ -369,8 +378,11 @@ class TestGetPlayerGameStatsBeforeDate:
     def test_before_date_narrows_the_key_condition(self, storage_env):
         storage, _, _, mock_stats, _ = _make_storage(storage_env)
 
-        storage.get_player_game_stats("p1", before_date="2025-10-01", limit=5)
+        storage.get_player_game_stats("p1", before_date="2025-10-01", limit=5, sport="nfl")
 
         condition = mock_stats.query.call_args.args[0]
         assert condition == Key("entity_id").eq("p1") & Key("event_date").lt("2025-10-01")
-        assert mock_stats.query.call_args.kwargs == {"index_name": "entity-history", "scan_index_forward": False, "limit": 5}
+        assert mock_stats.query.call_args.kwargs == {
+            "index_name": "entity-history", "scan_index_forward": False, "limit": 5,
+            "filter_expression": Attr("sport").eq("nfl"),
+        }

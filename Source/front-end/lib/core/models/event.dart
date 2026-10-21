@@ -142,6 +142,7 @@ class SportEvent {
     this.wentToOvertime,
     this.decidedByShootout,
     this.goalies = const {},
+    this.bettingFavorite,
   });
 
   final String eventId;
@@ -175,6 +176,9 @@ class SportEvent {
   final bool? wentToOvertime;
   final bool? decidedByShootout;
   final Map<String, EventGoalie> goalies;
+  // 'home'/'away': the sportsbook favourite on the pre-game line. Null
+  // without a line or for a pick'em.
+  final String? bettingFavorite;
 
   /// "FINAL", or "FINAL/OT" / "FINAL/SO" for a game that went past regulation.
   String get finalLabel {
@@ -215,6 +219,7 @@ class SportEvent {
         wentToOvertime: json['went_to_overtime'] as bool?,
         decidedByShootout: json['decided_by_shootout'] as bool?,
         goalies: EventGoalie.mapFromJson(json['goalies'], 'status'),
+        bettingFavorite: json['betting_favorite'] as String?,
       );
 
   Participant get home => participants.firstWhere((p) => p.role == 'home');

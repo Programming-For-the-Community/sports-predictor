@@ -58,6 +58,13 @@ data "aws_iam_policy_document" "ncaafb_backfill_permissions" {
     resources = [aws_dynamodb_table.entities.arn, aws_dynamodb_table.events.arn]
   }
 
+  # upsert_event reads the event first to keep its saved betting line.
+  statement {
+    sid       = "ReadEvents"
+    actions   = ["dynamodb:GetItem"]
+    resources = [aws_dynamodb_table.events.arn]
+  }
+
   statement {
     sid       = "WritePlayerGameStats"
     actions   = ["dynamodb:PutItem", "dynamodb:BatchWriteItem"]

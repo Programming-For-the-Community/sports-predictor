@@ -156,11 +156,12 @@ class TestHandler:
         with patch.object(nhl_predict._resources, "storage", return_value="storage"), \
              patch.object(nhl_predict, "_get_storage", return_value="storage"), \
              patch.object(nhl_predict, "_get_model_bucket", return_value="bucket"), \
+             patch.object(nhl_predict, "_get_predictions_table", return_value="table"), \
              patch.object(nhl_predict.season_projection, "run_scheduled", return_value={"status": "ok"}) as run:
             result = self._invoke({"detail-type": "ScheduledSeasonProjection"})
 
         assert result == {"status": "ok"}
-        run.assert_called_once_with("storage", "bucket")
+        run.assert_called_once_with("storage", "bucket", "table")
 
     def test_unrecognized_invocation_is_an_error(self):
         assert self._invoke({"detail-type": "Nope"})["status"] == "error"

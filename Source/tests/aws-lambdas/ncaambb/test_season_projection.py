@@ -391,12 +391,11 @@ class TestBatchScoreTeams:
 
 
 class TestConferenceBracketPayloads:
-    """_reconcile_single_elim_bracket's own reconciliation logic is
-    covered by TestResolveMatchup/TestScheduledMatchupRow -- these tests
-    are about _conference_bracket_payloads' own orchestration around it
-    (grouping by conference, skipping a conference with <2 tracked
-    members, and one conference's bracket build failing without losing
-    the others), so that machinery is mocked out here."""
+    """_conference_bracket_payloads' own orchestration -- grouping by
+    conference, skipping a conference with <2 tracked members, and one
+    conference's bracket build failing without losing the others -- with
+    the bracket walk itself mocked out (library.serving.bracket_simulation
+    has its own tests)."""
 
     def _season_inputs(self, team_conference):
         return {
@@ -410,8 +409,8 @@ class TestConferenceBracketPayloads:
         storage.get_all_events.return_value = []
 
         with patch.object(
-            season_projection, "_reconcile_single_elim_bracket",
-            side_effect=lambda seed_order, *a, **kw: {"rounds": [], "champion": seed_order[0]},
+            season_projection, "_single_elim_rounds",
+            side_effect=lambda play_round, seed_order, *a, **kw: ([], seed_order[0]),
         ):
             payloads = season_projection._conference_bracket_payloads(
                 storage, MagicMock(), MagicMock(), self._season_inputs(team_conference), 2026,
@@ -425,8 +424,8 @@ class TestConferenceBracketPayloads:
         storage.get_all_events.return_value = []
 
         with patch.object(
-            season_projection, "_reconcile_single_elim_bracket",
-            side_effect=lambda seed_order, *a, **kw: {"rounds": [], "champion": seed_order[0]},
+            season_projection, "_single_elim_rounds",
+            side_effect=lambda play_round, seed_order, *a, **kw: ([], seed_order[0]),
         ):
             payloads = season_projection._conference_bracket_payloads(
                 storage, MagicMock(), MagicMock(), self._season_inputs(team_conference), 2026,
@@ -439,12 +438,12 @@ class TestConferenceBracketPayloads:
         storage = MagicMock()
         storage.get_all_events.return_value = []
 
-        def _reconcile(seed_order, round_names, real_matchups, storage, s3, predictions_table, ratings, home_advantage):
+        def _rounds(play_round, seed_order, round_names, home_advantage):
             if "12" in seed_order:  # ACC's own bracket build fails; Big Ten's does not
                 raise Exception("model unavailable")
-            return {"rounds": [], "champion": seed_order[0]}
+            return [], seed_order[0]
 
-        with patch.object(season_projection, "_reconcile_single_elim_bracket", side_effect=_reconcile):
+        with patch.object(season_projection, "_single_elim_rounds", side_effect=_rounds):
             payloads = season_projection._conference_bracket_payloads(
                 storage, MagicMock(), MagicMock(), self._season_inputs(team_conference), 2026,
             )
@@ -461,10 +460,8 @@ class TestConferenceBracketPayloads:
 
 class TestMarchMadnessBracketPayload:
     """No real postseason games logged (storage.get_all_events returns
-    []), so every matchup resolves through the deterministic "projected"
-    branch -- these tests are about the payload's own shape (regions kept
-    separate, not flattened into one round list), not the reconciliation
-    logic itself (see TestResolveMatchup for that)."""
+    []), so every slot is simulated -- these tests are about the payload's
+    own shape (regions kept separate, not flattened into one round list)."""
 
     def _teams(self, n):
         return [str(i) for i in range(1, n + 1)]
@@ -500,16 +497,14 @@ class TestMarchMadnessBracketPayload:
         assert bracket["championship"]["team_b"] is not None
         assert bracket["champion"] in teams
 
-    def test_champion_is_the_top_overall_seed_when_nothing_upsets(self):
-        # Every matchup resolves by Elo alone here (no real games) --
-        # rating strictly decreasing with seed (unlike _season_inputs'
-        # own all-equal default) means no game is a 50/50 coin flip, so
-        # the top overall seed should carry all the way to the champion.
+    def test_the_strongest_team_has_the_best_title_odds(self):
+        # Rating strictly falling with seed, so the top overall seed is the
+        # likeliest champion even though the shown run has upsets in it.
         teams = self._teams(80)
         conference_champions = {f"conf{i}": teams[i] for i in range(10)}
         model_scores = {team_id: float(i) for i, team_id in enumerate(teams)}
         season_inputs = self._season_inputs(teams)
-        season_inputs["current_ratings"] = {team_id: 2000.0 - i for i, team_id in enumerate(teams)}
+        season_inputs["current_ratings"] = {team_id: 2000.0 - 10 * i for i, team_id in enumerate(teams)}
         storage = MagicMock()
         storage.get_all_events.return_value = []
 
@@ -519,7 +514,9 @@ class TestMarchMadnessBracketPayload:
                 MagicMock(), _model_card(1), teams, conference_champions,
             )
 
-        assert bracket["champion"] == "1"  # _teams() is 1-indexed; teams[0] == "1" has the best score/rating
+        rows = [row for group in bracket["round_odds"]["groups"].values() for row in group]
+        assert max(rows, key=lambda row: row["values"][-1])["team_id"] == "1"
+        assert bracket["round_odds"]["columns"] == ["Sweet 16", "Elite Eight", "Final Four", "Final", "Title"]
 
     def test_a_region_brackets_build_failing_returns_none_for_the_whole_bracket(self):
         # Unlike a conference bracket (one failure just skips that one
@@ -533,7 +530,7 @@ class TestMarchMadnessBracketPayload:
         storage.get_all_events.return_value = []
 
         with patch.object(season_projection, "_current_model_scores", return_value=model_scores), \
-             patch.object(season_projection, "_reconcile_single_elim_bracket", side_effect=Exception("model unavailable")):
+             patch.object(season_projection, "_single_elim_rounds", side_effect=Exception("model unavailable")):
             bracket = season_projection._march_madness_bracket_payload(
                 storage, MagicMock(), MagicMock(), self._season_inputs(teams), 2026,
                 MagicMock(), _model_card(1), teams, conference_champions,
@@ -603,172 +600,6 @@ class TestLatestApPollRanks:
         season_projection._latest_ap_poll_ranks(bucket, 2026)
 
         bucket.get_json.assert_called_once_with("ncaambb/rankings/2026/2/5.json")
-
-
-class TestRealPostseasonMatchups:
-    def test_includes_both_scheduled_and_completed_games_matching_the_predicate_and_season(self):
-        storage = MagicMock()
-        completed = _completed_event("E1", 2026, "12", "24", 70, 60, tournament_note="ACC Tournament")
-        scheduled = _scheduled_event("E2", 2026, "2026-03-14", "9", "7", tournament_note="Big Ten Tournament")
-        storage.get_all_events.side_effect = lambda sport, status: {"completed": [completed], "scheduled": [scheduled]}[status]
-
-        result = season_projection._real_postseason_matchups(storage, 2026, season_projection._is_conference_tournament_game)
-
-        assert result[frozenset({"12", "24"})] == completed
-        assert result[frozenset({"9", "7"})] == scheduled
-
-    def test_excludes_events_from_a_different_season(self):
-        storage = MagicMock()
-        other_season = _completed_event("E1", 2025, "12", "24", 70, 60, tournament_note="ACC Tournament")
-        storage.get_all_events.side_effect = lambda sport, status: {"completed": [other_season], "scheduled": []}[status]
-
-        result = season_projection._real_postseason_matchups(storage, 2026, season_projection._is_conference_tournament_game)
-
-        assert result == {}
-
-    def test_excludes_events_the_predicate_rejects(self):
-        storage = MagicMock()
-        regular_season = _completed_event("E1", 2026, "12", "24", 70, 60)  # no tournament_note
-        storage.get_all_events.side_effect = lambda sport, status: {"completed": [regular_season], "scheduled": []}[status]
-
-        result = season_projection._real_postseason_matchups(storage, 2026, season_projection._is_conference_tournament_game)
-
-        assert result == {}
-
-    def test_a_malformed_event_with_no_home_away_roles_is_skipped(self):
-        storage = MagicMock()
-        malformed = {
-            "event_key": "E1", "season": 2026, "season_type": 2, "conference_competition": True,
-            "tournament_note": "ACC Tournament", "participants": [{"entity_id": "12", "role": "unknown"}],
-        }
-        storage.get_all_events.side_effect = lambda sport, status: {"completed": [malformed], "scheduled": []}[status]
-
-        result = season_projection._real_postseason_matchups(storage, 2026, season_projection._is_conference_tournament_game)
-
-        assert result == {}
-
-
-class TestResolveMatchup:
-    def test_a_bye_slot_is_always_projected_at_full_confidence(self):
-        matchup = season_projection._resolve_matchup("t1", None, 1, None, {}, MagicMock(), MagicMock(), MagicMock(), {}, 0.0)
-
-        assert matchup == {
-            "status": "projected", "team_a": "t1", "seed_a": 1, "team_b": None, "seed_b": None,
-            "predicted_winner": "t1", "win_probability": 1.0,
-        }
-
-    def test_no_real_game_yet_falls_back_to_the_models_own_projection(self):
-        matchup = season_projection._resolve_matchup(
-            "t1", "t2", 1, 2, {}, MagicMock(), MagicMock(), MagicMock(),
-            {"t1": 1600.0, "t2": 1400.0}, 0.0,
-        )
-
-        assert matchup["status"] == "projected"
-        assert matchup["predicted_winner"] == "t1"
-
-    def test_a_completed_real_game_reports_the_actual_result(self):
-        real_event = _completed_event("E1", 2026, "t1", "t2", 70, 60, tournament_note="ACC Tournament")
-        predictions_table = MagicMock()
-        predictions_table.query.return_value = []
-
-        matchup = season_projection._resolve_matchup(
-            "t1", "t2", 1, 2, {frozenset({"t1", "t2"}): real_event}, MagicMock(), MagicMock(), predictions_table,
-            {}, 0.0,
-        )
-
-        assert matchup["status"] == "final"
-        assert matchup["actual_winner"] == "t1"
-        assert matchup["actual_home_score"] == 70
-
-    def test_a_real_but_not_yet_played_game_delegates_to_the_scheduled_row(self):
-        real_event = _scheduled_event("E1", 2026, "2026-03-14", "t1", "t2", tournament_note="ACC Tournament")
-        predictions_table = MagicMock()
-        predictions_table.query.return_value = []
-        storage = MagicMock()
-        s3 = MagicMock()
-
-        with patch.object(season_projection.event_prediction, "compute_and_cache_event") as compute_and_cache_event:
-            matchup = season_projection._resolve_matchup(
-                "t1", "t2", 1, 2, {frozenset({"t1", "t2"}): real_event}, storage, s3, predictions_table,
-                {}, 0.0,
-            )
-
-        assert matchup["status"] == "scheduled"
-        assert matchup["team_a"] == "t1"
-        assert matchup["team_b"] == "t2"
-        compute_and_cache_event.assert_called_once()
-
-
-class TestPredictedWinnerAndProbability:
-    def test_nothing_logged_returns_none_and_none(self):
-        result = season_projection._predicted_winner_and_probability(None, "home", "away")
-        assert result == (None, None)
-
-    def test_home_favored_returns_home_and_its_own_probability(self):
-        result = season_projection._predicted_winner_and_probability(
-            {"home_win_probability": 0.7}, "home", "away",
-        )
-        assert result == ("home", 0.7)
-
-    def test_away_favored_returns_away_and_the_complementary_probability(self):
-        result = season_projection._predicted_winner_and_probability(
-            {"home_win_probability": 0.3}, "home", "away",
-        )
-        assert result == ("away", 0.7)
-
-
-class TestScheduledMatchupRow:
-    def test_an_already_logged_prediction_is_used_without_recomputing(self):
-        predictions_table = MagicMock()
-        predictions_table.query.return_value = [
-            {"model_key": "MODEL#win-probability#v1", "generated_at": "2026-01-01T00:00:00+00:00",
-             "predicted_value": {"home_win_probability": 0.6}},
-        ]
-        real_event = _scheduled_event("E1", 2026, "2026-03-14", "t1", "t2", tournament_note="ACC Tournament")
-
-        with patch.object(season_projection.event_prediction, "compute_and_cache_event") as compute_and_cache_event:
-            row = season_projection._scheduled_matchup_row(
-                real_event, "E1", "t1", "t2", 1, 2, MagicMock(), MagicMock(), predictions_table,
-            )
-
-        assert row == {
-            "status": "scheduled", "team_a": "t1", "team_b": "t2", "seed_a": 1, "seed_b": 2,
-            "predicted_winner": "t1", "win_probability": 0.6,
-        }
-        compute_and_cache_event.assert_not_called()
-
-    def test_nothing_logged_yet_computes_and_caches_then_re_reads(self):
-        predictions_table = MagicMock()
-        predictions_table.query.side_effect = [
-            [],
-            [{"model_key": "MODEL#win-probability#v1", "generated_at": "2026-01-01T00:00:00+00:00",
-              "predicted_value": {"home_win_probability": 0.6}}],
-        ]
-        real_event = _scheduled_event("E1", 2026, "2026-03-14", "t1", "t2", tournament_note="ACC Tournament", event_id="401")
-        storage = MagicMock()
-        s3 = MagicMock()
-
-        with patch.object(season_projection.event_prediction, "compute_and_cache_event") as compute_and_cache_event:
-            row = season_projection._scheduled_matchup_row(real_event, "E1", "t1", "t2", 1, 2, storage, s3, predictions_table)
-
-        compute_and_cache_event.assert_called_once_with(storage, s3, predictions_table, "401")
-        assert row["predicted_winner"] == "t1"
-        assert row["win_probability"] == 0.6
-
-    def test_a_failed_live_computation_still_returns_a_valid_row_with_no_prediction(self):
-        predictions_table = MagicMock()
-        predictions_table.query.return_value = []
-        real_event = _scheduled_event("E1", 2026, "2026-03-14", "t1", "t2", tournament_note="ACC Tournament")
-
-        with patch.object(season_projection.event_prediction, "compute_and_cache_event") as compute_and_cache_event:
-            compute_and_cache_event.side_effect = Exception("model load failed")
-            row = season_projection._scheduled_matchup_row(
-                real_event, "E1", "t1", "t2", 1, 2, MagicMock(), MagicMock(), predictions_table,
-            )
-
-        assert row["status"] == "scheduled"
-        assert row["predicted_winner"] is None
-        assert row["win_probability"] is None
 
 
 class TestComputeProjectionsAndBrackets:

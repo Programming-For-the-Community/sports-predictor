@@ -18,6 +18,7 @@ import season_simulation
 from library.features.common import compute_elo_ratings
 from library.features.nfl_teams import TEAM_DIVISIONS, is_real_franchise_matchup
 from library.serving import bracket_projection
+from library.serving.bracket_simulation import BracketSimulation, RealPostseason, elo_rules
 from library.serving import season_projection_common
 from library.serving.common import enrich_bracket_team_names, enrich_team_standings
 from library.serving.nfl_reads import _home_and_away
@@ -29,8 +30,8 @@ logger = logging.getLogger("nfl-predict")
 SPORT = "nfl"
 
 # ESPN's own season.type convention -- 3 is postseason. Only
-# postseason-flagged events are matched against a bracket slot in
-# _real_postseason_matchups, so a coincidental regular-season rematch
+# postseason-flagged events feed the bracket simulation
+# (_bracket_payload), so a coincidental regular-season rematch
 # never gets mistaken for a real playoff meeting.
 POSTSEASON_TYPE = 3
 
@@ -226,100 +227,83 @@ def _leaderboards(storage: FeatureStorage, s3, model_cache: dict, season_inputs:
     return leaderboards
 
 
-_BRACKET = bracket_projection.BracketResolver(
-    event_prediction=event_prediction, season_simulation=season_simulation, logger=logger,
-)
-_logged_win_probability = bracket_projection.logged_win_probability
-_predicted_winner_and_probability = bracket_projection.predicted_winner_and_probability
-_completed_matchup_row = bracket_projection.completed_matchup_row
-_scheduled_matchup_row = _BRACKET.scheduled_matchup_row
-_resolve_matchup = _BRACKET.resolve_matchup
-_project_bracket_round = _BRACKET.project_bracket_round
+SUPER_BOWL = "Super Bowl"
+ROUND_ODDS_COLUMNS = [
+    ("Divisional", "Divisional"), ("Conf champ", "Conference Championship"), (SUPER_BOWL, SUPER_BOWL), ("Title", None),
+]
 
 
-def _real_postseason_matchups(storage: FeatureStorage, current_season: int | None) -> dict[frozenset, dict]:
-    return bracket_projection.real_postseason_matchups(storage, SPORT, current_season, lambda event: event.get("season_type") == POSTSEASON_TYPE)
-
-
-def _project_conference_bracket(
-    seeds: list[str], real_matchups: dict[frozenset, dict], storage: FeatureStorage, s3, predictions_table,
-    current_ratings: dict[str, float], home_advantage: float,
-) -> tuple[list[dict], str]:
-    """Reseeded 7-team playoff topology; each matchup goes through
-    _resolve_matchup's real-vs-projected reconciliation instead of a
-    pure Elo pick. Returns (rounds, champion)."""
-    seed_number = {team_id: rank + 1 for rank, team_id in enumerate(seeds)}
+def _conference_rounds(play_round, seeds: list[str], home_advantage: float):
+    """The reseeded 7-team conference bracket: 1 has a bye; 2v7, 3v6, 4v5;
+    then 1 hosts the lowest seed left while the other two meet. Returns
+    (rounds, champion)."""
+    number = {team: rank + 1 for rank, team in enumerate(seeds)}
     one, two, three, four, five, six, seven = seeds
-
-    wild_card_round, wild_card_advancing = _project_bracket_round(
-        "Wild Card",
-        [(a, b, seed_number[a], seed_number[b]) for a, b in ((two, seven), (three, six), (four, five))],
-        real_matchups, storage, s3, predictions_table, current_ratings, home_advantage,
+    wild_card, advancing = play_round(
+        "Wild Card", [(a, b, number[a], number[b]) for a, b in ((two, seven), (three, six), (four, five))], home_advantage,
     )
-
-    divisional_field = sorted(wild_card_advancing, key=lambda pair: pair[1])
-    lowest_remaining = divisional_field[-1]
-    other_two = divisional_field[:-1]
-    divisional_round, divisional_advancing = _project_bracket_round(
+    remaining = sorted(advancing, key=lambda pair: pair[1])
+    lowest, (other_a, other_b) = remaining[-1], remaining[:-1]
+    divisional, (div_1, div_2) = play_round(
         "Divisional",
-        [
-            (one, lowest_remaining[0], seed_number[one], lowest_remaining[1]),
-            (other_two[0][0], other_two[1][0], other_two[0][1], other_two[1][1]),
-        ],
-        real_matchups, storage, s3, predictions_table, current_ratings, home_advantage,
+        [(one, lowest[0], number[one], lowest[1]), (other_a[0], other_b[0], other_a[1], other_b[1])],
+        home_advantage,
     )
-
-    championship_round, championship_advancing = _project_bracket_round(
-        "Conference Championship",
-        [(divisional_advancing[0][0], divisional_advancing[1][0], divisional_advancing[0][1], divisional_advancing[1][1])],
-        real_matchups, storage, s3, predictions_table, current_ratings, home_advantage,
+    championship, (champion,) = play_round(
+        "Conference Championship", [(div_1[0], div_2[0], div_1[1], div_2[1])], home_advantage,
     )
-
-    return [wild_card_round, divisional_round, championship_round], championship_advancing[0][0]
+    return [wild_card, divisional, championship], champion[0]
 
 
 def _bracket_payload(
     storage: FeatureStorage, s3, predictions_table, season_inputs: dict, simulation: dict[str, dict],
 ) -> dict:
-    """Builds the full playoff bracket (both conferences + Super Bowl),
-    reconciled against real postseason results as they exist right now.
-    Reseeds from real wins/point-differential once the regular season is
-    actually over (season_inputs["remaining_games"] empty); otherwise
-    from simulate_season's own projected_wins."""
-    regular_season_over = not season_inputs["remaining_games"]
-    if regular_season_over:
-        wins, point_differential = season_inputs["wins"], season_inputs["point_differential"]
+    """The full playoff bracket (both conferences + Super Bowl) as one
+    simulated run -- see library.serving.bracket_simulation. Seeds from real
+    wins/point differential once the regular season is over, else from
+    simulate_season's projected_wins."""
+    if not season_inputs["remaining_games"]:
+        wins = season_inputs["wins"]
     else:
         wins = {team_id: projection["projected_wins"] for team_id, projection in simulation.items()}
-        point_differential = season_inputs["point_differential"]
-
+    point_differential = season_inputs["point_differential"]
     conferences = season_simulation._divisions_by_conference()
-    current_season = season_inputs["current_season"]
-    real_matchups = _real_postseason_matchups(storage, current_season)
-
-    conference_results: dict[str, list[dict]] = {}
-    champions: dict[str, str] = {}
-    for conference, division_teams in conferences.items():
-        seeds, _ = season_simulation._seed_conference(division_teams, wins, point_differential)
-        rounds, champion = _project_conference_bracket(
-            seeds, real_matchups, storage, s3, predictions_table, season_inputs["current_ratings"],
-            season_simulation.DEFAULT_HOME_ADVANTAGE,
-        )
-        conference_results[conference] = rounds
-        champions[conference] = champion
-
-    (_, champion_a), (_, champion_b) = champions.items()
-    super_bowl, super_bowl_advancing = _project_bracket_round(
-        "Super Bowl", [(champion_a, champion_b, None, None)],
-        real_matchups, storage, s3, predictions_table, season_inputs["current_ratings"], 0.0,
-    )
-
-    bracket = {
-        "conferences": conference_results,
-        "super_bowl": super_bowl["matchups"][0],
-        "champion": super_bowl_advancing[0][0],
+    seeded = {
+        conference: season_simulation._seed_conference(division_teams, wins, point_differential)[0]
+        for conference, division_teams in conferences.items()
     }
+    conference_of = {team: conference for conference, seeds in seeded.items() for team in seeds}
+    home_advantage = season_simulation.DEFAULT_HOME_ADVANTAGE
+
+    def record(team: str) -> tuple:
+        return (wins.get(team, 0), point_differential.get(team, 0))
+
+    def topology(play_round) -> dict:
+        rounds_by_conference, champions = {}, []
+        for conference, seeds in seeded.items():
+            rounds_by_conference[conference], champion = _conference_rounds(play_round, seeds, home_advantage)
+            champions.append(champion)
+        # A neutral site.
+        super_bowl, (winner,) = play_round(SUPER_BOWL, [(champions[0], champions[1], None, None)], 0.0)
+        return {"conferences": rounds_by_conference, "super_bowl": super_bowl["matchups"][0], "champion": winner[0]}
+
+    def tiebreak(team_a: str, team_b: str) -> str | None:
+        if record(team_a) == record(team_b):
+            return None
+        return team_a if record(team_a) > record(team_b) else team_b
+
+    events = bracket_projection.real_postseason_events(
+        storage, SPORT, season_inputs["current_season"], lambda event: event.get("season_type") == POSTSEASON_TYPE,
+    )
+    real = RealPostseason(events, bracket_projection.logged_home_probability(event_prediction, storage, s3, predictions_table, logger))
+    engine = BracketSimulation(real, elo_rules(season_inputs["current_ratings"]), tiebreak=tiebreak)
+    bracket = engine.run(topology, ROUND_ODDS_COLUMNS, group_of=conference_of.get)
     return enrich_bracket_team_names(storage, SPORT, bracket)
+
+
+def postseason_active(storage: FeatureStorage) -> bool:
+    """Whether the daily schedule should rebuild the projection today."""
+    return bracket_projection.postseason_active(storage, SPORT, lambda event: event.get("season_type") == POSTSEASON_TYPE)
 
 
 def build_season_projection(storage: FeatureStorage, s3, predictions_table) -> dict:

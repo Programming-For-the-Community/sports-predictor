@@ -113,7 +113,9 @@ class _Context:
 
     def goalie_history(self, goalie_id: str) -> list[dict]:
         """One goalie's goalie_game_records before this event, most recent first."""
-        rows = self.storage.get_player_game_stats(goalie_id, before_date=self.before_date, limit=GOALIE_HISTORY_GAMES)
+        rows = self.storage.get_player_game_stats(
+            goalie_id, before_date=self.before_date, limit=GOALIE_HISTORY_GAMES, sport=self.sport,
+        )
         return [nhl.goalie_game_record(row, self.season_by_event.get(row.get("event_key"))) for row in rows]
 
     def goalie_logs(self, team_id: str) -> dict[str, list[dict]]:
@@ -244,7 +246,9 @@ def build_live_player_features(
     team_id, position = metadata.get("team_id"), metadata.get("position")
     if position == GOALIE_POSITION:
         return _goalie_row(context, entity_id, team_id)
-    prior_games = storage.get_player_game_stats(entity_id, before_date=context.before_date, limit=nhl.SKATER_HISTORY_GAMES)
+    prior_games = storage.get_player_game_stats(
+        entity_id, before_date=context.before_date, limit=nhl.SKATER_HISTORY_GAMES, sport=sport,
+    )
     return _skater_row(context, entity_id, team_id, position, prior_games, context.recent_lines(team_id))
 
 
@@ -262,12 +266,14 @@ def build_live_event_leader_candidates(storage, sport: str, event_key: str, even
         }
         skater_ids = [entity_id for entity_id, position in positions.items() if position != GOALIE_POSITION]
         top = top_n_by_recent_volume(
-            storage, skater_ids, SKATER_VOLUME_STAT, context.before_date, nhl.PLAYER_WINDOW, LEADER_SKATER_LIMIT,
+            storage, sport, skater_ids, SKATER_VOLUME_STAT, context.before_date, nhl.PLAYER_WINDOW, LEADER_SKATER_LIMIT,
         )
         lines = context.recent_lines(team_id)
         skaters = []
         for entity_id in top:
-            prior_games = storage.get_player_game_stats(entity_id, before_date=context.before_date, limit=nhl.SKATER_HISTORY_GAMES)
+            prior_games = storage.get_player_game_stats(
+                entity_id, before_date=context.before_date, limit=nhl.SKATER_HISTORY_GAMES, sport=sport,
+            )
             skaters.append(_skater_row(context, entity_id, team_id, positions[entity_id], prior_games, lines))
         goalie_id, _ = context.starter(team_id)
         return {"skaters": skaters, "goalie": _goalie_row(context, goalie_id, team_id) if goalie_id else None}

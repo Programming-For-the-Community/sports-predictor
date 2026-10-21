@@ -27,7 +27,7 @@ const Map<String, NflTeam> kNflTeams = {
   '10': NflTeam('TEN', Color(0xFF4B92DB)),
   '11': NflTeam('IND', Color(0xFF002C5F)),
   '12': NflTeam('KC', Color(0xFFE31837)),
-  '13': NflTeam('LV', Color(0xFF000000)),
+  '13': NflTeam('LV', Color(0xFFC4CED4)),
   '14': NflTeam('LAR', Color(0xFF003594)),
   '15': NflTeam('MIA', Color(0xFF008E97)),
   '16': NflTeam('MIN', Color(0xFF4F2683)),

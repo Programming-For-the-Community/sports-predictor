@@ -41,5 +41,6 @@ _get_predictions_table = _resources.predictions_table
 lambda_handler = make_event_prediction_lambda_handler(
     resources=_resources, event_prediction=event_prediction,
     run_scheduled_fn=lambda: season_projection.run_scheduled(*_resources.all()),
+    postseason_active_fn=lambda: season_projection.postseason_active(_resources.storage()),
     logger=logger, player_props=True,
 )

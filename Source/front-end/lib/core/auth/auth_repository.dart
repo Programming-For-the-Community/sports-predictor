@@ -211,23 +211,47 @@ class AuthRepository extends StateNotifier<AuthState> {
     }
   }
 
-  Future<CognitoTokens> _refresh(CognitoTokens current) async {
+  /// One rotation at a time. Every request near expiry and renewSession can
+  /// ask at once; each rotating the same refresh token leaves Cognito
+  /// honouring a different one than whichever is written last.
+  Future<CognitoTokens> _refresh(CognitoTokens current) =>
+      _refreshing ??= _rotate(current).whenComplete(() => _refreshing = null);
+
+  Future<CognitoTokens>? _refreshing;
+
+  Future<CognitoTokens> _rotate(CognitoTokens current) async {
     var refreshToken = current.refreshToken;
     if (rollingSession) {
       // background_checks.dart may have rotated it since this isolate last
       // read the store; the old one stops working after Cognito's grace period.
-      final stored = await (await _tokens).read();
-      if (stored != null) refreshToken = CognitoTokens.fromJson(jsonDecode(stored) as Map<String, dynamic>).refreshToken;
+      refreshToken = await _storedRefreshToken() ?? refreshToken;
     }
-    final refreshed = await _authClient.refresh(refreshToken);
+    CognitoTokens refreshed;
+    try {
+      refreshed = await _authClient.refresh(refreshToken);
+    } on CognitoException catch (error) {
+      // The background job can rotate the stored token mid-request.
+      final stored = rollingSession && error.type == refreshTokenReuseError ? await _storedRefreshToken() : null;
+      if (stored == null || stored == refreshToken) rethrow;
+      refreshToken = stored;
+      refreshed = await _authClient.refresh(refreshToken);
+    }
     await _persist(refreshed);
     if (refreshed.refreshToken != refreshToken) await markSessionRenewed(await _prefsInstance);
     return refreshed;
   }
 
+  Future<String?> _storedRefreshToken() async {
+    final stored = await (await _tokens).read();
+    return stored == null ? null : CognitoTokens.fromJson(jsonDecode(stored) as Map<String, dynamic>).refreshToken;
+  }
+
   /// Web signs out on any failed refresh; the rolling session only when
-  /// Cognito rejects the refresh token itself (expired or revoked).
-  bool _signsOut(Object error) => !rollingSession || (error is CognitoException && error.type == 'NotAuthorizedException');
+  /// Cognito rejects the refresh token itself (expired, revoked, or already
+  /// rotated away).
+  bool _signsOut(Object error) =>
+      !rollingSession ||
+      (error is CognitoException && (error.type == 'NotAuthorizedException' || error.type == refreshTokenReuseError));
 
   Future<void> logout() async {
     await _clear();

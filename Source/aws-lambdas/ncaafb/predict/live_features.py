@@ -136,7 +136,7 @@ def _presumptive_leader(
             continue
         entity_id = candidate["entity_id"]
         if _still_on_team(storage, sport, entity_id, team_id, reference_date):
-            return entity_id, storage.get_player_game_stats(entity_id, before_date=before_date, limit=window)
+            return entity_id, storage.get_player_game_stats(entity_id, before_date=before_date, limit=window, sport=sport)
     return None
 
 
@@ -222,7 +222,7 @@ def build_live_player_features(
     team_id = (entity.get("metadata") or {}).get("team_id")
 
     team_coordinates = _team_coordinates_for(storage, sport, home_id, away_id)
-    prior_games = storage.get_player_game_stats(entity_id, before_date=event["event_date"], limit=window)
+    prior_games = storage.get_player_game_stats(entity_id, before_date=event["event_date"], limit=window, sport=sport)
     return _build_player_feature_row(
         storage, sport, event, home_id, away_id, entity_id, team_id,
         prior_games, team_coordinates, window, current_ratings, events,
@@ -265,7 +265,7 @@ def build_live_event_leader_candidates(
         for category, stat_key in LEADER_VOLUME_STATS.items():
             candidate_ids = _box_score_candidate_ids(storage, sport, team_id, before_date, current_season, stat_key, events)
             histories = _top_n_by_recent_volume(
-                storage, candidate_ids, stat_key, before_date, window, LEADER_CANDIDATE_LIMITS[category],
+                storage, sport, candidate_ids, stat_key, before_date, window, LEADER_CANDIDATE_LIMITS[category],
             )
             result[category] = [
                 _build_player_feature_row(
