@@ -14,7 +14,7 @@ The nfl_ingest module is registered in sys.modules by conftest.py, which
 also sets RAW_BUCKET_NAME before the module is imported (it's read at
 module level by the handler).
 """
-from unittest.mock import patch
+from unittest.mock import MagicMock, call, patch
 
 import nfl_ingest
 
@@ -326,3 +326,16 @@ class TestForceRefresh:
 
         self._run(mock_s3, mock_client, {**payload, "force_refresh": True})
         assert mock_client.get_depth_chart.call_count == 4
+
+
+def test_a_lock_odds_call_only_locks_the_named_games_lines():
+    client = MagicMock()
+    client.get_event_odds.return_value = {"items": [{"provider": {"name": "DraftKings"}, "details": "X -3"}]}
+    with patch.object(nfl_ingest, "NFLClient", return_value=client), patch.object(nfl_ingest, "_put_json") as put_json:
+        result = nfl_ingest.lambda_handler({"lock_odds": ["401"]}, None)
+
+    assert result == {"locked": 1, "failed": 0}
+    assert client.method_calls == [call.get_event_odds("401")]
+    key, payload = put_json.call_args.args
+    assert key == "nfl/odds/401.json"
+    assert "locked_at" in payload

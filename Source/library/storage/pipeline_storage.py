@@ -7,7 +7,7 @@ from boto3.dynamodb.conditions import Attr, Key
 
 from library.aws.dynamodb_table import DynamoDBTable
 from library.aws.s3_manager import S3Manager
-from library.normalize.odds import PREGAME_ODDS
+from library.normalize.odds import LOCKED_AT, PREGAME_ODDS
 from library.schema.keys import entity_key, entity_team_key
 
 
@@ -66,18 +66,21 @@ class PipelineStorage:
         # off status-index and discarding most of it in Python.
         if "sport" in item and "status" in item:
             item = {**item, "sport_status": f"{item['sport']}#{item['status']}"}
-        # A rewrite without odds (ESPN drops them once a game starts) keeps
-        # the line already on file.
-        if item.get("event_type") == "head_to_head" and PREGAME_ODDS not in item:
+        # The line on file stays when this rewrite has none (ESPN drops them
+        # once a game starts) or when it was locked at kickoff.
+        if item.get("event_type") == "head_to_head":
             existing = self._events_table.get_item({"event_key": item["event_key"]})
-            if existing and existing.get(PREGAME_ODDS) is not None:
-                item = {**item, PREGAME_ODDS: existing[PREGAME_ODDS]}
+            kept = (existing or {}).get(PREGAME_ODDS)
+            if kept is not None and (PREGAME_ODDS not in item or LOCKED_AT in kept):
+                item = {**item, PREGAME_ODDS: kept}
         self._events_table.put_item(item)
 
     def set_event_odds(self, event_key: str, odds: dict) -> bool:
         """Saves an event's betting line without touching anything else on
-        it. False when the event isn't on file yet."""
-        return self._events_table.set_attribute_if_exists({"event_key": event_key}, PREGAME_ODDS, odds)
+        it. False when the event isn't on file yet or its line is locked."""
+        return self._events_table.set_attribute_if_exists(
+            {"event_key": event_key}, PREGAME_ODDS, odds, condition=Attr(f"{PREGAME_ODDS}.{LOCKED_AT}").not_exists(),
+        )
 
     def get_events_by_status(self, sport: str, status: str) -> list[dict]:
         """Every event for a sport currently at `status`, via the

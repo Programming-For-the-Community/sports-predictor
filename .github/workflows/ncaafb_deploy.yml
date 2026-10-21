@@ -173,7 +173,7 @@ jobs:
       sport: 'NCAAFB'
       dockerfile_path: 'Source/data-backfills/ncaafb/Dockerfile'
       image_name: 'ncaafb-backfill'
-      image_version: '1.0.0'
+      image_version: '1.1.0'
 
   # Builds feature engineering and win-probability/score/player-prop
   # training (shared image). National-ranking training is a separate
@@ -213,7 +213,7 @@ jobs:
       sport: 'NCAAFB'
       dockerfile_path: 'Source/aws-lambdas/ncaafb/predict/Dockerfile'
       image_name: 'ncaafb-predict'
-      image_version: '2.0.0'
+      image_version: '2.1.0'
       platform: 'linux/arm64'
 
   # Only ai_hosting is a real dependency here -- see app_deploy.yml's own

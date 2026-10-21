@@ -182,7 +182,7 @@ jobs:
       sport: 'NHL'
       dockerfile_path: 'Source/data-backfills/nhl/Dockerfile'
       image_name: 'nhl-backfill'
-      image_version: '1.0.0'
+      image_version: '1.1.0'
 
   ai_training:
     name: AI training (build)
@@ -211,7 +211,7 @@ jobs:
       sport: 'NHL'
       dockerfile_path: 'Source/aws-lambdas/nhl/predict/Dockerfile'
       image_name: 'nhl-predict'
-      image_version: '1.0.0'
+      image_version: '1.1.0'
       platform: 'linux/arm64'
 
   infra:

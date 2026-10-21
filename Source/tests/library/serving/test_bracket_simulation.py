@@ -2,13 +2,18 @@
 Unit tests for library.serving.bracket_simulation: a four-team, two-round
 bracket (1v4, 2v3, then the winners) over fake real-game events.
 """
+import math
+
 import pytest
 
+from library.normalize.odds import no_vig_home_chance
 from library.serving.bracket_simulation import (
     BracketSimulation,
     MatchupRules,
     RealPostseason,
+    measured_home_edge,
     series_probability,
+    series_win_chance,
 )
 
 # team_a's chance in every game, by (team_a, team_b).
@@ -207,3 +212,79 @@ class TestRealPostseason:
         broken = {"event_key": "x", "status": "completed", "participants": []}
         real = RealPostseason([broken, _game("g1", "A", "D", status="completed", home_score=1, away_score=0)], lambda event: None)
         assert real.record("A", "D") == (1, 0)
+
+
+NBA_HOME_EDGE = 0.32  # logit(0.58), about the NBA's home win share
+
+
+def _line(home_ml, away_ml, locked=True):
+    line = {"favorite": "home" if home_ml < away_ml else "away", "home_moneyline": home_ml, "away_moneyline": away_ml}
+    return {**line, "locked_at": "2026-04-19T23:45:00+00:00"} if locked else line
+
+
+def _series_slot(events, home_edge=NBA_HOME_EDGE):
+    def topology(play_round):
+        round_payload, advancing = play_round("Final", [("A", "D", 1, 4)])
+        return {"rounds": [round_payload], "champion": advancing[0][0]}
+
+    real = RealPostseason(list(events), lambda event: None)
+    engine = BracketSimulation(real, _rules(wins_needed=4), simulations=50, home_edge=home_edge)
+    return engine.run(topology, COLUMNS, group_of=lambda team: "League")["rounds"][0]["matchups"][0]
+
+
+def _game_one(line, status="scheduled"):
+    event = _game("g1", "A", "D", status=status, home_score=100 if status == "completed" else None, away_score=90 if status == "completed" else None)
+    event["pregame_odds"] = line
+    return event
+
+
+class TestSeriesWinChance:
+    def test_a_modest_game_one_favourite_is_the_series_underdog(self):
+        # -130/+110: the host is 54% in Game 1 but only ~45% over the series.
+        host = no_vig_home_chance(_line(-130, 110))
+        assert host == pytest.approx(0.543, abs=1e-3)
+        assert series_win_chance(host, NBA_HOME_EDGE, 4) == pytest.approx(0.445, abs=1e-3)
+
+    def test_a_clear_game_one_favourite_stays_the_series_favourite(self):
+        assert series_win_chance(no_vig_home_chance(_line(-180, 150)), NBA_HOME_EDGE, 4) > 0.5
+
+    def test_with_no_home_edge_the_game_one_chance_carries_over(self):
+        assert series_win_chance(0.6, 0.0, 4) == pytest.approx(series_probability(lambda i: 0.6, 4))
+
+
+class TestMeasuredHomeEdge:
+    def _results(self, home_wins, away_wins):
+        return [
+            _game(f"h{i}", "A", "D", status="completed", home_score=100, away_score=90) for i in range(home_wins)
+        ] + [
+            _game(f"a{i}", "A", "D", status="completed", home_score=90, away_score=100) for i in range(away_wins)
+        ]
+
+    def test_logit_of_the_home_win_share(self):
+        assert measured_home_edge(self._results(174, 126)) == pytest.approx(math.log(174 / 126))
+
+    def test_too_few_games_measure_no_edge(self):
+        assert measured_home_edge(self._results(10, 5)) == 0.0
+
+
+class TestSeriesFavorite:
+    def test_comes_from_the_locked_game_one_line_with_home_court_removed(self):
+        # A hosts and is the Game 1 favourite, but D is likelier to win the series.
+        row = _series_slot([_game_one(_line(-130, 110))])
+        assert row["favorite"] == "D"
+
+    def test_the_better_seed_until_game_one_locks(self):
+        row = _series_slot([_game_one(_line(-115, -105, locked=False))])
+        assert row["favorite"] == "A"
+
+    def test_a_started_game_one_uses_its_line_even_without_a_lock(self):
+        row = _series_slot([_game_one(_line(-130, 110, locked=False), status="completed")])
+        assert row["favorite"] == "D"
+
+    def test_a_line_without_moneylines_falls_back_to_the_seeds(self):
+        row = _series_slot([_game_one({"favorite": "away", "locked_at": "t"})])
+        assert row["favorite"] == "A"
+
+    def test_a_single_game_still_uses_its_own_line(self):
+        bracket = _simulate([_game("g1", "A", "D", favorite="away")])
+        assert bracket["rounds"][0]["matchups"][0]["favorite"] == "D"

@@ -76,7 +76,7 @@ from library.aws.account import get_account_id
 from library.aws.boto_config import DEFAULT_CONFIG
 from library.http.espn_core import EspnCoreApiClient
 from library.http.nfl import NFLClient
-from library.normalize.odds import fetch_event_odds
+from library.normalize.odds import fetch_event_odds, lock_event_odds
 from library.storage.depth_chart_cache import DEPTH_CHART_CACHE_TTL_DAYS, get_cached_depth_chart
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s", force=True)  # AWS Lambda pre-attaches a root handler, so basicConfig() is otherwise a silent no-op
@@ -245,6 +245,12 @@ def _ingest_week(
 
 
 def lambda_handler(event: dict, context) -> dict:
+    # The prediction scheduler's kickoff call: lock these games' lines, nothing else.
+    if "lock_odds" in event:
+        locked, failed = lock_event_odds(NFLClient(), "nfl", event["lock_odds"], put_json=_put_json, logger=logger)
+        logger.info("Locked lines: %d locked, %d failed", locked, failed)
+        return {"locked": locked, "failed": failed}
+
     season = event.get("season")
     season_type = event.get("season_type")
     week = event.get("week")

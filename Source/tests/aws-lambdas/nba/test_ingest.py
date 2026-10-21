@@ -10,7 +10,7 @@ also sets RAW_BUCKET_NAME before the module is imported.
 """
 import json
 from datetime import date
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, call, patch
 
 from botocore.exceptions import ClientError
 
@@ -302,3 +302,16 @@ class TestYesterday:
 
     def test_crosses_a_month_boundary(self):
         assert nba_ingest._yesterday(date(2026, 3, 1)) == "20260228"
+
+
+def test_a_lock_odds_call_only_locks_the_named_games_lines():
+    client = MagicMock()
+    client.get_event_odds.return_value = {"items": [{"provider": {"name": "DraftKings"}, "details": "X -3"}]}
+    with patch.object(nba_ingest, "NBAClient", return_value=client), patch.object(nba_ingest, "_put_json") as put_json:
+        result = nba_ingest.lambda_handler({"lock_odds": ["401"]}, None)
+
+    assert result == {"locked": 1, "failed": 0}
+    assert client.method_calls == [call.get_event_odds("401")]
+    key, payload = put_json.call_args.args
+    assert key == "nba/odds/401.json"
+    assert "locked_at" in payload

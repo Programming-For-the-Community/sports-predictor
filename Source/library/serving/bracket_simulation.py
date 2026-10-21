@@ -14,11 +14,15 @@ simulated from the sport's own per-game odds (`MatchupRules`). The bracket
 shown is one of those runs: of the runs with the typical number of upsets,
 the most likely one. Round odds count every run.
 
-Who's favoured in a slot: the sportsbook favourite on the real game's
-pre-game line (a series' first game), else the better seed, else the
-sport's `tiebreak` (better record). UPSET = the favourite lost; UPSET WATCH
-= the favourite won but the model gave it no more than
-UPSET_WATCH_MAX_FAVORITE_PERCENT before the game or series began.
+Who's favoured in a slot, else the better seed, else the sport's `tiebreak`
+(better record):
+  - a single game: the sportsbook favourite on its pre-game line.
+  - a series: the team the betting market makes likelier to win the series,
+    from Game 1's line (series_win_chance) once Game 1 has locked or
+    started. It doesn't change after that.
+UPSET = the favourite lost; UPSET WATCH = the favourite won but the model
+gave it no more than UPSET_WATCH_MAX_FAVORITE_PERCENT before the game or
+series began.
 """
 import hashlib
 import math
@@ -28,12 +32,18 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 
 from library.features.common import DEFAULT_STARTING_RATING, expected_score
+from library.normalize.odds import LOCKED_AT, PREGAME_ODDS, no_vig_home_chance
 from library.serving.common import _actual_result, _home_and_away, betting_favorite
 
 SIMULATIONS = 2000
 UPSET_WATCH_MAX_FAVORITE_PERCENT = 60
 
 Pair = tuple[str | None, str | None, int | None, int | None]
+
+# Game 1's host is at home in games 1, 2, 5 and 7 of a best-of-seven (2-2-1-1-1).
+SERIES_HOME_PATTERN = (True, True, False, False, True, False, True)
+# Fewer decided games than this and the home edge isn't measured (0).
+MIN_GAMES_FOR_HOME_EDGE = 200
 
 
 @dataclass(frozen=True)
@@ -60,6 +70,37 @@ def series_probability(game_probability: Callable[[int], float], wins_needed: in
         return memo[(a, b)]
 
     return chance(wins_a, wins_b)
+
+
+def _logit(p: float) -> float:
+    return math.log(p / (1 - p))
+
+
+def _sigmoid(x: float) -> float:
+    return 1 / (1 + math.exp(-x))
+
+
+def measured_home_edge(events: list[dict]) -> float:
+    """The home side's edge in these completed games, in log-odds: the
+    logit of the home win share. 0 with fewer than MIN_GAMES_FOR_HOME_EDGE
+    decided games."""
+    results = [_actual_result(event) for event in events if event.get("status") == "completed"]
+    home_won = [r["home_won"] for r in results if r is not None and r["home_score"] != r["away_score"]]
+    if len(home_won) < MIN_GAMES_FOR_HOME_EDGE:
+        return 0.0
+    share = sum(home_won) / len(home_won)
+    return _logit(share) if 0 < share < 1 else 0.0
+
+
+def series_win_chance(host_game_one_chance: float, home_edge: float, wins_needed: int) -> float:
+    """Game 1's host's chance to win the series: its Game 1 chance with the
+    home edge taken out is its neutral strength, and each game adds the edge
+    back for whoever hosts it (SERIES_HOME_PATTERN)."""
+    strength = _logit(host_game_one_chance) - home_edge
+    home, away = _sigmoid(strength + home_edge), _sigmoid(strength - home_edge)
+    return series_probability(
+        lambda i: home if SERIES_HOME_PATTERN[i % len(SERIES_HOME_PATTERN)] else away, wins_needed,
+    )
 
 
 def elo_rules(ratings: dict[str, float], wins_needed: Callable[[str], int] = lambda round_name: 1):
@@ -124,6 +165,26 @@ class RealPostseason:
             return None
         home_id, away_id = _home_and_away(games[0])
         return home_id if side == "home" else away_id
+
+    def series_favorite(self, team_a: str, team_b: str, wins_needed: int, home_edge: float) -> str | None:
+        """The market's series favourite from Game 1's line (series_win_chance).
+        None until Game 1's line is locked or Game 1 has started, without
+        both moneylines, or for a dead-even series."""
+        games = self.games(team_a, team_b)
+        if not games:
+            return None
+        first = games[0]
+        line = first.get(PREGAME_ODDS) or {}
+        if LOCKED_AT not in line and first.get("status") == "scheduled":
+            return None
+        host_chance = no_vig_home_chance(line)
+        if host_chance is None or not 0 < host_chance < 1:
+            return None
+        host_series = series_win_chance(host_chance, home_edge, wins_needed)
+        if math.isclose(host_series, 0.5):
+            return None
+        host, visitor = _home_and_away(first)
+        return host if host_series > 0.5 else visitor
 
     def fingerprint(self) -> str:
         """Changes only when a real game is added or decided."""
@@ -190,19 +251,25 @@ class _Run:
 class BracketSimulation:
     """`rules(round_name, team_a, team_b, home_advantage)` is the sport's
     MatchupRules for a slot; `tiebreak(team_a, team_b)` names the better
-    team when neither the line nor the seeds settle who's favoured."""
+    team when neither the line nor the seeds settle who's favoured;
+    `home_edge` is the sport's measured_home_edge, for series favourites."""
 
     def __init__(
         self, real: RealPostseason, rules: Callable[[str, str, str, float], MatchupRules], *,
         tiebreak: Callable[[str, str], str | None] = lambda a, b: None, simulations: int = SIMULATIONS,
+        home_edge: float = 0.0,
     ):
         self._real = real
         self._rules = rules
         self._tiebreak = tiebreak
         self._simulations = simulations
+        self._home_edge = home_edge
 
-    def _favorite(self, team_a: str, team_b: str, seed_a: int | None, seed_b: int | None) -> str | None:
-        line = self._real.favorite(team_a, team_b)
+    def _favorite(self, team_a: str, team_b: str, seed_a: int | None, seed_b: int | None, wins_needed: int) -> str | None:
+        if wins_needed > 1:
+            line = self._real.series_favorite(team_a, team_b, wins_needed, self._home_edge)
+        else:
+            line = self._real.favorite(team_a, team_b)
         if line is not None:
             return line
         if seed_a is not None and seed_b is not None and seed_a != seed_b:
@@ -240,7 +307,7 @@ class BracketSimulation:
             round_name, team_a, team_b, seed_a, seed_b, winner=None, wins_needed=rules.wins_needed,
             real_wins_a=real_wins_a, real_wins_b=real_wins_b, real_games=bool(games), decided=decided,
             chance_pre_a=self._pre_start_chance(rules, team_a, team_b),
-            favorite=self._favorite(team_a, team_b, seed_a, seed_b),
+            favorite=self._favorite(team_a, team_b, seed_a, seed_b, rules.wins_needed),
         )
         if decided:
             slot.winner = team_a if real_wins_a >= rules.wins_needed else team_b

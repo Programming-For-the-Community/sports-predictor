@@ -22,11 +22,16 @@ class StateTable(FakeTable):
         return True
 
 
+# Locked by default, so only TestOddsLock sees the lock step.
+LOCKED_LINE = {"favorite": "home", "locked_at": "2026-09-27T15:50:00+00:00"}
+
+
 def _event(event_id, minutes_to_kickoff, **overrides):
     kickoff = NOW + timedelta(minutes=minutes_to_kickoff)
     return {
         "event_key": f"SPORT#NFL#EVENT#{event_id}", "event_id": event_id, "kickoff_time": kickoff.isoformat(),
-        "event_date": "2026-09-27", "season": 2026, "season_type": 2, "week": 3, **overrides,
+        "event_date": "2026-09-27", "season": 2026, "season_type": 2, "week": 3, "pregame_odds": LOCKED_LINE,
+        **overrides,
     }
 
 
@@ -86,7 +91,7 @@ class TestSnapshotWindow:
         summary, calls, _ = _run([_event("1", 10)])
 
         assert calls == [("proj-nfl-predict", {"detail-type": "SnapshotPrediction", "event_id": "1"})]
-        assert summary == {"nfl": {"refreshes": 0, "snapshots": 1}}
+        assert summary == {"nfl": {"refreshes": 0, "snapshots": 1, "locks": 0}}
 
     def test_an_already_snapshotted_event_is_left_alone(self):
         table = StateTable([{"event_key": "SPORT#NFL#EVENT#1", "model_key": "SNAPSHOT#final_pregame#MODEL#x#v1", "generated_at": "t"}])
@@ -128,7 +133,7 @@ class TestAfterKickoffSnapshot:
         for minutes in (45, 20, 5):
             summary, calls, _ = self._tick(minutes)
             assert calls == []
-            assert summary == {"nhl": {"refreshes": 0, "snapshots": 0}}
+            assert summary == {"nhl": {"refreshes": 0, "snapshots": 0, "locks": 0}}
 
     def test_refresh_fires_in_the_first_fifteen_minutes_of_the_game(self):
         _, calls, _ = self._tick(-5)
@@ -230,3 +235,48 @@ class TestStartOfEventSnapshot:
 
         assert in_flight == []
         assert len(retried) == 1
+
+
+class TestOddsLock:
+    def _lock_calls(self, calls):
+        return [payload for name, payload in calls if "lock_odds" in payload]
+
+    def test_an_unlocked_game_inside_fifteen_minutes_has_its_line_locked(self):
+        summary, calls, _ = _run([_event("1", 10, pregame_odds={"favorite": "home"}), _event("2", 12, pregame_odds=None)])
+
+        assert ("proj-nfl-ingest", {"lock_odds": ["1", "2"]}) in calls
+        assert summary["nfl"]["locks"] == 2
+
+    def test_nothing_is_locked_before_the_window(self):
+        _, calls, _ = _run([_event("1", 25, pregame_odds=None)])
+
+        assert self._lock_calls(calls) == []
+
+    def test_an_already_locked_line_is_left_alone(self):
+        _, calls, _ = _run([_event("1", 10)])
+
+        assert self._lock_calls(calls) == []
+
+    def test_a_failed_lock_is_retried_after_the_retry_window_but_not_sooner(self):
+        table = StateTable([])
+        _run([_event("1", 14, pregame_odds=None)], table)
+
+        _, soon, _ = _run([_event("1", 14, pregame_odds=None)], table, now=NOW + timedelta(minutes=4))
+        _, later, _ = _run([_event("1", 14, pregame_odds=None)], table, now=NOW + timedelta(minutes=8))
+
+        assert self._lock_calls(soon) == []
+        assert self._lock_calls(later) == [{"lock_odds": ["1"]}]
+
+    def test_nhl_locks_before_puck_drop_though_its_snapshot_comes_after(self):
+        sports = {"nhl": scheduler.SPORT_SCHEDULES["nhl"]}
+
+        _, before, _ = _run([_event("e1", 5, pregame_odds=None)], sports=sports)
+        _, after, _ = _run([_event("e2", -5, pregame_odds=None)], sports=sports)
+
+        assert before == [("proj-nhl-ingest", {"lock_odds": ["e1"]})]
+        assert self._lock_calls(after) == []
+
+    def test_every_head_to_head_sport_locks_and_field_sports_do_not(self):
+        locking = {sport for sport, schedule in scheduler.SPORT_SCHEDULES.items() if schedule.locks_odds}
+
+        assert locking == {"nfl", "ncaafb", "nba", "ncaambb", "nhl"}

@@ -638,7 +638,7 @@ jobs:
       sport: 'NFL'
       dockerfile_path: 'Source/data-backfills/nfl/Dockerfile'
       image_name: 'nfl-backfill'
-      image_version: '1.0.0'
+      image_version: '1.1.0'
 
   nfl_ai_training_build:
     name: NFL AI training (build)
@@ -663,7 +663,7 @@ jobs:
       sport: 'NFL'
       dockerfile_path: 'Source/aws-lambdas/nfl/predict/Dockerfile'
       image_name: 'nfl-predict'
-      image_version: '2.0.0'
+      image_version: '2.1.0'
       platform: 'linux/arm64'
 
   ncaafb_backfill_build:
@@ -675,7 +675,7 @@ jobs:
       sport: 'NCAAFB'
       dockerfile_path: 'Source/data-backfills/ncaafb/Dockerfile'
       image_name: 'ncaafb-backfill'
-      image_version: '1.0.0'
+      image_version: '1.1.0'
 
   ncaafb_ai_training_build:
     name: NCAAFB AI training (build)
@@ -712,7 +712,7 @@ jobs:
       sport: 'NCAAFB'
       dockerfile_path: 'Source/aws-lambdas/ncaafb/predict/Dockerfile'
       image_name: 'ncaafb-predict'
-      image_version: '2.0.0'
+      image_version: '2.1.0'
       platform: 'linux/arm64'
 
   nba_backfill_build:
@@ -724,7 +724,7 @@ jobs:
       sport: 'NBA'
       dockerfile_path: 'Source/data-backfills/nba/Dockerfile'
       image_name: 'nba-backfill'
-      image_version: '1.0.0'
+      image_version: '1.1.0'
 
   nba_ai_training_build:
     name: NBA AI training (build)
@@ -749,7 +749,7 @@ jobs:
       sport: 'NBA'
       dockerfile_path: 'Source/aws-lambdas/nba/predict/Dockerfile'
       image_name: 'nba-predict'
-      image_version: '2.0.0'
+      image_version: '2.1.0'
       platform: 'linux/arm64'
 
   ncaambb_backfill_build:
@@ -761,7 +761,7 @@ jobs:
       sport: 'NCAA MBB'
       dockerfile_path: 'Source/data-backfills/ncaambb/Dockerfile'
       image_name: 'ncaambb-backfill'
-      image_version: '1.0.0'
+      image_version: '1.1.0'
 
   ncaambb_ai_training_build:
     name: NCAA MBB AI training (build)
@@ -798,7 +798,7 @@ jobs:
       sport: 'NCAA MBB'
       dockerfile_path: 'Source/aws-lambdas/ncaambb/predict/Dockerfile'
       image_name: 'ncaambb-predict'
-      image_version: '2.0.0'
+      image_version: '2.1.0'
       platform: 'linux/arm64'
 
   pga_backfill_build:
@@ -858,7 +858,7 @@ jobs:
       sport: 'NHL'
       dockerfile_path: 'Source/data-backfills/nhl/Dockerfile'
       image_name: 'nhl-backfill'
-      image_version: '1.0.0'
+      image_version: '1.1.0'
 
   nhl_ai_training_build:
     name: NHL AI training (build)
@@ -883,7 +883,7 @@ jobs:
       sport: 'NHL'
       dockerfile_path: 'Source/aws-lambdas/nhl/predict/Dockerfile'
       image_name: 'nhl-predict'
-      image_version: '1.0.0'
+      image_version: '1.1.0'
       platform: 'linux/arm64'
 
   f1_ai_training_build:

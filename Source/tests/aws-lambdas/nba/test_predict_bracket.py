@@ -56,7 +56,7 @@ class TestBracketPayload:
         return {
             "current_season": 2026,
             "remaining_games": remaining_games or [],
-            "wins": {}, "point_differential": {}, "current_ratings": {},
+            "wins": {}, "point_differential": {}, "current_ratings": {}, "home_edge": 0.0,
         }
 
     def test_returns_both_conferences_finals_and_a_champion(self):

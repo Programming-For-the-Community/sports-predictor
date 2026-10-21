@@ -79,7 +79,7 @@ from library.aws.boto_config import DEFAULT_CONFIG
 from library.http.ncaambb import NCAAMBBClient
 from library.http.ncaambb_core import NCAAMBBCoreClient, current_ap_poll_pointer
 from library.normalize.espn import attach_injuries, league_team_ids, roster_to_team_injuries
-from library.normalize.odds import fetch_event_odds
+from library.normalize.odds import fetch_event_odds, lock_event_odds
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s", force=True)  # AWS Lambda pre-attaches a root handler, so basicConfig() is otherwise a silent no-op
 logger = logging.getLogger("ncaambb-ingest")
@@ -184,6 +184,12 @@ def _fetch_current_ap_poll(client: NCAAMBBClient, core_client: NCAAMBBCoreClient
 
 
 def lambda_handler(event: dict, context) -> dict:
+    # The prediction scheduler's kickoff call: lock these games' lines, nothing else.
+    if "lock_odds" in event:
+        locked, failed = lock_event_odds(NCAAMBBClient(), "ncaambb", event["lock_odds"], put_json=_put_json, logger=logger)
+        logger.info("Locked lines: %d locked, %d failed", locked, failed)
+        return {"locked": locked, "failed": failed}
+
     target_date = event.get("date") or _yesterday()
     client = NCAAMBBClient()
 

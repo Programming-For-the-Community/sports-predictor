@@ -21,7 +21,7 @@ import season_simulation
 from library.features.common import compute_elo_ratings
 from library.features.nba_teams import TEAM_DIVISIONS, is_real_franchise_matchup
 from library.serving import bracket_projection
-from library.serving.bracket_simulation import BracketSimulation, RealPostseason, elo_rules
+from library.serving.bracket_simulation import BracketSimulation, RealPostseason, elo_rules, measured_home_edge
 from library.serving import season_projection_common
 from library.serving.common import enrich_bracket_team_names, enrich_team_standings
 from library.serving.nba_reads import _home_and_away
@@ -138,6 +138,7 @@ def _season_standings_inputs(storage: FeatureStorage) -> dict:
     return {
         "current_season": current_season,
         "completed_event_keys": {e["event_key"] for e in completed},
+        "home_edge": measured_home_edge(all_completed),
         "wins": wins,
         "losses": losses,
         "point_differential": point_differential,
@@ -383,7 +384,9 @@ def _bracket_payload(
         storage, SPORT, season_inputs["current_season"], lambda event: event.get("season_type") in POSTSEASON_TYPES,
     )
     real = RealPostseason(events, bracket_projection.logged_home_probability(event_prediction, storage, s3, predictions_table, logger))
-    engine = BracketSimulation(real, _matchup_rules(season_inputs["current_ratings"]), tiebreak=tiebreak)
+    engine = BracketSimulation(
+        real, _matchup_rules(season_inputs["current_ratings"]), tiebreak=tiebreak, home_edge=season_inputs["home_edge"],
+    )
     bracket = engine.run(topology, ROUND_ODDS_COLUMNS, group_of=conference_of.get)
     return enrich_bracket_team_names(storage, SPORT, bracket)
 

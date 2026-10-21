@@ -187,7 +187,7 @@ jobs:
       sport: 'NCAA MBB'
       dockerfile_path: 'Source/data-backfills/ncaambb/Dockerfile'
       image_name: 'ncaambb-backfill'
-      image_version: '1.0.0'
+      image_version: '1.1.0'
 
   # Builds feature engineering and win-probability/score/player-prop
   # training (shared image). National-ranking training is a separate
@@ -228,7 +228,7 @@ jobs:
       sport: 'NCAA MBB'
       dockerfile_path: 'Source/aws-lambdas/ncaambb/predict/Dockerfile'
       image_name: 'ncaambb-predict'
-      image_version: '2.0.0'
+      image_version: '2.1.0'
       platform: 'linux/arm64'
 
   # Only ai_hosting is a real dependency here -- see app_deploy.yml's own

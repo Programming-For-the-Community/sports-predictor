@@ -37,7 +37,7 @@ from library.aws.boto_config import DEFAULT_CONFIG
 from library.http.nhl import NHLClient
 from library.normalize.espn import attach_injuries, league_team_ids, roster_to_team_injuries
 from library.normalize.nhl import CURRENT_INJURY_STATUSES, is_ingestable_event
-from library.normalize.odds import fetch_event_odds
+from library.normalize.odds import fetch_event_odds, lock_event_odds
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s", force=True)  # AWS Lambda pre-attaches a root handler, so basicConfig() is otherwise a silent no-op
 logger = logging.getLogger("nhl-ingest")
@@ -86,6 +86,12 @@ def _fetch_rosters(client: NHLClient, team_ids: list[str]) -> tuple[int, int, di
 
 
 def lambda_handler(event: dict, context) -> dict:
+    # The prediction scheduler's kickoff call: lock these games' lines, nothing else.
+    if "lock_odds" in event:
+        locked, failed = lock_event_odds(NHLClient(), "nhl", event["lock_odds"], put_json=_put_json, logger=logger)
+        logger.info("Locked lines: %d locked, %d failed", locked, failed)
+        return {"locked": locked, "failed": failed}
+
     target_date = event.get("date") or _yesterday()
     client = NHLClient()
 

@@ -1,8 +1,9 @@
 # prediction-scheduler's own role: reads upcoming events (events table's
 # sport-status-index), reads/writes its own claim markers and the snapshot
 # existence check (predictions table), and async-invokes each head-to-head
-# sport's ingest (pre-kickoff refresh) and predict (snapshot) Lambdas (PGA and
-# F1: predict only -- their start-of-event snapshot has no ingest refresh).
+# sport's ingest (pre-kickoff refresh and odds lock) and predict (snapshot)
+# Lambdas (PGA and F1: predict only -- their start-of-event snapshot has no
+# ingest step).
 # Not in the VPC, so it needs no network permissions.
 data "aws_iam_policy_document" "lambda_prediction_scheduler_assume" {
   statement {
@@ -47,6 +48,7 @@ data "aws_iam_policy_document" "lambda_prediction_scheduler" {
     actions = ["lambda:InvokeFunction"]
     resources = [
       aws_lambda_function.nfl_ingest.arn,
+      aws_lambda_function.ncaafb_ingest.arn,
       aws_lambda_function.nba_ingest.arn,
       aws_lambda_function.ncaambb_ingest.arn,
       aws_lambda_function.nhl_ingest.arn,

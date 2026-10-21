@@ -9,7 +9,7 @@ behavior (see tests/library/aws/test_dynamodb_table.py for that).
 from unittest.mock import MagicMock, patch
 
 import pytest
-from boto3.dynamodb.conditions import Key, Or
+from boto3.dynamodb.conditions import Attr, Key, Or
 
 from library.storage.pipeline_storage import PipelineStorage
 
@@ -160,14 +160,25 @@ class TestUpsertEventKeepsTheSavedLine:
 
         assert mock_events.put_item.call_args.args[0]["pregame_odds"] == self.LINE
 
-    def test_a_newer_line_replaces_the_saved_one(self, storage_env):
+    def test_a_newer_line_replaces_an_unlocked_one(self, storage_env):
         storage, mock_events = _make_storage_with_events(storage_env)
+        mock_events.get_item.return_value = {"event_key": "SPORT#NBA#EVENT#1", "pregame_odds": self.LINE}
         newer = {**self.LINE, "details": "ORL -3.5"}
 
         storage.upsert_event({"event_key": "SPORT#NBA#EVENT#1", "event_type": "head_to_head", "pregame_odds": newer})
 
-        mock_events.get_item.assert_not_called()
         assert mock_events.put_item.call_args.args[0]["pregame_odds"] == newer
+
+    def test_a_line_locked_at_kickoff_survives_a_newer_one(self, storage_env):
+        storage, mock_events = _make_storage_with_events(storage_env)
+        locked = {**self.LINE, "locked_at": "2026-10-22T23:50:00+00:00"}
+        mock_events.get_item.return_value = {"event_key": "SPORT#NBA#EVENT#1", "pregame_odds": locked}
+
+        storage.upsert_event({
+            "event_key": "SPORT#NBA#EVENT#1", "event_type": "head_to_head", "pregame_odds": {**self.LINE, "favorite": "away"},
+        })
+
+        assert mock_events.put_item.call_args.args[0]["pregame_odds"] == locked
 
     def test_a_new_event_without_odds_is_written_as_is(self, storage_env):
         storage, mock_events = _make_storage_with_events(storage_env)
@@ -193,6 +204,7 @@ class TestSetEventOdds:
         assert storage.set_event_odds("SPORT#NBA#EVENT#1", {"favorite": "away"}) is True
         mock_events.set_attribute_if_exists.assert_called_once_with(
             {"event_key": "SPORT#NBA#EVENT#1"}, "pregame_odds", {"favorite": "away"},
+            condition=Attr("pregame_odds.locked_at").not_exists(),
         )
 
 

@@ -190,6 +190,14 @@ class TestSetAttributeIfExists:
         assert kwargs["ExpressionAttributeValues"] == {":value": {"favorite": "home"}}
         assert kwargs["ConditionExpression"] == Attr("event_key").exists()
 
+    def test_an_extra_condition_is_anded_with_existing(self):
+        table, mock_boto_table = _make_table(query_pages=[])
+        extra = Attr("pregame_odds.locked_at").not_exists()
+
+        table.set_attribute_if_exists({"event_key": "E1"}, "pregame_odds", {}, condition=extra)
+
+        assert mock_boto_table.update_item.call_args.kwargs["ConditionExpression"] == Attr("event_key").exists() & extra
+
     def test_false_when_no_item_has_the_key(self):
         table, mock_boto_table = _make_table(query_pages=[])
         mock_boto_table.update_item.side_effect = ClientError(

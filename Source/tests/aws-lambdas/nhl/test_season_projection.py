@@ -229,7 +229,7 @@ class TestBracket:
         points.update({team: 120 - 2 * i for i, team in enumerate(ATLANTIC)})
         points.update({team: 110 - 2 * i for i, team in enumerate(METROPOLITAN)})
         simulation = {team: {"projected_points": p, "projected_wins": p / 2} for team, p in points.items()}
-        inputs = {"wins": {}, "regulation_wins": {}, "current_ratings": ratings, "current_season": SEASON}
+        inputs = {"wins": {}, "regulation_wins": {}, "current_ratings": ratings, "current_season": SEASON, "history": []}
         storage = MagicMock()
         storage.get_all_events.return_value = []
         storage.get_entity.return_value = None

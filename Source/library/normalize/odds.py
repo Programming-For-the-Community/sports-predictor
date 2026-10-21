@@ -8,14 +8,20 @@ closing line after the game.
 
 `favorite` is the sportsbook's own flag, else the shorter moneyline; None
 for a pick'em.
+
+A line captured in the last minutes before kickoff (lock_event_odds) carries
+`locked_at` and is the event's line for good: PipelineStorage writes nothing
+over it.
 """
 import posixpath
 from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime, timezone
 
 from library.schema.keys import event_key
 
 PREGAME_ODDS = "pregame_odds"
 PREFERRED_PROVIDER = "draftkings"
+LOCKED_AT = "locked_at"
 
 
 def _moneyline(value) -> int | None:
@@ -35,8 +41,19 @@ def _moneyline(value) -> int | None:
         return None
 
 
-def _implied(moneyline: int) -> float:
+def implied_probability(moneyline: int) -> float:
+    """American odds as a win chance, the sportsbook's margin included."""
     return -moneyline / (-moneyline + 100) if moneyline < 0 else 100 / (moneyline + 100)
+
+
+def no_vig_home_chance(line: dict) -> float | None:
+    """The home side's chance on a saved `pregame_odds` line with the
+    sportsbook's margin taken out; None without both moneylines."""
+    home, away = line.get("home_moneyline"), line.get("away_moneyline")
+    if home is None or away is None:
+        return None
+    home_chance, away_chance = implied_probability(home), implied_probability(away)
+    return home_chance / (home_chance + away_chance)
 
 
 def _favorite(home_flag, away_flag, home_moneyline: int | None, away_moneyline: int | None) -> str | None:
@@ -46,7 +63,7 @@ def _favorite(home_flag, away_flag, home_moneyline: int | None, away_moneyline: 
         return "away"
     if home_moneyline is None or away_moneyline is None:
         return None
-    home, away = _implied(home_moneyline), _implied(away_moneyline)
+    home, away = implied_probability(home_moneyline), implied_probability(away_moneyline)
     if home == away:
         return None
     return "home" if home > away else "away"
@@ -93,15 +110,19 @@ def scoreboard_odds(competition: dict) -> dict | None:
 
 def core_odds(payload: dict) -> dict | None:
     """From the core API's /events/{id}/competitions/{id}/odds listing; the
-    moneylines sit on each side as an int `moneyLine`."""
+    moneylines sit on each side as an int `moneyLine`. Carries the payload's
+    `locked_at` when lock_event_odds saved it."""
     line = _pick(payload.get("items") or [])
     if line is None:
         return None
-    return _odds(
+    odds = _odds(
         line,
         _moneyline((line.get("homeTeamOdds") or {}).get("moneyLine")),
         _moneyline((line.get("awayTeamOdds") or {}).get("moneyLine")),
     )
+    if odds is not None and payload.get(LOCKED_AT):
+        odds[LOCKED_AT] = payload[LOCKED_AT]
+    return odds
 
 
 def odds_key(sport: str, event_id: str) -> str:
@@ -116,7 +137,7 @@ def apply_core_odds(storage, sport: str, key: str, payload: dict, logger) -> Non
     if odds is None:
         logger.info("No line in %s", key)
     elif not storage.set_event_odds(event_key(sport, event_id), odds):
-        logger.warning("Event %s isn't on file yet -- line in %s not saved", event_id, key)
+        logger.info("Event %s isn't on file yet or its line is locked -- line in %s not saved", event_id, key)
 
 
 def fetch_event_odds(
@@ -144,3 +165,24 @@ def fetch_event_odds(
     with ThreadPoolExecutor(max_workers=min(max_workers, len(to_fetch))) as executor:
         outcomes = list(executor.map(fetch, to_fetch))
     return outcomes.count(True), outcomes.count(None)
+
+
+def lock_event_odds(client, sport: str, event_ids, *, put_json, logger, now: datetime | None = None) -> tuple[int, int]:
+    """Kickoff side: saves each event's current core-API line to odds_key
+    marked `locked_at`, which normalize then makes the event's line for good.
+    (locked, failed); an event with no line listed counts as neither, so the
+    scheduler's next attempt tries it again."""
+    locked_at = (now or datetime.now(timezone.utc)).isoformat()
+    locked = failed = 0
+    for event_id in event_ids:
+        try:
+            payload = client.get_event_odds(event_id)
+            if not payload.get("items"):
+                logger.info("No line listed for event %s yet", event_id)
+                continue
+            put_json(odds_key(sport, event_id), {**payload, LOCKED_AT: locked_at})
+            locked += 1
+        except Exception:
+            logger.exception("Failed locking the line for event %s", event_id)
+            failed += 1
+    return locked, failed

@@ -79,14 +79,16 @@ class DynamoDBTable:
                 return False
             raise
 
-    def set_attribute_if_exists(self, key: dict, name: str, value) -> bool:
+    def set_attribute_if_exists(self, key: dict, name: str, value, condition=None) -> bool:
         """Sets one attribute on an existing item, leaving the rest alone.
-        False (nothing written) when no item has this key."""
+        False (nothing written) when no item has this key, or when the item
+        fails `condition`."""
+        exists = Attr(next(iter(key))).exists()
         try:
             self._table.update_item(
                 Key=key,
                 UpdateExpression="SET #name = :value",
-                ConditionExpression=Attr(next(iter(key))).exists(),
+                ConditionExpression=exists if condition is None else exists & condition,
                 ExpressionAttributeNames={"#name": name},
                 ExpressionAttributeValues={":value": _to_dynamodb_safe(value)},
             )

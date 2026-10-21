@@ -21,7 +21,7 @@ import live_features
 import season_simulation
 from library.features import nhl_dataset, nhl_teams
 from library.serving import bracket_projection, season_projection_common
-from library.serving.bracket_simulation import BracketSimulation, MatchupRules, RealPostseason
+from library.serving.bracket_simulation import BracketSimulation, MatchupRules, RealPostseason, measured_home_edge
 from library.serving.common import enrich_bracket_team_names, enrich_team_standings
 from library.serving.nhl_reads import LEADER_CATEGORY_STATS, _home_and_away
 from library.storage.feature_storage import FeatureStorage
@@ -190,7 +190,10 @@ def _bracket(storage: FeatureStorage, s3, predictions_table, season_inputs: dict
         storage, SPORT, season_inputs["current_season"], lambda event: event.get("season_type") == POSTSEASON_TYPE,
     )
     real = RealPostseason(events, bracket_projection.logged_home_probability(event_prediction, storage, s3, predictions_table, logger))
-    engine = BracketSimulation(real, _matchup_rules(season_inputs["current_ratings"]), tiebreak=tiebreak)
+    engine = BracketSimulation(
+        real, _matchup_rules(season_inputs["current_ratings"]), tiebreak=tiebreak,
+        home_edge=measured_home_edge(season_inputs["history"]),
+    )
     bracket = engine.run(topology, ROUND_ODDS_COLUMNS, group_of=conference_of.get)
     return enrich_bracket_team_names(storage, SPORT, bracket)
 

@@ -30,7 +30,7 @@ data "archive_file" "prediction_scheduler_placeholder" {
 
 resource "aws_lambda_function" "prediction_scheduler" {
   function_name = "${var.project}-prediction-scheduler"
-  description   = "Every 5 minutes: re-runs a sport's ingest ~30 min before kickoff (fresh injuries/rosters), then triggers its predict Lambda ~15 min before to write the pre-kickoff snapshot. PGA/F1: one snapshot at event start."
+  description   = "Every 5 minutes: re-runs a sport's ingest ~30 min before kickoff, locks each game's betting line and triggers its predict Lambda ~15 min before for the pre-kickoff snapshot. PGA/F1: one snapshot at event start."
   role          = aws_iam_role.lambda_prediction_scheduler.arn
   runtime       = "python3.12"
   handler       = "handler.lambda_handler"

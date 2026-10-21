@@ -29,6 +29,13 @@ kickoff instead of before it. NHL uses it: the starting goalies are only
 confirmed once the game starts, so its refresh lands at T .. T+15min and
 its snapshot at T+15min .. T+30min.
 
+    T-15min .. T         LOCK (sports with `locks_odds`, whatever their
+                         snapshot_delay): invoke the sport's ingest with
+                         lock_odds, which saves the betting line as it stands
+                         and makes it the game's line for good (see
+                         library.normalize.odds). Retried every RETRY_AFTER
+                         until the event item shows a locked line.
+
 PGA and F1 have no kickoff to count down to, and are graded against ONE
 snapshot taken at the start of the event. A sport with
 `event_start_snapshot_utc_hour` gets a single SnapshotPrediction in a short
@@ -44,6 +51,7 @@ from typing import Callable
 
 from boto3.dynamodb.conditions import Attr, Key
 
+from library.normalize.odds import LOCKED_AT, PREGAME_ODDS
 from library.parsing import us_eastern_date
 from library.serving import prediction_snapshots as snapshots
 
@@ -54,6 +62,7 @@ RETRY_AFTER = timedelta(minutes=7)
 REFRESH_MARKER = "SNAPSHOT_STATE#refresh"
 SNAPSHOT_MARKER = "SNAPSHOT_STATE#snapshot"
 START_MARKER = "SNAPSHOT_STATE#event_start"
+LOCK_MARKER = "SNAPSHOT_STATE#odds_lock"
 
 
 def _nfl_ingest_payload(event: dict) -> dict:
@@ -79,16 +88,18 @@ class SportSchedule:
     event_types: frozenset[str] = frozenset()
     # Shifts the refresh and snapshot windows this long past kickoff.
     snapshot_delay: timedelta = timedelta(0)
+    # Locks each game's betting line in the last SNAPSHOT_LEAD before kickoff.
+    locks_odds: bool = False
 
 
 SPORT_SCHEDULES = {
-    "nfl": SportSchedule(_nfl_ingest_payload),
-    "ncaafb": SportSchedule(None),
-    "nba": SportSchedule(_date_ingest_payload),
-    "ncaambb": SportSchedule(_date_ingest_payload),
+    "nfl": SportSchedule(_nfl_ingest_payload, locks_odds=True),
+    "ncaafb": SportSchedule(None, locks_odds=True),
+    "nba": SportSchedule(_date_ingest_payload, locks_odds=True),
+    "ncaambb": SportSchedule(_date_ingest_payload, locks_odds=True),
     "pga": SportSchedule(None, event_start_snapshot_utc_hour=11, days_before_start=1, event_types=frozenset({"field"})),
     "f1": SportSchedule(None, event_start_snapshot_utc_hour=11, event_types=frozenset({"field", "sprint"})),
-    "nhl": SportSchedule(_date_ingest_payload, snapshot_delay=REFRESH_LEAD),
+    "nhl": SportSchedule(_date_ingest_payload, snapshot_delay=REFRESH_LEAD, locks_odds=True),
 }
 
 
@@ -162,6 +173,18 @@ def _kickoff_action(event: dict, now: datetime, schedule: SportSchedule, predict
     return None
 
 
+def _odds_lock_due(event: dict, now: datetime, schedule: SportSchedule, predictions_table) -> bool:
+    """True (and the attempt claimed) inside SNAPSHOT_LEAD of the real
+    kickoff while the event's line isn't locked yet."""
+    kickoff_raw = event.get("kickoff_time")
+    if not schedule.locks_odds or not kickoff_raw or LOCKED_AT in (event.get(PREGAME_ODDS) or {}):
+        return False
+    until = _parse_time(kickoff_raw) - now
+    if not timedelta(0) < until <= SNAPSHOT_LEAD:
+        return False
+    return _claim(predictions_table, event["event_key"], LOCK_MARKER, now, RETRY_AFTER)
+
+
 def _event_action(event: dict, now: datetime, schedule: SportSchedule, predictions_table) -> str | None:
     if schedule.event_start_snapshot_utc_hour is not None:
         return _SNAPSHOT if _event_start_snapshot_due(event, now, schedule, predictions_table) else None
@@ -178,7 +201,10 @@ def run_tick(
     for sport, schedule in sports.items():
         refresh_payloads: dict[tuple, dict] = {}
         snapshot_events: list[dict] = []
+        lock_ids: list[str] = []
         for event in list_events(sport):
+            if _odds_lock_due(event, now, schedule, predictions_table):
+                lock_ids.append(event["event_id"])
             action = _event_action(event, now, schedule, predictions_table)
             if action == _SNAPSHOT:
                 snapshot_events.append(event)
@@ -188,7 +214,9 @@ def run_tick(
 
         for payload in refresh_payloads.values():
             invoke(f"{project}-{sport}-ingest", payload)
+        if lock_ids:
+            invoke(f"{project}-{sport}-ingest", {"lock_odds": lock_ids})
         for event in snapshot_events:
             invoke(f"{project}-{sport}-predict", {"detail-type": "SnapshotPrediction", "event_id": event["event_id"]})
-        summary[sport] = {"refreshes": len(refresh_payloads), "snapshots": len(snapshot_events)}
+        summary[sport] = {"refreshes": len(refresh_payloads), "snapshots": len(snapshot_events), "locks": len(lock_ids)}
     return summary

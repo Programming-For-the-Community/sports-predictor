@@ -4,6 +4,7 @@ ESPN responses: the scoreboard's ATL at ORL (2026-10-21) and the core
 API's OKC at SAS (401909090, after it went final).
 """
 import logging
+from datetime import datetime, timezone
 from unittest.mock import MagicMock
 
 from library.normalize import odds
@@ -141,6 +142,40 @@ class TestFetchEventOdds:
         )
 
         assert (saved, failed) == (1, 1)
+
+
+class TestLockEventOdds:
+    NOW = datetime(2026, 10, 22, 23, 50, tzinfo=timezone.utc)
+
+    def test_saves_each_current_line_marked_locked(self):
+        client = MagicMock()
+        client.get_event_odds.return_value = CORE_LISTING
+        put_json = MagicMock()
+
+        assert odds.lock_event_odds(client, "nba", ["1", "2"], put_json=put_json, logger=_logger(), now=self.NOW) == (2, 0)
+
+        put_json.assert_any_call("nba/odds/2.json", {**CORE_LISTING, "locked_at": self.NOW.isoformat()})
+
+    def test_no_line_listed_yet_counts_as_neither(self):
+        client = MagicMock()
+        client.get_event_odds.return_value = {"count": 0, "items": []}
+        put_json = MagicMock()
+
+        assert odds.lock_event_odds(client, "nba", ["1"], put_json=put_json, logger=_logger(), now=self.NOW) == (0, 0)
+        put_json.assert_not_called()
+
+    def test_a_failed_fetch_is_counted_and_the_rest_still_lock(self):
+        client = MagicMock()
+        client.get_event_odds.side_effect = [RuntimeError("boom"), CORE_LISTING]
+
+        assert odds.lock_event_odds(client, "nhl", ["1", "2"], put_json=MagicMock(), logger=_logger(), now=self.NOW) == (1, 1)
+
+    def test_a_locked_payload_carries_locked_at_onto_the_line(self):
+        line = odds.core_odds({**CORE_LISTING, "locked_at": self.NOW.isoformat()})
+
+        assert line["locked_at"] == self.NOW.isoformat()
+        assert line["favorite"] == "away"
+        assert "locked_at" not in odds.core_odds(CORE_LISTING)
 
 
 class TestApplyCoreOdds:

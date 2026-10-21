@@ -45,7 +45,7 @@ from library.aws.account import get_account_id
 from library.aws.boto_config import DEFAULT_CONFIG
 from library.http.cfbd import CFBDClient
 from library.http.ncaafb_espn import NcaafbEspnClient
-from library.normalize.odds import fetch_event_odds
+from library.normalize.odds import fetch_event_odds, lock_event_odds
 from library.parsing import us_eastern_date_from_iso
 from library.storage.ncaafb_team_cache import get_cached_teams, teams_by_school
 
@@ -224,6 +224,19 @@ def _fetch_roster_if_stale(client: CFBDClient, season: int, teams: list[dict]) -
 
 
 def lambda_handler(event: dict, context) -> dict:
+    # The prediction scheduler's kickoff call: lock these games' lines, nothing else.
+    if "lock_odds" in event:
+        return _lock_odds(event["lock_odds"])
+    return _ingest(event)
+
+
+def _lock_odds(event_ids: list[str]) -> dict:
+    locked, failed = lock_event_odds(NcaafbEspnClient(), "ncaafb", event_ids, put_json=_put_json, logger=logger)
+    logger.info("Locked lines: %d locked, %d failed", locked, failed)
+    return {"locked": locked, "failed": failed}
+
+
+def _ingest(event: dict) -> dict:
     season = event.get("season")
     week = event.get("week")
     season_type = event.get("season_type")
