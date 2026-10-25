@@ -621,6 +621,17 @@ def betting_favorite(event: dict) -> str | None:
     return (event.get("pregame_odds") or {}).get("favorite")
 
 
+def betting_favorite_moneyline(event: dict) -> int | None:
+    """The betting_favorite side's American odds (e.g. -220), None without
+    a favourite or its moneyline."""
+    line = event.get("pregame_odds") or {}
+    favorite = line.get("favorite")
+    if favorite not in ("home", "away"):
+        return None
+    moneyline = line.get(f"{favorite}_moneyline")
+    return None if moneyline is None else int(moneyline)
+
+
 def list_events_grouped_by_day(
     storage, predictions_table, sport: str, status: str, model_bucket=None, *,
     leaders_comparison_fn=_basketball_leaders_comparison, extra_entry_fn=None,
@@ -675,6 +686,7 @@ def list_events_grouped_by_day(
             "venue_city": e.get("venue_city"),
             "venue_state": e.get("venue_state"),
             "betting_favorite": betting_favorite(e),
+            "betting_favorite_moneyline": betting_favorite_moneyline(e),
         }
         if read_prediction is not None:
             entry["prediction"] = read_prediction(e["event_key"])

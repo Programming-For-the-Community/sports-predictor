@@ -157,6 +157,7 @@ class _RowView {
     final away = awayScore;
     return upsetFlag(
       favorite: event.bettingFavorite,
+      favoriteMoneyline: event.bettingFavoriteMoneyline,
       isFinal: isFinal,
       homeWon: home == null || away == null || home == away ? null : home > away,
       homeWinProbability: predicted?.homeWinProbability,

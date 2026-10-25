@@ -279,7 +279,7 @@ void main() {
   });
 
   group('upsets filter', () {
-    SportEvent game(String id, String status, String favorite, {bool homeWon = true}) => SportEvent(
+    SportEvent game(String id, String status, String favorite, {bool homeWon = true, int moneyline = -220}) => SportEvent(
           eventId: id,
           eventDate: '2026-09-14',
           kickoffTime: '2026-09-14T17:00:00Z',
@@ -293,6 +293,7 @@ void main() {
           predictionComparison: null,
           leadersComparison: null,
           bettingFavorite: favorite,
+          bettingFavoriteMoneyline: moneyline,
         );
 
     Widget page(List<SportEvent> scheduled, List<SportEvent> completed) => ProviderScope(
@@ -327,6 +328,8 @@ void main() {
       await tester.pumpWidget(page(const [], [
         game('3', 'completed', 'home'),
         game('4', 'completed', 'home', homeWon: false),
+        // A -150 favourite losing is too close to count.
+        game('5', 'completed', 'home', homeWon: false, moneyline: -150),
       ]));
       await tester.pumpAndSettle();
       await tester.tap(find.text('Completed'));
@@ -341,7 +344,7 @@ void main() {
 
       await tester.tap(upset);
       await tester.pumpAndSettle();
-      expect(find.text('1 OF 2 GAMES'), findsOneWidget);
+      expect(find.text('1 OF 3 GAMES'), findsOneWidget);
     });
   });
 }

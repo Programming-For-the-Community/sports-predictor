@@ -282,7 +282,12 @@ class _EventListPageState extends ConsumerState<EventListPage> with WidgetsBindi
     if (_confidenceTiers.isNotEmpty && !_confidenceTiers.contains(ConfidenceTier.forProbability(probability))) {
       return _Verdict.drop;
     }
-    final flag = upsetFlag(favorite: event.bettingFavorite, isFinal: false, homeWinProbability: probability);
+    final flag = upsetFlag(
+      favorite: event.bettingFavorite,
+      favoriteMoneyline: event.bettingFavoriteMoneyline,
+      isFinal: false,
+      homeWinProbability: probability,
+    );
     return watchOnly && flag != UpsetFlag.watch ? _Verdict.drop : _Verdict.keep;
   }
 
@@ -291,6 +296,7 @@ class _EventListPageState extends ConsumerState<EventListPage> with WidgetsBindi
     final away = event.away.result?.score;
     return upsetFlag(
       favorite: event.bettingFavorite,
+      favoriteMoneyline: event.bettingFavoriteMoneyline,
       isFinal: true,
       homeWon: home == null || away == null || home == away ? null : home > away,
     );

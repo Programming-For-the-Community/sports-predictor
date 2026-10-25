@@ -28,6 +28,7 @@ SportEvent _scheduledEvent(String id, String kickoff, {String? round, int? week}
       // LV favoured by the books against a model that likes KC: every
       // upcoming card carries UPSET WATCH, the widest pill row a card gets.
       bettingFavorite: 'away',
+      bettingFavoriteMoneyline: -220,
     );
 
 SportEvent _completedEvent(String id, String kickoff) => SportEvent(
@@ -59,6 +60,7 @@ SportEvent _completedEvent(String id, String kickoff) => SportEvent(
       leadersComparison: null,
       // KC won as the betting underdog: MISS and UPSET side by side.
       bettingFavorite: 'away',
+      bettingFavoriteMoneyline: -220,
     );
 
 void main() {

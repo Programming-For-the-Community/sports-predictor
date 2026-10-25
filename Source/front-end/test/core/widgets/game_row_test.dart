@@ -119,8 +119,9 @@ SportEvent _completedWith(PredictionComparison? comparison) {
   );
 }
 
-/// [event] with a sportsbook favourite of 'home' (KC) or 'away' (LV).
-SportEvent _favoring(SportEvent event, String? favorite) => SportEvent(
+/// [event] with a sportsbook favourite of 'home' (KC) or 'away' (LV) at
+/// [moneyline].
+SportEvent _favoring(SportEvent event, String? favorite, {int moneyline = -220}) => SportEvent(
       eventId: event.eventId,
       eventDate: event.eventDate,
       kickoffTime: event.kickoffTime,
@@ -131,6 +132,7 @@ SportEvent _favoring(SportEvent event, String? favorite) => SportEvent(
       predictionComparison: event.predictionComparison,
       leadersComparison: event.leadersComparison,
       bettingFavorite: favorite,
+      bettingFavoriteMoneyline: favorite == null ? null : moneyline,
     );
 
 void main() {
@@ -146,6 +148,14 @@ void main() {
     testWidgets('no chip when the model backs the betting favourite', (tester) async {
       await _pumpRow(tester, _favoring(_scheduledEvent(), 'home'));
 
+      expect(find.byType(UpsetChip), findsNothing);
+    });
+
+    testWidgets('no chip for a favourite longer than -200, upcoming or final', (tester) async {
+      await _pumpRow(tester, _favoring(_scheduledEvent(), 'away', moneyline: -150));
+      expect(find.byType(UpsetChip), findsNothing);
+
+      await _pumpRow(tester, _favoring(_completedEvent(), 'away', moneyline: -150));
       expect(find.byType(UpsetChip), findsNothing);
     });
 

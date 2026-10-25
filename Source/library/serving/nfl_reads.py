@@ -181,6 +181,7 @@ def list_events(storage, predictions_table, sport: str, status: str, model_bucke
             "venue_city": e.get("venue_city"),
             "venue_state": e.get("venue_state"),
             "betting_favorite": common.betting_favorite(e),
+            "betting_favorite_moneyline": common.betting_favorite_moneyline(e),
         }
         if read_prediction is not None:
             entry["prediction"] = read_prediction(e["event_key"])
