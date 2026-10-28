@@ -621,10 +621,8 @@ void main() {
     // baseline by a few px from an unseeded row's -- real, pre-existing,
     // and harmless (both cards' Positioned.top below prove the cards
     // themselves, not just their teamA text, are on the identical row).
-    // .first: the grid now sits inside _HorizontalScrollableBracket's own
-    // Positioned.fill wrapper too (a farther-out ancestor than the card's
-    // own Positioned) -- find.ancestor walks upward and returns nearest
-    // first, so .first is still the card-level one this test cares about.
+    // .first: find.ancestor returns the nearest Positioned first, the
+    // card-level one this test cares about.
     double nearestPositionedTop(Finder textFinder) =>
         tester.widgetList<Positioned>(find.ancestor(of: textFinder, matching: find.byType(Positioned))).first.top!;
     final firstFourCardTop = nearestPositionedTop(find.text('90').at(0));

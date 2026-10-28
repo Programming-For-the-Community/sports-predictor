@@ -135,7 +135,88 @@ List<BracketConnection> _matchupConnections(
   return connections;
 }
 
+/// Indices of the real (non-bye) matchups in `previous` that share a team
+/// with `matchup`, ascending.
+List<int> _realSourceIndices(BracketMatchup matchup, List<BracketMatchup> previous) {
+  final sides = {matchup.teamA, matchup.teamB}..remove(null);
+  return [
+    for (var j = 0; j < previous.length; j++)
+      if (previous[j].teamA != null && previous[j].teamB != null && (sides.contains(previous[j].teamA) || sides.contains(previous[j].teamB)))
+        j,
+  ];
+}
+
+/// True when two matchups' feeder lines from the round before would cross:
+/// one sits above the other but is fed from lower down.
+bool _hasCrossing(List<BracketRound> rounds, List<List<double>> slots) {
+  for (var r = 1; r < rounds.length; r++) {
+    final spans = <({double at, double low, double high})>[];
+    for (var i = 0; i < rounds[r].matchups.length; i++) {
+      final sources = [for (final j in _realSourceIndices(rounds[r].matchups[i], rounds[r - 1].matchups)) slots[r - 1][j]];
+      if (sources.isEmpty) continue;
+      sources.sort();
+      spans.add((at: slots[r][i], low: sources.first, high: sources.last));
+    }
+    spans.sort((a, b) => a.at.compareTo(b.at));
+    for (var k = 1; k < spans.length; k++) {
+      if (spans[k - 1].high > spans[k].low) return true;
+    }
+  }
+  return false;
+}
+
+/// Each round's matchup indices walked back from the last round, so every
+/// matchup's feeders sit together in the order of what they feed. A
+/// reseeded round (NFL's 1 seed meeting the lowest seed left) can draw its
+/// feeders from anywhere in the round before.
+List<List<int>> _treeOrder(List<BracketRound> rounds) {
+  final orders = List<List<int>>.filled(rounds.length, const []);
+  orders[rounds.length - 1] = [for (var i = 0; i < rounds.last.matchups.length; i++) i];
+  for (var r = rounds.length - 1; r > 0; r--) {
+    final previous = rounds[r - 1].matchups;
+    final placed = <int>{};
+    final order = <int>[];
+    for (final i in orders[r]) {
+      for (final j in _realSourceIndices(rounds[r].matchups[i], previous)) {
+        if (placed.add(j)) order.add(j);
+      }
+    }
+    for (var j = 0; j < previous.length; j++) {
+      if (placed.add(j)) order.add(j);
+    }
+    orders[r - 1] = order;
+  }
+  return orders;
+}
+
+/// Slot positions for every matchup, in each round's own matchup order.
+/// Rounds stay in their given order unless that would cross connector
+/// lines, in which case they're laid out in _treeOrder.
 BracketSlotLayout computeBracketSlotLayout(List<BracketRound> rounds) {
+  final natural = _layoutInOrder(rounds);
+  if (rounds.isEmpty || !_hasCrossing(rounds, natural.slots)) return natural;
+
+  final orders = _treeOrder(rounds);
+  final reordered = _layoutInOrder([
+    for (var r = 0; r < rounds.length; r++)
+      BracketRound(round: rounds[r].round, matchups: [for (final i in orders[r]) rounds[r].matchups[i]]),
+  ]);
+  return BracketSlotLayout(
+    [for (var r = 0; r < rounds.length; r++) _inOriginalOrder(orders[r], reordered.slots[r])],
+    reordered.connections,
+  );
+}
+
+/// `slots` (in `order`'s sequence) put back at each matchup's own index.
+List<double> _inOriginalOrder(List<int> order, List<double> slots) {
+  final original = List<double>.filled(order.length, 0);
+  for (var k = 0; k < order.length; k++) {
+    original[order[k]] = slots[k];
+  }
+  return original;
+}
+
+BracketSlotLayout _layoutInOrder(List<BracketRound> rounds) {
   final slots = <List<double>>[];
   final connections = <BracketConnection>[];
 

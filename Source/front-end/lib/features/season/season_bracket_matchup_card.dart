@@ -35,7 +35,9 @@ class BracketMatchupCard extends StatelessWidget {
           gradient: const LinearGradient(begin: Alignment.topLeft, end: Alignment.bottomRight, colors: AppColors.surfaceGrad),
           border: Border.all(color: flag == UpsetFlag.upset ? AppColors.warn.withValues(alpha: 0.4) : AppColors.borderRaised),
         ),
+        // Centred in the card's fixed height, chip or no chip.
         child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             _BracketTeamRow(
