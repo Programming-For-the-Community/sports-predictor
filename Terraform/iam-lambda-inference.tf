@@ -128,6 +128,25 @@ data "aws_iam_policy_document" "lambda_inference_permissions" {
     resources = ["arn:aws:s3:::${local.raw_bucket_name}/ncaambb/conference-membership/*"]
   }
 
+  # ncaambb_predict's season_projection.py finds the latest ingest-cached
+  # AP poll by listing ncaambb/rankings/{season}/ and reading the newest one.
+  statement {
+    sid       = "ListNcaambbRankingsCache"
+    actions   = ["s3:ListBucket"]
+    resources = ["arn:aws:s3:::${local.raw_bucket_name}"]
+    condition {
+      test     = "StringLike"
+      variable = "s3:prefix"
+      values   = ["ncaambb/rankings/*"]
+    }
+  }
+
+  statement {
+    sid       = "ReadNcaambbRankingsCache"
+    actions   = ["s3:GetObject"]
+    resources = ["arn:aws:s3:::${local.raw_bucket_name}/ncaambb/rankings/*"]
+  }
+
   # pga_predict's own live_features.py resolves each golfer's season-stats
   # block (driving distance/accuracy, GIR%, etc.) the same way feature-
   # engineering/pga/build_dataset.py does at training time -- via

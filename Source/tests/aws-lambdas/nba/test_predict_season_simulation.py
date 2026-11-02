@@ -142,6 +142,24 @@ class TestSeasonStandingsInputs:
         assert inputs["remaining_cup_games"] == [("13", "2")]
 
 
+class TestPostseasonActive:
+    def test_a_scheduled_cup_game_keeps_the_daily_rebuild_on(self):
+        storage = MagicMock()
+        storage.get_all_events.return_value = [
+            {**_scheduled_event("E1", 2027, "2026-11-03", "13", "2", tournament_note="NBA Cup - Group Play"), "season_type": 2},
+        ]
+
+        assert season_projection.postseason_active(storage)
+
+    def test_regular_season_games_alone_do_not(self):
+        storage = MagicMock()
+        storage.get_all_events.return_value = [
+            {**_scheduled_event("E1", 2027, "2026-11-03", "13", "2"), "season_type": 2},
+        ]
+
+        assert not season_projection.postseason_active(storage)
+
+
 class TestScheduledSeasonProjection:
     """GET /nba/season doesn't terminate on this Lambda -- moved to
     predict-read/handler.py (see library.serving.nba_reads.

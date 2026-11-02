@@ -1063,9 +1063,17 @@ jobs:
       handler_dir: 'Source/aws-lambdas/nba/live-scores'
       extra_source_files: 'Source/aws-lambdas/nba/live-scores/live_scores.py'
 
-  # NCAA MBB has no live_scores job yet -- onboarding in progress (see
-  # project-ncaambb-onboarding memory), added in the same step that builds
-  # it (step 7), not batched here ahead of time.
+  ncaambb_live_scores_deploy:
+    name: NCAA MBB live-scores (deploy)
+    needs: [scan, infra]
+    uses: ./.github/workflows/zip_lambda_deploy.yml
+    secrets: inherit
+    with:
+      sport: 'NCAA MBB'
+      function_name: ${{ needs.infra.outputs.ncaambb_live_scores_function_name }}
+      handler_dir: 'Source/aws-lambdas/ncaambb/live-scores'
+      extra_source_files: 'Source/aws-lambdas/ncaambb/live-scores/live_scores.py'
+
   ncaambb_predict_deploy:
     name: NCAA MBB AI hosting (deploy)
     needs: [infra, ncaambb_ai_hosting_build]

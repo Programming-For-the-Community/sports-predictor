@@ -190,9 +190,17 @@ class TestScoreboardEventToEventItemCoachInjuryDepthChart:
         assert item["away_depth_chart"] == depth_chart
         assert "home_depth_chart" not in item
 
-    def test_tournament_note_headline_is_captured(self):
-        # notes is a sibling of competitions, not nested inside it --
-        # confirmed live against a real NBA Cup group-play game.
+    def test_tournament_note_headline_is_captured_from_the_competition(self):
+        # Real scoreboard shape (nba/scoreboard/20261030.json): notes is
+        # nested in competitions[0], with no event-level key.
+        raw = _scoreboard_event()
+        raw["competitions"][0]["notes"] = [{"type": "event", "headline": "NBA Cup - Group Play"}]
+
+        item = scoreboard_event_to_event_item(raw, "nba")
+
+        assert item["tournament_note"] == "NBA Cup - Group Play"
+
+    def test_tournament_note_falls_back_to_event_level_notes(self):
         raw = _scoreboard_event(notes=[{"type": "event", "headline": "NBA Cup - Group Play"}])
 
         item = scoreboard_event_to_event_item(raw, "nba")

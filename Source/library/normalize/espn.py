@@ -138,12 +138,12 @@ def scoreboard_event_to_event_item(event: dict, sport: str) -> dict:
     if (odds := _pregame_odds(event, competition)) is not None:
         item[PREGAME_ODDS] = odds
 
-    # Sport-agnostic passthrough of ESPN's event-level "notes" (a sibling
-    # of "competitions", not nested inside it). Stored as the raw headline
-    # string rather than a parsed boolean; interpretation is left to
-    # whichever sport's feature/serving code cares about it. Omitted when
-    # absent.
-    notes = event.get("notes") or []
+    # Sport-agnostic passthrough of ESPN's "notes" headline. Scoreboard
+    # events carry it on the competition (competitions[0].notes); the
+    # event-level key is a fallback. Stored as the raw headline string
+    # rather than a parsed boolean; interpretation is left to whichever
+    # sport's feature/serving code cares about it. Omitted when absent.
+    notes = competition.get("notes") or event.get("notes") or []
     if tournament_headline := next((n.get("headline") for n in notes if n.get("headline")), None):
         item["tournament_note"] = tournament_headline
 

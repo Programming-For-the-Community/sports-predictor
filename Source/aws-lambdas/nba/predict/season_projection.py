@@ -391,9 +391,14 @@ def _bracket_payload(
     return enrich_bracket_team_names(storage, SPORT, bracket)
 
 
+def _is_bracket_event(event: dict) -> bool:
+    """A playoff/play-in game or any NBA Cup game (group play or knockout)."""
+    return event.get("season_type") in POSTSEASON_TYPES or (event.get("tournament_note") or "").startswith("NBA Cup")
+
+
 def postseason_active(storage: FeatureStorage) -> bool:
-    """Whether the daily schedule should rebuild the projection today."""
-    return bracket_projection.postseason_active(storage, SPORT, lambda event: event.get("season_type") in POSTSEASON_TYPES)
+    """Whether the daily schedule should rebuild the projection today -- during the playoffs or the NBA Cup."""
+    return bracket_projection.postseason_active(storage, SPORT, _is_bracket_event)
 
 
 def build_season_projection(storage: FeatureStorage, s3, predictions_table) -> dict:
