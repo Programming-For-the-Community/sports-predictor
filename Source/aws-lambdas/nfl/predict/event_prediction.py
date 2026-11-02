@@ -52,16 +52,16 @@ def get_cached_model(model_cache: dict, s3, model_name: str):
 def _score_leader_candidate(s3, model_cache: dict, feature_row: dict, stats: list[str]) -> dict:
     """Predicted value per stat for one leader candidate -- {"entity_id",
     stat: value, ...}, missing a stat key entirely when that stat's model
-    hasn't been promoted yet. Scoring only: no predictions-table write and
-    no entity-name lookup -- both are deferred to the candidates that
+    isn't promoted or fails to load. Scoring only: no predictions-table write
+    and no entity-name lookup -- both are deferred to the candidates that
     actually survive ranking (see team_leaders below)."""
     result = {"entity_id": feature_row["entity_id"]}
     for stat in stats:
         model_name = model_name_to_prop(stat)
-        try:
-            booster, model_card = get_cached_model(model_cache, s3, model_name)
-        except model_loader.NoPromotedModelError:
+        loaded = common.get_cached_leader_model(model_cache, s3, SPORT, model_name)
+        if loaded is None:
             continue
+        booster, model_card = loaded
         result[stat] = non_negative(model_loader.predict(booster, model_card, feature_row))
     return result
 

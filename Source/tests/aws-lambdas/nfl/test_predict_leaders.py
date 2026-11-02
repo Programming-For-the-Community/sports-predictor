@@ -133,6 +133,31 @@ class TestEventOutcomeRouteLeaders:
         assert "passing_yards" not in passing
         assert passing["passing_touchdowns"] == 2.0
 
+    def test_a_prop_model_that_fails_to_load_is_skipped_not_fatal(self):
+        storage, s3, predictions_table = MagicMock(), MagicMock(), MagicMock()
+        storage.get_entity.return_value = None
+
+        candidates = {
+            "home": {"passing": [_candidate_row("qb1")], "receiving": [], "rushing": [], "sacks": []},
+            "away": {"passing": [], "receiving": [], "rushing": [], "sacks": []},
+        }
+
+        def fake_load(_s3, _sport, model_name):
+            if model_name == "player-prop-passing-yards":
+                raise ValueError("not a known BitGenerator module")
+            return MagicMock(), _model_card(1)
+
+        with patch.object(live_features, "build_live_event_features", return_value={"home_elo": 1500}), \
+             patch.object(live_features, "build_live_event_leader_candidates", return_value=candidates), \
+             patch.object(model_loader, "load_current_model", side_effect=fake_load), \
+             patch.object(model_loader, "predict", return_value=2.0):
+            result = event_prediction.predict_event(storage, s3, predictions_table, "401547417")
+
+        passing = result["leaders"]["home"]["passing"]
+        assert "passing_yards" not in passing
+        assert passing["passing_touchdowns"] == 2.0
+        assert "win_probability" in result["predictions"]
+
     def test_reuses_a_loaded_model_across_candidates_sharing_the_same_stat(self):
         storage, s3, predictions_table = MagicMock(), MagicMock(), MagicMock()
         storage.get_entity.return_value = None

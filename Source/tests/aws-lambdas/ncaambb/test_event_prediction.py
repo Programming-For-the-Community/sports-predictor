@@ -183,6 +183,32 @@ class TestPredictEventLeaders:
         assert "points" not in home_scoring
         predictions_table.put_item.assert_not_called()
 
+    def test_a_model_that_fails_to_load_skips_only_its_own_stat(self):
+        storage, s3, predictions_table = MagicMock(), MagicMock(), MagicMock()
+        candidates = {
+            "home": {
+                **_EMPTY_TEAM_CANDIDATES,
+                "scoring": [{"entity_id": "101"}],
+                "assists": [{"entity_id": "101"}, {"entity_id": "102"}],
+            },
+            "away": _EMPTY_TEAM_CANDIDATES,
+        }
+        storage.get_entity.return_value = None
+
+        def fake_load(_s3, _sport, model_name):
+            if model_name == "player-prop-assists":
+                raise ValueError("<class 'numpy.random._mt19937.MT19937'> is not a known BitGenerator module.")
+            return MagicMock(), {"version": 1}
+
+        with patch.object(event_prediction.live_features, "build_live_event_leader_candidates", return_value=candidates), \
+             patch.object(event_prediction.model_loader, "load_current_model", side_effect=fake_load) as load, \
+             patch.object(event_prediction.model_loader, "predict", return_value=21.0):
+            result = event_prediction.predict_event_leaders(storage, s3, predictions_table, "SPORT#NCAAMBB#EVENT#1")
+
+        assert result["home"]["scoring"][0]["points"] == 21.0
+        assert all("assists" not in row for row in result["home"]["assists"])
+        assert [call.args[2] for call in load.call_args_list].count("player-prop-assists") == 1
+
 
 class TestComputeAndCacheEvent:
     """compute_and_cache_event -- the ComputeAndCachePrediction background

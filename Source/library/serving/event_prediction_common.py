@@ -57,6 +57,22 @@ def get_cached_model(model_cache: dict, s3, sport: str, model_name: str):
     return model_cache[model_name]
 
 
+def get_cached_leader_model(model_cache: dict, s3, sport: str, model_name: str):
+    """get_cached_model for the best-effort leaders block -- None when the
+    model isn't promoted or fails to load. A load failure is logged once and
+    remembered for the rest of the request."""
+    if model_cache.get(model_name, ()) is None:
+        return None
+    try:
+        return get_cached_model(model_cache, s3, sport, model_name)
+    except model_loader.NoPromotedModelError:
+        return None
+    except Exception:
+        logger.exception("Failed loading %s/%s; leaving it out of leaders", sport, model_name)
+        model_cache[model_name] = None
+        return None
+
+
 # Basketball's own leader categories -- identical for nba/ncaambb (scoring/
 # rebounding/assists, one stat each). Matches library.serving.{sport}_reads'
 # own _STAT_CATEGORY, inverted. ncaafb/nfl each have their own genuinely
@@ -74,7 +90,7 @@ def _score_and_record_leader(
     feature_row: dict, stats: list[str],
 ) -> dict:
     """Scores one leader candidate against every stat in `stats` and records each prediction.
-    Missing a stat key entirely if that stat's model hasn't been promoted yet."""
+    Missing a stat key entirely if that stat's model isn't promoted or fails to load."""
     entity_id = feature_row["entity_id"]
     result = {"entity_id": entity_id}
     entity = storage.get_entity(sport, entity_id, "player")
@@ -83,10 +99,10 @@ def _score_and_record_leader(
 
     for stat in stats:
         model_name = model_name_to_prop(stat)
-        try:
-            booster, model_card = get_cached_model(model_cache, s3, sport, model_name)
-        except model_loader.NoPromotedModelError:
+        loaded = get_cached_leader_model(model_cache, s3, sport, model_name)
+        if loaded is None:
             continue
+        booster, model_card = loaded
         value = non_negative(model_loader.predict(booster, model_card, feature_row))
         result[stat] = value
         try:
