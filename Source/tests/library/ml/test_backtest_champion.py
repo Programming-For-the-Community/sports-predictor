@@ -87,10 +87,10 @@ class TestCurrentChampion:
 
         assert champion.score == pytest.approx(np.log(2))
 
-    def test_falls_back_to_the_stored_score_when_the_artifact_does_not_load(self):
-        champion = _current(_card(), loads=False)
-
-        assert (champion.score, champion.basis) == (0.2, backtest.CHAMPION_STORED)
+    def test_an_artifact_that_does_not_load_is_no_champion(self):
+        # Real case: NCAA MBB MLP props pickled under numpy 2, unloadable on
+        # numpy 1.26.4 -- their stored score kept every retrain from replacing them.
+        assert _current(_card(), loads=False) is None
 
 
 class TestPromotionDecision:

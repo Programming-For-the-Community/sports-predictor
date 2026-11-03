@@ -151,8 +151,14 @@ def _current_champion(
     if version is None:
         return None
     card = training_common.load_model_card(s3, sport, model_name, version)
+    # A champion this environment can't load can't serve either, so any
+    # candidate replaces it.
     try:
         estimator, _ = model_loader.load_current_model(s3, sport, model_name)
+    except Exception:  # noqa: BLE001
+        logger.warning("%s/%s v%d fails to load -- treating it as no champion.", sport, model_name, version, exc_info=True)
+        return None
+    try:
         score = _rescore(estimator, card, task, split, metric, test_start)
     except Exception:  # noqa: BLE001
         logger.warning("Could not re-score %s/%s v%d on this holdout.", sport, model_name, version, exc_info=True)

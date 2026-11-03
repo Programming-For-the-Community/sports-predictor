@@ -49,6 +49,14 @@ class PipelineStorage:
         return self._raw_data_lake.get_json(key)
 
     def upsert_entity(self, item: dict) -> None:
+        # A conference stamped by another writer (NCAA MBB schedule-sync)
+        # stays when this rewrite carries none.
+        metadata = item.get("metadata")
+        if metadata is not None and metadata.get("conference") is None:
+            existing = self._entities_table.get_item({"entity_key": item["entity_key"]})
+            kept = ((existing or {}).get("metadata") or {}).get("conference")
+            if kept is not None:
+                item = {**item, "metadata": {**metadata, "conference": kept}}
         self._entities_table.put_item(item)
 
     def upsert_player_entity(self, item: dict) -> bool:

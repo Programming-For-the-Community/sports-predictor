@@ -291,6 +291,32 @@ class TestPassThroughs:
 
         entities.put_item.assert_called_once_with({"entity_key": "x"})
 
+    def test_upsert_entity_keeps_a_stored_conference_the_rewrite_lacks(self, storage_env):
+        storage, _, entities, *_ = self._storage()
+        entities.get_item.return_value = {"entity_key": "x", "metadata": {"abbreviation": "ND", "conference": "ACC"}}
+
+        storage.upsert_entity({"entity_key": "x", "metadata": {"abbreviation": "ND", "color": "062340"}})
+
+        entities.put_item.assert_called_once_with(
+            {"entity_key": "x", "metadata": {"abbreviation": "ND", "color": "062340", "conference": "ACC"}},
+        )
+
+    def test_upsert_entity_writes_its_own_conference_over_the_stored_one(self, storage_env):
+        storage, _, entities, *_ = self._storage()
+
+        storage.upsert_entity({"entity_key": "x", "metadata": {"conference": "Big Ten"}})
+
+        entities.get_item.assert_not_called()
+        entities.put_item.assert_called_once_with({"entity_key": "x", "metadata": {"conference": "Big Ten"}})
+
+    def test_upsert_entity_with_nothing_stored_writes_as_is(self, storage_env):
+        storage, _, entities, *_ = self._storage()
+        entities.get_item.return_value = None
+
+        storage.upsert_entity({"entity_key": "x", "metadata": {"abbreviation": "ND"}})
+
+        entities.put_item.assert_called_once_with({"entity_key": "x", "metadata": {"abbreviation": "ND"}})
+
     def test_game_stats_batch_write_with_their_own_key_names(self, storage_env):
         storage, _, _, player_stats, team_stats = self._storage()
 
