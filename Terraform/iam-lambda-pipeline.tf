@@ -47,8 +47,13 @@ data "aws_iam_policy_document" "lambda_pipeline_permissions" {
   }
 
   statement {
-    sid     = "WriteNormalizedData"
-    actions = ["dynamodb:GetItem", "dynamodb:Query", "dynamodb:PutItem", "dynamodb:UpdateItem", "dynamodb:BatchWriteItem"]
+    sid = "WriteNormalizedData"
+    # BatchGetItem -- PipelineStorage.upsert_entities reads the stored teams
+    # before rewriting them.
+    actions = [
+      "dynamodb:GetItem", "dynamodb:BatchGetItem", "dynamodb:Query", "dynamodb:PutItem", "dynamodb:UpdateItem",
+      "dynamodb:BatchWriteItem",
+    ]
     resources = [
       "arn:aws:dynamodb:${var.region}:${var.account_id}:table/${local.entities_table}",
       "arn:aws:dynamodb:${var.region}:${var.account_id}:table/${local.events_table}",

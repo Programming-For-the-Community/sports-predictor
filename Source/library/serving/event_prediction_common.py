@@ -17,7 +17,7 @@ import live_features
 from library.schema.keys import entity_key as build_entity_key
 from library.schema.keys import event_key as build_event_key
 from library.serving import model_loader, prediction_snapshots, serving_features
-from library.storage import prediction_cache
+from library.storage import completed_events_snapshot, prediction_cache
 
 logger = logging.getLogger("event-prediction-common")
 
@@ -115,6 +115,30 @@ def _score_and_record_leader(
     return result
 
 
+class RequestMemoStorage:
+    """Wraps storage for one request: each read in MEMOIZED runs once per
+    distinct arguments. The basketball leader build repeats the same box
+    score, roster and player-history reads for every category."""
+
+    MEMOIZED = frozenset({"get_player_game_stats_for_event", "get_team_entities", "get_entity", "get_player_game_stats"})
+
+    def __init__(self, storage):
+        self._storage = storage
+        self._memo: dict = {}
+
+    def __getattr__(self, name: str):
+        attr = getattr(self._storage, name)
+        if name not in self.MEMOIZED:
+            return attr
+
+        def memoized(*args, **kwargs):
+            key = (name, args, tuple(sorted(kwargs.items())))
+            if key not in self._memo:
+                self._memo[key] = attr(*args, **kwargs)
+            return self._memo[key]
+        return memoized
+
+
 def basketball_predict_event_leaders(
     storage, s3, predictions_table, event_key_value: str, sport: str, events: list[dict] | None = None,
 ) -> dict | None:
@@ -123,7 +147,9 @@ def basketball_predict_event_leaders(
     in basketball). Best-effort: a failure here is logged and returns None
     rather than failing predict_event."""
     try:
-        candidates = live_features.build_live_event_leader_candidates(storage, sport, event_key_value, events=events)
+        candidates = live_features.build_live_event_leader_candidates(
+            RequestMemoStorage(storage), sport, event_key_value, events=events,
+        )
     except Exception:
         logger.exception("Failed to build leader candidates for %s", event_key_value)
         return None
@@ -157,7 +183,7 @@ def predict_event(
     score_models: dict, win_probability_model: str, leaders_fn,
 ) -> dict:
     event_key_value = build_event_key(sport, event_id)
-    events = storage.get_all_events(sport)
+    events = completed_events_snapshot.completed_events(storage, s3, sport)
     feature_row = live_features.build_live_event_features(storage, sport, event_key_value, events=events)
 
     booster, model_card = model_loader.load_current_model(s3, sport, win_probability_model)
@@ -195,7 +221,8 @@ def predict_player_prop(
     storage, s3, predictions_table, event_id: str, entity_id: str, target_stat: str, sport: str,
 ) -> dict:
     event_key_value = build_event_key(sport, event_id)
-    feature_row = live_features.build_live_player_features(storage, sport, event_key_value, entity_id)
+    events = completed_events_snapshot.completed_events(storage, s3, sport)
+    feature_row = live_features.build_live_player_features(storage, sport, event_key_value, entity_id, events=events)
 
     model_name = model_name_to_prop(target_stat)
     booster, model_card = model_loader.load_current_model(s3, sport, model_name)

@@ -290,32 +290,33 @@ class TestPassThroughs:
         storage.upsert_entity({"entity_key": "x"})
 
         entities.put_item.assert_called_once_with({"entity_key": "x"})
-
-    def test_upsert_entity_keeps_a_stored_conference_the_rewrite_lacks(self, storage_env):
-        storage, _, entities, *_ = self._storage()
-        entities.get_item.return_value = {"entity_key": "x", "metadata": {"abbreviation": "ND", "conference": "ACC"}}
-
-        storage.upsert_entity({"entity_key": "x", "metadata": {"abbreviation": "ND", "color": "062340"}})
-
-        entities.put_item.assert_called_once_with(
-            {"entity_key": "x", "metadata": {"abbreviation": "ND", "color": "062340", "conference": "ACC"}},
-        )
-
-    def test_upsert_entity_writes_its_own_conference_over_the_stored_one(self, storage_env):
-        storage, _, entities, *_ = self._storage()
-
-        storage.upsert_entity({"entity_key": "x", "metadata": {"conference": "Big Ten"}})
-
         entities.get_item.assert_not_called()
-        entities.put_item.assert_called_once_with({"entity_key": "x", "metadata": {"conference": "Big Ten"}})
 
-    def test_upsert_entity_with_nothing_stored_writes_as_is(self, storage_env):
+    def test_upsert_entities_keeps_a_stored_conference_the_rewrite_lacks(self, storage_env):
         storage, _, entities, *_ = self._storage()
-        entities.get_item.return_value = None
+        entities.batch_get_items.return_value = [{"entity_key": "x", "metadata": {"abbreviation": "ND", "conference": "ACC"}}]
 
-        storage.upsert_entity({"entity_key": "x", "metadata": {"abbreviation": "ND"}})
+        storage.upsert_entities([
+            {"entity_key": "x", "metadata": {"abbreviation": "ND", "color": "062340"}},
+            {"entity_key": "y", "metadata": {"abbreviation": "VILL"}},
+        ])
 
-        entities.put_item.assert_called_once_with({"entity_key": "x", "metadata": {"abbreviation": "ND"}})
+        entities.batch_get_items.assert_called_once_with([{"entity_key": "x"}, {"entity_key": "y"}])
+        entities.batch_write.assert_called_once_with([
+            {"entity_key": "x", "metadata": {"abbreviation": "ND", "color": "062340", "conference": "ACC"}},
+            {"entity_key": "y", "metadata": {"abbreviation": "VILL"}},
+        ], key_names=["entity_key"])
+
+    def test_upsert_entities_writes_their_own_conference_over_the_stored_one(self, storage_env):
+        storage, _, entities, *_ = self._storage()
+        entities.batch_get_items.return_value = []
+
+        storage.upsert_entities([{"entity_key": "x", "metadata": {"conference": "Big Ten"}}])
+
+        entities.batch_get_items.assert_called_once_with([])
+        entities.batch_write.assert_called_once_with(
+            [{"entity_key": "x", "metadata": {"conference": "Big Ten"}}], key_names=["entity_key"],
+        )
 
     def test_game_stats_batch_write_with_their_own_key_names(self, storage_env):
         storage, _, _, player_stats, team_stats = self._storage()
@@ -325,3 +326,19 @@ class TestPassThroughs:
 
         player_stats.batch_write.assert_called_once_with([{"p": 1}], key_names=["event_key", "player_key"])
         team_stats.batch_write.assert_called_once_with([{"t": 1}], key_names=["event_key", "team_key"])
+
+    def test_add_missing_entities_writes_only_teams_not_on_file(self, storage_env):
+        storage, _, entities, *_ = self._storage()
+        entities.batch_get_items.return_value = [{"entity_key": "on-file"}]
+
+        added = storage.add_missing_entities([
+            {"entity_key": "on-file", "name": "Duke"},
+            {"entity_key": "new", "name": "Milligan Buffaloes"},
+            {"entity_key": "new", "name": "Milligan Buffaloes"},
+        ])
+
+        assert added == 1
+        entities.batch_get_items.assert_called_once_with([{"entity_key": "on-file"}, {"entity_key": "new"}])
+        entities.batch_write.assert_called_once_with(
+            [{"entity_key": "new", "name": "Milligan Buffaloes"}], key_names=["entity_key"],
+        )

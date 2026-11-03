@@ -18,6 +18,17 @@ def _require_env(name: str) -> str:
     return value
 
 
+def _lacks_conference(item: dict) -> bool:
+    metadata = item.get("metadata")
+    return metadata is not None and metadata.get("conference") is None
+
+
+def _with_conference(item: dict, conference: str | None) -> dict:
+    if conference is None or not _lacks_conference(item):
+        return item
+    return {**item, "metadata": {**item["metadata"], "conference": conference}}
+
+
 class PipelineStorage:
     """Reads RAW_BUCKET_NAME/ENTITIES_TABLE_NAME/EVENTS_TABLE_NAME/
     PLAYER_GAME_STATS_TABLE_NAME/TEAM_GAME_STATS_TABLE_NAME/AWS_REGION
@@ -49,15 +60,29 @@ class PipelineStorage:
         return self._raw_data_lake.get_json(key)
 
     def upsert_entity(self, item: dict) -> None:
-        # A conference stamped by another writer (NCAA MBB schedule-sync)
-        # stays when this rewrite carries none.
-        metadata = item.get("metadata")
-        if metadata is not None and metadata.get("conference") is None:
-            existing = self._entities_table.get_item({"entity_key": item["entity_key"]})
-            kept = ((existing or {}).get("metadata") or {}).get("conference")
-            if kept is not None:
-                item = {**item, "metadata": {**metadata, "conference": kept}}
         self._entities_table.put_item(item)
+
+    def upsert_entities(self, items: list[dict]) -> None:
+        """Writes items in batches. A conference stamped by another writer
+        (NCAA MBB schedule-sync) stays when a rewrite carries none."""
+        missing = [item["entity_key"] for item in items if _lacks_conference(item)]
+        stored = {
+            existing["entity_key"]: conference
+            for existing in self._entities_table.batch_get_items([{"entity_key": key} for key in dict.fromkeys(missing)])
+            if (conference := (existing.get("metadata") or {}).get("conference")) is not None
+        }
+        self._entities_table.batch_write(
+            [_with_conference(item, stored.get(item["entity_key"])) for item in items], key_names=["entity_key"],
+        )
+
+    def add_missing_entities(self, items: list[dict]) -> int:
+        """Writes only the items whose entity isn't on file yet; returns how many."""
+        keys = list(dict.fromkeys(item["entity_key"] for item in items))
+        stored = self._entities_table.batch_get_items([{"entity_key": key} for key in keys])
+        on_file = {existing["entity_key"] for existing in stored}
+        missing = list({item["entity_key"]: item for item in items if item["entity_key"] not in on_file}.values())
+        self._entities_table.batch_write(missing, key_names=["entity_key"])
+        return len(missing)
 
     def upsert_player_entity(self, item: dict) -> bool:
         """Same as upsert_entity, but only overwrites metadata.team_id if

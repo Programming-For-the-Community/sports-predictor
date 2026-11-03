@@ -22,14 +22,14 @@ into one shared callable.
 import json
 import logging
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 
 from botocore.exceptions import ClientError
 
 from library.aws.account import get_account_id
 from library.http.espn import espn_scoreboard_date
 from library.normalize.espn import boxscore_to_player_game_stats
-from library.parsing import parse_number
+from library.parsing import parse_number, us_eastern_date
 from library.serving.live_window import POLL_SAFETY_CAP_AFTER_KICKOFF, parse_kickoff
 
 logger = logging.getLogger("library.serving.live_scores_common")
@@ -42,6 +42,12 @@ POLL_START_BEFORE_KICKOFF = timedelta(minutes=15)
 # How stale the cache is allowed to look before a reader should treat it
 # as "unknown" rather than trust it. Read by get_live_scores below.
 STALE_AFTER = timedelta(minutes=5)
+
+# Eastern event dates refresh reads scheduled events for, around today -- a
+# game started last night or not yet ingested as final, through one that
+# starts just after midnight.
+SCHEDULED_DAYS_BACK = 2
+SCHEDULED_DAYS_AHEAD = 1
 
 
 def get_cache(s3, bucket: str, cache_key: str) -> dict | None:
@@ -179,7 +185,12 @@ def refresh(
     previous_events = previous.get("events", {})
     already_completed = {event_id for event_id, state in previous_events.items() if state.get("completed")}
 
-    scheduled_events = storage.get_all_events(sport, status="scheduled")
+    today = date.fromisoformat(us_eastern_date(now))
+    scheduled_events = storage.get_all_events(
+        sport, status="scheduled",
+        since_date=(today - timedelta(days=SCHEDULED_DAYS_BACK)).isoformat(),
+        until_date=(today + timedelta(days=SCHEDULED_DAYS_AHEAD)).isoformat(),
+    )
     scheduled_event_ids = {event["event_id"] for event in scheduled_events}
     carried_over = _carried_over_events(previous_events, already_completed, scheduled_event_ids)
 

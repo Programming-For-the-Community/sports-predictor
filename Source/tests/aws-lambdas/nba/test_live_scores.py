@@ -156,6 +156,18 @@ class TestRefresh:
         client.get_scoreboard_for_date.assert_not_called()
         s3.put_object.assert_not_called()
 
+    def test_reads_only_scheduled_events_dated_around_today(self):
+        storage = MagicMock()
+        storage.get_all_events.return_value = []
+
+        with patch("library.serving.live_scores_common.datetime") as clock:
+            clock.now.return_value = datetime(2026, 11, 3, 2, 0, tzinfo=timezone.utc)  # 9pm Eastern, Nov 2
+            live_scores.refresh(storage, _make_s3(), BUCKET, MagicMock(), SPORT)
+
+        storage.get_all_events.assert_called_once_with(
+            SPORT, status="scheduled", since_date="2026-10-31", until_date="2026-11-03",
+        )
+
     def test_a_live_candidate_gets_fetched_and_cached(self):
         storage = MagicMock()
         storage.get_all_events.return_value = [_event("1", datetime.now(timezone.utc).isoformat())]

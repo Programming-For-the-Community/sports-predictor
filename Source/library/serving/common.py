@@ -166,12 +166,21 @@ def most_recent_event(events: list[dict]) -> list[dict]:
     return [max(events, key=lambda e: e.get("event_date", ""))]
 
 
+def _team_entities(storage, sport: str, team_ids: list[str]) -> dict[str, dict]:
+    """team_id -> team entity, batched; a team with no entity is absent."""
+    if not team_ids:
+        return {}
+    found = prefetch_entities(storage, sport, [(team_id, "team") for team_id in team_ids])
+    return {entity_id: entity for (entity_id, _), entity in found.items()}
+
+
 def enrich_team_standings(storage, sport: str, standings: list[dict]) -> list[dict]:
     """Same purpose as enrich_participants, for standings rows (keyed by
     team_id, no role/result)."""
+    entities = _team_entities(storage, sport, [row["team_id"] for row in standings])
     enriched = []
     for row in standings:
-        entity = storage.get_entity(sport, row["team_id"], "team")
+        entity = entities.get(row["team_id"])
         metadata = (entity or {}).get("metadata") or {}
         enriched.append({
             **row,
@@ -228,10 +237,12 @@ def _bracket_team_ids(bracket: dict) -> set[str]:
 def enrich_bracket_team_names(storage, sport: str, bracket: dict) -> dict:
     """Attaches a {team_id: {"name", "abbreviation", "color"}} lookup
     (`team_names`) to a bracket payload -- collects every distinct team id
-    across all matchup rows and looks each up exactly once."""
+    across all matchup rows and looks them up in one batched read."""
+    team_ids = sorted(_bracket_team_ids(bracket))
+    entities = _team_entities(storage, sport, team_ids)
     team_names = {}
-    for team_id in _bracket_team_ids(bracket):
-        entity = storage.get_entity(sport, team_id, "team")
+    for team_id in team_ids:
+        entity = entities.get(team_id)
         metadata = (entity or {}).get("metadata") or {}
         team_names[team_id] = {
             "name": (entity or {}).get("name"),

@@ -126,6 +126,24 @@ class TestGetAllEvents:
         condition = mock_events.query.call_args.args[0]
         assert condition == Key("sport_status").eq("nfl#completed") & Key("event_date").gte("2016-01-01")
 
+    def test_since_and_until_date_bound_both_ends(self, storage_env):
+        storage, _, mock_events, _, _ = _make_storage(storage_env)
+        mock_events.query.return_value = []
+
+        storage.get_all_events("ncaambb", status="scheduled", since_date="2026-10-31", until_date="2026-11-03")
+
+        condition = mock_events.query.call_args.args[0]
+        assert condition == Key("sport_status").eq("ncaambb#scheduled") & Key("event_date").between("2026-10-31", "2026-11-03")
+
+    def test_until_date_alone_bounds_the_upper_end(self, storage_env):
+        storage, _, mock_events, _, _ = _make_storage(storage_env)
+        mock_events.query.return_value = []
+
+        storage.get_all_events("nfl", until_date="2026-11-03")
+
+        condition = mock_events.query.call_args.args[0]
+        assert condition == Key("sport_status").eq("nfl#completed") & Key("event_date").lte("2026-11-03")
+
     def test_defaults_to_no_since_date(self, storage_env):
         storage, _, mock_events, _, _ = _make_storage(storage_env)
         mock_events.query.return_value = []

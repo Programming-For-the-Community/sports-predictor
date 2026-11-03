@@ -36,8 +36,7 @@ class EspnNormalizer:
     def process_teams(self, payload: dict, key: str) -> None:
         storage = self._get_storage()
         league = payload["sports"][0]["leagues"][0]
-        for team_entry in league["teams"]:
-            storage.upsert_entity(team_to_entity(team_entry["team"], self._sport))
+        storage.upsert_entities([team_to_entity(team_entry["team"], self._sport) for team_entry in league["teams"]])
         self._logger.info("Upserted %d team entities from %s", len(league["teams"]), key)
 
     def process_odds(self, payload: dict, key: str) -> None:
@@ -48,7 +47,16 @@ class EspnNormalizer:
         events = payload.get("events", [])
         for event in events:
             storage.upsert_event(scoreboard_event_to_event_item(event, self._sport))
-        self._logger.info("Upserted %d events from %s", len(events), key)
+        # /teams lists only a league's own members -- an NCAA non-Division I
+        # opponent exists only on the scoreboard.
+        teams = [
+            team_to_entity(competitor["team"], self._sport)
+            for event in events
+            for competitor in ((event.get("competitions") or [{}])[0].get("competitors") or [])
+            if (competitor.get("team") or {}).get("id") is not None
+        ]
+        added = storage.add_missing_entities(teams) if teams else 0
+        self._logger.info("Upserted %d events and added %d team entities from %s", len(events), added, key)
 
     def clear_departed_players(self, storage, team_id: str, entities: list[dict], as_of_date: str) -> int:
         """Clears metadata.team_id (and drops the entity out of the

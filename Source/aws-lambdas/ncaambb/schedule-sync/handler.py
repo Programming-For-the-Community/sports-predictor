@@ -186,17 +186,15 @@ def _current_ncaambb_season(today: date) -> int:
 
 
 def _sync_team_conference_metadata(team_conference: dict[str, str]) -> int:
-    updated = 0
     entities = _get_entities()
-    for team_id, conference in team_conference.items():
-        entity = entities.get_item({"entity_key": entity_key("ncaambb", team_id, "team")})
-        if entity is None:
-            continue
-        if entity.get("metadata", {}).get("conference") == conference:
-            continue
-        entities.put_item({**entity, "metadata": {**entity.get("metadata", {}), "conference": conference}})
-        updated += 1
-    return updated
+    on_file = entities.batch_get_items([{"entity_key": entity_key("ncaambb", team_id, "team")} for team_id in team_conference])
+    stale = [
+        {**entity, "metadata": {**entity.get("metadata", {}), "conference": team_conference[entity["entity_id"]]}}
+        for entity in on_file
+        if entity.get("metadata", {}).get("conference") != team_conference.get(entity.get("entity_id"))
+    ]
+    entities.batch_write(stale, key_names=["entity_key"])
+    return len(stale)
 
 
 def _sync_conference_membership(season: int) -> None:

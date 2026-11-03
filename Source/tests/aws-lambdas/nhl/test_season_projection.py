@@ -33,6 +33,9 @@ def _storage(completed, scheduled, player_stats=()):
     storage.get_all_events.side_effect = lambda sport, status="completed": {"completed": completed, "scheduled": scheduled}[status]
     storage.get_all_player_game_stats.return_value = list(player_stats)
     storage.get_entity.side_effect = lambda sport, entity_id, kind: {"name": f"Name {entity_id}", "metadata": {"abbreviation": f"A{entity_id}"}}
+    storage.get_entities.side_effect = lambda sport, refs: {
+        (entity_id, kind): {"name": f"Name {entity_id}", "metadata": {"abbreviation": f"A{entity_id}"}} for entity_id, kind in refs
+    }
     return storage
 
 

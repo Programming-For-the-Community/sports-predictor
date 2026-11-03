@@ -28,8 +28,27 @@ def test_teams_and_scoreboard_upsert_every_entry():
         normalizer.process_teams({"sports": [{"leagues": [{"teams": [{"team": {"id": "1"}}, {"team": {"id": "2"}}]}]}]}, "k")
         normalizer.process_scoreboard({"events": [{"id": "e1"}]}, "k")
 
-    assert [c.args[0] for c in storage.upsert_entity.call_args_list] == [{"team": "1"}, {"team": "2"}]
+    storage.upsert_entities.assert_called_once_with([{"team": "1"}, {"team": "2"}])
     storage.upsert_event.assert_called_once_with({"event": "e1"})
+
+
+def test_scoreboard_adds_competitor_teams_not_yet_on_file():
+    # Real case: NCAA MBB non-Division I opponents (e.g. Milligan, id 2397)
+    # never appear in /teams, so they rendered as bare ids.
+    storage = MagicMock()
+    storage.add_missing_entities.return_value = 1
+    event = {"id": "e1", "competitions": [{"competitors": [
+        {"homeAway": "home", "team": {"id": "150", "displayName": "Duke Blue Devils"}},
+        {"homeAway": "away", "team": {"id": "2397", "displayName": "Milligan Buffaloes", "abbreviation": "MILG"}},
+    ]}]}
+
+    with patch.object(espn_handler, "scoreboard_event_to_event_item", return_value={"event": "e1"}):
+        _normalizer(storage).process_scoreboard({"events": [event]}, "k")
+
+    written = storage.add_missing_entities.call_args.args[0]
+    assert [team["entity_id"] for team in written] == ["150", "2397"]
+    assert written[1]["name"] == "Milligan Buffaloes"
+    assert written[1]["metadata"]["abbreviation"] == "MILG"
 
 
 def test_boxscore_uses_the_sports_own_compound_key_splits():

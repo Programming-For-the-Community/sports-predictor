@@ -204,10 +204,24 @@ class TestMostRecentEvent:
         assert most_recent_event(events) == events
 
 
+def _batched_teams(teams: dict[str, dict]) -> MagicMock:
+    """A storage whose get_entities returns the given team_id -> entity map."""
+    storage = MagicMock()
+    storage.get_entities.side_effect = lambda sport, refs: {
+        (team_id, entity_type): teams[team_id] for team_id, entity_type in refs if team_id in teams
+    }
+    return storage
+
+
+TEAMS = {
+    "12": {"name": "Chiefs", "metadata": {"abbreviation": "KC"}},
+    "24": {"name": "Chargers", "metadata": {"abbreviation": "LAC"}},
+}
+
+
 class TestEnrichTeamStandings:
     def test_attaches_name_and_abbreviation_from_the_entity(self):
-        storage = MagicMock()
-        storage.get_entity.return_value = {"name": "Alabama", "metadata": {"abbreviation": "ALA"}}
+        storage = _batched_teams({"333": {"name": "Alabama", "metadata": {"abbreviation": "ALA"}}})
 
         result = enrich_team_standings(storage, "ncaafb", [{"team_id": "333", "wins": 5}])
 
@@ -215,27 +229,21 @@ class TestEnrichTeamStandings:
         assert result[0]["abbreviation"] == "ALA"
         assert result[0]["team_id"] == "333"
         assert result[0]["wins"] == 5
-        storage.get_entity.assert_called_once_with("ncaafb", "333", "team")
 
     def test_missing_entity_degrades_to_none_fields_not_an_error(self):
-        storage = MagicMock()
-        storage.get_entity.return_value = None
-
-        result = enrich_team_standings(storage, "ncaafb", [{"team_id": "333"}])
+        result = enrich_team_standings(_batched_teams({}), "ncaafb", [{"team_id": "333"}])
 
         assert result[0]["name"] is None
         assert result[0]["abbreviation"] is None
 
-    def test_each_row_resolved_independently(self):
-        storage = MagicMock()
-        storage.get_entity.side_effect = lambda sport, team_id, entity_type: {
-            "12": {"name": "Chiefs", "metadata": {"abbreviation": "KC"}},
-            "24": {"name": "Chargers", "metadata": {"abbreviation": "LAC"}},
-        }[team_id]
+    def test_every_row_is_resolved_in_one_batched_read(self):
+        storage = _batched_teams(TEAMS)
 
         result = enrich_team_standings(storage, "nfl", [{"team_id": "12"}, {"team_id": "24"}])
 
         assert [row["abbreviation"] for row in result] == ["KC", "LAC"]
+        storage.get_entities.assert_called_once_with("nfl", [("12", "team"), ("24", "team")])
+        storage.get_entity.assert_not_called()
 
     def test_empty_list_passes_through_unchanged(self):
         assert enrich_team_standings(MagicMock(), "nfl", []) == []
@@ -243,12 +251,7 @@ class TestEnrichTeamStandings:
 
 class TestEnrichBracketTeamNames:
     def _storage(self):
-        storage = MagicMock()
-        storage.get_entity.side_effect = lambda sport, team_id, entity_type: {
-            "12": {"name": "Chiefs", "metadata": {"abbreviation": "KC"}},
-            "24": {"name": "Chargers", "metadata": {"abbreviation": "LAC"}},
-        }.get(team_id)
-        return storage
+        return _batched_teams(TEAMS)
 
     def test_collects_team_ids_from_conference_split_rounds(self):
         bracket = {
@@ -289,14 +292,12 @@ class TestEnrichBracketTeamNames:
 
         enrich_bracket_team_names(storage, "nfl", bracket)
 
-        assert storage.get_entity.call_count == 3  # 12, 24, 99 -- not 4
+        storage.get_entities.assert_called_once_with("nfl", [("12", "team"), ("24", "team"), ("99", "team")])
 
     def test_missing_entity_degrades_to_none_fields_not_an_error(self):
-        storage = MagicMock()
-        storage.get_entity.return_value = None
         bracket = {"conferences": {}, "rounds": [{"round": "R1", "matchups": [{"team_a": "1", "team_b": "2"}]}]}
 
-        result = enrich_bracket_team_names(storage, "ncaafb", bracket)
+        result = enrich_bracket_team_names(_batched_teams({}), "ncaafb", bracket)
 
         assert result["team_names"]["1"] == {"name": None, "abbreviation": None, "color": None}
 

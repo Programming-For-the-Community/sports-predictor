@@ -51,8 +51,9 @@ class TestDispatch:
 
         storage = _dispatch(payload, "nhl/teams.json")
 
-        assert storage.upsert_entity.call_count == 2
-        assert storage.upsert_entity.call_args_list[0].args[0]["entity_key"] == "SPORT#NHL#ENTITY#TEAM#1"
+        written = storage.upsert_entities.call_args.args[0]
+        assert len(written) == 2
+        assert written[0]["entity_key"] == "SPORT#NHL#ENTITY#TEAM#1"
 
     def test_scoreboard_key_upserts_only_ingestable_events_through_the_nhl_normalizer(self):
         payload = {"events": [

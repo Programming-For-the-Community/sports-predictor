@@ -50,7 +50,7 @@ class TestDispatch:
              patch.object(espn_handler, "team_to_entity", return_value=entity_stub):
             nfl_normalize._dispatch("test-bucket", "nfl/teams.json")
 
-        assert mock_storage.upsert_entity.call_count == 2
+        assert len(mock_storage.upsert_entities.call_args.args[0]) == 2
 
     def test_routes_scoreboard_key_to_scoreboard_processor(self):
         payload = {"events": [{"id": "1"}, {"id": "2"}, {"id": "3"}]}

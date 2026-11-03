@@ -61,7 +61,7 @@ class FeatureStorage:
 
     def get_all_events(
         self, sport: str, status: str = "completed", scan_index_forward: bool = False, limit: int | None = None,
-        since_date: str | None = None,
+        since_date: str | None = None, until_date: str | None = None,
     ) -> list[dict]:
         """Every event for a sport, most recent first (or soonest first,
         scan_index_forward=True), via the sport-status-index GSI (range key
@@ -76,10 +76,15 @@ class FeatureStorage:
         or far ahead it falls. since_date (inclusive, ISO 8601) bounds the
         query the same way get_all_team_game_stats' own since_date does --
         a training-set-building caller that wants a rolling lookback
-        window (not full history) should pass this instead of limit."""
+        window (not full history) should pass this instead of limit.
+        until_date (inclusive) bounds the other end the same way."""
         condition = Key("sport_status").eq(f"{sport}#{status}")
-        if since_date is not None:
+        if since_date is not None and until_date is not None:
+            condition = condition & Key("event_date").between(since_date, until_date)
+        elif since_date is not None:
             condition = condition & Key("event_date").gte(since_date)
+        elif until_date is not None:
+            condition = condition & Key("event_date").lte(until_date)
         return self._events_table.query(
             condition, index_name="sport-status-index", scan_index_forward=scan_index_forward, limit=limit,
         )

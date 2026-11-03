@@ -44,7 +44,7 @@ class TestDispatch:
              patch("ncaambb_normalize.PipelineStorage", return_value=mock_storage):
             ncaambb_normalize._dispatch("test-bucket", "ncaambb/teams.json")
 
-        assert mock_storage.upsert_entity.call_count == 2
+        assert len(mock_storage.upsert_entities.call_args.args[0]) == 2
 
     def test_routes_scoreboard_key_to_scoreboard_processor(self):
         payload = {"events": [{"id": "1"}, {"id": "2"}]}

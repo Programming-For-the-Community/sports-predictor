@@ -59,3 +59,35 @@ class TestSnapshotEvent:
 
         assert written == 3
         s3.put_json.assert_called_once_with("serving-features/nba/77.json", {"win-probability#v4": {"home_elo": 1510.0}})
+
+
+class TestRequestMemoStorage:
+    def test_a_repeated_read_hits_storage_once(self):
+        storage = MagicMock()
+        storage.get_player_game_stats_for_event.return_value = [{"entity_id": "p1"}]
+        memo = event_prediction_common.RequestMemoStorage(storage)
+
+        first = memo.get_player_game_stats_for_event("EVENT#1")
+        second = memo.get_player_game_stats_for_event("EVENT#1")
+
+        assert first == second == [{"entity_id": "p1"}]
+        storage.get_player_game_stats_for_event.assert_called_once_with("EVENT#1")
+
+    def test_keyword_arguments_are_part_of_the_key(self):
+        storage = MagicMock()
+        memo = event_prediction_common.RequestMemoStorage(storage)
+
+        memo.get_player_game_stats("p1", before_date="2026-11-01", limit=5, sport="ncaambb")
+        memo.get_player_game_stats("p1", before_date="2026-11-01", limit=5, sport="ncaambb")
+        memo.get_player_game_stats("p1", before_date="2026-11-01", limit=10, sport="ncaambb")
+
+        assert storage.get_player_game_stats.call_count == 2
+
+    def test_other_reads_pass_straight_through(self):
+        storage = MagicMock()
+        memo = event_prediction_common.RequestMemoStorage(storage)
+
+        memo.get_event("EVENT#1")
+        memo.get_event("EVENT#1")
+
+        assert storage.get_event.call_count == 2
