@@ -621,66 +621,61 @@ def simulate_cup(
     }
 
 
-def project_cup_knockout_bracket(
-    season: int | None, cup_wins: dict[str, int], cup_losses: dict[str, int], ratings: dict[str, float],
-    home_advantage: float = 0.0,
-) -> dict | None:
-    """Deterministic version of simulate_cup's knockout-stage logic (3
-    group winners + 1 wildcard per conference, seeded by group_wins/
-    losses -- mirrored here unchanged): semis (1v4/2v3) then a conference
-    final, both conference finalists then meet in the Cup Championship.
-    None if `season` isn't in CUP_GROUPS yet, same as simulate_cup.
-    Neutral site throughout (home_advantage=0.0 default).
+CUP_KNOCKOUT_ROUNDS = ("Semifinals", "Conference Final")
+CUP_CHAMPIONSHIP_ROUND = "NBA Cup Championship"
 
-    Projected only -- unlike the main playoff bracket's own
-    season_projection.py _bracket_payload, this does not attempt
-    real-vs-actual reconciliation for Cup knockout games.
-    """
+
+def _cup_field(conference_groups: dict[str, list[str]], record_key) -> list[str]:
+    """The conference's 3 group winners best-to-worst, then the wildcard."""
+    group_winners = [max(team_ids, key=record_key) for team_ids in conference_groups.values()]
+    wildcard_pool = [t for team_ids in conference_groups.values() for t in team_ids if t not in group_winners]
+    return sorted(group_winners, key=record_key, reverse=True) + [max(wildcard_pool, key=record_key)]
+
+
+def project_cup_knockout_field(
+    season: int | None, cup_wins: dict[str, int], cup_losses: dict[str, int],
+    remaining_cup_games: list[tuple[str, str]], ratings: dict[str, float],
+    home_advantage: float = DEFAULT_HOME_ADVANTAGE,
+) -> dict[str, list[str]] | None:
+    """{conference: [seed 1, 2, 3, 4]} from each team's real group record
+    plus its Elo-expected wins in the group games still to play. None if
+    `season` isn't in CUP_GROUPS yet."""
     groups = CUP_GROUPS.get(season) if season is not None else None
     if not groups:
         return None
 
-    def record_key(team_id: str) -> tuple[int, int]:
-        return (cup_wins.get(team_id, 0), -cup_losses.get(team_id, 0))
+    wins = {team_id: float(value) for team_id, value in cup_wins.items()}
+    losses = {team_id: float(value) for team_id, value in cup_losses.items()}
+    for home_id, away_id in remaining_cup_games:
+        p = expected_score(ratings.get(home_id, DEFAULT_STARTING_RATING), ratings.get(away_id, DEFAULT_STARTING_RATING), home_advantage)
+        for team_id, chance in ((home_id, p), (away_id, 1 - p)):
+            wins[team_id] = wins.get(team_id, 0.0) + chance
+            losses[team_id] = losses.get(team_id, 0.0) + 1 - chance
 
-    # project_matchup's own return shape has no "status" key; the frontend's
-    # BracketMatchup.fromJson requires one as a non-nullable field on every
-    # matchup regardless of bracket type.
-    def projected(matchup: dict) -> dict:
-        return {**matchup, "status": "projected"}
+    def record_key(team_id: str) -> tuple[float, float]:
+        return (wins.get(team_id, 0.0), -losses.get(team_id, 0.0))
 
-    conference_rounds: dict[str, list[dict]] = {}
-    conference_finalists: dict[str, str] = {}
-    for conference, conference_groups in groups.items():
-        group_winners = [max(team_ids, key=record_key) for team_ids in conference_groups.values()]
-        all_conference_teams = [team_id for team_ids in conference_groups.values() for team_id in team_ids]
-        wildcard_pool = [t for t in all_conference_teams if t not in group_winners]
-        wildcard = max(wildcard_pool, key=record_key)
-        field = sorted(group_winners, key=record_key, reverse=True) + [wildcard]
-        seed_number = {team_id: rank + 1 for rank, team_id in enumerate(field)}
-        one, two, three, four = field
+    return {conference: _cup_field(conference_groups, record_key) for conference, conference_groups in groups.items()}
 
-        semi1 = projected(project_matchup(one, four, seed_number[one], seed_number[four], ratings, home_advantage))
-        semi2 = projected(project_matchup(two, three, seed_number[two], seed_number[three], ratings, home_advantage))
-        finalist_a, finalist_b = semi1["predicted_winner"], semi2["predicted_winner"]
-        conference_final = projected(project_matchup(
-            finalist_a, finalist_b, seed_number.get(finalist_a), seed_number.get(finalist_b), ratings, home_advantage,
-        ))
 
-        conference_rounds[conference] = [
-            {"round": "Semifinals", "matchups": [semi1, semi2]},
-            {"round": "Conference Final", "matchups": [conference_final]},
-        ]
-        conference_finalists[conference] = conference_final["predicted_winner"]
+def cup_bracket_topology(fields: dict[str, list[str]], home_advantage: float):
+    """library.serving.bracket_simulation topology for the Cup knockout:
+    per conference 1v4 and 2v3 hosted by the better seed, then a neutral
+    conference final; the conference champions meet at a neutral site."""
+    def topology(play_round) -> dict:
+        rounds_by_conference, champions = {}, []
+        for conference, (one, two, three, four) in fields.items():
+            semis, advancing = play_round(
+                CUP_KNOCKOUT_ROUNDS[0], [(one, four, 1, 4), (two, three, 2, 3)], home_advantage,
+            )
+            (a, seed_a), (b, seed_b) = advancing
+            final, ((champion, _),) = play_round(CUP_KNOCKOUT_ROUNDS[1], [(a, b, seed_a, seed_b)], 0.0)
+            rounds_by_conference[conference] = [semis, final]
+            champions.append(champion)
+        championship, ((winner, _),) = play_round(CUP_CHAMPIONSHIP_ROUND, [(champions[0], champions[1], None, None)], 0.0)
+        return {"conferences": rounds_by_conference, "championship": championship["matchups"][0], "champion": winner}
 
-    (_, finalist_a), (_, finalist_b) = conference_finalists.items()
-    championship = projected(project_matchup(finalist_a, finalist_b, None, None, ratings, 0.0))
-
-    return {
-        "conferences": conference_rounds,
-        "championship": championship,
-        "champion": championship["predicted_winner"],
-    }
+    return topology
 
 
 project_leaderboard = season_projection_common.project_leaderboard

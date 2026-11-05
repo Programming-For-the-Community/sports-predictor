@@ -427,56 +427,72 @@ class TestSimulateCup:
         assert result is not None  # doesn't raise -- the bad pair is simply skipped
 
 
-class TestProjectCupKnockoutBracket:
+class TestProjectCupKnockoutField:
     def test_none_when_season_is_not_in_cup_groups(self):
-        result = season_simulation.project_cup_knockout_bracket(2099, {}, {}, {})
-        assert result is None
+        assert season_simulation.project_cup_knockout_field(2099, {}, {}, [], {}) is None
 
     def test_none_when_season_is_none(self):
-        result = season_simulation.project_cup_knockout_bracket(None, {}, {}, {})
-        assert result is None
+        assert season_simulation.project_cup_knockout_field(None, {}, {}, [], {}) is None
 
-    def test_returns_both_conferences_a_championship_and_a_champion(self):
-        result = season_simulation.project_cup_knockout_bracket(2026, {}, {}, {})
+    def test_three_group_winners_then_a_wildcard_per_conference(self):
+        groups = season_simulation.CUP_GROUPS[2026]["Eastern"]
+        winners = [team_ids[0] for team_ids in groups.values()]
+        wildcard = list(groups.values())[0][1]
+        cup_wins = {winners[0]: 4, winners[1]: 3, winners[2]: 2, wildcard: 3}
 
-        assert set(result["conferences"]) == {"Eastern", "Western"}
-        for rounds in result["conferences"].values():
+        fields = season_simulation.project_cup_knockout_field(2026, cup_wins, {}, [], {})
+
+        assert set(fields) == {"Eastern", "Western"}
+        assert fields["Eastern"] == [winners[0], winners[1], winners[2], wildcard]
+
+    def test_remaining_group_games_count_toward_the_projected_record(self):
+        group = list(season_simulation.CUP_GROUPS[2026]["Eastern"].values())[0]
+        leader, chaser = group[0], group[1]
+        cup_wins = {leader: 2, chaser: 1}
+        remaining = [(chaser, group[2]), (chaser, group[3])]
+        ratings = {chaser: 2400}
+
+        fields = season_simulation.project_cup_knockout_field(2026, cup_wins, {}, remaining, ratings)
+
+        assert fields["Eastern"][0] == chaser
+
+
+def _play_to_favourite(fields, ratings):
+    """Runs cup_bracket_topology once, the better-rated side always winning."""
+    played = []
+
+    def play_round(round_name, pairs, home_advantage=0.0):
+        rows, advancing = [], []
+        for a, b, seed_a, seed_b in pairs:
+            winner = a if ratings.get(a, 1500) >= ratings.get(b, 1500) else b
+            played.append((round_name, a, b, home_advantage))
+            rows.append({"team_a": a, "team_b": b})
+            advancing.append((winner, seed_a if winner == a else seed_b))
+        return {"round": round_name, "matchups": rows}, advancing
+
+    return season_simulation.cup_bracket_topology(fields, 0.3)(play_round), played
+
+
+class TestCupBracketTopology:
+    FIELDS = {"Eastern": ["e1", "e2", "e3", "e4"], "Western": ["w1", "w2", "w3", "w4"]}
+
+    def test_rounds_per_conference_then_a_neutral_championship(self):
+        bracket, played = _play_to_favourite(self.FIELDS, {"e4": 2000, "w1": 2100})
+
+        for rounds in bracket["conferences"].values():
             assert [r["round"] for r in rounds] == ["Semifinals", "Conference Final"]
-            assert len(rounds[0]["matchups"]) == 2
-        assert result["champion"] == result["championship"]["predicted_winner"]
+        assert [(a, b) for name, a, b, _ in played if name == "Semifinals"] == [
+            ("e1", "e4"), ("e2", "e3"), ("w1", "w4"), ("w2", "w3"),
+        ]
+        assert bracket["champion"] == "w1"
+        assert bracket["championship"] == {"team_a": "e4", "team_b": "w1"}
 
-    def test_every_matchup_has_a_status_field(self):
-        # Every matchup here comes straight from project_matchup, which
-        # has no "status" key at all -- the frontend's
-        # BracketMatchup.fromJson requires one on every matchup
-        # regardless of bracket type.
-        result = season_simulation.project_cup_knockout_bracket(2026, {}, {}, {})
+    def test_only_the_first_knockout_round_has_a_home_side(self):
+        _, played = _play_to_favourite(self.FIELDS, {})
 
-        for rounds in result["conferences"].values():
-            for round_ in rounds:
-                for matchup in round_["matchups"]:
-                    assert matchup["status"] == "projected"
-        assert result["championship"]["status"] == "projected"
-
-    def test_no_rng_needed_and_deterministic_across_calls(self):
-        cup_wins = {"2": 4, "19": 3, "8": 2, "20": 1, "17": 0}
-
-        first = season_simulation.project_cup_knockout_bracket(2026, cup_wins, {}, {})
-        second = season_simulation.project_cup_knockout_bracket(2026, cup_wins, {}, {})
-
-        assert first == second
-
-    def test_a_dominant_group_winner_is_favored_to_win_its_conference(self):
-        # Boston ("2", real CUP_GROUPS Eastern-B membership) given a real
-        # group record so it's unambiguously its group's winner, then
-        # rated far above the rest of its own conference's knockout field.
-        cup_wins = {"2": 5}
-        ratings = {"2": 2400}
-
-        result = season_simulation.project_cup_knockout_bracket(2026, cup_wins, {}, ratings)
-
-        eastern_final = result["conferences"]["Eastern"][1]["matchups"][0]
-        assert eastern_final["predicted_winner"] == "2"
+        assert {name: edge for name, _, _, edge in played} == {
+            "Semifinals": 0.3, "Conference Final": 0.0, "NBA Cup Championship": 0.0,
+        }
 
 
 class TestProjectLeaderboard:

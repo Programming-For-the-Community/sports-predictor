@@ -20,7 +20,9 @@ from library.features.live_orchestration import (
 from library.schema.keys import player_key
 
 LEADER_VOLUME_STATS = {"scoring": "points", "rebounding": "rebounds", "assists": "assists"}
-LEADER_CANDIDATE_LIMITS = {"scoring": 5, "rebounding": 5, "assists": 5}
+# Prop stats predicted for grading only -- not shown as leader lists.
+PROP_ONLY_VOLUME_STATS = {"steals": "steals", "blocks": "blocks", "threes": "three_pointers_made"}
+LEADER_CANDIDATE_LIMITS = {"scoring": 5, "rebounding": 5, "assists": 5, "steals": 5, "blocks": 5, "threes": 5}
 
 
 class BasketballLiveFeatures:
@@ -118,11 +120,12 @@ class BasketballLiveFeatures:
 
     def build_live_event_leader_candidates(
         self, storage, sport: str, event_key: str, window: int | None = None, events: list[dict] | None = None,
+        volume_stats: dict[str, str] = LEADER_VOLUME_STATS,
     ) -> dict:
-        """One feature row per candidate likely to lead each team in
-        scoring/rebounding/assists, grouped {"home": {"scoring": [row, ...],
-        ...}, "away": {...}}. Loads no model -- scoring the rows is the
-        caller's job."""
+        """One feature row per candidate likely to lead each team in each
+        category of volume_stats (default scoring/rebounding/assists),
+        grouped {"home": {"scoring": [row, ...], ...}, "away": {...}}. Loads
+        no model -- scoring the rows is the caller's job."""
         window = self._default_window if window is None else window
         event = self._event(storage, event_key)
         home_id, away_id = home_away_ids(event)
@@ -133,18 +136,19 @@ class BasketballLiveFeatures:
 
         def team_candidates(team_id: str) -> dict:
             result = {}
-            for category, stat_key in LEADER_VOLUME_STATS.items():
+            rows: dict[str, dict] = {}
+            for category, stat_key in volume_stats.items():
                 candidate_ids = self._candidate_ids(storage, sport, team_id, before_date, current_season, stat_key, events)
                 histories = top_n_by_recent_volume(
                     storage, sport, candidate_ids, stat_key, before_date, window, LEADER_CANDIDATE_LIMITS[category],
                 )
-                result[category] = [
-                    self.build_player_feature_row(
-                        storage, sport, event, home_id, away_id, entity_id, team_id, prior_games, window,
-                        current_ratings, events,
-                    )
-                    for entity_id, prior_games in histories.items()
-                ]
+                for entity_id, prior_games in histories.items():
+                    if entity_id not in rows:
+                        rows[entity_id] = self.build_player_feature_row(
+                            storage, sport, event, home_id, away_id, entity_id, team_id, prior_games, window,
+                            current_ratings, events,
+                        )
+                result[category] = [rows[entity_id] for entity_id in histories]
             return result
 
         return {"home": team_candidates(home_id), "away": team_candidates(away_id)}

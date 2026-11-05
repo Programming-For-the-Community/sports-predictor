@@ -14,6 +14,7 @@ from unittest.mock import MagicMock
 import pytest
 
 import live_features
+from library.features import basketball_live
 
 
 def _event(event_key, event_date, home_id, away_id, season=2025, home_score=None, away_score=None):
@@ -283,3 +284,23 @@ class TestBuildLiveEventLeaderCandidates:
 
         assert [row["entity_id"] for row in result["home"]["scoring"]] == ["3917376"]
         assert result["home"]["scoring"][0]["team_id"] == "20"
+
+    def test_prop_only_categories_share_one_feature_row_per_player(self):
+        storage = MagicMock()
+        event = _event("SPORT#NBA#EVENT#1", "2026-10-21", "20", "2", season=2027)
+        storage.get_event.return_value = event
+        storage.get_all_events.return_value = []
+        storage.get_team_events.return_value = []
+        storage.get_team_entities.side_effect = lambda sport, team_id: (
+            [{"entity_id": "3917376", "entity_type": "player"}] if team_id == "20" else []
+        )
+        storage.get_entity.return_value = _entity("20")
+        storage.get_player_game_stats.side_effect = lambda entity_id, before_date=None, limit=None, *, sport: [
+            {"entity_id": entity_id, "team_id": "20", "stat_line": {"points": 29, "steals": 2, "blocks": 1}},
+        ]
+        volume_stats = {**live_features.LEADER_VOLUME_STATS, **basketball_live.PROP_ONLY_VOLUME_STATS}
+
+        result = live_features.build_live_event_leader_candidates(storage, "nba", event["event_key"], volume_stats=volume_stats)
+
+        assert set(result["home"]) == {"scoring", "rebounding", "assists", "steals", "blocks", "threes"}
+        assert result["home"]["steals"][0] is result["home"]["scoring"][0]

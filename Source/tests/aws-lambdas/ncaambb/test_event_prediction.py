@@ -210,6 +210,28 @@ class TestPredictEventLeaders:
         assert [call.args[2] for call in load.call_args_list].count("player-prop-assists") == 1
 
 
+    def test_records_prop_only_stats_without_returning_them(self):
+        storage, s3, predictions_table = MagicMock(), MagicMock(), MagicMock()
+        candidates = {
+            "home": {**_EMPTY_TEAM_CANDIDATES, "steals": [{"entity_id": "101"}], "blocks": [{"entity_id": "101"}],
+                     "threes": [{"entity_id": "102"}]},
+            "away": _EMPTY_TEAM_CANDIDATES,
+        }
+        storage.get_entity.return_value = None
+
+        with patch.object(event_prediction.live_features, "build_live_event_leader_candidates", return_value=candidates) as build,              patch.object(event_prediction.model_loader, "load_current_model", return_value=(MagicMock(), {"version": 1})),              patch.object(event_prediction.model_loader, "predict", return_value=1.5):
+            result = event_prediction.predict_event_leaders(storage, s3, predictions_table, "SPORT#NCAAMBB#EVENT#1")
+
+        assert set(result["home"]) == {"scoring", "rebounding", "assists"}
+        assert set(build.call_args.kwargs["volume_stats"]) == {"scoring", "rebounding", "assists", "steals", "blocks", "threes"}
+        written = sorted(call.args[0]["model_key"] for call in predictions_table.put_item.call_args_list)
+        assert written == [
+            "MODEL#player-prop-blocks#v1#PLAYER#101",
+            "MODEL#player-prop-steals#v1#PLAYER#101",
+            "MODEL#player-prop-three-pointers-made#v1#PLAYER#102",
+        ]
+
+
 class TestComputeAndCacheEvent:
     """compute_and_cache_event -- the ComputeAndCachePrediction background
     worker predict-read/handler.py's own async invoke triggers on a

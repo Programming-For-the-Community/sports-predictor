@@ -48,9 +48,8 @@ SPORT = "nba"
 # already recorded at least one stat line this season.
 PLAYER_PROP_STATS = ["points", "rebounds", "assists", "steals", "blocks", "three_pointers_made"]
 
-# Group-play games only; knockout-round games carry different note text
-# and are never matched here (the knockout bracket is entirely simulated,
-# not sourced from real results -- see season_simulation.simulate_cup).
+# Group-play games only; knockout games carry their own round's note (see
+# _is_cup_knockout_game).
 CUP_GROUP_PLAY_NOTE = "NBA Cup - Group Play"
 
 
@@ -282,18 +281,67 @@ def _cup_payload(storage: FeatureStorage, season_inputs: dict) -> dict | None:
     return {"groups": groups}
 
 
-def _cup_bracket_payload(storage: FeatureStorage, season_inputs: dict) -> dict | None:
-    """Deterministic NBA Cup knockout bracket (see
-    season_simulation.project_cup_knockout_bracket) -- projected only,
-    unlike the main playoff bracket's own _bracket_payload below (no
-    real-vs-actual reconciliation for Cup knockout games). None if this
-    season's groups aren't in CUP_GROUPS yet."""
-    bracket = season_simulation.project_cup_knockout_bracket(
-        season_inputs["current_season"], season_inputs["cup_wins"], season_inputs["cup_losses"],
-        season_inputs["current_ratings"],
+CUP_QUARTERFINALS_NOTE = "NBA Cup - Quarterfinals"
+CUP_ROUND_ODDS_COLUMNS = [
+    ("Conf final", season_simulation.CUP_KNOCKOUT_ROUNDS[1]), ("Final", season_simulation.CUP_CHAMPIONSHIP_ROUND),
+    ("Title", None),
+]
+
+
+def _is_cup_knockout_game(event: dict) -> bool:
+    note = event.get("tournament_note") or ""
+    return note.startswith("NBA Cup") and note != CUP_GROUP_PLAY_NOTE
+
+
+def _with_real_quarterfinals(fields: dict[str, list[str]], events: list[dict], record) -> dict[str, list[str]]:
+    """Each conference's seeds from its two real quarterfinals once both
+    are set: the better seed hosts, so the better host is seed 1 against
+    its visitor (seed 4), the other host seed 2 against seed 3."""
+    quarterfinals = [_home_and_away(e) for e in events if e.get("tournament_note") == CUP_QUARTERFINALS_NOTE]
+    teams_by_conference = season_simulation._teams_by_conference()
+    result = {}
+    for conference, field in fields.items():
+        teams = set(teams_by_conference.get(conference, ()))
+        games = [pair for pair in quarterfinals if pair is not None and set(pair) <= teams]
+        if len(games) != 2:
+            result[conference] = field
+            continue
+        (host_one, seed_four), (host_two, seed_three) = sorted(games, key=lambda pair: record(pair[0]), reverse=True)
+        result[conference] = [host_one, host_two, seed_three, seed_four]
+    return result
+
+
+def _cup_bracket_payload(storage: FeatureStorage, s3, predictions_table, season_inputs: dict) -> dict | None:
+    """The NBA Cup knockout as one simulated run (library.serving.
+    bracket_simulation), started from the real knockout games so far.
+    Seeded from the real quarterfinals once they're set, else from each
+    team's projected group record. None if this season's groups aren't in
+    CUP_GROUPS yet."""
+    season = season_inputs["current_season"]
+    cup_wins, cup_losses = season_inputs["cup_wins"], season_inputs["cup_losses"]
+    fields = season_simulation.project_cup_knockout_field(
+        season, cup_wins, cup_losses, season_inputs["remaining_cup_games"], season_inputs["current_ratings"],
     )
-    if bracket is None:
+    if fields is None:
         return None
+
+    def record(team: str) -> tuple[int, int]:
+        return (cup_wins.get(team, 0), -cup_losses.get(team, 0))
+
+    def tiebreak(team_a: str, team_b: str) -> str | None:
+        if record(team_a) == record(team_b):
+            return None
+        return team_a if record(team_a) > record(team_b) else team_b
+
+    events = bracket_projection.real_postseason_events(storage, SPORT, season, _is_cup_knockout_game)
+    fields = _with_real_quarterfinals(fields, events, record)
+    real = RealPostseason(events, bracket_projection.logged_home_probability(event_prediction, storage, s3, predictions_table, logger))
+    engine = BracketSimulation(
+        real, elo_rules(season_inputs["current_ratings"]), tiebreak=tiebreak, home_edge=season_inputs["home_edge"],
+    )
+    conference_of = {team: conference for conference, field in fields.items() for team in field}
+    topology = season_simulation.cup_bracket_topology(fields, season_simulation.DEFAULT_HOME_ADVANTAGE)
+    bracket = engine.run(topology, CUP_ROUND_ODDS_COLUMNS, group_of=conference_of.get)
     return enrich_bracket_team_names(storage, SPORT, bracket)
 
 
@@ -438,7 +486,7 @@ def build_season_projection(storage: FeatureStorage, s3, predictions_table) -> d
         cup = None
 
     try:
-        cup_bracket = _cup_bracket_payload(storage, season_inputs)
+        cup_bracket = _cup_bracket_payload(storage, s3, predictions_table, season_inputs)
     except Exception:
         logger.exception("Failed to build NBA Cup bracket")
         cup_bracket = None

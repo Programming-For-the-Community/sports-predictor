@@ -14,6 +14,7 @@ import logging
 from datetime import datetime, timezone
 
 import live_features
+from library.features import basketball_live
 from library.schema.keys import entity_key as build_entity_key
 from library.schema.keys import event_key as build_event_key
 from library.serving import model_loader, prediction_snapshots, serving_features
@@ -83,6 +84,13 @@ BASKETBALL_LEADER_CATEGORY_STATS = {
     "rebounding": ["rebounds"],
     "assists": ["assists"],
 }
+# Predicted and recorded so the scorecard can grade them, but not returned
+# as leader lists. Keys match basketball_live.PROP_ONLY_VOLUME_STATS.
+BASKETBALL_PROP_ONLY_CATEGORY_STATS = {
+    "steals": ["steals"],
+    "blocks": ["blocks"],
+    "threes": ["three_pointers_made"],
+}
 
 
 def _score_and_record_leader(
@@ -146,9 +154,11 @@ def basketball_predict_event_leaders(
     leaders per team, each always a list (no leader is inherently singular
     in basketball). Best-effort: a failure here is logged and returns None
     rather than failing predict_event."""
+    storage = RequestMemoStorage(storage)
     try:
         candidates = live_features.build_live_event_leader_candidates(
-            RequestMemoStorage(storage), sport, event_key_value, events=events,
+            storage, sport, event_key_value, events=events,
+            volume_stats={**basketball_live.LEADER_VOLUME_STATS, **basketball_live.PROP_ONLY_VOLUME_STATS},
         )
     except Exception:
         logger.exception("Failed to build leader candidates for %s", event_key_value)
@@ -173,6 +183,9 @@ def basketball_predict_event_leaders(
             scored = [score(row, BASKETBALL_LEADER_CATEGORY_STATS[category]) for row in team_candidates[category]]
             scored.sort(key=lambda row, primary_stat=primary_stat: row.get(primary_stat, float("-inf")), reverse=True)
             result[category] = scored
+        for category, stats in BASKETBALL_PROP_ONLY_CATEGORY_STATS.items():
+            for row in team_candidates.get(category, []):
+                score(row, stats)
         return result
 
     return {"home": team_leaders(candidates["home"]), "away": team_leaders(candidates["away"])}

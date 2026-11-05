@@ -160,6 +160,63 @@ class TestPostseasonActive:
         assert not season_projection.postseason_active(storage)
 
 
+def _cup_inputs(cup_wins, remaining_cup_games=()):
+    return {
+        "current_season": 2026, "cup_wins": cup_wins, "cup_losses": {},
+        "remaining_cup_games": list(remaining_cup_games), "current_ratings": {}, "home_edge": 0.0,
+    }
+
+
+def _cup_bracket(events, inputs):
+    storage = MagicMock()
+    storage.get_all_events.side_effect = lambda sport, status: [e for e in events if e["status"] == status]
+    with patch.object(season_projection.bracket_projection, "logged_home_probability", return_value=lambda event: None),          patch.object(season_projection, "enrich_bracket_team_names", side_effect=lambda storage, sport, bracket: bracket):
+        return season_projection._cup_bracket_payload(storage, MagicMock(), MagicMock(), inputs)
+
+
+class TestCupBracketPayload:
+    # CUP_GROUPS[2026] Eastern: A 28/1/5/11/27, B 19/2/8/20/17, C 18/14/15/30/4.
+    EAST_RECORDS = {"28": 4, "19": 3, "18": 2, "1": 3}
+
+    def test_none_when_the_seasons_groups_are_not_in_the_table(self):
+        assert _cup_bracket([], {**_cup_inputs({}), "current_season": 2099}) is None
+
+    def test_a_real_quarterfinal_result_stands_and_the_rest_is_simulated(self):
+        events = [
+            {**_completed_event("Q1", 2026, "28", "1", 101, 110, tournament_note="NBA Cup - Quarterfinals"), "season_type": 2},
+            {**_scheduled_event("Q2", 2026, "2025-12-10", "19", "18", tournament_note="NBA Cup - Quarterfinals"), "season_type": 2},
+        ]
+
+        bracket = _cup_bracket(events, _cup_inputs(self.EAST_RECORDS))
+
+        semis, final = bracket["conferences"]["Eastern"]
+        first, second = semis["matchups"]
+        assert (first["team_a"], first["team_b"], first["status"], first["actual_winner"]) == ("28", "1", "final", "1")
+        assert (second["team_a"], second["team_b"], second["status"]) == ("19", "18", "scheduled")
+        assert "1" in (final["matchups"][0]["team_a"], final["matchups"][0]["team_b"])
+        assert bracket["round_odds"]["columns"] == ["Conf final", "Final", "Title"]
+
+    def test_the_real_quarterfinals_set_the_seeds_over_the_projection(self):
+        events = [
+            {**_scheduled_event("Q1", 2026, "2025-12-09", "2", "14", tournament_note="NBA Cup - Quarterfinals"), "season_type": 2},
+            {**_scheduled_event("Q2", 2026, "2025-12-09", "28", "5", tournament_note="NBA Cup - Quarterfinals"), "season_type": 2},
+        ]
+
+        bracket = _cup_bracket(events, _cup_inputs({**self.EAST_RECORDS, "2": 1}))
+
+        semis = bracket["conferences"]["Eastern"][0]["matchups"]
+        assert [(m["team_a"], m["team_b"]) for m in semis] == [("28", "5"), ("2", "14")]
+
+    def test_group_play_games_are_not_knockout_games(self):
+        events = [
+            {**_completed_event("G1", 2026, "28", "1", 101, 110, tournament_note="NBA Cup - Group Play"), "season_type": 2},
+        ]
+
+        bracket = _cup_bracket(events, _cup_inputs(self.EAST_RECORDS))
+
+        assert all(m["status"] == "projected" for m in bracket["conferences"]["Eastern"][0]["matchups"])
+
+
 class TestScheduledSeasonProjection:
     """GET /nba/season doesn't terminate on this Lambda -- moved to
     predict-read/handler.py (see library.serving.nba_reads.
