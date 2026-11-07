@@ -220,3 +220,13 @@ resource "aws_iam_role_policy" "assistant_admin_tools" {
   role   = aws_iam_role.assistant_admin_tools.id
   policy = data.aws_iam_policy_document.assistant_admin_tools.json
 }
+
+# AgentCore checks the role can pull the image when a runtime is created,
+# so the runtimes wait for the role policies to propagate.
+resource "time_sleep" "assistant_agent_iam_propagation" {
+  depends_on = [aws_iam_role_policy.assistant_agent]
+  triggers = {
+    for agent, document in data.aws_iam_policy_document.assistant_agent : agent => document.json
+  }
+  create_duration = "30s"
+}

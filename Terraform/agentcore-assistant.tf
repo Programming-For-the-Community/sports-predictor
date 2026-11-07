@@ -116,6 +116,9 @@ resource "awscc_bedrockagentcore_runtime" "assistant" {
   description        = "Sports predictor assistant (${each.key}) -- Claude Haiku 5.5."
   role_arn           = aws_iam_role.assistant_agent[each.key].arn
 
+  # The role must be able to pull the image before the runtime is created.
+  depends_on = [time_sleep.assistant_agent_iam_propagation]
+
   agent_runtime_artifact = {
     container_configuration = {
       container_uri = "${var.ecr_repo_url}:${local.assistant_image_name}-latest"
