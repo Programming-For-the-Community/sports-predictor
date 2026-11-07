@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:go_router/go_router.dart';
 
@@ -24,7 +25,7 @@ void main() {
         ],
       );
 
-      await pumpAtWidth(tester, width, MaterialApp.router(routerConfig: router));
+      await pumpAtWidth(tester, width, ProviderScope(child: MaterialApp.router(routerConfig: router)));
 
       expect(tester.takeException(), isNull);
     });
@@ -41,7 +42,7 @@ void main() {
         ],
       );
 
-      await pumpAtWidth(tester, width, MaterialApp.router(routerConfig: router));
+      await pumpAtWidth(tester, width, ProviderScope(child: MaterialApp.router(routerConfig: router)));
 
       for (final label in ['Events', 'Season', 'Performance', 'Models']) {
         await tester.ensureVisible(find.text(label));

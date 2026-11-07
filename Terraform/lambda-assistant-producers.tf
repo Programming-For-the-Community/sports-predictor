@@ -41,6 +41,7 @@ resource "aws_lambda_function" "assistant_cost_snapshot" {
   description   = "Daily: pulls this project's Project-tagged spend from Cost Explorer into S3 aggregates the admin assistant reads. See scheduler-assistant-producers.tf."
   role          = aws_iam_role.lambda_assistant_cost_snapshot.arn
   runtime       = "python3.12"
+  architectures = ["arm64"]
   handler       = "handler.lambda_handler"
   timeout       = 300
   memory_size   = 256
@@ -86,6 +87,7 @@ resource "aws_lambda_function" "assistant_traffic_aggregate" {
   description   = "Hourly: counts blocked and denied requests from both WAF log groups and the API Gateway access log into S3 aggregates the admin assistant reads."
   role          = aws_iam_role.lambda_assistant_traffic_aggregate.arn
   runtime       = "python3.12"
+  architectures = ["arm64"]
   handler       = "handler.lambda_handler"
   # A {"backfill_days": 30} run issues 90 Logs Insights queries in sequence.
   timeout     = 900

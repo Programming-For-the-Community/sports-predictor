@@ -15,6 +15,7 @@ resource "aws_lambda_function" "assistant_public_tools" {
   description   = "Assistant tools for predictions and model performance: reads through predict-read and returns pruned, size-capped results to the agents."
   role          = aws_iam_role.assistant_public_tools.arn
   runtime       = "python3.12"
+  architectures = ["arm64"]
   handler       = "handler.lambda_handler"
   timeout       = 30
   memory_size   = 256
@@ -53,6 +54,7 @@ resource "aws_lambda_function" "assistant_admin_tools" {
   description   = "Admin assistant tools for cost, denied traffic, API traffic and Lambda health, from the producers' S3 aggregates and CloudWatch metrics."
   role          = aws_iam_role.assistant_admin_tools.arn
   runtime       = "python3.12"
+  architectures = ["arm64"]
   handler       = "handler.lambda_handler"
   timeout       = 60
   memory_size   = 512
