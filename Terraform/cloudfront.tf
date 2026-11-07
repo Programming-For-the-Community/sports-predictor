@@ -134,6 +134,30 @@ resource "aws_cloudfront_function" "android_only" {
   EOT
 }
 
+# /assistant/predictions and /assistant/admin -> each AgentCore runtime's
+# invocation path on the bedrock-agentcore origin. Anything else under
+# /assistant/ is a 404. The runtimes' own JWT authorizers check the caller.
+resource "aws_cloudfront_function" "assistant_route" {
+  name    = "${var.project}-assistant-route"
+  runtime = "cloudfront-js-2.0"
+  comment = "Routes /assistant/* to the AgentCore runtimes"
+  publish = true
+  code    = <<-EOT
+    var RUNTIMES = {
+      '/assistant/predictions': '${urlencode(awscc_bedrockagentcore_runtime.assistant["public"].agent_runtime_arn)}',
+      '/assistant/admin': '${urlencode(awscc_bedrockagentcore_runtime.assistant["admin"].agent_runtime_arn)}'
+    };
+    function handler(event) {
+      var request = event.request;
+      var arn = RUNTIMES[request.uri];
+      if (!arn) return { statusCode: 404, statusDescription: 'Not Found' };
+      request.uri = '/runtimes/' + arn + '/invocations';
+      request.querystring = { qualifier: { value: 'DEFAULT' } };
+      return request;
+    }
+  EOT
+}
+
 resource "aws_cloudfront_distribution" "main" {
   enabled             = true
   default_root_object = "index.html"
@@ -180,6 +204,21 @@ resource "aws_cloudfront_distribution" "main" {
     }
   }
 
+  # AgentCore Runtime's data plane. The runtimes stream answers as SSE, so
+  # the read timeout allows the longest gap between events.
+  origin {
+    origin_id   = "assistant"
+    domain_name = "bedrock-agentcore.${var.region}.amazonaws.com"
+
+    custom_origin_config {
+      origin_protocol_policy = "https-only"
+      http_port              = 80
+      https_port             = 443
+      origin_ssl_protocols   = ["TLSv1.2"]
+      origin_read_timeout    = 60
+    }
+  }
+
   default_cache_behavior {
     target_origin_id           = "frontend-s3"
     viewer_protocol_policy     = "redirect-to-https"
@@ -207,6 +246,26 @@ resource "aws_cloudfront_distribution" "main" {
       # substitutes the origin's own domain as the Host header; API
       # Gateway's execute-api endpoint rejects a mismatched Host header.
       origin_request_policy_id = "b689b0a8-53d0-40ab-baf2-68738e2966ac"
+    }
+  }
+
+  # The assistant: POST only in practice, never cached. Same managed policies
+  # as the sport APIs, so Authorization and the session-id header reach the
+  # runtime. The WAF's assistant-rate-limit rule (waf-cloudfront.tf) caps
+  # each IP on this path.
+  ordered_cache_behavior {
+    path_pattern               = "/assistant/*"
+    target_origin_id           = "assistant"
+    viewer_protocol_policy     = "redirect-to-https"
+    allowed_methods            = ["GET", "HEAD", "OPTIONS", "PUT", "POST", "PATCH", "DELETE"]
+    cached_methods             = ["GET", "HEAD"]
+    cache_policy_id            = "4135ea2d-6df8-44a3-9df3-4b5a84be39ad"
+    origin_request_policy_id   = "b689b0a8-53d0-40ab-baf2-68738e2966ac"
+    response_headers_policy_id = aws_cloudfront_response_headers_policy.security_headers.id
+
+    function_association {
+      event_type   = "viewer-request"
+      function_arn = aws_cloudfront_function.assistant_route.arn
     }
   }
 

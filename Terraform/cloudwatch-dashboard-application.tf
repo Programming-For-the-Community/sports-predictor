@@ -583,6 +583,25 @@ resource "aws_cloudwatch_dashboard" "application" {
           QUERY
         }
       },
+      # --- Assistant (details on the assistant dashboard) ---
+      {
+        type       = "text", x = 0, y = 133, width = 24, height = 1
+        properties = { markdown = "## Assistant -- see the ${var.project}-assistant dashboard for runtimes, model and tools" }
+      },
+      {
+        type = "log", x = 0, y = 134, width = 12, height = 6
+        properties = {
+          region = var.region, title = "Assistant questions per day by agent", view = "bar"
+          query  = "${local.assistant_turn_sources} | filter ispresent(assistant_turn) and outcome != 'status' | stats count(*) as questions by bin(1d) as day, agent | sort day asc"
+        }
+      },
+      {
+        type = "log", x = 12, y = 134, width = 12, height = 6
+        properties = {
+          region = var.region, title = "Daily assistant users", view = "bar"
+          query  = "${local.assistant_turn_sources} | filter ispresent(assistant_turn) and outcome != 'status' | stats count_distinct(user_sub) as users by bin(1d)"
+        }
+      },
     ]
   })
 }

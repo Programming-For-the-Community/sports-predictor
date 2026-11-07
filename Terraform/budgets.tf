@@ -1,12 +1,3 @@
-# Tags must be Active before any tag-scoped budget/Cost Explorer report shows
-# data; AWS rejects activation for a tag key with no cost/usage history yet.
-resource "aws_ce_cost_allocation_tag" "tags" {
-  for_each = var.activate_cost_allocation_tags ? toset(["Project", "Sport", "Component", "Environment"]) : []
-
-  tag_key = each.value
-  status  = "Active"
-}
-
 # Scoped to the Project tag so it tracks only this project's spend.
 resource "aws_budgets_budget" "project" {
   name         = "${var.project}-monthly"

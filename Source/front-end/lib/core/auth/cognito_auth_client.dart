@@ -14,6 +14,9 @@ import 'cognito_srp.dart';
 /// already replaced.
 const refreshTokenReuseError = 'RefreshTokenReuseException';
 
+/// The Cognito group whose members are admins (Terraform/cognito-user-pool.tf).
+const adminGroupName = 'admins';
+
 class CognitoException implements Exception {
   CognitoException(this.type, this.message);
 
@@ -53,16 +56,26 @@ class CognitoTokens {
   /// rather than waiting for a request to fail.
   bool get isNearExpiry => DateTime.now().isAfter(expiresAt.subtract(const Duration(seconds: 60)));
 
-  /// `cognito:username` from the ID token's payload. Read without verifying
-  /// the signature -- only for labeling analytics, never for access.
-  String? get username {
+  /// The ID token's payload, read without verifying the signature -- only
+  /// for labeling and showing UI, never for access.
+  Map<String, dynamic> get _claims {
     try {
       final payload = idToken.split('.')[1];
-      final claims = jsonDecode(utf8.decode(base64Url.decode(base64Url.normalize(payload)))) as Map<String, dynamic>;
-      return claims['cognito:username'] as String?;
+      return jsonDecode(utf8.decode(base64Url.decode(base64Url.normalize(payload)))) as Map<String, dynamic>;
     } catch (_) {
-      return null;
+      return const {};
     }
+  }
+
+  /// `cognito:username` from the ID token, for labeling analytics.
+  String? get username => _claims['cognito:username'] as String?;
+
+  /// Whether the ID token's `cognito:groups` holds the `admins` group
+  /// (Terraform/cognito-user-pool.tf). Shows the assistant's admin mode;
+  /// the admin agent checks the group again server-side.
+  bool get isAdmin {
+    final groups = _claims['cognito:groups'];
+    return groups is List && groups.contains(adminGroupName);
   }
 
   Map<String, dynamic> toJson() => {

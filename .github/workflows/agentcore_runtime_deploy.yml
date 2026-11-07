@@ -1,0 +1,86 @@
+# Reusable workflow: points an AgentCore runtime at an already-pushed image
+# -- the runtime counterpart of docker_lambda_deploy.yml. Terraform creates
+# each runtime from the "-latest" tag and ignores the image afterwards
+# (Terraform/agentcore-assistant.tf); this sets the versioned tag.
+#
+# UpdateAgentRuntime replaces the whole configuration, so the step reads the
+# runtime's current settings and sends them back unchanged with only the
+# container URI swapped -- Terraform stays the owner of everything else.
+# No test/scan/build here: the image was tested, scanned and built earlier
+# in the same pipeline run.
+
+name: AgentCore Runtime Deploy
+
+on:
+  workflow_dispatch:
+    inputs: &inputs
+      runtime_id:
+        description: 'AgentCore runtime id (Terraform output assistant_public_runtime_id / assistant_admin_runtime_id)'
+        required: true
+        type: string
+      image_tag:
+        description: 'Plain ECR tag to deploy (e.g. assistant-agent-1.0.0), no registry prefix -- leave blank to use default_image_tag'
+        required: false
+        type: string
+      default_image_tag:
+        description: 'Fallback ECR tag (e.g. assistant-agent-latest) used when image_tag is blank'
+        required: true
+        type: string
+  workflow_call:
+    inputs: *inputs
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  deploy:
+    name: Point runtime ${{ inputs.runtime_id }} at the image
+    runs-on: ubuntu-latest
+    steps:
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with:
+          role-to-assume: ${{ secrets.AWS_DEPLOY_SVC_ACCT_ARN }}
+          aws-region: ${{ vars.AWS_RESOURCE_REGION }}
+          role-session-name: GitHubActions-${{ github.run_id }}
+
+      - name: Update the runtime's image
+        env:
+          RUNTIME_ID: ${{ inputs.runtime_id }}
+          IMAGE_TAG: ${{ inputs.image_tag }}
+          ECR_URI: ${{ secrets.ECR_URI }}
+          DEFAULT_IMAGE_TAG: ${{ inputs.default_image_tag }}
+        run: |
+          set -euo pipefail
+          if [ -z "$IMAGE_TAG" ]; then
+            IMAGE_TAG="$DEFAULT_IMAGE_TAG"
+          fi
+          IMAGE_URI="$ECR_URI:$IMAGE_TAG"
+
+          aws bedrock-agentcore-control get-agent-runtime --agent-runtime-id "$RUNTIME_ID" > current.json
+          jq --arg uri "$IMAGE_URI" '{
+              agentRuntimeId,
+              agentRuntimeArtifact: {containerConfiguration: {containerUri: $uri}},
+              roleArn,
+              networkConfiguration,
+              description,
+              authorizerConfiguration,
+              requestHeaderConfiguration,
+              protocolConfiguration,
+              lifecycleConfiguration,
+              environmentVariables
+            } | with_entries(select(.value != null))' current.json > update.json
+
+          aws bedrock-agentcore-control update-agent-runtime --cli-input-json file://update.json > /dev/null
+
+          for attempt in $(seq 1 60); do
+            STATUS="$(aws bedrock-agentcore-control get-agent-runtime --agent-runtime-id "$RUNTIME_ID" --query status --output text)"
+            case "$STATUS" in
+              READY) echo "Deployed runtime $RUNTIME_ID -> $IMAGE_URI"; exit 0 ;;
+              *FAILED*) echo "::error::Runtime $RUNTIME_ID update ended $STATUS"; exit 1 ;;
+            esac
+            sleep 10
+          done
+          echo "::error::Runtime $RUNTIME_ID not READY after 10 minutes"
+          exit 1

@@ -1,0 +1,111 @@
+# Builds and deploys the assistant's four zip Lambdas: the two tool Lambdas
+# the agents invoke (Terraform/lambda-assistant-tools.tf) and the two data
+# producers (Terraform/lambda-assistant-producers.tf). Each pair reuses
+# python_lambda_build.yml / python_lambda_deploy.yml, the same as
+# shared_lambdas_deploy.yml.
+#
+# Build+deploy only -- no test, no scan. The caller (agents_deploy.yml and
+# app_deploy.yml) runs Source/tests/library/assistant/ and the handlers'
+# tests in Source/tests/aws-lambdas/shared/ and folds them into its own
+# single SonarQube Cloud scan -- a scan job can't depend on jobs nested
+# inside a called reusable workflow.
+name: Assistant Lambdas Deploy
+
+on:
+  workflow_dispatch:
+    inputs: &inputs
+      public_tools_function_name:
+        description: 'assistant public-tools Lambda function name (from Terraform output assistant_public_tools_function_name)'
+        required: false
+        type: string
+        default: 'sports-predictor-assistant-public-tools'
+      admin_tools_function_name:
+        description: 'assistant admin-tools Lambda function name (from Terraform output assistant_admin_tools_function_name)'
+        required: false
+        type: string
+        default: 'sports-predictor-assistant-admin-tools'
+      cost_snapshot_function_name:
+        description: 'assistant cost-snapshot Lambda function name (from Terraform output assistant_cost_snapshot_function_name)'
+        required: false
+        type: string
+        default: 'sports-predictor-assistant-cost-snapshot'
+      traffic_aggregate_function_name:
+        description: 'assistant traffic-aggregate Lambda function name (from Terraform output assistant_traffic_aggregate_function_name)'
+        required: false
+        type: string
+        default: 'sports-predictor-assistant-traffic-aggregate'
+  workflow_call:
+    inputs: *inputs
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  build_public_tools:
+    name: Build assistant public-tools Lambda
+    uses: ./.github/workflows/python_lambda_build.yml
+    with:
+      function_name: ${{ inputs.public_tools_function_name || 'sports-predictor-assistant-public-tools' }}
+      handler_dir: 'Source/aws-lambdas/shared/assistant-public-tools'
+      library_path: 'Source/library'
+
+  deploy_public_tools:
+    name: Deploy assistant public-tools Lambda
+    needs: build_public_tools
+    uses: ./.github/workflows/python_lambda_deploy.yml
+    secrets: inherit
+    with:
+      function_name: ${{ inputs.public_tools_function_name || 'sports-predictor-assistant-public-tools' }}
+      artifact_name: ${{ needs.build_public_tools.outputs.artifact_name }}
+
+  build_admin_tools:
+    name: Build assistant admin-tools Lambda
+    uses: ./.github/workflows/python_lambda_build.yml
+    with:
+      function_name: ${{ inputs.admin_tools_function_name || 'sports-predictor-assistant-admin-tools' }}
+      handler_dir: 'Source/aws-lambdas/shared/assistant-admin-tools'
+      library_path: 'Source/library'
+
+  deploy_admin_tools:
+    name: Deploy assistant admin-tools Lambda
+    needs: build_admin_tools
+    uses: ./.github/workflows/python_lambda_deploy.yml
+    secrets: inherit
+    with:
+      function_name: ${{ inputs.admin_tools_function_name || 'sports-predictor-assistant-admin-tools' }}
+      artifact_name: ${{ needs.build_admin_tools.outputs.artifact_name }}
+
+  build_cost_snapshot:
+    name: Build assistant cost-snapshot Lambda
+    uses: ./.github/workflows/python_lambda_build.yml
+    with:
+      function_name: ${{ inputs.cost_snapshot_function_name || 'sports-predictor-assistant-cost-snapshot' }}
+      handler_dir: 'Source/aws-lambdas/shared/assistant-cost-snapshot'
+      library_path: 'Source/library'
+
+  deploy_cost_snapshot:
+    name: Deploy assistant cost-snapshot Lambda
+    needs: build_cost_snapshot
+    uses: ./.github/workflows/python_lambda_deploy.yml
+    secrets: inherit
+    with:
+      function_name: ${{ inputs.cost_snapshot_function_name || 'sports-predictor-assistant-cost-snapshot' }}
+      artifact_name: ${{ needs.build_cost_snapshot.outputs.artifact_name }}
+
+  build_traffic_aggregate:
+    name: Build assistant traffic-aggregate Lambda
+    uses: ./.github/workflows/python_lambda_build.yml
+    with:
+      function_name: ${{ inputs.traffic_aggregate_function_name || 'sports-predictor-assistant-traffic-aggregate' }}
+      handler_dir: 'Source/aws-lambdas/shared/assistant-traffic-aggregate'
+      library_path: 'Source/library'
+
+  deploy_traffic_aggregate:
+    name: Deploy assistant traffic-aggregate Lambda
+    needs: build_traffic_aggregate
+    uses: ./.github/workflows/python_lambda_deploy.yml
+    secrets: inherit
+    with:
+      function_name: ${{ inputs.traffic_aggregate_function_name || 'sports-predictor-assistant-traffic-aggregate' }}
+      artifact_name: ${{ needs.build_traffic_aggregate.outputs.artifact_name }}

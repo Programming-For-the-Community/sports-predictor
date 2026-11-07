@@ -1,0 +1,12 @@
+# Compiled to a hashed requirements.txt by docker_build.yml (pip-compile
+# --generate-hashes) on every build. The shared library (Source/library)
+# is installed separately by the Dockerfile.
+#
+# anthropic[bedrock]: AnthropicBedrockMantle, Claude Haiku 5.5 on Bedrock.
+# bedrock-agentcore: the Runtime's HTTP contract (/invocations, /ping, SSE);
+#   also brings the boto3 that knows the bedrock-agentcore data plane.
+# aws-opentelemetry-distro: AgentCore Observability's spans
+#   (opentelemetry-instrument in the Dockerfile's CMD).
+anthropic[bedrock]==2.1.0
+bedrock-agentcore==1.24.2
+aws-opentelemetry-distro==0.21.0

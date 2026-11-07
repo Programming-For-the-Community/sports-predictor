@@ -73,6 +73,50 @@ resource "aws_wafv2_web_acl" "cloudfront" {
     }
   }
 
+  # The assistant's own, tighter per-IP cap: each question costs model
+  # tokens, so /assistant/* gets far fewer requests than the rest of the app.
+  rule {
+    name     = "assistant-rate-limit"
+    priority = 2
+
+    action {
+      block {
+        custom_response {
+          response_code            = 429
+          custom_response_body_key = "rate-limited"
+        }
+      }
+    }
+
+    statement {
+      rate_based_statement {
+        limit                 = var.assistant_rate_limit_per_ip
+        aggregate_key_type    = "IP"
+        evaluation_window_sec = 300
+
+        scope_down_statement {
+          byte_match_statement {
+            search_string         = "/assistant/"
+            positional_constraint = "STARTS_WITH"
+            field_to_match {
+              uri_path {}
+            }
+            text_transformation {
+              priority = 0
+              type     = "NONE"
+            }
+          }
+        }
+      }
+    }
+
+    visibility_config {
+      cloudwatch_metrics_enabled = true
+      metric_name                = "${var.project}-assistant-rate-limit"
+      sampled_requests_enabled   = true
+    }
+  }
+
   custom_response_body {
     key          = "rate-limited"
     content      = jsonencode({ error = "Too many requests" })

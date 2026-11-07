@@ -129,6 +129,22 @@ void main() {
     });
   });
 
+  group('CognitoTokens.isAdmin', () {
+    String jwt(Map<String, Object?> claims) =>
+        'header.${base64Url.encode(utf8.encode(jsonEncode(claims))).replaceAll('=', '')}.signature';
+    CognitoTokens tokens(String idToken) => CognitoTokens(accessToken: 'a', idToken: idToken, refreshToken: 'r', expiresAt: DateTime.now());
+
+    test('is true when cognito:groups holds admins', () {
+      expect(tokens(jwt({'cognito:groups': ['viewers', 'admins']})).isAdmin, isTrue);
+    });
+
+    test('is false for other groups, no groups, or a malformed token', () {
+      expect(tokens(jwt({'cognito:groups': ['viewers']})).isAdmin, isFalse);
+      expect(tokens(jwt({'sub': 'x'})).isAdmin, isFalse);
+      expect(tokens('not-a-jwt').isAdmin, isFalse);
+    });
+  });
+
   group('CognitoAuthClient.refresh', () {
     test('falls back to the prior refresh token when Cognito omits one', () async {
       final client = CognitoAuthClient(

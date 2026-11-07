@@ -53,13 +53,6 @@ variable "per_sport_limits" {
   nullable    = false
 }
 
-variable "activate_cost_allocation_tags" {
-  description = "Whether Terraform should activate the Project/Sport/Component/Environment cost allocation tags"
-  type        = bool
-  default     = false
-  nullable    = false
-}
-
 variable "environment" {
   description = "Deployment environment, applied as the Environment cost-allocation tag on every resource (see design/TAGGING_STRATEGY.md)"
   type        = string
@@ -118,6 +111,13 @@ variable "public3_subnet_cidr" {
 }
 
 # ── Containers ────────────────────────────────────────────────────────────────
+
+variable "assistant_rate_limit_per_ip" {
+  description = "Requests one client IP may make to /assistant/* per 5 minutes before the WAF answers 429 (WAF minimum: 10)"
+  type        = number
+  default     = 60
+  nullable    = false
+}
 
 variable "ecr_repo_url" {
   description = "URL of the shared ECR repository that sport-specific images are pushed to. Supplied via TF_VAR_ecr_repo_url from the ECR_URI GitHub Actions secret."

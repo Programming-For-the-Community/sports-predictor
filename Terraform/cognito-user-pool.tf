@@ -47,3 +47,15 @@ resource "aws_cognito_user_pool" "main" {
     Component = "serving"
   })
 }
+
+# Membership is the only thing that makes a user an admin: it unlocks the
+# assistant's Infrastructure mode, and the admin agent rejects any ID token
+# whose cognito:groups lacks it. Members are added by hand, like users:
+#   aws cognito-idp admin-add-user-to-group --user-pool-id <id> \
+#     --username <name> --group-name admins
+resource "aws_cognito_user_group" "admins" {
+  name         = "admins"
+  user_pool_id = aws_cognito_user_pool.main.id
+  description  = "Admins: may use the assistant's Infrastructure mode."
+  precedence   = 0
+}

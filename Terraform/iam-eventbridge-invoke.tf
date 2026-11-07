@@ -136,6 +136,10 @@ data "aws_iam_policy_document" "eventbridge_invoke_permissions" {
       # model_performance: scheduler-model-performance.tf's own daily target,
       # added in the same change that creates the scheduler.
       aws_lambda_function.model_performance.arn,
+      # The assistant's two data producers: scheduler-assistant-producers.tf's
+      # daily and hourly targets, added in the same change as the schedules.
+      aws_lambda_function.assistant_cost_snapshot.arn,
+      aws_lambda_function.assistant_traffic_aggregate.arn,
     ]
   }
 }

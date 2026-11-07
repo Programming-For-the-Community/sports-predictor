@@ -31,6 +31,9 @@ def _load_handler(module_name: str, relative_path: str) -> None:
 # the value Terraform passes the cloudwatch-geo-widget Lambda.
 os.environ.setdefault("AWS_DEFAULT_REGION", "us-east-2")
 os.environ.setdefault("CLOUDFRONT_EDGE_LOG_REGION", "us-east-1")
+os.environ.setdefault("WAF_CLOUDFRONT_LOG_REGION", "us-east-1")
+os.environ.setdefault("MODEL_ARTIFACTS_BUCKET_NAME", "model-artifacts")
+os.environ.setdefault("SPORT_REGISTRY_TABLE_NAME", "sport-registry")
 
 _load_handler("shared_season_gate", "aws-lambdas/shared/season-gate/handler.py")
 _load_handler("shared_cloudwatch_geo_widget", "aws-lambdas/shared/cloudwatch-geo-widget/handler.py")
@@ -38,6 +41,10 @@ _load_handler("shared_ec2_training_reaper", "aws-lambdas/shared/ec2-training-rea
 _load_handler("shared_predict_read", "aws-lambdas/shared/predict-read/handler.py")
 _load_handler("shared_prediction_scheduler", "aws-lambdas/shared/prediction-scheduler/handler.py")
 _load_handler("shared_model_performance", "aws-lambdas/shared/model-performance/handler.py")
+_load_handler("shared_assistant_cost_snapshot", "aws-lambdas/shared/assistant-cost-snapshot/handler.py")
+_load_handler("shared_assistant_traffic_aggregate", "aws-lambdas/shared/assistant-traffic-aggregate/handler.py")
+_load_handler("shared_assistant_public_tools", "aws-lambdas/shared/assistant-public-tools/handler.py")
+_load_handler("shared_assistant_admin_tools", "aws-lambdas/shared/assistant-admin-tools/handler.py")
 
 
 @pytest.fixture(autouse=True)

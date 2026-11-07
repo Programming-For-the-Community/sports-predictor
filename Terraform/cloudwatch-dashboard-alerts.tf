@@ -308,6 +308,38 @@ resource "aws_cloudwatch_dashboard" "alerts" {
           alarms = [aws_cloudwatch_metric_alarm.cloudfront_5xx_rate.arn]
         }
       },
+      {
+        type       = "text", x = 0, y = 38, width = 24, height = 1
+        properties = { markdown = "## Assistant -- failures page ${var.alert_email}; the rest are warnings" }
+      },
+      {
+        type = "alarm", x = 0, y = 39, width = 6, height = 4
+        properties = {
+          title  = "Assistant failures"
+          alarms = [aws_cloudwatch_metric_alarm.assistant_failures.arn]
+        }
+      },
+      {
+        type = "alarm", x = 6, y = 39, width = 6, height = 4
+        properties = {
+          title  = "Assistant blocked-question spike"
+          alarms = [aws_cloudwatch_metric_alarm.assistant_blocked_spike.arn]
+        }
+      },
+      {
+        type = "alarm", x = 12, y = 39, width = 6, height = 4
+        properties = {
+          title  = "Assistant tool errors"
+          alarms = [aws_cloudwatch_metric_alarm.assistant_tool_errors.arn]
+        }
+      },
+      {
+        type = "alarm", x = 18, y = 39, width = 6, height = 4
+        properties = {
+          title  = "Assistant producer errors"
+          alarms = [aws_cloudwatch_metric_alarm.assistant_producer_errors.arn]
+        }
+      },
     ]
   })
 }

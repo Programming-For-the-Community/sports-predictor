@@ -19,6 +19,12 @@ terraform {
       source  = "hashicorp/random"
       version = "~> 3.6"
     }
+    # AgentCore Runtime and Memory (agentcore-assistant.tf): not in the
+    # hashicorp/aws 5.x provider.
+    awscc = {
+      source  = "hashicorp/awscc"
+      version = "~> 1.109"
+    }
   }
 
   backend "s3" {
@@ -32,6 +38,10 @@ terraform {
 }
 
 provider "aws" {
+  region = var.region
+}
+
+provider "awscc" {
   region = var.region
 }
 

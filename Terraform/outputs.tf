@@ -104,3 +104,33 @@ output "predict_read_function_name" {
   description = "Shared predict-read Lambda function name (serves all 6 sports) -- passed to shared_lambdas_deploy workflow for `aws lambda update-function-code`"
   value       = aws_lambda_function.predict_read.function_name
 }
+
+output "assistant_cost_snapshot_function_name" {
+  description = "Assistant cost-snapshot Lambda function name -- passed to assistant_lambdas_deploy workflow for `aws lambda update-function-code`"
+  value       = aws_lambda_function.assistant_cost_snapshot.function_name
+}
+
+output "assistant_traffic_aggregate_function_name" {
+  description = "Assistant traffic-aggregate Lambda function name -- passed to assistant_lambdas_deploy workflow for `aws lambda update-function-code`"
+  value       = aws_lambda_function.assistant_traffic_aggregate.function_name
+}
+
+output "assistant_public_tools_function_name" {
+  description = "Assistant public-tools Lambda function name -- passed to assistant_lambdas_deploy workflow for `aws lambda update-function-code`"
+  value       = aws_lambda_function.assistant_public_tools.function_name
+}
+
+output "assistant_admin_tools_function_name" {
+  description = "Assistant admin-tools Lambda function name -- passed to assistant_lambdas_deploy workflow for `aws lambda update-function-code`"
+  value       = aws_lambda_function.assistant_admin_tools.function_name
+}
+
+output "assistant_public_runtime_id" {
+  description = "Public assistant AgentCore runtime id -- passed to agentcore_runtime_deploy workflow to point it at the new image"
+  value       = awscc_bedrockagentcore_runtime.assistant["public"].agent_runtime_id
+}
+
+output "assistant_admin_runtime_id" {
+  description = "Admin assistant AgentCore runtime id -- passed to agentcore_runtime_deploy workflow to point it at the new image"
+  value       = awscc_bedrockagentcore_runtime.assistant["admin"].agent_runtime_id
+}

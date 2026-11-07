@@ -22,12 +22,12 @@ Not every AWS resource supports tags at the same granularity — S3 buckets and 
 
 ## Activating cost allocation tags
 
-Tags don't appear in Cost Explorer automatically — they have to be activated once:
+Tags don't appear in Cost Explorer until they're activated. Activation is a billing setting for the whole AWS organization, shared by every project in the account, so this repository doesn't manage it. It belongs to the shared-infrastructure repository, along with the cost allocation tag backfill.
 
-1. Go to **Billing and Cost Management → Cost Allocation Tags** in the console.
-2. Find `Project`, `Sport`, `Component`, and `Environment` under **User-Defined Cost Allocation Tags**.
-3. Select each and click **Activate**.
-4. Allow up to 24 hours for activated tags to start appearing in Cost Explorer reports — tagged resources created before activation will backfill once it takes effect, but there can be a short lag.
+This project relies on these tags being Active: `Project`, `Sport`, `Component`, and `Owner`. `iamPrincipal/Project` is also Active in the account. `Environment` is applied to every resource but is inactive, so Cost Explorer can't group by it.
+
+- Allow up to 24 hours for a newly activated tag to appear in Cost Explorer reports.
+- Activation labels spend from that point on. Earlier spend gets the tag only through Cost Explorer's cost allocation tag backfill.
 
 ## Using tags once activated
 
@@ -46,9 +46,9 @@ That task-level tagging is what AWS's **split cost allocation data for Amazon EC
 
 ## Native cost dashboards (manual, console-only)
 
-**Billing and Cost Management → Dashboards** supports pinning a tag-grouped cost report directly — group by `Sport` or `Component` the same way you would in Cost Explorer, but pinned to a dashboard instead of rebuilt each visit. There's no Terraform resource for this (the `hashicorp/aws` provider manages `aws_budgets_budget` and cost-allocation-tag activation, not the Dashboards UI itself), so this is a one-time manual setup, same as tag activation above:
+**Billing and Cost Management → Dashboards** supports pinning a tag-grouped cost report directly — group by `Sport` or `Component` the same way you would in Cost Explorer, but pinned to a dashboard instead of rebuilt each visit. There's no Terraform resource for this (the `hashicorp/aws` provider manages `aws_budgets_budget`, not the Dashboards UI itself), so this is a one-time manual setup:
 
-1. Confirm the cost allocation tags are Active first (see the activation steps above) — a dashboard widget grouped by a tag that has no cost data yet will show empty/no groupings.
+1. Confirm the cost allocation tags are Active first (see "Activating cost allocation tags" above) — a dashboard widget grouped by a tag that has no cost data yet will show empty/no groupings.
 2. Go to **Billing and Cost Management → Dashboards**.
 3. Add a widget grouped by the `Sport` tag, and a second grouped by `Component`.
 4. Re-check after a day — like Cost Explorer, newly tagged resources can take up to 24 hours to show up in grouped reports.

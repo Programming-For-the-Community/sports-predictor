@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_riverpod/legacy.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -340,6 +341,13 @@ class AuthRepository extends StateNotifier<AuthState> {
     return DateTime.now().isAfter(lastActivity.add(inactivityTtl));
   }
 }
+
+/// Whether the signed-in user is in the Cognito admins group. Recomputed
+/// whenever the tokens change, so a refresh picks up a group change.
+final isAdminProvider = Provider<bool>((ref) {
+  final auth = ref.watch(authRepositoryProvider);
+  return auth is AuthAuthenticated && auth.tokens.isAdmin;
+});
 
 final authRepositoryProvider = StateNotifierProvider<AuthRepository, AuthState>((ref) {
   if (ref.read(appShellProvider) == AppShell.androidApp) {

@@ -551,6 +551,28 @@ jobs:
     with:
       test_path: 'Source/tests/aws-lambdas/shared/test_ec2_training_reaper.py'
 
+  # ============================ assistant tests ============================
+  test-assistant-library:
+    name: Run assistant library tests
+    uses: ./.github/workflows/run_python_tests.yml
+    with:
+      test_path: 'Source/tests/library/assistant/'
+      requirements_files: ''
+
+  test-assistant-lambdas:
+    name: Run assistant Lambda tests
+    uses: ./.github/workflows/run_python_tests.yml
+    with:
+      test_path: 'Source/tests/aws-lambdas/shared/test_assistant_tools.py Source/tests/aws-lambdas/shared/test_assistant_producers.py'
+      requirements_files: ''
+
+  test-assistant-agent:
+    name: Run assistant agent tests
+    uses: ./.github/workflows/run_python_tests.yml
+    with:
+      test_path: 'Source/tests/agents/'
+      requirements_files: ''
+
   # ============================ frontend tests ============================
   test-frontend:
     name: Run frontend tests
@@ -605,6 +627,7 @@ jobs:
       test-nhl-library, test-nhl-backfill, test-nhl-feature-engineering, test-nhl-train-model,
       test-nhl-predict, test-nhl-live-scores, test-nhl-schedule-sync, test-nhl-ingest, test-nhl-normalize,
       test-predict-read, test-season-gate, test-cloudwatch-geo-widget, test-ec2-training-reaper,
+      test-assistant-library, test-assistant-lambdas, test-assistant-agent,
       test-frontend,
     ]
     # always() -- deliberately NOT gated on every listed job being
@@ -886,6 +909,20 @@ jobs:
       image_version: '1.1.0'
       platform: 'linux/arm64'
 
+  # Pushes assistant-agent-latest; creating an AgentCore runtime checks its
+  # image exists, so infra waits for it.
+  assistant_agent_build:
+    name: Assistant agent (build)
+    needs: scan
+    uses: ./.github/workflows/docker_image_deploy.yml
+    secrets: inherit
+    with:
+      sport: 'Assistant'
+      dockerfile_path: 'Source/agents/assistant/Dockerfile'
+      image_name: 'assistant-agent'
+      image_version: '1.0.0'
+      platform: 'linux/arm64'
+
   f1_ai_training_build:
     name: F1 AI training (build)
     needs: scan
@@ -939,6 +976,7 @@ jobs:
       pga_ai_hosting_build,
       f1_ai_hosting_build,
       nhl_ai_hosting_build,
+      assistant_agent_build,
     ]
     uses: ./.github/workflows/tf_install.yml
     secrets: inherit
@@ -955,6 +993,37 @@ jobs:
       predict_read_function_name: ${{ needs.infra.outputs.predict_read_function_name }}
       prediction_scheduler_function_name: ${{ needs.infra.outputs.prediction_scheduler_function_name }}
       model_performance_function_name: ${{ needs.infra.outputs.model_performance_function_name }}
+
+  assistant_public_runtime_deploy:
+    name: Assistant public runtime (deploy)
+    needs: [infra, assistant_agent_build]
+    uses: ./.github/workflows/agentcore_runtime_deploy.yml
+    secrets: inherit
+    with:
+      runtime_id: ${{ needs.infra.outputs.assistant_public_runtime_id }}
+      image_tag: ${{ needs.assistant_agent_build.outputs.image_tag }}
+      default_image_tag: 'assistant-agent-latest'
+
+  assistant_admin_runtime_deploy:
+    name: Assistant admin runtime (deploy)
+    needs: [infra, assistant_agent_build]
+    uses: ./.github/workflows/agentcore_runtime_deploy.yml
+    secrets: inherit
+    with:
+      runtime_id: ${{ needs.infra.outputs.assistant_admin_runtime_id }}
+      image_tag: ${{ needs.assistant_agent_build.outputs.image_tag }}
+      default_image_tag: 'assistant-agent-latest'
+
+  assistant_lambdas_deploy:
+    name: Assistant Lambdas (deploy)
+    needs: [scan, infra]
+    uses: ./.github/workflows/assistant_lambdas_deploy.yml
+    secrets: inherit
+    with:
+      public_tools_function_name: ${{ needs.infra.outputs.assistant_public_tools_function_name }}
+      admin_tools_function_name: ${{ needs.infra.outputs.assistant_admin_tools_function_name }}
+      cost_snapshot_function_name: ${{ needs.infra.outputs.assistant_cost_snapshot_function_name }}
+      traffic_aggregate_function_name: ${{ needs.infra.outputs.assistant_traffic_aggregate_function_name }}
 
   nfl_predict_deploy:
     name: NFL predict (deploy)

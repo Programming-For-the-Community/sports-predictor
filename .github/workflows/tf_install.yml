@@ -68,6 +68,24 @@ on:
       model_performance_function_name:
         description: 'Shared model-performance Lambda function name'
         value: ${{ jobs.terraform.outputs.model_performance_function_name }}
+      assistant_public_tools_function_name:
+        description: 'Assistant public-tools Lambda function name'
+        value: ${{ jobs.terraform.outputs.assistant_public_tools_function_name }}
+      assistant_admin_tools_function_name:
+        description: 'Assistant admin-tools Lambda function name'
+        value: ${{ jobs.terraform.outputs.assistant_admin_tools_function_name }}
+      assistant_cost_snapshot_function_name:
+        description: 'Assistant cost-snapshot Lambda function name'
+        value: ${{ jobs.terraform.outputs.assistant_cost_snapshot_function_name }}
+      assistant_traffic_aggregate_function_name:
+        description: 'Assistant traffic-aggregate Lambda function name'
+        value: ${{ jobs.terraform.outputs.assistant_traffic_aggregate_function_name }}
+      assistant_public_runtime_id:
+        description: 'Public assistant AgentCore runtime id'
+        value: ${{ jobs.terraform.outputs.assistant_public_runtime_id }}
+      assistant_admin_runtime_id:
+        description: 'Admin assistant AgentCore runtime id'
+        value: ${{ jobs.terraform.outputs.assistant_admin_runtime_id }}
       nfl_live_scores_function_name:
         description: 'NFL live-scores Lambda function name'
         value: ${{ jobs.terraform.outputs.nfl_live_scores_function_name }}
@@ -228,6 +246,12 @@ jobs:
       predict_read_function_name: ${{ steps.tf_outputs.outputs.predict_read_function_name }}
       prediction_scheduler_function_name: ${{ steps.tf_outputs.outputs.prediction_scheduler_function_name }}
       model_performance_function_name: ${{ steps.tf_outputs.outputs.model_performance_function_name }}
+      assistant_public_tools_function_name: ${{ steps.tf_outputs.outputs.assistant_public_tools_function_name }}
+      assistant_admin_tools_function_name: ${{ steps.tf_outputs.outputs.assistant_admin_tools_function_name }}
+      assistant_cost_snapshot_function_name: ${{ steps.tf_outputs.outputs.assistant_cost_snapshot_function_name }}
+      assistant_traffic_aggregate_function_name: ${{ steps.tf_outputs.outputs.assistant_traffic_aggregate_function_name }}
+      assistant_public_runtime_id: ${{ steps.tf_outputs.outputs.assistant_public_runtime_id }}
+      assistant_admin_runtime_id: ${{ steps.tf_outputs.outputs.assistant_admin_runtime_id }}
       nfl_live_scores_function_name: ${{ steps.tf_outputs.outputs.nfl_live_scores_function_name }}
       ncaafb_ingest_function_name: ${{ steps.tf_outputs.outputs.ncaafb_ingest_function_name }}
       ncaafb_normalize_function_name: ${{ steps.tf_outputs.outputs.ncaafb_normalize_function_name }}
@@ -382,6 +406,12 @@ jobs:
         capture_output predict_read_function_name
         capture_output prediction_scheduler_function_name
         capture_output model_performance_function_name
+        capture_output assistant_public_tools_function_name
+        capture_output assistant_admin_tools_function_name
+        capture_output assistant_cost_snapshot_function_name
+        capture_output assistant_traffic_aggregate_function_name
+        capture_output assistant_public_runtime_id
+        capture_output assistant_admin_runtime_id
         capture_output nfl_live_scores_function_name
         capture_output ncaafb_ingest_function_name
         capture_output ncaafb_normalize_function_name

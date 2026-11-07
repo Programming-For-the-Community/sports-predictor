@@ -331,6 +331,7 @@ resource "aws_cloudwatch_dashboard" "platform" {
             ["AWS/WAFV2", "AllowedRequests", "WebACL", aws_wafv2_web_acl.cloudfront.name, "Rule", "ALL", { stat = "Sum", label = "Allowed" }],
             ["AWS/WAFV2", "BlockedRequests", "WebACL", aws_wafv2_web_acl.cloudfront.name, "Rule", "${var.project}-amazon-ip-reputation-list", { stat = "Sum", label = "Blocked -- IP reputation" }],
             ["AWS/WAFV2", "BlockedRequests", "WebACL", aws_wafv2_web_acl.cloudfront.name, "Rule", "${var.project}-per-ip-rate-limit", { stat = "Sum", label = "Blocked -- per-IP rate limit" }],
+            ["AWS/WAFV2", "BlockedRequests", "WebACL", aws_wafv2_web_acl.cloudfront.name, "Rule", "${var.project}-assistant-rate-limit", { stat = "Sum", label = "Blocked -- assistant rate limit" }],
           ]
         }
       },
