@@ -12,7 +12,7 @@ resource "aws_cloudwatch_log_metric_filter" "assistant_turns" {
   for_each = local.assistant_agents
 
   name           = "${var.project}-assistant-${each.key}-turns"
-  log_group_name = aws_cloudwatch_log_group.assistant_runtime[each.key].name
+  log_group_name = local.assistant_runtime_log_groups[each.key]
   pattern        = "{ $.assistant_turn IS TRUE }"
 
   metric_transformation {

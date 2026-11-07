@@ -182,13 +182,13 @@ resource "awscc_bedrockagentcore_runtime" "assistant" {
 }
 
 # The runtimes' own log groups (stdout, spans, and the per-turn transcript
-# lines from Source/library/assistant/turn_log.py), created before the
-# first invocation so their retention is ours: 14 days.
-resource "aws_cloudwatch_log_group" "assistant_runtime" {
-  for_each = local.assistant_agents
-
-  name              = "/aws/bedrock-agentcore/runtimes/${awscc_bedrockagentcore_runtime.assistant[each.key].agent_runtime_id}-DEFAULT"
-  retention_in_days = 14
-
-  tags = local.assistant_tags
+# lines from Source/library/assistant/turn_log.py). AgentCore creates each
+# one with its runtime, so they're referenced by name here, not managed;
+# agentcore_runtime_deploy.yml sets their 14-day retention after each
+# runtime update.
+locals {
+  assistant_runtime_log_groups = {
+    for agent in keys(local.assistant_agents) :
+    agent => "/aws/bedrock-agentcore/runtimes/${awscc_bedrockagentcore_runtime.assistant[agent].agent_runtime_id}-DEFAULT"
+  }
 }

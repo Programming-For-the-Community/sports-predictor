@@ -4,7 +4,7 @@
 # Logs Insights views over the per-turn JSON lines (turn_log.py).
 
 locals {
-  assistant_turn_sources = join(" | ", [for agent in keys(local.assistant_agents) : "SOURCE '${aws_cloudwatch_log_group.assistant_runtime[agent].name}'"])
+  assistant_turn_sources = join(" | ", [for agent in keys(local.assistant_agents) : "SOURCE '${local.assistant_runtime_log_groups[agent]}'"])
   assistant_lambdas = [
     aws_lambda_function.assistant_public_tools.function_name,
     aws_lambda_function.assistant_admin_tools.function_name,

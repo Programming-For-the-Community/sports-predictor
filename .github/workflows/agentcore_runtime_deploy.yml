@@ -77,8 +77,16 @@ jobs:
           for attempt in $(seq 1 60); do
             STATUS="$(aws bedrock-agentcore-control get-agent-runtime --agent-runtime-id "$RUNTIME_ID" --query status --output text)"
             case "$STATUS" in
-              READY) echo "Deployed runtime $RUNTIME_ID -> $IMAGE_URI"; exit 0 ;;
+              READY)
+                # AgentCore creates the runtime's log group itself (never
+                # expiring); it holds the turn transcripts, kept 14 days.
+                aws logs put-retention-policy \
+                  --log-group-name "/aws/bedrock-agentcore/runtimes/${RUNTIME_ID}-DEFAULT" \
+                  --retention-in-days 14
+                echo "Deployed runtime $RUNTIME_ID -> $IMAGE_URI"
+                exit 0 ;;
               *FAILED*) echo "::error::Runtime $RUNTIME_ID update ended $STATUS"; exit 1 ;;
+              *) echo "Runtime $RUNTIME_ID is $STATUS; waiting" ;;
             esac
             sleep 10
           done
