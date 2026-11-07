@@ -45,7 +45,8 @@ def test_traffic_aggregate_rewrites_the_last_whole_hours_from_all_three_sources(
         traffic_handler.lambda_handler({}, None)
 
     start, end, sources = windows[0]
-    assert end.minute == 0 and end.second == 0
+    assert end.minute == 0
+    assert end.second == 0
     assert end - start == timedelta(hours=3)
     assert sources == [("waf_cloudfront", "aws-waf-logs-cf"), ("waf_api", "aws-waf-logs-api"), ("api_gateway", "/aws/apigateway/access")]
 
@@ -64,4 +65,5 @@ def test_traffic_backfill_runs_one_window_per_day(monkeypatch):
     assert len(windows) == 3
     assert all(end - start == timedelta(days=1) for start, end in windows)
     assert windows[0][0] == windows[1][1]
-    assert totals["hours_written"] == 72 and totals["blocked"] == 3
+    assert totals["hours_written"] == 72
+    assert totals["blocked"] == 3

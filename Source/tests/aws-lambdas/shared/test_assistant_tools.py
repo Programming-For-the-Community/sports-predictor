@@ -25,17 +25,18 @@ def test_public_tools_read_through_predict_read_with_an_api_gateway_shaped_reque
     monkeypatch.setenv("PREDICT_READ_FUNCTION_NAME", "sports-predictor-predict-read")
     client = FakeLambdaClient({"statusCode": 200, "body": json.dumps({"sport": "nfl", "events": [{"event_id": "1"}]})})
 
-    with patch.object(public_handler, "_lambda", client), patch.object(public_handler, "load_sports", lambda table: ["nfl"]):
+    with patch.object(public_handler, "_lambda", client), patch.object(public_handler, "load_sports", return_value=["nfl"]):
         response = public_handler.lambda_handler({"tool": "list_events", "input": {"sport": "nfl", "when": "recent"}}, None)
 
-    assert response["ok"] is True and response["result"]["count"] == 1
+    assert response["ok"] is True
+    assert response["result"]["count"] == 1
     name, request = client.invoked[0]
     assert name == "sports-predictor-predict-read"
     assert request == {"resource": "/nfl/events", "httpMethod": "GET", "pathParameters": {}, "queryStringParameters": {"status": "completed"}}
 
 
 def test_public_tools_refuse_an_admin_tool_and_bad_input():
-    with patch.object(public_handler, "load_sports", lambda table: ["nfl"]):
+    with patch.object(public_handler, "load_sports", return_value=["nfl"]):
         _refuses_admin_and_bad_input()
 
 
@@ -51,7 +52,7 @@ def test_a_tool_crash_returns_a_message_not_an_exception(monkeypatch):
         def invoke(self, **kwargs):
             raise RuntimeError("boom")
 
-    with patch.object(public_handler, "_lambda", Broken()), patch.object(public_handler, "load_sports", lambda table: ["nba"]):
+    with patch.object(public_handler, "_lambda", Broken()), patch.object(public_handler, "load_sports", return_value=["nba"]):
         response = public_handler.lambda_handler({"tool": "get_season_projection", "input": {"sport": "nba"}}, None)
 
     assert response == {"ok": False, "error": "The tool failed. Try again shortly."}
@@ -66,7 +67,7 @@ def test_admin_tools_pass_their_config_through(monkeypatch):
         seen.update(name=name, args=args, api_name=tools_context.api_name, project=tools_context.project)
         return {"total": 1}
 
-    with patch.object(admin_handler.admin_tools, "run", run), patch.object(admin_handler, "_get_s3", lambda: "s3"):
+    with patch.object(admin_handler.admin_tools, "run", run), patch.object(admin_handler, "_get_s3", return_value="s3"):
         response = admin_handler.lambda_handler({"tool": "get_cost_summary", "input": {"group_by": "sport"}}, None)
 
     assert response == {"ok": True, "result": {"total": 1}}
@@ -74,5 +75,5 @@ def test_admin_tools_pass_their_config_through(monkeypatch):
 
 
 def test_admin_tools_refuse_a_public_tool_name():
-    with patch.object(admin_handler, "_get_s3", lambda: "s3"):
+    with patch.object(admin_handler, "_get_s3", return_value="s3"):
         assert admin_handler.lambda_handler({"tool": "list_events", "input": {"sport": "nfl", "when": "recent"}}, None)["ok"] is False

@@ -66,7 +66,9 @@ def test_event_prediction_strips_ids_and_bookkeeping_and_rounds():
 
     assert read.calls == [("/nfl/predictions/events/{event_id}", {"event_id": "1"}, {})]
     text = json.dumps(result)
-    assert "entity_id" not in text and "model_version" not in text and "event_key" not in text
+    assert "entity_id" not in text
+    assert "model_version" not in text
+    assert "event_key" not in text
     assert result["predictions"]["win_probability"]["home_win_probability"] == 0.712
     assert result["leaders"]["home"]["passing"]["name"] == "A Passer"
 
@@ -82,7 +84,8 @@ def test_list_events_maps_when_to_the_status_query_and_caps_rows():
     result = public_tools.run("list_events", {"sport": "nhl", "when": "upcoming"}, read, SPORTS, SETTINGS)
 
     assert read.calls[0][2] == {"status": "scheduled"}
-    assert result["count"] == 40 and len(result["events"]) <= SETTINGS.max_rows
+    assert result["count"] == 40
+    assert len(result["events"]) <= SETTINGS.max_rows
 
 
 def test_model_performance_can_be_narrowed_to_one_model_and_keeps_the_trend():
@@ -142,7 +145,8 @@ def test_repeat_offenders_apply_the_thresholds(traffic_s3):
 
     assert result["serious_count"] == 1
     assert result["serious"][0]["ip"] == "198.51.100.23"
-    assert result["serious"][0]["blocked"] == 110 and result["serious"][0]["days_active"] == 2
+    assert result["serious"][0]["blocked"] == 110
+    assert result["serious"][0]["days_active"] == 2
     assert result["data_from"] == "2026-11-04"
     assert result["start_date"] == "2026-11-04"
 
@@ -169,8 +173,10 @@ def test_long_trends_are_daily(traffic_s3):
 
 
 def test_a_range_ending_before_it_starts_is_refused(traffic_s3):
+    context = admin_tools.AdminContext(s3=traffic_s3, settings=SETTINGS)
+    backwards = {"start_date": "2026-11-06", "end_date": "2026-11-01"}
     with pytest.raises(ValueError):
-        admin_tools.run("get_denied_trend", {"start_date": "2026-11-06", "end_date": "2026-11-01"}, admin_tools.AdminContext(s3=traffic_s3, settings=SETTINGS))
+        admin_tools.run("get_denied_trend", backwards, context)
 
 
 def test_cost_summary_groups_compares_and_reports_the_budget(fake_s3):
@@ -182,10 +188,13 @@ def test_cost_summary_groups_compares_and_reports_the_budget(fake_s3):
 
     result = admin_tools.run("get_cost_summary", {}, admin_tools.AdminContext(s3=s3, settings=SETTINGS))
 
-    assert result["start_date"] == "2026-11-01" and result["total"] == 12.0
+    assert result["start_date"] == "2026-11-01"
+    assert result["total"] == 12.0
     assert result["groups"][0] == {"name": "AWS Lambda", "usd": 9.0}
-    assert result["previous_period_total"] == 6.0 and result["change_pct"] == 100.0
-    assert result["budget_used_pct"] == 10.0 and result["month_forecast"] == 118.0
+    assert result["previous_period_total"] == 6.0
+    assert result["change_pct"] == 100.0
+    assert result["budget_used_pct"] == 10.0
+    assert result["month_forecast"] == 118.0
     assert result["excluded"] == ["tax"]
 
 
@@ -225,7 +234,8 @@ def test_api_traffic_reads_api_metrics_and_denied_routes(traffic_s3):
     cloudwatch = FakeCloudWatch({"requests": 1000, "e4xx": 40, "e5xx": 2, "p95": 812.4})
     result = admin_tools.run("get_api_traffic", {"start_date": "2026-11-04"}, admin_tools.AdminContext(s3=traffic_s3, settings=SETTINGS, cloudwatch=cloudwatch, api_name="sports-predictor-api"))
 
-    assert result["requests"] == 1000 and result["latency_p95_ms"] == 812.4
+    assert result["requests"] == 1000
+    assert result["latency_p95_ms"] == 812.4
     assert result["denied_by_route"] == [{"status": "429", "method": "GET", "route": "/nba/season", "count": 7}]
     dims = cloudwatch.calls[0][0]["MetricStat"]["Metric"]["Dimensions"]
     assert dims == [{"Name": "ApiName", "Value": "sports-predictor-api"}]

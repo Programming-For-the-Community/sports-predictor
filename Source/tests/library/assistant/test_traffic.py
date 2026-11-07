@@ -64,7 +64,8 @@ def test_run_writes_each_hour_and_rolls_up_the_day(fake_s3):
     assert {"source": "api_gateway", "ip": None, "country": None, "rule": "429", "method": "GET",
             "path": "/nba/season", "kind": "route", "n": 3} in hour13
     day = s3.objects["assistant/admin/traffic/day/2026-11-06.json"]
-    assert day["hours"] == 2 and sum(r["n"] for r in day["rows"]) == 11
+    assert day["hours"] == 2
+    assert sum(r["n"] for r in day["rows"]) == 11
 
 
 def test_a_rerun_clears_counts_for_an_hour_that_is_now_empty(fake_s3):
@@ -76,5 +77,8 @@ def test_a_rerun_clears_counts_for_an_hour_that_is_now_empty(fake_s3):
 
 
 def test_a_failed_query_raises():
+    logs = FakeLogs([], status="Failed")
+    start = datetime(2026, 11, 6, tzinfo=timezone.utc)
+    end = datetime(2026, 11, 6, 1, tzinfo=timezone.utc)
     with pytest.raises(RuntimeError):
-        traffic.run_query(FakeLogs([], status="Failed"), "g", "q", datetime(2026, 11, 6, tzinfo=timezone.utc), datetime(2026, 11, 6, 1, tzinfo=timezone.utc))
+        traffic.run_query(logs, "g", "q", start, end)

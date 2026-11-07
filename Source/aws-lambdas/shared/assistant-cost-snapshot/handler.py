@@ -22,9 +22,10 @@ from library.aws.s3_manager import S3Manager
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s", force=True)  # AWS Lambda pre-attaches a root handler, so basicConfig() is otherwise a silent no-op
 logger = logging.getLogger("assistant-cost-snapshot")
 
-# Cost Explorer and Budgets are global services served from us-east-1.
-_ce = boto3.client("ce", region_name="us-east-1", config=DEFAULT_CONFIG)
-_budgets = boto3.client("budgets", region_name="us-east-1", config=DEFAULT_CONFIG)
+# Cost Explorer and Budgets are global services, served from the region
+# Terraform passes (us-east-1).
+_ce = boto3.client("ce", region_name=os.environ["COST_EXPLORER_REGION"], config=DEFAULT_CONFIG)
+_budgets = boto3.client("budgets", region_name=os.environ["COST_EXPLORER_REGION"], config=DEFAULT_CONFIG)
 _s3: S3Manager | None = None
 
 

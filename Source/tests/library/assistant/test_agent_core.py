@@ -110,11 +110,13 @@ def test_a_question_runs_the_tool_loop_and_remembers_the_turn():
     events = _run(PUBLIC, clients)
 
     assert events[0] == {"type": "progress", "tool": "get_event_prediction"}
-    assert events[-1]["text"] == "DET -6.5, 71% to win." and events[-1]["questions_left"] == 49
+    assert events[-1]["text"] == "DET -6.5, 71% to win."
+    assert events[-1]["questions_left"] == 49
     assert events[-1]["sources"] == ["get_event_prediction"]
     assert invoked == [("get_event_prediction", {"sport": "nfl", "event_id": "1"})]
     second = model.requests[1]["messages"]
-    assert second[-1]["content"][0]["type"] == "tool_result" and second[-1]["content"][0]["tool_use_id"] == "t1"
+    assert second[-1]["content"][0]["type"] == "tool_result"
+    assert second[-1]["content"][0]["tool_use_id"] == "t1"
     assert memory.created[0]["actor"] == "user-1"
     assert model.requests[0]["model"] == "anthropic.claude-haiku-5-5"
     assert model.requests[0]["output_config"] == {"effort": "low"}
@@ -155,7 +157,8 @@ def test_a_blocked_input_never_reaches_the_model():
 
     events = _run(PUBLIC, clients, "Should I bet the Lions?")
 
-    assert events[-1]["text"] == "blocked input" and events[-1]["blocked"] is True
+    assert events[-1]["text"] == "blocked input"
+    assert events[-1]["blocked"] is True
     assert model.requests == []
 
 
@@ -245,5 +248,6 @@ def test_status_and_removing_a_favorite_cost_no_question():
     assert status == {"type": "status", "questions_left": 50, "daily_limit": 50, "favorites": {"nfl": ["DET", "GB"]}}
 
     removed = list(agent_core.handle(PUBLIC, clients, {"action": "remove_favorite", "sport": "nfl", "team": "GB"}, USER, SESSION))[0]
-    assert removed["favorites"] == {"nfl": ["DET"]} and removed["questions_left"] == 50
+    assert removed["favorites"] == {"nfl": ["DET"]}
+    assert removed["questions_left"] == 50
     assert model.requests == []

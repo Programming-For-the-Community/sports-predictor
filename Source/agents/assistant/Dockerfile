@@ -11,11 +11,14 @@ FROM public.ecr.aws/docker/library/python:3.12-slim AS builder
 
 WORKDIR /build
 
-COPY library/ ./library/
 COPY agents/assistant/requirements.txt ./requirements.txt
 
-RUN pip install --no-cache-dir --only-binary :all: --require-hashes --target=/install -r requirements.txt && \
-    pip install --no-cache-dir --target=/install --no-deps ./library
+RUN pip install --no-cache-dir --only-binary :all: --require-hashes --target=/install -r requirements.txt
+
+# The shared library is plain source (no build step, and its imports are
+# the standard library plus boto3 from requirements.txt), so it is copied
+# in rather than pip-installed -- no setup script runs.
+COPY library/ /install/library/
 
 # --- Runtime: installed packages + the agent, nothing else ---
 FROM public.ecr.aws/docker/library/python:3.12-slim AS runtime

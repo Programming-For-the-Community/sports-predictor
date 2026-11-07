@@ -21,7 +21,6 @@ from botocore.config import Config
 from library.assistant import public_tools
 from library.assistant.settings import ToolSettings
 from library.assistant.sports import load_sports
-from library.assistant.tool_specs import ToolInputError
 from library.aws.boto_config import DEFAULT_CONFIG
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s", force=True)  # AWS Lambda pre-attaches a root handler, so basicConfig() is otherwise a silent no-op
@@ -44,7 +43,7 @@ def lambda_handler(event, context):
     name = (event or {}).get("tool", "")
     try:
         result = public_tools.run(name, (event or {}).get("input"), _read_predict, load_sports(_registry), ToolSettings.from_env())
-    except (ToolInputError, ValueError) as error:
+    except ValueError as error:  # includes ToolInputError: a bad tool call
         logger.info("Rejected %s: %s", name, error)
         return {"ok": False, "error": str(error)}
     except Exception:

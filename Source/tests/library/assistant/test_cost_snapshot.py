@@ -57,7 +57,8 @@ def test_every_request_carries_the_project_filter(fake_s3):
     ce = FakeCostExplorer(SERVICE, COMPONENT)
     cost_snapshot.run(ce, FakeBudgets(), fake_s3({cost_snapshot.meta_key(): {"data_from": "2026-01-01"}}), "123", "b", date(2026, 11, 6), SETTINGS)
 
-    assert ce.calls and ce.forecast_calls
+    assert ce.calls
+    assert ce.forecast_calls
     for call in ce.calls + ce.forecast_calls:
         assert call["Filter"] == cost_snapshot.PROJECT_FILTER
     tags = {t["Tags"]["Key"]: t["Tags"]["Values"] for t in cost_snapshot.PROJECT_FILTER["Or"]}
@@ -84,9 +85,11 @@ def test_daily_run_rewrites_the_last_three_days_and_rolls_up_the_month(fake_s3):
     assert ce.calls[0]["TimePeriod"] == {"Start": "2026-11-03", "End": "2026-11-06"}
     assert summary["backfill"] is False
     month = s3.objects[cost_snapshot.monthly_key(2026, 11)]
-    assert month["total"] == 4.0 and month["days"] == 2
+    assert month["total"] == 4.0
+    assert month["days"] == 2
     meta = s3.objects[cost_snapshot.meta_key()]
-    assert meta["budget_limit"] == 120.0 and meta["month_forecast"] == 100.0
+    assert meta["budget_limit"] == 120.0
+    assert meta["month_forecast"] == 100.0
     assert meta["data_from"] == "2026-01-01"
 
 

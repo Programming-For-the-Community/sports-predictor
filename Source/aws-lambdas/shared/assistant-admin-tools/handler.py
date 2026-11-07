@@ -14,7 +14,6 @@ import boto3
 
 from library.assistant import admin_tools
 from library.assistant.settings import ToolSettings
-from library.assistant.tool_specs import ToolInputError
 from library.aws.boto_config import DEFAULT_CONFIG
 from library.aws.s3_manager import S3Manager
 
@@ -41,7 +40,7 @@ def lambda_handler(event, context):
             api_name=os.environ["API_GATEWAY_NAME"], project=os.environ["PROJECT_NAME"],
         )
         result = admin_tools.run(name, (event or {}).get("input"), tools_context)
-    except (ToolInputError, ValueError) as error:
+    except ValueError as error:  # includes ToolInputError: a bad tool call
         logger.info("Rejected %s: %s", name, error)
         return {"ok": False, "error": str(error)}
     except Exception:

@@ -44,7 +44,8 @@ def test_settings_fall_back_to_defaults(monkeypatch):
     for name in ("ASSISTANT_DAILY_LIMIT", "ASSISTANT_MODEL_ID"):
         monkeypatch.delenv(name, raising=False)
     settings = AgentSettings.from_env(default_daily_limit=50)
-    assert settings.daily_limit == 50 and settings.model_id == "anthropic.claude-haiku-5-5"
+    assert settings.daily_limit == 50
+    assert settings.model_id == "anthropic.claude-haiku-5-5"
 
 
 def test_turn_log_lines_name_the_outcome_and_carry_the_transcript():
@@ -54,8 +55,11 @@ def test_turn_log_lines_name_the_outcome_and_carry_the_transcript():
 
     answered = json.loads(turn_log.record("public", "u1", "s1", {"message": "Why DET?"},
                                           {"type": "answer", "text": "DET -6.5", "sources": ["list_events"], "questions_left": 49}))
-    assert answered["assistant_turn"] is True and answered["outcome"] == "answered"
-    assert answered["question"] == "Why DET?" and answered["answer"] == "DET -6.5" and answered["tools"] == ["list_events"]
+    assert answered["assistant_turn"] is True
+    assert answered["outcome"] == "answered"
+    assert answered["question"] == "Why DET?"
+    assert answered["answer"] == "DET -6.5"
+    assert answered["tools"] == ["list_events"]
 
     assert turn_log.outcome({"type": "answer", "blocked": True}) == "blocked"
     assert turn_log.outcome({"type": "error", "code": "quota"}) == "quota"

@@ -34,6 +34,7 @@ os.environ.setdefault("CLOUDFRONT_EDGE_LOG_REGION", "us-east-1")
 os.environ.setdefault("WAF_CLOUDFRONT_LOG_REGION", "us-east-1")
 os.environ.setdefault("MODEL_ARTIFACTS_BUCKET_NAME", "model-artifacts")
 os.environ.setdefault("SPORT_REGISTRY_TABLE_NAME", "sport-registry")
+os.environ.setdefault("COST_EXPLORER_REGION", "us-east-1")
 
 _load_handler("shared_season_gate", "aws-lambdas/shared/season-gate/handler.py")
 _load_handler("shared_cloudwatch_geo_widget", "aws-lambdas/shared/cloudwatch-geo-widget/handler.py")

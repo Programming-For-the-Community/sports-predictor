@@ -54,6 +54,8 @@ resource "aws_lambda_function" "assistant_cost_snapshot" {
       AWS_ACCOUNT_ID              = var.account_id
       MODEL_ARTIFACTS_BUCKET_NAME = aws_s3_bucket.model_artifacts.bucket
       PROJECT_BUDGET_NAME         = aws_budgets_budget.project.name
+      # Cost Explorer and Budgets are served from us-east-1 only.
+      COST_EXPLORER_REGION = "us-east-1"
     })
   }
 

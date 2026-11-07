@@ -56,14 +56,16 @@ def test_the_entrypoint_streams_events_and_logs_one_json_line_per_turn(agent, ca
     context = types.SimpleNamespace(request_headers={"Authorization": "Bearer h.eyJzdWIiOiJ1LTEifQ.s"}, session_id="s" * 36)
     agent.turn_logger.propagate = True
 
-    with patch.object(agent, "sports", lambda: ["nfl"]), patch.object(agent.agent_core, "handle", lambda *a: iter(events)), \
+    with patch.object(agent, "sports", return_value=["nfl"]), patch.object(agent.agent_core, "handle", return_value=iter(events)), \
             caplog.at_level(logging.INFO, logger="assistant-turns"):
         streamed = list(agent.app.entry({"message": "Why DET?"}, context))
 
     assert streamed == events
     lines = [json.loads(r.getMessage()) for r in caplog.records if r.name == "assistant-turns"]
     assert len(lines) == 1
-    assert lines[0]["user_sub"] == "u-1" and lines[0]["outcome"] == "answered" and lines[0]["question"] == "Why DET?"
+    assert lines[0]["user_sub"] == "u-1"
+    assert lines[0]["outcome"] == "answered"
+    assert lines[0]["question"] == "Why DET?"
 
 
 def test_tools_go_to_the_public_lambda_unless_they_are_admin_tools(agent, monkeypatch):

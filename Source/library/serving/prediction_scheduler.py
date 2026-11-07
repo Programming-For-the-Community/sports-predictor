@@ -191,6 +191,24 @@ def _event_action(event: dict, now: datetime, schedule: SportSchedule, predictio
     return _kickoff_action(event, now, schedule, predictions_table)
 
 
+def _plan(events: list[dict], now: datetime, schedule: SportSchedule, predictions_table) -> tuple[list[dict], list[dict], list[str]]:
+    """What one sport's events need this tick: (distinct ingest refresh
+    payloads, events to snapshot, event ids whose odds to lock)."""
+    refresh_payloads: dict[tuple, dict] = {}
+    snapshot_events: list[dict] = []
+    lock_ids: list[str] = []
+    for event in events:
+        if _odds_lock_due(event, now, schedule, predictions_table):
+            lock_ids.append(event["event_id"])
+        action = _event_action(event, now, schedule, predictions_table)
+        if action == _SNAPSHOT:
+            snapshot_events.append(event)
+        elif action == _REFRESH:
+            payload = schedule.ingest_payload(event)
+            refresh_payloads[tuple(sorted(payload.items()))] = payload
+    return list(refresh_payloads.values()), snapshot_events, lock_ids
+
+
 def run_tick(
     now: datetime, sports: dict[str, SportSchedule], list_events: Callable[[str], list[dict]], predictions_table,
     invoke: Callable[[str, dict], None], project: str,
@@ -199,20 +217,8 @@ def run_tick(
     asynchronously. Returns counts per sport for logging."""
     summary: dict[str, dict[str, int]] = {}
     for sport, schedule in sports.items():
-        refresh_payloads: dict[tuple, dict] = {}
-        snapshot_events: list[dict] = []
-        lock_ids: list[str] = []
-        for event in list_events(sport):
-            if _odds_lock_due(event, now, schedule, predictions_table):
-                lock_ids.append(event["event_id"])
-            action = _event_action(event, now, schedule, predictions_table)
-            if action == _SNAPSHOT:
-                snapshot_events.append(event)
-            elif action == _REFRESH:
-                payload = schedule.ingest_payload(event)
-                refresh_payloads[tuple(sorted(payload.items()))] = payload
-
-        for payload in refresh_payloads.values():
+        refresh_payloads, snapshot_events, lock_ids = _plan(list_events(sport), now, schedule, predictions_table)
+        for payload in refresh_payloads:
             invoke(f"{project}-{sport}-ingest", payload)
         if lock_ids:
             invoke(f"{project}-{sport}-ingest", {"lock_odds": lock_ids})

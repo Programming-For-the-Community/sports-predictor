@@ -25,6 +25,7 @@ ADMIN_TOOL_NAMES = frozenset({
 
 _DATE_PATTERN = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 _DATE = {"type": "string", "description": "Date as YYYY-MM-DD (UTC)."}
+_WEEK_BACK = "Defaults to 7 days ago."
 _SOURCE = {"type": "string", "enum": TRAFFIC_SOURCES, "description": "Which log to count. Defaults to all."}
 
 
@@ -103,7 +104,7 @@ def _admin() -> list[dict]:
             [],
         ),
         _tool("get_denied_locations", "Blocked or denied requests by client country for a date range.",
-              {**_range("Defaults to 7 days ago."), "source": _SOURCE}, []),
+              {**_range(_WEEK_BACK), "source": _SOURCE}, []),
         _tool(
             "get_repeat_offenders",
             "Client IPs that were blocked repeatedly in a date range. An IP counts as serious when it reaches min_blocks or was blocked on min_days different days.",
@@ -113,13 +114,13 @@ def _admin() -> list[dict]:
             [],
         ),
         _tool("get_denied_endpoints", "The paths blocked or denied requests asked for in a date range, each marked as a real app route or a probe.",
-              {**_range("Defaults to 7 days ago."), "source": _SOURCE}, []),
+              {**_range(_WEEK_BACK), "source": _SOURCE}, []),
         _tool("get_denied_trend", "Blocked or denied requests over time by rule: hourly for short ranges, daily beyond.",
-              {**_range("Defaults to 7 days ago."), "source": _SOURCE}, []),
+              {**_range(_WEEK_BACK), "source": _SOURCE}, []),
         _tool("get_api_traffic", "API Gateway requests, 4xx, 5xx and p95 latency for a date range (up to 455 days back), plus denied requests by route.",
-              _range("Defaults to 7 days ago."), []),
+              _range(_WEEK_BACK), []),
         _tool("get_lambda_health", "This project's Lambda functions with the most errors, throttles and timeouts in a date range (up to 455 days back).",
-              _range("Defaults to 7 days ago."), []),
+              _range(_WEEK_BACK), []),
     ]
 
 

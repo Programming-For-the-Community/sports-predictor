@@ -16,6 +16,8 @@ MAX_METRIC_DAYS = 455
 TOP_FUNCTIONS = 10
 NEAR_TIMEOUT = 0.95
 METRIC_BATCH = 500
+API_GATEWAY = "AWS/ApiGateway"
+LAMBDA = "AWS/Lambda"
 
 
 def _window(args: dict) -> tuple[date, date, datetime, datetime, int]:
@@ -45,10 +47,10 @@ def api_traffic(s3, args: dict, settings: ToolSettings, cloudwatch, api_name: st
     start, end, begin, finish, period = _window(args)
     api = ("ApiName", api_name)
     values = _values(cloudwatch, [
-        _query("requests", "AWS/ApiGateway", "Count", api, "Sum", period),
-        _query("e4xx", "AWS/ApiGateway", "4XXError", api, "Sum", period),
-        _query("e5xx", "AWS/ApiGateway", "5XXError", api, "Sum", period),
-        _query("p95", "AWS/ApiGateway", "Latency", api, "p95", period),
+        _query("requests", API_GATEWAY, "Count", api, "Sum", period),
+        _query("e4xx", API_GATEWAY, "4XXError", api, "Sum", period),
+        _query("e5xx", API_GATEWAY, "5XXError", api, "Sum", period),
+        _query("p95", API_GATEWAY, "Latency", api, "p95", period),
     ], begin, finish)
     rows, _ = traffic_rows(s3, start, end, "api_gateway")
     by_route: dict[tuple, int] = defaultdict(int)
@@ -90,7 +92,7 @@ def lambda_health(args: dict, cloudwatch, lambda_client, project: str) -> dict:
     start, end, begin, finish, period = _window(args)
     functions = _project_functions(lambda_client, project)
     queries = [
-        _query(f"m{i}_{metric.lower()}", "AWS/Lambda", metric, ("FunctionName", fn["FunctionName"]), stat, period)
+        _query(f"m{i}_{metric.lower()}", LAMBDA, metric, ("FunctionName", fn["FunctionName"]), stat, period)
         for i, fn in enumerate(functions)
         for metric, stat in (("Invocations", "Sum"), ("Errors", "Sum"), ("Throttles", "Sum"), ("Duration", "Maximum"))
     ]

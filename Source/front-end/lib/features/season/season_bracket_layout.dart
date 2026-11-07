@@ -173,20 +173,21 @@ List<List<int>> _treeOrder(List<BracketRound> rounds) {
   final orders = List<List<int>>.filled(rounds.length, const []);
   orders[rounds.length - 1] = [for (var i = 0; i < rounds.last.matchups.length; i++) i];
   for (var r = rounds.length - 1; r > 0; r--) {
-    final previous = rounds[r - 1].matchups;
-    final placed = <int>{};
-    final order = <int>[];
-    for (final i in orders[r]) {
-      for (final j in _realSourceIndices(rounds[r].matchups[i], previous)) {
-        if (placed.add(j)) order.add(j);
-      }
-    }
-    for (var j = 0; j < previous.length; j++) {
-      if (placed.add(j)) order.add(j);
-    }
-    orders[r - 1] = order;
+    orders[r - 1] = _feederOrder(rounds[r].matchups, orders[r], rounds[r - 1].matchups);
   }
   return orders;
+}
+
+/// The previous round's matchup indices: the feeders of each matchup in
+/// `order` first, in that order, then any matchup that feeds nothing.
+List<int> _feederOrder(List<BracketMatchup> matchups, List<int> order, List<BracketMatchup> previous) {
+  final placed = <int>{};
+  final feeders = <int>[];
+  for (final i in order) {
+    feeders.addAll(_realSourceIndices(matchups[i], previous).where(placed.add));
+  }
+  feeders.addAll([for (var j = 0; j < previous.length; j++) j].where(placed.add));
+  return feeders;
 }
 
 /// Slot positions for every matchup, in each round's own matchup order.
