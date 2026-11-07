@@ -4,6 +4,8 @@ build_golfer_event_features, and the round-level/cut-line counterparts
 added 2026-08-25, the field-event counterpart to library.features.common's
 head-to-head rolling helpers.
 """
+import pytest
+
 from library.features.pga import (
     field_results,
     SEASON_STAT_CATEGORIES,
@@ -12,6 +14,7 @@ from library.features.pga import (
     build_golfer_event_features,
     build_match_event_features,
     build_round_event_features,
+    course_scoring_average,
     in_tournament_progress_features,
     rolling_golfer_averages,
     rolling_round_averages,
@@ -249,7 +252,7 @@ class TestBuildGolferEventFeatures:
         # rounds_so_far defaults to None (pre-tournament) -- nothing has
         # happened yet, so "remaining" is the whole tournament.
         event = self._event()
-        participant = {"entity_id": "1", "result": {"finish_position": 5, "score_to_par": -8}}
+        participant = {"entity_id": "1", "result": {"finish_position": 5, "score_to_par": -8, "status": "finished"}}
 
         row = build_golfer_event_features(event, participant, [])
 
@@ -257,24 +260,37 @@ class TestBuildGolferEventFeatures:
 
     def test_label_remaining_score_to_par_subtracts_this_weeks_cumulative_so_far(self):
         event = self._event()
-        participant = {"entity_id": "1", "result": {"finish_position": 5, "score_to_par": -8}}
+        participant = {"entity_id": "1", "result": {"finish_position": 5, "score_to_par": -8, "status": "finished"}}
         rounds_so_far = [_round(1, score_to_par=-3), _round(2, score_to_par=-1)]
 
         row = build_golfer_event_features(event, participant, [], rounds_so_far=rounds_so_far)
 
         assert row["label_remaining_score_to_par"] == -4  # -8 final - (-3 + -1) already shot
 
-    def test_label_remaining_score_to_par_is_zero_at_a_cut_golfers_own_final_snapshot(self):
-        # A cut golfer's stored final score_to_par IS their cumulative
-        # through the rounds they actually played -- nothing is left for
-        # them to shoot, so remaining is exactly 0, not None or negative.
+    def test_label_remaining_score_to_par_is_none_for_a_golfer_who_did_not_finish(self):
+        # A cut golfer's 36-hole total isn't a 72-hole score -- training on
+        # it would pull every projection toward a two-round number.
         event = self._event()
-        participant = {"entity_id": "1", "result": {"finish_position": None, "score_to_par": 4}}
-        rounds_so_far = [_round(1, score_to_par=4), _round(2, score_to_par=0)]
+        participant = {"entity_id": "1", "result": {"finish_position": None, "score_to_par": 4, "status": "cut"}}
 
-        row = build_golfer_event_features(event, participant, [], rounds_so_far=rounds_so_far)
+        for rounds_so_far in (None, [_round(1, score_to_par=4), _round(2, score_to_par=0)]):
+            row = build_golfer_event_features(event, participant, [], rounds_so_far=rounds_so_far)
+            assert row["label_remaining_score_to_par"] is None
 
-        assert row["label_remaining_score_to_par"] == 0
+    def test_course_scoring_scales_with_the_rounds_still_to_play(self):
+        event = self._event()
+        participant = {"entity_id": "1", "result": {"status": "finished", "score_to_par": -8}}
+
+        before = build_golfer_event_features(event, participant, [], course_field_avg_per_round=-1.5)
+        midway = build_golfer_event_features(
+            event, participant, [], rounds_so_far=[_round(1, score_to_par=-3)], course_field_avg_per_round=-1.5,
+        )
+        unknown = build_golfer_event_features(event, participant, [])
+
+        assert before["course_field_avg_score_to_par_per_round"] == -1.5
+        assert before["course_field_expected_remaining_score_to_par"] == -6.0
+        assert midway["course_field_expected_remaining_score_to_par"] == -4.5
+        assert unknown["course_field_expected_remaining_score_to_par"] is None
 
     def test_label_remaining_score_to_par_is_none_for_a_golfer_with_no_recorded_score(self):
         event = self._event()
@@ -393,7 +409,37 @@ class TestRollingRoundAverages:
         assert averages["avg_score_to_par"] == -10
 
 
+class TestCourseScoringAverage:
+    @staticmethod
+    def _past(*field_rounds):
+        """An event whose two golfers shot field_rounds[n] in round n+1."""
+        return {"participants": [
+            {"entity_id": entity, "result": {"rounds": [_round(n + 1, score_to_par=score) for n, score in enumerate(scores)]}}
+            for entity, scores in zip(("1", "2"), zip(*field_rounds))
+        ]}
+
+    def test_averages_each_rounds_field_average(self):
+        events = [self._past((-2, -4), (0, 2)), self._past((-6, -6))]
+
+        assert course_scoring_average(events) == pytest.approx(-8 / 3)  # rounds average -3, 1 and -6, weighted equally
+        assert course_scoring_average(events, round_number=1) == -4.5
+        assert course_scoring_average(events, round_number=2) == 1.0
+
+    def test_none_without_past_events(self):
+        assert course_scoring_average([]) is None
+        assert course_scoring_average([self._past((-2, -4))], round_number=3) is None
+
+
 class TestBuildRoundEventFeatures:
+    def test_carries_the_courses_scoring_for_this_round(self):
+        event = {"event_key": "E", "event_date": "2026-08-20", "participants": [{"entity_id": "1"}]}
+
+        row = build_round_event_features(event, {"entity_id": "1"}, _round(3, score_to_par=-1), [], [], 5, -0.75)
+        default = build_round_event_features(event, {"entity_id": "1"}, _round(3, score_to_par=-1), [], [])
+
+        assert row["course_field_avg_round_score_to_par"] == -0.75
+        assert default["course_field_avg_round_score_to_par"] is None
+
     def _event(self, participants=None):
         return {
             "event_key": "SPORT#PGA#EVENT#1", "event_date": "2026-08-20",

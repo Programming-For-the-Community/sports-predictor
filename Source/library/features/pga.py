@@ -61,6 +61,21 @@ def _rounds_vs_field(round_results: list[dict]) -> float | None:
     return _mean([diff for r in round_results if (diff := _vs_field(r)) is not None])
 
 
+TOURNAMENT_ROUNDS = 4
+FINISHED_STATUS = "finished"
+
+
+def course_scoring_average(past_course_events: list[dict], round_number: int | None = None) -> float | None:
+    """How the course plays: the field's average score to par per round
+    across past events at it, each round weighted equally -- only rounds
+    numbered round_number when given."""
+    averages = []
+    for event in past_course_events:
+        by_round = _field_round_averages(event)
+        averages.extend(v for n, v in by_round.items() if round_number is None or n == round_number)
+    return _mean(averages)
+
+
 # Raw ESPN category name -> this project's snake_case feature column
 # name, for the 6 season-stat categories golfer_features.parquet carries
 # (season_* columns, build_golfer_event_features below). Only categories
@@ -147,6 +162,7 @@ def build_golfer_event_features(
     course_window: int = DEFAULT_COURSE_HISTORY_WINDOW,
     season_stats: dict[str, float | None] | None = None,
     rounds_so_far: list[dict] | None = None,
+    course_field_avg_per_round: float | None = None,
 ) -> dict:
     """One training row: this golfer's rolling form (from prior_results)
     plus this event's field-strength context (purse, is_major,
@@ -166,7 +182,8 @@ def build_golfer_event_features(
     caller that hasn't resolved that history yet still gets every
     course_*/season_* column as an explicit missing value, rather than a
     row whose column set differs from every other row's. rounds_so_far
-    similarly defaults to None."""
+    similarly defaults to None. course_field_avg_per_round is
+    course_scoring_average over this course's past events."""
     result = participant.get("result") or {}
     finish_position = _as_number(result.get("finish_position"))
     progress = in_tournament_progress_features(rounds_so_far)
@@ -182,23 +199,19 @@ def build_golfer_event_features(
         **progress,
         "label_top_10": 1 if finish_position is not None and finish_position <= 10 else 0,
         "label_top_5": 1 if finish_position is not None and finish_position <= 5 else 0,
-        # Continuous label for the projected-score-to-par regression
-        # model. This is the REMAINING score-to-par over whatever rounds
-        # aren't reflected in score_to_par_this_week_so_far yet, not the
-        # absolute final score -- the raw cumulative-as-feature version
-        # let that one feature dominate every other, collapsing the model
-        # to roughly "final ≈ current cumulative." Serving time
-        # (aws-lambdas/pga/predict/event_prediction.py) adds this model's
-        # remaining-score output back onto score_to_par_this_week_so_far
-        # to get the field-facing projected_score_to_par value.
-        #
-        # None for a row with no recorded final score (e.g. a withdrawal
-        # before playing a hole) -- filtered out at training time.
-        # Correct at every snapshot: pre-tournament (remaining = the full
-        # tournament), mid-tournament (remaining = what's actually left),
-        # and a cut golfer's last snapshot (remaining = 0).
+        # Remaining score to par over the rounds not yet in
+        # score_to_par_this_week_so_far; serving adds it back onto that
+        # cumulative. Finishers only: a golfer who missed the cut or
+        # withdrew has no 72-hole score, and their partial total would
+        # pull every projection toward a 36-hole number.
         "label_remaining_score_to_par": (
-            None if final_score_to_par is None else final_score_to_par - (progress["score_to_par_this_week_so_far"] or 0)
+            final_score_to_par - (progress["score_to_par_this_week_so_far"] or 0)
+            if final_score_to_par is not None and result.get("status") == FINISHED_STATUS else None
+        ),
+        "course_field_avg_score_to_par_per_round": _as_number(course_field_avg_per_round),
+        "course_field_expected_remaining_score_to_par": (
+            None if _as_number(course_field_avg_per_round) is None
+            else course_field_avg_per_round * max(TOURNAMENT_ROUNDS - progress["rounds_completed_this_week"], 0)
         ),
     }
     row.update(rolling_golfer_averages(prior_results, window))
@@ -233,6 +246,7 @@ def build_round_event_features(
     prior_overall_results: list[dict],
     prior_same_round_results: list[dict],
     window: int = DEFAULT_ROLLING_WINDOW,
+    course_field_avg_round_score_to_par: float | None = None,
 ) -> dict:
     """One row per (golfer, tournament, round actually played) -- finer
     grain than build_golfer_event_features' one-row-per-tournament.
@@ -247,7 +261,9 @@ def build_round_event_features(
     rolling averages (rolling_golfer_averages, `overall_`-prefixed);
     prior_same_round_results feeds their round-number-specific history
     (rolling_round_averages, `same_round_`-prefixed). No course-fit or
-    season-stats block here, unlike build_golfer_event_features."""
+    season-stats block here, unlike build_golfer_event_features;
+    course_field_avg_round_score_to_par is course_scoring_average for this
+    round number over the course's past events."""
     row = {
         "event_key": event["event_key"],
         "entity_id": participant["entity_id"],
@@ -257,6 +273,7 @@ def build_round_event_features(
         "is_major": bool(event.get("is_major", False)),
         "field_size": len(event.get("participants", [])),
         "label_round_score_to_par": _as_number(round_result.get("score_to_par")),
+        "course_field_avg_round_score_to_par": _as_number(course_field_avg_round_score_to_par),
     }
     row.update({f"overall_{key}": value for key, value in rolling_golfer_averages(prior_overall_results, window).items()})
     row.update({f"same_round_{key}": value for key, value in rolling_round_averages(prior_same_round_results, window).items()})

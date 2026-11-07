@@ -29,10 +29,14 @@ def _event(event_key, event_date, participants, course_id=None, cut_score=None, 
     }
 
 
-def _participant(entity_id, finish_position=None, score_to_par=None, earnings=0.0):
+def _participant(entity_id, finish_position=None, score_to_par=None, earnings=0.0, status=None):
+    """status defaults to "finished" for a golfer with a finish position."""
     return {
         "entity_id": entity_id,
-        "result": {"finish_position": finish_position, "score_to_par": score_to_par, "earnings": earnings, "rounds": []},
+        "result": {
+            "finish_position": finish_position, "score_to_par": score_to_par, "earnings": earnings, "rounds": [],
+            "status": status or ("finished" if finish_position is not None else None),
+        },
     }
 
 
@@ -113,6 +117,31 @@ class TestBuildGolferDataset:
 
         last_row = next(r for r in rows if r["event_key"] == "E7")
         assert last_row["events_played"] == 3
+
+    def test_course_scoring_comes_only_from_earlier_events_at_the_same_course(self):
+        def played(event_key, event_date, course_id, round_one):
+            return _event(
+                event_key, event_date, [_participant("1", finish_position=1, score_to_par=round_one)], course_id=course_id,
+                rounds_by_participant={"1": [_round(1, round_one)]},
+            )
+        events = [played("E1", "2025-06-01", "C1", -4), played("E2", "2025-07-01", "C2", 3), played("E3", "2026-06-01", "C1", -1)]
+
+        rows = build_dataset.build_golfer_dataset(self._storage(events), window=5)
+        pre_tournament = {r["event_key"]: r for r in rows if r["rounds_completed_this_week"] == 0}
+
+        assert pre_tournament["E1"]["course_field_avg_score_to_par_per_round"] is None
+        assert pre_tournament["E3"]["course_field_avg_score_to_par_per_round"] == -4
+        assert pre_tournament["E3"]["course_field_expected_remaining_score_to_par"] == -16
+
+    def test_a_cut_golfer_has_no_remaining_score_label(self):
+        events = [_event(
+            "E1", "2026-06-01", [_participant("1", score_to_par=4, status="cut")],
+            rounds_by_participant={"1": [_round(1, 3), _round(2, 1)]},
+        )]
+
+        rows = build_dataset.build_golfer_dataset(self._storage(events), window=5)
+
+        assert [r["label_remaining_score_to_par"] for r in rows] == [None, None, None]
 
     def test_field_size_reflects_this_events_own_participant_count(self):
         participants = [_participant(str(i)) for i in range(1, 6)]
@@ -276,6 +305,19 @@ class TestBuildRoundDataset:
         storage = MagicMock()
         storage.get_all_events.return_value = events
         return storage
+
+    def test_each_round_carries_its_own_round_numbers_course_scoring(self):
+        events = [
+            _event("E1", "2025-06-01", [_participant("1")], course_id="C1",
+                   rounds_by_participant={"1": [_round(1, -4), _round(2, 2)]}),
+            _event("E2", "2026-06-01", [_participant("1")], course_id="C1",
+                   rounds_by_participant={"1": [_round(1, 0), _round(2, 0), _round(3, 0)]}),
+        ]
+
+        rows = build_dataset.build_round_dataset(self._storage(events), window=5)
+        e2 = {r["round_number"]: r for r in rows if r["event_key"] == "E2"}
+
+        assert [e2[n]["course_field_avg_round_score_to_par"] for n in (1, 2, 3)] == [-4, 2, None]
 
     def test_builds_one_row_per_round_actually_played(self):
         events = [_event("E1", "2026-06-01", [_participant("1")], rounds_by_participant={

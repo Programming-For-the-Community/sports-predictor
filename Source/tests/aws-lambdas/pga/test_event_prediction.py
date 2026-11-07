@@ -83,6 +83,13 @@ class TestFieldProjectedScoreToPar:
 
         assert result["value"] == -9.0
 
+    def test_a_golfer_with_no_rounds_left_keeps_their_real_score(self):
+        scored = {"value": -6.0, "model_version": 3}
+
+        result = event_prediction._field_projected_score_to_par(scored, {"score_to_par_this_week_so_far": 4}, rounds_left=False)
+
+        assert result == {"value": 4, "model_version": 3}
+
     def test_does_not_mutate_the_original_scored_dict(self):
         scored = {"value": -2.0, "model_version": 3}
         event_prediction._field_projected_score_to_par(scored, {"score_to_par_this_week_so_far": -5})

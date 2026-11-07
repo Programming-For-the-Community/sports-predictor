@@ -169,6 +169,26 @@ class TestBuildLiveFieldFeatures:
         assert result["golfer_rows"]["1"]["golfer"]["course_avg_score_to_par"] == -8.0
         assert result["golfer_rows"]["1"]["golfer"]["course_events_played"] == 1
 
+    def test_course_scoring_matches_trainings_and_ignores_other_courses(self):
+        # Two golfers so each round's field average is a real average.
+        def at(event_id, event_date, course_id, round_one, round_two):
+            return _field_event(event_id, event_date, [
+                _participant("1", rounds=[_round(1, round_one[0]), _round(2, round_two[0])]),
+                _participant("2", rounds=[_round(1, round_one[1]), _round(2, round_two[1])]),
+            ], course_id=course_id)
+        same_course = at("998", "2026-08-01", "C1", (-2, -4), (0, 2))
+        other_course = at("997", "2026-07-01", "C2", (6, 6), (6, 6))
+        target = _field_event("999", "2026-08-20", [_participant("1")], course_id="C1")
+        storage = _storage(target, [target, same_course, other_course])
+
+        rows = live_features.build_live_field_features(storage, "pga", "999")["golfer_rows"]["1"]
+
+        assert rows["golfer"]["course_field_avg_score_to_par_per_round"] == -1.0  # rounds average -3 and 1
+        assert rows["golfer"]["course_field_expected_remaining_score_to_par"] == -4.0
+        assert rows["rounds"][1]["course_field_avg_round_score_to_par"] == -3.0
+        assert rows["rounds"][2]["course_field_avg_round_score_to_par"] == 1.0
+        assert rows["rounds"][3]["course_field_avg_round_score_to_par"] is None
+
     def test_no_course_id_on_the_target_event_means_no_course_history(self):
         target = _field_event("999", "2026-08-20", [_participant("1")], course_id=None)
         storage = _storage(target, [target])
@@ -255,6 +275,15 @@ class TestBuildProjectedFieldFeatures:
         result = live_features.build_projected_field_features(storage, "pga", target, golfer_ids=["1"])
 
         assert result["1"]["avg_finish_position"] == 3.0
+
+    def test_a_projected_field_gets_the_courses_scoring(self):
+        past = _field_event("998", "2026-08-01", [_participant("1", rounds=[_round(1, -2), _round(2, -4)])], course_id="C1")
+        target = {**_field_event("999", "2026-09-10", participants=[]), "course_id": "C1"}
+        storage = _storage(target, [target, past])
+
+        result = live_features.build_projected_field_features(storage, "pga", target, golfer_ids=["1"])
+
+        assert result["1"]["course_field_avg_score_to_par_per_round"] == -3.0
 
     def test_no_rounds_completed_this_week_for_a_projected_field_member(self):
         target = _field_event("999", "2026-09-10", participants=[])

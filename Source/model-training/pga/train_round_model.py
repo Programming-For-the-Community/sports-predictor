@@ -58,6 +58,9 @@ VALID_ROUND_NUMBERS = {1, 2, 3, 4}
 # that would contribute nothing to split on.
 NON_FEATURE_COLUMNS = {"event_key", "entity_id", "event_date", "round_number"}
 LABEL_COLUMN = "label_round_score_to_par"
+# Candidates learn each golfer's strokes against how this round usually
+# plays at the course (see regressor_common.train's baseline_column).
+BASELINE_COLUMN = "course_field_avg_round_score_to_par"
 
 CANDIDATES = model_types.regressor_candidates(include_lightgbm=False)
 
@@ -101,7 +104,7 @@ def train(s3: S3Manager, df: pd.DataFrame, round_number: int) -> dict:
         s3, df, SPORT, f"round-{round_number}",
         label_column=LABEL_COLUMN, non_feature_columns=NON_FEATURE_COLUMNS,
         candidates=CANDIDATES, logger=logger,
-        extra_metadata={"round_number": round_number},
+        extra_metadata={"round_number": round_number}, baseline_column=BASELINE_COLUMN,
     )
 
 

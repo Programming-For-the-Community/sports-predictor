@@ -1,7 +1,9 @@
 """
-An Elo-implied baseline a regressor learns the correction to: a straight line
-on home_elo - away_elo, fitted on training rows and stored on the model card
-({"kind": "elo_linear", "slope", "intercept"}). Predictions add it back.
+A baseline a regressor learns the correction to: a straight line fitted on
+training rows and stored on the model card, which predictions add back.
+  - {"kind": "elo_linear", "slope", "intercept"}: on home_elo - away_elo.
+  - {"kind": "column_linear", "column", "slope", "intercept", "fill"}: on one
+    feature column; a row missing it uses `fill`, the training rows' mean.
 """
 import numpy as np
 import pandas as pd
@@ -27,8 +29,27 @@ def fit_elo_linear(X: pd.DataFrame, y: pd.Series) -> dict | None:
     return {"kind": "elo_linear", "slope": float(slope), "intercept": float(intercept)}
 
 
+def fit_column_linear(X: pd.DataFrame, y: pd.Series, column: str) -> dict | None:
+    """None without `column` or with fewer than MIN_BASELINE_ROWS rows that have it."""
+    if column not in X.columns:
+        return None
+    values = X[column]
+    known = values.notna() & y.notna()
+    if known.sum() < MIN_BASELINE_ROWS:
+        return None
+    slope, intercept = np.polyfit(values[known].to_numpy(dtype=float), y[known].to_numpy(dtype=float), 1)
+    return {
+        "kind": "column_linear", "column": column, "slope": float(slope), "intercept": float(intercept),
+        "fill": float(values[known].mean()),
+    }
+
+
 def apply(baseline: dict | None, X: pd.DataFrame) -> np.ndarray:
-    """The baseline per row (an unrated row gets the intercept); zeros when `baseline` is None."""
+    """The baseline per row; zeros when `baseline` is None. An unrated elo_linear
+    row gets the intercept."""
     if not baseline:
         return np.zeros(len(X))
+    if baseline["kind"] == "column_linear":
+        values = X[baseline["column"]].astype(float).fillna(baseline["fill"])
+        return (baseline["slope"] * values + baseline["intercept"]).to_numpy(dtype=float)
     return (baseline["slope"] * _elo_gap(X).fillna(0.0) + baseline["intercept"]).to_numpy(dtype=float)

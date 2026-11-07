@@ -21,6 +21,7 @@ from library.features.pga import (
     field_results,
     build_match_event_features,
     build_round_event_features,
+    course_scoring_average,
 )
 from library.schema.keys import event_key as build_event_key
 from library.storage.pga_season_stats import resolve_season_stats
@@ -116,6 +117,20 @@ def _golfer_prior_history(
     return prior_results, course_results, season_stats
 
 
+def _past_course_events(history_events: list[dict], course_id: str | None, before_date: str, course_window: int) -> list[dict]:
+    """The last course_window field events played at course_id before
+    before_date, oldest first -- the same events training's course
+    scoring averages over."""
+    if course_id is None:
+        return []
+    past = [
+        e for e in history_events
+        if e.get("event_type") == "field" and e.get("course_id") == course_id and e.get("event_date", "") < before_date
+    ]
+    past.sort(key=lambda e: e.get("event_date", ""))
+    return past[-course_window:]
+
+
 def build_live_field_features(
     storage, sport: str, event_id: str,
     window: int = DEFAULT_ROLLING_WINDOW, course_window: int = DEFAULT_COURSE_HISTORY_WINDOW,
@@ -140,6 +155,8 @@ def build_live_field_features(
     # One fetch, reused for every golfer's history and the course-level
     # cut-score history below.
     history_events = storage.get_all_events(sport)
+    course_events = _past_course_events(history_events, course_id, before_date, course_window)
+    course_scoring = course_scoring_average(course_events)
 
     golfer_rows = {}
     for participant in participants:
@@ -157,6 +174,7 @@ def build_live_field_features(
 
         golfer_row = build_golfer_event_features(
             event, participant, prior_results, window, course_results, course_window, season_stats, rounds_so_far,
+            course_field_avg_per_round=course_scoring,
         )
 
         round_rows = {}
@@ -168,6 +186,7 @@ def build_live_field_features(
             # score_to_par label, which model_loader.predict never uses.
             round_rows[round_number] = build_round_event_features(
                 event, participant, {"round": round_number}, prior_results, prior_same_round, window,
+                course_scoring_average(course_events, round_number),
             )
 
         golfer_rows[entity_id] = {"golfer": golfer_row, "rounds": round_rows}
@@ -210,6 +229,7 @@ def build_projected_field_features(
     course_id = event.get("course_id")
     snapshots = season_stat_snapshots or []
     all_events = history_events if history_events is not None else storage.get_all_events(sport)
+    course_scoring = course_scoring_average(_past_course_events(all_events, course_id, before_date, course_window))
 
     golfer_rows = {}
     for entity_id in golfer_ids:
@@ -218,6 +238,7 @@ def build_projected_field_features(
         )
         golfer_rows[entity_id] = build_golfer_event_features(
             event, {"entity_id": entity_id}, prior_results, window, course_results, course_window, season_stats,
+            course_field_avg_per_round=course_scoring,
         )
     return golfer_rows
 

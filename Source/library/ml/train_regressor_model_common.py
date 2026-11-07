@@ -17,7 +17,7 @@ import pandas as pd
 from sklearn.metrics import mean_absolute_error, root_mean_squared_error
 
 from library.aws.s3_manager import S3Manager
-from library.ml import backtest, training_common
+from library.ml import backtest, target_baseline, training_common
 
 SUMMARY_METRICS = ["rmse", "mae", "naive_baseline_rmse", "naive_baseline_mae"]
 PROMOTION_METRIC = "rmse"
@@ -26,13 +26,14 @@ PROMOTION_METRIC = "rmse"
 def train(
     s3: S3Manager, df: pd.DataFrame, sport: str, model_name: str, *, label_column: str,
     non_feature_columns: set[str], candidates: list, logger, extra_metadata: dict | None = None,
-    date_column: str = "event_date",
+    date_column: str = "event_date", baseline_column: str | None = None,
 ) -> dict:
     """Runs the full candidate tournament and returns run_backtest's
     result ({"promotions": [card, ...], "candidates": [summary, ...]}).
     `df` is expected to already be filtered to the rows this model should
     train on -- any sport-specific pre-split filtering stays in the
-    caller."""
+    caller. With baseline_column, candidates learn the correction to a
+    straight line on that feature (target_baseline.fit_column_linear)."""
     feature_columns = training_common.feature_columns(df, non_feature_columns)
     train_df, test_df = training_common.chronological_split(df, training_common.TEST_FRACTION, date_column=date_column)
     train_date_range = [str(train_df[date_column].min()), str(train_df[date_column].max())]
@@ -72,5 +73,8 @@ def train(
         summary_metrics=SUMMARY_METRICS,
         promotion_metric=PROMOTION_METRIC,
         run_id=training_common.resolve_run_id(),
-        options=backtest.RunOptions(sample_weights=training_common.recency_weights(train_df[date_column])),
+        options=backtest.RunOptions(
+            target_baseline=target_baseline.fit_column_linear(X_train, y_train, baseline_column) if baseline_column else None,
+            sample_weights=training_common.recency_weights(train_df[date_column]),
+        ),
     )

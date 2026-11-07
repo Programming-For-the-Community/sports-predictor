@@ -29,6 +29,33 @@ class TestFit:
         assert target_baseline.fit_elo_linear(X.head(10), y.head(10)) is None
 
 
+class TestColumnLinear:
+    def _course(self, n=60):
+        course = np.linspace(-3, 1, n)
+        return pd.DataFrame({"course": course, "other": np.zeros(n)}), pd.Series(0.9 * course + 0.2)
+
+    def test_recovers_the_line_and_the_fill_value(self):
+        baseline = target_baseline.fit_column_linear(*self._course(), "course")
+
+        assert baseline["kind"] == "column_linear"
+        assert baseline["column"] == "course"
+        assert baseline["slope"] == pytest.approx(0.9)
+        assert baseline["intercept"] == pytest.approx(0.2)
+        assert baseline["fill"] == pytest.approx(-1.0)
+
+    def test_no_column_or_too_few_known_rows_gives_no_baseline(self):
+        X, y = self._course()
+
+        assert target_baseline.fit_column_linear(X, y, "missing") is None
+        assert target_baseline.fit_column_linear(X.head(10), y.head(10), "course") is None
+
+    def test_a_row_missing_the_column_uses_the_fill_value(self):
+        X = pd.DataFrame({"course": [-2.0, np.nan]})
+        baseline = {"kind": "column_linear", "column": "course", "slope": 1.0, "intercept": 0.5, "fill": -1.0}
+
+        assert list(target_baseline.apply(baseline, X)) == pytest.approx([-1.5, -0.5])
+
+
 class TestApply:
     def test_an_unrated_row_gets_the_intercept_and_none_gives_zeros(self):
         X = pd.DataFrame({"home_elo": [1600.0, np.nan], "away_elo": [1500.0, 1500.0]})

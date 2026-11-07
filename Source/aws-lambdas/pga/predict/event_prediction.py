@@ -46,13 +46,14 @@ def _score(
     )
 
 
-def _field_projected_score_to_par(scored: dict, golfer_row: dict) -> dict:
+def _field_projected_score_to_par(scored: dict, golfer_row: dict, rounds_left: bool = True) -> dict:
     """The model outputs a REMAINING-score-to-par (see build_golfer_event_
     features' docstring). Adds the golfer's real score_to_par_this_week_
-    so_far (0 pre-tournament) to get the projected FINAL score. Does not
-    change what _score already recorded to predictions_table."""
+    so_far (0 pre-tournament) to get the projected FINAL score; a golfer
+    with no rounds left (cut, withdrawn, done) keeps exactly that score.
+    Does not change what _score already recorded to predictions_table."""
     score_so_far = golfer_row.get("score_to_par_this_week_so_far") or 0
-    return {**scored, "value": scored["value"] + score_so_far}
+    return {**scored, "value": (scored["value"] if rounds_left else 0) + score_so_far}
 
 
 def _golfer_name(storage, entity_id: str) -> dict:
@@ -130,7 +131,10 @@ def _field_sort_key(entry: dict):
     return (2, 0)
 
 
-def _golfer_event_predictions(model_cache: dict, s3, predictions_table, event_key_value: str, entity_id: str, golfer_row: dict) -> dict:
+def _golfer_event_predictions(
+    model_cache: dict, s3, predictions_table, event_key_value: str, entity_id: str, golfer_row: dict,
+    rounds_left: bool = True,
+) -> dict:
     """This golfer's own FIELD_EVENT_MODELS predictions (projected score,
     top-10/top-5 probabilities, etc.) -- a model with no promoted version
     yet is simply absent, not an error."""
@@ -139,7 +143,7 @@ def _golfer_event_predictions(model_cache: dict, s3, predictions_table, event_ke
         scored = _score(model_cache, s3, predictions_table, event_key_value, model_name, golfer_row, f"GOLFER#{entity_id}")
         if scored is not None:
             if key == "projected_score_to_par":
-                scored = _field_projected_score_to_par(scored, golfer_row)
+                scored = _field_projected_score_to_par(scored, golfer_row, rounds_left)
             predictions[key] = scored
     return predictions
 
@@ -174,7 +178,10 @@ def _build_field_entry(
     storage, model_cache: dict, s3, predictions_table, event_key_value: str, entity_id: str, rows: dict,
     participant: dict | None, historical_rounds: dict[str, dict[int, dict]],
 ) -> dict:
-    predictions = _golfer_event_predictions(model_cache, s3, predictions_table, event_key_value, entity_id, rows["golfer"])
+    rounds_left = participant is None or bool(live_features.applicable_rounds(participant))
+    predictions = _golfer_event_predictions(
+        model_cache, s3, predictions_table, event_key_value, entity_id, rows["golfer"], rounds_left,
+    )
     round_predictions = _golfer_round_predictions(
         model_cache, s3, predictions_table, event_key_value, entity_id, rows["rounds"], participant, historical_rounds,
     )

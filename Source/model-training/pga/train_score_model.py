@@ -20,9 +20,9 @@ score_to_par_this_week_so_far to get the field-facing
 projected_score_to_par value.
 
 Reads golfer_features.parquet (the same dataset train_top10_model.py/
-train_top5_model.py read) from S3, filters out rows with no recorded
-final score (label_remaining_score_to_par.isna() -- a withdrawal before
-playing a single hole), then runs the same 4-candidate regressor
+train_top5_model.py read) from S3, filters out rows with no 72-hole
+final score (label_remaining_score_to_par.isna() -- every golfer who
+didn't finish, cut or withdrawn), then runs the same 4-candidate regressor
 tournament every other sport's score/ranking model uses via
 library.ml.backtest.run_backtest, promoted on rmse.
 
@@ -54,6 +54,9 @@ GOLFER_FEATURES_KEY = "pga/training-data/golfer_features.parquet"
 
 NON_FEATURE_COLUMNS = {"event_key", "entity_id", "event_date"}
 LABEL_COLUMN = "label_remaining_score_to_par"
+# Candidates learn each golfer's strokes against how the remaining rounds
+# usually play at the course (see regressor_common.train's baseline_column).
+BASELINE_COLUMN = "course_field_expected_remaining_score_to_par"
 
 CANDIDATES = model_types.regressor_candidates(include_lightgbm=False)
 
@@ -66,7 +69,7 @@ _job = training_common.ModelJob(
     globals(),
     trainer=regressor_common.train, sport=SPORT, model_name=MODEL_NAME, features_key=GOLFER_FEATURES_KEY,
     row_noun="golfer-tournament", label_column=LABEL_COLUMN, non_feature_columns=NON_FEATURE_COLUMNS,
-    candidates=CANDIDATES, prepare=_filter_to_scored_rows,
+    candidates=CANDIDATES, prepare=_filter_to_scored_rows, baseline_column=BASELINE_COLUMN,
 )
 _feature_columns = _job.feature_columns
 train = _job.train

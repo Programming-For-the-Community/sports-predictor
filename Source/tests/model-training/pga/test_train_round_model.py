@@ -152,3 +152,22 @@ class TestMain:
 
         with pytest.raises(KeyError):
             train_round_model.main()
+
+
+class TestCourseBaseline:
+    def test_candidates_learn_the_correction_to_the_courses_scoring(self):
+        df = _make_df(40)
+        df["course_field_avg_round_score_to_par"] = [-0.05 * i for i in range(40)]
+
+        with patch.object(train_round_model.backtest, "run_backtest", return_value=_fake_result()) as mock_run:
+            train_round_model.train(MagicMock(), df, 1)
+
+        baseline = mock_run.call_args.kwargs["options"].target_baseline
+        assert baseline["kind"] == "column_linear"
+        assert baseline["column"] == "course_field_avg_round_score_to_par"
+
+    def test_no_baseline_without_course_history(self):
+        with patch.object(train_round_model.backtest, "run_backtest", return_value=_fake_result()) as mock_run:
+            train_round_model.train(MagicMock(), _make_df(40), 1)
+
+        assert mock_run.call_args.kwargs["options"].target_baseline is None

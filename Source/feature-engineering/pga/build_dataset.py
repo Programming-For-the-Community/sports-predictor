@@ -66,6 +66,7 @@ from library.features.pga import (
     field_results,
     build_match_event_features,
     build_round_event_features,
+    course_scoring_average,
 )
 from library.storage.feature_storage import FeatureStorage
 from library.storage.pga_season_stats import load_season_stat_snapshots, resolve_season_stats
@@ -137,15 +138,20 @@ def build_golfer_dataset(
 
     history: dict[str, list[dict]] = defaultdict(list)  # entity_id -> ascending list of result dicts
     course_history: dict[tuple[str, str], list[dict]] = defaultdict(list)  # (entity_id, course_id) -> ascending result dicts
+    course_events: dict[str, list[dict]] = defaultdict(list)  # course_id -> ascending past events there
     snapshots = season_stat_snapshots or []
     total = len(events_ascending)
     rows = []
     for i, event in enumerate(events_ascending, start=1):
         participants = event.get("participants", [])
+        course_scoring = _course_scoring(event, course_events, course_window)
         for participant in participants:
-            rows.extend(_build_golfer_rows(event, participant, window, course_window, history, course_history, snapshots))
+            rows.extend(_build_golfer_rows(
+                event, participant, window, course_window, history, course_history, snapshots, course_scoring,
+            ))
         for entity_id, result in field_results(event).items():
             _update_golfer_history(event, entity_id, result, history, course_history)
+        _add_course_event(event, course_events)
 
         if i % 50 == 0 or i == total:
             logger.info("Built golfer features: %d/%d tournaments", i, total)
@@ -153,9 +159,26 @@ def build_golfer_dataset(
     return rows
 
 
+def _course_scoring(
+    event: dict, course_events: dict[str, list[dict]], course_window: int, round_number: int | None = None,
+) -> float | None:
+    """course_scoring_average over the last course_window events already
+    played at this event's course."""
+    course_id = event.get("course_id")
+    if course_id is None:
+        return None
+    return course_scoring_average(course_events[course_id][-course_window:], round_number)
+
+
+def _add_course_event(event: dict, course_events: dict[str, list[dict]]) -> None:
+    if event.get("course_id") is not None:
+        course_events[event["course_id"]].append(event)
+
+
 def _build_golfer_rows(
     event: dict, participant: dict, window: int, course_window: int,
     history: dict[str, list[dict]], course_history: dict[tuple[str, str], list[dict]], snapshots: list[dict],
+    course_scoring: float | None = None,
 ) -> list[dict]:
     """This participant's own in-tournament-progress snapshot rows (one per
     already-played round boundary, k=0 pre-tournament through
@@ -171,7 +194,7 @@ def _build_golfer_rows(
     return [
         build_golfer_event_features(
             event, participant, prior_results, window, course_results, course_window, season_stats,
-            played_rounds[:k] or None,
+            played_rounds[:k] or None, course_field_avg_per_round=course_scoring,
         )
         for k in range(len(played_rounds) + 1)
     ]
@@ -189,7 +212,10 @@ def _update_golfer_history(
         course_history[(entity_id, course_id)].append(result)
 
 
-def build_round_dataset(storage: FeatureStorage, window: int, since_date: str | None = None) -> list[dict]:
+def build_round_dataset(
+    storage: FeatureStorage, window: int, since_date: str | None = None,
+    course_window: int = DEFAULT_COURSE_HISTORY_WINDOW,
+) -> list[dict]:
     """Round-level grain: one row per golfer per round ACTUALLY PLAYED
     (design/DATA_SCHEMA.md's participants[].result.rounds -- a cut
     golfer naturally contributes only rounds 1-2, never 3-4, no
@@ -218,14 +244,17 @@ def build_round_dataset(storage: FeatureStorage, window: int, since_date: str | 
 
     history: dict[str, list[dict]] = defaultdict(list)  # entity_id -> ascending result dicts (tournament-level)
     round_history: dict[tuple[str, int], list[dict]] = defaultdict(list)  # (entity_id, round_number) -> ascending round dicts
+    course_events: dict[str, list[dict]] = defaultdict(list)  # course_id -> ascending past events there
     total = len(events_ascending)
     rows = []
     for i, event in enumerate(events_ascending, start=1):
         participants = event.get("participants", [])
+        course_scoring = {n: _course_scoring(event, course_events, course_window, n) for n in range(1, 5)}
         for participant in participants:
-            rows.extend(_build_round_rows(event, participant, window, history, round_history))
+            rows.extend(_build_round_rows(event, participant, window, history, round_history, course_scoring))
         for entity_id, result in field_results(event).items():
             _update_round_history(entity_id, result, history, round_history)
+        _add_course_event(event, course_events)
 
         if i % 50 == 0 or i == total:
             logger.info("Built round features: %d/%d tournaments", i, total)
@@ -236,6 +265,7 @@ def build_round_dataset(storage: FeatureStorage, window: int, since_date: str | 
 def _build_round_rows(
     event: dict, participant: dict, window: int,
     history: dict[str, list[dict]], round_history: dict[tuple[str, int], list[dict]],
+    course_scoring: dict[int, float | None] | None = None,
 ) -> list[dict]:
     """This participant's own round-level rows (one per round actually
     played), built from history snapshots taken BEFORE this tournament --
@@ -248,6 +278,7 @@ def _build_round_rows(
         build_round_event_features(
             event, participant, round_result, prior_overall,
             round_history[(entity_id, round_result["round"])][-window:][::-1], window,
+            (course_scoring or {}).get(round_result["round"]),
         )
         for round_result in result.get("rounds", [])
     ]
@@ -456,7 +487,7 @@ def main() -> None:
     golfer_rows = build_golfer_dataset(storage, window, course_window, snapshots, since_date=since_date)
     _write_dataset(s3, GOLFER_FEATURES_KEY, golfer_rows, "golfer")
 
-    round_rows = build_round_dataset(storage, window, since_date=since_date)
+    round_rows = build_round_dataset(storage, window, since_date=since_date, course_window=course_window)
     _write_dataset(s3, ROUND_FEATURES_KEY, round_rows, "round")
 
     cutline_rows = build_cutline_dataset(storage, course_window, since_date=since_date)
