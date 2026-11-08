@@ -81,12 +81,15 @@ data "aws_iam_policy_document" "assistant_agent" {
     }
   }
 
-  # Claude on Bedrock's Messages endpoint. The model is an environment
-  # setting (ASSISTANT_MODEL_ID), so the action isn't pinned to one model.
+  # Claude through the US cross-region inference profile, which can route
+  # each request to any of the profile's regions.
   statement {
-    sid       = "InvokeClaude"
-    actions   = ["bedrock-mantle:CreateInference"]
-    resources = ["*"]
+    sid     = "InvokeClaude"
+    actions = ["bedrock:InvokeModel"]
+    resources = concat(
+      ["arn:aws:bedrock:${var.region}:${var.account_id}:inference-profile/${local.assistant_settings.ASSISTANT_MODEL_ID}"],
+      [for r in local.assistant_model_regions : "arn:aws:bedrock:${r}::foundation-model/${local.assistant_foundation_model}"],
+    )
   }
 
   statement {

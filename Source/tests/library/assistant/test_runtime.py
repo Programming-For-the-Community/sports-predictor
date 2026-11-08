@@ -1,0 +1,53 @@
+import io
+import json
+from unittest.mock import MagicMock, patch
+
+from library.assistant import runtime
+
+ENV = {
+    "AWS_REGION": "us-east-2", "SPORT_REGISTRY_TABLE_NAME": "registry", "ASSISTANT_TABLE_NAME": "assistant",
+    "GUARDRAIL_ID": "g", "GUARDRAIL_VERSION": "1", "MEMORY_ID": "m", "ASSISTANT_PROFILE": "admin",
+    "PUBLIC_TOOLS_FUNCTION_NAME": "public-tools", "ADMIN_TOOLS_FUNCTION_NAME": "admin-tools", "GUARDRAIL_GROUNDING": "true",
+}
+
+
+class FakeLambda:
+    def __init__(self, response=None):
+        self.calls = []
+        self.response = response or {"Payload": io.BytesIO(b'{"ok": true, "result": {}}')}
+
+    def invoke(self, FunctionName, Payload):
+        self.calls.append((FunctionName, json.loads(Payload)))
+        return self.response
+
+
+def test_tools_go_to_the_public_lambda_unless_they_are_admin_tools():
+    client = FakeLambda()
+    invoke = runtime.tool_invoker(client, ENV)
+
+    assert invoke("list_events", {"sport": "nfl"}) == {"ok": True, "result": {}}
+    client.response = {"Payload": io.BytesIO(b"{}")}
+    invoke("get_cost_summary", {})
+
+    assert [name for name, _ in client.calls] == ["public-tools", "admin-tools"]
+    assert client.calls[0][1] == {"tool": "list_events", "input": {"sport": "nfl"}}
+
+
+def test_a_tool_lambda_crash_becomes_a_message():
+    client = FakeLambda({"FunctionError": "Unhandled", "Payload": io.BytesIO(b"{}")})
+    assert runtime.tool_invoker(client, ENV)("list_events", {})["ok"] is False
+
+
+def test_clients_and_profile_come_from_the_environment():
+    with patch.object(runtime.boto3, "client", MagicMock()), patch.object(runtime.boto3, "resource", MagicMock()), \
+            patch.object(runtime, "load_sports", return_value=["nfl", "nba"]):
+        clients = runtime.build_clients(ENV, model="model")
+        profile = runtime.profile_for(ENV, clients)
+        sports = clients.sports()
+
+    assert clients.model == "model"
+    assert clients.memory_id == "m"
+    assert clients.grounding is True
+    assert sports == ["nfl", "nba"]
+    assert profile.name == "admin"
+    assert "nfl, nba" in profile.system

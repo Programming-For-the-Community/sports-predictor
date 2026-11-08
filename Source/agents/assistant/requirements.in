@@ -2,7 +2,8 @@
 # --generate-hashes) on every build. The shared library (Source/library)
 # is installed separately by the Dockerfile.
 #
-# anthropic[bedrock]: AnthropicBedrockMantle, Claude Haiku 5.5 on Bedrock.
+# anthropic[bedrock]: AnthropicBedrock, Claude Haiku 5.5 through Bedrock's
+#   US cross-region inference profile (InvokeModel).
 # bedrock-agentcore: the Runtime's HTTP contract (/invocations, /ping, SSE);
 #   also brings the boto3 that knows the bedrock-agentcore data plane.
 # aws-opentelemetry-distro: AgentCore Observability's spans

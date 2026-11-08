@@ -45,7 +45,7 @@ def test_settings_fall_back_to_defaults(monkeypatch):
         monkeypatch.delenv(name, raising=False)
     settings = AgentSettings.from_env(default_daily_limit=50)
     assert settings.daily_limit == 50
-    assert settings.model_id == "anthropic.claude-haiku-5-5"
+    assert settings.model_id == "us.anthropic.claude-haiku-5-5"
 
 
 def test_turn_log_lines_name_the_outcome_and_carry_the_transcript():

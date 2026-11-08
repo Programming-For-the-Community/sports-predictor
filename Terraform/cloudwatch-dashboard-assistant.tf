@@ -1,7 +1,8 @@
 # The assistant at a glance: questions and outcomes (from the agents' turn
 # metric, cloudwatch-alarms-assistant.tf), the AgentCore runtimes, model
-# tokens, guardrail interventions, the tool and producer Lambdas, and
-# Logs Insights views over the per-turn JSON lines (turn_log.py).
+# tokens, guardrail interventions, the tool and producer Lambdas, Logs
+# Insights views over the per-turn JSON lines (turn_log.py), and the
+# AgentCore Evaluations scores (agentcore-evaluations.tf).
 
 locals {
   assistant_turn_sources = join(" | ", [for agent in keys(local.assistant_agents) : "SOURCE '${local.assistant_runtime_log_groups[agent]}'"])
@@ -115,6 +116,24 @@ resource "aws_cloudwatch_dashboard" "assistant" {
         properties = {
           region  = var.region, title = "Duration p95 (ms)", view = "timeSeries", period = 300
           metrics = [for fn in local.assistant_lambdas : ["AWS/Lambda", "Duration", "FunctionName", fn, { stat = "p95" }]]
+        }
+      },
+      {
+        type       = "text", x = 0, y = 33, width = 24, height = 1
+        properties = { markdown = "## Answer quality (AgentCore Evaluations, ${local.assistant_evaluation_sampling_percentage}% of sessions)" }
+      },
+      {
+        type = "metric", x = 0, y = 34, width = 12, height = 6
+        properties = {
+          region  = var.region, title = "Average score by evaluator (0-1)", view = "timeSeries", period = 86400
+          metrics = [[{ expression = "SEARCH('Namespace=\"${local.assistant_evaluation_namespace}\"', 'Average', 86400)", id = "scores" }]]
+        }
+      },
+      {
+        type = "log", x = 12, y = 34, width = 12, height = 6
+        properties = {
+          region = var.region, title = "Recent low scores", view = "table"
+          query  = "SOURCE '${aws_cloudwatch_log_group.assistant_evaluations.name}' | fields @timestamp, attributes.gen_ai.evaluation.name as evaluator, attributes.gen_ai.evaluation.score.label as label, attributes.gen_ai.evaluation.score.value as score, attributes.gen_ai.evaluation.explanation as why | filter score < 0.5 | sort @timestamp desc | limit 50"
         }
       },
     ]

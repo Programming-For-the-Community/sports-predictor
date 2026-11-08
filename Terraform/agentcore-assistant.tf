@@ -15,7 +15,7 @@ locals {
   # Every limit the agents and tools read (Source/library/assistant/
   # settings.py). Change one here and apply; no code release needed.
   assistant_settings = {
-    ASSISTANT_MODEL_ID          = "anthropic.claude-haiku-5-5"
+    ASSISTANT_MODEL_ID          = "us.${local.assistant_foundation_model}"
     ASSISTANT_EFFORT            = "low"
     ASSISTANT_MAX_TOKENS        = "4096"
     ASSISTANT_MAX_TOOL_CALLS    = "6"
@@ -23,6 +23,11 @@ locals {
     ASSISTANT_HISTORY_TURNS     = "10"
     ASSISTANT_MAX_SESSION_TURNS = "30"
   }
+  # Claude Haiku 5.5, called through its US cross-region inference profile
+  # (the ASSISTANT_MODEL_ID above), which routes to these regions.
+  assistant_foundation_model = "anthropic.claude-haiku-5-5"
+  assistant_model_regions    = ["us-east-1", "us-east-2", "us-west-2"]
+
   assistant_daily_limits = {
     public = "50"
     admin  = "300"
@@ -161,16 +166,19 @@ resource "awscc_bedrockagentcore_runtime" "assistant" {
   }
 
   environment_variables = merge(local.assistant_settings, {
-    ASSISTANT_PROFILE          = each.key
-    ASSISTANT_DAILY_LIMIT      = local.assistant_daily_limits[each.key]
-    ASSISTANT_TABLE_NAME       = aws_dynamodb_table.assistant.name
-    SPORT_REGISTRY_TABLE_NAME  = aws_dynamodb_table.sport_registry.name
-    MEMORY_ID                  = awscc_bedrockagentcore_memory.assistant[each.key].memory_id
-    GUARDRAIL_ID               = each.value.guardrail.guardrail_arn
-    GUARDRAIL_VERSION          = each.value.guardrail.version
-    GUARDRAIL_GROUNDING        = tostring(each.value.grounding)
-    PUBLIC_TOOLS_FUNCTION_NAME = aws_lambda_function.assistant_public_tools.function_name
-    ADMIN_TOOLS_FUNCTION_NAME  = each.key == "admin" ? aws_lambda_function.assistant_admin_tools.function_name : ""
+    # Spans go to this runtime's own log group, where AgentCore Evaluations
+    # reads them (agentcore-evaluations.tf).
+    UNIFIED_TRACES_DESTINATION_ENABLED = "true"
+    ASSISTANT_PROFILE                  = each.key
+    ASSISTANT_DAILY_LIMIT              = local.assistant_daily_limits[each.key]
+    ASSISTANT_TABLE_NAME               = aws_dynamodb_table.assistant.name
+    SPORT_REGISTRY_TABLE_NAME          = aws_dynamodb_table.sport_registry.name
+    MEMORY_ID                          = awscc_bedrockagentcore_memory.assistant[each.key].memory_id
+    GUARDRAIL_ID                       = each.value.guardrail.guardrail_arn
+    GUARDRAIL_VERSION                  = each.value.guardrail.version
+    GUARDRAIL_GROUNDING                = tostring(each.value.grounding)
+    PUBLIC_TOOLS_FUNCTION_NAME         = aws_lambda_function.assistant_public_tools.function_name
+    ADMIN_TOOLS_FUNCTION_NAME          = each.key == "admin" ? aws_lambda_function.assistant_admin_tools.function_name : ""
   })
 
   tags = local.assistant_tags

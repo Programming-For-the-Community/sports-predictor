@@ -1,9 +1,9 @@
 """
 Source/agents/assistant/agent.py wiring: the runtime entrypoint builds the
 profile, streams agent_core's events, and writes one bare-JSON turn line per
-finished turn. The Anthropic and AgentCore SDKs are stubbed -- the turn
-itself is covered by tests/library/assistant/test_agent_core.py, and the
-real SDKs by the image build.
+finished turn. The Anthropic and AgentCore SDKs and the client builder are
+stubbed -- the turn is covered by tests/library/assistant/test_agent_core.py,
+the clients by test_runtime.py, and the real SDKs by the image build.
 """
 import importlib.util
 import json
@@ -16,6 +16,9 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 AGENT_PATH = os.path.normpath(os.path.join(os.path.dirname(__file__), "..", "..", "agents", "assistant", "agent.py"))
+
+
+CLIENTS = types.SimpleNamespace()
 
 
 class _App:
@@ -32,19 +35,12 @@ class _App:
 
 @pytest.fixture
 def agent(monkeypatch):
-    env = {
-        "ASSISTANT_PROFILE": "public", "AWS_REGION": "us-east-2", "SPORT_REGISTRY_TABLE_NAME": "registry",
-        "ASSISTANT_TABLE_NAME": "assistant", "GUARDRAIL_ID": "g", "GUARDRAIL_VERSION": "1", "MEMORY_ID": "m",
-        "PUBLIC_TOOLS_FUNCTION_NAME": "public-tools", "ADMIN_TOOLS_FUNCTION_NAME": "",
-    }
-    for key, value in env.items():
-        monkeypatch.setenv(key, value)
-    monkeypatch.setitem(sys.modules, "anthropic", types.SimpleNamespace(AnthropicBedrockMantle=lambda **kwargs: object()))
+    monkeypatch.setenv("ASSISTANT_PROFILE", "public")
+    monkeypatch.setenv("AWS_REGION", "us-east-2")
+    monkeypatch.setitem(sys.modules, "anthropic", types.SimpleNamespace(AnthropicBedrock=MagicMock()))
     monkeypatch.setitem(sys.modules, "bedrock_agentcore", types.SimpleNamespace(BedrockAgentCoreApp=_App))
-    # The library's pinned boto3 predates the bedrock-agentcore service; the
-    # clients are never called here.
-    monkeypatch.setattr("boto3.client", lambda *args, **kwargs: MagicMock())
-    monkeypatch.setattr("boto3.resource", lambda *args, **kwargs: MagicMock())
+    from library.assistant import runtime
+    monkeypatch.setattr(runtime, "build_clients", MagicMock(return_value=CLIENTS))
     spec = importlib.util.spec_from_file_location("assistant_agent_under_test", AGENT_PATH)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
@@ -56,11 +52,13 @@ def test_the_entrypoint_streams_events_and_logs_one_json_line_per_turn(agent, ca
     context = types.SimpleNamespace(request_headers={"Authorization": "Bearer h.eyJzdWIiOiJ1LTEifQ.s"}, session_id="s" * 36)
     agent.turn_logger.propagate = True
 
-    with patch.object(agent, "sports", return_value=["nfl"]), patch.object(agent.agent_core, "handle", return_value=iter(events)), \
+    with patch.object(agent.runtime, "profile_for", return_value="profile"), \
+            patch.object(agent.agent_core, "handle", return_value=iter(events)) as handle, \
             caplog.at_level(logging.INFO, logger="assistant-turns"):
         streamed = list(agent.app.entry({"message": "Why DET?"}, context))
 
     assert streamed == events
+    assert handle.call_args.args[:2] == ("profile", CLIENTS)
     lines = [json.loads(r.getMessage()) for r in caplog.records if r.name == "assistant-turns"]
     assert len(lines) == 1
     assert lines[0]["user_sub"] == "u-1"
@@ -68,27 +66,7 @@ def test_the_entrypoint_streams_events_and_logs_one_json_line_per_turn(agent, ca
     assert lines[0]["question"] == "Why DET?"
 
 
-def test_tools_go_to_the_public_lambda_unless_they_are_admin_tools(agent, monkeypatch):
-    calls = []
-
-    class FakeLambda:
-        def invoke(self, FunctionName, Payload):
-            calls.append((FunctionName, json.loads(Payload)))
-            return {"Payload": types.SimpleNamespace(read=lambda: b'{"ok": true, "result": {}}')}
-
-    monkeypatch.setenv("ADMIN_TOOLS_FUNCTION_NAME", "admin-tools")
-    with patch.object(agent, "_lambda", FakeLambda()):
-        assert agent.invoke_tool("list_events", {"sport": "nfl"}) == {"ok": True, "result": {}}
-        agent.invoke_tool("get_cost_summary", {})
-
-    assert [name for name, _ in calls] == ["public-tools", "admin-tools"]
-    assert calls[0][1] == {"tool": "list_events", "input": {"sport": "nfl"}}
-
-
-def test_a_tool_lambda_crash_becomes_a_message(agent):
-    class Crashing:
-        def invoke(self, **kwargs):
-            return {"FunctionError": "Unhandled", "Payload": types.SimpleNamespace(read=lambda: b"{}")}
-
-    with patch.object(agent, "_lambda", Crashing()):
-        assert agent.invoke_tool("list_events", {})["ok"] is False
+def test_the_clients_get_a_tracer(agent):
+    # OpenTelemetry is installed only in the agent image; without it the
+    # turn records nothing.
+    assert hasattr(agent.clients.tracer, "start")

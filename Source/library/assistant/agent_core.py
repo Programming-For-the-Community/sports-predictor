@@ -22,7 +22,7 @@ from dataclasses import dataclass, field
 from datetime import date, datetime, timezone
 from typing import Callable, Iterator
 
-from library.assistant import guardrail, history, user_store
+from library.assistant import gen_ai_spans, guardrail, history, user_store
 from library.assistant.prompts import Profile
 from library.assistant.tool_specs import FAVORITE_TOOL_NAMES, anthropic_tools
 from library.parsing import us_eastern_date
@@ -45,7 +45,7 @@ def _eastern_today() -> date:
 
 @dataclass
 class Clients:
-    model: object                      # anthropic.AnthropicBedrockMantle
+    model: object                      # anthropic.AnthropicBedrock
     guardrails: object                 # boto3 bedrock-runtime
     memory: object                     # boto3 bedrock-agentcore
     table: object                      # boto3 DynamoDB Table (assistant)
@@ -57,6 +57,17 @@ class Clients:
     grounding: bool = False
     # Quota days run on US Eastern dates, like the app's game dates.
     today: Callable[[], date] = field(default=_eastern_today)
+    tracer: object = gen_ai_spans.NULL_TRACER
+
+
+@dataclass
+class _Turn:
+    """One question's working state: the caller, the tools run so far and
+    their JSON results, and the turn's span."""
+    sub: str
+    span: object
+    sources: list[str] = field(default_factory=list)
+    tool_outputs: list[str] = field(default_factory=list)
 
 
 def token_claims(authorization: str | None) -> dict:
@@ -139,41 +150,56 @@ def _answer_text(response) -> str:
     return "".join(b.text for b in response.content if b.type == "text").strip()
 
 
-def _run_calls(profile: Profile, clients: Clients, sub: str, calls: list, sources: list[str], tool_outputs: list[str]):
+def _run_calls(profile: Profile, clients: Clients, turn: _Turn, calls: list):
     """Runs one round of tool calls. Yields progress events; returns the
     tool_result blocks for the next request."""
     results = []
     for call in calls:
         yield {"type": "progress", "tool": call.name}
-        outcome = _run_tool(profile, clients, sub, call)
-        sources.append(call.name)
+        span = gen_ai_spans.start_tool(clients.tracer, turn.span, call)
+        outcome = _run_tool(profile, clients, turn.sub, call)
+        turn.sources.append(call.name)
         body = json.dumps(outcome.get("result") if outcome.get("ok") else {"error": outcome.get("error")})
-        tool_outputs.append(body)
+        gen_ai_spans.end_tool(span, body, bool(outcome.get("ok")))
+        turn.tool_outputs.append(body)
         results.append({"type": "tool_result", "tool_use_id": call.id, "content": body, "is_error": not outcome.get("ok")})
     return results
 
 
-def _model_loop(profile: Profile, clients: Clients, sub: str, messages: list[dict], sources: list[str], tool_outputs: list[str]):
+def _call_model(clients: Clients, turn: _Turn, request: dict):
+    span = gen_ai_spans.start_chat(clients.tracer, turn.span, request["model"], request["tools"])
+    try:
+        response = clients.model.messages.create(**request)
+    except Exception:
+        span.set_attribute("error.type", "model_error")
+        span.end()
+        raise
+    gen_ai_spans.end_chat(span, response)
+    return response
+
+
+def _model_loop(profile: Profile, clients: Clients, turn: _Turn, messages: list[dict]):
     """Yields progress events; returns the answer text. Tool names and their
-    JSON results are appended to sources and tool_outputs."""
+    JSON results are recorded on the turn."""
     settings = profile.settings
-    system = [{"type": "text", "text": profile.system, "cache_control": {"type": "ephemeral"}}]
-    tools = anthropic_tools(profile.tool_names, clients.sports())
+    request = {
+        "model": settings.model_id, "max_tokens": settings.max_tokens,
+        "system": [{"type": "text", "text": profile.system, "cache_control": {"type": "ephemeral"}}],
+        "tools": anthropic_tools(profile.tool_names, clients.sports()),
+        "messages": messages, "output_config": {"effort": settings.effort},
+    }
     for _ in range(settings.max_tool_calls + 1):
-        response = clients.model.messages.create(
-            model=settings.model_id, max_tokens=settings.max_tokens, system=system, tools=tools, messages=messages,
-            output_config={"effort": settings.effort},
-        )
+        response = _call_model(clients, turn, request)
         if response.stop_reason == "refusal":
             return REFUSAL_MESSAGE
         calls = [b for b in response.content if b.type == "tool_use"]
         if response.stop_reason != "tool_use" or not calls:
             return _answer_text(response)
-        if len(sources) + len(calls) > settings.max_tool_calls:
+        if len(turn.sources) + len(calls) > settings.max_tool_calls:
             return TOO_MANY_LOOKUPS
         # Thinking and tool-use blocks go back exactly as they came.
         messages.append({"role": "assistant", "content": response.content})
-        results = yield from _run_calls(profile, clients, sub, calls, sources, tool_outputs)
+        results = yield from _run_calls(profile, clients, turn, calls)
         messages.append({"role": "user", "content": results})
     return None
 
@@ -221,20 +247,21 @@ def handle(profile: Profile, clients: Clients, payload: dict, authorization: str
     note = _context_note(profile, _favorites_of(profile, clients, sub) or {}, clients.sports(), payload.get("sport"), payload.get("event_id"))
     user_text = f"{question}\n\n<context>{note}</context>" if note else question
     messages = past[-2 * profile.settings.history_turns:] + [{"role": "user", "content": user_text}]
-    sources: list[str] = []
-    tool_outputs: list[str] = []
+    turn = _Turn(sub, gen_ai_spans.start_turn(clients.tracer, f"assistant_{profile.name}", session_id, question))
     try:
-        answer = yield from _model_loop(profile, clients, sub, messages, sources, tool_outputs)
+        answer = yield from _model_loop(profile, clients, turn, messages)
     except Exception:
         logger.exception("Model loop failed")
+        gen_ai_spans.end_turn(turn.span, None)
         yield _error("failed", FAILED_MESSAGE)
         return
 
-    grounding = tool_outputs if (clients.grounding and tool_outputs) else None
+    grounding = turn.tool_outputs if (clients.grounding and turn.tool_outputs) else None
     blocked, answer = _guard(clients, "OUTPUT", answer or FAILED_MESSAGE, grounding, question)
+    gen_ai_spans.end_turn(turn.span, answer)
     if not blocked:
         history.save(clients.memory, clients.memory_id, sub, session_id, question, answer)
     yield {
-        "type": "answer", "text": answer, "sources": sorted(set(sources)), "questions_left": questions_left,
+        "type": "answer", "text": answer, "sources": sorted(set(turn.sources)), "questions_left": questions_left,
         "blocked": blocked, "favorites": _favorites_of(profile, clients, sub),
     }

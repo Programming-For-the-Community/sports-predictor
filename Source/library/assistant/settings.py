@@ -29,7 +29,7 @@ class AgentSettings:
     @classmethod
     def from_env(cls, default_daily_limit: int = 50) -> AgentSettings:
         return cls(
-            model_id=os.environ.get("ASSISTANT_MODEL_ID", "anthropic.claude-haiku-5-5"),
+            model_id=os.environ.get("ASSISTANT_MODEL_ID", "us.anthropic.claude-haiku-5-5"),
             effort=os.environ.get("ASSISTANT_EFFORT", "low"),
             max_tokens=_int("ASSISTANT_MAX_TOKENS", 4096),
             max_tool_calls=_int("ASSISTANT_MAX_TOOL_CALLS", 6),
