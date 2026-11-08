@@ -204,6 +204,8 @@ class FakeCloudWatch:
         self.calls = []
 
     def get_metric_data(self, MetricDataQueries, StartTime, EndTime):
+        if EndTime <= StartTime:
+            raise AssertionError("CloudWatch rejects EndTime <= StartTime")
         self.calls.append(MetricDataQueries)
         return {"MetricDataResults": [{"Id": q["Id"], "Values": [self.values.get(q["Id"], 0.0)]} for q in MetricDataQueries]}
 
@@ -239,3 +241,13 @@ def test_api_traffic_reads_api_metrics_and_denied_routes(traffic_s3):
     assert result["denied_by_route"] == [{"status": "429", "method": "GET", "route": "/nba/season", "count": 7}]
     dims = cloudwatch.calls[0][0]["MetricStat"]["Metric"]["Dimensions"]
     assert dims == [{"Name": "ApiName", "Value": "sports-predictor-api"}]
+
+
+@pytest.mark.parametrize("args, message", [
+    ({"start_date": "2024-09-01", "end_date": "2024-09-30"}, "CloudWatch keeps the last 455 days"),
+    ({"start_date": "2099-01-01"}, "start_date is in the future"),
+])
+def test_metric_ranges_outside_the_history_are_refused_not_sent(traffic_s3, args, message):
+    context = admin_tools.AdminContext(s3=traffic_s3, settings=SETTINGS, cloudwatch=FakeCloudWatch({}), api_name="sports-predictor-api")
+    with pytest.raises(ValueError, match=message):
+        admin_tools.run("get_api_traffic", args, context)

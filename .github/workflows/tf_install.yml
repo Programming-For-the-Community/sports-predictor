@@ -330,7 +330,8 @@ jobs:
           exit 1
         fi
 
-    # ASSISTANT_MODEL, ASSISTANT_EFFORT and ASSISTANT_JUDGE_MODEL override
+    # ASSISTANT_MODEL, ASSISTANT_EFFORT, ASSISTANT_TEMPERATURE and
+    # ASSISTANT_JUDGE_MODEL override
     # variables.tf's defaults only when set to a value: an unset or blank
     # GitHub variable would otherwise reach Terraform as "" and replace the
     # default.
@@ -338,9 +339,10 @@ jobs:
       env:
         ASSISTANT_MODEL: ${{ vars.ASSISTANT_MODEL }}
         ASSISTANT_EFFORT: ${{ vars.ASSISTANT_EFFORT }}
+        ASSISTANT_TEMPERATURE: ${{ vars.ASSISTANT_TEMPERATURE }}
         ASSISTANT_JUDGE_MODEL: ${{ vars.ASSISTANT_JUDGE_MODEL }}
       run: |
-        for name in assistant_model assistant_effort assistant_judge_model; do
+        for name in assistant_model assistant_effort assistant_temperature assistant_judge_model; do
           setting="$(echo "$name" | tr '[:lower:]' '[:upper:]')"
           value="$(printf '%s' "${!setting}" | tr -d '[:space:]')"
           if [ -n "$value" ]; then

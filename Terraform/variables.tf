@@ -119,10 +119,10 @@ variable "assistant_rate_limit_per_ip" {
   nullable    = false
 }
 
-# The assistant's model, effort and evaluation judge. The ASSISTANT_MODEL,
-# ASSISTANT_EFFORT and ASSISTANT_JUDGE_MODEL GitHub Actions variables
-# override these defaults when set (tf_install.yml); unset or blank keeps
-# them. Claude models go through the Anthropic client, any other model
+# The assistant's model, effort, temperature and evaluation judge. The
+# ASSISTANT_MODEL, ASSISTANT_EFFORT, ASSISTANT_TEMPERATURE and
+# ASSISTANT_JUDGE_MODEL GitHub Actions variables override these defaults when
+# set (tf_install.yml); unset or blank keeps them. Claude models go through the Anthropic client, any other model
 # through Bedrock's Converse API (Source/library/assistant/runtime.py).
 variable "assistant_model" {
   description = "Bedrock model ID the assistant agents call: a US inference profile (us.anthropic.claude-haiku-4-5-20251001-v1:0, us.amazon.nova-2-lite-v1:0) or an on-demand model (openai.gpt-oss-120b-1:0)."
@@ -145,6 +145,18 @@ variable "assistant_effort" {
   validation {
     condition     = contains(["none", "low", "medium", "high"], var.assistant_effort)
     error_message = "assistant_effort must be none, low, medium or high."
+  }
+}
+
+variable "assistant_temperature" {
+  description = "Sampling temperature for non-Claude assistant models, 0 to 1: lower answers more consistently from the tools' data. Claude models keep their own default."
+  type        = number
+  default     = 0.2
+  nullable    = false
+
+  validation {
+    condition     = var.assistant_temperature >= 0 && var.assistant_temperature <= 1
+    error_message = "assistant_temperature must be between 0 and 1."
   }
 }
 

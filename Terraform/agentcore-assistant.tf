@@ -22,8 +22,9 @@ locals {
     ASSISTANT_MAX_MESSAGE_CHARS = "1000"
     ASSISTANT_HISTORY_TURNS     = "10"
     ASSISTANT_MAX_SESSION_TURNS = "30"
+    ASSISTANT_TEMPERATURE       = tostring(var.assistant_temperature)
   }
-  # Model and effort: variables.tf (assistant_model, assistant_effort). A us.
+  # Model, effort and temperature: variables.tf. A us.
   # inference profile routes to the regions below; the role may invoke the
   # model in each.
   assistant_model_id         = var.assistant_model

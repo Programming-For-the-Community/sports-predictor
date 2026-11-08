@@ -24,7 +24,7 @@ def _reply(content, stop="end_turn"):
 
 def test_a_request_becomes_converse_and_claude_only_fields_are_dropped():
     runtime = FakeRuntime(_reply([{"text": "Hi."}]))
-    model = ConverseModel(runtime)
+    model = ConverseModel(runtime, temperature=0.2)
 
     response = model.messages.create(
         model="openai.gpt-oss-120b-1:0", max_tokens=512, tools=TOOLS, output_config={"effort": "low"},
@@ -35,7 +35,7 @@ def test_a_request_becomes_converse_and_claude_only_fields_are_dropped():
     request = runtime.requests[0]
     assert request["modelId"] == "openai.gpt-oss-120b-1:0"
     assert request["system"] == [{"text": "Be brief."}]
-    assert request["inferenceConfig"] == {"maxTokens": 512}
+    assert request["inferenceConfig"] == {"maxTokens": 512, "temperature": 0.2}
     assert request["toolConfig"]["tools"][0]["toolSpec"]["inputSchema"] == {"json": TOOLS[0]["input_schema"]}
     assert request["messages"] == [{"role": "user", "content": [{"text": "Hello"}]}]
     assert "output_config" not in request
@@ -50,7 +50,7 @@ def test_a_tool_round_trips_through_the_next_request():
                 {"toolUse": {"toolUseId": "t1", "name": "list_events", "input": {"sport": "nfl"}}}], stop="tool_use"),
         _reply([{"text": "Two games."}]),
     )
-    model = ConverseModel(runtime)
+    model = ConverseModel(runtime, temperature=0.2)
     messages = [{"role": "user", "content": "Games?"}]
 
     first = model.messages.create(model="m", max_tokens=100, tools=TOOLS, messages=messages)
@@ -67,7 +67,7 @@ def test_a_tool_round_trips_through_the_next_request():
 
 def test_blank_text_is_left_out_and_errors_and_filters_map_across():
     runtime = FakeRuntime(_reply([{"text": "No."}], stop="content_filtered"))
-    model = ConverseModel(runtime)
+    model = ConverseModel(runtime, temperature=0.2)
     previous = [SimpleNamespace(type="text", text="  "), SimpleNamespace(type="tool_use", id="t1", name="x", input=None)]
 
     response = model.messages.create(model="m", max_tokens=10, messages=[

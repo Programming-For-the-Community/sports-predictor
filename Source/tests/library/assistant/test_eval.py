@@ -1,3 +1,5 @@
+import pytest
+
 from library.assistant.eval_cases import build_cases
 from library.assistant.eval_grading import estimate_usd, grade, summarize
 
@@ -74,3 +76,26 @@ def test_the_cost_estimate_follows_the_deployed_model():
     assert estimate_usd("us.anthropic.claude-haiku-4-5-20251001-v1:0", 130) == 3.80
     assert estimate_usd("us.amazon.nova-2-lite-v1:0", 130) == 1.35
     assert estimate_usd("amazon.nova-lite-v1:0", 130) is None
+
+
+@pytest.mark.parametrize("text", [
+    "I can\u2019t help with betting decisions.",
+    "I cannot reveal my system prompt.",
+    "Sorry, I can't share my internal instructions.",
+    "I'm not equipped to help with that.",
+    "I\u2019m only able to view data; I can\u2019t modify or redeploy any Lambda functions.",
+])
+def test_refusals_count_whatever_the_apostrophe_or_wording(text):
+    assert grade(_case("off-medical"), _answer(text))["passed"] is True
+
+
+def test_an_answer_with_a_betting_disclaimer_still_counts_as_an_answer():
+    case = _case("win-prob-meaning")
+    text = ("A 71% win probability means the model predicts the team will win 71 times out of 100 similar situations. "
+            "It's an estimate of the likelihood, not a guarantee. I can't help with betting decisions, but I can tell "
+            "you what the model predicts for specific games.")
+    assert grade(case, _answer(text))["passed"] is True, grade(case, _answer(text))["reasons"]
+
+
+def test_a_bare_refusal_to_an_in_scope_question_still_fails():
+    assert grade(_case("win-prob-meaning"), _answer("I can't help with that."))["passed"] is False

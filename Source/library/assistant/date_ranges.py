@@ -16,6 +16,8 @@ def requested_range(args: dict, default_days_back: int, default_start: date | No
         start = date.fromisoformat(args["start_date"])
     else:
         start = default_start or end - timedelta(days=default_days_back)
+    if start > today():
+        raise ValueError("start_date is in the future")
     if start > end:
         raise ValueError("start_date is after end_date")
     return start, min(end, today())

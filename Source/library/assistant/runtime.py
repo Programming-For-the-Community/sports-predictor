@@ -22,6 +22,8 @@ from library.assistant.tool_specs import ADMIN_TOOL_NAMES
 
 logger = logging.getLogger(__name__)
 
+DEFAULT_TEMPERATURE = 0.2
+
 
 def tool_invoker(lambda_client, env: Mapping[str, str]):
     """invoke_tool for agent_core: admin tools go to the admin tool Lambda,
@@ -49,7 +51,9 @@ def model_client(env: Mapping[str, str], claude_client: Callable[[], object]):
         return claude_client()
     # A model call with several tool results in context can take a while.
     config = Config(read_timeout=120, retries={"max_attempts": 3, "mode": "standard"})
-    return ConverseModel(boto3.client("bedrock-runtime", region_name=env["AWS_REGION"], config=config))
+    # Low by default: answers come from tool data, not invention.
+    temperature = float(env.get("ASSISTANT_TEMPERATURE") or DEFAULT_TEMPERATURE)
+    return ConverseModel(boto3.client("bedrock-runtime", region_name=env["AWS_REGION"], config=config), temperature)
 
 
 def build_clients(env: Mapping[str, str], model) -> agent_core.Clients:

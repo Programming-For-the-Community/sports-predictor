@@ -22,9 +22,12 @@ LAMBDA = "AWS/Lambda"
 
 def _window(args: dict) -> tuple[date, date, datetime, datetime, int]:
     start, end = requested_range(args, 7)
-    start = max(start, today() - timedelta(days=MAX_METRIC_DAYS))
+    oldest = today() - timedelta(days=MAX_METRIC_DAYS)
+    start = max(start, oldest)
     begin = datetime.combine(start, datetime.min.time(), tzinfo=timezone.utc)
     finish = min(datetime.combine(end + timedelta(days=1), datetime.min.time(), tzinfo=timezone.utc), datetime.now(timezone.utc))
+    if begin >= finish:
+        raise ValueError(f"No metric history for that range: CloudWatch keeps the last {MAX_METRIC_DAYS} days, from {oldest.isoformat()}.")
     period = max(60, int((finish - begin).total_seconds()) // 60 * 60)
     return start, end, begin, finish, period
 

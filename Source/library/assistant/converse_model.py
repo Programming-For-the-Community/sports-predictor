@@ -6,7 +6,8 @@ blocks (.type "text" or "tool_use") and usage. runtime.model_client picks
 this for every non-Claude ASSISTANT_MODEL_ID; Claude keeps the Anthropic
 client.
 
-Claude-only request fields (cache_control, output_config) are dropped.
+Claude-only request fields (cache_control, output_config) are dropped, and
+requests carry the adapter's temperature (Claude keeps its default).
 Reasoning blocks some models return are not kept: answers and tool calls
 are what the next request needs.
 """
@@ -71,14 +72,15 @@ def _from_converse_block(block: dict):
 
 
 class _Messages:
-    def __init__(self, runtime_client) -> None:
+    def __init__(self, runtime_client, temperature: float) -> None:
         self._runtime = runtime_client
+        self._temperature = temperature
 
     def create(self, *, model: str, max_tokens: int, messages: list[dict], system=None, tools=None, **_claude_only):
         request = {
             "modelId": model,
             "messages": [_to_converse_message(m) for m in messages],
-            "inferenceConfig": {"maxTokens": max_tokens},
+            "inferenceConfig": {"maxTokens": max_tokens, "temperature": self._temperature},
         }
         if system:
             request["system"] = [{"text": s["text"]} for s in system]
@@ -97,5 +99,5 @@ class _Messages:
 class ConverseModel:
     """runtime_client: a boto3 bedrock-runtime client."""
 
-    def __init__(self, runtime_client) -> None:
-        self.messages = _Messages(runtime_client)
+    def __init__(self, runtime_client, temperature: float) -> None:
+        self.messages = _Messages(runtime_client, temperature)

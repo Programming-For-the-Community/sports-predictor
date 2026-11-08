@@ -67,10 +67,12 @@ data "aws_iam_policy_document" "assistant_evaluations" {
     resources = concat(local.assistant_span_log_group_arns, [for arn in local.assistant_span_log_group_arns : "${arn}:*"])
   }
 
+  # CreateLogGroup although Terraform creates the group: the service checks
+  # the role could create it before it accepts a configuration.
   statement {
     sid       = "WriteResults"
-    actions   = ["logs:CreateLogStream", "logs:PutLogEvents"]
-    resources = ["${aws_cloudwatch_log_group.assistant_evaluations.arn}:*"]
+    actions   = ["logs:CreateLogGroup", "logs:CreateLogStream", "logs:PutLogEvents"]
+    resources = [aws_cloudwatch_log_group.assistant_evaluations.arn, "${aws_cloudwatch_log_group.assistant_evaluations.arn}:*"]
   }
 
   statement {
