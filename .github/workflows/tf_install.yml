@@ -206,8 +206,6 @@ env:
   TF_VAR_project: ${{ vars.PROJECT}}
   TF_VAR_owner: ${{ vars.OWNER}}
   TF_VAR_alert_email: ${{ secrets.ALERT_EMAIL }}
-  TF_VAR_assistant_model: ${{ vars.ASSISTANT_MODEL }}
-  TF_VAR_assistant_effort: ${{ vars.ASSISTANT_EFFORT }}
   TF_VAR_environment: ${{ github.event.inputs.environment || 'development' }}
   TF_VAR_private1_subnet_cidr: ${{ vars.SUBNET_A_CIDR }}
   TF_VAR_private2_subnet_cidr: ${{ vars.SUBNET_B_CIDR }}
@@ -331,6 +329,27 @@ jobs:
           echo "::error::THIRD_PARTY_API_KEYS_SECRET_ARN is not set. Create it under Settings > Secrets and variables > Actions > Secrets (value: the ARN of the development/sports-predictor Secrets Manager secret -- get it via: aws secretsmanager describe-secret --secret-id development/sports-predictor --query ARN --output text). variables.tf has no default for this one -- every terraform plan/apply, for every sport, fails without it."
           exit 1
         fi
+
+    # ASSISTANT_MODEL, ASSISTANT_EFFORT and ASSISTANT_JUDGE_MODEL override
+    # variables.tf's defaults only when set to a value: an unset or blank
+    # GitHub variable would otherwise reach Terraform as "" and replace the
+    # default.
+    - name: Assistant model overrides
+      env:
+        ASSISTANT_MODEL: ${{ vars.ASSISTANT_MODEL }}
+        ASSISTANT_EFFORT: ${{ vars.ASSISTANT_EFFORT }}
+        ASSISTANT_JUDGE_MODEL: ${{ vars.ASSISTANT_JUDGE_MODEL }}
+      run: |
+        for name in assistant_model assistant_effort assistant_judge_model; do
+          setting="$(echo "$name" | tr '[:lower:]' '[:upper:]')"
+          value="$(printf '%s' "${!setting}" | tr -d '[:space:]')"
+          if [ -n "$value" ]; then
+            echo "TF_VAR_${name}=${value}" >> "$GITHUB_ENV"
+            echo "${setting}: ${value}"
+          else
+            echo "${setting}: variables.tf default"
+          fi
+        done
 
     - name: Echo vars
       run: |

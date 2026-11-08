@@ -76,10 +76,10 @@ data "aws_iam_policy_document" "assistant_evaluations" {
   statement {
     sid     = "InvokeJudge"
     actions = ["bedrock:InvokeModel", "bedrock:InvokeModelWithResponseStream"]
-    resources = [
-      "arn:aws:bedrock:${var.region}:${var.account_id}:inference-profile/${local.assistant_judge_model_id}",
-      "arn:aws:bedrock:*::foundation-model/${local.assistant_judge_foundation_model}",
-    ]
+    resources = concat(
+      startswith(local.assistant_judge_model_id, "us.") ? ["arn:aws:bedrock:${var.region}:${var.account_id}:inference-profile/${local.assistant_judge_model_id}"] : [],
+      [for r in local.assistant_model_regions : "arn:aws:bedrock:${r}::foundation-model/${local.assistant_judge_foundation_model}"],
+    )
   }
 }
 

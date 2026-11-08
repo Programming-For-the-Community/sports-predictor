@@ -119,32 +119,44 @@ variable "assistant_rate_limit_per_ip" {
   nullable    = false
 }
 
-# The assistant's model and effort, from the ASSISTANT_MODEL and
-# ASSISTANT_EFFORT GitHub Actions variables (tf_install.yml). An unset
-# GitHub variable arrives as "", which means the default
-# (agentcore-assistant.tf), so both can be changed with no code change.
+# The assistant's model, effort and evaluation judge. The ASSISTANT_MODEL,
+# ASSISTANT_EFFORT and ASSISTANT_JUDGE_MODEL GitHub Actions variables
+# override these defaults when set (tf_install.yml); unset or blank keeps
+# them. Claude models go through the Anthropic client, any other model
+# through Bedrock's Converse API (Source/library/assistant/runtime.py).
 variable "assistant_model" {
-  description = "Bedrock model ID the assistant agents call: a US inference profile (us.anthropic.claude-haiku-5-5, us.meta.llama4-maverick-17b-instruct-v1:0) or an on-demand model (openai.gpt-oss-120b-1:0). Empty for the default."
+  description = "Bedrock model ID the assistant agents call: a US inference profile (us.anthropic.claude-haiku-4-5-20251001-v1:0, us.amazon.nova-2-lite-v1:0) or an on-demand model (openai.gpt-oss-120b-1:0)."
   type        = string
-  default     = ""
+  default     = "us.anthropic.claude-haiku-4-5-20251001-v1:0"
   nullable    = false
 
-  # Models from US-based creators only.
   validation {
-    condition     = var.assistant_model == "" || can(regex("^(us\\.)?(anthropic|openai|nvidia|meta|amazon|google)\\.[a-z0-9.:-]+$", var.assistant_model))
-    error_message = "assistant_model must be empty or a Bedrock model ID from a US-based creator (anthropic, openai, nvidia, meta, amazon, google), optionally with the us. inference-profile prefix."
+    condition     = can(regex("^(us\\.)?(anthropic|openai|nvidia|meta|amazon|google)\\.[a-z0-9.:-]+$", var.assistant_model))
+    error_message = "assistant_model must come from a US-based creator (anthropic, openai, nvidia, meta, amazon, google): a us. inference profile or an on-demand model ID."
   }
 }
 
 variable "assistant_effort" {
-  description = "Effort the assistant model runs at: low, medium or high, or none for models without effort (Claude Haiku 4.5). Empty for the default."
+  description = "Effort the assistant model runs at: low, medium or high for Claude models that take it (Claude Haiku 5.5), none for the rest."
   type        = string
-  default     = ""
+  default     = "none"
   nullable    = false
 
   validation {
-    condition     = contains(["", "none", "low", "medium", "high"], var.assistant_effort)
-    error_message = "assistant_effort must be empty, none, low, medium or high."
+    condition     = contains(["none", "low", "medium", "high"], var.assistant_effort)
+    error_message = "assistant_effort must be none, low, medium or high."
+  }
+}
+
+variable "assistant_judge_model" {
+  description = "Bedrock model ID of the AgentCore Evaluations custom judge that scores the public agent's answers (agentcore-evaluations.tf), in the same forms as assistant_model."
+  type        = string
+  default     = "us.anthropic.claude-haiku-4-5-20251001-v1:0"
+  nullable    = false
+
+  validation {
+    condition     = can(regex("^(us\\.)?(anthropic|openai|nvidia|meta|amazon|google)\\.[a-z0-9.:-]+$", var.assistant_judge_model))
+    error_message = "assistant_judge_model must come from a US-based creator (anthropic, openai, nvidia, meta, amazon, google): a us. inference profile or an on-demand model ID."
   }
 }
 

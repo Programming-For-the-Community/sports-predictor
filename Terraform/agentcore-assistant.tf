@@ -23,14 +23,12 @@ locals {
     ASSISTANT_HISTORY_TURNS     = "10"
     ASSISTANT_MAX_SESSION_TURNS = "30"
   }
-  # var.assistant_model / var.assistant_effort (ASSISTANT_MODEL and
-  # ASSISTANT_EFFORT in GitHub Actions) override these defaults. Claude goes
-  # through the Anthropic client, any other model through Bedrock's Converse
-  # API (Source/library/assistant/runtime.py). A us. inference profile
-  # routes to the regions below; the role may invoke the model in each.
-  assistant_model_id         = var.assistant_model != "" ? var.assistant_model : "us.anthropic.claude-haiku-4-5-20251001-v1:0"
+  # Model and effort: variables.tf (assistant_model, assistant_effort). A us.
+  # inference profile routes to the regions below; the role may invoke the
+  # model in each.
+  assistant_model_id         = var.assistant_model
   assistant_foundation_model = trimprefix(local.assistant_model_id, "us.")
-  assistant_effort           = var.assistant_effort != "" ? var.assistant_effort : "none"
+  assistant_effort           = var.assistant_effort
   assistant_model_regions    = ["us-east-1", "us-east-2", "us-west-2"]
 
   assistant_daily_limits = {
