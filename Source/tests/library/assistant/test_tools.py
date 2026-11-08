@@ -88,6 +88,25 @@ def test_list_events_maps_when_to_the_status_query_and_caps_rows():
     assert len(result["events"]) <= SETTINGS.max_rows
 
 
+def test_a_whole_slate_fits_because_player_leaders_are_left_out_of_a_list():
+    # 14 games each carrying a heavy leaders block used to be cut to 4.
+    leaders = {
+        "home": {"passing": {"name": "A Passer", "passing_yards": 250.123, "attempts": 33.1}},
+        "away": {"rushing": {"name": "R Back", "rushing_yards": 88.0, "carries": 17.0, "detail": "x" * 600}},
+    }
+    events = [{
+        "event_id": str(i), "status": "scheduled", "kickoff_time": "2026-11-08T18:00Z",
+        "participants": [{"role": "home", "abbreviation": f"H{i}"}, {"role": "away", "abbreviation": f"A{i}"}],
+        "prediction": {"predictions": {"win_probability": {"home_win_probability": 0.6}}, "leaders": leaders},
+    } for i in range(14)]
+    read = FakeReader({"/nfl/events": (200, {"sport": "nfl", "events": events})})
+    result = public_tools.run("list_events", {"sport": "nfl", "when": "upcoming"}, read, SPORTS, SETTINGS)
+
+    assert len(result["events"]) == 14
+    assert "leaders" not in json.dumps(result["events"])
+    assert result["events"][0]["prediction"]["predictions"]["win_probability"]["home_win_probability"] == 0.6
+
+
 def test_model_performance_can_be_narrowed_to_one_model_and_keeps_the_trend():
     body = {"season": 2026, "models": [
         {"model_name": "win-probability", "version": 10, "season": {"value": 0.64, "n": 120}, "history": [{"label": f"Wk {i}", "value": 0.6} for i in range(40)], "periods": []},
@@ -147,7 +166,8 @@ def test_repeat_offenders_apply_the_thresholds(traffic_s3):
     assert result["serious"][0]["ip"] == "198.51.100.23"
     assert result["serious"][0]["blocked"] == 110
     assert result["serious"][0]["days_active"] == 2
-    assert result["data_from"] == "2026-11-04"
+    assert result["history_starts"] == "2026-11-04"
+    assert "2026-11-01" in result["note"]
     assert result["start_date"] == "2026-11-04"
 
 
@@ -192,6 +212,8 @@ def test_cost_summary_groups_compares_and_reports_the_budget(fake_s3):
     assert result["total"] == 12.0
     assert result["groups"][0] == {"name": "AWS Lambda", "usd": 9.0}
     assert result["previous_period_total"] == 6.0
+    assert result["previous_period"] == {"start_date": "2026-10-26", "end_date": "2026-10-31"}
+    assert "history_starts" not in result
     assert result["change_pct"] == 100.0
     assert result["budget_used_pct"] == 10.0
     assert result["month_forecast"] == 118.0

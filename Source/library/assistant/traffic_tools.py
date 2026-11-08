@@ -9,7 +9,7 @@ from collections import defaultdict
 from datetime import date
 
 from library.assistant import traffic
-from library.assistant.date_ranges import clip, days_between, first_day, get_all, requested_range
+from library.assistant.date_ranges import clip, days_between, first_day, get_all, history_note, requested_range
 from library.assistant.settings import ToolSettings
 
 
@@ -37,7 +37,7 @@ def _daily_rows(s3, days: list[date]) -> list[tuple[str, dict]]:
 
 def _range_info(start: date, end: date, data_from: str | None, source: str) -> dict:
     """The range the answer actually covers: the start is clipped to data_from."""
-    return {"start_date": clip(start, data_from).isoformat(), "end_date": end.isoformat(), "data_from": data_from, "source": source}
+    return {"start_date": clip(start, data_from).isoformat(), "end_date": end.isoformat(), "source": source, **history_note(start, data_from)}
 
 
 def _share(part: int, total: int) -> float:

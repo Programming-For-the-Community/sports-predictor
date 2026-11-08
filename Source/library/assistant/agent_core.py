@@ -94,7 +94,7 @@ def _context_note(profile: Profile, favorites: dict, sports: list[str], sport, e
         notes.append("The user's saved favourites: " + "; ".join(f"{s}: {', '.join(t)}" for s, t in favorites.items()) + ".")
     if sport in sports:
         good_id = isinstance(event_id, str) and _EVENT_ID.match(event_id)
-        notes.append(f"The user is looking at {sport}" + (f" event {event_id}." if good_id else "."))
+        notes.append(f"The user is on the {sport} page" + (f", viewing game {event_id}." if good_id else "."))
     return " ".join(notes)
 
 
@@ -247,8 +247,11 @@ def handle(profile: Profile, clients: Clients, payload: dict, authorization: str
         yield stop
         return
 
-    note = _context_note(profile, _favorites_of(profile, clients, sub) or {}, clients.sports(), payload.get("sport"), payload.get("event_id"))
-    user_text = f"{question}\n\n<context>{note}</context>" if note else question
+    # Today's date with every question: models only know roughly when their
+    # training ended, so "this week" or "last month" needs it.
+    hints = _context_note(profile, _favorites_of(profile, clients, sub) or {}, clients.sports(), payload.get("sport"), payload.get("event_id"))
+    note = f"Today is {clients.today().isoformat()} (US Eastern). {hints}".strip()
+    user_text = f"{question}\n\n<context>{note}</context>"
     messages = past[-2 * profile.settings.history_turns:] + [{"role": "user", "content": user_text}]
     turn = _Turn(sub, gen_ai_spans.start_turn(clients.tracer, f"assistant_{profile.name}", session_id, question))
     try:

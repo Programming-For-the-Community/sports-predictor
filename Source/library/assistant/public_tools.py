@@ -30,11 +30,16 @@ DROPPED_KEYS = {
 }
 
 
-def prune(value, max_list: int = MAX_LIST):
+# Per-game player leaders: most of a game's size. A list of games leaves them
+# out so the whole slate fits; get_event_prediction has them.
+LIST_DROPPED_KEYS = frozenset({"leaders", "leaders_comparison"})
+
+
+def prune(value, max_list: int = MAX_LIST, dropped: frozenset[str] = frozenset()):
     if isinstance(value, dict):
-        return {k: prune(v, max_list) for k, v in value.items() if k not in DROPPED_KEYS and v is not None}
+        return {k: prune(v, max_list, dropped) for k, v in value.items() if k not in DROPPED_KEYS | dropped and v is not None}
     if isinstance(value, list):
-        return [prune(v, max_list) for v in value[:max_list]]
+        return [prune(v, max_list, dropped) for v in value[:max_list]]
     if isinstance(value, float):
         return round(value, 3)
     return value
@@ -65,7 +70,11 @@ def list_events(read: Reader, args: dict, settings: ToolSettings) -> dict:
     if code != 200:
         return _unavailable(code, body)
     events = body.get("events", [])
-    return _bounded({"sport": args["sport"], "when": args["when"], "count": len(events), "events": prune(events[:settings.max_rows])}, settings)
+    return _bounded({
+        "sport": args["sport"], "when": args["when"], "count": len(events),
+        "events": prune(events[:settings.max_rows], settings.max_rows, LIST_DROPPED_KEYS),
+        "note": "Player leaders are left out here; get_event_prediction has them for one game.",
+    }, settings)
 
 
 def get_event_prediction(read: Reader, args: dict, settings: ToolSettings) -> dict:
@@ -101,7 +110,9 @@ def get_model_performance(read: Reader, args: dict, settings: ToolSettings) -> d
         "period_kind": body.get("period_kind"),
         "generated_at": body.get("generated_at"),
         "coverage": body.get("coverage"),
+        "window_days": body.get("window_days"),
         "models": prune([_trim_model(m) for m in chosen], MAX_HISTORY),
+        "by_conference": prune(body.get("by_conference")),
     }, settings)
 
 

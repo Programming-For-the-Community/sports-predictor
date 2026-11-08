@@ -64,7 +64,7 @@ def _public(sport: dict) -> list[dict]:
         ),
         _tool(
             "get_model_performance",
-            "Get how this app's models have performed this season: per model, the season result, the latest period, a period-by-period trend, and accuracy by confidence band.",
+            "Get how this app's models have performed this season: per model, the season result, the latest period, a period-by-period trend and accuracy by confidence band, plus win-pick accuracy by conference where teams have conferences (by_conference; window_days, when set, limits it to recent days).",
             {"sport": sport, "model": {"type": "string", "description": "Optional model name, e.g. win-probability. Omit for all models."}},
             ["sport"],
         ),

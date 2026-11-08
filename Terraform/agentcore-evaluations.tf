@@ -104,7 +104,9 @@ resource "awscc_bedrockagentcore_online_evaluation_config" "assistant" {
 
   data_source_config = {
     cloudwatch_logs = {
-      log_group_names = [local.assistant_runtime_log_groups[each.key]]
+      # The runtimes send spans to the shared aws/spans group (their own log
+      # group holds the logs); both are read.
+      log_group_names = [local.assistant_runtime_log_groups[each.key], "aws/spans"]
       service_names   = ["${each.value.runtime_name}.DEFAULT"]
     }
   }

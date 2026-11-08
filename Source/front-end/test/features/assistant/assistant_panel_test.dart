@@ -61,7 +61,7 @@ void main() {
     expect(find.text('Infrastructure'), findsOneWidget);
   });
 
-  testWidgets('switching an admin to Infrastructure hides the favourites and the event chip', (tester) async {
+  testWidgets('switching an admin to Infrastructure hides the favourites but keeps the page context', (tester) async {
     await tester.pumpWidget(_panel(admin: true));
     await tester.pumpAndSettle();
 
@@ -69,7 +69,8 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('NFL · DET'), findsNothing);
-    expect(find.text('ABOUT  DET @ GB'), findsNothing);
+    // The admin agent answers predictions questions too, so it gets the page's game.
+    expect(find.text('ABOUT  DET @ GB'), findsOneWidget);
     expect(find.text('Ask about cost or traffic'), findsOneWidget);
   });
 }

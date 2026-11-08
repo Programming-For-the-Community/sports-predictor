@@ -40,3 +40,12 @@ def first_day(s3, prefix: str) -> str | None:
 
 def clip(start: date, data_from: str | None) -> date:
     return max(start, date.fromisoformat(data_from)) if data_from else start
+
+
+def history_note(requested_start: date, data_from: str | None) -> dict:
+    """{"history_starts", "note"} only when the data begins after the start
+    asked for, so the agent mentions the shortened range only then."""
+    if not data_from or date.fromisoformat(data_from) <= requested_start:
+        return {}
+    return {"history_starts": data_from,
+            "note": f"Data only goes back to {data_from}, so the range starts then instead of {requested_start.isoformat()}."}

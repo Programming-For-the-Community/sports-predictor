@@ -12,7 +12,7 @@ from datetime import date, timedelta
 
 from boto3.dynamodb.conditions import Key
 
-from library.performance import field_events
+from library.performance import conferences, field_events
 from library.performance.head_to_head import build_head_to_head_scorecard
 from library.serving.common import list_models
 from library.serving.prediction_snapshots import event_prediction_rows
@@ -89,10 +89,19 @@ def _run_head_to_head_sport(sport: str, storage, predictions_table, s3, today: d
         sport, season, events, rows_by_event, stats_by_event, list_models(s3, sport)["models"], _next_event(storage, sport, today),
     )
     document["coverage"] = _coverage(events, rows_by_event)
+    _add_conferences(storage, sport, document, events, rows_by_event)
     _name_best(storage, sport, document)
     _stamp_window(document, sport)
     s3.put_json(model_performance_key(sport), document)
     return document
+
+
+def _add_conferences(storage, sport: str, document: dict, events: list[dict], rows_by_event: dict[str, list[dict]]) -> None:
+    """Win accuracy by conference, from one batched read of every team."""
+    refs = conferences.team_refs(events)
+    breakdown = conferences.by_conference(events, rows_by_event, storage.get_entities(sport, refs) if refs else {})
+    if breakdown:
+        document["by_conference"] = breakdown
 
 
 def _name_best(storage, sport: str, document: dict) -> None:

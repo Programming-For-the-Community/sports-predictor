@@ -56,7 +56,7 @@ class _AssistantPanelState extends ConsumerState<AssistantPanel> {
     final mode = isAdmin ? ref.watch(assistantModeProvider) : AssistantMode.predictions;
     final state = ref.watch(assistantControllerProvider(mode));
     final controller = ref.read(assistantControllerProvider(mode).notifier);
-    void ask(String text) => controller.ask(text, context: mode == AssistantMode.predictions ? widget.context : const AssistantContext());
+    void ask(String text) => controller.ask(text, context: widget.context);
 
     return Material(
       color: AppColors.menu,
@@ -81,7 +81,7 @@ class _AssistantPanelState extends ConsumerState<AssistantPanel> {
               progressTool: state.progressTool,
               suggestions: _suggestions(mode),
               onSuggestion: ask,
-              contextLabel: mode == AssistantMode.predictions ? widget.context.eventLabel : null,
+              contextLabel: widget.context.eventLabel,
             ),
           ),
           AssistantInput(

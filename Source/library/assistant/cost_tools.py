@@ -8,7 +8,7 @@ from collections import defaultdict
 from datetime import date, timedelta
 
 from library.assistant import cost_snapshot
-from library.assistant.date_ranges import clip, days_between, get_all, requested_range, today
+from library.assistant.date_ranges import clip, days_between, get_all, history_note, requested_range, today
 
 TOP_GROUPS = 10
 
@@ -59,18 +59,20 @@ def _budget(s3, limit: float | None) -> tuple[float | None, float | None]:
 def cost_summary(s3, args: dict) -> dict:
     meta = s3.get_json_or_none(cost_snapshot.meta_key()) or {}
     data_from = meta.get("data_from")
-    start, end = requested_range(args, 0, default_start=today().replace(day=1))
-    start = clip(start, data_from)
+    requested_start, end = requested_range(args, 0, default_start=today().replace(day=1))
+    start = clip(requested_start, data_from)
     group_by = args.get("group_by", "service")
     days = days_between(start, end) if start <= end else []
     total, groups, estimated = _total(_daily(s3, days), group_by)
 
     previous_total, comparable = _previous(s3, start, len(days), data_from, group_by)
+    previous_start, previous_end = start - timedelta(days=len(days)), start - timedelta(days=1)
     change = round(100 * (total - comparable) / comparable, 1) if comparable else None
     month_to_date, used_pct = _budget(s3, meta.get("budget_limit"))
     return {
-        "start_date": start.isoformat(), "end_date": end.isoformat(), "data_from": data_from,
+        "start_date": start.isoformat(), "end_date": end.isoformat(), **history_note(requested_start, data_from),
         "currency": "USD", "total": round(total, 2), "estimated": estimated, "group_by": group_by, "groups": _ranked(groups),
+        "previous_period": {"start_date": previous_start.isoformat(), "end_date": previous_end.isoformat()} if days else None,
         "previous_period_total": previous_total, "change_pct": change,
         "budget_limit": meta.get("budget_limit"), "month_to_date": month_to_date, "budget_used_pct": used_pct,
         "month_forecast": meta.get("month_forecast"),
