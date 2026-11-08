@@ -81,13 +81,14 @@ data "aws_iam_policy_document" "assistant_agent" {
     }
   }
 
-  # Claude through the US cross-region inference profile, which can route
-  # each request to any of the profile's regions.
+  # The configured model only (InvokeModel also covers Converse): its US
+  # inference profile when it has one, and the model in each region the
+  # profile can route to.
   statement {
-    sid     = "InvokeClaude"
+    sid     = "InvokeModel"
     actions = ["bedrock:InvokeModel"]
     resources = concat(
-      ["arn:aws:bedrock:${var.region}:${var.account_id}:inference-profile/${local.assistant_settings.ASSISTANT_MODEL_ID}"],
+      startswith(local.assistant_model_id, "us.") ? ["arn:aws:bedrock:${var.region}:${var.account_id}:inference-profile/${local.assistant_model_id}"] : [],
       [for r in local.assistant_model_regions : "arn:aws:bedrock:${r}::foundation-model/${local.assistant_foundation_model}"],
     )
   }

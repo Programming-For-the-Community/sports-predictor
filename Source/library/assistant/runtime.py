@@ -8,11 +8,13 @@ from __future__ import annotations
 
 import json
 import logging
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 
 import boto3
+from botocore.config import Config
 
 from library.assistant import agent_core
+from library.assistant.converse_model import ConverseModel
 from library.assistant.prompts import Profile, build_profile
 from library.assistant.settings import AgentSettings
 from library.assistant.sports import load_sports
@@ -34,9 +36,24 @@ def tool_invoker(lambda_client, env: Mapping[str, str]):
     return invoke_tool
 
 
+def is_claude(model_id: str) -> bool:
+    """anthropic.claude-... or an inference profile of one (us.anthropic...)."""
+    return model_id.startswith("anthropic.") or ".anthropic." in model_id
+
+
+def model_client(env: Mapping[str, str], claude_client: Callable[[], object]):
+    """The client for ASSISTANT_MODEL_ID: claude_client() (an AnthropicBedrock,
+    built by the caller so this module doesn't need the Anthropic SDK) for
+    Claude, the Converse adapter for any other Bedrock model."""
+    if is_claude(env["ASSISTANT_MODEL_ID"]):
+        return claude_client()
+    # A model call with several tool results in context can take a while.
+    config = Config(read_timeout=120, retries={"max_attempts": 3, "mode": "standard"})
+    return ConverseModel(boto3.client("bedrock-runtime", region_name=env["AWS_REGION"], config=config))
+
+
 def build_clients(env: Mapping[str, str], model) -> agent_core.Clients:
-    """model: an AnthropicBedrock client (passed in so this module
-    doesn't need the Anthropic SDK)."""
+    """model: from model_client."""
     region = env["AWS_REGION"]
     dynamodb = boto3.resource("dynamodb", region_name=region)
     registry = dynamodb.Table(env["SPORT_REGISTRY_TABLE_NAME"])

@@ -1,6 +1,6 @@
 """
 Runs the assistant eval (library.assistant.eval_cases) against the deployed
-agents: real Claude Haiku 5.5, guardrails, memory and tool Lambdas, with the
+agents: the real Claude model, guardrails, memory and tool Lambdas, with the
 settings read from each live AgentCore runtime. Only the runtime's JWT
 authorizer is skipped -- the turn runs in this process under the eval's own
 caller id, with a raised daily limit so the run isn't cut off by the quota.
@@ -9,7 +9,11 @@ Run inside the agent image so the SDK versions match the runtime:
 
   docker run --rm -v <repo>/Source:/src -w /src -v <home>/.aws:/home/agent/.aws:ro -e AWS_PROFILE=<profile> \\
     -e PYTHONPATH=/src:/app/packages assistant-agent:local \\
-    python agents/assistant/run_eval.py --public-runtime <id> --admin-runtime <id> --out eval-results.json
+    python agents/assistant/run_eval.py --public-runtime <id> --admin-runtime <id>
+
+Results are written to eval-results.json in the working directory (-w).
+--model <bedrock model id> tries another model with the same runtimes'
+settings, no deploy needed; --sample N runs N cases spread across the set.
 
 --dry-run lists the cases and estimates the cost without calling anything.
 """
@@ -27,15 +31,14 @@ from anthropic import AnthropicBedrock
 from library.assistant import agent_core, runtime
 from library.assistant.agent_core import Clients
 from library.assistant.eval_cases import build_cases
-from library.assistant.eval_grading import grade, summarize
+from library.assistant.eval_grading import estimate_usd, grade, summarize
 from library.assistant.settings import AgentSettings
 from library.assistant.sports import load_sports
 
 EVAL_SUB = "assistant-eval-runner"
 EVAL_DAILY_LIMIT = 1000
-# Per question: ~3 model calls (~24K input, ~800 output tokens at Haiku 5.5's
-# $0.10/$0.50 per million) plus two guardrail checks (~4 text units).
-EST_USD_PER_QUESTION = 0.0024 + 0.0004 + 0.0012
+# Written to the working directory.
+RESULTS_FILE = "eval-results.json"
 
 
 def _token(admin: bool) -> str:
@@ -44,15 +47,30 @@ def _token(admin: bool) -> str:
     return f"Bearer eval.{body}.unsigned"
 
 
-def _runtime_env(control, runtime_id: str) -> dict:
+def _runtime_env(control, runtime_id: str, overrides: dict) -> dict:
     env = dict(control.get_agent_runtime(agentRuntimeId=runtime_id)["environmentVariables"])
     env.setdefault("AWS_REGION", control.meta.region_name)
-    return env
+    return {**env, **overrides}
 
 
-def _agent(control, runtime_id: str) -> tuple[Clients, object]:
-    env = _runtime_env(control, runtime_id)
-    clients = runtime.build_clients(env, AnthropicBedrock(aws_region=env["AWS_REGION"]))
+def _overrides(args) -> dict:
+    """--model tries another model without a deploy; effort is left out
+    unless --effort is given, since most models have none."""
+    if not args.model:
+        return {}
+    return {"ASSISTANT_MODEL_ID": args.model, "ASSISTANT_EFFORT": args.effort or ""}
+
+
+def _sample(cases: list[dict], count: int | None) -> list[dict]:
+    """count cases spread evenly across the set (both agents, every kind)."""
+    if not count or count >= len(cases):
+        return cases
+    return [cases[i * len(cases) // count] for i in range(count)]
+
+
+def _agent(control, runtime_id: str, overrides: dict) -> tuple[Clients, object]:
+    env = _runtime_env(control, runtime_id, overrides)
+    clients = runtime.build_clients(env, runtime.model_client(env, lambda: AnthropicBedrock(aws_region=env["AWS_REGION"])))
     settings = replace(
         AgentSettings.from_env(),
         model_id=env["ASSISTANT_MODEL_ID"], effort=env["ASSISTANT_EFFORT"], daily_limit=EVAL_DAILY_LIMIT,
@@ -66,22 +84,28 @@ def main() -> int:
     parser.add_argument("--admin-runtime", required=True)
     parser.add_argument("--region", default=os.environ.get("AWS_REGION", "us-east-2"))
     parser.add_argument("--only", help="comma-separated case ids")
-    parser.add_argument("--out", default="eval-results.json")
+    parser.add_argument("--sample", type=int, help="run this many cases, spread across the set")
+    parser.add_argument("--model", help="Bedrock model ID to evaluate instead of the runtime's")
+    parser.add_argument("--effort", help="effort for --model (Claude only)")
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
 
     control = boto3.client("bedrock-agentcore-control", region_name=args.region)
-    registry = _runtime_env(control, args.public_runtime)["SPORT_REGISTRY_TABLE_NAME"]
-    cases = build_cases(load_sports(boto3.resource("dynamodb", region_name=args.region).Table(registry)))
+    overrides = _overrides(args)
+    public_env = _runtime_env(control, args.public_runtime, overrides)
+    registry = boto3.resource("dynamodb", region_name=args.region).Table(public_env["SPORT_REGISTRY_TABLE_NAME"])
+    cases = build_cases(load_sports(registry))
     if args.only:
         wanted = set(args.only.split(","))
         cases = [c for c in cases if c["id"] in wanted]
+    cases = _sample(cases, args.sample)
     if args.dry_run:
-        print(json.dumps({"cases": len(cases), "estimated_usd": round(len(cases) * EST_USD_PER_QUESTION, 2),
+        print(json.dumps({"cases": len(cases), "model": public_env["ASSISTANT_MODEL_ID"],
+                          "estimated_usd": estimate_usd(public_env["ASSISTANT_MODEL_ID"], len(cases)),
                           "ids": [c["id"] for c in cases]}, indent=2))
         return 0
 
-    agents = {"public": _agent(control, args.public_runtime), "admin": _agent(control, args.admin_runtime)}
+    agents = {"public": _agent(control, args.public_runtime, overrides), "admin": _agent(control, args.admin_runtime, overrides)}
     results = []
     for case in cases:
         clients, profile = agents[case["agent"]]
@@ -92,9 +116,9 @@ def main() -> int:
         print(("PASS " if result["passed"] else "FAIL ") + case["id"] + ("" if result["passed"] else f"  {result['reasons']}"), flush=True)
 
     summary = summarize(results)
-    with open(args.out, "w", encoding="utf-8") as handle:
+    with open(RESULTS_FILE, "w", encoding="utf-8") as handle:
         json.dump({"summary": summary, "results": results}, handle, indent=2)
-    print(json.dumps({k: summary[k] for k in ("cases", "passed", "pass_rate", "by_agent")}, indent=2))
+    print(json.dumps({"model": public_env["ASSISTANT_MODEL_ID"], **{k: summary[k] for k in ("cases", "passed", "pass_rate", "by_agent")}}, indent=2))
     return 0 if summary["passed"] == summary["cases"] else 1
 
 

@@ -37,6 +37,7 @@ class _App:
 def agent(monkeypatch):
     monkeypatch.setenv("ASSISTANT_PROFILE", "public")
     monkeypatch.setenv("AWS_REGION", "us-east-2")
+    monkeypatch.setenv("ASSISTANT_MODEL_ID", "us.anthropic.claude-haiku-4-5-20251001-v1:0")
     monkeypatch.setitem(sys.modules, "anthropic", types.SimpleNamespace(AnthropicBedrock=MagicMock()))
     monkeypatch.setitem(sys.modules, "bedrock_agentcore", types.SimpleNamespace(BedrockAgentCoreApp=_App))
     from library.assistant import runtime

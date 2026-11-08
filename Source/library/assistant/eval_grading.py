@@ -1,10 +1,24 @@
 """
 Grades one eval turn (library.assistant.eval_cases) from the events the
 agent produced. Rule-based and deterministic -- no model judges the model.
+Also estimates a run's cost for run_eval.py --dry-run.
 """
 from __future__ import annotations
 
 import re
+
+# Per question: ~3 model calls (~24K input, ~800 output tokens) plus two
+# guardrail checks (~4 text units, $0.0012). USD per million tokens, in/out.
+TOKENS_PER_QUESTION = (24_000, 800)
+GUARDRAIL_USD_PER_QUESTION = 0.0012
+MODEL_PRICES = {
+    "claude-haiku-5-5": (0.10, 0.50),
+    "claude-haiku-4-5": (1.00, 5.00),
+    "gpt-oss-120b": (0.15, 0.60),
+    "nemotron-super-3-120b": (0.15, 0.65),
+    "llama4-maverick": (0.24, 0.97),
+    "nova-2-lite": (0.30, 2.50),
+}
 
 REFUSAL = re.compile(
     r"can(no|')t help|can only (help|answer)|not (able|something i can)|only (answer|help)|isn'?t something|"
@@ -64,3 +78,13 @@ def summarize(results: list[dict]) -> dict:
     passed = sum(r["passed"] for r in results)
     return {"cases": total, "passed": passed, "pass_rate": round(100 * passed / total, 1) if total else 0, "by_agent": by_agent,
             "failed": [{"id": r["id"], "reasons": r["reasons"]} for r in results if not r["passed"]]}
+
+
+def estimate_usd(model_id: str, questions: int) -> float | None:
+    """Rough cost of running `questions` cases on model_id, or None for a
+    model without a price here."""
+    price = next((p for name, p in MODEL_PRICES.items() if name in model_id), None)
+    if price is None:
+        return None
+    per_question = sum(t * usd / 1_000_000 for t, usd in zip(TOKENS_PER_QUESTION, price)) + GUARDRAIL_USD_PER_QUESTION
+    return round(questions * per_question, 2)

@@ -15,17 +15,22 @@ locals {
   # Every limit the agents and tools read (Source/library/assistant/
   # settings.py). Change one here and apply; no code release needed.
   assistant_settings = {
-    ASSISTANT_MODEL_ID          = "us.${local.assistant_foundation_model}"
-    ASSISTANT_EFFORT            = "low"
+    ASSISTANT_MODEL_ID          = local.assistant_model_id
+    ASSISTANT_EFFORT            = local.assistant_effort == "none" ? "" : local.assistant_effort
     ASSISTANT_MAX_TOKENS        = "4096"
     ASSISTANT_MAX_TOOL_CALLS    = "6"
     ASSISTANT_MAX_MESSAGE_CHARS = "1000"
     ASSISTANT_HISTORY_TURNS     = "10"
     ASSISTANT_MAX_SESSION_TURNS = "30"
   }
-  # Claude Haiku 5.5, called through its US cross-region inference profile
-  # (the ASSISTANT_MODEL_ID above), which routes to these regions.
-  assistant_foundation_model = "anthropic.claude-haiku-5-5"
+  # var.assistant_model / var.assistant_effort (ASSISTANT_MODEL and
+  # ASSISTANT_EFFORT in GitHub Actions) override these defaults. Claude goes
+  # through the Anthropic client, any other model through Bedrock's Converse
+  # API (Source/library/assistant/runtime.py). A us. inference profile
+  # routes to the regions below; the role may invoke the model in each.
+  assistant_model_id         = var.assistant_model != "" ? var.assistant_model : "us.anthropic.claude-haiku-4-5-20251001-v1:0"
+  assistant_foundation_model = trimprefix(local.assistant_model_id, "us.")
+  assistant_effort           = var.assistant_effort != "" ? var.assistant_effort : "none"
   assistant_model_regions    = ["us-east-1", "us-east-2", "us-west-2"]
 
   assistant_daily_limits = {
@@ -118,7 +123,7 @@ resource "awscc_bedrockagentcore_runtime" "assistant" {
   for_each = local.assistant_agents
 
   agent_runtime_name = each.value.runtime_name
-  description        = "Sports predictor assistant (${each.key}) -- Claude Haiku 5.5."
+  description        = "Sports predictor assistant (${each.key})."
   role_arn           = aws_iam_role.assistant_agent[each.key].arn
 
   # The role must be able to pull the image before the runtime is created.

@@ -4,7 +4,7 @@ picks the profile). Every client is passed in, so the whole flow runs in
 tests without AWS:
 
   verify caller -> daily quota -> input guardrail -> history + favourites
-  -> model/tool loop (Claude Haiku 5.5) -> output guardrail -> memory
+  -> model/tool loop (Claude Haiku) -> output guardrail -> memory
 
 It yields small event dicts that the runtime streams to the app as SSE:
   {"type": "progress", "tool": "<name>"}
@@ -186,8 +186,11 @@ def _model_loop(profile: Profile, clients: Clients, turn: _Turn, messages: list[
         "model": settings.model_id, "max_tokens": settings.max_tokens,
         "system": [{"type": "text", "text": profile.system, "cache_control": {"type": "ephemeral"}}],
         "tools": anthropic_tools(profile.tool_names, clients.sports()),
-        "messages": messages, "output_config": {"effort": settings.effort},
+        "messages": messages,
     }
+    # Effort is left out for models without it (ASSISTANT_EFFORT empty).
+    if settings.effort:
+        request["output_config"] = {"effort": settings.effort}
     for _ in range(settings.max_tool_calls + 1):
         response = _call_model(clients, turn, request)
         if response.stop_reason == "refusal":

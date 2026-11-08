@@ -206,6 +206,8 @@ env:
   TF_VAR_project: ${{ vars.PROJECT}}
   TF_VAR_owner: ${{ vars.OWNER}}
   TF_VAR_alert_email: ${{ secrets.ALERT_EMAIL }}
+  TF_VAR_assistant_model: ${{ vars.ASSISTANT_MODEL }}
+  TF_VAR_assistant_effort: ${{ vars.ASSISTANT_EFFORT }}
   TF_VAR_environment: ${{ github.event.inputs.environment || 'development' }}
   TF_VAR_private1_subnet_cidr: ${{ vars.SUBNET_A_CIDR }}
   TF_VAR_private2_subnet_cidr: ${{ vars.SUBNET_B_CIDR }}

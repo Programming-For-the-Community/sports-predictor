@@ -79,10 +79,10 @@ resource "aws_cloudwatch_dashboard" "assistant" {
       {
         type = "metric", x = 0, y = 20, width = 12, height = 6
         properties = {
-          region = var.region, title = "Claude Haiku tokens per day", view = "bar", period = 86400
+          region = var.region, title = "Assistant model tokens per day", view = "bar", period = 86400
           metrics = [
-            [{ expression = "SEARCH('{AWS/Bedrock,ModelId} MetricName=\"InputTokenCount\" haiku', 'Sum', 86400)", id = "input" }],
-            [{ expression = "SEARCH('{AWS/Bedrock,ModelId} MetricName=\"OutputTokenCount\" haiku', 'Sum', 86400)", id = "output" }],
+            [{ expression = "SEARCH('{AWS/Bedrock,ModelId} MetricName=\"InputTokenCount\" ModelId=\"${local.assistant_model_id}\"', 'Sum', 86400)", id = "input" }],
+            [{ expression = "SEARCH('{AWS/Bedrock,ModelId} MetricName=\"OutputTokenCount\" ModelId=\"${local.assistant_model_id}\"', 'Sum', 86400)", id = "output" }],
           ]
         }
       },

@@ -7,7 +7,7 @@ assistant.tf). Every limit is an environment variable (library.assistant.
 settings); the sports come from the sport registry table. Clients are built
 by library.assistant.runtime, which the eval runner shares.
 
-The turn itself -- quota, guardrails, memory, the Claude Haiku 5.5 tool
+The turn itself -- quota, guardrails, memory, the Claude Haiku tool
 loop -- is library.assistant.agent_core. Each yielded event goes to the app
 as one SSE `data:` line.
 
@@ -38,7 +38,9 @@ turn_logger.setLevel(logging.INFO)
 PROFILE_NAME = os.environ["ASSISTANT_PROFILE"]
 
 app = BedrockAgentCoreApp()
-clients = runtime.build_clients(os.environ, AnthropicBedrock(aws_region=os.environ["AWS_REGION"]))
+clients = runtime.build_clients(
+    os.environ, runtime.model_client(os.environ, lambda: AnthropicBedrock(aws_region=os.environ["AWS_REGION"])),
+)
 # GenAI spans for AgentCore Evaluations (library.assistant.gen_ai_spans).
 clients.tracer = gen_ai_spans.otel_tracer()
 

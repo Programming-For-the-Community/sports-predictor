@@ -44,7 +44,7 @@ class RecordingTracer:
         return span
 
     def by_operation(self, operation):
-        return [s for s in self.spans if s.attributes["gen_ai.operation.name"] == operation]
+        return [s for s in self.spans if s.attributes[gen_ai_spans.OPERATION] == operation]
 
 
 @pytest.fixture
@@ -106,7 +106,8 @@ def test_a_failed_model_call_ends_both_spans_as_errors(traced):
     (chat,) = clients.tracer.by_operation("chat")
     assert turn.attributes["error.type"] == "failed"
     assert chat.attributes["error.type"] == "model_error"
-    assert turn.ended and chat.ended
+    assert turn.ended
+    assert chat.ended
 
 
 def test_a_blocked_question_records_nothing(traced):

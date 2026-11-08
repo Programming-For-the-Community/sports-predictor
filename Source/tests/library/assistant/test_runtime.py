@@ -51,3 +51,15 @@ def test_clients_and_profile_come_from_the_environment():
     assert sports == ["nfl", "nba"]
     assert profile.name == "admin"
     assert "nfl, nba" in profile.system
+
+
+def test_claude_uses_the_anthropic_client_and_other_models_use_converse():
+    claude = MagicMock(name="anthropic-client")
+
+    with patch.object(runtime.boto3, "client") as boto_client:
+        assert runtime.model_client({**ENV, "ASSISTANT_MODEL_ID": "us.anthropic.claude-haiku-5-5"}, lambda: claude) is claude
+        assert runtime.model_client({**ENV, "ASSISTANT_MODEL_ID": "anthropic.claude-haiku-4-5"}, lambda: claude) is claude
+        other = runtime.model_client({**ENV, "ASSISTANT_MODEL_ID": "openai.gpt-oss-120b-1:0"}, lambda: claude)
+
+    assert type(other).__name__ == "ConverseModel"
+    assert boto_client.call_args.args == ("bedrock-runtime",)

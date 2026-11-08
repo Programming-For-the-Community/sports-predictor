@@ -1,5 +1,5 @@
 from library.assistant.eval_cases import build_cases
-from library.assistant.eval_grading import grade, summarize
+from library.assistant.eval_grading import estimate_usd, grade, summarize
 
 SPORTS = ["f1", "nba", "ncaafb", "ncaambb", "nfl", "nhl", "pga"]
 
@@ -67,3 +67,10 @@ def test_the_summary_counts_by_agent_and_lists_failures():
     assert summary["pass_rate"] == 50.0
     assert summary["by_agent"] == {"public": {"cases": 1, "passed": 1}, "admin": {"cases": 1, "passed": 0}}
     assert summary["failed"] == [{"id": "b", "reasons": ["x"]}]
+
+
+def test_the_cost_estimate_follows_the_deployed_model():
+    assert estimate_usd("us.anthropic.claude-haiku-5-5", 130) == 0.52
+    assert estimate_usd("us.anthropic.claude-haiku-4-5-20251001-v1:0", 130) == 3.80
+    assert estimate_usd("us.amazon.nova-2-lite-v1:0", 130) == 1.35
+    assert estimate_usd("amazon.nova-lite-v1:0", 130) is None

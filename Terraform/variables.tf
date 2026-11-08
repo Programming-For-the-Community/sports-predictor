@@ -119,6 +119,35 @@ variable "assistant_rate_limit_per_ip" {
   nullable    = false
 }
 
+# The assistant's model and effort, from the ASSISTANT_MODEL and
+# ASSISTANT_EFFORT GitHub Actions variables (tf_install.yml). An unset
+# GitHub variable arrives as "", which means the default
+# (agentcore-assistant.tf), so both can be changed with no code change.
+variable "assistant_model" {
+  description = "Bedrock model ID the assistant agents call: a US inference profile (us.anthropic.claude-haiku-5-5, us.meta.llama4-maverick-17b-instruct-v1:0) or an on-demand model (openai.gpt-oss-120b-1:0). Empty for the default."
+  type        = string
+  default     = ""
+  nullable    = false
+
+  # Models from US-based creators only.
+  validation {
+    condition     = var.assistant_model == "" || can(regex("^(us\\.)?(anthropic|openai|nvidia|meta|amazon|google)\\.[a-z0-9.:-]+$", var.assistant_model))
+    error_message = "assistant_model must be empty or a Bedrock model ID from a US-based creator (anthropic, openai, nvidia, meta, amazon, google), optionally with the us. inference-profile prefix."
+  }
+}
+
+variable "assistant_effort" {
+  description = "Effort the assistant model runs at: low, medium or high, or none for models without effort (Claude Haiku 4.5). Empty for the default."
+  type        = string
+  default     = ""
+  nullable    = false
+
+  validation {
+    condition     = contains(["", "none", "low", "medium", "high"], var.assistant_effort)
+    error_message = "assistant_effort must be empty, none, low, medium or high."
+  }
+}
+
 variable "ecr_repo_url" {
   description = "URL of the shared ECR repository that sport-specific images are pushed to. Supplied via TF_VAR_ecr_repo_url from the ECR_URI GitHub Actions secret."
   type        = string

@@ -21,6 +21,7 @@ import json
 
 SCOPE = "opentelemetry.instrumentation.sports_predictor_assistant"
 PROVIDER = "aws.bedrock"
+OPERATION = "gen_ai.operation.name"
 
 
 class _NullSpan:
@@ -32,7 +33,8 @@ class _NullSpan:
 
 
 class _NullTracer:
-    def start(self, name: str, attributes: dict, parent=None) -> _NullSpan:
+    def start(self, *_args, **_kwargs) -> _NullSpan:
+        """Same call as the OpenTelemetry adapter's start; records nothing."""
         return _NullSpan()
 
 
@@ -77,7 +79,7 @@ def _parts(blocks) -> list[dict]:
 
 def start_turn(tracer, agent: str, session_id: str, question: str):
     return tracer.start(f"invoke_agent {agent}", {
-        "gen_ai.operation.name": "invoke_agent",
+        OPERATION: "invoke_agent",
         "gen_ai.provider.name": PROVIDER,
         "gen_ai.agent.name": agent,
         "gen_ai.conversation.id": session_id,
@@ -96,7 +98,7 @@ def end_turn(span, answer: str | None) -> None:
 
 def start_chat(tracer, parent, model_id: str, tools: list[dict]):
     return tracer.start(f"chat {model_id}", {
-        "gen_ai.operation.name": "chat",
+        OPERATION: "chat",
         "gen_ai.provider.name": PROVIDER,
         "gen_ai.request.model": model_id,
         "gen_ai.tool.definitions": _json(tools),
@@ -117,7 +119,7 @@ def end_chat(span, response) -> None:
 
 def start_tool(tracer, parent, call):
     return tracer.start(f"execute_tool {call.name}", {
-        "gen_ai.operation.name": "execute_tool",
+        OPERATION: "execute_tool",
         "gen_ai.tool.name": call.name,
         "gen_ai.tool.type": "function",
         "gen_ai.tool.call.id": call.id,

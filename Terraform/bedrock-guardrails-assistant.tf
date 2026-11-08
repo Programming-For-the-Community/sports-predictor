@@ -1,7 +1,7 @@
 # The assistant's two Bedrock Guardrails, applied by the agents with
 # ApplyGuardrail to each question and each answer (Source/library/assistant/
-# guardrail.py). The public agent also refuses gambling decisions, anything
-# off-topic and infrastructure questions; both mask AWS identifiers.
+# guardrail.py). The public agent also refuses gambling advice, unrelated
+# tasks and infrastructure questions; both mask AWS identifiers.
 # Each runtime is pinned to a published version.
 
 locals {
@@ -14,13 +14,17 @@ locals {
     internal-resource = { pattern = "${var.project}-[a-z0-9-]+", description = "This project's internal resource names" }
   }
 
+  # Each definition describes only what it blocks: a topic defined by what
+  # it is not ("anything other than predictions") matches the predictions
+  # questions themselves, and wording like "picks" matches "the model's
+  # picks". The system prompt keeps the agent to its own subject.
   assistant_public_topics = {
     gambling-decisions = {
-      definition = "Advice on whether, what or how much to bet: picking bets, parlays, staking, bankroll plans, odds shopping, or calling any outcome certain."
+      definition = "Requests for advice on placing a wager: whether to bet, which bet to place, how much money to stake, building a parlay, managing a betting bankroll, or finding a sportsbook or better odds."
       examples   = ["Should I bet the Lions this week?", "How much should I put on this parlay?", "Which bet is a lock tonight?"]
     }
-    off-topic = {
-      definition = "Anything other than this app's sports predictions and how its prediction models have performed."
+    unrelated-tasks = {
+      definition = "Requests for creative writing, homework, coding help, general knowledge, news, weather, politics, travel, health or personal advice."
       examples   = ["Write me a poem.", "What's the weather tomorrow?", "Help me with my homework."]
     }
     infrastructure = {
