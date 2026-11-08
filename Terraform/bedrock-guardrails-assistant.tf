@@ -1,7 +1,7 @@
 # The assistant's two Bedrock Guardrails, applied by the agents with
 # ApplyGuardrail to each question and each answer (Source/library/assistant/
-# guardrail.py). The public agent also refuses gambling advice, unrelated
-# tasks and infrastructure questions; both mask AWS identifiers.
+# guardrail.py). The public guardrail also blocks unrelated tasks and
+# infrastructure questions; both mask AWS identifiers.
 # Each runtime is pinned to a published version.
 
 locals {
@@ -16,13 +16,12 @@ locals {
 
   # Each definition describes only what it blocks: a topic defined by what
   # it is not ("anything other than predictions") matches the predictions
-  # questions themselves, and wording like "picks" matches "the model's
-  # picks". The system prompt keeps the agent to its own subject.
+  # questions themselves. There is no gambling topic: the classifier blocked
+  # "the model's picks" and "who is favoured, and by how much" along with
+  # betting advice. Refusing betting advice is the system prompt's rule
+  # (prompts.py), checked by the eval's refusal cases and the public-scope
+  # judge (agentcore-evaluations.tf).
   assistant_public_topics = {
-    gambling-decisions = {
-      definition = "Requests for advice on placing a wager: whether to bet, which bet to place, how much money to stake, building a parlay, managing a betting bankroll, or finding a sportsbook or better odds."
-      examples   = ["Should I bet the Lions this week?", "How much should I put on this parlay?", "Which bet is a lock tonight?"]
-    }
     unrelated-tasks = {
       definition = "Requests for creative writing, homework, coding help, general knowledge, news, weather, politics, travel, health or personal advice."
       examples   = ["Write me a poem.", "What's the weather tomorrow?", "Help me with my homework."]
@@ -36,8 +35,8 @@ locals {
 
 resource "aws_bedrock_guardrail" "assistant_public" {
   name                      = "${var.project}-assistant-public"
-  description               = "Public assistant: content and prompt-attack filters, no gambling advice or off-topic answers, AWS identifiers and IPs masked."
-  blocked_input_messaging   = "I can only help with this app's predictions and how its models have performed, and I can't help with betting decisions."
+  description               = "Public assistant: content and prompt-attack filters, no unrelated tasks or infrastructure questions, AWS identifiers and IPs masked."
+  blocked_input_messaging   = "I can only help with this app's predictions and how its models have performed."
   blocked_outputs_messaging = "I couldn't answer that from the available data."
 
   content_policy_config {
