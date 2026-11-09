@@ -62,7 +62,24 @@ def _matches_conference(event: dict, conference: str) -> bool:
     return any(wanted in (p.get("conference") or "").lower() for p in event.get("participants") or [])
 
 
-def filtered(events: list[dict], team: str | None, conference: str | None) -> list[dict]:
+def _names_in(value) -> list[str]:
+    """Every player name in a game's predicted leaders or its predicted-vs-actual."""
+    if isinstance(value, dict):
+        own = [value["name"]] if isinstance(value.get("name"), str) else []
+        return own + [n for v in value.values() for n in _names_in(v)]
+    if isinstance(value, list):
+        return [n for v in value for n in _names_in(v)]
+    return []
+
+
+def _matches_player(event: dict, player: str) -> bool:
+    leaders = [(event.get("prediction") or {}).get("leaders"), event.get("leaders_comparison")]
+    return any(names_team(player, None, name) for name in _names_in(leaders))
+
+
+def filtered(events: list[dict], team: str | None, conference: str | None, player: str | None = None) -> list[dict]:
+    if player:
+        events = [e for e in events if _matches_player(e, player)]
     if team:
         events = [e for e in events if _matches_team(e, team)]
     if conference:

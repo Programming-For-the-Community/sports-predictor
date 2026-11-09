@@ -109,3 +109,21 @@ def test_model_info_reports_version_training_and_main_inputs():
     assert len(one["models"][0]["candidates"]) == public_tools.MAX_CANDIDATES
     missing = public_tools.run("get_model_info", {"sport": "nfl", "model": "nope"}, read, SPORTS, SETTINGS)
     assert missing["models"] == ["score-margin", "win-probability"]
+
+
+def test_a_prediction_being_refreshed_still_counts_as_the_answer():
+    read = FakeReader({"/pga/predictions/events/{event_id}": (203, {"tournament_name": "Open", "stale": True, "field": [{"name": "A Golfer"}]})})
+    result = public_tools.run("get_event_prediction", {"sport": "pga", "event_id": "9"}, read, SPORTS, SETTINGS)
+    assert result["field"] == [{"name": "A Golfer"}]
+
+
+def test_a_player_name_finds_their_game_without_knowing_the_team():
+    def game(event_id, scorer):
+        return {"event_id": event_id, "status": "scheduled", "participants": [],
+                "prediction": {"leaders": {"home": {"scoring": [{"name": scorer, "points": 30.1}]}}}}
+    read = FakeReader({"/nba/events": (200, {"events": [game("1", "Luka Doncic"), game("2", "Darius Garland")]})})
+
+    result = public_tools.run("list_events", {"sport": "nba", "player": "doncic"}, read, SPORTS, SETTINGS)
+
+    assert [e["event_id"] for e in result["events"]] == ["1"]
+    assert result["events"][0]["prediction"]["leaders"]["home"]["scoring"][0]["points"] == 30.1

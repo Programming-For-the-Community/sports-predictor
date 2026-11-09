@@ -22,6 +22,9 @@ Reader = Callable[[str, dict, dict], tuple[int, dict]]
 LiveReader = Callable[[str], dict | None]
 
 MAX_LIST = 16
+# predict-read's 203 is a cached answer being refreshed in the background:
+# still the app's current prediction.
+OK = (200, 203)
 MAX_HISTORY = 26
 
 # Ids, cache bookkeeping and display-only fields: nothing an answer needs.
@@ -76,7 +79,7 @@ def _unavailable(status: int, body: dict) -> dict:
 def _games(read: Reader, sport: str, status: str, date: str | None = None) -> tuple[list[dict] | None, dict | None]:
     query = {"status": status, **({"date": date} if date else {})}
     code, body = read(f"/{sport}/events", {}, query)
-    return (body.get("events", []), None) if code == 200 else (None, _unavailable(code, body))
+    return (body.get("events", []), None) if code in OK else (None, _unavailable(code, body))
 
 
 def _dated_games(read: Reader, sport: str, date: str) -> tuple[list[dict] | None, dict | None]:
@@ -110,7 +113,7 @@ def list_events(read: Reader, args: dict, settings: ToolSettings) -> dict:
         events, error = _games(read, args["sport"], "scheduled" if when == "upcoming" else "completed")
     if error:
         return error
-    matching = game_list.filtered(events, args.get("team"), args.get("conference"))
+    matching = game_list.filtered(events, args.get("team"), args.get("conference"), args.get("player"))
     period = {"date": args["date"]} if args.get("date") else {"when": when}
     result = {"sport": args["sport"], **period, **_game_list(matching, settings)}
     if len(matching) > PLAYER_DETAIL_MAX_GAMES:
@@ -155,7 +158,7 @@ def only_player(value, player: str):
 def get_event_prediction(read: Reader, args: dict, settings: ToolSettings) -> dict:
     resource = f"/{args['sport']}/predictions/events/{{event_id}}"
     code, body = read(resource, {"event_id": args["event_id"]}, {})
-    if code != 200:
+    if code not in OK:
         return _unavailable(code, body)
     result = body.get("result", body)
     if args.get("player"):
@@ -178,7 +181,7 @@ def _trim_model(model: dict) -> dict:
 
 def get_model_performance(read: Reader, args: dict, settings: ToolSettings) -> dict:
     code, body = read(f"/{args['sport']}/model-performance", {}, {})
-    if code != 200:
+    if code not in OK:
         return _unavailable(code, body)
     models = body.get("models", [])
     wanted = args.get("model")
@@ -203,7 +206,7 @@ BRACKET_NOTE = ("Each bracket shows one simulated run with the typical number of
 
 def get_season_projection(read: Reader, args: dict, settings: ToolSettings) -> dict:
     code, body = read(f"/{args['sport']}/season", {}, {})
-    if code != 200:
+    if code not in OK:
         return _unavailable(code, body)
     team, conference = args.get("team"), args.get("conference")
     base = {"sport": args["sport"], "season": body.get("season"), "generated_at": body.get("generated_at")}
@@ -228,7 +231,7 @@ def _model_info(card: dict) -> dict:
 
 def get_model_info(read: Reader, args: dict, settings: ToolSettings) -> dict:
     code, body = read(f"/{args['sport']}/models", {}, {})
-    if code != 200:
+    if code not in OK:
         return _unavailable(code, body)
     models = body.get("models", [])
     wanted = args.get("model")

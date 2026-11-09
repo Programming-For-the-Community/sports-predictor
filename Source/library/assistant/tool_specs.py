@@ -64,7 +64,8 @@ def _public(sport: dict) -> list[dict]:
             {"sport": sport, "when": {"type": "string", "enum": ["upcoming", "recent"], "description": "Which game day. Ignored when date is given; defaults to upcoming."},
              "date": {**_DATE, "description": "One game date, YYYY-MM-DD (U.S. Eastern, as the app dates games): every game that day, played or not. Not for golf or racing."},
              "team": {**_TEAM, "description": "Only games with this team: abbreviation (DET) or part of its name."},
-             "conference": {**_CONFERENCE, "description": "Only games with a team from this conference, as the app names it (Big Ten, SEC)."}},
+             "conference": {**_CONFERENCE, "description": "Only games with a team from this conference, as the app names it (Big Ten, SEC)."},
+             "player": {"type": "string", "description": "Only the game whose player predictions include this player (part of the name): finds a player's game without knowing their team."}},
             ["sport"],
         ),
         _tool(

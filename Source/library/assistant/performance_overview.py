@@ -28,7 +28,7 @@ def _row(model: dict) -> dict:
 
 def _sport(read: Reader, sport: str, model: str | None) -> dict:
     code, body = read(f"/{sport}/model-performance", {}, {})
-    if code != 200:
+    if code not in (200, 203):
         return {"sport": sport, "error": f"Results unavailable ({code})."}
     models = [m for m in body.get("models", []) if not model or model.lower() in (m.get("model_name") or "").lower()]
     return {"sport": sport, "season": body.get("season"), "generated_at": body.get("generated_at"),
@@ -39,4 +39,5 @@ def overview(read: Reader, sports: list[str], model: str | None) -> dict:
     with ThreadPoolExecutor(max_workers=max(1, min(len(sports), 8))) as pool:
         per_sport = list(pool.map(lambda sport: _sport(read, sport, model), sports))
     return {"kinds": KINDS, "sports": per_sport,
-            "note": "season is the share right for pick and chance models, or the average miss for amount models; graded is how many predictions it covers."}
+            "note": ("season is the share right for pick and chance models, or the average miss for amount models; graded is how many predictions it covers. "
+                     "Rank or compare models only against others of the same kind; a chance model's share right is not a pick accuracy.")}
