@@ -127,3 +127,9 @@ def test_a_player_name_finds_their_game_without_knowing_the_team():
 
     assert [e["event_id"] for e in result["events"]] == ["1"]
     assert result["events"][0]["prediction"]["leaders"]["home"]["scoring"][0]["points"] == 30.1
+
+
+def test_a_player_not_in_the_field_is_said_to_be_missing():
+    read = FakeReader({"/pga/predictions/events/{event_id}": (200, {"result": {"field": [{"name": "Ben James"}]}})})
+    result = public_tools.run("get_event_prediction", {"sport": "pga", "event_id": "9", "player": "Scheffler"}, read, SPORTS, SETTINGS)
+    assert "Scheffler" in result["player_note"]

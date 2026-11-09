@@ -164,6 +164,8 @@ def get_event_prediction(read: Reader, args: dict, settings: ToolSettings) -> di
     if args.get("player"):
         result = only_player(result, args["player"])
     pruned = prune(result, settings.max_rows)
+    if args.get("player") and "field" in result and not result["field"]:
+        pruned["player_note"] = f"No player matching {args['player']!r} is in this event's field."
     if len(result.get("field") or []) > settings.max_rows:
         pruned["field_note"] = f"Top {settings.max_rows} of {len(result['field'])} by predicted finish; ask about a player by name for the rest."
     return _bounded({"sport": args["sport"], "event_id": args["event_id"], **pruned}, settings)
