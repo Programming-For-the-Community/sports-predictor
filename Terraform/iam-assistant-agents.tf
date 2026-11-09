@@ -171,6 +171,13 @@ data "aws_iam_policy_document" "assistant_public_tools" {
     actions   = ["dynamodb:Scan"]
     resources = [aws_dynamodb_table.sport_registry.arn]
   }
+
+  # Each sport's live-score cache, the one its live-scores Lambda writes.
+  statement {
+    sid       = "ReadLiveScores"
+    actions   = ["s3:GetObject"]
+    resources = ["arn:aws:s3:::${local.raw_bucket_name}/*/cache/live-scores/latest.json"]
+  }
 }
 
 resource "aws_iam_role_policy" "assistant_public_tools" {
@@ -191,9 +198,10 @@ resource "aws_iam_role_policy_attachment" "assistant_admin_tools_logs" {
   policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
 }
 
-# Reads only the producers' aggregates and CloudWatch metrics -- no Cost
-# Explorer and no log read. GetMetricData and ListFunctions can't be scoped
-# to a resource.
+# Reads the producers' aggregates, CloudWatch metrics, the events table's
+# status index (pipeline health), the assistant table (usage rows) and the
+# sport registry -- no Cost Explorer and no log read. GetMetricData and
+# ListFunctions can't be scoped to a resource.
 data "aws_iam_policy_document" "assistant_admin_tools" {
   statement {
     sid       = "ListAggregates"
@@ -216,6 +224,29 @@ data "aws_iam_policy_document" "assistant_admin_tools" {
     sid       = "ReadMetrics"
     actions   = ["cloudwatch:GetMetricData", "lambda:ListFunctions"]
     resources = ["*"]
+  }
+
+  statement {
+    sid       = "ReadEventStatus"
+    actions   = ["dynamodb:Query"]
+    resources = ["${aws_dynamodb_table.events.arn}/index/sport-status-index"]
+  }
+
+  statement {
+    sid       = "ReadAssistantUsage"
+    actions   = ["dynamodb:Query"]
+    resources = [aws_dynamodb_table.assistant.arn]
+    condition {
+      test     = "ForAllValues:StringLike"
+      variable = "dynamodb:LeadingKeys"
+      values   = ["usage#*"]
+    }
+  }
+
+  statement {
+    sid       = "ReadSports"
+    actions   = ["dynamodb:Scan"]
+    resources = [aws_dynamodb_table.sport_registry.arn]
   }
 }
 

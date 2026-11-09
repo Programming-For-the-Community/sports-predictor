@@ -77,3 +77,33 @@ def test_admin_tools_pass_their_config_through(monkeypatch):
 def test_admin_tools_refuse_a_public_tool_name():
     with patch.object(admin_handler, "_get_s3", return_value="s3"):
         assert admin_handler.lambda_handler({"tool": "list_events", "input": {"sport": "nfl", "when": "recent"}}, None)["ok"] is False
+
+
+class FakeRaw:
+    def __init__(self, cache=None, error=False):
+        self.cache, self.error, self.keys = cache, error, []
+
+    def get_json(self, key):
+        from botocore.exceptions import ClientError
+        self.keys.append(key)
+        if self.error:
+            raise ClientError({"Error": {"Code": "403"}}, "GetObject")
+        return self.cache
+
+
+def test_live_scores_come_from_a_fresh_cache_only(monkeypatch):
+    from datetime import datetime, timedelta, timezone
+    now = datetime.now(timezone.utc)
+    fresh = {"fetched_at": now.isoformat(), "events": {"1": {"live": True}}}
+    stale = {"fetched_at": (now - timedelta(minutes=30)).isoformat(), "events": {"1": {"live": True}}}
+
+    raw = FakeRaw(fresh)
+    monkeypatch.setattr(public_handler, "_raw", raw)
+    assert public_handler._read_live("ncaambb") == fresh
+    assert raw.keys == ["ncaambb/cache/live-scores/latest.json"]
+
+    monkeypatch.setattr(public_handler, "_raw", FakeRaw(stale))
+    assert public_handler._read_live("ncaambb") is None
+
+    monkeypatch.setattr(public_handler, "_raw", FakeRaw(error=True))
+    assert public_handler._read_live("f1") is None

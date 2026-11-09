@@ -33,12 +33,14 @@ locals {
   assistant_model_regions    = ["us-east-1", "us-east-2", "us-west-2"]
 
   assistant_daily_limits = {
-    public = "50"
-    admin  = "300"
+    public = tostring(var.assistant_daily_limit_public)
+    admin  = tostring(var.assistant_daily_limit_admin)
   }
   assistant_tool_settings = {
-    ASSISTANT_MAX_ROWS          = "25"
-    ASSISTANT_MAX_RESULT_CHARS  = "12000"
+    # Rows a tool returns in one list (a full NCAAMBB day, a golf field) and
+    # the size cap on one tool result (~20K tokens); totals cover every row.
+    ASSISTANT_MAX_ROWS          = "100"
+    ASSISTANT_MAX_RESULT_CHARS  = "80000"
     ASSISTANT_MAX_TREND_POINTS  = "400"
     ASSISTANT_HOURLY_TREND_DAYS = "7"
     ASSISTANT_REPEAT_MIN_BLOCKS = "100"

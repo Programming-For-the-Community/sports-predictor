@@ -30,6 +30,7 @@ from library.aws.boto_config import DEFAULT_CONFIG
 from library.normalize import dispatch as dispatch_common
 from library.normalize import nhl
 from library.normalize.espn_handler import EspnNormalizer
+from library.normalize.unlisted_events import cancel_unlisted
 from library.storage.pipeline_storage import PipelineStorage
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s", force=True)  # AWS Lambda pre-attaches a root handler, so basicConfig() is otherwise a silent no-op
@@ -51,7 +52,8 @@ class NhlNormalizer(EspnNormalizer):
         events = [event for event in payload.get("events", []) if nhl.is_ingestable_event(event)]
         for event in events:
             storage.upsert_event(nhl.scoreboard_event_to_event_item(event, self._sport))
-        self._logger.info("Upserted %d events from %s", len(events), key)
+        canceled = cancel_unlisted(storage, self._sport, key, payload, self._logger)
+        self._logger.info("Upserted %d events and canceled %d unlisted events from %s", len(events), canceled, key)
 
     def process_boxscore(self, payload: dict, key: str) -> None:
         if not nhl.is_ingestable_summary(payload):

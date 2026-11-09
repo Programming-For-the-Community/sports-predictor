@@ -10,6 +10,7 @@ from collections.abc import Callable
 
 from library.normalize import dispatch as dispatch_common
 from library.normalize.odds import apply_core_odds
+from library.normalize.unlisted_events import cancel_unlisted
 from library.normalize.espn import (
     boxscore_to_player_game_stats,
     boxscore_to_team_game_stats,
@@ -56,7 +57,8 @@ class EspnNormalizer:
             if (competitor.get("team") or {}).get("id") is not None
         ]
         added = storage.add_missing_entities(teams) if teams else 0
-        self._logger.info("Upserted %d events and added %d team entities from %s", len(events), added, key)
+        canceled = cancel_unlisted(storage, self._sport, key, payload, self._logger)
+        self._logger.info("Upserted %d events, added %d team entities and canceled %d unlisted events from %s", len(events), added, canceled, key)
 
     def clear_departed_players(self, storage, team_id: str, entities: list[dict], as_of_date: str) -> int:
         """Clears metadata.team_id (and drops the entity out of the

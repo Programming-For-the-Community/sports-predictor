@@ -115,6 +115,12 @@ class PipelineStorage:
             {"event_key": event_key}, PREGAME_ODDS, odds, condition=Attr(f"{PREGAME_ODDS}.{LOCKED_AT}").not_exists(),
         )
 
+    def get_events_on_date(self, sport: str, status: str, event_date: str) -> list[dict]:
+        """A sport's events at `status` on one event_date, via the
+        sport-status-index GSI (range key event_date)."""
+        condition = Key("sport_status").eq(f"{sport}#{status}") & Key("event_date").eq(event_date)
+        return self._events_table.query(condition, index_name="sport-status-index")
+
     def get_events_by_status(self, sport: str, status: str) -> list[dict]:
         """Every event for a sport currently at `status`, via the
         sport-status-index GSI."""

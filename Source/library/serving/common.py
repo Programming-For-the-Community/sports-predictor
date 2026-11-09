@@ -643,9 +643,27 @@ def betting_favorite_moneyline(event: dict) -> int | None:
     return None if moneyline is None else int(moneyline)
 
 
+def select_list_events(storage, sport: str, status: str, event_date: str | None, latest, soonest, keep=None) -> list[dict]:
+    """The events one GET /{sport}/events list shows: every `status` game on
+    event_date when given (YYYY-MM-DD, the stored U.S.-Eastern game date),
+    else latest(...) of the most recent completed rows or soonest(...) of
+    the soonest scheduled ones. keep(event), when given, drops rows before
+    grouping."""
+    def kept(events: list[dict]) -> list[dict]:
+        return [e for e in events if keep is None or keep(e)]
+
+    if event_date:
+        return kept(storage.get_all_events(sport, status=status, since_date=event_date, until_date=event_date))
+    if status == "completed":
+        return latest(kept(storage.get_all_events(sport, status=status, limit=RECENT_EVENTS_LIMIT)))
+    if status == "scheduled":
+        return soonest(kept(storage.get_all_events(sport, status=status, scan_index_forward=True, limit=RECENT_EVENTS_LIMIT)))
+    return kept(storage.get_all_events(sport, status=status))
+
+
 def list_events_grouped_by_day(
     storage, predictions_table, sport: str, status: str, model_bucket=None, *,
-    leaders_comparison_fn=_basketball_leaders_comparison, extra_entry_fn=None,
+    leaders_comparison_fn=_basketball_leaders_comparison, extra_entry_fn=None, event_date: str | None = None,
 ) -> dict:
     """GET /{sport}/events?status=scheduled|completed for a day-grouped
     sport (nba/ncaambb/nhl) -- scoped to exactly one calendar
@@ -665,20 +683,15 @@ def list_events_grouped_by_day(
     below -- an unbounded get_all_events call here would paginate through
     the sport's entire completed/scheduled history before ever discarding
     everything but one date (see pga_reads.py's own list_events
-    docstring)."""
-    if status == "completed":
-        events = storage.get_all_events(sport, status=status, limit=RECENT_EVENTS_LIMIT)
-        events = _previous_day_events(events)
-    elif status == "scheduled":
-        events = storage.get_all_events(sport, status=status, scan_index_forward=True, limit=RECENT_EVENTS_LIMIT)
-        events = _next_day_events(events)
-    else:
-        events = storage.get_all_events(sport, status=status)
+    docstring). event_date lists that date instead (select_list_events);
+    such a list is never read from or written to the snapshot, which holds
+    the latest day's."""
+    events = select_list_events(storage, sport, status, event_date, _previous_day_events, _next_day_events)
 
     if not events:
         return {"sport": sport, "events": []}
 
-    snapshot_fingerprint, entries = read_completed_snapshot(model_bucket, sport, status, events)
+    snapshot_fingerprint, entries = read_completed_snapshot(None if event_date else model_bucket, sport, status, events)
     if entries is not None:
         return {"sport": sport, "events": entries}
 

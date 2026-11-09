@@ -11,7 +11,7 @@
 locals {
   # Share of sessions scored. Each scored turn costs ~$0.07 across the
   # evaluators below, against ~$0.004 to answer it.
-  assistant_evaluation_sampling_percentage = 10
+  assistant_evaluation_sampling_percentage = var.assistant_evaluation_sampling_percentage
 
   # The custom judge's model: variables.tf (assistant_judge_model).
   assistant_judge_model_id         = var.assistant_judge_model

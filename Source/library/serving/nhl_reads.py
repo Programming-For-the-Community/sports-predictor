@@ -67,7 +67,7 @@ def probable_goalies(storage, sport: str, event: dict) -> dict:
     return goalies
 
 
-def list_events(storage, predictions_table, sport: str, status: str, model_bucket=None) -> dict:
+def list_events(storage, predictions_table, sport: str, status: str, model_bucket=None, event_date: str | None = None) -> dict:
     def hockey_fields(event: dict) -> dict:
         return {
             "went_to_overtime": event.get("went_to_overtime"),
@@ -77,5 +77,5 @@ def list_events(storage, predictions_table, sport: str, status: str, model_bucke
 
     return common.list_events_grouped_by_day(
         storage, predictions_table, sport, status, model_bucket=model_bucket,
-        leaders_comparison_fn=_leaders_comparison, extra_entry_fn=hockey_fields,
+        leaders_comparison_fn=_leaders_comparison, extra_entry_fn=hockey_fields, event_date=event_date,
     )

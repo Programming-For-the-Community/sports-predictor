@@ -7,7 +7,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:workmanager/workmanager.dart';
 
 import '../api/api_routes.dart';
-import '../auth/auth_repository.dart' show markSessionRenewed;
+import '../auth/auth_repository.dart' show appUnusedTooLong, markSessionRenewed;
 import '../auth/cognito_auth_client.dart';
 import '../auth/token_store.dart';
 import '../config/app_config.dart';
@@ -176,6 +176,10 @@ class _BackgroundApi {
   Future<String?> _resolveIdToken() async {
     final raw = await _tokenStore.read();
     if (raw == null) return null;
+    // Background work never counts as use: an app not opened for
+    // appInactivityTtl gets no more updates, and signs out on next launch.
+    await _prefs.reload();
+    if (appUnusedTooLong(_prefs)) return null;
     var tokens = CognitoTokens.fromJson(jsonDecode(raw) as Map<String, dynamic>);
     if (!tokens.isNearExpiry) return tokens.idToken;
     try {

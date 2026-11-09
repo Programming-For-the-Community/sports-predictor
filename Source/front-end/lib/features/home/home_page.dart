@@ -14,6 +14,7 @@ import '../../core/widgets/brand_mark.dart';
 import '../../core/widgets/page_glow.dart';
 import '../../core/widgets/responsive.dart';
 import '../../core/widgets/sport_card.dart';
+import '../assistant/assistant_launcher.dart';
 import '../mobile/get_app_prompt.dart';
 import '../mobile/update_banner.dart';
 
@@ -65,9 +66,13 @@ class _HomePageState extends ConsumerState<HomePage> with WidgetsBindingObserver
   @override
   Widget build(BuildContext context) {
     final shell = ref.watch(appShellProvider);
+    final docks = assistantDocks(context);
     return Scaffold(
       backgroundColor: AppColors.bg,
-      body: Stack(
+      floatingActionButton: docks ? null : const AssistantFab(),
+      // No sport here: the assistant opens without one and asks which.
+      body: AssistantDock(
+        child: Stack(
         children: [
           const PageGlow(),
           SafeArea(
@@ -89,6 +94,7 @@ class _HomePageState extends ConsumerState<HomePage> with WidgetsBindingObserver
                           style: AppTextStyles.sectionTitle(),
                         ),
                       ),
+                      if (docks) ...[const AssistantToggle(), const SizedBox(width: 8)],
                       if (shell == AppShell.androidBrowser) ...[const GetAppButton(), const SizedBox(width: 4)],
                       // The Android app moves Sign out into Settings › Notifications.
                       if (shell == AppShell.androidApp)
@@ -122,6 +128,7 @@ class _HomePageState extends ConsumerState<HomePage> with WidgetsBindingObserver
             ),
           ),
         ],
+        ),
       ),
     );
   }

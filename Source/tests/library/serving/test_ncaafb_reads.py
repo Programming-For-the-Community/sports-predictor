@@ -8,7 +8,7 @@ from datetime import datetime, timedelta, timezone
 from unittest.mock import MagicMock
 
 from library.parsing import us_eastern_date
-from library.serving import ncaafb_reads
+from library.serving import common, ncaafb_reads
 
 # "scheduled" event_dates are relative to today, not hardcoded -- list_events'
 # soonest-upcoming-week scoping ignores anything more than a few days in the
@@ -239,7 +239,7 @@ class TestListEvents:
         ncaafb_reads.list_events(storage, predictions_table, "ncaafb", "completed")
 
         storage.get_all_events.assert_called_once_with(
-            "ncaafb", status="completed", limit=ncaafb_reads.RECENT_EVENTS_LIMIT,
+            "ncaafb", status="completed", limit=common.RECENT_EVENTS_LIMIT,
         )
 
     def test_scheduled_queries_get_all_events_soonest_first_and_bounded(self):
@@ -250,7 +250,7 @@ class TestListEvents:
         ncaafb_reads.list_events(storage, predictions_table, "ncaafb", "scheduled")
 
         storage.get_all_events.assert_called_once_with(
-            "ncaafb", status="scheduled", scan_index_forward=True, limit=ncaafb_reads.RECENT_EVENTS_LIMIT,
+            "ncaafb", status="scheduled", scan_index_forward=True, limit=common.RECENT_EVENTS_LIMIT,
         )
 
     def test_postseason_completed_events_group_by_date_not_the_flat_week_number(self):

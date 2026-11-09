@@ -29,14 +29,36 @@ class FakeTable:
     def __init__(self):
         self.items = {}
 
-    def update_item(self, Key, UpdateExpression, ConditionExpression, ExpressionAttributeValues, ReturnValues):
+    def update_item(self, Key, UpdateExpression, ExpressionAttributeValues, ConditionExpression=None, ReturnValues=None,
+                    ExpressionAttributeNames=None):
         key = (Key["pk"], Key["sk"])
         item = self.items.setdefault(key, {})
+        if Key["pk"].startswith("usage#"):
+            return self._add_usage(item, ExpressionAttributeNames, ExpressionAttributeValues)
         if item.get("asked", 0) >= ExpressionAttributeValues[":limit"]:
             raise ClientError({"Error": {"Code": "ConditionalCheckFailedException"}}, "UpdateItem")
         item["asked"] = item.get("asked", 0) + 1
         item["expires_at"] = ExpressionAttributeValues[":expires"]
         return {"Attributes": {"asked": item["asked"]}}
+
+    @staticmethod
+    def _add_usage(item, names, values):
+        """usage.record's ADDs: counts, tokens, tool calls and the user set."""
+        for field in ("questions", names["#outcome"]):
+            item[field] = item.get(field, 0) + values[":one"]
+        for field, value in (("input_tokens", ":input"), ("output_tokens", ":output"), ("tool_calls", ":tools")):
+            item[field] = item.get(field, 0) + values[value]
+        item["users"] = set(item.get("users", set())) | values[":user"]
+        item["expires_at"] = values[":expires"]
+        return {}
+
+    def query(self, KeyConditionExpression):
+        """pk equals and sk between, as usage.read asks."""
+        pk_condition, sk_condition = KeyConditionExpression._values
+        pk = pk_condition._values[1]
+        low, high = sk_condition._values[1:]
+        rows = [item | {"sk": sk} for (p, sk), item in sorted(self.items.items()) if p == pk and low <= sk <= high]
+        return {"Items": rows}
 
     def get_item(self, Key):
         item = self.items.get((Key["pk"], Key["sk"]))

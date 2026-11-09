@@ -8,6 +8,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:front_end/core/auth/auth_repository.dart';
 import 'package:front_end/core/auth/cognito_auth_client.dart';
 import 'package:front_end/core/data/live_scores_repository.dart';
+import 'package:front_end/features/assistant/assistant_launcher.dart';
 import 'package:front_end/features/home/home_page.dart';
 
 /// HomePage's sport cards (SportCard's own LIVE/ACTIVE dot) have no
@@ -85,4 +86,22 @@ void main() {
 
     expect(authRepo.state, isA<AuthUnauthenticated>());
   });
+
+  for (final (width, wide) in [(390.0, false), (1280.0, true)]) {
+    testWidgets('the Ask button is on the home page at ${width}px wide', (tester) async {
+      tester.view.physicalSize = Size(width, 900);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+
+      await tester.pumpWidget(ProviderScope(
+        overrides: overrides(onLiveScoresCall: () {}, onPgaLiveScoresCall: () {}),
+        child: const MaterialApp(home: HomePage()),
+      ));
+      await tester.pumpAndSettle();
+
+      expect(find.byType(AssistantFab), wide ? findsNothing : findsOneWidget);
+      expect(find.byType(AssistantToggle), wide ? findsOneWidget : findsNothing);
+      expect(tester.takeException(), isNull);
+    });
+  }
 }

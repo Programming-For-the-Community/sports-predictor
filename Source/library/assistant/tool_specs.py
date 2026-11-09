@@ -16,15 +16,20 @@ from datetime import date
 TRAFFIC_SOURCES = ["all", "waf_cloudfront", "waf_api", "api_gateway"]
 MAX_STRING = 64
 
-PUBLIC_TOOL_NAMES = frozenset({"list_events", "get_event_prediction", "get_model_performance", "get_season_projection"})
+PUBLIC_TOOL_NAMES = frozenset({
+    "list_events", "get_event_prediction", "get_model_performance", "get_season_projection", "get_live_scores", "get_model_info",
+    "get_performance_overview",
+})
 FAVORITE_TOOL_NAMES = frozenset({"save_favorite", "clear_favorites"})
 ADMIN_TOOL_NAMES = frozenset({
     "get_cost_summary", "get_denied_locations", "get_repeat_offenders", "get_denied_endpoints",
-    "get_denied_trend", "get_api_traffic", "get_lambda_health",
+    "get_denied_trend", "get_api_traffic", "get_lambda_health", "get_pipeline_health", "get_assistant_usage",
 })
 
 _DATE_PATTERN = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 _DATE = {"type": "string", "description": "Date as YYYY-MM-DD (UTC)."}
+_TEAM = {"type": "string", "description": "Only this team: abbreviation (DET) or part of its name."}
+_CONFERENCE = {"type": "string", "description": "Only teams from this conference or division, as the app names it (Big Ten, SEC, AFC North)."}
 _WEEK_BACK = "Defaults to 7 days ago."
 _SOURCE = {"type": "string", "enum": TRAFFIC_SOURCES, "description": "Which log to count. Defaults to all."}
 
@@ -52,14 +57,28 @@ def _public(sport: dict) -> list[dict]:
     return [
         _tool(
             "list_events",
-            "List this app's games for a sport with each prediction: the next game day ('upcoming') or the most recent one ('recent', with results and whether each pick was right).",
-            {"sport": sport, "when": {"type": "string", "enum": ["upcoming", "recent"], "description": "Which game day."}},
-            ["sport", "when"],
+            "List this app's games for a sport with each prediction: the next game day ('upcoming'), the most recent one ('recent', with results and whether each pick was right), or any one date. "
+            "totals covers every game (picks graded and correct, accuracy, UPSET and UPSET WATCH counts) even when the list itself is cut short; each game carries its upset flag. "
+            "A list of three games or fewer (filter by team) also has each game's player predictions, with actual stats once played. "
+            "Games in progress still count as upcoming: use get_live_scores for live games.",
+            {"sport": sport, "when": {"type": "string", "enum": ["upcoming", "recent"], "description": "Which game day. Ignored when date is given; defaults to upcoming."},
+             "date": {**_DATE, "description": "One game date, YYYY-MM-DD (U.S. Eastern, as the app dates games): every game that day, played or not. Not for golf or racing."},
+             "team": {**_TEAM, "description": "Only games with this team: abbreviation (DET) or part of its name."},
+             "conference": {**_CONFERENCE, "description": "Only games with a team from this conference, as the app names it (Big Ten, SEC)."}},
+            ["sport"],
+        ),
+        _tool(
+            "get_live_scores",
+            "Games in progress or just finished right now: live score and game clock, with the model's prediction for each. Golf and racing return their live leaderboards.",
+            {"sport": sport},
+            ["sport"],
         ),
         _tool(
             "get_event_prediction",
-            "Get this app's prediction for one game: win probability, predicted margin and scores, and predicted player stat leaders.",
-            {"sport": sport, "event_id": {"type": "string", "description": "Event id from list_events."}},
+            "Get this app's prediction for one game: win probability, predicted margin and scores, and predicted player stats for each team's likely leaders. "
+            "For golf and racing, the whole field ranked by predicted finish (and actual results once under way).",
+            {"sport": sport, "event_id": {"type": "string", "description": "Event id from list_events."},
+             "player": {"type": "string", "description": "Only this player (or golfer, driver): part of their name."}},
             ["sport", "event_id"],
         ),
         _tool(
@@ -69,9 +88,24 @@ def _public(sport: dict) -> list[dict]:
             ["sport"],
         ),
         _tool(
+            "get_performance_overview",
+            "Every sport's model results side by side this season: one row per model with its season result, how many predictions that covers, and how it compares with a simple baseline. "
+            "For comparing sports or finding where the models do best or worst; get_model_performance has one sport's detail.",
+            {"model": {"type": "string", "description": "Only models whose name contains this, e.g. win-probability."}},
+            [],
+        ),
+        _tool(
             "get_season_projection",
-            "Get this app's season projection for a sport: projected records and playoff or title chances.",
-            {"sport": sport},
+            "Get this app's season projection for a sport. view 'standings' (default): projected records and playoff or title chances, ranked, plus stat leaderboards and NBA Cup groups. "
+            "view 'bracket': the simulated playoff or tournament brackets, one row per matchup with each side's chance, plus each team's chance of reaching each round.",
+            {"sport": sport, "view": {"type": "string", "enum": ["standings", "bracket"], "description": "Defaults to standings."},
+             "team": _TEAM, "conference": _CONFERENCE},
+            ["sport"],
+        ),
+        _tool(
+            "get_model_info",
+            "About the models behind the predictions: each model's current version, when it was trained, its algorithm, test-set accuracy or error against a simple baseline, and the inputs it leans on most.",
+            {"sport": sport, "model": {"type": "string", "description": "Optional model name, e.g. win-probability. Omit for all models."}},
             ["sport"],
         ),
     ]
@@ -94,7 +128,7 @@ def _favorites(sport: dict) -> list[dict]:
     ]
 
 
-def _admin() -> list[dict]:
+def _admin(sport: dict) -> list[dict]:
     return [
         _tool(
             "get_cost_summary",
@@ -121,12 +155,26 @@ def _admin() -> list[dict]:
               _range(_WEEK_BACK), []),
         _tool("get_lambda_health", "This project's Lambda functions with the most errors, throttles and timeouts in a date range (up to 455 days back).",
               _range(_WEEK_BACK), []),
+        _tool(
+            "get_pipeline_health",
+            "Whether each sport's data is flowing now: its newest finished game and next scheduled one, games still marked scheduled two or more days after their date, "
+            "and each pipeline Lambda's (ingest, normalize, predict, live scores) runs, errors and last run over the last 48 hours.",
+            {"sport": {**sport, "description": "One sport. Omit for every sport."}},
+            [],
+        ),
+        _tool(
+            "get_assistant_usage",
+            "How much the two assistants (public and admin) were used in a date range: questions per day, how each ended (answered, blocked, out of questions, "
+            "session full, failed), distinct users per day, model tokens and lookups per question.",
+            {**_range(_WEEK_BACK), "agent": {"type": "string", "enum": ["public", "admin"], "description": "One agent. Omit for both."}},
+            [],
+        ),
     ]
 
 
 def all_tools(sports: list[str]) -> list[dict]:
     sport = {"type": "string", "enum": list(sports), "description": "Sport key."}
-    return _public(sport) + _favorites(sport) + _admin()
+    return _public(sport) + _favorites(sport) + _admin(sport)
 
 
 def anthropic_tools(names: frozenset[str] | set[str], sports: list[str]) -> list[dict]:
@@ -145,7 +193,7 @@ def _check_value(key: str, prop: dict, value) -> None:
         raise ToolInputError(f"{key} must be a short string")
     if "enum" in prop and value not in prop["enum"]:
         raise ToolInputError(f"{key} must be one of {prop['enum']}")
-    if key.endswith("_date"):
+    if key == "date" or key.endswith("_date"):
         if not _DATE_PATTERN.match(value):
             raise ToolInputError(f"{key} must be YYYY-MM-DD")
         try:

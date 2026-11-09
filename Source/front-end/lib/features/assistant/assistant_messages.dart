@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_text_styles.dart';
+import 'assistant_markdown.dart';
 import 'assistant_models.dart';
 
 /// The conversation: the user's questions right-aligned, answers in cards
@@ -115,7 +116,7 @@ class _Answer extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          SelectableText(message.text, style: AppTextStyles.body().copyWith(height: 1.45)),
+          SelectionArea(child: AssistantMarkdown(message.text)),
           if (message.sources.isNotEmpty) ...[
             const SizedBox(height: 10),
             Text('FROM · ${message.sources.map(_sourceLabel).join(' · ')}', style: AppTextStyles.microLabel(color: AppColors.inkSub)),

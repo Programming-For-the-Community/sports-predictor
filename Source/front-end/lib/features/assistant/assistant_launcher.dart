@@ -21,7 +21,9 @@ bool assistantDocks(BuildContext context) => MediaQuery.sizeOf(context).width >=
 
 /// Where the user is: the sport, and on an event page the event and its
 /// "AWAY @ HOME" label, read from the events list that page already loaded.
-AssistantContext assistantContextFor(WidgetRef ref, String sportId, String? eventId) {
+/// No sport (the home page): no context, so the agent asks which sport.
+AssistantContext assistantContextFor(WidgetRef ref, String? sportId, String? eventId) {
+  if (sportId == null) return const AssistantContext();
   if (eventId == null) return AssistantContext(sport: sportId);
   String label = 'THIS EVENT';
   if (sportById(sportId).eventShape == EventShape.headToHead) {
@@ -61,10 +63,10 @@ void openAssistant(BuildContext context, WidgetRef ref, AssistantContext assista
   );
 }
 
-/// Phone: the round "Ask" button floating over the sport page.
+/// Phone: the round "Ask" button floating over the page.
 class AssistantFab extends ConsumerWidget {
-  const AssistantFab({super.key, required this.sportId, this.eventId});
-  final String sportId;
+  const AssistantFab({super.key, this.sportId, this.eventId});
+  final String? sportId;
   final String? eventId;
 
   @override
@@ -81,7 +83,7 @@ class AssistantFab extends ConsumerWidget {
   }
 }
 
-/// Wide screens: the outlined "Ask" toggle in the sport header.
+/// Wide screens: the outlined "Ask" toggle in the page header.
 class AssistantToggle extends ConsumerWidget {
   const AssistantToggle({super.key});
 
@@ -105,8 +107,8 @@ class AssistantToggle extends ConsumerWidget {
 
 /// Wide screens: the page with the docked panel beside it when open.
 class AssistantDock extends ConsumerWidget {
-  const AssistantDock({super.key, required this.sportId, this.eventId, required this.child});
-  final String sportId;
+  const AssistantDock({super.key, this.sportId, this.eventId, required this.child});
+  final String? sportId;
   final String? eventId;
   final Widget child;
 

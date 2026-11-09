@@ -22,10 +22,10 @@ from dataclasses import dataclass, field
 from datetime import date, datetime, timezone
 from typing import Callable, Iterator
 
-from library.assistant import gen_ai_spans, guardrail, history, user_store
+from library.assistant import gen_ai_spans, guardrail, history, usage, user_store
+from library.assistant.date_ranges import eastern_today
 from library.assistant.prompts import Profile
 from library.assistant.tool_specs import FAVORITE_TOOL_NAMES, anthropic_tools
-from library.parsing import us_eastern_date
 
 logger = logging.getLogger(__name__)
 
@@ -39,8 +39,14 @@ STATUS_ACTIONS = ("status", "remove_favorite")
 _EVENT_ID = re.compile(r"^[A-Za-z0-9_-]{1,40}$")
 
 
-def _eastern_today() -> date:
-    return date.fromisoformat(us_eastern_date(datetime.now(timezone.utc)))
+def _utc_today() -> date:
+    return datetime.now(timezone.utc).date()
+
+
+def _today_note(eastern: date, utc: date) -> str:
+    """Game days are US Eastern; the admin tools' dates are UTC, which runs
+    a day ahead late in the evening."""
+    return f"{eastern.isoformat()} (US Eastern)" + (f"; {utc.isoformat()} in UTC" if utc != eastern else "")
 
 
 @dataclass
@@ -56,7 +62,8 @@ class Clients:
     memory_id: str
     grounding: bool = False
     # Quota days run on US Eastern dates, like the app's game dates.
-    today: Callable[[], date] = field(default=_eastern_today)
+    today: Callable[[], date] = field(default=eastern_today)
+    utc_today: Callable[[], date] = field(default=_utc_today)
     tracer: object = gen_ai_spans.NULL_TRACER
 
 
@@ -68,6 +75,8 @@ class _Turn:
     span: object
     sources: list[str] = field(default_factory=list)
     tool_outputs: list[str] = field(default_factory=list)
+    input_tokens: int = 0
+    output_tokens: int = 0
 
 
 def token_claims(authorization: str | None) -> dict:
@@ -175,6 +184,9 @@ def _call_model(clients: Clients, turn: _Turn, request: dict):
         span.end()
         raise
     gen_ai_spans.end_chat(span, response)
+    used = getattr(response, "usage", None)
+    turn.input_tokens += int(getattr(used, "input_tokens", 0) or 0)
+    turn.output_tokens += int(getattr(used, "output_tokens", 0) or 0)
     return response
 
 
@@ -226,6 +238,12 @@ def _admit(profile: Profile, clients: Clients, sub: str, session_id: str, questi
     return None, questions_left, past
 
 
+def _count(profile: Profile, clients: Clients, sub: str, outcome: str, turn: _Turn | None = None) -> None:
+    """Adds the question to the day's usage row (library.assistant.usage)."""
+    usage.record(clients.table, profile.name, clients.today(), sub, outcome,
+                 turn.input_tokens if turn else 0, turn.output_tokens if turn else 0, len(turn.sources) if turn else 0)
+
+
 def _favorites_of(profile: Profile, clients: Clients, sub: str) -> dict | None:
     return user_store.get_favorites(clients.table, sub) if profile.keeps_favorites else None
 
@@ -244,13 +262,14 @@ def handle(profile: Profile, clients: Clients, payload: dict, authorization: str
     sub = claims["sub"]
     stop, questions_left, past = _admit(profile, clients, sub, session_id, question)
     if stop:
+        _count(profile, clients, sub, stop.get("code") or "blocked")
         yield stop
         return
 
     # Today's date with every question: models only know roughly when their
     # training ended, so "this week" or "last month" needs it.
     hints = _context_note(profile, _favorites_of(profile, clients, sub) or {}, clients.sports(), payload.get("sport"), payload.get("event_id"))
-    note = f"Today is {clients.today().isoformat()} (US Eastern). {hints}".strip()
+    note = f"Today is {_today_note(clients.today(), clients.utc_today())}. {hints}".strip()
     user_text = f"{question}\n\n<context>{note}</context>"
     messages = past[-2 * profile.settings.history_turns:] + [{"role": "user", "content": user_text}]
     turn = _Turn(sub, gen_ai_spans.start_turn(clients.tracer, f"assistant_{profile.name}", session_id, question))
@@ -259,6 +278,7 @@ def handle(profile: Profile, clients: Clients, payload: dict, authorization: str
     except Exception:
         logger.exception("Model loop failed")
         gen_ai_spans.end_turn(turn.span, None)
+        _count(profile, clients, sub, "failed", turn)
         yield _error("failed", FAILED_MESSAGE)
         return
 
@@ -267,6 +287,7 @@ def handle(profile: Profile, clients: Clients, payload: dict, authorization: str
     gen_ai_spans.end_turn(turn.span, answer)
     if not blocked:
         history.save(clients.memory, clients.memory_id, sub, session_id, question, answer)
+    _count(profile, clients, sub, "blocked" if blocked else "answered", turn)
     yield {
         "type": "answer", "text": answer, "sources": sorted(set(turn.sources)), "questions_left": questions_left,
         "blocked": blocked, "favorites": _favorites_of(profile, clients, sub),

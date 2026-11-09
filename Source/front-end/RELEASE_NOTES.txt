@@ -3,4 +3,4 @@
 # Short, plain sentences about what's new or fixed -- no technical details;
 # keep it brief, it's read on a phone screen.
 # Lines starting with # are ignored; 200 characters max.
-New in 2.0: tap Ask on any sport page to ask about our picks and how our models have done. Save your favourite teams to follow their picks.
+Ask is now on the home screen too and knows which sport you're viewing. Picks and results show as easy-to-read tables, and you can ask about games in progress.

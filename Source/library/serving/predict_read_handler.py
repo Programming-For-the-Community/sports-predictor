@@ -52,6 +52,8 @@ exactly:
     sub-route -- one compute already scores the whole field/grid, so
     there's nothing narrower to fetch.
 """
+from datetime import date
+
 from library.aws import lambda_singletons
 from library.schema.keys import event_key as build_event_key
 from library.serving.common import get_model_performance
@@ -98,7 +100,21 @@ def _handle_events(namespace, config: dict, response_fn, query_params: dict) -> 
     if parent_event_id and "list_child_events_fn" in config:
         return response_fn(200, config["list_child_events_fn"](namespace["_get_storage"](), parent_event_id))
     status = query_params.get("status", "scheduled")
-    return response_fn(200, config["list_events_fn"](namespace["_get_storage"](), status))
+    event_date = query_params.get("date")
+    if event_date is None:
+        return response_fn(200, config["list_events_fn"](namespace["_get_storage"](), status))
+    if not config.get("lists_by_date"):
+        return response_fn(400, {"error": "This sport's events can't be listed by date."})
+    if not _is_iso_date(event_date):
+        return response_fn(400, {"error": "date must be YYYY-MM-DD"})
+    return response_fn(200, config["list_events_fn"](namespace["_get_storage"](), status, event_date=event_date))
+
+
+def _is_iso_date(value: str) -> bool:
+    try:
+        return date.fromisoformat(value).isoformat() == value
+    except ValueError:
+        return False
 
 
 def _handle_models(namespace, list_models_fn, response_fn) -> dict:
@@ -191,7 +207,9 @@ def make_multi_sport_lambda_handler(*, sport_configs: dict, namespace, logger, r
     list_models_fn, freshness_inputs_fn, has_player_prop_route, optional
     list_child_events_fn}}, one entry per sport this Lambda serves.
     list_child_events_fn(storage, parent_event_id) serves GET /{sport}/
-    events?parent_event_id=... for a sport that sets it. Builds the resource-path -> (sport,
+    events?parent_event_id=... for a sport that sets it. A sport with
+    lists_by_date also serves ?date=YYYY-MM-DD (list_events_fn(storage,
+    status, event_date=...)); any other answers 400. Builds the resource-path -> (sport,
     route) lookup once at Lambda cold start (not per-request) -- the same
     5 route shapes every sport already had (f"/{sport}/events" etc.), just
     resolved dynamically per request via this dict instead of baked into a

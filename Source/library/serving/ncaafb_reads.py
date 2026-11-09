@@ -31,7 +31,6 @@ from library.features.ncaafb import is_bowl_game, is_playoff_game
 from library.parsing import us_eastern_date
 from library.serving import common
 from library.serving.common import (
-    RECENT_EVENTS_LIMIT,
     SCORE_MODELS,
     WIN_PROBABILITY_MODEL,
     enrich_participants,
@@ -171,7 +170,7 @@ def _round_label(event: dict) -> str | None:
     return label
 
 
-def list_events(storage, predictions_table, sport: str, status: str, model_bucket=None) -> dict:
+def list_events(storage, predictions_table, sport: str, status: str, model_bucket=None, event_date: str | None = None) -> dict:
     """GET /ncaafb/events?status=scheduled|completed -- scoped to exactly
     one week, not the whole matching history. No exhibition-game filter --
     NCAAFB has no equivalent contamination to exclude. Each participant
@@ -189,20 +188,14 @@ def list_events(storage, predictions_table, sport: str, status: str, model_bucke
     below -- an unbounded get_all_events call here would paginate through
     the sport's entire completed/scheduled history before ever
     discarding everything but one week (see pga_reads.py's own
-    list_events docstring)."""
-    if status == "completed":
-        events = storage.get_all_events(sport, status=status, limit=RECENT_EVENTS_LIMIT)
-        events = _previous_week_events(events)
-    elif status == "scheduled":
-        events = storage.get_all_events(sport, status=status, scan_index_forward=True, limit=RECENT_EVENTS_LIMIT)
-        events = _next_week_events(events)
-    else:
-        events = storage.get_all_events(sport, status=status)
+    list_events docstring). event_date lists that date's games instead,
+    without the snapshot."""
+    events = common.select_list_events(storage, sport, status, event_date, _previous_week_events, _next_week_events)
 
     if not events:
         return {"sport": sport, "events": []}
 
-    snapshot_fingerprint, entries = read_completed_snapshot(model_bucket, sport, status, events)
+    snapshot_fingerprint, entries = read_completed_snapshot(None if event_date else model_bucket, sport, status, events)
     if entries is not None:
         return {"sport": sport, "events": entries}
 

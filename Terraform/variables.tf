@@ -160,6 +160,42 @@ variable "assistant_temperature" {
   }
 }
 
+variable "assistant_daily_limit_public" {
+  description = "Questions each user may ask the public assistant per US Eastern day."
+  type        = number
+  default     = 50
+  nullable    = false
+
+  validation {
+    condition     = var.assistant_daily_limit_public >= 1 && var.assistant_daily_limit_public <= 1000
+    error_message = "assistant_daily_limit_public must be between 1 and 1000."
+  }
+}
+
+variable "assistant_daily_limit_admin" {
+  description = "Questions each admin may ask the admin assistant per US Eastern day."
+  type        = number
+  default     = 300
+  nullable    = false
+
+  validation {
+    condition     = var.assistant_daily_limit_admin >= 1 && var.assistant_daily_limit_admin <= 5000
+    error_message = "assistant_daily_limit_admin must be between 1 and 5000."
+  }
+}
+
+variable "assistant_evaluation_sampling_percentage" {
+  description = "Share of assistant sessions AgentCore Evaluations scores, 0.01 to 100. Each scored turn costs about $0.07."
+  type        = number
+  default     = 10
+  nullable    = false
+
+  validation {
+    condition     = var.assistant_evaluation_sampling_percentage >= 0.01 && var.assistant_evaluation_sampling_percentage <= 100
+    error_message = "assistant_evaluation_sampling_percentage must be between 0.01 and 100."
+  }
+}
+
 variable "assistant_judge_model" {
   description = "Bedrock model ID of the AgentCore Evaluations custom judge that scores the public agent's answers (agentcore-evaluations.tf), in the same forms as assistant_model."
   type        = string
@@ -169,6 +205,18 @@ variable "assistant_judge_model" {
   validation {
     condition     = can(regex("^(us\\.)?(anthropic|openai|nvidia|meta|amazon|google)\\.[a-z0-9.:-]+$", var.assistant_judge_model))
     error_message = "assistant_judge_model must come from a US-based creator (anthropic, openai, nvidia, meta, amazon, google): a us. inference profile or an on-demand model ID."
+  }
+}
+
+variable "mobile_refresh_token_days" {
+  description = "Outer limit on an Android app sign-in, in days (Cognito allows up to 3650). The app itself signs out after 30 days without being opened; this only matters for an app in constant use."
+  type        = number
+  default     = 3650
+  nullable    = false
+
+  validation {
+    condition     = var.mobile_refresh_token_days >= 30 && var.mobile_refresh_token_days <= 3650
+    error_message = "mobile_refresh_token_days must be between 30 and 3650."
   }
 }
 

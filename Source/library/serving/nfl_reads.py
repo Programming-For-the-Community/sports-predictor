@@ -33,7 +33,6 @@ from library.features.nfl_teams import is_real_franchise_matchup
 from library.parsing import us_eastern_date
 from library.serving import common
 from library.serving.common import (
-    RECENT_EVENTS_LIMIT,
     SCORE_MODELS,
     WIN_PROBABILITY_MODEL,
     enrich_participants,
@@ -116,7 +115,7 @@ def _round_label(event: dict) -> str | None:
     return POSTSEASON_ROUND_LABELS.get(event.get("week"))
 
 
-def list_events(storage, predictions_table, sport: str, status: str, model_bucket=None) -> dict:
+def list_events(storage, predictions_table, sport: str, status: str, model_bucket=None, event_date: str | None = None) -> dict:
     """GET /nfl/events?status=scheduled|completed -- scoped to exactly one
     week, not the whole matching history: status=scheduled returns the
     soonest upcoming week (empty if that week hasn't been ingested yet);
@@ -142,24 +141,16 @@ def list_events(storage, predictions_table, sport: str, status: str, model_bucke
     below -- an unbounded get_all_events call here would paginate through
     the sport's entire completed/scheduled history before ever
     discarding everything but one week (see pga_reads.py's own
-    list_events docstring)."""
-    if status == "completed":
-        raw_events = storage.get_all_events(sport, status=status, limit=RECENT_EVENTS_LIMIT)
-    elif status == "scheduled":
-        raw_events = storage.get_all_events(sport, status=status, scan_index_forward=True, limit=RECENT_EVENTS_LIMIT)
-    else:
-        raw_events = storage.get_all_events(sport, status=status)
-    events = [e for e in raw_events if is_real_franchise_matchup(e)]
-
-    if status == "completed":
-        events = _previous_week_events(events)
-    elif status == "scheduled":
-        events = _next_week_events(events)
+    list_events docstring). event_date lists that date's games instead,
+    without the snapshot."""
+    events = common.select_list_events(
+        storage, sport, status, event_date, _previous_week_events, _next_week_events, keep=is_real_franchise_matchup,
+    )
 
     if not events:
         return {"sport": sport, "events": []}
 
-    snapshot_fingerprint, entries = read_completed_snapshot(model_bucket, sport, status, events)
+    snapshot_fingerprint, entries = read_completed_snapshot(None if event_date else model_bucket, sport, status, events)
     if entries is not None:
         return {"sport": sport, "events": entries}
 

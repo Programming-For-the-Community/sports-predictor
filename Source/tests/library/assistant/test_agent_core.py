@@ -1,5 +1,6 @@
 import json
 from dataclasses import replace
+from datetime import date
 
 import pytest
 from _turn_fakes import (
@@ -208,3 +209,13 @@ def test_status_and_removing_a_favorite_cost_no_question():
     assert removed["favorites"] == {"nfl": ["DET"]}
     assert removed["questions_left"] == 50
     assert model.requests == []
+
+
+def test_late_evening_questions_also_carry_the_utc_date():
+    model = FakeModel([_response(_text("ok"))])
+    clients, _ = _clients(model)
+    clients.utc_today = lambda: date(2026, 11, 7)
+
+    _run(PUBLIC, clients, "How did the API do today?")
+
+    assert "Today is 2026-11-06 (US Eastern); 2026-11-07 in UTC." in model.requests[0]["messages"][-1]["content"]

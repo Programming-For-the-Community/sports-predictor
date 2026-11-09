@@ -237,6 +237,16 @@ void main() {
       expect(jsonDecode(tokens.value!)['refreshToken'], 'refresh');
     });
 
+    test('makes no requests once the app has gone 30 days unopened', () async {
+      await prefs.setString('last_activity_at', DateTime.now().subtract(const Duration(days: 31)).toIso8601String());
+      final tokens = _MemoryTokenStore(_tokens(expiresIn: Duration.zero));
+
+      await run(client(publishedVersionCode: 41, scorecards: {SportIds.nfl: _scorecard(SportIds.nfl)}), tokens: tokens);
+
+      expect(requests.where((r) => r.url.path == '/nfl/model-performance'), isEmpty);
+      expect(jsonDecode(tokens.value!)['idToken'], 'id-token');
+    });
+
     test('refreshes once per run however many requests need the token', () async {
       final tokens = _MemoryTokenStore(_tokens(expiresIn: Duration.zero));
       final host = _FakeWidgetHost([(id: 7, kind: HomeWidgetKind.accuracy)])..sports[7] = SportIds.nba;

@@ -27,6 +27,8 @@ resource "aws_lambda_function" "assistant_public_tools" {
     variables = merge(local.assistant_tool_settings, {
       PREDICT_READ_FUNCTION_NAME = aws_lambda_function.predict_read.function_name
       SPORT_REGISTRY_TABLE_NAME  = aws_dynamodb_table.sport_registry.name
+      RAW_DATA_BUCKET_NAME       = local.raw_bucket_name
+      AWS_ACCOUNT_ID             = var.account_id
     })
   }
 
@@ -51,7 +53,7 @@ resource "aws_cloudwatch_log_group" "assistant_admin_tools" {
 
 resource "aws_lambda_function" "assistant_admin_tools" {
   function_name = "${var.project}-assistant-admin-tools"
-  description   = "Admin assistant tools for cost, denied traffic, API traffic and Lambda health, from the producers' S3 aggregates and CloudWatch metrics."
+  description   = "Admin assistant tools: cost, denied traffic, API traffic, Lambda and pipeline health, assistant usage. Reads S3 aggregates, CloudWatch metrics and DynamoDB."
   role          = aws_iam_role.assistant_admin_tools.arn
   runtime       = "python3.12"
   architectures = ["arm64"]
@@ -68,6 +70,9 @@ resource "aws_lambda_function" "assistant_admin_tools" {
       MODEL_ARTIFACTS_BUCKET_NAME = aws_s3_bucket.model_artifacts.bucket
       API_GATEWAY_NAME            = aws_api_gateway_rest_api.main.name
       PROJECT_NAME                = var.project
+      EVENTS_TABLE_NAME           = aws_dynamodb_table.events.name
+      ASSISTANT_TABLE_NAME        = aws_dynamodb_table.assistant.name
+      SPORT_REGISTRY_TABLE_NAME   = aws_dynamodb_table.sport_registry.name
     })
   }
 

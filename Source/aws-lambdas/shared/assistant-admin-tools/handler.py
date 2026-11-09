@@ -1,8 +1,10 @@
 """
 Assistant admin-tools Lambda: runs the admin agent's cost and traffic tools
 (library.assistant.admin_tools). Invoked only by the admin agent's runtime
-role (Terraform/iam-assistant-agents.tf). Reads the producers' S3 aggregates
-and CloudWatch metrics; it holds no Cost Explorer or log-read permission.
+role (Terraform/iam-assistant-agents.tf). Reads the producers' S3 aggregates,
+CloudWatch metrics, the events table (pipeline health), the assistant table's
+usage rows and the sport registry; it holds no Cost Explorer or log-read
+permission.
 
 Request: {"tool": "<name>", "input": {...}}
 Response: {"ok": true, "result": {...}} or {"ok": false, "error": "..."}.
@@ -14,6 +16,7 @@ import boto3
 
 from library.assistant import admin_tools
 from library.assistant.settings import ToolSettings
+from library.assistant.sports import load_sports
 from library.aws.boto_config import DEFAULT_CONFIG
 from library.aws.s3_manager import S3Manager
 
@@ -22,6 +25,10 @@ logger = logging.getLogger("assistant-admin-tools")
 
 _cloudwatch = boto3.client("cloudwatch", config=DEFAULT_CONFIG)
 _lambda = boto3.client("lambda", config=DEFAULT_CONFIG)
+_dynamodb = boto3.resource("dynamodb", config=DEFAULT_CONFIG)
+_events = _dynamodb.Table(os.environ["EVENTS_TABLE_NAME"])
+_assistant = _dynamodb.Table(os.environ["ASSISTANT_TABLE_NAME"])
+_registry = _dynamodb.Table(os.environ["SPORT_REGISTRY_TABLE_NAME"])
 _s3: S3Manager | None = None
 
 
@@ -38,6 +45,7 @@ def lambda_handler(event, context):
         tools_context = admin_tools.AdminContext(
             s3=_get_s3(), settings=ToolSettings.from_env(), cloudwatch=_cloudwatch, lambda_client=_lambda,
             api_name=os.environ["API_GATEWAY_NAME"], project=os.environ["PROJECT_NAME"],
+            events_table=_events, assistant_table=_assistant, sports=lambda: load_sports(_registry),
         )
         result = admin_tools.run(name, (event or {}).get("input"), tools_context)
     except ValueError as error:  # includes ToolInputError: a bad tool call

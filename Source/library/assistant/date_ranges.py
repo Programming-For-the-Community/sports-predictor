@@ -4,9 +4,16 @@ from __future__ import annotations
 from concurrent.futures import ThreadPoolExecutor
 from datetime import date, datetime, timedelta, timezone
 
+from library.parsing import us_eastern_date
+
 
 def today() -> date:
     return datetime.now(timezone.utc).date()
+
+
+def eastern_today() -> date:
+    """Today on U.S. Eastern dates, the app's game dates."""
+    return date.fromisoformat(us_eastern_date(datetime.now(timezone.utc)))
 
 
 def requested_range(args: dict, default_days_back: int, default_start: date | None = None) -> tuple[date, date]:

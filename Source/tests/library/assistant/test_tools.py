@@ -16,7 +16,7 @@ SETTINGS = ToolSettings(max_rows=25, max_result_chars=12_000, max_trend_points=4
 def test_the_public_agent_tools_never_include_an_admin_tool():
     assert not tool_specs.PUBLIC_TOOL_NAMES & tool_specs.ADMIN_TOOL_NAMES
     public = {t["name"] for t in tool_specs.anthropic_tools(tool_specs.PUBLIC_TOOL_NAMES | tool_specs.FAVORITE_TOOL_NAMES, SPORTS)}
-    assert public == {"list_events", "get_event_prediction", "get_model_performance", "get_season_projection", "save_favorite", "clear_favorites"}
+    assert public == {"list_events", "get_event_prediction", "get_model_performance", "get_season_projection", "get_live_scores", "get_model_info", "get_performance_overview", "save_favorite", "clear_favorites"}
 
 
 def test_sports_come_from_the_registry_list():
@@ -26,7 +26,8 @@ def test_sports_come_from_the_registry_list():
 
 
 @pytest.mark.parametrize("name, args, message", [
-    ("list_events", {"sport": "nfl"}, "Missing"),
+    ("get_event_prediction", {"sport": "nfl"}, "Missing"),
+    ("list_events", {"sport": "nfl", "date": "11/08/2026"}, "YYYY-MM-DD"),
     ("list_events", {"sport": "cricket", "when": "upcoming"}, "one of"),
     ("list_events", {"sport": "nfl", "when": "upcoming", "limit": 500}, "Unknown argument"),
     ("get_denied_trend", {"start_date": "2026-13-01"}, "real date"),
@@ -105,6 +106,42 @@ def test_a_whole_slate_fits_because_player_leaders_are_left_out_of_a_list():
     assert len(result["events"]) == 14
     assert "leaders" not in json.dumps(result["events"])
     assert result["events"][0]["prediction"]["predictions"]["win_probability"]["home_win_probability"] == 0.6
+
+
+def test_a_long_day_reports_totals_over_every_game_and_says_the_list_is_cut():
+    events = [{"event_id": str(i), "status": "completed", "participants": [],
+               "prediction_comparison": {"correct": i < 30, "actual_home_won": True}} for i in range(46)]
+    read = FakeReader({"/ncaambb/events": (200, {"events": events})})
+    result = public_tools.run("list_events", {"sport": "ncaambb", "when": "recent"}, read, SPORTS, SETTINGS)
+
+    assert result["totals"]["games"] == 46
+    assert result["totals"]["correct"] == 30
+    assert len(result["events"]) == SETTINGS.max_rows
+    assert "46" in result["truncated"]
+
+
+def test_a_conference_with_no_games_lists_the_ones_that_played():
+    events = [{"event_id": "1", "status": "completed", "participants": [{"role": "home", "conference": "WCC"}]}]
+    read = FakeReader({"/ncaambb/events": (200, {"events": events})})
+    result = public_tools.run("list_events", {"sport": "ncaambb", "when": "recent", "conference": "Big Ten"}, read, SPORTS, SETTINGS)
+
+    assert result["count"] == 0
+    assert result["conferences"] == ["WCC"]
+
+
+def test_live_scores_join_the_cache_to_the_day_s_games():
+    events = [{"event_id": "7", "status": "scheduled", "participants": [{"role": "home", "abbreviation": "PEPP"}]}]
+    read = FakeReader({"/ncaambb/events": (200, {"events": events})})
+    live = {"fetched_at": "2026-11-08T04:00:00+00:00", "events": {"7": {"live": True, "detail": "2nd 8:41", "home_score": 33, "away_score": 16}}}
+    result = public_tools.run("get_live_scores", {"sport": "ncaambb"}, read, SPORTS, SETTINGS, lambda sport: live)
+
+    assert result["in_progress"] == 1
+    assert result["games"][0]["live"]["home_score"] == 33
+
+
+def test_no_live_cache_means_no_live_games():
+    result = public_tools.run("get_live_scores", {"sport": "nba"}, FakeReader({}), SPORTS, SETTINGS, lambda sport: None)
+    assert result["live"] == []
 
 
 def test_model_performance_can_be_narrowed_to_one_model_and_keeps_the_trend():

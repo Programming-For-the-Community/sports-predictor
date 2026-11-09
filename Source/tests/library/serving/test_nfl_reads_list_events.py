@@ -14,7 +14,7 @@ from datetime import datetime, timedelta, timezone
 from unittest.mock import MagicMock
 
 from library.parsing import us_eastern_date
-from library.serving import nfl_reads
+from library.serving import common, nfl_reads
 
 from _nfl_reads_test_helpers import completed_event as _completed_event
 from _nfl_reads_test_helpers import prediction_row as _prediction_row
@@ -51,7 +51,7 @@ class TestListEvents:
         assert result["events"][0]["event_id"] == "401547417"
         assert result["events"][0]["kickoff_time"] == f"{event_date}T20:25Z"
         storage.get_all_events.assert_called_once_with(
-            "nfl", status="scheduled", scan_index_forward=True, limit=nfl_reads.RECENT_EVENTS_LIMIT,
+            "nfl", status="scheduled", scan_index_forward=True, limit=common.RECENT_EVENTS_LIMIT,
         )
 
     def test_completed_queries_get_all_events_most_recent_first_and_bounded(self):
@@ -65,7 +65,7 @@ class TestListEvents:
 
         nfl_reads.list_events(storage, MagicMock(), "nfl", "completed")
 
-        storage.get_all_events.assert_called_once_with("nfl", status="completed", limit=nfl_reads.RECENT_EVENTS_LIMIT)
+        storage.get_all_events.assert_called_once_with("nfl", status="completed", limit=common.RECENT_EVENTS_LIMIT)
 
     def test_any_other_status_queries_without_a_bound(self):
         storage = MagicMock()

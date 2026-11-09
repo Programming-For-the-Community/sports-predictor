@@ -89,7 +89,7 @@ def make_clients(model, table, guardrails=None, memory=None, tools=None, groundi
     clients = agent_core.Clients(
         model=model, guardrails=guardrails or FakeGuardrails(), memory=memory or FakeMemory(), table=table,
         invoke_tool=invoke_tool, sports=lambda: SPORTS, guardrail_id="g", guardrail_version="1", memory_id="m", grounding=grounding,
-        today=lambda: date(2026, 11, 6),
+        today=lambda: date(2026, 11, 6), utc_today=lambda: date(2026, 11, 6),
     )
     return clients, invoked
 

@@ -13,10 +13,25 @@ import 'token_store.dart';
 const _lastActivityPrefsKey = 'last_activity_at';
 const _sessionRenewedAtPrefsKey = 'session_renewed_at';
 
-/// How long a refresh token lasts -- refresh_token_validity on both Cognito
-/// app clients (Terraform/cognito-app-client.tf). On web it counts from the
-/// password sign-in; in the Android app every rotation restarts it.
+/// How long the website's refresh token lasts from the password sign-in --
+/// refresh_token_validity on the web Cognito client
+/// (Terraform/cognito-app-client.tf).
 const sessionLifetime = Duration(days: 30);
+
+/// The Android app signs out after this long without being opened. Cognito
+/// can't expire a session on inactivity (a rotated refresh token keeps the
+/// first sign-in's expiry), so the mobile client's refresh token is long-lived
+/// and this is checked here. Only foreground use counts: launches, resumes,
+/// taps and the app's own API calls; widget and background refreshes don't.
+const appInactivityTtl = Duration(days: 30);
+
+/// True once the app hasn't been used in the foreground for appInactivityTtl
+/// (false when no use was ever recorded). Also read by background_checks.dart,
+/// which then stops refreshing so an unused app's widgets go quiet.
+bool appUnusedTooLong(SharedPreferences prefs) {
+  final lastActivity = DateTime.tryParse(prefs.getString(_lastActivityPrefsKey) ?? '');
+  return lastActivity != null && DateTime.now().isAfter(lastActivity.add(appInactivityTtl));
+}
 
 /// Records that sessionLifetime restarted now: a password sign-in, or a
 /// rotated refresh token (here or in background_checks.dart).
@@ -189,7 +204,7 @@ class AuthRepository extends StateNotifier<AuthState> {
     if (await _isInactive()) {
       await _clear();
       state = AuthUnauthenticated();
-      throw StateError('Session expired after $inactivityTtl of inactivity');
+      throw StateError('Session expired after ${rollingSession ? appInactivityTtl : inactivityTtl} of inactivity');
     }
     await _touchActivity();
     if (forceRefresh ? _refreshedRecently : !current.tokens.isNearExpiry) {
@@ -216,6 +231,10 @@ class AuthRepository extends StateNotifier<AuthState> {
     await _restored.future;
     final current = state;
     if (current is! AuthAuthenticated) return;
+    if (await _isInactive()) {
+      await logout();
+      return;
+    }
     if (!current.tokens.isNearExpiry && !await _renewalDue()) return;
     try {
       state = AuthAuthenticated(await _refresh(current.tokens));
@@ -289,12 +308,13 @@ class AuthRepository extends StateNotifier<AuthState> {
     state = AuthUnauthenticated();
   }
 
-  /// When the current sign-in expires without another renewal. Null when
-  /// not signed in, or signed in before renewals were recorded.
+  /// When the current sign-in ends if the app isn't opened again: the last
+  /// foreground use plus appInactivityTtl. Null when not signed in or no use
+  /// was recorded yet.
   Future<DateTime?> sessionExpiresAt() async {
     if (state is! AuthAuthenticated) return null;
-    final raw = (await _prefsInstance).getString(_sessionRenewedAtPrefsKey);
-    return raw == null ? null : DateTime.parse(raw).add(sessionLifetime);
+    final raw = (await _prefsInstance).getString(rollingSession ? _lastActivityPrefsKey : _sessionRenewedAtPrefsKey);
+    return raw == null ? null : DateTime.parse(raw).add(rollingSession ? appInactivityTtl : sessionLifetime);
   }
 
   Future<void> _persist(CognitoTokens tokens) async {
@@ -333,8 +353,8 @@ class AuthRepository extends StateNotifier<AuthState> {
   /// False when no activity has ever been recorded -- treated as active
   /// rather than instantly expiring the session.
   Future<bool> _isInactive() async {
-    if (rollingSession) return false;
     final prefs = await _prefsInstance;
+    if (rollingSession) return appUnusedTooLong(prefs);
     final raw = prefs.getString(_lastActivityPrefsKey);
     if (raw == null) return false;
     final lastActivity = DateTime.parse(raw);

@@ -351,6 +351,37 @@ void main() {
       expect((state as AuthAuthenticated).tokens.idToken, 'kept-id');
     });
 
+    String daysAgo(int days) => DateTime.now().subtract(Duration(days: days)).toIso8601String();
+
+    test('restore signs out after 30 days without the app being opened', () async {
+      SharedPreferences.setMockInitialValues({'cognito_tokens': persisted(), 'last_activity_at': daysAgo(31)});
+      final repo = rolling((r) async => _tokenResponse(id: 'rotated-id', refresh: 'r2'));
+
+      expect(await _firstRealState(repo), isA<AuthUnauthenticated>());
+      expect((await SharedPreferences.getInstance()).getString('cognito_tokens'), isNull);
+    });
+
+    test('restore keeps the session when the app was opened within 30 days, and moves the expiry out', () async {
+      SharedPreferences.setMockInitialValues({'cognito_tokens': persisted(), 'last_activity_at': daysAgo(29)});
+      final repo = rolling((r) async => _tokenResponse(id: 'rotated-id', refresh: 'r2'));
+
+      expect(await _firstRealState(repo), isA<AuthAuthenticated>());
+      final expiresAt = await repo.sessionExpiresAt();
+      expect(expiresAt!.difference(DateTime.now().add(appInactivityTtl)).inMinutes.abs(), lessThan(1));
+    });
+
+    test('returning to the app after 30 days away signs out', () async {
+      SharedPreferences.setMockInitialValues({'cognito_tokens': persisted()});
+      final repo = rolling((r) async => _tokenResponse(id: 'rotated-id', refresh: 'r2'));
+      expect(await _firstRealState(repo), isA<AuthAuthenticated>());
+
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString('last_activity_at', daysAgo(31));
+      await repo.renewSession();
+
+      expect(repo.state, isA<AuthUnauthenticated>());
+    });
+
     test('restore signs out when Cognito rejects the refresh token', () async {
       SharedPreferences.setMockInitialValues({'cognito_tokens': persisted()});
       final repo = rolling((r) async => http.Response(jsonEncode({'__type': 'NotAuthorizedException', 'message': 'Refresh Token has expired'}), 400));

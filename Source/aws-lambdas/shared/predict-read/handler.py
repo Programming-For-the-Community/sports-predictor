@@ -127,45 +127,50 @@ def _f1_freshness_inputs_for_event(s3, storage, event_id: str) -> tuple[dict, in
 
 SPORT_CONFIGS = {
     "nfl": {
-        "list_events_fn": lambda storage, status: nfl_reads.list_events(
-            storage, _get_predictions_table(), "nfl", status, model_bucket=_get_model_bucket(),
+        "list_events_fn": lambda storage, status, event_date=None: nfl_reads.list_events(
+            storage, _get_predictions_table(), "nfl", status, model_bucket=_get_model_bucket(), event_date=event_date,
         ),
+        "lists_by_date": True,
         "get_season_projection_fn": lambda model_bucket: nfl_reads.get_season_projection(model_bucket, "nfl"),
         "list_models_fn": lambda model_bucket: list_models(model_bucket, "nfl"),
         "freshness_inputs_fn": _team_sport_freshness_inputs("nfl"),
         "has_player_prop_route": True,
     },
     "nba": {
-        "list_events_fn": lambda storage, status: nba_reads.list_events(
-            storage, _get_predictions_table(), "nba", status, model_bucket=_get_model_bucket(),
+        "list_events_fn": lambda storage, status, event_date=None: nba_reads.list_events(
+            storage, _get_predictions_table(), "nba", status, model_bucket=_get_model_bucket(), event_date=event_date,
         ),
+        "lists_by_date": True,
         "get_season_projection_fn": lambda model_bucket: nba_reads.get_season_projection(model_bucket, "nba"),
         "list_models_fn": lambda model_bucket: list_models(model_bucket, "nba"),
         "freshness_inputs_fn": _team_sport_freshness_inputs("nba"),
         "has_player_prop_route": True,
     },
     "ncaafb": {
-        "list_events_fn": lambda storage, status: ncaafb_reads.list_events(
-            storage, _get_predictions_table(), "ncaafb", status, model_bucket=_get_model_bucket(),
+        "list_events_fn": lambda storage, status, event_date=None: ncaafb_reads.list_events(
+            storage, _get_predictions_table(), "ncaafb", status, model_bucket=_get_model_bucket(), event_date=event_date,
         ),
+        "lists_by_date": True,
         "get_season_projection_fn": lambda model_bucket: ncaafb_reads.get_season_projection(model_bucket, "ncaafb"),
         "list_models_fn": lambda model_bucket: list_models(model_bucket, "ncaafb"),
         "freshness_inputs_fn": _team_sport_freshness_inputs("ncaafb"),
         "has_player_prop_route": True,
     },
     "ncaambb": {
-        "list_events_fn": lambda storage, status: ncaambb_reads.list_events(
-            storage, _get_predictions_table(), "ncaambb", status, model_bucket=_get_model_bucket(),
+        "list_events_fn": lambda storage, status, event_date=None: ncaambb_reads.list_events(
+            storage, _get_predictions_table(), "ncaambb", status, model_bucket=_get_model_bucket(), event_date=event_date,
         ),
+        "lists_by_date": True,
         "get_season_projection_fn": lambda model_bucket: ncaambb_reads.get_season_projection(model_bucket, "ncaambb"),
         "list_models_fn": lambda model_bucket: list_models(model_bucket, "ncaambb"),
         "freshness_inputs_fn": _team_sport_freshness_inputs("ncaambb"),
         "has_player_prop_route": True,
     },
     "nhl": {
-        "list_events_fn": lambda storage, status: nhl_reads.list_events(
-            storage, _get_predictions_table(), "nhl", status, model_bucket=_get_model_bucket(),
+        "list_events_fn": lambda storage, status, event_date=None: nhl_reads.list_events(
+            storage, _get_predictions_table(), "nhl", status, model_bucket=_get_model_bucket(), event_date=event_date,
         ),
+        "lists_by_date": True,
         "get_season_projection_fn": lambda model_bucket: nhl_reads.get_season_projection(model_bucket, "nhl"),
         "list_models_fn": lambda model_bucket: list_models(model_bucket, "nhl"),
         "freshness_inputs_fn": _team_sport_freshness_inputs("nhl"),
