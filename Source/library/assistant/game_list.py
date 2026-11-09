@@ -42,15 +42,24 @@ def upset_flag(event: dict) -> str | None:
     return "UPSET WATCH" if round(favorite_chance * 100) <= UPSET_WATCH_MAX_FAVORITE_PERCENT else None
 
 
+_WORD = re.compile(r"[\w'.&-]+")
+
+
+def _words(text: str | None) -> set[str]:
+    return set(_WORD.findall((text or "").lower()))
+
+
 def names_team(team: str, abbreviation: str | None, name: str | None) -> bool:
-    """`team` is the abbreviation, or whole words of the name: "duke" is
-    Duke, not the Duquesne Dukes."""
+    """`team` is the abbreviation, or whole words of the name in any order:
+    "duke" is Duke, not the Duquesne Dukes; "minnesota gophers" is the
+    Minnesota Golden Gophers."""
     wanted = team.strip().lower()
     if not wanted:
         return False
     if wanted == (abbreviation or "").lower():
         return True
-    return re.search(rf"\b{re.escape(wanted)}\b", (name or "").lower()) is not None
+    words = _words(wanted)
+    return bool(words) and words <= _words(name)
 
 
 def _matches_team(event: dict, team: str) -> bool:
@@ -153,22 +162,38 @@ def _player_entries(value) -> list[dict]:
     return []
 
 
-def player_totals(events: list[dict]) -> list[dict]:
+def _graded_players(event: dict):
+    """(team abbreviation, entry) for each predicted-vs-actual player entry,
+    the team being the side of the game the entry is listed under."""
+    comparison = event.get("leaders_comparison") or {}
+    for side in ("home", "away"):
+        team = next((p.get("abbreviation") for p in event.get("participants") or [] if p.get("role") == side), None)
+        for entry in _player_entries(comparison.get(side)):
+            yield team, entry
+
+
+def player_totals(events: list[dict], stat: str | None = None, max_rows: int = 100) -> list[dict]:
     """Per stat, over every game's listed players with an actual: how many
     were graded, the average miss, the average lean (+ = predicted too high)
-    and the biggest misses."""
-    misses: dict[str, list[tuple[float, float, float, str]]] = {}
+    and the biggest misses. With `stat`, only that stat, and every graded
+    player in it (players: name, team, predicted, actual), biggest miss first."""
+    graded: dict[str, list[dict]] = {}
     for event in events:
-        for entry in _player_entries(event.get("leaders_comparison")):
-            for stat, actual in entry["actual"].items():
-                predicted = entry["predicted"].get(stat)
-                if isinstance(predicted, (int, float)) and isinstance(actual, (int, float)):
-                    misses.setdefault(stat, []).append((predicted - actual, predicted, actual, entry.get("name") or "?"))
+        for team, entry in _graded_players(event):
+            for name, actual in entry["actual"].items():
+                predicted = entry["predicted"].get(name)
+                if (stat is None or name == stat) and isinstance(predicted, (int, float)) and isinstance(actual, (int, float)):
+                    graded.setdefault(name, []).append({"player": entry.get("name") or "?", "team": team,
+                                                        "predicted": round(predicted, 1), "actual": actual, "miss": round(predicted - actual, 1)})
     rows = []
-    for stat, values in sorted(misses.items()):
-        worst = sorted(values, key=lambda v: -abs(v[0]))[:BIGGEST_MISSES]
-        rows.append({"stat": stat, "graded": len(values),
-                     "avg_miss": round(sum(abs(v[0]) for v in values) / len(values), 1),
-                     "avg_lean": round(sum(v[0] for v in values) / len(values), 1),
-                     "biggest_misses": [{"player": name, "predicted": round(p, 1), "actual": a} for _, p, a, name in worst]})
+    for name, players in sorted(graded.items()):
+        players.sort(key=lambda p: -abs(p["miss"]))
+        row = {"stat": name, "graded": len(players),
+               "avg_miss": round(sum(abs(p["miss"]) for p in players) / len(players), 1),
+               "avg_lean": round(sum(p["miss"] for p in players) / len(players), 1)}
+        if stat:
+            row["players"] = players[:max_rows]
+        else:
+            row["biggest_misses"] = [{k: p[k] for k in ("player", "team", "predicted", "actual")} for p in players[:BIGGEST_MISSES]]
+        rows.append(row)
     return rows

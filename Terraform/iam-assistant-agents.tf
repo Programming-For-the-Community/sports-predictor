@@ -203,7 +203,8 @@ resource "aws_iam_role_policy_attachment" "assistant_admin_tools_logs" {
 
 # Reads the producers' aggregates, CloudWatch metrics, the events table's
 # status index (pipeline health), the assistant table (usage rows) and the
-# sport registry -- no Cost Explorer and no log read. GetMetricData and
+# sport registry and the training orchestrator's runs -- no Cost Explorer
+# and no log read. GetMetricData and
 # ListFunctions can't be scoped to a resource.
 data "aws_iam_policy_document" "assistant_admin_tools" {
   statement {
@@ -250,6 +251,18 @@ data "aws_iam_policy_document" "assistant_admin_tools" {
     sid       = "ReadSports"
     actions   = ["dynamodb:Scan"]
     resources = [aws_dynamodb_table.sport_registry.arn]
+  }
+
+  statement {
+    sid       = "ReadTrainingRuns"
+    actions   = ["states:ListExecutions"]
+    resources = [aws_sfn_state_machine.training_orchestrator.arn]
+  }
+
+  statement {
+    sid       = "ReadTrainingRunDetail"
+    actions   = ["states:DescribeExecution"]
+    resources = ["arn:aws:states:${var.region}:${var.account_id}:execution:${aws_sfn_state_machine.training_orchestrator.name}:*"]
   }
 }
 

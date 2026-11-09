@@ -76,7 +76,7 @@ class _Messages:
         self._runtime = runtime_client
         self._temperature = temperature
 
-    def create(self, *, model: str, max_tokens: int, messages: list[dict], system=None, tools=None, **_claude_only):
+    def create(self, *, model: str, max_tokens: int, messages: list[dict], system=None, tools=None, tool_choice=None, **_claude_only):
         request = {
             "modelId": model,
             "messages": [_to_converse_message(m) for m in messages],
@@ -86,6 +86,9 @@ class _Messages:
             request["system"] = [{"text": s["text"]} for s in system]
         if tools:
             request["toolConfig"] = _tool_config(tools)
+            # {"type": "any"}: the reply must call a tool.
+            if (tool_choice or {}).get("type") == "any":
+                request["toolConfig"]["toolChoice"] = {"any": {}}
         response = self._runtime.converse(**request)
         blocks = response["output"]["message"]["content"]
         usage = response.get("usage", {})

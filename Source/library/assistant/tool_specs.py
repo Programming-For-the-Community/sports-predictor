@@ -24,7 +24,7 @@ FAVORITE_TOOL_NAMES = frozenset({"save_favorite", "clear_favorites"})
 PREFERENCE_TOOL_NAMES = frozenset({"forget_preferences"})
 ADMIN_TOOL_NAMES = frozenset({
     "get_cost_summary", "get_denied_locations", "get_repeat_offenders", "get_denied_endpoints",
-    "get_denied_trend", "get_api_traffic", "get_lambda_health", "get_pipeline_health", "get_assistant_usage",
+    "get_denied_trend", "get_api_traffic", "get_lambda_health", "get_pipeline_health", "get_assistant_usage", "get_training_runs",
 })
 
 _DATE_PATTERN = re.compile(r"^\d{4}-\d{2}-\d{2}$")
@@ -67,6 +67,7 @@ def _public(sport: dict) -> list[dict]:
              "date": {**_DATE, "description": "One game date, YYYY-MM-DD (U.S. Eastern, as the app dates games): every game that day, played or not. Not for golf or racing."},
              "team": {**_TEAM, "description": "Only games with this team: abbreviation (DET) or part of its name."},
              "conference": {**_CONFERENCE, "description": "Only games with a team from this conference, as the app names it (Big Ten, SEC)."},
+             "stat": {"type": "string", "description": "For finished games: every graded player for this stat (passing_yards, rushing_yards, receiving_yards, points, rebounds, assists, goals...) with team, predicted, actual and miss."},
              "player": {"type": "string", "description": "Only the game whose player predictions include this player (part of the name): finds a player's game without knowing their team."}},
             ["sport"],
         ),
@@ -86,8 +87,9 @@ def _public(sport: dict) -> list[dict]:
         ),
         _tool(
             "get_model_performance",
-            "Get how this app's models have performed this season, including the player-stat models (player-prop-passing-yards, player-prop-points, ...): per model, the season result, the latest period, a period-by-period trend and accuracy by confidence band, plus win-pick accuracy by conference where teams have conferences (by_conference; window_days, when set, limits it to recent days).",
-            {"sport": sport, "model": {"type": "string", "description": "Optional model name, e.g. win-probability. Omit for all models."}},
+            "Get how this app's models have performed this season, including the player-stat models (player-prop-passing-yards, player-prop-points, ...): per model, the season result, the latest period, the last 4 periods combined (last_4_periods: about the last month), a period-by-period trend and accuracy by confidence band, plus win-pick accuracy by conference where teams have conferences (by_conference; window_days, when set, limits it to recent days).",
+            {"sport": sport, "model": {"type": "string", "description": "Optional model name, e.g. win-probability. Omit for all models."},
+             "team": {**_TEAM, "description": "One team instead: how often the win pick was right in its games, overall and in the last 30 days."}},
             ["sport"],
         ),
         _tool(
@@ -120,7 +122,7 @@ def _favorites(sport: dict) -> list[dict]:
             "save_favorite",
             "Save the user's favourite for a sport, only when the user names one: one per sport, replacing any earlier one. "
             "One call per sport; several in one answer is fine.",
-            {"sport": sport, "team": {"type": "string", "description": "The team's abbreviation as this app shows it (DET); for golf and racing, the player's or driver's full name (Scottie Scheffler)."}},
+            {"sport": sport, "team": {"type": "string", "description": "The team as the user named it (Minnesota Gophers) or its abbreviation; for golf and racing, the player's or driver's name. The tool finds the app's team and says which it saved."}},
             ["sport", "team"],
         ),
         _tool(
@@ -170,6 +172,13 @@ def _admin(sport: dict) -> list[dict]:
             "Whether each sport's data is flowing now: its newest finished game and next scheduled one, games still marked scheduled two or more days after their date, "
             "and each pipeline Lambda's (ingest, normalize, predict, live scores) runs, errors and last run over the last 48 hours.",
             {"sport": {**sport, "description": "One sport. Omit for every sport."}},
+            [],
+        ),
+        _tool(
+            "get_training_runs",
+            "Model training runs in a date range (the weekly training orchestrator): each run's start, status and wall-clock minutes, its "
+            "slowest models, the average run time, and each model's average and longest training minutes.",
+            {**_range("Defaults to 30 days ago."), "sport": {**sport, "description": "Only this sport's models in the per-model times."}},
             [],
         ),
         _tool(

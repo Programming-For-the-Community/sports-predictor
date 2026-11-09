@@ -63,3 +63,29 @@ def test_claude_uses_the_anthropic_client_and_other_models_use_converse():
 
     assert type(other).__name__ == "ConverseModel"
     assert boto_client.call_args.args == ("bedrock-runtime",)
+
+
+class Throttled(Exception):
+    pass
+
+
+class ThrottledLambda(FakeLambda):
+    """Throttles the first `throttles` invokes, like a Lambda at its reserved concurrency."""
+    exceptions = type("Exceptions", (), {"TooManyRequestsException": Throttled})
+
+    def __init__(self, throttles):
+        super().__init__()
+        self.throttles = throttles
+
+    def invoke(self, FunctionName, Payload):
+        if self.throttles:
+            self.throttles -= 1
+            raise Throttled()
+        return super().invoke(FunctionName, Payload)
+
+
+def test_a_throttled_tool_is_retried_once_then_reported_busy(monkeypatch):
+    monkeypatch.setattr(runtime, "THROTTLE_RETRY_SECONDS", 0)
+    assert runtime.tool_invoker(ThrottledLambda(1), ENV)("list_events", {})["ok"] is True
+    busy = runtime.tool_invoker(ThrottledLambda(2), ENV)("list_events", {})
+    assert busy == {"ok": False, "error": runtime.BUSY}

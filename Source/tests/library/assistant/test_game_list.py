@@ -79,13 +79,28 @@ def test_day_totals_break_down_by_conference_counting_a_conference_game_once():
     assert "by_conference" not in game_list.totals([{"status": "completed", "participants": []}])
 
 
-def test_player_totals_sum_every_game_s_predicted_vs_actual_per_stat():
-    def game(passer, predicted, actual):
-        return {"status": "completed", "leaders_comparison": {
-            "home": {"passing": {"name": passer, "predicted": {"passing_yards": predicted}, "actual": {"passing_yards": actual}}},
-            "away": {"rushing": [{"name": "Back", "predicted": {"rushing_yards": 80.0}, "actual": {}}]}}}
+def _player_game(passer, team, predicted, actual):
+    return {"status": "completed", "participants": [{"role": "home", "abbreviation": team}, {"role": "away", "abbreviation": "OPP"}],
+            "leaders_comparison": {
+                "home": {"passing": {"name": passer, "predicted": {"passing_yards": predicted}, "actual": {"passing_yards": actual}}},
+                "away": {"rushing": [{"name": "Back", "predicted": {"rushing_yards": 80.0}, "actual": {}}]}}}
 
-    rows = game_list.player_totals([game("A", 250.0, 300), game("B", 220.0, 200), {"status": "completed", "leaders_comparison": None}])
+
+def test_player_totals_sum_every_game_s_predicted_vs_actual_per_stat():
+    rows = game_list.player_totals([_player_game("A", "GB", 250.0, 300), _player_game("B", "DET", 220.0, 200),
+                                    {"status": "completed", "leaders_comparison": None}])
 
     assert rows == [{"stat": "passing_yards", "graded": 2, "avg_miss": 35.0, "avg_lean": -15.0,
-                     "biggest_misses": [{"player": "A", "predicted": 250.0, "actual": 300}, {"player": "B", "predicted": 220.0, "actual": 200}]}]
+                     "biggest_misses": [{"player": "A", "team": "GB", "predicted": 250.0, "actual": 300},
+                                        {"player": "B", "team": "DET", "predicted": 220.0, "actual": 200}]}]
+
+
+def test_one_stat_lists_every_graded_player_with_the_team_from_the_game():
+    games = [_player_game(f"QB{i}", f"T{i}", 200.0 + i, 200) for i in range(5)]
+
+    rows = game_list.player_totals(games, "passing_yards", max_rows=3)
+
+    assert [r["stat"] for r in rows] == ["passing_yards"]
+    assert rows[0]["graded"] == 5
+    assert rows[0]["players"][0] == {"player": "QB4", "team": "T4", "predicted": 204.0, "actual": 200, "miss": 4.0}
+    assert len(rows[0]["players"]) == 3

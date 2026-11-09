@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import logging
+import time
 from collections.abc import Callable, Mapping
 
 import boto3
@@ -25,12 +26,32 @@ logger = logging.getLogger(__name__)
 DEFAULT_TEMPERATURE = 0.2
 
 
+# The tool Lambdas have reserved concurrency (Terraform/lambda-assistant-tools.tf):
+# a throttled call waits once, then tells the model the assistant is busy.
+THROTTLE_RETRY_SECONDS = 1.0
+BUSY = "The assistant is busy right now. Say so, and ask the user to try again in a minute."
+
+
+def _invoke(lambda_client, function: str, payload: bytes):
+    for attempt in range(2):
+        try:
+            return lambda_client.invoke(FunctionName=function, Payload=payload)
+        except lambda_client.exceptions.TooManyRequestsException:
+            if attempt:
+                return None
+            time.sleep(THROTTLE_RETRY_SECONDS)
+    return None
+
+
 def tool_invoker(lambda_client, env: Mapping[str, str]):
     """invoke_tool for agent_core: admin tools go to the admin tool Lambda,
     everything else to the public one."""
     def invoke_tool(name: str, args: dict) -> dict:
         function = env["ADMIN_TOOLS_FUNCTION_NAME"] if name in ADMIN_TOOL_NAMES else env["PUBLIC_TOOLS_FUNCTION_NAME"]
-        response = lambda_client.invoke(FunctionName=function, Payload=json.dumps({"tool": name, "input": args}).encode())
+        response = _invoke(lambda_client, function, json.dumps({"tool": name, "input": args}).encode())
+        if response is None:
+            logger.warning("Tool %s throttled in %s", name, function)
+            return {"ok": False, "error": BUSY}
         if response.get("FunctionError"):
             logger.error("Tool %s raised in %s", name, function)
             return {"ok": False, "error": "The tool failed. Try again shortly."}

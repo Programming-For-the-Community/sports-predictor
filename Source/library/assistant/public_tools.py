@@ -93,16 +93,18 @@ def _dated_games(read: Reader, sport: str, date: str) -> tuple[list[dict] | None
     return found, None
 
 
-def _game_list(events: list[dict], settings: ToolSettings) -> dict:
+def _game_list(events: list[dict], settings: ToolSettings, stat: str | None = None) -> dict:
     """Totals over every game, then the games themselves up to the cap;
     player detail only when the list is a few games."""
     shown = events[:settings.max_rows]
     dropped = frozenset() if len(events) <= PLAYER_DETAIL_MAX_GAMES else LIST_DROPPED_KEYS
     result = {"totals": game_list.totals(events), "count": len(events),
               "events": prune(game_list.with_flags(shown), settings.max_rows, dropped)}
-    players = game_list.player_totals(events)
+    players = game_list.player_totals(events, stat, settings.max_rows)
     if players:
         result["player_totals"] = players
+    elif stat:
+        result["player_totals_note"] = f"No graded {stat} predictions in these games (they appear once games are final)."
     if len(shown) < len(events):
         result["truncated"] = f"Showing {len(shown)} of {len(events)} games; totals cover all of them. Filter by team or conference for the rest."
     return result
@@ -118,7 +120,7 @@ def list_events(read: Reader, args: dict, settings: ToolSettings) -> dict:
         return error
     matching = game_list.filtered(events, args.get("team"), args.get("conference"), args.get("player"))
     period = {"date": args["date"]} if args.get("date") else {"when": when}
-    result = {"sport": args["sport"], **period, **_game_list(matching, settings)}
+    result = {"sport": args["sport"], **period, **_game_list(matching, settings, args.get("stat"))}
     if len(matching) > PLAYER_DETAIL_MAX_GAMES:
         result["note"] = "Player predictions are left out of a list this long; filter by team, or get_event_prediction for one game."
     if args.get("conference") and not matching:
@@ -177,17 +179,55 @@ def get_event_prediction(read: Reader, args: dict, settings: ToolSettings) -> di
 _PERFORMANCE_KEYS = ("model_name", "version", "kind", "season", "last_period", "history", "vs_baseline_pct", "bias", "bands", "best")
 
 
+RECENT_PERIODS = 4
+
+
+def recent_periods(history: list[dict]) -> dict | None:
+    """The last RECENT_PERIODS graded periods (about a month of weeks)
+    combined, each weighted by how many predictions it graded."""
+    periods = [h for h in history if h.get("n") and h.get("value") is not None][-RECENT_PERIODS:]
+    graded = sum(h["n"] for h in periods)
+    if not graded:
+        return None
+    value = sum(h["value"] * h["n"] for h in periods) / graded
+    return {"from": periods[0].get("label"), "to": periods[-1].get("label"), "periods": len(periods), "value": value, "n": graded}
+
+
 def _trim_model(model: dict) -> dict:
     entry = {k: model[k] for k in _PERFORMANCE_KEYS if model.get(k) is not None}
     if "history" in entry:
+        recent = recent_periods(entry["history"])
+        if recent:
+            entry["last_4_periods"] = recent
         entry["history"] = entry["history"][-MAX_HISTORY:]
     return entry
+
+
+MAX_TEAMS = 5
+
+
+def _team_performance(sport: str, team: str, body: dict) -> dict:
+    """One team's win-pick record from the scorecard's per-team breakdown."""
+    breakdown = body.get("by_team") or {}
+    rows = [r for r in breakdown.get("teams") or [] if game_list.names_team(team, r.get("team"), r.get("name"))]
+    result = {"sport": sport, "season": body.get("season"), "generated_at": body.get("generated_at")}
+    if body.get("window_days"):
+        result["window_days"] = body["window_days"]
+    if not breakdown:
+        return {**result, "error": "This sport's results aren't broken down by team."}
+    if not rows:
+        return {**result, "error": f"No graded games for a team matching {team!r}."}
+    note = (f"games/correct: win picks in games the team played, over the scorecard's games; recent_*: the last {breakdown.get('recent_days')} days. "
+            "A pick counts whichever team it backed.")
+    return {**result, "teams": prune(rows[:MAX_TEAMS]), "note": note}
 
 
 def get_model_performance(read: Reader, args: dict, settings: ToolSettings) -> dict:
     code, body = read(f"/{args['sport']}/model-performance", {}, {})
     if code not in OK:
         return _unavailable(code, body)
+    if args.get("team"):
+        return _team_performance(args["sport"], args["team"], body)
     models = body.get("models", [])
     wanted = args.get("model")
     chosen = [m for m in models if m.get("model_name") == wanted] if wanted else models

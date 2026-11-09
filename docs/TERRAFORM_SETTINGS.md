@@ -82,7 +82,9 @@ you know they exist.
 
 | Setting | File | Current |
 |---|---|---|
-| Model max tokens / tool calls per answer | `agentcore-assistant.tf` (`assistant_settings`) | 4096 / 6 |
+| Model max tokens | `agentcore-assistant.tf` (`assistant_settings`) | 4096 |
+| Steps per answer / calls per step / calls run at once | same | 4 / 10 / 4 |
+| Tool Lambdas' reserved concurrency (public / admin) | `lambda-assistant-tools.tf` | 20 / 5 |
 | Max question length / history turns / session turns | same | 1000 chars / 10 / 30 |
 | Rows per tool list / size cap per tool result | `agentcore-assistant.tf` (`assistant_tool_settings`) | 100 / 80,000 chars |
 | Trend points / hourly-trend days | same | 400 / 7 |

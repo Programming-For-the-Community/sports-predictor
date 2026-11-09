@@ -12,7 +12,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Callable
 
-from library.assistant import cost_tools, metric_tools, pipeline_health, traffic_tools, usage
+from library.assistant import cost_tools, metric_tools, pipeline_health, traffic_tools, training_runs, usage
 from library.assistant.date_ranges import eastern_today, requested_range
 from library.assistant.settings import ToolSettings
 from library.assistant.tool_specs import ADMIN_TOOL_NAMES, validate
@@ -30,11 +30,18 @@ class AdminContext:
     assistant_table: object = None
     sports: Callable[[], list[str]] = field(default=list)
     today: Callable[[], object] = field(default=eastern_today)
+    stepfunctions: object = None
+    training_state_machine_arn: str = ""
 
 
 def _pipeline(ctx: AdminContext, args: dict) -> dict:
     sports = [args["sport"]] if args.get("sport") else ctx.sports()
     return pipeline_health.pipeline_health(ctx.events_table, ctx.cloudwatch, ctx.project, sports, ctx.today(), datetime.now(timezone.utc))
+
+
+def _training(ctx: AdminContext, args: dict) -> dict:
+    start, end = requested_range(args, 30)
+    return training_runs.report(ctx.stepfunctions, ctx.training_state_machine_arn, start, end, args.get("sport"))
 
 
 def _usage(ctx: AdminContext, args: dict) -> dict:
@@ -52,6 +59,7 @@ _TOOLS = {
     "get_lambda_health": lambda ctx, args: metric_tools.lambda_health(args, ctx.cloudwatch, ctx.lambda_client, ctx.project),
     "get_pipeline_health": _pipeline,
     "get_assistant_usage": _usage,
+    "get_training_runs": _training,
 }
 
 

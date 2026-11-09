@@ -20,7 +20,11 @@ class AgentSettings:
     model_id: str
     effort: str
     max_tokens: int
-    max_tool_calls: int
+    # Steps (model turns that run tools) per answer -- the main cap on cost
+    # and wait; calls one step may make; and how many of them run at once.
+    max_steps: int
+    max_calls_per_step: int
+    parallel_tools: int
     max_message_chars: int
     history_turns: int
     max_session_turns: int
@@ -32,7 +36,9 @@ class AgentSettings:
             model_id=os.environ.get("ASSISTANT_MODEL_ID", "us.anthropic.claude-haiku-5-5"),
             effort=os.environ.get("ASSISTANT_EFFORT", "low"),
             max_tokens=_int("ASSISTANT_MAX_TOKENS", 4096),
-            max_tool_calls=_int("ASSISTANT_MAX_TOOL_CALLS", 6),
+            max_steps=_int("ASSISTANT_MAX_STEPS", 4),
+            max_calls_per_step=_int("ASSISTANT_MAX_CALLS_PER_STEP", 10),
+            parallel_tools=_int("ASSISTANT_PARALLEL_TOOLS", 4),
             max_message_chars=_int("ASSISTANT_MAX_MESSAGE_CHARS", 1000),
             history_turns=_int("ASSISTANT_HISTORY_TURNS", 10),
             max_session_turns=_int("ASSISTANT_MAX_SESSION_TURNS", 30),

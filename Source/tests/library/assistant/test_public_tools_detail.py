@@ -133,3 +133,26 @@ def test_a_player_not_in_the_field_is_said_to_be_missing():
     read = FakeReader({"/pga/predictions/events/{event_id}": (200, {"result": {"field": [{"name": "Ben James"}]}})})
     result = public_tools.run("get_event_prediction", {"sport": "pga", "event_id": "9", "player": "Scheffler"}, read, SPORTS, SETTINGS)
     assert "Scheffler" in result["player_note"]
+
+
+def test_one_team_s_record_comes_from_the_per_team_breakdown():
+    body = {"season": 2026, "by_team": {"recent_days": 30, "teams": [
+        {"team": "MIN", "name": "Minnesota Vikings", "games": 9, "correct": 7, "accuracy_pct": 77.8, "recent_games": 4, "recent_correct": 3},
+        {"team": "DET", "name": "Detroit Lions", "games": 9, "correct": 6, "accuracy_pct": 66.7}]}}
+    read = FakeReader({"/nfl/model-performance": (200, body)})
+
+    result = public_tools.run("get_model_performance", {"sport": "nfl", "team": "vikings"}, read, SPORTS, SETTINGS)
+
+    assert [t["team"] for t in result["teams"]] == ["MIN"]
+    assert result["teams"][0]["recent_correct"] == 3
+    assert "30 days" in result["note"]
+    assert "error" in public_tools.run("get_model_performance", {"sport": "nfl", "team": "Packers"}, read, SPORTS, SETTINGS)
+
+
+def test_the_last_four_periods_are_combined_by_how_many_each_graded():
+    history = [{"label": f"Wk {i}", "value": v, "n": n} for i, (v, n) in enumerate([(0.5, 10), (0.6, 10), (0.7, 20), (0.8, 10), (0.4, 10)], 1)]
+    recent = public_tools.recent_periods(history)
+    assert recent["from"] == "Wk 2"
+    assert recent["to"] == "Wk 5"
+    assert recent["n"] == 50
+    assert round(recent["value"], 3) == 0.64

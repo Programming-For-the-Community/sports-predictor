@@ -15,14 +15,19 @@ locals {
   # Every limit the agents and tools read (Source/library/assistant/
   # settings.py). Change one here and apply; no code release needed.
   assistant_settings = {
-    ASSISTANT_MODEL_ID          = local.assistant_model_id
-    ASSISTANT_EFFORT            = local.assistant_effort == "none" ? "" : local.assistant_effort
-    ASSISTANT_MAX_TOKENS        = "4096"
-    ASSISTANT_MAX_TOOL_CALLS    = "6"
-    ASSISTANT_MAX_MESSAGE_CHARS = "1000"
-    ASSISTANT_HISTORY_TURNS     = "10"
-    ASSISTANT_MAX_SESSION_TURNS = "30"
-    ASSISTANT_TEMPERATURE       = tostring(var.assistant_temperature)
+    ASSISTANT_MODEL_ID   = local.assistant_model_id
+    ASSISTANT_EFFORT     = local.assistant_effort == "none" ? "" : local.assistant_effort
+    ASSISTANT_MAX_TOKENS = "4096"
+    # Steps per answer (the main cap), calls one step may make, and how many
+    # run at once; the tool Lambdas' reserved concurrency caps all users
+    # together (lambda-assistant-tools.tf).
+    ASSISTANT_MAX_STEPS          = "4"
+    ASSISTANT_MAX_CALLS_PER_STEP = "10"
+    ASSISTANT_PARALLEL_TOOLS     = "4"
+    ASSISTANT_MAX_MESSAGE_CHARS  = "1000"
+    ASSISTANT_HISTORY_TURNS      = "10"
+    ASSISTANT_MAX_SESSION_TURNS  = "30"
+    ASSISTANT_TEMPERATURE        = tostring(var.assistant_temperature)
   }
   # Model, effort and temperature: variables.tf. A us.
   # inference profile routes to the regions below; the role may invoke the

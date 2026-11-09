@@ -18,11 +18,12 @@ import base64
 import json
 import logging
 import re
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from datetime import date, datetime, timezone
 from typing import Callable, Iterator
 
-from library.assistant import gen_ai_spans, guardrail, history, preferences, usage, user_store
+from library.assistant import favorite_names, gen_ai_spans, guardrail, history, preferences, usage, user_store
 from library.assistant.date_ranges import eastern_today
 from library.assistant.prompts import Profile
 from library.assistant.tool_specs import FAVORITE_TOOL_NAMES, PREFERENCE_TOOL_NAMES, anthropic_tools
@@ -35,6 +36,12 @@ REFUSAL_MESSAGE = "I can't help with that one."
 FAILED_MESSAGE = "Something went wrong answering that. Please try again."
 SESSION_FULL_MESSAGE = "This chat is full. Start a new chat to keep going."
 TOO_MANY_LOOKUPS = "That needs more lookups than I can do in one answer. Try a narrower question."
+# Tool results for calls not run: past the step's call cap, or out of steps.
+NOT_RUN_STEP_FULL = "Not run: too many lookups in one step. Ask for it in the next step."
+NOT_RUN_OUT_OF_STEPS = ("Not run: this answer is out of lookups. Answer now from the results you have, and say plainly "
+                        "what you couldn't look up so the user can ask for it separately.")
+# Tools that write the user's own row run one at a time (each reads, then writes it).
+_SEQUENTIAL_TOOLS = FAVORITE_TOOL_NAMES | PREFERENCE_TOOL_NAMES
 # Claims an answer may only make when this turn backs them. Figures (money,
 # percentages, table rows with numbers) need a tool run; saying something was
 # saved or will be remembered needs a favourites tool run. An unbacked answer
@@ -57,15 +64,81 @@ UNFINISHED_MESSAGE = "I couldn't finish that just now. Please ask again."
 UNSAVED_MESSAGE = "I couldn't save that just now. Please ask again."
 
 
-def _unbacked(answer: str, turn: "_Turn") -> tuple[str, str] | None:
-    """(reminder, fallback message) when the answer claims what this turn didn't do."""
+# The chat card fits this many table columns (AssistantMarkdown.fittedTableColumns
+# in the app); a wider table is sent back once to be narrowed, then kept as it is.
+MAX_TABLE_COLUMNS = 3
+NARROW_IT = (f"A table in that answer has more than {MAX_TABLE_COLUMNS} columns, too wide for the chat window. Rewrite it with at most "
+             f"{MAX_TABLE_COLUMNS} columns: the name and the one or two figures the question is about. Give any other figures in a "
+             "sentence or a second small table. Keep every figure exactly as the tools gave it.")
+
+
+NEEDS_A_CALL = (SAVE_IT, LOOK_IT_UP, ACT_NOW)
+
+# Figures checked against this turn's tool results: unsigned numbers of 10 or
+# more or with a decimal point. Signed ones (+147.3, -5) are worked-out
+# differences and years are dates, so neither is checked.
+_ANSWER_NUMBER = re.compile(r"(?<![\w.+\-−])\d[\d,]*(?:\.\d+)?")
+_OUTPUT_NUMBER = re.compile(r"-?\d+(?:\.\d+)?")
+MIN_UNSOURCED = 4
+MAX_UNSOURCED_SHARE = 0.25
+UNVERIFIED_MESSAGE = "I couldn't match all of those figures to the app's data, so I've left them out. Please ask again, more narrowly."
+
+
+def _checked(text: str) -> list[float]:
+    values = []
+    for match in _ANSWER_NUMBER.findall(text):
+        value = float(match.replace(",", ""))
+        if ("." in match or value >= 10) and not (match.isdigit() and 1900 <= value <= 2100):
+            values.append(value)
+    return values
+
+
+def unsourced_figures(answer: str, tool_outputs: list[str]) -> list[float]:
+    """The answer's checked figures found nowhere in the tool results, as
+    given, rounded, or as a percentage of a fraction."""
+    known: set[float] = set()
+    for value in (float(n) for n in _OUTPUT_NUMBER.findall(" ".join(tool_outputs))):
+        for form in (value, abs(value), value * 100):
+            known.update((round(form, 1), float(round(form))))
+    return [v for v in _checked(answer) if round(v, 1) not in known and float(round(v)) not in known]
+
+
+def _source_it(missing: list[float]) -> str:
+    examples = ", ".join(f"{v:g}" for v in missing[:6])
+    return (f"These figures in that answer aren't in this turn's tool results: {examples}. Use only figures the tools returned: "
+            "drop any row or number you can't source (never fill a table from memory) and look up what's missing.")
+
+
+def widest_table(answer: str) -> int:
+    """The most cells in any Markdown table row of the answer."""
+    widest = 0
+    for line in answer.splitlines():
+        row = line.strip()
+        if len(row) > 1 and row.startswith("|") and row.endswith("|"):
+            widest = max(widest, row[1:-1].count("|") + 1)
+    return widest
+
+
+def _unbacked(answer: str, turn: "_Turn") -> tuple[str, str | None] | None:
+    """(reminder, fallback) when the answer claims what this turn didn't do,
+    or has a table too wide to read; a None fallback keeps the answer."""
     if (_SAVED.search(answer) or _SAVED_LINE.search(answer)) and not (FAVORITE_TOOL_NAMES | PREFERENCE_TOOL_NAMES) & set(turn.sources):
         return SAVE_IT, UNSAVED_MESSAGE
     if _FIGURES.search(answer) and not turn.sources:
         return LOOK_IT_UP, UNLOOKED_MESSAGE
-    if _PROMISE.search(answer) and not turn.sources:
+    # A promise with no figures is unfinished, whatever ran before it.
+    if _PROMISE.search(answer) and (not turn.sources or not any(ch.isdigit() for ch in answer)):
         return ACT_NOW, UNFINISHED_MESSAGE
+    if turn.tool_outputs:
+        checked = _checked(answer)
+        missing = unsourced_figures(answer, turn.tool_outputs)
+        if len(missing) >= MIN_UNSOURCED and len(missing) > MAX_UNSOURCED_SHARE * len(checked):
+            return _source_it(missing), UNVERIFIED_MESSAGE
+    if widest_table(answer) > MAX_TABLE_COLUMNS:
+        return NARROW_IT, None
     return None
+
+
 STATUS_ACTIONS = ("status", "remove_favorite")
 _EVENT_ID = re.compile(r"^[A-Za-z0-9_-]{1,40}$")
 
@@ -163,7 +236,9 @@ def _preference_tool(clients: Clients, sub: str) -> dict:
 def _favorite_tool(clients: Clients, sub: str, name: str, args: dict) -> dict:
     try:
         if name == "save_favorite":
-            teams = user_store.save_favorite(clients.table, sub, args.get("sport", ""), args.get("team", ""), clients.sports(), clients.field_sports())
+            sport, field_sports = args.get("sport", ""), clients.field_sports()
+            team = favorite_names.resolve(clients.invoke_tool, sport, args.get("team", ""), sport in field_sports)
+            teams = user_store.save_favorite(clients.table, sub, sport, team, clients.sports(), field_sports)
         else:
             teams = user_store.clear_favorites(clients.table, sub, args.get("sport"))
     except user_store.FavoriteError as error:
@@ -214,23 +289,46 @@ def _answer_text(response) -> str:
     return "".join(b.text for b in response.content if b.type == "text").strip()
 
 
-def _run_calls(profile: Profile, clients: Clients, turn: _Turn, calls: list):
-    """Runs one round of tool calls. Yields progress events; returns the
-    tool_result blocks for the next request."""
-    results = []
-    for call in calls:
+def _one_call(profile: Profile, clients: Clients, turn: _Turn, call) -> dict:
+    if call.name in ("clear_favorites", "forget_preferences") and not _ASKS_TO_CLEAR.search(turn.question):
+        return {"ok": False, "error": "The user didn't ask to remove anything; leave it as it is."}
+    return _run_tool(profile, clients, turn.sub, call)
+
+
+def _not_run(call, reason: str) -> dict:
+    return {"type": "tool_result", "tool_use_id": call.id, "content": json.dumps({"error": reason}), "is_error": True}
+
+
+def _run_calls(profile: Profile, clients: Clients, turn: _Turn, calls: list, out_of_steps: bool = False):
+    """Runs one step's tool calls: lookups up to settings.parallel_tools at a
+    time, then writes to the user's own row one by one. Yields progress
+    events; returns the tool_result blocks for the next request, in call
+    order. Calls past the step's cap, or every call once out of steps, get a
+    not-run result instead."""
+    settings = profile.settings
+    if out_of_steps:
+        return [_not_run(call, NOT_RUN_OUT_OF_STEPS) for call in calls]
+    run, extra = calls[:settings.max_calls_per_step], calls[settings.max_calls_per_step:]
+    for call in run:
         yield {"type": "progress", "tool": call.name}
-        span = gen_ai_spans.start_tool(clients.tracer, turn.span, call)
-        if call.name in ("clear_favorites", "forget_preferences") and not _ASKS_TO_CLEAR.search(turn.question):
-            outcome = {"ok": False, "error": "The user didn't ask to remove anything; leave it as it is."}
-        else:
-            outcome = _run_tool(profile, clients, turn.sub, call)
+    spans = {call.id: gen_ai_spans.start_tool(clients.tracer, turn.span, call) for call in run}
+    lookups = [call for call in run if call.name not in _SEQUENTIAL_TOOLS]
+    outcomes: dict[str, dict] = {}
+    with ThreadPoolExecutor(max_workers=max(1, min(settings.parallel_tools, len(lookups) or 1))) as pool:
+        for call, outcome in zip(lookups, pool.map(lambda c: _one_call(profile, clients, turn, c), lookups)):
+            outcomes[call.id] = outcome
+    for call in run:
+        if call.id not in outcomes:
+            outcomes[call.id] = _one_call(profile, clients, turn, call)
+    results = []
+    for call in run:
+        outcome = outcomes[call.id]
         turn.sources.append(call.name)
         body = json.dumps(outcome.get("result") if outcome.get("ok") else {"error": outcome.get("error")})
-        gen_ai_spans.end_tool(span, body, bool(outcome.get("ok")))
+        gen_ai_spans.end_tool(spans[call.id], body, bool(outcome.get("ok")))
         turn.tool_outputs.append(body)
         results.append({"type": "tool_result", "tool_use_id": call.id, "content": body, "is_error": not outcome.get("ok")})
-    return results
+    return results + [_not_run(call, NOT_RUN_STEP_FULL) for call in extra]
 
 
 def _call_model(clients: Clients, turn: _Turn, request: dict):
@@ -262,8 +360,9 @@ def _model_loop(profile: Profile, clients: Clients, turn: _Turn, messages: list[
     if settings.effort:
         request["output_config"] = {"effort": settings.effort}
     sent_back = False
-    # Rounds, not lookups: favourites can take a round per team.
-    for _ in range(2 * settings.max_tool_calls + 2):
+    steps = 0
+    # Each step, then the answer, one sent-back retry and one answer once out of steps.
+    for _ in range(settings.max_steps + 3):
         response = _call_model(clients, turn, request)
         if response.stop_reason == "refusal":
             return REFUSAL_MESSAGE
@@ -274,18 +373,23 @@ def _model_loop(profile: Profile, clients: Clients, turn: _Turn, messages: list[
             if unbacked is None:
                 return answer
             if sent_back:
-                return unbacked[1]
+                return unbacked[1] or answer
             sent_back = True
             messages.append({"role": "assistant", "content": response.content})
             messages.append({"role": "user", "content": unbacked[0]})
+            # A reply copying earlier answers' wording keeps skipping the call:
+            # the retry must make one.
+            if unbacked[0] in NEEDS_A_CALL:
+                request["tool_choice"] = {"type": "any"}
             continue
-        # Saving or clearing favourites isn't a lookup: a list of teams saves in one answer.
-        lookups = [name for name in turn.sources + [c.name for c in calls] if name not in FAVORITE_TOOL_NAMES]
-        if len(lookups) > settings.max_tool_calls:
+        request.pop("tool_choice", None)
+        if steps > settings.max_steps:
             return TOO_MANY_LOOKUPS
+        out_of_steps = steps == settings.max_steps
+        steps += 1
         # Thinking and tool-use blocks go back exactly as they came.
         messages.append({"role": "assistant", "content": response.content})
-        results = yield from _run_calls(profile, clients, turn, calls)
+        results = yield from _run_calls(profile, clients, turn, calls, out_of_steps)
         messages.append({"role": "user", "content": results})
     return None
 

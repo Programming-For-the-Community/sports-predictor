@@ -185,10 +185,80 @@ def test_a_refusal_and_too_many_tool_calls_end_cleanly():
     clients, _ = _clients(FakeModel([_response(stop="refusal")]))
     assert _run(PUBLIC, clients)[-1]["text"] == agent_core.REFUSAL_MESSAGE
 
-    looping = FakeModel([_response(*[_call("list_events", {"sport": "nfl", "when": "upcoming"}, f"t{i}") for i in range(7)], stop="tool_use")])
-    clients, invoked = _clients(looping)
+
+
+def _lookup_step(step, count=1):
+    return _response(*[_call("list_events", {"sport": "nfl", "when": "upcoming"}, f"s{step}c{i}") for i in range(count)], stop="tool_use")
+
+
+def test_out_of_steps_the_model_answers_from_what_it_has():
+    steps = SETTINGS.max_steps
+    model = FakeModel([_lookup_step(i) for i in range(steps + 1)] + [_response(_text("Here is what I found; ask about NHL separately."))])
+    clients, invoked = _clients(model)
+
+    events = _run(PUBLIC, clients)
+
+    assert len(invoked) == steps
+    assert events[-1]["text"] == "Here is what I found; ask about NHL separately."
+    last_results = model.requests[-1]["messages"][-1]["content"]
+    assert json.loads(last_results[0]["content"])["error"] == agent_core.NOT_RUN_OUT_OF_STEPS
+
+
+def test_still_calling_tools_after_the_last_step_ends_cleanly():
+    model = FakeModel([_lookup_step(i) for i in range(SETTINGS.max_steps + 2)])
+    clients, invoked = _clients(model)
     assert "narrower" in _run(PUBLIC, clients)[-1]["text"]
-    assert invoked == []
+    assert len(invoked) == SETTINGS.max_steps
+
+
+def test_a_step_runs_its_cap_of_calls_and_says_the_rest_were_not_run():
+    cap = SETTINGS.max_calls_per_step
+    model = FakeModel([_lookup_step(0, cap + 2), _response(_text("Done."))])
+    clients, invoked = _clients(model)
+
+    _run(PUBLIC, clients)
+
+    assert len(invoked) == cap
+    results = model.requests[1]["messages"][-1]["content"]
+    assert len(results) == cap + 2
+    assert [json.loads(r["content"]).get("error") for r in results[cap:]] == [agent_core.NOT_RUN_STEP_FULL] * 2
+    assert [r["tool_use_id"] for r in results] == [f"s0c{i}" for i in range(cap + 2)]
+
+
+def test_a_step_s_lookups_run_in_parallel_up_to_the_setting():
+    import threading
+    import time
+    active, peak, lock = [0], [0], threading.Lock()
+
+    def slow_tool(name, args):
+        with lock:
+            active[0] += 1
+            peak[0] = max(peak[0], active[0])
+        time.sleep(0.05)
+        with lock:
+            active[0] -= 1
+        return {"ok": True, "result": {"value": 1}}
+
+    model = FakeModel([_lookup_step(0, 8), _response(_text("Done."))])
+    clients, _ = _clients(model)
+    clients.invoke_tool = slow_tool
+
+    started = time.monotonic()
+    _run(PUBLIC, clients)
+
+    assert peak[0] == SETTINGS.parallel_tools
+    assert time.monotonic() - started < 8 * 0.05
+
+
+def test_favourite_saves_in_one_step_all_land():
+    saves = [_call("save_favorite", {"sport": s, "team": t}, f"f{i}") for i, (s, t) in enumerate([("nfl", "MIN"), ("nba", "DEN"), ("nhl", "MIN")])]
+    table = FakeTable()
+    model = FakeModel([_response(*saves, stop="tool_use"), _response(_text("Saved all three."))])
+    clients, _ = _clients(model, table=table)
+
+    _run(PUBLIC, clients, "Save these")
+
+    assert table.items[("user-1", "favorites")]["teams"] == {"nfl": ["MIN"], "nba": ["DEN"], "nhl": ["MIN"]}
 
 
 @pytest.mark.parametrize("message, code", [("", "empty"), ("x" * 1001, "too_long")])
@@ -343,3 +413,61 @@ def test_favourites_are_only_cleared_when_the_user_asks():
 
     assert table.items[("user-1", "favorites")]["teams"] == {"nfl": ["MIN"]}
     assert model.requests[1]["messages"][-1]["content"][0]["is_error"] is True
+
+
+WIDE = "| Sport | Cost | Share | Change |\n|---|---|---|---|\n| nfl | $0.62 | 0.3% | +1% |"
+NARROW = "| Sport | Cost |\n|---|---|\n| nfl | $0.62 |"
+
+
+def test_a_table_too_wide_for_the_chat_is_sent_back_once_to_be_narrowed():
+    model = FakeModel([
+        _response(_call("get_cost_summary", {}), stop="tool_use"), _response(_text(WIDE)), _response(_text(NARROW)),
+    ])
+    clients, _ = _clients(model)
+
+    assert _run(ADMIN, clients, "Cost by sport?", token=ADMIN_USER)[-1]["text"] == NARROW
+    assert model.requests[2]["messages"][-1]["content"] == agent_core.NARROW_IT
+
+
+def test_a_table_still_wide_after_one_reminder_is_kept():
+    model = FakeModel([_response(_call("get_cost_summary", {}), stop="tool_use"), _response(_text(WIDE)), _response(_text(WIDE))])
+    clients, _ = _clients(model)
+    assert _run(ADMIN, clients, "Cost by sport?", token=ADMIN_USER)[-1]["text"] == WIDE
+
+
+def test_widest_table_counts_cells_and_ignores_other_pipes():
+    assert agent_core.widest_table(WIDE) == 4
+    assert agent_core.widest_table(NARROW) == 2
+    assert agent_core.widest_table("A | B is not a table") == 0
+
+
+def test_a_promise_after_lookups_with_nothing_found_is_sent_back():
+    model = FakeModel([
+        _lookup_step(0),
+        _response(_text("Let me try again in a moment and summarize what I have.")),
+        _response(_text("NFL: 9 of 12 picks right (75%).")),
+    ])
+    clients, _ = _clients(model)
+    assert _run(PUBLIC, clients)[-1]["text"] == "NFL: 9 of 12 picks right (75%)."
+
+
+SUMMARY = json.dumps({"player_totals": [{"stat": "passing_yards", "graded": 28, "avg_miss": 50.7,
+                                         "biggest_misses": [{"player": "Shedeur Sanders", "predicted": 149.7, "actual": 297}]}]})
+INVENTED = "\n".join(f"| QB{i} | {170 + i * 3.1:.1f} | {150 + i * 7} |" for i in range(8))
+
+
+def test_figures_missing_from_the_tool_results_are_sent_back_then_withheld():
+    model = FakeModel([
+        _lookup_step(0), _response(_text(INVENTED)), _response(_text(INVENTED)),
+    ])
+    clients, _ = _clients(model, tools={"list_events": {"ok": True, "result": json.loads(SUMMARY)}})
+
+    events = _run(PUBLIC, clients)
+
+    assert events[-1]["text"] == agent_core.UNVERIFIED_MESSAGE
+    assert "aren't in this turn's tool results" in model.requests[2]["messages"][-1]["content"]
+
+
+def test_sourced_figures_and_worked_out_differences_pass():
+    honest = "Sanders: predicted 149.7, threw 297 (+147.3). 28 graded, average miss 50.7 yards, 2026-11-08."
+    assert agent_core.unsourced_figures(honest, [SUMMARY]) == []

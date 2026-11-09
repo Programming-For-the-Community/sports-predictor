@@ -13,7 +13,7 @@ from library.assistant.prompts import build_profile
 from library.assistant.settings import AgentSettings
 
 SPORTS = ["f1", "nba", "ncaafb", "ncaambb", "nfl", "nhl", "pga"]
-SETTINGS = AgentSettings(model_id="anthropic.claude-haiku-5-5", effort="low", max_tokens=4096, max_tool_calls=6,
+SETTINGS = AgentSettings(model_id="anthropic.claude-haiku-5-5", effort="low", max_tokens=4096, max_steps=4, max_calls_per_step=10, parallel_tools=4,
                          max_message_chars=1000, history_turns=10, max_session_turns=30, daily_limit=50)
 PUBLIC = build_profile("public", SETTINGS, SPORTS)
 ADMIN = build_profile("admin", SETTINGS, SPORTS)

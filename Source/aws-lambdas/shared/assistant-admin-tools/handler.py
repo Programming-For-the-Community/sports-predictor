@@ -3,7 +3,7 @@ Assistant admin-tools Lambda: runs the admin agent's cost and traffic tools
 (library.assistant.admin_tools). Invoked only by the admin agent's runtime
 role (Terraform/iam-assistant-agents.tf). Reads the producers' S3 aggregates,
 CloudWatch metrics, the events table (pipeline health), the assistant table's
-usage rows and the sport registry; it holds no Cost Explorer or log-read
+usage rows, the sport registry and the training orchestrator's runs; it holds no Cost Explorer or log-read
 permission.
 
 Request: {"tool": "<name>", "input": {...}}
@@ -25,6 +25,7 @@ logger = logging.getLogger("assistant-admin-tools")
 
 _cloudwatch = boto3.client("cloudwatch", config=DEFAULT_CONFIG)
 _lambda = boto3.client("lambda", config=DEFAULT_CONFIG)
+_stepfunctions = boto3.client("stepfunctions", config=DEFAULT_CONFIG)
 _dynamodb = boto3.resource("dynamodb", config=DEFAULT_CONFIG)
 _events = _dynamodb.Table(os.environ["EVENTS_TABLE_NAME"])
 _assistant = _dynamodb.Table(os.environ["ASSISTANT_TABLE_NAME"])
@@ -46,6 +47,7 @@ def lambda_handler(event, context):
             s3=_get_s3(), settings=ToolSettings.from_env(), cloudwatch=_cloudwatch, lambda_client=_lambda,
             api_name=os.environ["API_GATEWAY_NAME"], project=os.environ["PROJECT_NAME"],
             events_table=_events, assistant_table=_assistant, sports=lambda: load_sports(_registry),
+            stepfunctions=_stepfunctions, training_state_machine_arn=os.environ["TRAINING_STATE_MACHINE_ARN"],
         )
         result = admin_tools.run(name, (event or {}).get("input"), tools_context)
     except ValueError as error:  # includes ToolInputError: a bad tool call

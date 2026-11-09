@@ -9,6 +9,9 @@ from concurrent.futures import ThreadPoolExecutor
 from typing import Callable
 
 Reader = Callable[[str, dict, dict], tuple[int, dict]]
+# Sports read at once: each is a predict-read invocation, which shares the
+# account's Lambda concurrency with the app.
+PARALLEL_READS = 4
 
 KINDS = {
     "pick": "share of winners called right (higher is better); baseline: always the home team",
@@ -36,7 +39,7 @@ def _sport(read: Reader, sport: str, model: str | None) -> dict:
 
 
 def overview(read: Reader, sports: list[str], model: str | None) -> dict:
-    with ThreadPoolExecutor(max_workers=max(1, min(len(sports), 8))) as pool:
+    with ThreadPoolExecutor(max_workers=max(1, min(len(sports), PARALLEL_READS))) as pool:
         per_sport = list(pool.map(lambda sport: _sport(read, sport, model), sports))
     return {"kinds": KINDS, "sports": per_sport,
             "note": ("season is the share right for pick and chance models, or the average miss for amount models; graded is how many predictions it covers. "
