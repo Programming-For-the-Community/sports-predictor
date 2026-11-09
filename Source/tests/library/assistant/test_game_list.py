@@ -60,3 +60,32 @@ def test_live_games_join_scores_to_the_day_s_games():
 
     assert [g["event_id"] for g in joined] == ["1", "3"]
     assert joined[0]["live"] == {"live": True, "detail": "2nd 8:41", "home_score": 33, "away_score": 16}
+
+
+def test_day_totals_break_down_by_conference_counting_a_conference_game_once():
+    def game(home_conf, away_conf, correct):
+        return {"status": "completed", "prediction_comparison": {"correct": correct},
+                "participants": [{"role": "home", "conference": home_conf}, {"role": "away", "conference": away_conf}]}
+    events = [game("Big Ten", "Big Ten", True), game("Big Ten", "SEC", False), game("WCC", None, True),
+              {"status": "completed", "participants": [{"conference": "SEC"}]}]  # no grade: left out
+
+    rows = game_list.totals(events)["by_conference"]
+
+    assert rows == [
+        {"conference": "Big Ten", "graded": 2, "correct": 1, "accuracy_pct": 50.0},
+        {"conference": "SEC", "graded": 1, "correct": 0, "accuracy_pct": 0.0},
+        {"conference": "WCC", "graded": 1, "correct": 1, "accuracy_pct": 100.0},
+    ]
+    assert "by_conference" not in game_list.totals([{"status": "completed", "participants": []}])
+
+
+def test_player_totals_sum_every_game_s_predicted_vs_actual_per_stat():
+    def game(passer, predicted, actual):
+        return {"status": "completed", "leaders_comparison": {
+            "home": {"passing": {"name": passer, "predicted": {"passing_yards": predicted}, "actual": {"passing_yards": actual}}},
+            "away": {"rushing": [{"name": "Back", "predicted": {"rushing_yards": 80.0}, "actual": {}}]}}}
+
+    rows = game_list.player_totals([game("A", 250.0, 300), game("B", 220.0, 200), {"status": "completed", "leaders_comparison": None}])
+
+    assert rows == [{"stat": "passing_yards", "graded": 2, "avg_miss": 35.0, "avg_lean": -15.0,
+                     "biggest_misses": [{"player": "A", "predicted": 250.0, "actual": 300}, {"player": "B", "predicted": 220.0, "actual": 200}]}]

@@ -19,17 +19,31 @@ def test_the_daily_limit_stops_at_the_limit_per_user_and_agent(fake_table):
     assert user_store.take_question(table, "sub-1", "public", 3, date(2026, 11, 7)) == (True, 2)
 
 
-def test_favorites_are_normalised_deduplicated_and_limited(fake_table):
+FIELD = frozenset({"f1", "pga"})
+
+
+def test_one_favourite_per_sport_replaces_the_last_and_every_sport_can_have_one(fake_table):
     table = fake_table()
-    assert user_store.save_favorite(table, "s", "nfl", " det ", SPORTS) == {"nfl": ["DET"]}
-    assert user_store.save_favorite(table, "s", "nfl", "DET", SPORTS) == {"nfl": ["DET"]}
-    user_store.save_favorite(table, "s", "nfl", "GB", SPORTS)
-    with pytest.raises(user_store.FavoriteError, match="per sport"):
-        user_store.save_favorite(table, "s", "nfl", "CHI", SPORTS)
-    user_store.save_favorite(table, "s", "nba", "DEN", SPORTS)
-    user_store.save_favorite(table, "s", "nhl", "COL", SPORTS)
-    with pytest.raises(user_store.FavoriteError, match="sports"):
-        user_store.save_favorite(table, "s", "pga", "ABC", SPORTS)
+    assert user_store.save_favorite(table, "s", "nfl", " det ", SPORTS, FIELD) == {"nfl": ["DET"]}
+    assert user_store.save_favorite(table, "s", "nfl", "MIN", SPORTS, FIELD) == {"nfl": ["MIN"]}
+    for sport, team in [("nba", "DEN"), ("ncaambb", "MINN"), ("ncaafb", "MINN"), ("nhl", "MIN"),
+                        ("pga", "  Scottie   Scheffler "), ("f1", "Max Verstappen")]:
+        user_store.save_favorite(table, "s", sport, team, SPORTS, FIELD)
+
+    saved = user_store.get_favorites(table, "s")
+    assert len(saved) == len(SPORTS)
+    assert saved["pga"] == ["Scottie Scheffler"]
+    assert saved["nfl"] == ["MIN"]
+
+
+def test_a_field_sport_takes_a_name_and_a_team_sport_an_abbreviation(fake_table):
+    table = fake_table()
+    with pytest.raises(user_store.FavoriteError, match="name"):
+        user_store.save_favorite(table, "s", "pga", "<script>", SPORTS, FIELD)
+    with pytest.raises(user_store.FavoriteError, match="abbreviation"):
+        user_store.save_favorite(table, "s", "nfl", "Scottie Scheffler", SPORTS, FIELD)
+    assert user_store.save_favorite(table, "s", "f1", "Kimi Antonelli", SPORTS, FIELD) == {"f1": ["Kimi Antonelli"]}
+    assert user_store.remove_favorite(table, "s", "f1", "kimi antonelli") == {}
 
 
 @pytest.mark.parametrize("sport, team", [("cricket", "IND"), ("nfl", "Detroit Lions"), ("nfl", "<b>")])

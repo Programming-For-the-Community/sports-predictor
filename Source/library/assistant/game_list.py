@@ -101,7 +101,26 @@ def totals(events: list[dict]) -> dict:
     if graded:
         result.update(graded=len(graded), correct=correct, accuracy_pct=round(100 * correct / len(graded), 1))
     result.update(upsets=flags.count("UPSET"), upset_watch=flags.count("UPSET WATCH"))
+    conferences = by_conference(events)
+    if conferences:
+        result["by_conference"] = conferences
     return result
+
+
+def by_conference(events: list[dict]) -> list[dict]:
+    """Graded picks per conference, most games first: a game counts once for
+    each conference its teams are in, so a conference game counts once."""
+    counts: dict[str, list[int]] = {}
+    for event in events:
+        comparison = event.get("prediction_comparison")
+        if not comparison:
+            continue
+        for conference in {p["conference"] for p in event.get("participants") or [] if p.get("conference")}:
+            tally = counts.setdefault(conference, [0, 0])
+            tally[0] += 1
+            tally[1] += 1 if comparison.get("correct") else 0
+    rows = [{"conference": c, "graded": g, "correct": r, "accuracy_pct": round(100 * r / g, 1)} for c, (g, r) in counts.items()]
+    return sorted(rows, key=lambda row: (-row["graded"], row["conference"]))
 
 
 def with_flags(events: list[dict]) -> list[dict]:
@@ -118,3 +137,38 @@ def live_games(events: list[dict], live: dict) -> list[dict]:
         if state and (state.get("live") or state.get("completed")):
             joined.append({**event, "live": {k: state.get(k) for k in ("live", "completed", "detail", "home_score", "away_score", "situation") if state.get(k) is not None}})
     return joined
+
+
+BIGGEST_MISSES = 3
+
+
+def _player_entries(value) -> list[dict]:
+    """Every predicted-vs-actual player entry ({name, predicted, actual}) in a game's leaders_comparison."""
+    if isinstance(value, dict):
+        if isinstance(value.get("predicted"), dict) and isinstance(value.get("actual"), dict):
+            return [value]
+        return [e for v in value.values() for e in _player_entries(v)]
+    if isinstance(value, list):
+        return [e for v in value for e in _player_entries(v)]
+    return []
+
+
+def player_totals(events: list[dict]) -> list[dict]:
+    """Per stat, over every game's listed players with an actual: how many
+    were graded, the average miss, the average lean (+ = predicted too high)
+    and the biggest misses."""
+    misses: dict[str, list[tuple[float, float, float, str]]] = {}
+    for event in events:
+        for entry in _player_entries(event.get("leaders_comparison")):
+            for stat, actual in entry["actual"].items():
+                predicted = entry["predicted"].get(stat)
+                if isinstance(predicted, (int, float)) and isinstance(actual, (int, float)):
+                    misses.setdefault(stat, []).append((predicted - actual, predicted, actual, entry.get("name") or "?"))
+    rows = []
+    for stat, values in sorted(misses.items()):
+        worst = sorted(values, key=lambda v: -abs(v[0]))[:BIGGEST_MISSES]
+        rows.append({"stat": stat, "graded": len(values),
+                     "avg_miss": round(sum(abs(v[0]) for v in values) / len(values), 1),
+                     "avg_lean": round(sum(v[0] for v in values) / len(values), 1),
+                     "biggest_misses": [{"player": name, "predicted": round(p, 1), "actual": a} for _, p, a, name in worst]})
+    return rows

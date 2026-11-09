@@ -100,6 +100,9 @@ def _game_list(events: list[dict], settings: ToolSettings) -> dict:
     dropped = frozenset() if len(events) <= PLAYER_DETAIL_MAX_GAMES else LIST_DROPPED_KEYS
     result = {"totals": game_list.totals(events), "count": len(events),
               "events": prune(game_list.with_flags(shown), settings.max_rows, dropped)}
+    players = game_list.player_totals(events)
+    if players:
+        result["player_totals"] = players
     if len(shown) < len(events):
         result["truncated"] = f"Showing {len(shown)} of {len(events)} games; totals cover all of them. Filter by team or conference for the rest."
     return result

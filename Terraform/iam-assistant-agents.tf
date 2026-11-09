@@ -100,8 +100,11 @@ data "aws_iam_policy_document" "assistant_agent" {
   }
 
   statement {
-    sid       = "OwnMemory"
-    actions   = ["bedrock-agentcore:CreateEvent", "bedrock-agentcore:ListEvents"]
+    sid = "OwnMemory"
+    actions = [
+      "bedrock-agentcore:CreateEvent", "bedrock-agentcore:ListEvents",
+      "bedrock-agentcore:ListMemoryRecords", "bedrock-agentcore:BatchDeleteMemoryRecords",
+    ]
     resources = [awscc_bedrockagentcore_memory.assistant[each.key].memory_arn]
   }
 

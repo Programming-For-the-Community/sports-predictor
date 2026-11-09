@@ -107,15 +107,26 @@ resource "aws_dynamodb_table" "assistant" {
   tags = local.assistant_tags
 }
 
-# Short-term conversation memory: one event per turn, under the caller's
-# sub (Source/library/assistant/history.py). Kept 7 days, the shortest the
-# service allows. Names allow letters, digits and underscores only.
+# Conversation memory: one event per turn, under the caller's sub
+# (Source/library/assistant/history.py), kept 7 days, the shortest the
+# service allows. The user-preference strategy reads those events and keeps
+# how each user has asked to be answered as long-term records under
+# /preferences/<sub> (Source/library/assistant/preferences.py); favourite
+# teams stay in DynamoDB. Names allow letters, digits and underscores only.
 resource "awscc_bedrockagentcore_memory" "assistant" {
   for_each = local.assistant_agents
 
   name                  = each.value.memory_name
-  description           = "Assistant (${each.key}) conversation turns, 7 days."
+  description           = "Assistant (${each.key}) conversation turns, 7 days, and each user's answer preferences."
   event_expiry_duration = 7
+
+  memory_strategies = [{
+    user_preference_memory_strategy = {
+      name        = "answer_preferences"
+      description = "How each user has asked the assistant to answer."
+      namespaces  = ["/preferences/{actorId}"]
+    }
+  }]
 
   tags = local.assistant_tags
 }

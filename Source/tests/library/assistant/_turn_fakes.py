@@ -66,9 +66,22 @@ class FakeGuardrails:
 
 
 class FakeMemory:
-    def __init__(self, events=None):
+    def __init__(self, events=None, records=None):
         self.events = list(events or [])
         self.created = []
+        self.records = dict(records or {})  # namespace -> [record]
+        self.record_reads = 0
+        self.deleted = []
+
+    def list_memory_records(self, memoryId, namespace, maxResults, nextToken=None):
+        self.record_reads += 1
+        return {"memoryRecordSummaries": self.records.get(namespace, [])}
+
+    def batch_delete_memory_records(self, memoryId, records):
+        self.deleted += [r["memoryRecordId"] for r in records]
+        for namespace in self.records:
+            self.records[namespace] = [r for r in self.records[namespace] if r["memoryRecordId"] not in self.deleted]
+        return {"successfulRecords": records, "failedRecords": []}
 
     def list_events(self, memoryId, actorId, sessionId, includePayloads, maxResults):
         return {"events": [e for e in self.events if e["actor"] == actorId and e["session"] == sessionId]}

@@ -21,6 +21,7 @@ PUBLIC_TOOL_NAMES = frozenset({
     "get_performance_overview",
 })
 FAVORITE_TOOL_NAMES = frozenset({"save_favorite", "clear_favorites"})
+PREFERENCE_TOOL_NAMES = frozenset({"forget_preferences"})
 ADMIN_TOOL_NAMES = frozenset({
     "get_cost_summary", "get_denied_locations", "get_repeat_offenders", "get_denied_endpoints",
     "get_denied_trend", "get_api_traffic", "get_lambda_health", "get_pipeline_health", "get_assistant_usage",
@@ -58,8 +59,9 @@ def _public(sport: dict) -> list[dict]:
         _tool(
             "list_events",
             "List this app's games for a sport with each prediction: the next game day ('upcoming'), the most recent one ('recent', with results and whether each pick was right), or any one date. "
-            "totals covers every game (picks graded and correct, accuracy, UPSET and UPSET WATCH counts) even when the list itself is cut short; each game carries its upset flag. "
-            "A list of three games or fewer (filter by team) also has each game's player predictions, with actual stats once played. "
+            "totals covers every game (picks graded and correct, accuracy, UPSET and UPSET WATCH counts, and the same per conference where teams have one) even when the list itself is cut short; each game carries its upset flag. "
+            "A list of three games or fewer (filter by team) also has each game's player predictions, with actual stats once played; "
+            "for finished games, player_totals sums up every game's player predictions per stat (graded, average miss, lean, biggest misses). "
             "Games in progress still count as upcoming: use get_live_scores for live games.",
             {"sport": sport, "when": {"type": "string", "enum": ["upcoming", "recent"], "description": "Which game day. Ignored when date is given; defaults to upcoming."},
              "date": {**_DATE, "description": "One game date, YYYY-MM-DD (U.S. Eastern, as the app dates games): every game that day, played or not. Not for golf or racing."},
@@ -84,7 +86,7 @@ def _public(sport: dict) -> list[dict]:
         ),
         _tool(
             "get_model_performance",
-            "Get how this app's models have performed this season: per model, the season result, the latest period, a period-by-period trend and accuracy by confidence band, plus win-pick accuracy by conference where teams have conferences (by_conference; window_days, when set, limits it to recent days).",
+            "Get how this app's models have performed this season, including the player-stat models (player-prop-passing-yards, player-prop-points, ...): per model, the season result, the latest period, a period-by-period trend and accuracy by confidence band, plus win-pick accuracy by conference where teams have conferences (by_conference; window_days, when set, limits it to recent days).",
             {"sport": sport, "model": {"type": "string", "description": "Optional model name, e.g. win-probability. Omit for all models."}},
             ["sport"],
         ),
@@ -116,14 +118,21 @@ def _favorites(sport: dict) -> list[dict]:
     return [
         _tool(
             "save_favorite",
-            "Save one of the user's favourite teams, only when the user asks you to remember it.",
-            {"sport": sport, "team": {"type": "string", "description": "Team abbreviation as this app shows it, e.g. DET."}},
+            "Save the user's favourite for a sport, only when the user names one: one per sport, replacing any earlier one. "
+            "One call per sport; several in one answer is fine.",
+            {"sport": sport, "team": {"type": "string", "description": "The team's abbreviation as this app shows it (DET); for golf and racing, the player's or driver's full name (Scottie Scheffler)."}},
             ["sport", "team"],
         ),
         _tool(
             "clear_favorites",
-            "Remove the user's saved favourite teams, only when the user asks. Omit sport to clear all.",
+            "Remove the user's saved favourites, only when the user asks to remove or forget them. Omit sport to clear all.",
             {"sport": sport},
+            [],
+        ),
+        _tool(
+            "forget_preferences",
+            "Forget every preference the user has stated about how you answer (tables, length, detail), only when they ask you to forget them.",
+            {},
             [],
         ),
     ]

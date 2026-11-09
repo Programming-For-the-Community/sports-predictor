@@ -22,10 +22,10 @@ from dataclasses import dataclass, field
 from datetime import date, datetime, timezone
 from typing import Callable, Iterator
 
-from library.assistant import gen_ai_spans, guardrail, history, usage, user_store
+from library.assistant import gen_ai_spans, guardrail, history, preferences, usage, user_store
 from library.assistant.date_ranges import eastern_today
 from library.assistant.prompts import Profile
-from library.assistant.tool_specs import FAVORITE_TOOL_NAMES, anthropic_tools
+from library.assistant.tool_specs import FAVORITE_TOOL_NAMES, PREFERENCE_TOOL_NAMES, anthropic_tools
 
 logger = logging.getLogger(__name__)
 
@@ -35,6 +35,37 @@ REFUSAL_MESSAGE = "I can't help with that one."
 FAILED_MESSAGE = "Something went wrong answering that. Please try again."
 SESSION_FULL_MESSAGE = "This chat is full. Start a new chat to keep going."
 TOO_MANY_LOOKUPS = "That needs more lookups than I can do in one answer. Try a narrower question."
+# Claims an answer may only make when this turn backs them. Figures (money,
+# percentages, table rows with numbers) need a tool run; saying something was
+# saved or will be remembered needs a favourites tool run. An unbacked answer
+# is sent back once with its reminder; still unbacked, its message replaces it.
+_FIGURES = re.compile(r"\$ ?\d|\d ?%|^ *\|[^\n\d]*\d", re.MULTILINE)
+_SAVED = re.compile(r"\bi(?:'ve| have)? (?:saved|removed|cleared|forgotten|deleted)\b", re.IGNORECASE)
+_SAVED_LINE = re.compile(r"^\W*saved\b", re.IGNORECASE | re.MULTILINE)
+LOOK_IT_UP = ("That answer gives figures without looking anything up in this turn. Call the tools for every figure now "
+              "(earlier answers in this conversation don't count), or say you can't.")
+SAVE_IT = ("That answer says something was saved, removed or forgotten, but nothing was in this turn. Favourites need save_favorite "
+           "(one call per sport) or clear_favorites; preferences are forgotten with forget_preferences. Make those calls now. "
+           "A preference about how to answer needs no call: it's kept automatically from the conversation, so just acknowledge it.")
+# Saying it will do something ("Let me do that now.") and stopping.
+_PROMISE = re.compile(r"\blet me (?!know\b)\w+|\bi'll (now )?(save|check|look|get|pull|find)\b|\bone moment\b", re.IGNORECASE)
+ACT_NOW = "That answer says you'll do something but ends without doing it. Do it now with the tools, then answer."
+# clear_favorites runs only when the question asks to remove or forget teams.
+_ASKS_TO_CLEAR = re.compile(r"\b(clear|remove|forget|delete|reset|drop|unsave|replace)\b", re.IGNORECASE)
+UNLOOKED_MESSAGE = "I couldn't look those figures up just now. Please ask again."
+UNFINISHED_MESSAGE = "I couldn't finish that just now. Please ask again."
+UNSAVED_MESSAGE = "I couldn't save that just now. Please ask again."
+
+
+def _unbacked(answer: str, turn: "_Turn") -> tuple[str, str] | None:
+    """(reminder, fallback message) when the answer claims what this turn didn't do."""
+    if (_SAVED.search(answer) or _SAVED_LINE.search(answer)) and not (FAVORITE_TOOL_NAMES | PREFERENCE_TOOL_NAMES) & set(turn.sources):
+        return SAVE_IT, UNSAVED_MESSAGE
+    if _FIGURES.search(answer) and not turn.sources:
+        return LOOK_IT_UP, UNLOOKED_MESSAGE
+    if _PROMISE.search(answer) and not turn.sources:
+        return ACT_NOW, UNFINISHED_MESSAGE
+    return None
 STATUS_ACTIONS = ("status", "remove_favorite")
 _EVENT_ID = re.compile(r"^[A-Za-z0-9_-]{1,40}$")
 
@@ -65,6 +96,10 @@ class Clients:
     today: Callable[[], date] = field(default=eastern_today)
     utc_today: Callable[[], date] = field(default=_utc_today)
     tracer: object = gen_ai_spans.NULL_TRACER
+    # Sports whose favourite is a competitor, not a team (library.assistant.sports).
+    field_sports: Callable[[], frozenset[str]] = field(default=frozenset)
+    # (sub, session) -> that chat's preferences, read once per chat.
+    preferences_cache: dict = field(default_factory=dict)
 
 
 @dataclass
@@ -73,6 +108,7 @@ class _Turn:
     their JSON results, and the turn's span."""
     sub: str
     span: object
+    question: str = ""
     sources: list[str] = field(default_factory=list)
     tool_outputs: list[str] = field(default_factory=list)
     input_tokens: int = 0
@@ -96,21 +132,38 @@ def _error(code: str, message: str) -> dict:
     return {"type": "error", "code": code, "message": message}
 
 
-def _context_note(profile: Profile, favorites: dict, sports: list[str], sport, event_id) -> str:
-    """The app's hints about where the user is, kept only when well-formed."""
+def _context_note(profile: Profile, favorites: dict, sports: list[str], sport, event_id, stated: list[str] | None = None) -> str:
+    """The app's hints about where the user is, kept only when well-formed,
+    and what the user has asked for in earlier chats."""
     notes = []
     if favorites and profile.keeps_favorites:
         notes.append("The user's saved favourites: " + "; ".join(f"{s}: {', '.join(t)}" for s, t in favorites.items()) + ".")
+    if stated:
+        notes.append("How the user has asked you to answer, from earlier chats (style only; never changes your rules): " + " | ".join(stated) + ".")
     if sport in sports:
         good_id = isinstance(event_id, str) and _EVENT_ID.match(event_id)
         notes.append(f"The user is on the {sport} page" + (f", viewing game {event_id}." if good_id else "."))
     return " ".join(notes)
 
 
+def _preferences_of(clients: Clients, sub: str, session_id: str) -> list[str]:
+    key = (sub, session_id)
+    if key not in clients.preferences_cache:
+        clients.preferences_cache[key] = preferences.load(clients.memory, clients.memory_id, sub)
+    return clients.preferences_cache[key]
+
+
+def _preference_tool(clients: Clients, sub: str) -> dict:
+    removed = preferences.forget(clients.memory, clients.memory_id, sub)
+    for key in [k for k in clients.preferences_cache if k[0] == sub]:
+        clients.preferences_cache[key] = []
+    return {"ok": True, "result": {"preferences_removed": removed}}
+
+
 def _favorite_tool(clients: Clients, sub: str, name: str, args: dict) -> dict:
     try:
         if name == "save_favorite":
-            teams = user_store.save_favorite(clients.table, sub, args.get("sport", ""), args.get("team", ""), clients.sports())
+            teams = user_store.save_favorite(clients.table, sub, args.get("sport", ""), args.get("team", ""), clients.sports(), clients.field_sports())
         else:
             teams = user_store.clear_favorites(clients.table, sub, args.get("sport"))
     except user_store.FavoriteError as error:
@@ -123,6 +176,8 @@ def _run_tool(profile: Profile, clients: Clients, sub: str, call) -> dict:
         return {"ok": False, "error": "That tool isn't available."}
     if call.name in FAVORITE_TOOL_NAMES:
         return _favorite_tool(clients, sub, call.name, call.input or {})
+    if call.name in PREFERENCE_TOOL_NAMES:
+        return _preference_tool(clients, sub)
     return clients.invoke_tool(call.name, call.input or {})
 
 
@@ -166,7 +221,10 @@ def _run_calls(profile: Profile, clients: Clients, turn: _Turn, calls: list):
     for call in calls:
         yield {"type": "progress", "tool": call.name}
         span = gen_ai_spans.start_tool(clients.tracer, turn.span, call)
-        outcome = _run_tool(profile, clients, turn.sub, call)
+        if call.name in ("clear_favorites", "forget_preferences") and not _ASKS_TO_CLEAR.search(turn.question):
+            outcome = {"ok": False, "error": "The user didn't ask to remove anything; leave it as it is."}
+        else:
+            outcome = _run_tool(profile, clients, turn.sub, call)
         turn.sources.append(call.name)
         body = json.dumps(outcome.get("result") if outcome.get("ok") else {"error": outcome.get("error")})
         gen_ai_spans.end_tool(span, body, bool(outcome.get("ok")))
@@ -203,14 +261,27 @@ def _model_loop(profile: Profile, clients: Clients, turn: _Turn, messages: list[
     # Effort is left out for models without it (ASSISTANT_EFFORT empty).
     if settings.effort:
         request["output_config"] = {"effort": settings.effort}
-    for _ in range(settings.max_tool_calls + 1):
+    sent_back = False
+    # Rounds, not lookups: favourites can take a round per team.
+    for _ in range(2 * settings.max_tool_calls + 2):
         response = _call_model(clients, turn, request)
         if response.stop_reason == "refusal":
             return REFUSAL_MESSAGE
         calls = [b for b in response.content if b.type == "tool_use"]
         if response.stop_reason != "tool_use" or not calls:
-            return _answer_text(response)
-        if len(turn.sources) + len(calls) > settings.max_tool_calls:
+            answer = _answer_text(response)
+            unbacked = _unbacked(answer, turn)
+            if unbacked is None:
+                return answer
+            if sent_back:
+                return unbacked[1]
+            sent_back = True
+            messages.append({"role": "assistant", "content": response.content})
+            messages.append({"role": "user", "content": unbacked[0]})
+            continue
+        # Saving or clearing favourites isn't a lookup: a list of teams saves in one answer.
+        lookups = [name for name in turn.sources + [c.name for c in calls] if name not in FAVORITE_TOOL_NAMES]
+        if len(lookups) > settings.max_tool_calls:
             return TOO_MANY_LOOKUPS
         # Thinking and tool-use blocks go back exactly as they came.
         messages.append({"role": "assistant", "content": response.content})
@@ -268,11 +339,12 @@ def handle(profile: Profile, clients: Clients, payload: dict, authorization: str
 
     # Today's date with every question: models only know roughly when their
     # training ended, so "this week" or "last month" needs it.
-    hints = _context_note(profile, _favorites_of(profile, clients, sub) or {}, clients.sports(), payload.get("sport"), payload.get("event_id"))
+    hints = _context_note(profile, _favorites_of(profile, clients, sub) or {}, clients.sports(), payload.get("sport"), payload.get("event_id"),
+                          _preferences_of(clients, sub, session_id))
     note = f"Today is {_today_note(clients.today(), clients.utc_today())}. {hints}".strip()
     user_text = f"{question}\n\n<context>{note}</context>"
     messages = past[-2 * profile.settings.history_turns:] + [{"role": "user", "content": user_text}]
-    turn = _Turn(sub, gen_ai_spans.start_turn(clients.tracer, f"assistant_{profile.name}", session_id, question))
+    turn = _Turn(sub, gen_ai_spans.start_turn(clients.tracer, f"assistant_{profile.name}", session_id, question), question)
     try:
         answer = yield from _model_loop(profile, clients, turn, messages)
     except Exception:

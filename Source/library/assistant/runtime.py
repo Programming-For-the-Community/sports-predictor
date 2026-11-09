@@ -17,7 +17,7 @@ from library.assistant import agent_core
 from library.assistant.converse_model import ConverseModel
 from library.assistant.prompts import Profile, build_profile
 from library.assistant.settings import AgentSettings
-from library.assistant.sports import load_sports
+from library.assistant.sports import load_field_sports, load_sports
 from library.assistant.tool_specs import ADMIN_TOOL_NAMES
 
 logger = logging.getLogger(__name__)
@@ -68,6 +68,7 @@ def build_clients(env: Mapping[str, str], model) -> agent_core.Clients:
         table=dynamodb.Table(env["ASSISTANT_TABLE_NAME"]),
         invoke_tool=tool_invoker(boto3.client("lambda", region_name=region), env),
         sports=lambda: load_sports(registry),
+        field_sports=lambda: load_field_sports(registry),
         guardrail_id=env["GUARDRAIL_ID"],
         guardrail_version=env["GUARDRAIL_VERSION"],
         memory_id=env["MEMORY_ID"],

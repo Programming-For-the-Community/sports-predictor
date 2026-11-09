@@ -28,6 +28,17 @@ def test_sports_are_read_from_every_registry_page_and_cached():
     sports.clear_cache()
 
 
+def test_field_sports_come_from_the_registry_event_type():
+    sports.clear_cache()
+    registry = FakeRegistry([{"Items": [{"sport": "nfl", "event_type": "head_to_head"}, {"sport": "pga", "event_type": "field"},
+                                        {"sport": "f1", "event_type": "field"}, {"sport": "nhl"}]}])
+
+    assert sports.load_field_sports(registry) == frozenset({"pga", "f1"})
+    assert sports.load_sports(registry) == ["f1", "nfl", "nhl", "pga"]
+    assert registry.scans == 1
+    sports.clear_cache()
+
+
 def test_settings_come_from_the_environment(monkeypatch):
     monkeypatch.setenv("ASSISTANT_DAILY_LIMIT", "300")
     monkeypatch.setenv("ASSISTANT_EFFORT", "medium")
