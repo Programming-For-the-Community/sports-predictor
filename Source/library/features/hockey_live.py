@@ -219,7 +219,7 @@ def _skater_row(context: _Context, entity_id: str, team_id: str, position: str |
     )
     row.update(live_matchup_columns(
         context.storage, context.sport, player_game, context.home_id, context.away_id, prior_games, nhl.PLAYER_WINDOW,
-        context.events,
+        context.events, event=context.event,
     ))
     return row
 

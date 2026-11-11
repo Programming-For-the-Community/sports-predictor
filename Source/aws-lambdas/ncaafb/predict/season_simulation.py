@@ -27,7 +27,11 @@ nuances.
 import random
 from typing import Callable
 
-from library.features.common import DEFAULT_HOME_ADVANTAGE, DEFAULT_K_FACTOR, DEFAULT_STARTING_RATING, expected_score
+from library.features.common import DEFAULT_STARTING_RATING, expected_score
+from library.features.elo import params_for
+
+DEFAULT_HOME_ADVANTAGE = params_for("ncaafb").home_advantage
+DEFAULT_K_FACTOR = params_for("ncaafb").k_factor
 
 DEFAULT_SIMULATIONS = 1000
 BOWL_ELIGIBILITY_WINS = 6

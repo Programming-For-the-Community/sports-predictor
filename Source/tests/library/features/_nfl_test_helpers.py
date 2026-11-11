@@ -14,7 +14,7 @@ def event(
     home_coach_experience=None, away_coach_experience=None,
     home_coach_season_win_pct=None, away_coach_season_win_pct=None,
     home_coach_career_playoff_win_pct=None, away_coach_career_playoff_win_pct=None,
-    home_injuries=None, away_injuries=None, kickoff_time=None,
+    home_injuries=None, away_injuries=None, kickoff_time=None, injuries_as_of=None,
 ):
     home_result = {"score": home_score, "won": home_score is not None and home_score > away_score}
     away_result = {"score": away_score, "won": away_score is not None and away_score > home_score}
@@ -36,6 +36,7 @@ def event(
         "away_coach_career_playoff_win_pct": away_coach_career_playoff_win_pct,
         "home_injuries": home_injuries,
         "away_injuries": away_injuries,
+        "injuries_as_of": injuries_as_of,
         "participants": [
             {"entity_id": home_id, "role": "home", "result": home_result},
             {"entity_id": away_id, "role": "away", "result": away_result},

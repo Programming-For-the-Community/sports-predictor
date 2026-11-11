@@ -18,7 +18,7 @@ from datetime import datetime, timezone
 import event_prediction
 import live_features
 import season_simulation
-from library.features.common import compute_elo_ratings
+from library.features.elo import sport_elo_ratings
 from library.features.nba_teams import TEAM_DIVISIONS, is_real_franchise_matchup
 from library.serving import bracket_projection
 from library.serving.bracket_simulation import BracketSimulation, RealPostseason, elo_rules, measured_home_edge
@@ -131,7 +131,7 @@ def _season_standings_inputs(storage: FeatureStorage) -> dict:
     # below gets the FULL (unscoped) history instead, since it does its
     # own season-boundary regression (see that function's docstring).
     wins, losses, point_differential, cup_wins, cup_losses = _completed_game_records(completed)
-    _, current_ratings = compute_elo_ratings(all_completed, as_of_season=current_season)
+    _, current_ratings = sport_elo_ratings("nba", all_completed, as_of_season=current_season)
     remaining_games, remaining_cup_games, team_next_event = _remaining_game_inputs(scheduled)
 
     return {

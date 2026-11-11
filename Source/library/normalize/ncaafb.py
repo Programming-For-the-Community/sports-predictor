@@ -181,6 +181,7 @@ def game_to_event_item(game: dict, sport: str) -> dict:
         "away_conference": game.get("awayConference"),
         "conference_game": game.get("conferenceGame"),
         "is_playoff_game": game.get("playoff") is not None,
+        "neutral_site": game.get("neutralSite"),
     }
 
     if home_coach := game.get("home_coach"):

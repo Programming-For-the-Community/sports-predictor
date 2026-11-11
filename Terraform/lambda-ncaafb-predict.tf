@@ -38,6 +38,7 @@ resource "aws_lambda_function" "ncaafb_predict" {
       EVENTS_TABLE_NAME            = aws_dynamodb_table.events.name
       PLAYER_GAME_STATS_TABLE_NAME = aws_dynamodb_table.player_game_stats.name
       TEAM_GAME_STATS_TABLE_NAME   = aws_dynamodb_table.team_game_stats.name
+      RAW_BUCKET_NAME              = aws_s3_bucket.raw_data_lake.bucket
     }
   }
 

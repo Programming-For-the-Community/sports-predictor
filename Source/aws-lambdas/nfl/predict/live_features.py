@@ -20,7 +20,9 @@ omitted, each function fetches its own.
 """
 from datetime import date
 
-from library.features.common import TEAM_HISTORY_GAMES, compute_elo_ratings
+from library.features.box_history import live_paired_history
+from library.features.common import TEAM_HISTORY_GAMES
+from library.features.elo import sport_elo_ratings
 from library.features.matchup import live_matchup_columns
 from library.features.live_orchestration import EventNotFoundError, MalformedEventError
 from library.features.live_orchestration import home_away_ids as _home_away_ids
@@ -205,8 +207,8 @@ def build_live_event_features(
 
     home_events = storage.get_team_events(sport, home_id, before_date=event["event_date"], limit=TEAM_HISTORY_GAMES, events=events)
     away_events = storage.get_team_events(sport, away_id, before_date=event["event_date"], limit=TEAM_HISTORY_GAMES, events=events)
-    home_box = storage.get_team_game_stats_for_team(sport, home_id, before_date=event["event_date"], limit=window, team_game_stats=team_game_stats)
-    away_box = storage.get_team_game_stats_for_team(sport, away_id, before_date=event["event_date"], limit=window, team_game_stats=team_game_stats)
+    home_box = live_paired_history(storage, sport, home_id, event["event_date"], team_game_stats, events, TEAM_HISTORY_GAMES)
+    away_box = live_paired_history(storage, sport, away_id, event["event_date"], team_game_stats, events, TEAM_HISTORY_GAMES)
 
     # Depth chart/injuries are the event's own ingest-time snapshot.
     # Absent for any event without one, in which case every
@@ -289,7 +291,7 @@ def _build_player_feature_row(
         own_previous_event_date,
         window,
     )
-    row.update(live_matchup_columns(storage, sport, player_game, home_id, away_id, prior_games, window, events))
+    row.update(live_matchup_columns(storage, sport, player_game, home_id, away_id, prior_games, window, events, event=event))
     return row
 
 
@@ -344,7 +346,7 @@ def build_live_event_leader_candidates(
     home_id, away_id = _home_away_ids(event)
 
     events = events if events is not None else storage.get_all_events(sport)
-    _, current_ratings = compute_elo_ratings(events, as_of_season=event.get("season"))
+    _, current_ratings = sport_elo_ratings(sport, events, as_of_season=event.get("season"))
 
     return {
         "home": _team_leader_candidates(

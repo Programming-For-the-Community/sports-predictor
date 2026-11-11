@@ -16,6 +16,8 @@ bulk-per-week rather than per-game:
     ncaafb/boxscore/{season}/{season_type}/{week}.json  -> player stats, player entities
     ncaafb/teamstats/{season}/{season_type}/{week}.json -> team stats
     ncaafb/roster/{season}.json                         -> player entities (position)
+    ncaafb/advanced|talent|returning/...                -> skipped (read in place, see
+                                                           library.storage.cfbd_supplements)
                                                             -- a {"fetched_at", "data"}
                                                             envelope, not a bare list
 
@@ -225,7 +227,14 @@ def _process_teamstats(payload: list, key: str) -> None:
     logger.info("Wrote %d team stat lines from %s", total, key)
 
 
+# CFBD supplements feature engineering and predict read straight from S3.
+_READ_IN_PLACE_PREFIXES = ("ncaafb/advanced/", "ncaafb/talent/", "ncaafb/returning/")
+
+
 def _dispatch(bucket: str, key: str) -> None:
+    if key.startswith(_READ_IN_PLACE_PREFIXES):
+        logger.info("Read in place by feature engineering, nothing to normalize: %s", key)
+        return
     response = _s3.get_object(Bucket=bucket, Key=key, ExpectedBucketOwner=get_account_id())
     payload = json.loads(response["Body"].read())
 

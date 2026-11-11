@@ -418,7 +418,7 @@ class TestBuildEventFeatures:
         assert row["elo_diff"] is None
 
     def test_goalie_lineup_and_injury_columns(self):
-        game = {**self._game(), "home_injuries": [{"status": "Out"}]}
+        game = {**self._game(), "home_injuries": [{"status": "Out"}], "injuries_as_of": "2025-01-01T00:00:00+00:00"}
         home_goalie = {**nhl.empty_goalie_features(), "save_pct_career": 0.915}
         home_lineup = {"ice_time_share_missing": 0.1, "regulars_missing": 2, "top_scorers_out": 1}
 

@@ -90,6 +90,18 @@ TEAM_COORDINATES: dict[str, tuple[float, float]] = {
     "30": (35.2251, -80.8392),   # CHA -- Charlotte (Spectrum Center)
 }
 
+# Standard-time UTC offset (hours) of each team's home market.
+_EASTERN, _CENTRAL, _MOUNTAIN, _PACIFIC = -5, -6, -7, -8
+
+TEAM_UTC_OFFSETS: dict[str, int] = {
+    "1": _EASTERN, "2": _EASTERN, "5": _EASTERN, "8": _EASTERN, "11": _EASTERN, "14": _EASTERN, "17": _EASTERN,
+    "18": _EASTERN, "19": _EASTERN, "20": _EASTERN, "27": _EASTERN, "28": _EASTERN, "30": _EASTERN,
+    "3": _CENTRAL, "4": _CENTRAL, "6": _CENTRAL, "10": _CENTRAL, "15": _CENTRAL, "16": _CENTRAL,
+    "24": _CENTRAL, "25": _CENTRAL, "29": _CENTRAL,
+    "7": _MOUNTAIN, "21": _MOUNTAIN, "26": _MOUNTAIN,
+    "9": _PACIFIC, "12": _PACIFIC, "13": _PACIFIC, "22": _PACIFIC, "23": _PACIFIC,
+}
+
 # Recurring NBA international/neutral-site game host cities. The
 # designated home team isn't actually at their own market for these.
 INTERNATIONAL_VENUES: dict[str, tuple[float, float]] = {

@@ -115,7 +115,7 @@ def _skater_rows(
             game, prior, event, elo_ratings, team["records"], sides[other]["records"],
             opponent_goalie=sides[other]["goalie"], recent_lines=lines,
         )
-        row.update(matchup.matchup_columns(SPORT, game, sides[other]["team_id"], prior, lookup, nhl.PLAYER_WINDOW))
+        row.update(matchup.matchup_columns(SPORT, game, sides[other]["team_id"], prior, lookup, nhl.PLAYER_WINDOW, event=event))
         rows.append(row)
     return rows
 

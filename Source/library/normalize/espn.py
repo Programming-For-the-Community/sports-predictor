@@ -8,8 +8,20 @@ one string -- is passed in by the caller via compound_key_splits rather
 than hardcoded here.
 """
 from library.normalize.odds import PREGAME_ODDS, scoreboard_odds
-from library.parsing import parse_clock_to_seconds, parse_number, snake_case, us_eastern_date_from_iso
-from library.schema.keys import entity_key, entity_team_key, event_key, player_key, team_key
+from library.normalize.pregame import INJURIES_AS_OF, is_completed, now_iso
+from library.parsing import (
+    parse_clock_to_seconds,
+    parse_number,
+    snake_case,
+    us_eastern_date_from_iso,
+)
+from library.schema.keys import (
+    entity_key,
+    entity_team_key,
+    event_key,
+    player_key,
+    team_key,
+)
 
 
 def team_to_entity(team: dict, sport: str) -> dict:
@@ -74,6 +86,25 @@ def _event_status(status: dict) -> str:
     return "scheduled"
 
 
+MAX_POLL_RANK = 25
+
+
+def _periods(competition: dict) -> int | None:
+    """Periods played, overtime included; None before any linescores exist."""
+    return max((len(c.get("linescores") or []) for c in competition["competitors"]), default=0) or None
+
+
+def _poll_ranks(competition: dict) -> dict:
+    """{home,away}_current_rank: the scoreboard's AP rank going into the
+    game, for ranked sides only (99 means unranked)."""
+    ranks = {}
+    for competitor in competition["competitors"]:
+        rank = (competitor.get("curatedRank") or {}).get("current")
+        if competitor.get("homeAway") in ("home", "away") and isinstance(rank, int) and 1 <= rank <= MAX_POLL_RANK:
+            ranks[f"{competitor['homeAway']}_current_rank"] = rank
+    return ranks
+
+
 def _pregame_odds(event: dict, competition: dict) -> dict | None:
     """Only a game that hasn't started: an in-progress one can carry live
     odds, and PipelineStorage.upsert_event keeps the line already on file."""
@@ -124,6 +155,10 @@ def scoreboard_event_to_event_item(event: dict, sport: str) -> dict:
         "venue_city": venue_address.get("city"),
         "venue_state": venue_address.get("state"),
         "weather_temperature": weather.get("temperature"),
+        # AccuWeather icon id, present only on a scheduled game's forecast.
+        "weather_condition_id": parse_number(weather.get("conditionId")),
+        "neutral_site": competition.get("neutralSite"),
+        "periods": _periods(competition),
         # Sport-agnostic passthrough of ESPN's own per-competition flag --
         # always set (may be None on a sport/competition that doesn't
         # carry it), same "native ESPN field" treatment as venue_indoor
@@ -137,6 +172,8 @@ def scoreboard_event_to_event_item(event: dict, sport: str) -> dict:
 
     if (odds := _pregame_odds(event, competition)) is not None:
         item[PREGAME_ODDS] = odds
+
+    item.update(_poll_ranks(competition))
 
     # Sport-agnostic passthrough of ESPN's "notes" headline. Scoreboard
     # events carry it on the competition (competitions[0].notes); the
@@ -171,6 +208,8 @@ def scoreboard_event_to_event_item(event: dict, sport: str) -> dict:
         item["home_injuries"] = home_injuries
     if (away_injuries := event.get("away_injuries")) is not None:
         item["away_injuries"] = away_injuries
+    if injuries_as_of := event.get(INJURIES_AS_OF):
+        item[INJURIES_AS_OF] = injuries_as_of
     if (home_depth_chart := event.get("home_depth_chart")) is not None:
         item["home_depth_chart"] = home_depth_chart
     if (away_depth_chart := event.get("away_depth_chart")) is not None:
@@ -246,14 +285,19 @@ def league_team_ids(teams_response: dict) -> list[str]:
     return [t["team"]["id"] for t in teams if t.get("team", {}).get("id")]
 
 
-def attach_injuries(events: list[dict], injuries_by_team: dict[str, list[dict]]) -> None:
+def attach_injuries(events: list[dict], injuries_by_team: dict[str, list[dict]], as_of: str | None = None) -> None:
     """Sets home_injuries/away_injuries on each raw scoreboard event in
     place, from the same ingest run's roster fetch -- the fields
-    scoreboard_event_to_event_item reads. A team missing from
+    scoreboard_event_to_event_item reads. A completed game gets none: its
+    injuries stay the pre-game snapshot already on file (see
+    library.normalize.pregame). A team missing from
     injuries_by_team (its roster fetch failed) leaves that side unset rather
     than an empty list, keeping "never checked" distinct from "checked,
-    nobody's hurt"."""
+    nobody's hurt". An event given either side's report is stamped
+    injuries_as_of (as_of, default now)."""
     for evt in events:
+        if is_completed(evt):
+            continue
         competitions = evt.get("competitions") or [{}]
         for competitor in competitions[0].get("competitors", []):
             team_id = str(competitor.get("team", {}).get("id", ""))
@@ -261,6 +305,7 @@ def attach_injuries(events: list[dict], injuries_by_team: dict[str, list[dict]])
             if role not in ("home", "away") or team_id not in injuries_by_team:
                 continue
             evt[f"{role}_injuries"] = injuries_by_team[team_id]
+            evt[INJURIES_AS_OF] = as_of or now_iso()
 
 
 def roster_to_team_injuries(roster: dict, current_statuses: frozenset[str] | set[str] = _CURRENT_INJURY_STATUSES) -> list[dict]:

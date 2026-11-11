@@ -9,6 +9,8 @@ import time
 from collections import defaultdict
 from typing import Protocol
 
+from library.features import player_context
+
 FOOTBALL_PROP_STATS = (
     "passing_yards", "passing_touchdowns", "rushing_yards", "rushing_touchdowns",
     "receiving_yards", "receiving_touchdowns", "defensive_sacks",
@@ -37,6 +39,9 @@ class MatchupLookup(Protocol):
 
     def team_totals(self, event_key: str, team_id: str) -> dict[str, float]:
         """Each stat summed over the team's player rows in that event."""
+
+    def player_games_before(self, entity_id: str, before_date: str, limit: int) -> list[dict]:
+        """The player's own game rows before before_date, most recent first."""
 
 
 def _mean(values: list[float]) -> float | None:
@@ -68,7 +73,7 @@ def _allowed_by_opponent(opponent_id: str | None, before_date: str, lookup: Matc
     return allowed
 
 
-def _share(game: dict, stat: str, lookup: MatchupLookup) -> float | None:
+def share_of_team(game: dict, stat: str, lookup: MatchupLookup) -> float | None:
     if game.get("event_key") is None:
         return None
     team_total = lookup.team_totals(game["event_key"], game.get("team_id")).get(stat)
@@ -78,18 +83,22 @@ def _share(game: dict, stat: str, lookup: MatchupLookup) -> float | None:
 
 def matchup_columns(
     sport: str, player_game: dict, opponent_id: str | None, prior_games: list[dict], lookup: MatchupLookup, window: int,
+    event: dict | None = None,
 ) -> dict:
     """opp_allowed_<stat>: the opponent's last `window` games' average of what
     its opponents totaled; share_<stat>: the player's average share of team
-    volume over prior_games. Empty for a sport without MATCHUP_STATS."""
+    volume over prior_games. With `event`, also library.features.
+    player_context's injury, pace and trend columns. Empty for a sport
+    without MATCHUP_STATS."""
     if sport not in MATCHUP_STATS:
         return {}
+    context = player_context.context_columns(sport, player_game, opponent_id, event, lookup) if event is not None else {}
     prop_stats, usage_stats = MATCHUP_STATS[sport]
     allowed = [totals for totals in _allowed_by_opponent(opponent_id, player_game["event_date"], lookup, window) if totals]
     columns = {f"opp_allowed_{stat}": _mean([totals.get(stat, 0.0) for totals in allowed]) for stat in prop_stats}
     for stat in usage_stats:
-        columns[f"share_{stat}"] = _mean([share for game in prior_games[:window] if (share := _share(game, stat, lookup)) is not None])
-    return columns
+        columns[f"share_{stat}"] = _mean([share for game in prior_games[:window] if (share := share_of_team(game, stat, lookup)) is not None])
+    return {**columns, **context}
 
 
 class InMemoryMatchupLookup:
@@ -108,6 +117,10 @@ class InMemoryMatchupLookup:
             for participant in event.get("participants", []):
                 self._games[participant.get("entity_id")].append(event)
         self._dates = {team_id: [e["event_date"] for e in games] for team_id, games in self._games.items()}
+        self._player_games: dict[str, list[dict]] = defaultdict(list)
+        for row in sorted(player_games, key=lambda r: r.get("event_date", "")):
+            self._player_games[row["entity_id"]].append(row)
+        self._player_dates = {entity_id: [r.get("event_date", "") for r in rows] for entity_id, rows in self._player_games.items()}
 
     def team_games_before(self, team_id: str, before_date: str, limit: int) -> list[dict]:
         end = bisect.bisect_left(self._dates.get(team_id, []), before_date)
@@ -116,13 +129,20 @@ class InMemoryMatchupLookup:
     def team_totals(self, event_key: str, team_id: str) -> dict[str, float]:
         return self._totals.get((event_key, team_id), {})
 
+    def player_games_before(self, entity_id: str, before_date: str, limit: int) -> list[dict]:
+        end = bisect.bisect_left(self._player_dates.get(entity_id, []), before_date)
+        return self._player_games.get(entity_id, [])[max(0, end - limit):end][::-1]
+
 
 _event_rows_cache: dict[str, tuple[float, dict[str, dict[str, float]]]] = {}
+_PLAYER_GAMES_MAX = 2048
+_player_games_cache: dict[tuple, tuple[float, list[dict]]] = {}
 
 
 class StorageMatchupLookup:
-    """Live serving: reads each past game's player rows at most once per
-    _EVENT_ROWS_TTL_SECONDS across requests in a warm container."""
+    """Live serving: reads each past game's player rows, and each player's
+    recent games, at most once per _EVENT_ROWS_TTL_SECONDS across requests
+    in a warm container."""
 
     def __init__(self, storage, sport: str, events: list[dict] | None = None):
         self._storage = storage
@@ -142,11 +162,24 @@ class StorageMatchupLookup:
             _event_rows_cache[event_key] = cached
         return cached[1].get(team_id, {})
 
+    def player_games_before(self, entity_id: str, before_date: str, limit: int) -> list[dict]:
+        key = (self._sport, entity_id, before_date, limit)
+        cached = _player_games_cache.get(key)
+        if cached is None or time.monotonic() - cached[0] >= _EVENT_ROWS_TTL_SECONDS:
+            if len(_player_games_cache) >= _PLAYER_GAMES_MAX:
+                _player_games_cache.pop(next(iter(_player_games_cache)))
+            rows = self._storage.get_player_game_stats(entity_id, before_date=before_date, limit=limit, sport=self._sport)
+            cached = (time.monotonic(), rows)
+            _player_games_cache[key] = cached
+        return cached[1]
+
 
 def live_matchup_columns(
     storage, sport: str, player_game: dict, home_id: str, away_id: str, prior_games: list[dict], window: int,
-    events: list[dict] | None = None,
+    events: list[dict] | None = None, event: dict | None = None,
 ) -> dict:
     """matchup_columns for a live (not yet played) player row."""
     opponent_id = away_id if player_game["team_id"] == home_id else home_id
-    return matchup_columns(sport, player_game, opponent_id, prior_games, StorageMatchupLookup(storage, sport, events), window)
+    return matchup_columns(
+        sport, player_game, opponent_id, prior_games, StorageMatchupLookup(storage, sport, events), window, event=event,
+    )

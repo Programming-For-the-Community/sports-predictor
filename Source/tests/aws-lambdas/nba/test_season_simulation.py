@@ -571,3 +571,10 @@ class TestSimulateFinalsHomeCourt:
         champions = [("east", 58, 100), ("west", 58, 250)]
 
         assert season_simulation._simulate_finals(champions, {}, 0.0, self._AlwaysHome()) == "west"
+
+
+def test_simulates_on_the_sports_own_elo_scale():
+    from library.features.elo import params_for
+
+    assert season_simulation.DEFAULT_HOME_ADVANTAGE == params_for("nba").home_advantage
+    assert season_simulation.DEFAULT_K_FACTOR == params_for("nba").k_factor

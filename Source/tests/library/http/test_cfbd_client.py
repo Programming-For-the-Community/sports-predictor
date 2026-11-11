@@ -190,3 +190,22 @@ class TestGetRoster:
         client = _client_with_mocked_get()
         client.get_roster(2025)
         client._get.assert_called_once_with("roster", params={"year": 2025})
+
+
+class TestSupplementEndpoints:
+    def test_advanced_game_stats_excludes_garbage_time(self):
+        client = _client_with_mocked_get()
+        client.get_advanced_game_stats(2025, 9, "regular")
+        client._get.assert_called_once_with("stats/game/advanced", params={
+            "year": 2025, "week": 9, "seasonType": "regular", "excludeGarbageTime": "true",
+        })
+
+    def test_talent_by_year(self):
+        client = _client_with_mocked_get()
+        client.get_talent(2025)
+        client._get.assert_called_once_with("talent", params={"year": 2025})
+
+    def test_returning_production_by_year(self):
+        client = _client_with_mocked_get()
+        client.get_returning_production(2025)
+        client._get.assert_called_once_with("player/returning", params={"year": 2025})

@@ -79,7 +79,7 @@ def build_event_dataset(storage: FeatureStorage, window: int, since_date: str | 
     logger.info("Loaded %d completed events (excluding exhibition games)", len(events))
     return build_dataset_common.build_team_event_rows(
         events, storage.get_all_team_game_stats(SPORT, since_date=since_date), window, _event_features, logger,
-        player_games=storage.get_all_player_game_stats(SPORT, since_date=since_date), leaders=LEADERS,
+        sport=SPORT, player_games=storage.get_all_player_game_stats(SPORT, since_date=since_date), leaders=LEADERS,
     )
 
 

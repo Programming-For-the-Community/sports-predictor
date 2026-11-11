@@ -185,6 +185,7 @@ jobs:
       test_path: >-
         Source/tests/aws-lambdas/ncaafb/test_ingest_lambda_handler.py
         Source/tests/aws-lambdas/ncaafb/test_ingest_enrichment.py
+        Source/tests/aws-lambdas/ncaafb/test_ingest_supplements.py
       requirements_files: 'Source/aws-lambdas/ncaafb/ingest/requirements.txt'
 
   test-ncaafb-normalize:
@@ -1080,7 +1081,7 @@ jobs:
       sport: 'NCAAFB'
       ingest_function_name: ${{ needs.infra.outputs.ncaafb_ingest_function_name }}
       ingest_handler_dir: 'Source/aws-lambdas/ncaafb/ingest'
-      ingest_extra_source_files: 'Source/aws-lambdas/ncaafb/ingest/enrichment.py'
+      ingest_extra_source_files: 'Source/aws-lambdas/ncaafb/ingest/enrichment.py Source/aws-lambdas/ncaafb/ingest/supplements.py'
       normalize_function_name: ${{ needs.infra.outputs.ncaafb_normalize_function_name }}
       normalize_handler_dir: 'Source/aws-lambdas/ncaafb/normalize'
       schedule_sync_function_name: ${{ needs.infra.outputs.ncaafb_schedule_sync_function_name }}

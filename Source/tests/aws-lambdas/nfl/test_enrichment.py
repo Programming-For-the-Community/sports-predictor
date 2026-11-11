@@ -110,7 +110,20 @@ class TestEnrichEvents:
         assert event["away_coach"] is None  # team 24 has no entry in get_season_coaches' return value
         assert event["home_injuries"] == [{"entity_id": "p-12", "status": "Out"}]
         assert event["away_injuries"] == [{"entity_id": "p-24", "status": "Out"}]
+        assert event["injuries_as_of"]
         assert event["home_depth_chart"] == {"qb": {"position": {"abbreviation": "QB"}, "athletes": [{"id": "qb-12"}]}}
+
+    def test_a_completed_game_gets_no_coach_or_injuries(self):
+        # Its pre-game coach record and injury report stay on file (library.normalize.pregame).
+        event = _competition_event("1", "12", "24")
+        event["status"]["type"]["completed"] = True
+        core_client = MagicMock()
+        core_client.get_season_coaches.return_value = {"12": {"coach_id": "1"}}
+        core_client.get_team_injuries.return_value = [{"entity_id": "p", "status": "Out"}]
+
+        enrichment.enrich_events([event], 2025, MagicMock(), core_client, _make_s3(), BUCKET)
+
+        assert not {"home_coach", "away_coach", "home_injuries", "away_injuries"} & set(event)
 
     def test_malformed_event_is_skipped_without_raising(self):
         events = [{"id": "1"}]  # no competitions -- home_away_team_ids returns None

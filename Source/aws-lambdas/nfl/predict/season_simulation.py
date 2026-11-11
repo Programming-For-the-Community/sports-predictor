@@ -16,7 +16,11 @@ record, etc.) are not implemented.
 """
 import random
 
-from library.features.common import DEFAULT_HOME_ADVANTAGE, DEFAULT_K_FACTOR, DEFAULT_STARTING_RATING, expected_score
+from library.features.common import DEFAULT_STARTING_RATING, expected_score
+from library.features.elo import params_for
+
+DEFAULT_HOME_ADVANTAGE = params_for("nfl").home_advantage
+DEFAULT_K_FACTOR = params_for("nfl").k_factor
 from library.features.nfl_teams import TEAM_DIVISIONS
 from library.serving import season_projection_common
 

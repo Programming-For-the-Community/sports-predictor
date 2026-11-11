@@ -43,6 +43,8 @@ Genuinely different from NBA, not just renamed:
   schedule is date-based, not week-based, same as NBA's.
 """
 from library.features import common
+from library.features.basketball_extras import basketball_extra_columns
+from library.features.schedule import SiteTable
 from library.features.common import (
     DEFAULT_ROLLING_WINDOW,
     _season_record,
@@ -50,6 +52,9 @@ from library.features.common import (
     current_streak,
     rolling_team_scoring_averages,
 )
+
+
+SITES = SiteTable(by_state=True)
 
 
 def is_conference_game(event: dict) -> bool | None:
@@ -63,7 +68,12 @@ def is_conference_game(event: dict) -> bool | None:
 
 
 def _event_extra_fields(event: dict, home_id: str, away_id: str) -> dict:
-    return {"is_conference_game": is_conference_game(event)}
+    """The conference flag and each side's AP rank going into the game (None unranked)."""
+    return {
+        "is_conference_game": is_conference_game(event),
+        "home_current_rank": event.get("home_current_rank"),
+        "away_current_rank": event.get("away_current_rank"),
+    }
 
 
 def _player_extra_fields(event: dict, home_id: str, away_id: str, is_home: bool) -> dict:
@@ -96,11 +106,16 @@ def build_event_features(
     home_qb_games-style per-position argument -- see this module's own
     docstring for why.
     """
-    return common.build_basketball_event_features(
+    row = common.build_basketball_event_features(
         event, elo_ratings, home_team_events, away_team_events, window,
         home_team_box_stats, away_team_box_stats,
         rebounds_fn=lambda box_stats: box_stats.get("avg_total_rebounds"), extra_fields_fn=_event_extra_fields,
     )
+    row.update(basketball_extra_columns(
+        "ncaambb", event, elo_ratings, home_team_events, away_team_events,
+        home_team_box_stats or [], away_team_box_stats or [], window, SITES,
+    ))
+    return row
 
 
 def build_player_features(

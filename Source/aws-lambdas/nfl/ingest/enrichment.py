@@ -11,6 +11,7 @@ from botocore.exceptions import ClientError
 from library.aws.account import get_account_id
 from library.http.espn_core import EspnCoreApiClient
 from library.http.nfl import NFLClient
+from library.normalize.pregame import INJURIES_AS_OF, is_completed, now_iso
 from library.storage.depth_chart_cache import DEPTH_CHART_CACHE_TTL_DAYS, attach_depth_charts, home_away_team_ids
 
 logger = logging.getLogger("nfl-ingest")
@@ -114,12 +115,16 @@ def enrich_events(
 
     for event in events:
         ids = home_away_team_ids(event)
-        if ids is None:
+        # A finished game keeps the pre-game coach record and injury report
+        # already on file (see library.normalize.pregame).
+        if ids is None or is_completed(event):
             continue
         home_id, away_id = ids
         event["home_coach"] = coaches.get(home_id)
         event["away_coach"] = coaches.get(away_id)
         event["home_injuries"] = injuries_by_team.get(home_id)
         event["away_injuries"] = injuries_by_team.get(away_id)
+        if event["home_injuries"] is not None or event["away_injuries"] is not None:
+            event[INJURIES_AS_OF] = now_iso()
 
     attach_depth_charts(events, nfl_client, s3, bucket, 0 if force_refresh else DEPTH_CHART_CACHE_TTL_DAYS)

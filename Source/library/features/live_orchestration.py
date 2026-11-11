@@ -23,7 +23,8 @@ from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from datetime import date
 
-from library.features.common import DEFAULT_STARTING_RATING, compute_elo_ratings
+from library.features.common import DEFAULT_STARTING_RATING
+from library.features.elo import sport_elo_ratings
 
 
 class EventNotFoundError(Exception):
@@ -60,7 +61,7 @@ def live_elo_ratings(
     pre_game_ratings: dict = {}
     if current_ratings is None:
         completed_events = events if events is not None else storage.get_all_events(sport)
-        pre_game_ratings, current_ratings = compute_elo_ratings(completed_events, as_of_season=event.get("season"))
+        pre_game_ratings, current_ratings = sport_elo_ratings(sport, completed_events, as_of_season=event.get("season"))
     return {
         **pre_game_ratings,
         event["event_key"]: {

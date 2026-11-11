@@ -367,3 +367,10 @@ class TestSimulationEdgeCases:
         assert sum(sweet_16.values()) == 4
         assert sum(elite_eight.values()) == 2
         assert list(final_four) == champions
+
+
+def test_simulates_on_the_sports_own_elo_scale():
+    from library.features.elo import params_for
+
+    assert ss.DEFAULT_HOME_ADVANTAGE == params_for("ncaambb").home_advantage
+    assert ss.DEFAULT_K_FACTOR == params_for("ncaambb").k_factor

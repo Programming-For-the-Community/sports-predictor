@@ -78,18 +78,36 @@ class TestBuildTeamEventRows:
         events = [_event("E1", "2025-09-01"), _event("E2", "2025-09-08")]
 
         rows = build_dataset_common.build_team_event_rows(
-            events, [{"event_key": "E1", "team_id": "A", "yds": 300}], 5, _record_calls(calls), logging.getLogger(),
+            events, [{"event_key": "E1", "team_id": "A", "stat_line": {"yds": 300}}], 5, _record_calls(calls), logging.getLogger(),
+            sport="nfl",
         )
 
         assert rows == [{"event_key": "E1"}, {"event_key": "E2"}]
         assert calls[1]["home_team_box_stats"] == []
-        assert calls[1]["away_team_box_stats"] == [{"event_key": "E1", "team_id": "A", "yds": 300}]
+        [paired] = calls[1]["away_team_box_stats"]
+        assert paired["event_key"] == "E1" and paired["team_id"] == "A"
+        assert paired["stat_line"] == {"yds": 300}
+        assert paired["opponent_stat_line"] == {}
+
+    def test_pairs_each_box_row_with_the_opponents_row_and_the_score(self):
+        calls = []
+        events = [_event("E1", "2025-09-01"), _event("E2", "2025-09-08")]
+        box = [
+            {"event_key": "E1", "team_id": "H", "stat_line": {"yds": 300}},
+            {"event_key": "E1", "team_id": "A", "stat_line": {"yds": 250}},
+        ]
+
+        build_dataset_common.build_team_event_rows(events, box, 5, _record_calls(calls), logging.getLogger(), sport="nfl")
+
+        [home] = calls[1]["home_team_box_stats"]
+        assert home["opponent_stat_line"] == {"yds": 250}
+        assert (home["points_for"], home["points_against"]) == (2, 1)
 
     def test_passes_no_position_games_without_leaders(self):
         calls = []
 
         build_dataset_common.build_team_event_rows(
-            [_event("E1", "2025-09-01")], [], 5, _record_calls(calls), logging.getLogger(),
+            [_event("E1", "2025-09-01")], [], 5, _record_calls(calls), logging.getLogger(), sport="nfl",
         )
 
         assert "home_position_games" not in calls[0]
@@ -105,7 +123,7 @@ class TestBuildTeamEventRows:
 
         build_dataset_common.build_team_event_rows(
             events, [], 5, _record_calls(calls), logging.getLogger(),
-            player_games=[qb_e1, qb_e2], leaders={"qb": first_or_none},
+            sport="nfl", player_games=[qb_e1, qb_e2], leaders={"qb": first_or_none},
         )
 
         assert calls[0]["home_position_games"] == {"qb": []}

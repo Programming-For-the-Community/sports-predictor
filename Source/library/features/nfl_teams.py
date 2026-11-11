@@ -87,6 +87,19 @@ TEAM_COORDINATES: dict[str, tuple[float, float]] = {
     "28": (38.9077, -76.8645),   # WSH -- Landover
 }
 
+# Standard-time UTC offset (hours) of each team's home market.
+_EASTERN, _CENTRAL, _MOUNTAIN, _PACIFIC = -5, -6, -7, -8
+
+TEAM_UTC_OFFSETS: dict[str, int] = {
+    "1": _EASTERN, "2": _EASTERN, "4": _EASTERN, "5": _EASTERN, "8": _EASTERN, "11": _EASTERN, "15": _EASTERN,
+    "17": _EASTERN, "19": _EASTERN, "20": _EASTERN, "21": _EASTERN, "23": _EASTERN, "27": _EASTERN,
+    "28": _EASTERN, "29": _EASTERN, "30": _EASTERN, "33": _EASTERN,
+    "3": _CENTRAL, "6": _CENTRAL, "9": _CENTRAL, "10": _CENTRAL, "12": _CENTRAL, "16": _CENTRAL,
+    "18": _CENTRAL, "34": _CENTRAL,
+    "7": _MOUNTAIN, "22": _MOUNTAIN,
+    "13": _PACIFIC, "14": _PACIFIC, "24": _PACIFIC, "25": _PACIFIC, "26": _PACIFIC,
+}
+
 # Recurring NFL international-game host cities (2016-2025), keyed on the
 # same venue_city string normalize.py already captures for every event.
 # Neither team is at their own market for these -- the designated "home"

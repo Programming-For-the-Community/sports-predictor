@@ -59,7 +59,10 @@ def enrich_games(games: list[dict], season: int, week: int, client: CFBDClient, 
         home_school = by_id.get(home_id, {}).get("school") if home_id else None
         away_school = by_id.get(away_id, {}).get("school") if away_id else None
 
-        game["home_coach"] = coach_by_school.get(home_school)
-        game["away_coach"] = coach_by_school.get(away_school)
+        # A finished game keeps the pre-game coach record already on file
+        # (see library.normalize.pregame); today's record includes its result.
+        if not game.get("completed"):
+            game["home_coach"] = coach_by_school.get(home_school)
+            game["away_coach"] = coach_by_school.get(away_school)
         game["home_current_rank"] = rank_by_school.get(home_school)
         game["away_current_rank"] = rank_by_school.get(away_school)

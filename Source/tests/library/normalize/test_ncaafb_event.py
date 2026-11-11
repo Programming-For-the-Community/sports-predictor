@@ -154,3 +154,11 @@ class TestGameToEventItemCoachAndRank:
         item = game_to_event_item(_game(home_current_rank=None, away_current_rank=12), "ncaafb")
         assert item["away_current_rank"] == 12
         assert "home_current_rank" not in item
+
+
+class TestNeutralSite:
+    def test_cfbd_neutral_site_is_passed_through(self):
+        assert game_to_event_item(_game(neutralSite=True), "ncaafb")["neutral_site"] is True
+
+    def test_neutral_site_is_none_when_cfbd_omits_it(self):
+        assert game_to_event_item(_game(), "ncaafb")["neutral_site"] is None

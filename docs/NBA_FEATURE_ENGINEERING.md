@@ -42,7 +42,7 @@ Both are built by walking every completed NBA event in chronological order exact
 
 ## Shared primitives (`library/features/common.py`)
 
-- **Elo ratings** (`compute_elo_ratings`) -- one running rating per team, updated after every game, margin-of-victory scaled, regressed toward the mean at each season boundary. Every feature row uses each team's *pre-game* rating. **Left at `library.features.common`'s NFL-tuned defaults** (starting rating 1500, K-factor 20, home advantage 55, MOV base/divisor 2.2/0.001) -- same as NCAAFB's own precedent (its `build_dataset.py` doesn't override them either). NBA-specific tuning (higher-scoring games, different margin-of-victory behavior) is a plausible future improvement, but that's an empirical exercise against a real trained model's backtest results, not something to guess up front -- still an open item.
+- **Elo ratings** (`compute_elo_ratings`) -- one running rating per team, updated after every game, margin-of-victory scaled, regressed toward the mean at each season boundary. Every feature row uses each team's *pre-game* rating. Basketball constants from `library/features/elo.py` (K 20, home advantage 100, margin multiplier (|margin| + 3)^0.8 / (7.5 + 0.006 × Elo gap), 3/4 carried over a season); a neutral-site game gets no home advantage. Each feature-engineering run logs a sweep of alternatives.
 - **Rolling team scoring averages** (`rolling_team_scoring_averages`) -- points scored/allowed, averaged over a team's own last N completed games (N = `ROLLING_WINDOW`, default 5).
 - **Rolling player/team stat averages** (`rolling_player_stat_averages`) -- for every `stat_line` key that appears in at least one of the last N games, the average of that key over the games that have it, plus `games_with_<stat>` and `games_played`/`starts`. Used for both player-level rolling stats and team-level rolling box-score stats (a `team_game_stats` row's `stat_line` is the same generic shape a player-game row's is).
 - **Current streak** (`current_streak`) -- positive = win streak length, negative = loss streak length, 0 if no history or the last game was a tie.
@@ -50,7 +50,7 @@ Both are built by walking every completed NBA event in chronological order exact
 
 ## `event_features.parquet` fields
 
-One row per completed event, home/away perspective.
+One row per completed event, home/away perspective. Efficiency, opponent ("allowed"), context, schedule and player-prop context columns shared across the team sports are catalogued in [TEAM_SPORT_FEATURES.md](TEAM_SPORT_FEATURES.md).
 
 | Field | Description |
 |---|---|
@@ -111,7 +111,7 @@ Unlike NFL, which needs a separate core-API injury-report call (`EspnCoreApiClie
 
 `build_event_features` reduces this to `home_team_injury_count`/`away_team_injury_count` via `library/features/common.py`'s `_team_injury_count` -- the same function NFL uses, so both sports share one severity threshold (Doubtful/Out counted, Questionable not). No `home_qb_injury_status`-equivalent field -- there's no starting-QB-style single player whose own status matters more than the team's overall count (see "No position-leader tracking" below).
 
-**Forward-only**, same as NFL's own coach/injury fields: only events an ingest run has actually enriched carry this data; `null` (not `0`) on anything backfilled before this shipped, or on any date whose own roster fetch failed for that team.
+Ingest attaches the roster's injuries only to games that haven't finished -- the pre-kickoff refresh supplies each game's last pre-game report, kept on the event once it completes (`library/normalize/pregame.py`). **Forward-only**, same as NFL's own coach/injury fields: only events an ingest run has actually enriched carry this data; `null` (not `0`) on anything backfilled before this shipped, or on any date whose own roster fetch failed for that team.
 
 **UNVERIFIED:** only the existence of `athlete["injuries"]` on a live NBA roster payload was confirmed (2026-08-14), not the exact key holding each entry's status string. `library/normalize/espn.py`'s `roster_to_team_injuries` assumes a top-level `"status"` string (matching `EspnCoreApiClient.get_team_injuries`'s own confirmed shape and ESPN's established status vocabulary), with a fallback to a nested `type.description` shape -- needs a real captured payload to confirm before fully trusting these two columns in production.
 

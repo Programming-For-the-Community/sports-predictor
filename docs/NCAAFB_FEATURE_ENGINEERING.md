@@ -39,7 +39,7 @@ All three are built by walking every completed NCAAFB event in chronological ord
 
 ## Shared primitives (`library/features/common.py`)
 
-- **Elo ratings** (`compute_elo_ratings`) -- one running rating per team, updated after every game, margin-of-victory scaled, regressed 1/3 toward the mean at each season boundary. Every feature row uses each team's *pre-game* rating (`home_pre_rating`/`away_pre_rating`), never the post-game one.
+- **Elo ratings** (`compute_elo_ratings`) -- one running rating per team, updated after every game, margin-of-victory scaled, regressed 1/3 toward the mean at each season boundary (constants in `library/features/elo.py`; no home advantage at a neutral site). Every feature row uses each team's *pre-game* rating (`home_pre_rating`/`away_pre_rating`), never the post-game one.
 - **Rolling team scoring averages** (`rolling_team_scoring_averages`) -- points scored/allowed, averaged over a team's own last N completed games (N = `ROLLING_WINDOW`, default 5) for the event/player datasets; over a team's full season-to-date for the ranking dataset (see below).
 - **Rolling player stat averages** (`rolling_player_stat_averages`) -- for every `stat_line` key that appears in at least one of a player's last N games, the average of that key over the games that have it, plus `games_with_<stat>` (how many of those N games actually recorded it) and `games_played`/`starts`.
 - **Current streak** (`current_streak`) -- positive = win streak length, negative = loss streak length, 0 if no history or the last game was a tie.
@@ -47,7 +47,7 @@ All three are built by walking every completed NCAAFB event in chronological ord
 
 ## `event_features.parquet` fields
 
-One row per completed event, home/away perspective.
+One row per completed event, home/away perspective. Efficiency, opponent ("allowed"), context, schedule and player-prop context columns shared across the team sports are catalogued in [TEAM_SPORT_FEATURES.md](TEAM_SPORT_FEATURES.md). NCAAFB's CFBD advanced stats, talent composite and returning production are covered there too.
 
 | Field | Description |
 |---|---|

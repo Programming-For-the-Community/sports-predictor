@@ -60,7 +60,11 @@ project's own training_seconds tracking).
 import random
 from typing import Callable
 
-from library.features.common import DEFAULT_HOME_ADVANTAGE, DEFAULT_K_FACTOR, DEFAULT_STARTING_RATING, expected_score
+from library.features.common import DEFAULT_STARTING_RATING, expected_score
+from library.features.elo import params_for
+
+DEFAULT_HOME_ADVANTAGE = params_for("ncaambb").home_advantage
+DEFAULT_K_FACTOR = params_for("ncaambb").k_factor
 
 DEFAULT_SIMULATIONS = 200
 MARCH_MADNESS_FIELD_SIZE = 68

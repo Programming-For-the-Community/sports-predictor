@@ -16,7 +16,7 @@ from datetime import datetime, timezone
 
 import event_prediction
 import season_simulation
-from library.features.common import compute_elo_ratings
+from library.features.elo import sport_elo_ratings
 from library.serving import bracket_projection
 from library.serving.bracket_simulation import BracketSimulation, RealPostseason, elo_rules
 from library.serving import model_loader, season_projection_common
@@ -108,7 +108,7 @@ def _season_standings_inputs(storage: FeatureStorage) -> dict:
     wins, losses, ties, point_differential, team_last_completed_date, team_conference, completed_by_team = (
         _completed_game_records(completed)
     )
-    pre_game_ratings, current_ratings = compute_elo_ratings(all_completed, as_of_season=current_season)
+    pre_game_ratings, current_ratings = sport_elo_ratings("ncaafb", all_completed, as_of_season=current_season)
     avg_points_scored, avg_points_allowed, win_streak, strength_of_schedule = _team_rolling_stats(
         completed_by_team, pre_game_ratings,
     )

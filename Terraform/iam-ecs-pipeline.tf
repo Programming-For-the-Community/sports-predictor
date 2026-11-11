@@ -64,20 +64,22 @@ data "aws_iam_policy_document" "ecs_pipeline_permissions" {
     resources = ["arn:aws:s3:::${local.model_artifacts_bucket}/*"]
   }
 
-  # NCAA MBB's and PGA's build_dataset.py are the feature-engineering
-  # scripts that read the raw data lake directly (NCAA MBB: raw AP-poll
-  # payloads, for the ranking-model dataset; PGA: raw season-stats
-  # snapshots -- see feature-engineering/pga/build_dataset.py's own
-  # _load_season_stat_snapshots docstring, no backfill path exists for
-  # that data) -- NBA/NCAAFB have no equivalent raw-bucket read. Scoped
-  # to those two prefixes, not the whole raw bucket, same least-privilege
-  # discipline as ReadWriteModelArtifacts's own sport prefixes below.
+  # The feature-engineering scripts that read the raw data lake directly:
+  # NCAA MBB (raw AP-poll payloads, for the ranking-model dataset), PGA (raw
+  # season-stats snapshots -- see feature-engineering/pga/build_dataset.py's
+  # own _load_season_stat_snapshots docstring) and NCAAFB (CFBD supplements,
+  # library.storage.cfbd_supplements). Scoped to those prefixes, not the
+  # whole raw bucket, same least-privilege discipline as
+  # ReadWriteModelArtifacts's own sport prefixes below.
   statement {
     sid     = "ReadRawRankingPolls"
     actions = ["s3:GetObject"]
     resources = [
       "arn:aws:s3:::${local.raw_bucket_name}/ncaambb/rankings/*",
       "arn:aws:s3:::${local.raw_bucket_name}/pga/statistics/*",
+      "arn:aws:s3:::${local.raw_bucket_name}/ncaafb/advanced/*",
+      "arn:aws:s3:::${local.raw_bucket_name}/ncaafb/talent/*",
+      "arn:aws:s3:::${local.raw_bucket_name}/ncaafb/returning/*",
     ]
   }
 
@@ -89,7 +91,7 @@ data "aws_iam_policy_document" "ecs_pipeline_permissions" {
     condition {
       test     = "StringLike"
       variable = "s3:prefix"
-      values   = ["ncaambb/rankings/*", "pga/statistics/*"]
+      values   = ["ncaambb/rankings/*", "pga/statistics/*", "ncaafb/advanced/*", "ncaafb/talent/*", "ncaafb/returning/*"]
     }
   }
 

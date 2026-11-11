@@ -23,8 +23,9 @@ from typing import Callable
 
 import pandas as pd
 
-from library.features import matchup
-from library.features.common import TEAM_HISTORY_GAMES, compute_elo_ratings
+from library.features import elo, matchup
+from library.features.box_history import paired_row
+from library.features.common import TEAM_HISTORY_GAMES
 
 LOG_INTERVAL = 20000  # rows between progress log lines
 
@@ -110,16 +111,17 @@ def _fold_into_team_history(
     event: dict, team_ids: tuple[str, str], team_history: dict[str, list[dict]],
     team_box_history: dict[str, list[dict]], box_by_event_team: dict,
 ) -> None:
-    for team_id in team_ids:
+    """Appends the event, and each side's box row paired with its opponent's."""
+    for team_id, opponent_id in (team_ids, team_ids[::-1]):
         team_history[team_id].append(event)
         box_row = box_by_event_team.get((event["event_key"], team_id))
         if box_row:
-            team_box_history[team_id].append(box_row)
+            team_box_history[team_id].append(paired_row(event, box_row, box_by_event_team.get((event["event_key"], opponent_id))))
 
 
 def build_team_event_rows(
     events: list[dict], team_game_stats: list[dict], window: int, build_event_features: Callable, logger,
-    *, player_games: list[dict] = (), leaders: dict[str, Callable] | None = None,
+    *, sport: str, player_games: list[dict] = (), leaders: dict[str, Callable] | None = None,
 ) -> list[dict]:
     """One event-feature row per event with both a home and an away side,
     built in a single chronological pass: each team's own game and box-score
@@ -129,11 +131,15 @@ def build_team_event_rows(
     `leaders` ({position: identify_fn}) also passes each side's identified
     leader's prior games as home_position_games/away_position_games. Leader
     history is keyed by player entity_id, so it follows a player across a
-    trade."""
+    trade. Box histories are paired with each game's opponent row
+    (library.features.box_history) and run TEAM_HISTORY_GAMES deep.
+
+    Also logs the sport's Elo constant sweep (library.features.elo)."""
+    elo.log_sweep(sport, events, logger)
     team_game_stats_by_event_team = index_team_game_stats(team_game_stats)
     player_games_by_event_team = group_player_games_by_event_and_team(player_games) if leaders else {}
     leader_history: dict[str, dict[str, list[dict]]] = {position: defaultdict(list) for position in leaders or {}}
-    elo_ratings, _ = compute_elo_ratings(events)  # only the pre-game side is used here
+    elo_ratings, _ = elo.sport_elo_ratings(sport, events)  # only the pre-game side is used here
     events_ascending = sorted(events, key=lambda e: e.get("event_date", ""))
 
     team_history: dict[str, list[dict]] = defaultdict(list)  # ascending, grows as we go
@@ -155,11 +161,11 @@ def build_team_event_rows(
             )
             for side, team_id in (("home", home_id), ("away", away_id))
         } if leaders else {}
-        # Most-recent-first: team history capped at TEAM_HISTORY_GAMES, box scores at `window`.
+        # Most-recent-first, capped at TEAM_HISTORY_GAMES.
         rows.append(build_event_features(
             event, elo_ratings, team_history[home_id][-TEAM_HISTORY_GAMES:][::-1], team_history[away_id][-TEAM_HISTORY_GAMES:][::-1], window,
-            home_team_box_stats=team_box_history[home_id][-window:][::-1],
-            away_team_box_stats=team_box_history[away_id][-window:][::-1],
+            home_team_box_stats=team_box_history[home_id][-TEAM_HISTORY_GAMES:][::-1],
+            away_team_box_stats=team_box_history[away_id][-TEAM_HISTORY_GAMES:][::-1],
             **leader_kwargs,
         ))
 
@@ -187,7 +193,7 @@ def build_player_dataset(
     if filter_fn is not None:
         events = [e for e in events if filter_fn(e)]
     events_by_key = {event["event_key"]: event for event in events}
-    elo_ratings, _ = compute_elo_ratings(events)  # only the pre-game side is used here
+    elo_ratings, _ = elo.sport_elo_ratings(sport, events)  # only the pre-game side is used here
     previous_event_dates = team_previous_event_dates(events)
 
     player_games = storage.get_all_player_game_stats(sport, since_date=since_date)
@@ -235,6 +241,7 @@ def get_player_rows(
             )
             row.update(matchup.matchup_columns(
                 context.sport, game, matchup.opponent_in(event, game["team_id"]), prior, context.matchup_lookup, context.window,
+                event=event,
             ))
             rows.append(row)
             history.append(game)

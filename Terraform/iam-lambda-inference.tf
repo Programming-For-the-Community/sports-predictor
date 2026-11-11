@@ -147,6 +147,30 @@ data "aws_iam_policy_document" "lambda_inference_permissions" {
     resources = ["arn:aws:s3:::${local.raw_bucket_name}/ncaambb/rankings/*"]
   }
 
+  # ncaafb_predict's live_features.py reads the CFBD supplements NCAAFB
+  # ingest saves (library.storage.cfbd_supplements): per-week advanced game
+  # stats it lists, plus each season's talent and returning-production file.
+  statement {
+    sid       = "ListNcaafbCfbdSupplements"
+    actions   = ["s3:ListBucket"]
+    resources = ["arn:aws:s3:::${local.raw_bucket_name}"]
+    condition {
+      test     = "StringLike"
+      variable = "s3:prefix"
+      values   = ["ncaafb/advanced/*", "ncaafb/talent/*", "ncaafb/returning/*"]
+    }
+  }
+
+  statement {
+    sid     = "ReadNcaafbCfbdSupplements"
+    actions = ["s3:GetObject"]
+    resources = [
+      "arn:aws:s3:::${local.raw_bucket_name}/ncaafb/advanced/*",
+      "arn:aws:s3:::${local.raw_bucket_name}/ncaafb/talent/*",
+      "arn:aws:s3:::${local.raw_bucket_name}/ncaafb/returning/*",
+    ]
+  }
+
   # pga_predict's own live_features.py resolves each golfer's season-stats
   # block (driving distance/accuracy, GIR%, etc.) the same way feature-
   # engineering/pga/build_dataset.py does at training time -- via

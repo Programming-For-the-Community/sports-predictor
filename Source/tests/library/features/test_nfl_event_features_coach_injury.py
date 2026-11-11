@@ -42,7 +42,7 @@ class TestBuildEventFeaturesCoachAndInjury:
     def test_qb_injury_status_looks_up_the_presumptive_qb_by_entity_id(self):
         event = _event(
             "E1", "2025-09-07", "KC", "LAC", 27, 20,
-            home_injuries=[{"entity_id": "mahomes", "status": "Questionable"}],
+            home_injuries=[{"entity_id": "mahomes", "status": "Questionable"}], injuries_as_of="2025-01-01T00:00:00+00:00",
         )
         home_qb_games = [{"entity_id": "mahomes", "event_date": "2025-08-31", "stat_line": {}}]
 
@@ -50,6 +50,12 @@ class TestBuildEventFeaturesCoachAndInjury:
 
         assert row["home_qb_injury_status"] == 1
         assert row["away_qb_injury_status"] is None  # no away_qb_games given, no away_injuries either
+
+    def test_an_unstamped_report_counts_as_unknown(self):
+        # Attached after the game, before pre-game reports were stamped.
+        event = _event("E1", "2025-09-07", "KC", "LAC", 27, 20, home_injuries=[{"entity_id": "1", "status": "Out"}])
+        row = build_event_features(event, {}, [], [])
+        assert row["home_team_injury_count"] is None
 
     def test_team_injury_count_from_event_level_injuries(self):
         event = _event(
@@ -59,6 +65,7 @@ class TestBuildEventFeaturesCoachAndInjury:
                 {"entity_id": "2", "status": "Doubtful"},
                 {"entity_id": "3", "status": "Questionable"},  # not counted
             ],
+            injuries_as_of="2025-01-01T00:00:00+00:00",
         )
 
         row = build_event_features(event, {}, [], [])

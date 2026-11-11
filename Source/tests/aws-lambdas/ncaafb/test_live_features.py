@@ -289,6 +289,10 @@ class TestPresumptiveLeader:
 
 
 class TestBuildLiveEventFeatures:
+    @pytest.fixture(autouse=True)
+    def _no_supplements(self, monkeypatch):
+        monkeypatch.setattr(live_features, "_cfbd_supplements", lambda season: None)
+
     def test_raises_when_event_not_found(self):
         storage = MagicMock()
         storage.get_event.return_value = None
@@ -421,3 +425,24 @@ class TestBuildLiveEventLeaderCandidates:
 
         # LEADER_CANDIDATE_LIMITS caps rushing at 2 -- the top 2 by volume (102, 103), not 101.
         assert [row["entity_id"] for row in result["home"]["rushing"]] == ["102", "103"]
+
+
+class TestCfbdSupplements:
+    def test_none_without_a_raw_bucket(self, monkeypatch):
+        monkeypatch.delenv("RAW_BUCKET_NAME", raising=False)
+        assert live_features._cfbd_supplements(2025) is None
+
+    def test_reads_this_and_last_season(self, monkeypatch):
+        calls = []
+        monkeypatch.setattr(live_features, "S3Manager", lambda bucket: bucket)
+        monkeypatch.setattr(live_features.cfbd_supplements, "load_cached", lambda raw, seasons: calls.append((raw, seasons)) or "loaded")
+        assert live_features._cfbd_supplements(2025) == "loaded"
+        assert calls == [("test-bucket", {2024, 2025})]
+
+    def test_a_read_failure_leaves_the_columns_empty(self, monkeypatch):
+        monkeypatch.setattr(live_features, "S3Manager", lambda bucket: bucket)
+
+        def fail(raw, seasons):
+            raise RuntimeError("S3 down")
+        monkeypatch.setattr(live_features.cfbd_supplements, "load_cached", fail)
+        assert live_features._cfbd_supplements(2025) is None

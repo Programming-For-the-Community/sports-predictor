@@ -36,6 +36,7 @@ resource "aws_ecs_task_definition" "ncaafb_feature_engineering" {
         { name = "PLAYER_GAME_STATS_TABLE_NAME", value = aws_dynamodb_table.player_game_stats.name },
         { name = "TEAM_GAME_STATS_TABLE_NAME", value = aws_dynamodb_table.team_game_stats.name },
         { name = "MODEL_ARTIFACTS_BUCKET_NAME", value = aws_s3_bucket.model_artifacts.bucket },
+        { name = "RAW_BUCKET_NAME", value = aws_s3_bucket.raw_data_lake.bucket },
         { name = "AWS_REGION", value = var.region },
       ]
       logConfiguration = {

@@ -8,7 +8,9 @@ row reads team box scores.
 from collections.abc import Callable
 from datetime import date, timedelta
 
-from library.features.common import TEAM_HISTORY_GAMES, compute_elo_ratings
+from library.features.box_history import live_paired_history
+from library.features.common import TEAM_HISTORY_GAMES
+from library.features.elo import sport_elo_ratings
 from library.features.matchup import live_matchup_columns
 from library.features.live_orchestration import (
     EventNotFoundError,
@@ -63,7 +65,7 @@ class BasketballLiveFeatures:
             team_previous_event_date(storage, sport, team_id, event["event_date"], events),
             window,
         )
-        row.update(live_matchup_columns(storage, sport, player_game, home_id, away_id, prior_games, window, events))
+        row.update(live_matchup_columns(storage, sport, player_game, home_id, away_id, prior_games, window, events, event=event))
         return row
 
     def build_live_event_features(
@@ -85,9 +87,7 @@ class BasketballLiveFeatures:
         def team_rows(team_id: str) -> tuple[list[dict], list[dict]]:
             return (
                 storage.get_team_events(sport, team_id, before_date=before_date, limit=TEAM_HISTORY_GAMES, events=events),
-                storage.get_team_game_stats_for_team(
-                    sport, team_id, before_date=before_date, limit=window, team_game_stats=team_game_stats,
-                ),
+                live_paired_history(storage, sport, team_id, before_date, team_game_stats, events, TEAM_HISTORY_GAMES),
             )
 
         home_events, home_box = team_rows(home_id)
@@ -132,7 +132,7 @@ class BasketballLiveFeatures:
         before_date = event["event_date"]
         current_season = event.get("season")
         events = events if events is not None else storage.get_all_events(sport)
-        _, current_ratings = compute_elo_ratings(events, as_of_season=current_season)
+        _, current_ratings = sport_elo_ratings(sport, events, as_of_season=current_season)
 
         def team_candidates(team_id: str) -> dict:
             result = {}

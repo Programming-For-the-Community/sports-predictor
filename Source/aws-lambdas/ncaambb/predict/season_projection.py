@@ -36,7 +36,7 @@ from datetime import date, datetime, timezone
 
 import event_prediction
 import season_simulation
-from library.features.common import DEFAULT_HOME_ADVANTAGE, compute_elo_ratings
+from library.features.elo import sport_elo_ratings
 from library.http.ncaambb_core import ap_poll_to_rank_by_team
 from library.serving import bracket_projection
 from library.serving.bracket_simulation import BracketSimulation, RealPostseason, elo_rules
@@ -243,7 +243,7 @@ def _season_standings_inputs(storage: FeatureStorage, raw_bucket) -> dict:
     wins, losses, point_differential, team_last_completed_date, conference_wins, conference_losses, completed_by_team = (
         _completed_game_records(completed)
     )
-    pre_game_ratings, current_ratings = compute_elo_ratings(all_completed, as_of_season=current_season)
+    pre_game_ratings, current_ratings = sport_elo_ratings("ncaambb", all_completed, as_of_season=current_season)
     avg_points_scored, avg_points_allowed, win_streak, strength_of_schedule = _team_rolling_stats(
         completed_by_team, pre_game_ratings,
     )
@@ -409,7 +409,7 @@ def _conference_bracket_payloads(
         round_names = season_simulation._round_names(season_simulation._next_power_of_two(len(seed_order)))
 
         def topology(play_round, seed_order=seed_order, round_names=round_names) -> dict:
-            rounds, champion = _single_elim_rounds(play_round, seed_order, round_names, DEFAULT_HOME_ADVANTAGE)
+            rounds, champion = _single_elim_rounds(play_round, seed_order, round_names, season_simulation.DEFAULT_HOME_ADVANTAGE)
             return {"rounds": rounds, "champion": champion}
 
         columns = [(name, name) for name in round_names[1:]] + [("Title", None)]

@@ -54,7 +54,7 @@ from collections import defaultdict
 from library.aws import xray
 from library.aws.s3_manager import S3Manager
 from library.features import build_dataset_common
-from library.features.common import compute_elo_ratings
+from library.features.elo import sport_elo_ratings
 from library.features.ncaambb import build_event_features, build_player_features, build_team_week_features
 from library.http.ncaambb_core import ap_poll_to_rank_by_team
 from library.storage.feature_storage import FeatureStorage
@@ -77,6 +77,7 @@ def build_event_dataset(storage: FeatureStorage, window: int, since_date: str | 
     logger.info("Loaded %d completed events", len(events))
     return build_dataset_common.build_team_event_rows(
         events, storage.get_all_team_game_stats(SPORT, since_date=since_date), window, build_event_features, logger,
+        sport=SPORT,
     )
 
 
@@ -158,7 +159,7 @@ def build_ranking_dataset(storage: FeatureStorage, raw_s3: S3Manager, since_date
     at every poll would be mostly wasted work (only ~25 of 362 teams are
     ever ranked by any one poll)."""
     events = storage.get_all_events(SPORT, since_date=since_date)
-    elo_ratings, _ = compute_elo_ratings(events)  # only the pre-game side is used here
+    elo_ratings, _ = sport_elo_ratings(SPORT, events)  # only the pre-game side is used here
 
     events_by_team: dict[str, list[dict]] = defaultdict(list)
     for event in events:

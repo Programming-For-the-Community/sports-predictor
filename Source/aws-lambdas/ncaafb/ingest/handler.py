@@ -41,6 +41,7 @@ import boto3
 from botocore.exceptions import ClientError
 
 import enrichment
+import supplements
 from library.aws.account import get_account_id
 from library.aws.boto_config import DEFAULT_CONFIG
 from library.http.cfbd import CFBDClient
@@ -312,6 +313,12 @@ def _ingest(event: dict) -> dict:
         except Exception:
             logger.exception("Failed fetching team box scores for season %s type %s week %s", season, season_type, week)
             failed += 1
+
+    saved = supplements.save_supplements(
+        client, season, season_type, week, season_teams, bool(completed_games),
+        object_exists=_object_exists, put_json=_put_json,
+    )
+    logger.info("CFBD supplements saved: %s", saved)
 
     try:
         odds_saved, odds_failed = _fetch_odds(games)

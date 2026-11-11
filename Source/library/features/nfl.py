@@ -14,7 +14,10 @@ the event-level features below.
 """
 import logging
 
-from library.features import football
+from library.features import football, schedule
+from library.features.football_box import football_box_columns
+from library.features.team_context import context_columns
+from library.normalize.pregame import pregame_injuries
 from library.features.common import (
     DEFAULT_ROLLING_WINDOW,
     _identify_leader,
@@ -31,9 +34,18 @@ from library.features.common import (
     rolling_team_scoring_averages,
     team_scoring_columns,
 )
-from library.features.nfl_teams import INTERNATIONAL_VENUES, is_divisional_game, is_international_game, travel_distances_km
+from library.features.nfl_teams import (
+    INTERNATIONAL_VENUES,
+    TEAM_COORDINATES,
+    TEAM_UTC_OFFSETS,
+    is_divisional_game,
+    is_international_game,
+    travel_distances_km,
+)
 
 logger = logging.getLogger(__name__)
+
+SITES = schedule.SiteTable(TEAM_COORDINATES, TEAM_UTC_OFFSETS, INTERNATIONAL_VENUES)
 
 
 def identify_starting_qb(team_player_games: list[dict]) -> dict | None:
@@ -117,9 +129,10 @@ def build_event_features(
     leader couldn't be identified for that team/position, in which case
     those columns are just None.
 
-    home_team_box_stats/away_team_box_stats are each team's own prior
-    team_game_stats rows (see FeatureStorage.get_all_team_game_stats),
-    most recent first, NOT including this one.
+    home_team_box_stats/away_team_box_stats are each team's paired box
+    history (library.features.box_history), most recent first, NOT
+    including this one -- up to TEAM_HISTORY_GAMES games, of which the
+    base rolling averages use the first `window`.
     """
     participants = event["participants"]
     home = next(p for p in participants if p.get("role") == "home")
@@ -150,8 +163,8 @@ def build_event_features(
     # first row's entity_id is that player's id.
     home_qb_entity_id = home_qb_games[0].get("entity_id") if home_qb_games else None
     away_qb_entity_id = away_qb_games[0].get("entity_id") if away_qb_games else None
-    home_injuries = event.get("home_injuries")
-    away_injuries = event.get("away_injuries")
+    home_injuries = pregame_injuries(event, "home")
+    away_injuries = pregame_injuries(event, "away")
 
     venue_city = event.get("venue_city")
     home_travel_km, away_travel_km = _travel_distances_with_warning(event, venue_city, home_id, away_id)
@@ -207,6 +220,13 @@ def build_event_features(
         "away_travel_km": away_travel_km,
         "home_win_streak": home_win_streak,
         "away_win_streak": away_win_streak,
+        "is_precipitation": football.is_precipitation(event.get("weather_condition_id")),
+        **football_box_columns("nfl", home_team_box_stats or [], away_team_box_stats or [], window, event["event_date"]),
+        **context_columns(event, home_id, away_id, home_team_events, away_team_events, elo_ratings),
+        **schedule.side_columns({
+            "home": schedule.clock_columns(event, home_id, home_team_events, SITES),
+            "away": schedule.clock_columns(event, away_id, away_team_events, SITES),
+        }),
         # Coach/injury fields are absent (None) if ingest enrichment
         # didn't run. Raw coach identity is never a feature here, only
         # experience/season_win_pct/career_playoff_win_pct, used directly

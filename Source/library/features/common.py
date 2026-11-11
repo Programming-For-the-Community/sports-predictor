@@ -12,6 +12,8 @@ import math
 from datetime import date, datetime
 from typing import NamedTuple
 
+from library.normalize.pregame import pregame_injuries
+
 DEFAULT_ROLLING_WINDOW = 5
 # A longer gap between two games is an off-season.
 OFFSEASON_GAP_DAYS = 60
@@ -44,13 +46,21 @@ def expected_score(rating: float, opponent_rating: float, rating_advantage: floa
     return 1 / (1 + 10 ** ((opponent_rating - (rating + rating_advantage)) / 400))
 
 
-def _mov_multiplier(point_diff: int, winner_elo_diff: float, base: float, divisor: float) -> float:
+MOV_LOG = "log"
+MOV_POWER = "power"
+
+
+def _mov_multiplier(point_diff: int, winner_elo_diff: float, base: float, divisor: float, formula: str = MOV_LOG) -> float:
     """Scales a rating update by how many points a game was decided by,
-    log-dampened, and further dampened by winner_elo_diff (the winner's
+    dampened, and further dampened by winner_elo_diff (the winner's
     pre-game rating edge, home-field advantage included) so a big
     favorite winning big moves ratings less than a big underdog winning
-    by the same margin.
+    by the same margin. MOV_LOG: ln(|margin|+1) * base/(diff*divisor+base),
+    for low-scoring sports. MOV_POWER: (|margin|+3)^0.8 / (base+divisor*diff),
+    for basketball's larger margins.
     """
+    if formula == MOV_POWER:
+        return (abs(point_diff) + 3) ** 0.8 / (base + divisor * winner_elo_diff)
     return math.log(abs(point_diff) + 1) * (base / (winner_elo_diff * divisor + base))
 
 
@@ -63,6 +73,7 @@ def compute_elo_ratings(
     mov_divisor: float = DEFAULT_MOV_DIVISOR,
     season_carryover: float = DEFAULT_SEASON_CARRYOVER,
     as_of_season: int | None = None,
+    mov_formula: str = MOV_LOG,
 ) -> tuple[dict[str, dict[str, float]], dict[str, float]]:
     """Walks head-to-head events in chronological order, updating a running
     Elo-style rating per team. Returns (pre_game_ratings, current_ratings):
@@ -80,6 +91,8 @@ def compute_elo_ratings(
     margin from). Events without both a home/away role or a final score
     still get a pre-game rating recorded, they just don't produce a
     rating update.
+
+    A neutral-site event (event["neutral_site"]) gets no home advantage.
 
     Crossing a season boundary (detected from each event's own `season`
     field) regresses every existing rating toward starting_rating by
@@ -109,7 +122,8 @@ def compute_elo_ratings(
         current_season = event_season
 
         _process_elo_event(
-            event, ratings, pre_game_ratings, starting_rating, home_advantage, k_factor, mov_base, mov_divisor,
+            event, ratings, pre_game_ratings, starting_rating, 0.0 if event.get("neutral_site") else home_advantage,
+            k_factor, (mov_base, mov_divisor, mov_formula),
         )
 
     if as_of_season is not None and current_season is not None and as_of_season != current_season:
@@ -146,7 +160,7 @@ def compute_pre_game_scoring(events: list[dict], window: int = DEFAULT_ROLLING_W
 
 def _process_elo_event(
     event: dict, ratings: dict[str, float], pre_game_ratings: dict[str, dict[str, float]],
-    starting_rating: float, home_advantage: float, k_factor: float, mov_base: float, mov_divisor: float,
+    starting_rating: float, home_advantage: float, k_factor: float, mov: tuple[float, float, str],
 ) -> None:
     """Records this event's own pre-game ratings and, if it has a final
     score, applies its margin-of-victory-scaled rating update -- mutates
@@ -182,7 +196,7 @@ def _process_elo_event(
         home_actual = away_actual = 0.5
         winner_elo_diff = 0.0
 
-    mov_multiplier = _mov_multiplier(point_diff, winner_elo_diff, mov_base, mov_divisor) if point_diff != 0 else 1.0
+    mov_multiplier = _mov_multiplier(point_diff, winner_elo_diff, *mov) if point_diff != 0 else 1.0
 
     expected_home = expected_score(home_rating, away_rating, home_advantage)
     expected_away = 1 - expected_home
@@ -694,8 +708,8 @@ def build_basketball_event_features(
         **extra_fields_fn(event, home_id, away_id),
         "home_win_streak": home_win_streak,
         "away_win_streak": away_win_streak,
-        "home_team_injury_count": _team_injury_count(event.get("home_injuries")),
-        "away_team_injury_count": _team_injury_count(event.get("away_injuries")),
+        "home_team_injury_count": _team_injury_count(pregame_injuries(event, "home")),
+        "away_team_injury_count": _team_injury_count(pregame_injuries(event, "away")),
         "label_home_won": home.get("result", {}).get("won"),
         "label_home_score": home.get("result", {}).get("score"),
         "label_away_score": away.get("result", {}).get("score"),

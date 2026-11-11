@@ -72,6 +72,7 @@ class TestBuildEventFeaturesInjuries:
         event = _event("E1", "2025-12-01", "2", "13")
         event["home_injuries"] = [{"entity_id": "1", "status": "Out"}, {"entity_id": "2", "status": "Questionable"}]
         event["away_injuries"] = [{"entity_id": "3", "status": "Doubtful"}]
+        event["injuries_as_of"] = "2025-01-01T00:00:00+00:00"
 
         row = build_event_features(event, {}, [], [])
 

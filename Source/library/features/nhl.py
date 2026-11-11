@@ -20,6 +20,7 @@ from datetime import datetime
 
 from library.features import geo, nhl_teams
 from library.features.common import OFFSEASON_GAP_DAYS, rest_days, rolling_player_stat_averages
+from library.normalize.pregame import pregame_injuries
 
 WINDOWS = (10, 25)
 LONG_WINDOW = WINDOWS[-1]
@@ -434,6 +435,7 @@ def context_features(event: dict, home_id: str, away_id: str, home_records: list
         "is_playoff": int(event.get("season_type") == PLAYOFF_SEASON_TYPE),
         **_series_state(home_records, away_id, event),
         "is_international_game": int(nhl_teams.is_international_game(event.get("venue_city"))),
+        "is_neutral_site": None if event.get("neutral_site") is None else int(bool(event.get("neutral_site"))),
         "h2h_goal_diff_last_5": _mean(head_to_head, "goal_diff"),
     }
 
@@ -733,14 +735,14 @@ def build_event_features(
         "home": {
             **rolling_team_features(home_records, season),
             **schedule_features(home_records, event, home_id, True, home_id),
-            "team_injury_count": team_injury_count(event.get("home_injuries")),
+            "team_injury_count": team_injury_count(pregame_injuries(event, "home")),
             **(home_lineup or lineup_features([], None)),
             **{f"goalie_{name}": value for name, value in (home_goalie or empty_goalie_features()).items()},
         },
         "away": {
             **rolling_team_features(away_records, season),
             **schedule_features(away_records, event, away_id, False, home_id),
-            "team_injury_count": team_injury_count(event.get("away_injuries")),
+            "team_injury_count": team_injury_count(pregame_injuries(event, "away")),
             **(away_lineup or lineup_features([], None)),
             **{f"goalie_{name}": value for name, value in (away_goalie or empty_goalie_features()).items()},
         },
@@ -922,7 +924,7 @@ FEATURE_GROUPS: dict[str, frozenset[str]] = {
     }),
     "context": frozenset({
         "is_divisional_game", "is_conference_game", "is_playoff", "series_game_number", "series_lead",
-        "is_elimination_game", "is_international_game", "h2h_goal_diff_last_5",
+        "is_elimination_game", "is_international_game", "is_neutral_site", "h2h_goal_diff_last_5",
     }),
     "lineup": frozenset({"ice_time_share_missing", "regulars_missing", "top_scorers_out", "team_injury_count"}),
 }

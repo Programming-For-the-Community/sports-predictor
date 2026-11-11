@@ -139,3 +139,21 @@ class CFBDClient(HttpClient):
         call (~9MB). Fetched by ingest/handler.py on a monthly cadence,
         refreshed early if the season has already started."""
         return self._get("roster", params={"year": year})
+
+    def get_advanced_game_stats(self, year: int, week: int, season_type: str = "regular") -> list[dict]:
+        """One week's per-team advanced game stats (EPA per play, success
+        rate, explosiveness, drives...), garbage time excluded. Each entry:
+        {"gameId", "team" (school), "opponent", "offense": {...}, "defense": {...}}."""
+        return self._get("stats/game/advanced", params={
+            "year": year, "week": week, "seasonType": season_type, "excludeGarbageTime": "true",
+        })
+
+    def get_talent(self, year: int) -> list[dict]:
+        """247Sports team talent composite for one season: [{"year", "team", "talent"}]."""
+        return self._get("talent", params={"year": year})
+
+    def get_returning_production(self, year: int) -> list[dict]:
+        """Share of last season's production each team returns: [{"season",
+        "team", "percentPPA", "percentPassingPPA", "percentRushingPPA",
+        "percentReceivingPPA", "usage", ...}]."""
+        return self._get("player/returning", params={"year": year})

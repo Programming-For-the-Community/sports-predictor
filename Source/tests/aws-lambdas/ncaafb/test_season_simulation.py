@@ -273,3 +273,10 @@ class TestProjectMatchupSeedOrder:
 
         assert (result["team_a"], result["seed_a"]) == ("top", 1)
         assert (result["team_b"], result["seed_b"]) == ("low", 6)
+
+
+def test_simulates_on_the_sports_own_elo_scale():
+    from library.features.elo import params_for
+
+    assert season_simulation.DEFAULT_HOME_ADVANTAGE == params_for("ncaafb").home_advantage
+    assert season_simulation.DEFAULT_K_FACTOR == params_for("ncaafb").k_factor

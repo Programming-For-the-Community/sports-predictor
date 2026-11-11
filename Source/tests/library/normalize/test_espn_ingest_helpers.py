@@ -28,3 +28,22 @@ def test_attach_injuries_sets_only_the_sides_that_were_checked():
     assert events[0]["home_injuries"] == [{"entity_id": "p1"}]
     assert "away_injuries" not in events[0]
     assert events[1] == {}
+
+
+def test_attach_injuries_skips_a_completed_game():
+    # A final keeps the pre-game report already on file -- today's report is post-game.
+    events = [{"status": {"type": {"completed": True}}, "competitions": [{"competitors": [
+        {"team": {"id": 1}, "homeAway": "home"},
+    ]}]}]
+
+    attach_injuries(events, {"1": [{"entity_id": "p1"}]})
+
+    assert "home_injuries" not in events[0]
+
+
+def test_attach_injuries_stamps_the_pregame_report():
+    events = [{"competitions": [{"competitors": [{"team": {"id": 1}, "homeAway": "home"}]}]}]
+
+    attach_injuries(events, {"1": []}, as_of="2026-11-11T23:30:00+00:00")
+
+    assert events[0]["injuries_as_of"] == "2026-11-11T23:30:00+00:00"

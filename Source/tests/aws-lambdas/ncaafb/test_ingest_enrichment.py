@@ -48,6 +48,20 @@ class TestEnrichGames:
         assert games[0]["away_coach"] is None
         assert games[0]["away_current_rank"] is None
 
+    def test_a_completed_game_gets_no_coach_but_keeps_its_rank(self):
+        # Today's coach record includes the game's own result.
+        games = [{"id": "1", "homeId": "2", "awayId": "52", "completed": True}]
+        mock_client = MagicMock()
+        mock_client.get_rankings.return_value = [{"polls": [
+            {"poll": "AP Top 25", "ranks": [{"school": "Georgia", "rank": 1}]},
+        ]}]
+
+        with patch("enrichment.attach_venue_indoor"),              patch("enrichment.get_cached_teams", return_value=self._teams()),              patch("enrichment.get_cached_coaches", return_value=[_coach("Kirby", "Smart", "Georgia", 2025, 11, 1)]):
+            enrich_games(games, 2025, 4, mock_client, MagicMock(), "bucket")
+
+        assert "home_coach" not in games[0]
+        assert games[0]["home_current_rank"] == 1
+
     def test_coach_fetch_failure_omits_coach_fields_without_raising(self):
         games = [{"id": "1", "homeId": "2", "awayId": "52"}]
         mock_client = MagicMock()

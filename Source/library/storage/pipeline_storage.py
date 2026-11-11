@@ -8,6 +8,7 @@ from boto3.dynamodb.conditions import Attr, Key
 from library.aws.dynamodb_table import DynamoDBTable
 from library.aws.s3_manager import S3Manager
 from library.normalize.odds import LOCKED_AT, PREGAME_ODDS
+from library.normalize.pregame import carry_pregame_fields
 from library.schema.keys import entity_key, entity_team_key
 
 
@@ -100,12 +101,14 @@ class PipelineStorage:
         if "sport" in item and "status" in item:
             item = {**item, "sport_status": f"{item['sport']}#{item['status']}"}
         # The line on file stays when this rewrite has none (ESPN drops them
-        # once a game starts) or when it was locked at kickoff.
+        # once a game starts) or when it was locked at kickoff; so do the
+        # other pre-game fields.
         if item.get("event_type") == "head_to_head":
             existing = self._events_table.get_item({"event_key": item["event_key"]})
             kept = (existing or {}).get(PREGAME_ODDS)
             if kept is not None and (PREGAME_ODDS not in item or LOCKED_AT in kept):
                 item = {**item, PREGAME_ODDS: kept}
+            item = carry_pregame_fields(item, existing)
         self._events_table.put_item(item)
 
     def set_event_odds(self, event_key: str, odds: dict) -> bool:

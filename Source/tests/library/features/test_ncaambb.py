@@ -34,7 +34,6 @@ class TestBuildEventFeaturesCore:
         assert row["event_key"] == "E1"
         assert "week" not in row
         assert "season_type" not in row
-        assert "home_travel_km" not in row
         assert "is_international_game" not in row
         assert row["home_elo"] == 1600.0
         assert row["away_elo"] == 1550.0
@@ -73,6 +72,7 @@ class TestBuildEventFeaturesInjuries:
         event = _event("E1", "2025-12-01", "150", "153")
         event["home_injuries"] = [{"entity_id": "1", "status": "Out"}, {"entity_id": "2", "status": "Questionable"}]
         event["away_injuries"] = [{"entity_id": "3", "status": "Doubtful"}]
+        event["injuries_as_of"] = "2025-01-01T00:00:00+00:00"
 
         row = build_event_features(event, {}, [], [])
 

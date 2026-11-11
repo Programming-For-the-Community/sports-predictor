@@ -286,6 +286,7 @@ class TestMain:
 
     def _run(self, monkeypatch, rows_for):
         monkeypatch.setenv("MODEL_ARTIFACTS_BUCKET_NAME", "models")
+        monkeypatch.setenv("RAW_BUCKET_NAME", "raw")
         monkeypatch.delenv("TRAINING_LOOKBACK_SEASONS", raising=False)
         s3 = MagicMock()
         s3.bucket = "models"
@@ -319,7 +320,7 @@ class TestBuildRankingDatasetMalformedEvents:
             {"event_key": "E2", "event_date": "2025-09-02", "season": 2025,
              "participants": [{"entity_id": "1", "role": "home"}, {"entity_id": "2", "role": "away"}]},
         ]
-        with patch.object(build_dataset, "compute_elo_ratings", return_value=({}, {})),              patch.object(build_dataset, "build_team_week_features", side_effect=lambda team_id, event, elo, history: {"team_id": team_id, "event_key": event["event_key"]}):
+        with patch.object(build_dataset, "sport_elo_ratings", return_value=({}, {})),              patch.object(build_dataset, "build_team_week_features", side_effect=lambda team_id, event, elo, history: {"team_id": team_id, "event_key": event["event_key"]}):
             rows = build_dataset.build_ranking_dataset(storage)
 
         assert rows == [{"team_id": "1", "event_key": "E2"}, {"team_id": "2", "event_key": "E2"}]

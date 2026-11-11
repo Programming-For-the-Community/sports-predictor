@@ -43,17 +43,18 @@ All three are built by walking history in chronological order exactly once, grow
 
 ## Shared primitives (`library/features/common.py`)
 
-Same set NBA uses -- Elo ratings (`compute_elo_ratings`, left at the NFL-tuned defaults, same open tuning item every basketball sport currently carries), rolling team scoring averages, rolling player/team stat averages, current streak, rest days, and the Dean Oliver possession/efficiency helpers (`estimate_possessions`, `_efficiency_per_100` -- promoted here from NBA's own copy, per the shared-math convention this project follows for genuinely sport-agnostic formulas).
+Same set NBA uses -- Elo ratings (`compute_elo_ratings` with `library/features/elo.py`'s basketball constants; no home advantage at a neutral site), rolling team scoring averages, rolling player/team stat averages, current streak, rest days, and the Dean Oliver possession/efficiency helpers (`estimate_possessions`, `_efficiency_per_100` -- promoted here from NBA's own copy, per the shared-math convention this project follows for genuinely sport-agnostic formulas).
 
 ## `event_features.parquet` fields
 
-One row per completed event, home/away perspective. Field names and derivations are the same as `NBA_FEATURE_ENGINEERING.md`'s own table (`home_elo`/`away_elo`/`elo_diff`, `*_rest_days`, `*_avg_points_scored/allowed`, `*_avg_offensive_rebounds/defensive_rebounds/assists/steals/blocks/turnovers/fouls`, `*_field_goal_pct`/`*_three_point_pct`/`*_free_throw_pct`, `*_offensive_efficiency`/`*_defensive_efficiency`, `*_win_streak`, `*_team_injury_count`, `label_home_won`/`label_home_score`/`label_away_score`), with these genuine differences:
+One row per completed event, home/away perspective. Field names and derivations are the same as `NBA_FEATURE_ENGINEERING.md`'s own table (`home_elo`/`away_elo`/`elo_diff`, `*_rest_days`, `*_avg_points_scored/allowed`, `*_avg_offensive_rebounds/defensive_rebounds/assists/steals/blocks/turnovers/fouls`, `*_field_goal_pct`/`*_three_point_pct`/`*_free_throw_pct`, `*_offensive_efficiency`/`*_defensive_efficiency`, `*_win_streak`, `*_team_injury_count`, `label_home_won`/`label_home_score`/`label_away_score`), with these genuine differences. Efficiency, opponent ("allowed"), context, schedule and player-prop context columns shared across the team sports are catalogued in [TEAM_SPORT_FEATURES.md](TEAM_SPORT_FEATURES.md).
 
 | Field | Difference from NBA |
 |---|---|
 | `home_avg_rebounds`/`away_avg_rebounds` | Read **directly** off `avg_total_rebounds` -- unlike NBA, ESPN's NCAA MBB box score carries a real combined-rebounds stat (labeled "Total Rebounds"), so there's no need for NBA's offensive+defensive derivation workaround. |
 | `is_conference_game` | Replaces NBA's `is_divisional_game` -- ESPN's own `conferenceCompetition` flag (`library/normalize/espn.py`'s `scoreboard_event_to_event_item`), true for both a regular-season conference game and a conference-tournament game. No static conference table needed (real yearly D1 realignment makes a hand-maintained table the wrong tool -- see "Conference membership" below). |
-| — | **No `travel_km`/`is_international_game` at all.** Confirmed live: ESPN has no geo-coordinates anywhere for NCAA MBB teams or venues (only city/state text), unlike NCAAFB's CFBD source or NBA's own static 30-team table. Hand-typing coordinates for ~362 D1 teams would repeat, at 12x the scale, the exact "2 of NBA's 30 hand-typed ids were wrong until checked individually" risk already flagged for NBA -- dropped rather than guessed. |
+| `home_travel_km`/`away_travel_km`, `*_trip_km`, `*_timezone_shift_hours` | ESPN has no geo-coordinates for NCAA MBB teams or venues (only city/state text), so distances run between state centres (`library/features/us_states.py`): a team's home is the state of most of its home games, a game is at its `venue_state`. No `is_international_game`. |
+| `home_current_rank`/`away_current_rank` | The scoreboard's AP rank going into the game (`curatedRank`, 1-25; unranked is null). Forward-only. |
 
 **No QB/RB/WR-style leader sub-features, no coach-tenure features, no `venue_indoor`** -- same reasoning as NBA's own doc (no single dominant position in basketball; no coach data source; every D1 arena is indoor).
 

@@ -1,8 +1,20 @@
 """
 Feature columns NFL and NCAAFB build the same way: each side's identified
-QB, lead rusher and lead receiver's rolling averages.
+QB, lead rusher and lead receiver's rolling averages, and the forecast's
+precipitation flag.
 """
 from library.features.common import rolling_player_stat_averages
+
+# AccuWeather icon ids (ESPN's weather.conditionId) for rain, showers,
+# thunderstorms, snow, flurries, ice, sleet and freezing rain, day and night.
+PRECIPITATION_CONDITION_IDS = frozenset({12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 29, 39, 40, 41, 42, 43, 44})
+
+
+def is_precipitation(condition_id) -> int | None:
+    """1 when the pre-game forecast calls for precipitation; None without a forecast."""
+    if not isinstance(condition_id, (int, float)) or isinstance(condition_id, bool):
+        return None
+    return int(int(condition_id) in PRECIPITATION_CONDITION_IDS)
 
 # (column suffix, rolling_player_stat_averages key) per position. Keys
 # match the stat_line fields normalize produces: "passing_interceptions"

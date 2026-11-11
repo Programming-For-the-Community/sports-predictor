@@ -33,9 +33,14 @@ optional pass-through accepted by every public function here and threaded
 into get_team_events/_live_elo_ratings calls, so one event-prediction
 request can share a single fetch instead of each function re-querying.
 """
+import logging
+import os
 from datetime import date
 
-from library.features.common import TEAM_HISTORY_GAMES, compute_elo_ratings
+from library.aws.s3_manager import S3Manager
+from library.features.box_history import live_paired_history
+from library.features.common import TEAM_HISTORY_GAMES
+from library.features.elo import sport_elo_ratings
 from library.features.matchup import live_matchup_columns
 from library.features.live_orchestration import EventNotFoundError, MalformedEventError, box_score_candidate_ids
 from library.features.live_orchestration import home_away_ids as _home_away_ids
@@ -53,6 +58,9 @@ from library.features.ncaafb import (
     identify_starting_qb,
 )
 from library.schema.keys import player_key
+from library.storage import cfbd_supplements
+
+logger = logging.getLogger(__name__)
 
 DEFAULT_ROLLING_WINDOW = 5
 SEASON_LOOKBACK = 1
@@ -159,7 +167,7 @@ def _build_player_feature_row(
         _team_previous_event_date(storage, sport, team_id, event["event_date"], events),
         team_coordinates, window,
     )
-    row.update(live_matchup_columns(storage, sport, player_game, home_id, away_id, prior_games, window, events))
+    row.update(live_matchup_columns(storage, sport, player_game, home_id, away_id, prior_games, window, events, event=event))
     return row
 
 
@@ -176,12 +184,15 @@ def build_live_event_features(
     before_date = event["event_date"]
     current_season = event.get("season")
     events = events if events is not None else storage.get_all_events(sport)
+    supplements = _cfbd_supplements(current_season)
     team_game_stats = storage.get_all_team_game_stats(sport)
+    if supplements is not None:
+        team_game_stats = cfbd_supplements.attach_advanced(team_game_stats, supplements)
 
     home_events = storage.get_team_events(sport, home_id, before_date=before_date, limit=TEAM_HISTORY_GAMES, events=events)
     away_events = storage.get_team_events(sport, away_id, before_date=before_date, limit=TEAM_HISTORY_GAMES, events=events)
-    home_box = storage.get_team_game_stats_for_team(sport, home_id, before_date=before_date, limit=window, team_game_stats=team_game_stats)
-    away_box = storage.get_team_game_stats_for_team(sport, away_id, before_date=before_date, limit=window, team_game_stats=team_game_stats)
+    home_box = live_paired_history(storage, sport, home_id, before_date, team_game_stats, events, TEAM_HISTORY_GAMES)
+    away_box = live_paired_history(storage, sport, away_id, before_date, team_game_stats, events, TEAM_HISTORY_GAMES)
     team_coordinates = _team_coordinates_for(storage, sport, home_id, away_id)
 
     def leader_games(team_id: str, category: str) -> list[dict] | None:
@@ -201,8 +212,22 @@ def build_live_event_features(
             "rb": leader_games(away_id, "rushing"),
             "wr": leader_games(away_id, "receiving"),
         },
-        home_team_box_stats=home_box, away_team_box_stats=away_box,
+        home_team_box_stats=home_box, away_team_box_stats=away_box, supplements=supplements,
     )
+
+
+def _cfbd_supplements(season: int | None):
+    """This season's and last season's CFBD supplements from the raw
+    bucket (RAW_BUCKET_NAME), or None when it isn't configured or can't be
+    read -- the supplement columns are then left empty."""
+    bucket = os.environ.get("RAW_BUCKET_NAME")
+    if not bucket or season is None:
+        return None
+    try:
+        return cfbd_supplements.load_cached(S3Manager(bucket), {season, season - 1})
+    except Exception:
+        logger.exception("Couldn't read CFBD supplements for %s -- those columns stay empty", season)
+        return None
 
 
 def build_live_player_features(
@@ -258,7 +283,7 @@ def build_live_event_leader_candidates(
     current_season = event.get("season")
     team_coordinates = _team_coordinates_for(storage, sport, home_id, away_id)
     events = events if events is not None else storage.get_all_events(sport)
-    _, current_ratings = compute_elo_ratings(events, as_of_season=current_season)
+    _, current_ratings = sport_elo_ratings(sport, events, as_of_season=current_season)
 
     def team_candidates(team_id: str) -> dict:
         result = {}

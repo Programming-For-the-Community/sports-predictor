@@ -35,7 +35,11 @@ group assignments.
 """
 import random
 
-from library.features.common import DEFAULT_HOME_ADVANTAGE, DEFAULT_K_FACTOR, DEFAULT_STARTING_RATING, expected_score
+from library.features.common import DEFAULT_STARTING_RATING, expected_score
+from library.features.elo import params_for
+
+DEFAULT_HOME_ADVANTAGE = params_for("nba").home_advantage
+DEFAULT_K_FACTOR = params_for("nba").k_factor
 from library.features.nba_cup_groups import CUP_GROUPS, cup_group_for_team
 from library.features.nba_teams import TEAM_DIVISIONS
 from library.serving import season_projection_common

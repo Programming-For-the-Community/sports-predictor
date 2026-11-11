@@ -63,7 +63,11 @@ Genuinely different from NFL/NCAAFB, not just renamed:
 """
 from library.features import common
 from library.features import nba_teams
+from library.features.basketball_extras import basketball_extra_columns
 from library.features.common import DEFAULT_ROLLING_WINDOW
+from library.features.schedule import SiteTable
+
+SITES = SiteTable(nba_teams.TEAM_COORDINATES, nba_teams.TEAM_UTC_OFFSETS, nba_teams.INTERNATIONAL_VENUES)
 
 
 def _total_rebounds(box_stats: dict) -> float | None:
@@ -129,11 +133,16 @@ def build_event_features(
     recent first, NOT including this one. No home_qb_games-style
     per-position argument -- see this module's own docstring for why.
     """
-    return common.build_basketball_event_features(
+    row = common.build_basketball_event_features(
         event, elo_ratings, home_team_events, away_team_events, window,
         home_team_box_stats, away_team_box_stats,
         rebounds_fn=_total_rebounds, extra_fields_fn=_event_extra_fields,
     )
+    row.update(basketball_extra_columns(
+        "nba", event, elo_ratings, home_team_events, away_team_events,
+        home_team_box_stats or [], away_team_box_stats or [], window, SITES,
+    ))
+    return row
 
 
 def build_player_features(

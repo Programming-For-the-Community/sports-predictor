@@ -18,6 +18,7 @@ Required environment variables:
     TEAM_GAME_STATS_TABLE_NAME
     AWS_REGION
     MODEL_ARTIFACTS_BUCKET_NAME
+    RAW_BUCKET_NAME -- CFBD supplements (library.storage.cfbd_supplements)
 
 Optional environment variables:
     ROLLING_WINDOW (default 5) -- games of history each event/player
@@ -41,7 +42,7 @@ from collections import defaultdict
 from library.aws import xray
 from library.aws.s3_manager import S3Manager
 from library.features import build_dataset_common
-from library.features.common import compute_elo_ratings
+from library.features.elo import sport_elo_ratings
 from library.features.ncaafb import (
     build_event_features,
     build_player_features,
@@ -50,6 +51,7 @@ from library.features.ncaafb import (
     identify_lead_rusher,
     identify_starting_qb,
 )
+from library.storage import cfbd_supplements
 from library.storage.feature_storage import FeatureStorage
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
@@ -90,20 +92,33 @@ def _team_coordinates(storage: FeatureStorage, team_ids: set[str]) -> dict[str, 
 LEADERS = {"qb": identify_starting_qb, "rb": identify_lead_rusher, "wr": identify_lead_receiver}
 
 
-def build_event_dataset(storage: FeatureStorage, window: int, since_date: str | None = None) -> list[dict]:
+def build_event_dataset(
+    storage: FeatureStorage, window: int, since_date: str | None = None, raw_s3: S3Manager | None = None,
+) -> list[dict]:
     """Every event's feature row, each team's history and each team's
     starting QB, lead rusher and lead receiver's history capped to the
-    last `window` games."""
+    last `window` games. raw_s3 (the raw bucket) supplies the CFBD
+    supplements; without it those columns stay empty."""
     events = storage.get_all_events(SPORT, since_date=since_date)
     logger.info("Loaded %d completed events", len(events))
     team_coordinates = _team_coordinates(storage, _team_ids(events))
+    team_game_stats = storage.get_all_team_game_stats(SPORT, since_date=since_date)
+    supplements = cfbd_supplements.load(raw_s3) if raw_s3 is not None else None
+    if supplements is not None:
+        logger.info(
+            "Loaded CFBD supplements: %d advanced game rows, %d talent rows, %d returning rows",
+            len(supplements.advanced), len(supplements.talent), len(supplements.returning),
+        )
+        team_game_stats = cfbd_supplements.attach_advanced(team_game_stats, supplements)
 
     def event_features(event, elo_ratings, home_history, away_history, window, **kwargs):
-        return build_event_features(event, elo_ratings, home_history, away_history, team_coordinates, window, **kwargs)
+        return build_event_features(
+            event, elo_ratings, home_history, away_history, team_coordinates, window, supplements=supplements, **kwargs,
+        )
 
     return build_dataset_common.build_team_event_rows(
-        events, storage.get_all_team_game_stats(SPORT, since_date=since_date), window, event_features, logger,
-        player_games=storage.get_all_player_game_stats(SPORT, since_date=since_date), leaders=LEADERS,
+        events, team_game_stats, window, event_features, logger,
+        sport=SPORT, player_games=storage.get_all_player_game_stats(SPORT, since_date=since_date), leaders=LEADERS,
     )
 
 
@@ -126,7 +141,7 @@ def build_ranking_dataset(storage: FeatureStorage, since_date: str | None = None
     uses season-to-date record/scoring/SOS rather than a trailing N-game
     average."""
     events = storage.get_all_events(SPORT, since_date=since_date)
-    elo_ratings, _ = compute_elo_ratings(events)
+    elo_ratings, _ = sport_elo_ratings(SPORT, events)
     events_ascending = sorted(events, key=lambda e: e.get("event_date", ""))
 
     team_season_history: dict[tuple[str, int], list[dict]] = defaultdict(list)
@@ -174,9 +189,10 @@ def main() -> None:
 
     storage = FeatureStorage()
     s3 = S3Manager(bucket, region=region)
+    raw_s3 = S3Manager(os.environ["RAW_BUCKET_NAME"], region=region)
 
     logger.info("Building event-level dataset...")
-    _write_dataset(s3, EVENT_FEATURES_KEY, build_event_dataset(storage, window, since_date=since_date), "event")
+    _write_dataset(s3, EVENT_FEATURES_KEY, build_event_dataset(storage, window, since_date=since_date, raw_s3=raw_s3), "event")
 
     logger.info("Building player-level dataset...")
     _write_dataset(s3, PLAYER_FEATURES_KEY, build_player_dataset(storage, window, since_date=since_date), "player")

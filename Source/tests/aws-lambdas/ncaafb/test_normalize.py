@@ -112,6 +112,14 @@ class TestDispatch:
 
         mock_storage.write_team_game_stats.assert_called_once_with(team_stats)
 
+    def test_cfbd_supplement_keys_are_left_for_feature_engineering(self):
+        mock_s3 = MagicMock()
+        with patch.object(ncaafb_normalize, "_s3", mock_s3):
+            for key in ("ncaafb/advanced/2025/regular/4.json", "ncaafb/talent/2025.json", "ncaafb/returning/2025.json"):
+                ncaafb_normalize._dispatch("test-bucket", key)
+
+        mock_s3.get_object.assert_not_called()
+
     def test_ignores_unrecognized_key_without_raising(self):
         mock_s3 = MagicMock()
         mock_s3.get_object.return_value = _s3_response([])

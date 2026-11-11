@@ -50,13 +50,11 @@ SEASON_LOOKBACK = 1
 # _ROSTER_STALENESS_DAYS, which is tight for the same reason.
 _ROSTER_STALENESS_DAYS = 14
 
-# get_team_game_stats_for_team only keeps each team's DEFAULT_ROLLING_WINDOW
-# most recent games -- bounding the underlying get_all_team_game_stats
-# Query to this many days back (instead of every row ever written for the
-# sport) keeps it a recent-window Query, not a full-season partition read.
-# Generous relative to NCAA MBB's own ~2-3 games/week pace, including
-# through a holiday break.
-TEAM_GAME_STATS_LOOKBACK_DAYS = 60
+# Event rows read each team's box history back to TEAM_HISTORY_GAMES games,
+# for the season-to-date and recency-weighted columns -- a whole NCAA MBB
+# season (November to early April) fits in this many days. Bounding the
+# get_all_team_game_stats Query keeps it off older seasons' rows.
+TEAM_GAME_STATS_LOOKBACK_DAYS = 160
 
 # Leaders-panel candidate generation -- box-score volume stat per category.
 # Matches library.serving.ncaambb_reads' own _CATEGORY_PRIMARY_STAT.

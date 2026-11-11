@@ -247,3 +247,41 @@ class TestPregameOdds:
     def test_no_odds_posted_yet(self):
         raw = _scoreboard_event(status={"type": {"completed": False, "state": "pre"}})
         assert "pregame_odds" not in scoreboard_event_to_event_item(raw, "nfl")
+
+
+class TestScoreboardEventFeatureFields:
+    def test_neutral_site_is_passed_through(self):
+        raw = _scoreboard_event()
+        raw["competitions"][0]["neutralSite"] = True
+        assert scoreboard_event_to_event_item(raw, "ncaambb")["neutral_site"] is True
+
+    def test_neutral_site_is_none_when_espn_omits_it(self):
+        assert scoreboard_event_to_event_item(_scoreboard_event(), "nba")["neutral_site"] is None
+
+    def test_weather_condition_id_is_parsed_from_the_forecast(self):
+        raw = _scoreboard_event()
+        raw["competitions"][0]["weather"] = {"temperature": 53, "conditionId": "18"}
+        item = scoreboard_event_to_event_item(raw, "nfl")
+        assert (item["weather_temperature"], item["weather_condition_id"]) == (53, 18)
+
+    def test_periods_counts_linescores_overtime_included(self):
+        raw = _scoreboard_event()
+        raw["competitions"][0]["competitors"][0]["linescores"] = [{"value": 30}] * 5
+        raw["competitions"][0]["competitors"][1]["linescores"] = [{"value": 28}] * 5
+        assert scoreboard_event_to_event_item(raw, "nba")["periods"] == 5
+
+    def test_periods_is_none_before_any_linescores(self):
+        assert scoreboard_event_to_event_item(_scoreboard_event(), "nba")["periods"] is None
+
+    def test_ap_rank_is_kept_for_ranked_teams_only(self):
+        raw = _scoreboard_event()
+        raw["competitions"][0]["competitors"][0]["curatedRank"] = {"current": 9}
+        raw["competitions"][0]["competitors"][1]["curatedRank"] = {"current": 99}
+        item = scoreboard_event_to_event_item(raw, "ncaambb")
+        assert item["home_current_rank"] == 9
+        assert "away_current_rank" not in item
+
+
+def test_the_pregame_injury_stamp_is_carried_onto_the_event():
+    raw = _scoreboard_event(home_injuries=[], injuries_as_of="2026-11-11T23:30:00+00:00")
+    assert scoreboard_event_to_event_item(raw, "nba")["injuries_as_of"] == "2026-11-11T23:30:00+00:00"

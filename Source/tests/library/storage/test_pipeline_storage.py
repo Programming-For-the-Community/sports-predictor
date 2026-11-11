@@ -196,6 +196,35 @@ class TestUpsertEventKeepsTheSavedLine:
         mock_events.get_item.assert_not_called()
 
 
+class TestUpsertEventKeepsPregameFields:
+    INJURIES = [{"entity_id": "7", "status": "Out"}]
+
+    def test_a_completed_rewrite_keeps_the_pregame_injuries_and_weather(self, storage_env):
+        # ESPN sends no weather on a final, and ingest attaches no injuries to one.
+        storage, mock_events = _make_storage_with_events(storage_env)
+        mock_events.get_item.return_value = {
+            "event_key": "SPORT#NFL#EVENT#1", "home_injuries": self.INJURIES, "weather_temperature": 41,
+            "weather_condition_id": 18, "home_coach_season_win_pct": 0.6,
+        }
+
+        storage.upsert_event({
+            "event_key": "SPORT#NFL#EVENT#1", "event_type": "head_to_head", "status": "completed", "weather_temperature": None,
+        })
+
+        written = mock_events.put_item.call_args.args[0]
+        assert written["home_injuries"] == self.INJURIES
+        assert (written["weather_temperature"], written["weather_condition_id"]) == (41, 18)
+        assert written["home_coach_season_win_pct"] == 0.6
+
+    def test_a_newer_pregame_report_replaces_the_saved_one(self, storage_env):
+        storage, mock_events = _make_storage_with_events(storage_env)
+        mock_events.get_item.return_value = {"event_key": "SPORT#NBA#EVENT#1", "home_injuries": self.INJURIES}
+
+        storage.upsert_event({"event_key": "SPORT#NBA#EVENT#1", "event_type": "head_to_head", "home_injuries": []})
+
+        assert mock_events.put_item.call_args.args[0]["home_injuries"] == []
+
+
 class TestSetEventOdds:
     def test_sets_only_the_odds_attribute_on_an_existing_event(self, storage_env):
         storage, mock_events = _make_storage_with_events(storage_env)

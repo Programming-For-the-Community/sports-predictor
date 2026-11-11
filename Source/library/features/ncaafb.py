@@ -22,7 +22,7 @@ already-fetched rows and returns numbers.
   with CFBD's own AP Top 25 rank when enrichment attached one to that
   team's game that week.
 """
-from library.features import football, geo
+from library.features import football, geo, ncaafb_advanced, schedule
 from library.features.common import (
     DEFAULT_ROLLING_WINDOW,
     _identify_leader,
@@ -37,6 +37,10 @@ from library.features.common import (
     rolling_team_scoring_averages,
     team_scoring_columns,
 )
+from library.features.football_box import football_box_columns
+from library.features.team_context import context_columns
+
+SITES = schedule.SiteTable(by_state=True)
 
 
 def identify_starting_qb(team_player_games: list[dict]) -> dict | None:
@@ -91,6 +95,7 @@ def build_event_features(
     away_position_games: dict[str, list[dict]] | None = None,
     home_team_box_stats: list[dict] | None = None,
     away_team_box_stats: list[dict] | None = None,
+    supplements=None,
 ) -> dict:
     """Assembles one training row for a head-to-head event -- same shape
     and calling convention as library.features.nfl.build_event_features
@@ -114,6 +119,11 @@ def build_event_features(
     postseason signal as real, usable numeric features (regular season is
     simply both False), so there's nothing left for a raw season_type
     column to add.
+
+    Box histories are paired (library.features.box_history), up to
+    TEAM_HISTORY_GAMES long; rows carrying CFBD advanced stats feed the
+    EPA columns. supplements (library.storage.cfbd_supplements) supplies
+    talent and returning production; None leaves those columns empty.
     """
     participants = event["participants"]
     home = next(p for p in participants if p.get("role") == "home")
@@ -127,8 +137,9 @@ def build_event_features(
     home_scoring = rolling_team_scoring_averages(home_team_events, home_id, window, as_of=event["event_date"], pre_game=elo_ratings)
     away_scoring = rolling_team_scoring_averages(away_team_events, away_id, window, as_of=event["event_date"], pre_game=elo_ratings)
 
-    home_box_stats = rolling_player_stat_averages(home_team_box_stats or [], window)
-    away_box_stats = rolling_player_stat_averages(away_team_box_stats or [], window)
+    home_box, away_box = home_team_box_stats or [], away_team_box_stats or []
+    home_box_stats = rolling_player_stat_averages(home_box, window)
+    away_box_stats = rolling_player_stat_averages(away_box, window)
     home_third_down_pct = _rate(home_box_stats, "avg_third_down_conversions", "avg_third_down_attempts")
     away_third_down_pct = _rate(away_box_stats, "avg_third_down_conversions", "avg_third_down_attempts")
 
@@ -182,6 +193,14 @@ def build_event_features(
         "away_coach_season_win_pct": event.get("away_coach_season_win_pct"),
         "home_current_rank": event.get("home_current_rank"),
         "away_current_rank": event.get("away_current_rank"),
+        **football_box_columns("ncaafb", home_box, away_box, window, event["event_date"]),
+        **ncaafb_advanced.advanced_columns(home_box, away_box, window, event["event_date"]),
+        **ncaafb_advanced.season_columns(supplements, event.get("season"), home_id, away_id),
+        **context_columns(event, home_id, away_id, home_team_events, away_team_events, elo_ratings),
+        **schedule.side_columns({
+            "home": schedule.clock_columns(event, home_id, home_team_events, SITES),
+            "away": schedule.clock_columns(event, away_id, away_team_events, SITES),
+        }),
         "label_home_won": home.get("result", {}).get("won"),
         "label_home_score": home.get("result", {}).get("score"),
         "label_away_score": away.get("result", {}).get("score"),
