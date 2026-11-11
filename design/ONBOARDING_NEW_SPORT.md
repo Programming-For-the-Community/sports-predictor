@@ -6,7 +6,7 @@ A runbook for adding sport #7 (or beyond). Every sport in this project follows t
 
 **Decide the event shape.** Every sport is either **head-to-head** (two teams/competitors — NFL, NCAA FB, NBA, NCAA MBB) or **field** (many entrants, ranked finish — PGA Tour, F1). This decision drives everything downstream: storage shape (`design/DATA_SCHEMA.md`'s two `participants` shapes), whether a `player_game_stats` table applies at all (head-to-head only — a field-event entity *is* the participant), and whether player-prop routes exist on the API (head-to-head only). If the new sport is field-event, budget real time for pinning down the real API response shape before writing any normalizer code — PGA and F1's field-event schemas both needed a genuine second pass once the real API response didn't match the originally-sketched shape.
 
-**Pick a data source**, following `design/DATA_SOURCES.md`'s own priority order: free and keyless first (ESPN's unofficial site/core APIs have covered 4 of 6 sports so far), a free-tier keyed API second (CFBD for NCAA FB — see below for the shared-secret pattern), a purpose-built free API third (Jolpica-F1). Confirm the source actually has what you need — team/player identifiers, box scores or field results, and either a bulk schedule/calendar endpoint or a per-date scoreboard — before committing to it.
+**Pick a data source**, following `design/DATA_SOURCES.md`'s own priority order: free and keyless first (ESPN's unofficial site/core APIs have covered 5 of 7 sports so far: NFL, NBA, NCAA MBB, NHL and PGA), a free-tier keyed API second (CFBD for NCAA FB — see below for the shared-secret pattern), a purpose-built free API third (Jolpica-F1). Confirm the source actually has what you need — team/player identifiers, box scores or field results, and either a bulk schedule/calendar endpoint or a per-date scoreboard — before committing to it.
 
 **If the source needs an API key**, it goes in the one shared Secrets Manager secret every paid source already uses (`var.third_party_api_key_secret_arn`), as a new JSON field (e.g. `<sport>_ingest_key`, `<sport>_backfill_key` if separate ingest/backfill accounts make sense) — never a new Terraform-managed secret. See `library/http/cfbd.py`'s `_resolve_api_key` for the pattern to copy.
 
@@ -53,6 +53,10 @@ The Android app picks the sport up from the same `kSports` entry — its widgets
 - **Weekly model report** — add the sport to `reportWeekday` in `Source/front-end/lib/core/mobile/model_report.dart`, on the same weekday as its schedule-sync (the report goes out at 10 AM Eastern that day). A sport missing from that map simply gets no weekly report.
 - **Top-picks widget** — head-to-head sports work as-is; a new field-event shape needs its own builder in `lib/core/mobile/widget_sync.dart`'s `_fetchPicks` (PGA and F1 each have one).
 
+## Assistant
+
+Nothing to add per sport: the assistant's tool definitions, favourites and sport list come from the sport registry (`library/assistant/sports.py`, `tool_specs.py`), its game lookups read through the sport's own `predict-read`, and `get_pipeline_health` finds the sport's Lambdas by the `<project>-<sport>-<stage>` naming convention. Once the registry row exists, ask the Predictions agent a few questions about the new sport, and add cases for it to `Source/library/assistant/eval_cases.py` if its event shape is new.
+
 ## Checklist
 
 - [ ] Event shape decided, data source picked and its real response shape verified live
@@ -67,11 +71,12 @@ The Android app picks the sport up from the same `kSports` entry — its widgets
 - [ ] CI workflows created and wired into `app_deploy.yml`
 - [ ] `sport_config.dart`'s `kSports` entry added with `active: true`, `id` matching the backend route prefix exactly
 - [ ] Android app: weekly-report day added to `model_report.dart`'s `reportWeekday`; top-picks builder added if it's a new field-event shape; `RELEASE_NOTES.txt` updated
+- [ ] Assistant answers questions about the sport (no code change expected — see "Assistant" above)
 - [ ] Mobile pass on this sport's event list/detail/leaderboard widgets once live data is flowing (see `design/FRONTEND_STYLE.md`'s responsiveness section) — every sport onboarded so far has needed at least one overflow fix once live-score content actually appeared
 
 ## Common pitfalls
 
-Real bugs found across the six onboardings so far, in the order they tend to bite:
+Real bugs found across the seven onboardings so far, in the order they tend to bite:
 
 - **EventBridge invoke-permission gap.** A new sport's `schedule-sync`/`live-scores`/`predict` Lambda gets its own `aws_scheduler_schedule` target, but `iam-eventbridge-invoke.tf`'s `InvokeDirectLambdaJobs` statement is a separate, manually-maintained resource list — missing an entry here doesn't fail `terraform apply` (both the schedule and the Lambda still create cleanly on their own), it fails silently at runtime with `AccessDenied` that only shows up in EventBridge's own retry logs. This has happened twice for real (PGA and NCAAFB's own `schedule-sync` functions).
 - **`sport_config.dart` id mismatch.** The frontend `id` must match the backend's route prefix exactly — a mismatch 404s every API call the moment `active` flips to `true`, not before.

@@ -12,7 +12,7 @@ One row per team or player, regardless of sport.
 |---|---|---|
 | `entity_key` | `SPORT#NFL#ENTITY#KC` | Partition key prefixed by sport so per-sport queries don't scan unrelated data |
 | `entity_id` | `KC` | Source system's team/player identifier |
-| `sport` | `nfl` | One of the six supported sports |
+| `sport` | `nfl` | One of the seven supported sports |
 | `entity_type` | `team` or `player` | Team sports use both (team-level and player-level records); golf and F1 are primarily player-level |
 | `name` | `Kansas City Chiefs` | Display name |
 | `metadata` | `{abbreviation, location, nickname}` for a team; `{team_id: "KC", jersey: "15"}` for a player | Sport-specific attributes, stored as a flexible map rather than fixed columns. For player entities in team sports, `team_id` is the current roster link — it's what lets a feature pipeline join a player to their team's pace/scheme context, and it changes on trades, so treat it as current-state, not historical. Division/conference are NOT here — ESPN's teams endpoint doesn't return them, and since they're essentially static (last realignment 2002), they live in a hardcoded table (`library/features/nfl_teams.py`) instead |
@@ -35,6 +35,11 @@ One row per game, match, tournament, or race.
 | `weather_temperature` | `52` or `null` | Frequently `null` — most reliably for indoor games, where it doesn't apply, but also for outdoor games the source API simply didn't report on. A partial signal, not a guaranteed one |
 | `home_coach_id`, `home_coach_name`, `home_coach_experience`, `home_coach_season_win_pct` (+ `away_*`) | `"4872749"`, `"Mike LaFleur"`, `0`, `0.4706` | NFL-only so far. Attached by ingest (`aws-lambdas/nfl/ingest/handler.py`'s `_enrich_events`, via ESPN's other "core" API) before every event write, so every event carries whatever coach data was current as of its most recent ingest cycle. `experience`/`season_win_pct` are ESPN's own numbers (tenure with this team, this season's win rate), used directly as feature inputs — no derivation. `*_coach_id`/`*_coach_name` are identifiers only, never fed to a model, same rule as every other raw id/name field here. Absent entirely on any event ingested before this shipped — forward-only, no historical backfill (ESPN's coach data is current-state only, no historical-as-of-date endpoint exists) |
 | `home_injuries`, `away_injuries` | `[{"entity_id": "4912218", "status": "Questionable"}, ...]` | NFL-only so far. Each team's current injury report as of the most recent ingest cycle, same enrichment as coach data above. Re-fetched daily (not just the historical Tue/Wed ingest cadence) since injury reports genuinely change through the week in a way box scores and coach data don't — see `Terraform/sfn-ingest-orchestrator.tf`'s daily schedule. An empty list is real signal ("checked, nobody's hurt"), distinct from the key being absent entirely ("never checked") |
+| `weather_condition_id` | `18` or `null` | ESPN's pre-game forecast `conditionId` (an AccuWeather icon id); only scheduled games carry it. Feeds NFL's `is_precipitation` |
+| `neutral_site` | `true`, `false` or `null` | ESPN `competitions[0].neutralSite` / CFBD `neutralSite`. Elo gives a neutral-site game no home advantage |
+| `periods` | `5` or `null` | Periods played, overtime included, from the scoreboard's linescores; basketball pace uses it to scale overtime games to regulation length |
+| `home_current_rank`, `away_current_rank` | `9` | NCAA FB: CFBD's AP rank for the week. NCAA MBB: the scoreboard's `curatedRank` (1-25); absent when unranked |
+| Pre-game fields | | Injuries, weather and coach fields are attached only while a game hasn't finished; an event rewrite without one keeps the stored value (`library/normalize/pregame.py`), so a completed event carries its last pre-game snapshot |
 | `home_depth_chart`, `away_depth_chart` | `{"qb": {"position": {...}, "athletes": [{"id": "4912218"}, ...]}, ...}` | NFL-only so far. Filtered to QB/RB/WR only (the positions live prediction's leader-selection needs — see `aws-lambdas/nfl/predict/live_features.py`), not ESPN's full ~25-position payload. Same enrichment/refresh cadence as injuries above |
 
 **Head-to-head `participants` shape** (NFL, NCAA FB, NBA, NCAA MBB):
@@ -129,14 +134,15 @@ One row per event per model per version for event-level outcomes, or one row per
 
 ## Serving layer
 
-Three Lambda types sit behind API Gateway per sport (`Terraform/api-gateway-{sport}-predict.tf`, `api-gateway-{sport}-live-scores.tf` — identical shape for all 6 sports), all authenticated by the same Cognito authorizer (see `design/ARCHITECTURE.md`'s client-request-path walkthrough). `predict` and `predict-read` are split for cold-start isolation — `predict-read` never imports the ML dependency chain, so its two routes stay light and, unlike `predict`, isn't VPC-attached at all (see that same doc's "Networking" section for why). Most predictions are computed live from current DynamoDB/S3 state on each request; `GET /{sport}/season` is the one exception, serving a cached S3 object that `predict` recomputes weekly rather than per-request.
+API Gateway (`Terraform/api-gateway-{sport}-predict.tf`, `api-gateway-{sport}-live-scores.tf` — identical shape for all 7 sports, all behind the same Cognito authorizer) invokes two kinds of Lambda: the one shared `predict-read` for every route except live scores, and each sport's own `live-scores`. Each sport's `predict` is never invoked by API Gateway: `predict-read` serves predictions from a read-through S3 cache (`predictions-cache/`, below) and invokes `predict` asynchronously to fill a missing or stale entry, answering `202`/`203` meanwhile (`docs/SPORT_PREDICTOR_API.md`, "Prediction-route caching semantics"). The split is for cold-start isolation — `predict-read` never imports the ML dependency chain and, unlike `predict`, isn't VPC-attached (see `design/ARCHITECTURE.md`'s "Networking" section). `GET /{sport}/season` serves a cached S3 object `predict` recomputes on a schedule.
 
 | Route | Lambda | Returns |
 |---|---|---|
-| `GET /{sport}/predictions/events/{event_id}` | `predict` | Event-level prediction(s) for one matchup/tournament/race, from one shared live feature vector scored against every event-level model that sport trains |
-| `GET /{sport}/predictions/events/{event_id}/players/{entity_id}?stat=passing_yards` | `predict` | One player-prop prediction for one player in one event (head-to-head sports only), scored against the `player-prop-<stat>` model matching the `stat` query parameter |
-| `GET /{sport}/events?status=scheduled\|completed` | `predict-read` | Event list, filtered by status |
+| `GET /{sport}/predictions/events/{event_id}` | `predict-read` (cache), `predict` (computes on a miss) | Event-level prediction(s) for one matchup/tournament/race, from one shared live feature vector scored against every event-level model that sport trains |
+| `GET /{sport}/predictions/events/{event_id}/players/{entity_id}?stat=passing_yards` | `predict-read` (cache), `predict` (computes on a miss) | One player-prop prediction for one player in one event (head-to-head sports only), scored against the `player-prop-<stat>` model matching the `stat` query parameter |
+| `GET /{sport}/events?status=scheduled\|completed[&date=YYYY-MM-DD]` | `predict-read` | Event list, filtered by status (and, for head-to-head sports, one date) |
 | `GET /{sport}/models` | `predict-read` | Current model versions |
+| `GET /{sport}/model-performance` | `predict-read` | The daily model scorecard (`model-performance/{sport}/latest.json`) |
 | `GET /{sport}/season` | `predict-read` | Season-projection output, read from the S3 cache `predict` writes weekly (`scheduler-{sport}-season-projection.tf`) |
 | `GET /{sport}/live-scores` | `{sport}-live-scores` | Cache-only live score refresh for events near kickoff or in progress; never writes to the Predictions table. Its own IAM role (`lambda_live_scores`), not `lambda_inference` — also not VPC-attached |
 
@@ -168,13 +174,27 @@ Drives both orchestrator state machines' Map states (`Terraform/sfn-ingest-orche
 ```
 `task_definition_suffix` resolves the ECS task-definition family at runtime as `<project>-<sport>-<task_definition_suffix>` (e.g. `sports-predictor-nfl-train-player-prop-model`) — the same `${project}-${sport}-<stage>` convention every Lambda/ECS resource in this project already follows (`sports-predictor-nfl-ingest`, `sports-predictor-nfl-feature-engineering`, etc.), which is what lets the state machines resolve a resource name from `sport` alone rather than needing a stored ARN per row. `env_name`/`env_value` is a single optional override pair, not a list — every training script this project has needed so far takes at most one (`SCORE_TARGET` or `TARGET_STAT`); a target with no real override (`win-probability`) gets a harmless no-op (`AWS_REGION` re-asserted at its own value) rather than a variable-length-list special case the state machine would otherwise need to branch on.
 
+## Assistant table and memory
+
+The in-app assistant (`design/ARCHITECTURE.md`, "In-app assistant") keeps its own small state, apart from the sports tables:
+
+**DynamoDB `<project>-assistant`** (`Terraform/agentcore-assistant.tf`) — `pk`/`sk` strings, on-demand, TTL on `expires_at`, point-in-time recovery on.
+
+| `pk` | `sk` | Holds | Written by |
+|---|---|---|---|
+| `<cognito sub>` | `quota#<agent>#<yyyy-mm-dd>` | Questions that user asked that Eastern day (TTL'd) | the agent, each counted question (`library/assistant/user_store.py`) |
+| `<cognito sub>` | `favorites` | `{"teams": {"<sport>": ["<team or competitor>"]}}`, one per registry sport | the agent's `save_favorite` / `clear_favorites` |
+| `usage#<agent>` | `<yyyy-mm-dd>` | That day's question count per outcome (TTL 400 days) | the agent, best-effort (`library/assistant/usage.py`); read by `get_assistant_usage` |
+
+**AgentCore Memory**, one per agent: one event per turn under the caller's `sub`, kept 7 days (`library/assistant/history.py`), and the user-preference strategy's long-term records under `/preferences/<sub>` — how the user has asked to be answered (`library/assistant/preferences.py`). Favourite teams stay in DynamoDB, not memory.
+
 ## Access patterns and indexes
 
-The `SPORT#<sport>#...` prefix on every partition key means a query for "all NFL events" or "all NFL entities" is a single partition query, not a table scan — this matters once six sports share the same tables. Add a global secondary index on `event_date` (scoped within the sport prefix) once you need date-range queries like "this week's games," and an index on `entity_id` once the frontend needs "show me this team's full history" — don't add either speculatively before a feature actually needs it, since each GSI roughly doubles the write cost for that table.
+The `SPORT#<sport>#...` prefix on every partition key means a query for "all NFL events" or "all NFL entities" is a single partition query, not a table scan — this matters once seven sports share the same tables. Add a global secondary index on `event_date` (scoped within the sport prefix) once you need date-range queries like "this week's games," and an index on `entity_id` once the frontend needs "show me this team's full history" — don't add either speculatively before a feature actually needs it, since each GSI roughly doubles the write cost for that table.
 
 ## S3 key conventions
 
-Every S3 prefix used by more than one sport follows `<sport>/<purpose>/...`, the same partitioning discipline the DynamoDB tables use, so a bucket serving all six sports never has one sport's keys collide with another's. Established prefixes, all under the model-artifacts or raw-data-lake bucket as noted:
+Every S3 prefix used by more than one sport follows `<sport>/<purpose>/...`, the same partitioning discipline the DynamoDB tables use, so a bucket serving all seven sports never has one sport's keys collide with another's. Established prefixes, all under the model-artifacts or raw-data-lake bucket as noted:
 
 | Prefix | Bucket | Written by | Read by |
 |---|---|---|---|
@@ -187,6 +207,10 @@ Every S3 prefix used by more than one sport follows `<sport>/<purpose>/...`, the
 | `<sport>/conference-membership/{season}.json` | raw data lake | `ncaambb-schedule-sync` (the one Lambda in this prefix's sport with internet egress) | `ncaambb-predict` (VPC-isolated, reads the cache instead of calling out itself) |
 | `pga/statistics/{date}.json` | raw data lake | `pga-ingest`, unconditionally every day regardless of whether a tournament is current (one raw season-stats snapshot per date -- driving distance/accuracy, GIR%, putts per hole, scoring average, etc.) | `feature-engineering/pga/build_dataset.py` (nullable, join-by-nearest-preceding-date features -- see `docs/PGA_FEATURE_ENGINEERING.md`). Same "raw snapshot bypasses DynamoDB entirely" pattern as NCAA MBB's AP polls above -- ESPN's own `golf/pga/statistics` endpoint is CURRENT-SNAPSHOT-ONLY (confirmed live, 2026-08-25: its `season`/`year` query params are silently ignored), so this prefix is the ONLY possible historical record of these categories this project can ever have; there is no backfill path for it at all |
 
-The last row is the general shape for the S3-relay pattern described in `design/ARCHITECTURE.md`'s "Networking: no NAT Gateway, anywhere" section — a future sport needing something similar should follow the same `<sport>/<purpose>/...` prefix convention and grant the reading Lambda a scoped `s3:GetObject` statement on just that prefix, not bucket-wide access.
+| `assistant/admin/cost/{daily/<yyyy-mm-dd>, monthly/<yyyy-mm>, meta}.json` | model artifacts | `assistant-cost-snapshot`, daily (this project's tagged spend only) | `assistant-admin-tools` (`get_cost_summary`) |
+| `assistant/admin/traffic/{hour/<yyyy-mm-ddThh>, day/<yyyy-mm-dd>}.json` | model artifacts | `assistant-traffic-aggregate`, hourly (blocked/denied request counts from both WAF log groups and the API Gateway access log) | `assistant-admin-tools` (the denied-traffic and API-traffic tools) |
+| `<sport>/cache/live-scores/latest.json` | raw data lake | each sport's `live-scores` Lambda | the app's live-scores route, and `assistant-public-tools`' `get_live_scores` |
+
+The conference-membership row above is the general shape for the S3-relay pattern described in `design/ARCHITECTURE.md`'s "Networking: no NAT Gateway, anywhere" section — a future sport needing something similar should follow the same `<sport>/<purpose>/...` prefix convention and grant the reading Lambda a scoped `s3:GetObject` statement on just that prefix, not bucket-wide access.
 
 `player_game_stats` needs its own `entity_id` GSI sooner rather than later, even under the same "don't add speculatively" rule — its primary key is event-first (`PK = SPORT#...#EVENT#...`), so "this player's last N games" (the core input to most player-prop features, e.g. rolling averages) isn't answerable from the base table at all, unlike team history which can at least be brute-forced from `events`.

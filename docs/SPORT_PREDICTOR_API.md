@@ -1,12 +1,12 @@
 # Sport Predictor API
 
-This documents every route live on the shared API Gateway REST API (`Terraform/api-gateway.tf`, `Terraform/api-gateway-{sport}-predict.tf`, `Terraform/api-gateway-{sport}-live-scores.tf`, one pair per sport), fronted by CloudFront at the app's single public domain -- see `design/ARCHITECTURE.md`'s client-request-path walkthrough. Every head-to-head sport (NFL, NCAAFB, NBA, NCAAMBB) gets the identical `/{sport}/events`, `/{sport}/models`, `/{sport}/season`, `/{sport}/live-scores`, `/{sport}/predictions/events/{event_id}[/players/{entity_id}]` route shape; the two field-event sports (PGA, F1) share the same first four routes but have no `/players/{entity_id}` route at all -- a golfer's/driver's own entity IS the participant, so their full prediction is already the single event-level response (see the PGA/F1 section below). Nothing about either contract is sport-specific beyond the path prefix, response field names, and (for head-to-head sports) player-prop stat names. **All six sports are fully live, backend and frontend.**
+This documents every route live on the shared API Gateway REST API (`Terraform/api-gateway.tf`, `Terraform/api-gateway-{sport}-predict.tf`, `Terraform/api-gateway-{sport}-live-scores.tf`, one pair per sport), fronted by CloudFront at the app's single public domain -- see `design/ARCHITECTURE.md`'s client-request-path walkthrough. Every head-to-head sport (NFL, NCAAFB, NBA, NCAAMBB, NHL) gets the identical `/{sport}/events`, `/{sport}/models`, `/{sport}/model-performance`, `/{sport}/season`, `/{sport}/live-scores`, `/{sport}/predictions/events/{event_id}[/players/{entity_id}]` route shape; the two field-event sports (PGA, F1) share the same first four routes but have no `/players/{entity_id}` route at all -- a golfer's/driver's own entity IS the participant, so their full prediction is already the single event-level response (see the PGA/F1 section below). Nothing about either contract is sport-specific beyond the path prefix, response field names, and (for head-to-head sports) player-prop stat names. **All seven sports are fully live, backend and frontend.** The in-app assistant's two endpoints (`/assistant/*`, not on API Gateway) are documented at the end.
 
 Formerly `NFL_API.md` -- renamed and expanded to cover every onboarded sport under one doc, since the contract genuinely is shared (this file documents the contract once, then calls out each sport's own concrete values).
 
 ## Base URL
 
-`https://<project>.<domain>` -- the CloudFront distribution's own domain (`local.domain` in `Terraform/locals.tf`, exposed as the `api_endpoint` Terraform output). CloudFront routes `/nfl/*`, `/ncaafb/*`, `/nba/*`, `/ncaambb/*`, `/pga/*`, `/f1/*` to API Gateway's own custom domain (`Terraform/api-gateway-domain.tf` -- not the raw `execute-api` hostname, which is disabled entirely) `/app/*` to the Android APK's S3 bucket (see "Android APK" at the end), and everything else to the Flutter frontend's S3 bucket (`Terraform/cloudfront.tf`), so the frontend and API share one origin -- no CORS is involved in production traffic.
+`https://<project>.<domain>` -- the CloudFront distribution's own domain (`local.domain` in `Terraform/locals.tf`, exposed as the `api_endpoint` Terraform output). CloudFront routes `/nfl/*`, `/ncaafb/*`, `/nba/*`, `/ncaambb/*`, `/nhl/*`, `/pga/*`, `/f1/*` to API Gateway's own custom domain (`Terraform/api-gateway-domain.tf` -- not the raw `execute-api` hostname, which is disabled entirely) `/app/*` to the Android APK's S3 bucket (see "Android APK" at the end), and everything else to the Flutter frontend's S3 bucket (`Terraform/cloudfront.tf`), so the frontend and API share one origin -- no CORS is involved in production traffic.
 
 ## Authentication
 
@@ -26,7 +26,7 @@ A missing or invalid token gets rejected by API Gateway directly (401/403) -- it
 
 Every sport's serving layer splits across two Lambdas, not one:
 
-- **`<sport>-predict-read`** (zip-packaged, no ML dependencies) -- what API Gateway actually invokes for every route below. Serves `/events`/`/models`/`/season` directly from DynamoDB/S3, and fronts the two `/predictions/...` routes with a read-through S3 cache (`library.storage.prediction_cache`).
+- **`predict-read`** (zip-packaged, no ML dependencies, one Lambda shared by every sport -- `Terraform/lambda-predict-read.tf`) -- what API Gateway actually invokes for every route below except `/{sport}/live-scores`, which goes to that sport's own `<sport>-live-scores` Lambda. Serves `/events`/`/models`/`/season` directly from DynamoDB/S3, and fronts the two `/predictions/...` routes with a read-through S3 cache (`library.storage.prediction_cache`).
 - **`<sport>-predict`** (container image, ML dependencies) -- never invoked by API Gateway directly. A background compute worker: populates the prediction cache asynchronously on a cache miss/stale refresh (triggered by `predict-read`), and runs the weekly season-projection job on a schedule.
 
 This split exists so the hot path (every page load hits `/events`/`/models`) never pays a Lambda cold start for xgboost/scikit-learn/pandas, and so a live request never blocks on a real inference computation -- it gets served from cache or told to poll.
@@ -55,6 +55,9 @@ Scoped to exactly **one week**, not the whole matching history: `status=schedule
 | Name | Required | Values | Default |
 |---|---|---|---|
 | `status` | no | `scheduled`, `completed` | `scheduled` |
+| `date` | no | `YYYY-MM-DD` (the stored U.S.-Eastern game date) | -- |
+
+With `date`, the list is every game of that `status` on that one date instead of the default window. Head-to-head sports only (NFL, NCAAFB, NBA, NCAAMBB, NHL); PGA and F1 answer `400`, as does a malformed date.
 
 **Response `200`**
 
@@ -446,6 +449,18 @@ Identical contract to `/nfl/live-scores` -- `player_stats` keys match NBA's (`po
 
 Identical contract to NBA's own, including the `scoring`/`rebounding`/`assists` `leaders` shape. Player-prop `stat` values (`Terraform/dynamodb-sport-registry.tf`'s `ncaambb_player_prop_stats`) -- same 6 names as NBA: `points`, `rebounds`, `assists`, `steals`, `blocks`, `three_pointers_made`.
 
+## NHL routes (`/nhl/*`) -- live
+
+Head-to-head, date-based like NBA: `/nhl/events`, `/nhl/models`, `/nhl/model-performance`, `/nhl/season` and `/nhl/live-scores` follow the NBA contract (`/events` grouped by calendar date). The hockey additions (`library/serving/nhl_reads.py`):
+
+### `GET /nhl/events`
+
+Each event also carries `went_to_overtime` / `decided_by_shootout` (null until final), each participant's `result.period_scores` and `result.regulation_score`, and `goalies`: `{"home": {"entity_id", "name", "status"}, "away": {...}}`, each side's probable starting goalie as ESPN lists it, `status` `"Confirmed"` or `"Expected"`, a side omitted when none is listed.
+
+### `GET /nhl/predictions/events/{event_id}` and `.../players/{entity_id}`
+
+Same contract as NFL's own. `leaders` categories, each a list: `scoring` (goals, assists; up to 5), `shooting` (shots_total; 5), `physical` (hits; 3), `goaltending` (saves; the starting goalie only). The event prediction also carries `goalies` with names. Player-prop `stat` values (`Terraform/dynamodb-sport-registry.tf`'s `nhl_player_prop_stats`): `shots_total`, `goals`, `assists`, `hits`, `saves`. Score targets are `margin`, `home_score`, `away_score` (no overtime model).
+
 ## PGA routes (`/pga/*`) -- live
 
 Field-event shape, genuinely different from every head-to-head sport above -- a golfer's own entity IS the participant, so there's no separate player-prop route at all. `/pga/events`, `/pga/models`, `/pga/live-scores` follow the same contract as the head-to-head sports (tournament-scoped instead of week-scoped for `/events`); `/pga/predictions/events/{event_id}` has its own shape.
@@ -527,6 +542,10 @@ Same field-event shape as PGA -- no player-prop route, one response scores the w
 
 `field` is sorted ascending by `projected_finish_position` -- the same "field finish order" role PGA's `projected_score_to_par` plays. `actual` follows the same "populated whenever real data exists, not gated on `completed`" rule as PGA's -- a DNF is a real, distinct `status` value (`"dnf"`), not a null finish position with no explanation.
 
+## Model performance (`GET /{sport}/model-performance`) -- every sport
+
+Served by `predict-read` for all seven sports from `model-performance/{sport}/latest.json` in the model-artifacts bucket, written daily by the `model-performance` Lambda (`library/performance/scorecard.py`): `{"sport", "season", "period_kind": "week" | "event", "generated_at", "models": [...]}`, one record per model with its live accuracy over the season and recent periods. Before the first scorecard exists it returns `200` with `{"sport": "<sport>", "models": []}`, so the app shows "no results yet" rather than an error.
+
 ## Error responses
 
 Every route shares the same error shape: `{"error": "<message>"}`.
@@ -568,3 +587,47 @@ A missing object is CloudFront's `403` page, never a `200`.
 ### `GET /app/sports-predictor.apk?src=web|update&u=<username>`
 
 Downloads the APK. `src` and `u` don't change what's served (CloudFront's cache key ignores the query string) but are recorded in CloudFront's edge logs, which is how the application dashboard's "Android app" widgets attribute downloads to a user and to the website vs. the in-app updater.
+
+
+## Assistant (`/assistant/*`)
+
+The in-app assistant (`design/ARCHITECTURE.md`, "In-app assistant"). Not an API Gateway route: CloudFront's `/assistant/*` behavior forwards to two Amazon Bedrock AgentCore runtimes, never cached, behind the WAF's own `assistant-rate-limit` rule.
+
+| Path | Agent | Who |
+|---|---|---|
+| `POST /assistant/predictions` | Predictions (public) | any signed-in user |
+| `POST /assistant/admin` | Infrastructure (admin) | members of the Cognito `admins` group only |
+
+Any other `/assistant/` path is `404`.
+
+**Authentication.** Unlike the API above, the ID token goes with the `Bearer ` prefix -- the runtime's own JWT authorizer checks it against the user pool and both app clients:
+
+```
+Authorization: Bearer <id_token>
+Content-Type: application/json
+Accept: text/event-stream
+X-Amzn-Bedrock-AgentCore-Runtime-Session-Id: <chat id, at least 33 characters>
+```
+
+A missing or invalid token is `401` (the app refreshes the token once and retries); a valid token without the `admins` group on `/assistant/admin` is `403`; the WAF rate limit is `429`. The session id names one chat: history carries over within it, and a chat holds up to 30 questions.
+
+**Request body** -- one of:
+
+| Body | Does | Costs a question |
+|---|---|---|
+| `{"message": "<question>", "sport": "<sport>"?, "event_id": "<id>"?}` | Answers the question; `sport`/`event_id` are the page the user is on | yes |
+| `{"action": "status"}` | Questions left today and saved favourites | no |
+| `{"action": "remove_favorite", "sport": "<sport>", "team": "<team>"}` | Removes one saved favourite, then as `status` | no |
+
+`message` is at most 1,000 characters. Favourites exist on the Predictions agent only.
+
+**Response** -- `200`, server-sent events, one JSON object per `data:` line:
+
+| `type` | Fields | When |
+|---|---|---|
+| `progress` | `tool` | a lookup is running (zero or more, before the answer) |
+| `answer` | `text` (Markdown), `sources` (lookups it was read from), `questions_left`, `blocked`, `favorites` | the answer; last event |
+| `status` | `questions_left`, `daily_limit`, `favorites` | reply to an `action` |
+| `error` | `code`, `message` | the request stopped; last event |
+
+`error` codes: `unauthorized` (no user or session id), `forbidden` (admin agent without the `admins` group), `empty`, `too_long`, `quota` (the day's questions are used up; they reset at midnight Eastern -- 50 a day by default, 300 for admins), `session_full` (start a new chat), `failed`. `blocked: true` on an answer means a guardrail replaced it with a refusal; it still counts as a question.

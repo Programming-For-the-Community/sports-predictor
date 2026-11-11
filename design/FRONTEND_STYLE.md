@@ -154,6 +154,8 @@ labels are UPPERCASE mono.
   rounded track bars, current version filled with `cyan-fill`, prior versions a flat slate.
 - **Recent-form card** — the one place violet leads: violet-tinted surface + border, violet title.
 
+- **Assistant** (`lib/features/assistant/`) — opened from a cyan `Ask` button with a chat-bubble icon: a floating action button on phones (the panel opens as a bottom sheet), an outlined stadium toggle in the header on screens at least 900px wide (the panel docks beside the page, 400px). Header: title, then, for admins only, a Predictions | Infrastructure switch, then the saved-favourites row (Predictions only). A cyan-outlined `ABOUT <SPORT or AWAY @ HOME>` pill shows the page's context. Questions sit right-aligned; answers are `--surface` cards with a mono `FROM · …` micro-label naming what they were read from, and render Markdown (paragraphs, lists, small section labels, tables — up to 3 columns fill the card, wider ones scroll sideways inside it). While tools run, a progress line names the lookup. Starter questions are outlined stadium chips. The questions-left line above the input is a muted micro-label that turns `--warn` amber when the day's limit is reached, with the input disabled.
+
 ## Data-viz conventions
 
 - **Win-probability split bar**: favored segment = `cyan-fill`, underdog = translucent slate
