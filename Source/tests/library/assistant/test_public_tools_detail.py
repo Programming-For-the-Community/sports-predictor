@@ -156,3 +156,29 @@ def test_the_last_four_periods_are_combined_by_how_many_each_graded():
     assert recent["to"] == "Wk 5"
     assert recent["n"] == 50
     assert round(recent["value"], 3) == 0.64
+
+
+def test_a_team_missing_from_the_next_game_day_gets_its_next_game_within_a_week(monkeypatch):
+    from datetime import date
+    monkeypatch.setattr(public_tools, "_today", lambda: date(2026, 11, 10))
+    nuggets = {"event_id": "77", "status": "scheduled", "participants": [{"role": "home", "abbreviation": "DEN", "name": "Denver Nuggets"}]}
+    by_day = {"2026-11-12": [nuggets]}
+
+    def events(query):
+        if "date" not in query:
+            return 200, {"events": [{"event_id": "1", "status": "scheduled", "participants": [{"abbreviation": "LAL"}]}]}
+        return 200, {"events": by_day.get(query["date"], [])}
+
+    read = FakeReader({"/nba/events": events})
+    result = public_tools.run("list_events", {"sport": "nba", "team": "DEN"}, read, SPORTS, SETTINGS)
+
+    assert [e["event_id"] for e in result["events"]] == ["77"]
+    assert result["next_game_date"] == "2026-11-12"
+    assert [c[2].get("date") for c in read.calls] == [None, "2026-11-11", "2026-11-12"]
+
+
+def test_a_field_sport_does_not_look_ahead_by_date():
+    read = FakeReader({"/pga/events": lambda q: (400, {"error": "by date"}) if "date" in q else (200, {"events": []})})
+    result = public_tools.run("list_events", {"sport": "pga", "player": "Scheffler"}, read, SPORTS, SETTINGS)
+    assert result["count"] == 0
+    assert len(read.calls) == 2

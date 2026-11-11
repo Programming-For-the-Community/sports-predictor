@@ -97,7 +97,7 @@ def report(sfn, arn: str, start: date, end: date, sport: str | None = None) -> d
     return {
         "start_date": start.isoformat(), "end_date": end.isoformat(), "runs": runs,
         "summary": {"runs": len(runs), "succeeded": len(finished),
-                    "avg_wall_minutes": round(sum(finished) / len(finished), 1) if finished else None},
+                    "avg_wall_minutes_of_succeeded_runs": round(sum(finished) / len(finished), 1) if finished else None},
         "slowest_models": models[:MODEL_ROWS],
         "note": "wall_minutes is a whole run, start to finish, with sports training side by side; a model's minutes are its own ECS task.",
     }

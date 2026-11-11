@@ -52,7 +52,7 @@ def test_runs_in_range_with_wall_time_task_times_and_failures():
     assert result["runs"][0]["wall_minutes"] == 180.0
     assert result["runs"][0]["failed_tasks"] == 1
     assert result["runs"][0]["slowest"][0] == "nba player-prop (points): 120.0 min"
-    assert result["summary"] == {"runs": 2, "succeeded": 2, "avg_wall_minutes": 120.0}
+    assert result["summary"] == {"runs": 2, "succeeded": 2, "avg_wall_minutes_of_succeeded_runs": 120.0}
     points = next(m for m in result["slowest_models"] if m["model"] == "player-prop (points)")
     assert points == {"sport": "nba", "model": "player-prop (points)", "runs": 2, "avg_minutes": 90.0, "max_minutes": 120.0}
 

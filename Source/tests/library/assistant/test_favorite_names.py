@@ -36,3 +36,8 @@ def test_a_field_sport_keeps_the_competitor_s_full_name():
 
 def test_without_standings_the_name_is_kept_for_the_store_to_check():
     assert favorite_names.resolve(_invoker([], ok=False), "nhl", "COL", False) == "COL"
+
+
+def test_a_name_with_a_mascot_finds_a_team_listed_by_school_alone():
+    fbs_short = [{"name": "Minnesota", "abbreviation": "MINN"}, {"name": "Miami", "abbreviation": "MIA"}]
+    assert favorite_names.resolve(_invoker(fbs_short), "ncaafb", "Minnesota Gophers", False) == "MINN"

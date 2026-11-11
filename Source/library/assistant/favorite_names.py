@@ -26,9 +26,20 @@ def _rows(invoke_tool: ToolInvoker, sport: str, team: str) -> list[dict] | None:
     return [row for key in STANDINGS for row in (result.get(key) or {}).get("rows") or []]
 
 
+def _shortened(invoke_tool: ToolInvoker, sport: str, team: str) -> list[dict] | None:
+    """Standings rows for the name, dropping words from the end until one
+    matches: NCAAFB calls the Gophers just "Minnesota"."""
+    words = team.split()
+    rows = _rows(invoke_tool, sport, team)
+    while rows == [] and len(words) > 1:
+        words = words[:-1]
+        rows = _rows(invoke_tool, sport, " ".join(words))
+    return rows
+
+
 def resolve(invoke_tool: ToolInvoker, sport: str, team: str, field_sport: bool) -> str:
     """The app's abbreviation (team sports) or full name (field sports)."""
-    rows = _rows(invoke_tool, sport, team)
+    rows = _shortened(invoke_tool, sport, team)
     if rows is None:
         return team
     key = "name" if field_sport else "abbreviation"
@@ -39,6 +50,6 @@ def resolve(invoke_tool: ToolInvoker, sport: str, team: str, field_sport: bool) 
     if len(values) == 1:
         return values[0]
     if not values:
-        raise FavoriteError(f"No {sport} {'player' if field_sport else 'team'} matches {team!r}. Use the name the user gave, e.g. Minnesota Golden Gophers.")
+        raise FavoriteError(f"No {sport} {'player' if field_sport else 'team'} matches {team!r}. Ask the user for the team's full name or school.")
     choices = ", ".join(f"{row.get('name')} ({row.get('abbreviation')})" if not field_sport else str(row.get("name")) for row in rows[:MAX_CHOICES])
     raise FavoriteError(f"{team!r} matches more than one: {choices}. Ask the user which, then save that one.")

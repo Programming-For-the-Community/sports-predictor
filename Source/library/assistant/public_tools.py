@@ -11,11 +11,13 @@ capped, a hard size limit on what reaches the model.
 from __future__ import annotations
 
 import json
+from datetime import date, datetime, timedelta, timezone
 from typing import Callable
 
 from library.assistant import game_list, performance_overview, season_view
 from library.assistant.settings import ToolSettings
 from library.assistant.tool_specs import PUBLIC_TOOL_NAMES, validate
+from library.parsing import us_eastern_date
 
 Reader = Callable[[str, dict, dict], tuple[int, dict]]
 # sport -> that sport's live-score cache ({"fetched_at", "events"}), None when there is none.
@@ -103,11 +105,36 @@ def _game_list(events: list[dict], settings: ToolSettings, stat: str | None = No
     players = game_list.player_totals(events, stat, settings.max_rows)
     if players:
         result["player_totals"] = players
+        if not stat:
+            result["player_totals_note"] = ("Summaries only. For every player in one stat (each with team, predicted and actual), "
+                                            "call list_events again with stat, e.g. passing_yards.")
     elif stat:
         result["player_totals_note"] = f"No graded {stat} predictions in these games (they appear once games are final)."
     if len(shown) < len(events):
         result["truncated"] = f"Showing {len(shown)} of {len(events)} games; totals cover all of them. Filter by team or conference for the rest."
     return result
+
+
+# A team or player not playing on the next game day: days ahead to look for its next game.
+LOOKAHEAD_DAYS = 7
+
+
+def _today() -> date:
+    return date.fromisoformat(us_eastern_date(datetime.now(timezone.utc)))
+
+
+def _look_ahead(read: Reader, args: dict) -> tuple[list[dict], str | None]:
+    """The team's or player's games on the first day within LOOKAHEAD_DAYS
+    that has one, and that day; nothing when the sport can't list by date."""
+    for offset in range(1, LOOKAHEAD_DAYS + 1):
+        day = (_today() + timedelta(days=offset)).isoformat()
+        events, error = _games(read, args["sport"], "scheduled", day)
+        if error:
+            return [], None
+        matching = game_list.filtered(events, args.get("team"), None, args.get("player"))
+        if matching:
+            return matching, day
+    return [], None
 
 
 def list_events(read: Reader, args: dict, settings: ToolSettings) -> dict:
@@ -120,6 +147,10 @@ def list_events(read: Reader, args: dict, settings: ToolSettings) -> dict:
         return error
     matching = game_list.filtered(events, args.get("team"), args.get("conference"), args.get("player"))
     period = {"date": args["date"]} if args.get("date") else {"when": when}
+    if not matching and when == "upcoming" and not args.get("date") and (args.get("team") or args.get("player")):
+        matching, day = _look_ahead(read, args)
+        if day:
+            period = {"when": when, "next_game_date": day}
     result = {"sport": args["sport"], **period, **_game_list(matching, settings, args.get("stat"))}
     if len(matching) > PLAYER_DETAIL_MAX_GAMES:
         result["note"] = "Player predictions are left out of a list this long; filter by team, or get_event_prediction for one game."
@@ -240,6 +271,8 @@ def get_model_performance(read: Reader, args: dict, settings: ToolSettings) -> d
         "generated_at": body.get("generated_at"),
         "coverage": body.get("coverage"),
         "window_days": body.get("window_days"),
+        "window_note": (f"Every figure here covers only the last {body['window_days']} days, not the season."
+                        if body.get("window_days") else None),
         "models": prune([_trim_model(m) for m in chosen], MAX_HISTORY),
         "by_conference": prune(body.get("by_conference")),
     }, settings)
