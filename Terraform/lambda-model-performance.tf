@@ -33,8 +33,8 @@ resource "aws_lambda_function" "model_performance" {
   role          = aws_iam_role.lambda_model_performance.arn
   runtime       = "python3.12"
   handler       = "handler.lambda_handler"
-  timeout       = 300
-  memory_size   = 512
+  timeout       = 900
+  memory_size   = 1024
 
   filename         = data.archive_file.model_performance_placeholder.output_path
   source_code_hash = data.archive_file.model_performance_placeholder.output_base64sha256

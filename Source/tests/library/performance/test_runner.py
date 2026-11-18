@@ -197,22 +197,13 @@ class TestFieldSport:
         assert document["coverage"] == {"completed_events": 1, "with_prediction": 1, "unpredicted": 0}
 
 
-class TestRollingWindow:
-    def test_ncaambb_is_graded_on_the_last_seven_days_and_says_so(self):
-        storage = _Storage([])
+class TestSeasonScope:
+    def test_every_sport_is_graded_on_the_whole_season_without_a_window(self):
+        for sport, today in (("ncaambb", date(2026, 3, 10)), ("nfl", date(2026, 9, 30))):
+            storage = _Storage([])
 
-        with patch.object(runner, "list_models", return_value={"models": []}):
-            document = runner.run_sport("ncaambb", storage, _Table({}), _S3(), date(2026, 3, 10))
+            with patch.object(runner, "list_models", return_value={"models": []}):
+                document = runner.run_sport(sport, storage, _Table({}), _S3(), today)
 
-        _, _, since = storage.requested
-        assert since == "2026-03-03"
-        assert document["window_days"] == 7
-
-    def test_other_sports_are_graded_on_the_whole_season_and_do_not_claim_a_window(self):
-        storage = _Storage([])
-
-        with patch.object(runner, "list_models", return_value={"models": []}):
-            document = runner.run_sport("nfl", storage, _Table({}), _S3(), date(2026, 9, 30))
-
-        assert storage.requested[2] < "2025-09-01"
-        assert "window_days" not in document
+            assert storage.requested[2] < f"{today.year - 1}-{today.month:02d}-{today.day:02d}"
+            assert "window_days" not in document

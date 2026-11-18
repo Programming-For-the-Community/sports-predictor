@@ -21,17 +21,12 @@ from library.storage.model_performance import model_performance_key
 # Wide enough to reach the start of any sport's current season (they all begin
 # within the previous 12 months); the season filter below does the real scoping.
 _LOOKBACK_DAYS = 400
-# A sport with too many events to grade all season in one daily job is graded on
-# a rolling window instead: NCAAMBB plays thousands of games. Its scorecard then
-# covers just this window, and says so (`window_days`).
-WINDOW_DAYS = {"ncaambb": 7}
 _MAX_WORKERS = 16
 _PROP_ROW_MARKER = "MODEL#player-prop-"
 
 
 def _current_season_events(storage, sport: str, today: date) -> tuple[int | None, list[dict]]:
-    days = WINDOW_DAYS.get(sport, _LOOKBACK_DAYS)
-    events = storage.get_all_events(sport, "completed", since_date=(today - timedelta(days=days)).isoformat())
+    events = storage.get_all_events(sport, "completed", since_date=(today - timedelta(days=_LOOKBACK_DAYS)).isoformat())
     seasons = [e["season"] for e in events if e.get("season") is not None]
     season = max(seasons) if seasons else None
     return season, [e for e in events if e.get("season") == season]
@@ -64,7 +59,6 @@ def _run_field_sport(sport: str, storage, predictions_table, s3, today: date) ->
     document = field_events.build_field_scorecard(sport, season, events, raw_rows_by_event, list_models(s3, sport)["models"])
     document["coverage"] = _coverage(events, raw_rows_by_event)
     _name_best(storage, sport, document)
-    _stamp_window(document, sport)
     s3.put_json(model_performance_key(sport), document)
     return document
 
@@ -91,7 +85,6 @@ def _run_head_to_head_sport(sport: str, storage, predictions_table, s3, today: d
     document["coverage"] = _coverage(events, rows_by_event)
     _add_team_breakdowns(storage, sport, document, events, rows_by_event, today)
     _name_best(storage, sport, document)
-    _stamp_window(document, sport)
     s3.put_json(model_performance_key(sport), document)
     return document
 
@@ -119,12 +112,6 @@ def _name_best(storage, sport: str, document: dict) -> None:
             entity = entities.get((entry["entity_id"], ranked["entity_type"])) or {}
             metadata = entity.get("metadata") or {}
             entry.update(name=entity.get("name"), abbreviation=metadata.get("abbreviation"), color=metadata.get("color"))
-
-
-def _stamp_window(document: dict, sport: str) -> None:
-    """Says so on the scorecard when it covers a rolling window, not the season."""
-    if sport in WINDOW_DAYS:
-        document["window_days"] = WINDOW_DAYS[sport]
 
 
 def _coverage(events: list[dict], rows_by_event: dict[str, list[dict]]) -> dict:
